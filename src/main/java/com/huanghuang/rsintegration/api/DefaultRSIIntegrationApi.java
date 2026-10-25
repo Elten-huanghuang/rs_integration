@@ -28,7 +28,7 @@ import java.util.Objects;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 @ApiStatus.Internal
-final class DefaultRSIIntegrationApi implements RSIIntegrationApi {
+public final class DefaultRSIIntegrationApi implements RSIIntegrationApi {
     private final RecipeIntegrationRegistry recipeRegistry = new DefaultRecipeRegistry();
     private final MachineIntegrationRegistry machineRegistry =
             new DefaultMachineRegistry();
@@ -89,19 +89,19 @@ final class DefaultRSIIntegrationApi implements RSIIntegrationApi {
         return register(RegistrationKind.EXECUTION, integration, options);
     }
 
-    synchronized void beginRegistration() {
+    public synchronized void beginRegistration() {
         if (phase == RegistrationPhase.CREATED) {
             phase = RegistrationPhase.REGISTRATION;
         }
     }
 
-    synchronized void freezeRegistration() {
+    public synchronized void freezeRegistration() {
         if (phase == RegistrationPhase.REGISTRATION) {
             phase = RegistrationPhase.FROZEN;
         }
     }
 
-    synchronized void stop() {
+    public synchronized void stop() {
         phase = RegistrationPhase.STOPPED;
     }
 

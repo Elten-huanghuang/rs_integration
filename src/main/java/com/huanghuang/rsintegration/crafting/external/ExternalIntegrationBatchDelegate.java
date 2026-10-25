@@ -87,6 +87,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 /**
  * 公共 Integration API 的图节点执行适配器。
@@ -95,6 +96,8 @@ import java.util.UUID;
  * 真实产物收取。无法无损落入标准物品端口的声明在这里显式拒绝。</p>
  */
 public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegate {
+    private final Supplier<RSIIntegrationApi> apiProvider;
+    private final boolean retainChunks;
     private ServerLevel level;
     private BlockPos machinePos;
     private Recipe<?> recipe;
@@ -131,6 +134,22 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     private final List<ItemStack> uninsertedMaterials = new ArrayList<>();
     private final List<ItemStack> pendingInputRefunds = new ArrayList<>();
 
+    public ExternalIntegrationBatchDelegate() {
+        this(() -> RSIIntegrationApi.get().orElse(null), true);
+    }
+
+    ExternalIntegrationBatchDelegate(RSIIntegrationApi api) {
+        this(() -> api, false);
+    }
+
+    private ExternalIntegrationBatchDelegate(
+            Supplier<RSIIntegrationApi> apiProvider,
+            boolean retainChunks
+    ) {
+        this.apiProvider = apiProvider;
+        this.retainChunks = retainChunks;
+    }
+
     @Override
     public boolean startOperation(OperationStartContext context) {
         this.operationStartContext = context;
@@ -162,7 +181,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             @Nullable ResourceLocation dim,
             BlockPos pos
     ) {
-        RSIIntegrationApi api = RSIIntegrationApi.get().orElse(null);
+        RSIIntegrationApi api = apiProvider.get();
         if (api == null) {
             preparationFailure = Component.literal(
                     "RSI Integration API is unavailable");
@@ -430,7 +449,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         if (!insertFluidInputs(player)) return false;
         markCraftStarted();
         this.operationStarted = true;
-        forceMachineChunk(level, machinePos, true);
+        retainMachineChunk();
         return true;
     }
 
@@ -686,6 +705,12 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         return machinePos;
     }
 
+    private void retainMachineChunk() {
+        if (retainChunks) {
+            forceMachineChunk(level, machinePos, true);
+        }
+    }
+
     private boolean startCustomOperation(
             ServerPlayer player,
             List<ItemStack> materials,
@@ -756,7 +781,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             this.startedAtTick = level.getGameTime();
             markCraftStarted();
             this.operationStarted = true;
-            forceMachineChunk(level, machinePos, true);
+            retainMachineChunk();
             return true;
         }
         if (started.status() != ExecutionStartStatus.STARTED
@@ -771,7 +796,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         this.startedAtTick = level.getGameTime();
         markCraftStarted();
         this.operationStarted = true;
-        forceMachineChunk(level, machinePos, true);
+        retainMachineChunk();
         return true;
     }
 
