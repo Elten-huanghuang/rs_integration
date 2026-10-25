@@ -33,4 +33,26 @@ class RecipeIdNormalizerTest {
 
         assertFalse(RecipeIdNormalizer.isCosmopolitanTisane(incomplete));
     }
+
+    @Test
+    void detectsSyntheticEnchantmentInfoDisplayId() {
+        ResourceLocation displayId = new ResourceLocation(
+                "minecraft", "enchantment.tacz.modern_kinetic_gun.emxarms.emx_sf7b");
+
+        assertTrue(RecipeIdNormalizer.isEnchantmentInfoDisplayId(displayId));
+    }
+
+    @Test
+    void preservesRealEnchantedBookRecipeIds() {
+        ResourceLocation craftTweakerRecipe = new ResourceLocation(
+                "crafttweaker", "apotheosis.enchanted_book.life_mending");
+        ResourceLocation apotheosisRecipe = new ResourceLocation(
+                "apotheosis", "enchanting/stalwart_dungeons/tungsten_hammer");
+        ResourceLocation otherNamespace = new ResourceLocation(
+                "example", "enchantment.test");
+
+        assertFalse(RecipeIdNormalizer.isEnchantmentInfoDisplayId(craftTweakerRecipe));
+        assertFalse(RecipeIdNormalizer.isEnchantmentInfoDisplayId(apotheosisRecipe));
+        assertFalse(RecipeIdNormalizer.isEnchantmentInfoDisplayId(otherNamespace));
+    }
 }

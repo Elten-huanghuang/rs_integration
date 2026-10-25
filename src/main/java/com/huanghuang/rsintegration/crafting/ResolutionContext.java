@@ -357,6 +357,22 @@ final class ResolutionContext {
         return diagLog != null;
     }
 
+    int missingCount() {
+        return missingOut == null ? 0 : missingOut.size();
+    }
+
+    void addMissing(String missing) {
+        if (missingOut != null && missing != null && !missingOut.contains(missing)) {
+            missingOut.add(missing);
+        }
+    }
+
+    /** 回滚探测候选时产生的缺料记录，避免失败备选污染最终结果。 */
+    void truncateMissing(int checkpoint) {
+        if (missingOut == null || checkpoint < 0 || checkpoint >= missingOut.size()) return;
+        missingOut.subList(checkpoint, missingOut.size()).clear();
+    }
+
     void diag(String msg) {
         if (diagLog != null) diagLog.add(msg);
     }

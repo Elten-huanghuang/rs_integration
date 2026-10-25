@@ -11,11 +11,13 @@ import net.minecraft.world.level.Level;
 import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.storage.StorageSession;
+import com.huanghuang.rsintegration.util.ModIds;
 
 import javax.annotation.Nonnull;
 import java.util.List;
 import java.util.Optional;
 import com.refinedmods.refinedstorage.api.network.INetwork;
+import net.minecraftforge.fml.ModList;
 import javax.annotation.Nullable;
 
 /** Resolves the backend-selected storage endpoint for recursive crafting. */
@@ -34,6 +36,7 @@ public final class CraftStorageEndpoints {
      */
     @Nullable
     public static INetwork legacyNetwork(@Nullable CraftStorageEndpoint endpoint) {
+        if (!isRefinedStorageLoaded()) return null;
         return endpoint instanceof LegacyRsCraftStorageEndpoint legacy
                 ? legacy.network() : null;
     }
@@ -116,7 +119,8 @@ public final class CraftStorageEndpoints {
             @Nonnull ServerPlayer player,
             @Nullable ResourceKey<Level> dimension,
             @Nullable BlockPos position) {
-        if (dimension == null || position == null) return Optional.empty();
+        if (!isRefinedStorageLoaded()
+                || dimension == null || position == null) return Optional.empty();
         INetwork network = RSAltarBindingResolver.resolveNetworkForAltar(
                 player, dimension, position);
         return network == null ? Optional.empty()
@@ -129,7 +133,11 @@ public final class CraftStorageEndpoints {
         // A persisted RS coordinate is a locator, not an authorization token.
         // Require the same network to be authenticated by a current terminal,
         // active grid, side-panel listener, or explicit machine binding.
-        if ("refinedstorage".equals(reference.backendId().value())) {
+        boolean refinedStorage = "refinedstorage".equals(reference.backendId().value());
+        if (refinedStorage && !isRefinedStorageLoaded()) {
+            return Optional.empty();
+        }
+        if (refinedStorage) {
             boolean currentAccess = RSIntegrationNetwork.hasCurrentNetworkAccess(player, reference);
             if (!currentAccess) {
                 // Packets created by pre-v1 builds may still carry the old
@@ -163,7 +171,7 @@ public final class CraftStorageEndpoints {
         // protocol upgrade). Refresh that form from the current RS credential
         // only. Canonical v1 references remain strict to preserve selection
         // between multiple RS networks.
-        if ("refinedstorage".equals(reference.backendId().value())
+        if (refinedStorage
                 && !reference.networkId().startsWith("v1|")) {
             INetwork current = RSIntegrationNetwork.resolveCurrentNetworkFromPlayer(player);
             if (current != null) {
@@ -176,5 +184,10 @@ public final class CraftStorageEndpoints {
             }
         }
         return Optional.empty();
+    }
+
+    private static boolean isRefinedStorageLoaded() {
+        ModList mods = ModList.get();
+        return mods != null && mods.isLoaded(ModIds.REFINED_STORAGE);
     }
 }

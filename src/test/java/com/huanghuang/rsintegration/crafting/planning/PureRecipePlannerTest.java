@@ -602,6 +602,97 @@ class PureRecipePlannerTest extends BootstrapTest {
     }
 
     @Test
+    void selfAmplifyingMaterialCanFeedASiblingIntermediateAndItsNestedRecipe() {
+        MaterialRef archaicBrick = material("archaic_brick");
+        MaterialRef soulSand = material("soul_sand");
+        MaterialRef clay = material("clay");
+        MaterialRef copper = material("copper");
+        MaterialRef copperPlate = material("copper_plate");
+        MaterialRef archaicCircuit = material("archaic_circuit");
+        MaterialRef intelligentApparatus = material("intelligent_apparatus");
+        MaterialRef controllerMatrix = material("controller_matrix");
+
+        RecipeNode makeBrick = recipe("embers_alchemy_archaic_brick",
+                archaicBrick, 5,
+                ingredient(archaicBrick, 1),
+                ingredient(soulSand, 1),
+                ingredient(clay, 2));
+        RecipeNode makeCircuit = recipe("archaic_circuit",
+                archaicCircuit, 1,
+                ingredient(archaicBrick, 4),
+                ingredient(copper, 2));
+        RecipeNode makeApparatus = recipe("intelligent_apparatus",
+                intelligentApparatus, 4,
+                ingredient(archaicCircuit, 2),
+                ingredient(copper, 2),
+                ingredient(copperPlate, 1));
+        RecipeNode makeController = recipe("controller_matrix",
+                controllerMatrix, 1,
+                ingredient(intelligentApparatus, 1),
+                ingredient(archaicBrick, 3));
+
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
+                archaicBrick, List.of(makeBrick),
+                archaicCircuit, List.of(makeCircuit),
+                intelligentApparatus, List.of(makeApparatus),
+                controllerMatrix, List.of(makeController)));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                graph,
+                Map.of(archaicBrick, 1L, soulSand, 3L, clay, 6L,
+                        copper, 8L, copperPlate, 1L),
+                List.of(ingredient(controllerMatrix, 1)), 20);
+
+        assertTrue(result.feasible(), result.toString());
+    }
+
+    @Test
+    void sharedSelfAmplifyingChainReportsItsBootstrapMaterial() {
+        MaterialRef archaicBrick = material("archaic_brick_bootstrap");
+        MaterialRef soulSand = material("soul_sand_bootstrap");
+        MaterialRef clay = material("clay_bootstrap");
+        MaterialRef copper = material("copper_bootstrap");
+        MaterialRef copperPlate = material("copper_plate_bootstrap");
+        MaterialRef archaicCircuit = material("archaic_circuit_bootstrap");
+        MaterialRef intelligentApparatus = material("intelligent_apparatus_bootstrap");
+        MaterialRef controllerMatrix = material("controller_matrix_bootstrap");
+
+        RecipeNode makeBrick = recipe("embers_alchemy_archaic_brick_bootstrap",
+                archaicBrick, 5,
+                ingredient(archaicBrick, 1),
+                ingredient(soulSand, 1),
+                ingredient(clay, 2));
+        RecipeNode makeCircuit = recipe("archaic_circuit_bootstrap",
+                archaicCircuit, 1,
+                ingredient(archaicBrick, 4),
+                ingredient(copper, 2));
+        RecipeNode makeApparatus = recipe("intelligent_apparatus_bootstrap",
+                intelligentApparatus, 4,
+                ingredient(archaicCircuit, 2),
+                ingredient(copper, 2),
+                ingredient(copperPlate, 1));
+        RecipeNode makeController = recipe("controller_matrix_bootstrap",
+                controllerMatrix, 1,
+                ingredient(intelligentApparatus, 1),
+                ingredient(archaicBrick, 3));
+
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
+                archaicBrick, List.of(makeBrick),
+                archaicCircuit, List.of(makeCircuit),
+                intelligentApparatus, List.of(makeApparatus),
+                controllerMatrix, List.of(makeController)));
+
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                graph,
+                Map.of(soulSand, 3L, clay, 6L, copper, 8L, copperPlate, 1L),
+                List.of(ingredient(controllerMatrix, 1)), 20);
+
+        assertFalse(result.feasible(), result.toString());
+        assertTrue(result.missing().stream().anyMatch(ingredient ->
+                ingredient.alternatives().contains(archaicBrick)), result.toString());
+    }
+
+    @Test
     void cycleTerminatesAndReportsCycle() {
         RecipeNode logFromPlank = recipe("log", LOG, 1, ingredient(PLANK, 1));
         RecipeNode plankFromLog = recipe("plank", PLANK, 1, ingredient(LOG, 1));

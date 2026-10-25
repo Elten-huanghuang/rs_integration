@@ -8,6 +8,7 @@ import net.minecraft.world.item.crafting.Ingredient;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -44,5 +45,34 @@ class CraftingResolverTimeoutPolicyTest extends BootstrapTest {
                 false, new ArrayList<>(), System.nanoTime() - 1L, true);
 
         assertThrows(CraftingPlanningTimeoutException.class, context::timedOut);
+    }
+
+    @Test
+    void strictFailureKeepsNestedMissingInsteadOfReportingItsParent() {
+        ArrayList<String> missing = new ArrayList<>();
+        ResolutionContext context = new ResolutionContext(
+                null, Map.of(), Map.of(), null, null, null, null,
+                false, missing, Long.MAX_VALUE, false);
+        context.addMissing("item.test.nested_missing");
+
+        CraftingResolver.recordFailureMissing(
+                context, Ingredient.of(Items.STICK), 0);
+
+        assertEquals(List.of("item.test.nested_missing"), missing);
+    }
+
+    @Test
+    void failedAlternativeMissingIsRemovedAfterSuccessfulResolution() {
+        ArrayList<String> missing = new ArrayList<>();
+        ResolutionContext context = new ResolutionContext(
+                null, Map.of(), Map.of(), null, null, null, null,
+                false, missing, Long.MAX_VALUE, false);
+
+        CraftingResolver.recordFailureMissing(
+                context, Ingredient.of(Items.STICK), context.missingCount());
+        assertEquals(1, missing.size());
+
+        context.truncateMissing(0);
+        assertTrue(missing.isEmpty());
     }
 }

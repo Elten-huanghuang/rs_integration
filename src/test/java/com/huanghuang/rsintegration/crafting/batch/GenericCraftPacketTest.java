@@ -32,6 +32,7 @@ import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.planning.PlanningSnapshot;
 import com.huanghuang.rsintegration.crafting.planning.PlanningPreferences;
 import com.huanghuang.rsintegration.crafting.plan.RecipeChoice;
+import com.huanghuang.rsintegration.mods.embers.EreAlchemyRSModule;
 import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketRecipeWrapper;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import com.huanghuang.rsintegration.util.ModIds;
@@ -101,6 +102,7 @@ class GenericCraftPacketTest extends BootstrapTest {
         CommentedConfig config = CommentedConfig.inMemory();
         RSIntegrationConfig.SERVER_SPEC.correct(config);
         RSIntegrationConfig.SERVER_SPEC.setConfig(config);
+        EreAlchemyRSModule.INSTANCE.registerModType();
     }
 
     @Test
@@ -459,12 +461,12 @@ class GenericCraftPacketTest extends BootstrapTest {
     }
 
     @Test
-    void purePreviewPlanCannotReplaceAPhysicalMachineTerminal() {
+    void purePreviewPlanCanPrecedeAPhysicalMachineTerminal() {
         PureRecipePlanner.Result complete = new PureRecipePlanner.Result(true,
                 List.of(), List.of(), Map.of());
 
         assertTrue(GenericCraftPacket.canUsePureExecutionPlan(complete, ModType.GENERIC));
-        assertFalse(GenericCraftPacket.canUsePureExecutionPlan(
+        assertTrue(GenericCraftPacket.canUsePureExecutionPlan(
                 complete, ModType.FARMINGFORBLOCKHEADS_MARKET));
     }
 
@@ -908,6 +910,16 @@ class GenericCraftPacketTest extends BootstrapTest {
         assertTrue(CraftIngredientPlanMath.useDirectTerminalPlan(
                 new DirectMaterialAllocator.Result(true, List.of(), -1, 0),
                 ordinarySpecs, planks));
+    }
+
+    @Test
+    void feasiblePureDependenciesCanPrecedeANonGenericTerminalStep() {
+        PureRecipePlanner.Result plan = new PureRecipePlanner.Result(
+                true, List.of(), List.of(), Map.of());
+
+        assertTrue(GenericCraftPacket.canUsePureExecutionPlan(
+                plan, ModType.byId(ModIds.ID_EMBERS_ALCHEMY)));
+        assertFalse(GenericCraftPacket.canUsePureExecutionPlan(plan, null));
     }
 
     @Test

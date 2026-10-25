@@ -270,6 +270,11 @@ public class RecipeGuiLayoutsMixin {
                 skippedNoRecipe++;
                 continue;
             }
+            if (RecipeIdNormalizer.isEnchantmentInfoDisplayId(
+                    StandardRecipeIdResolver.resolve(recipe))) {
+                skippedNoFilter++;
+                continue;
+            }
             boolean isFa = recipeClassName.startsWith("com.stal111.forbidden_arcanus");
             boolean isFaOrTlm = isFa
                     || recipeClassName.startsWith("com.github.tartaricacid.touhoulittlemaid.");
@@ -1096,8 +1101,10 @@ public class RecipeGuiLayoutsMixin {
 
         // JEI AnvilRecipe (repair, enchantment combine, rename)
         if (recipe instanceof mezz.jei.api.recipe.vanilla.IJeiAnvilRecipe anvilRecipe) {
-            ResourceLocation uid = anvilRecipe.getUid();
-            if (uid != null) return uid;
+            // JEI may omit the UID for non-craftable anvil pages. Returning
+            // null here is an intentional unsupported result, not a resolver
+            // failure, and must not emit a warning.
+            return anvilRecipe.getUid();
         }
 
         // JEI's vanilla brewing display is not a Recipe and has no stable ID.

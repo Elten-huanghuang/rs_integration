@@ -127,6 +127,11 @@ public final class ContainerTransferLogic {
     }
 
     private static void transferToRS(ServerPlayer player, AbstractContainerMenu menu) {
+        if (!ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
+            player.sendSystemMessage(
+                    Component.translatable("rsi.transfer.no_network"), false);
+            return;
+        }
         if (isSelfNetworkStorageMenu(menu.getClass().getName())) {
             player.sendSystemMessage(
                     Component.translatable("rsi.transfer.self_network_blocked"), false);

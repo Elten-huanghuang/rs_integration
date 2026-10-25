@@ -743,7 +743,9 @@ public final class GenericCraftPacket {
     private static void executeQueuedRequest(ServerPlayer player, GenericCraftPacket packet,
                                              boolean preparationRequest) {
         try {
-            if (!RSGridMatrixNormalizer.returnToSelectedNetwork(player, packet.storageReference)) {
+            if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)
+                    && !RSGridMatrixNormalizer.returnToSelectedNetwork(
+                            player, packet.storageReference)) {
                 player.sendSystemMessage(Component.translatable(
                         "rsi.generic.error.matrix_return_failed"));
                 return;
@@ -786,6 +788,14 @@ public final class GenericCraftPacket {
 
     static int compatibilityResolverBudgetMs(int resolveTimeoutMs) {
         return Math.max(1, resolveTimeoutMs);
+    }
+
+    private static void recordMissingMaterial(
+            List<String> missing,
+            ImmutableRecipeGraph.IngredientRef unresolved) {
+        if (unresolved.alternatives().isEmpty()) return;
+        ImmutableRecipeGraph.MaterialRef material = unresolved.alternatives().get(0);
+        missing.add(CraftPacketUtils.missingMaterialKey(material.itemId()));
     }
 
     record BindingAwareGraph(ImmutableRecipeGraph graph,
@@ -960,7 +970,11 @@ public final class GenericCraftPacket {
         if (canUsePureExecutionPlan(cached.purePlan(), terminalType)) {
             List<ResolutionStep> steps = new ArrayList<>(PurePlanAdapter.toResolutionSteps(
                     cached.purePlan(), cached.snapshot().recipeGraph()));
-            ensureTerminalRecipeStep(steps, CraftTerminalSteps.genericTerminalStep(recipeId, repeatCount));
+            ResolutionStep terminalStep = terminalType == ModType.GENERIC
+                    ? CraftTerminalSteps.genericTerminalStep(recipeId, repeatCount)
+                    : CraftTerminalSteps.backgroundPhysicalTerminalStep(
+                            recipeId, terminalType, inferMode, repeatCount);
+            ensureTerminalRecipeStep(steps, terminalStep);
             RSIntegrationMod.debug("[RSI-Generic] Executing revalidated pure preview plan for {}",
                     recipeId);
             boolean hasPhysicalSteps = steps.stream()
@@ -1020,10 +1034,9 @@ public final class GenericCraftPacket {
 
     static boolean canUsePureExecutionPlan(@Nullable PureRecipePlanner.Result plan,
                                            ModType terminalType) {
-        // Pure plans describe crafting-table operations only. A physical
-        // terminal must retain its typed delegate and wait for real output.
-        return terminalType == ModType.GENERIC
-                && CraftPlanDecisionRules.canUsePrecomputedPlan(plan);
+        // 纯计划只描述依赖；非通用终点会在链尾追加 typed 机器步骤。
+        if (terminalType == null) return false;
+        return CraftPlanDecisionRules.canUsePrecomputedPlan(plan);
     }
 
     private static void tickExecutionRequests(MinecraftServer server) {
@@ -3253,18 +3266,12 @@ public final class GenericCraftPacket {
                             demandTree.unresolved().itemId()));
                 } else {
                     for (var unresolved : precomputedPlan.missing()) {
-                        if (!unresolved.alternatives().isEmpty()) {
-                            missing.add(CraftPacketUtils.missingMaterialKey(
-                                    unresolved.alternatives().get(0).itemId()));
-                        }
+                        recordMissingMaterial(missing, unresolved);
                     }
                 }
             } else {
                 for (var unresolved : precomputedPlan.missing()) {
-                    if (!unresolved.alternatives().isEmpty()) {
-                        missing.add(CraftPacketUtils.missingMaterialKey(
-                                unresolved.alternatives().get(0).itemId()));
-                    }
+                    recordMissingMaterial(missing, unresolved);
                 }
             }
             resolutionSteps = PurePlanAdapter.toResolutionSteps(precomputedPlan,
@@ -3305,10 +3312,7 @@ public final class GenericCraftPacket {
                         precomputedPlan, demandTree, directTerminalPlan)) {
                     if (missing.isEmpty()) {
                         for (var unresolved : precomputedPlan.missing()) {
-                            if (!unresolved.alternatives().isEmpty()) {
-                                missing.add(CraftPacketUtils.missingMaterialKey(
-                                        unresolved.alternatives().get(0).itemId()));
-                            }
+                            recordMissingMaterial(missing, unresolved);
                         }
                     }
                     selectedTypedResolver = false;
@@ -4235,7 +4239,7 @@ public final class GenericCraftPacket {
             // ItemHandlerHelper path mutates the server inventory but does not
             // broadcast the changed slots when a custom container is open,
             // leaving a client-side ghost stack until the inventory is reopened.
-            PlayerUtils.safeGiveToPlayer(player, stack, null);
+            PlayerUtils.safeGiveToStorage(player, stack, null);
         }
     }
 

@@ -690,7 +690,7 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
             if (remainder.isEmpty()) return;
         }
         if (player != null && !player.hasDisconnected()) {
-            PlayerUtils.safeGiveToPlayer(player, remainder, null);
+            PlayerUtils.safeGiveToStorage(player, remainder, null);
             return;
         }
         if (level != null && pos != null) {

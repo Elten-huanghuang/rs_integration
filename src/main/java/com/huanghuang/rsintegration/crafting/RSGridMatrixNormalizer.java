@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.storage.StorageReference;
+import com.huanghuang.rsintegration.util.ModIds;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.network.grid.GridType;
 import com.refinedmods.refinedstorage.api.network.grid.IGrid;
@@ -11,6 +12,7 @@ import com.refinedmods.refinedstorage.container.GridContainerMenu;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.inventory.CraftingContainer;
 import net.minecraft.world.item.ItemStack;
+import net.minecraftforge.fml.ModList;
 
 import javax.annotation.Nullable;
 
@@ -25,6 +27,7 @@ public final class RSGridMatrixNormalizer {
     /** 仅在当前请求属于 Refined Storage 时归还工作台矩阵。 */
     public static boolean returnToSelectedNetwork(
             ServerPlayer player, @Nullable StorageReference selectedReference) {
+        if (!isRefinedStorageLoaded()) return true;
         if (selectedReference != null
                 && !"refinedstorage".equals(selectedReference.backendId().value())) {
             return true;
@@ -37,6 +40,8 @@ public final class RSGridMatrixNormalizer {
      * @return true when the matrix is empty or was returned in full
      */
     public static boolean returnToNetwork(ServerPlayer player, @Nullable INetwork network) {
+        // 无 RS 环境仍会走通用合成收尾；必须在解析 GridContainerMenu 前退出。
+        if (!isRefinedStorageLoaded()) return true;
         if (player == null || !(player.containerMenu instanceof GridContainerMenu gridMenu)) {
             return true;
         }
@@ -85,6 +90,11 @@ public final class RSGridMatrixNormalizer {
             gridMenu.broadcastChanges();
         }
         return true;
+    }
+
+    private static boolean isRefinedStorageLoaded() {
+        ModList mods = ModList.get();
+        return mods != null && mods.isLoaded(ModIds.REFINED_STORAGE);
     }
 
     private static boolean isEmpty(CraftingContainer matrix) {

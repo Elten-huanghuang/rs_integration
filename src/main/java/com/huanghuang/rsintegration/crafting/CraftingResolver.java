@@ -26,7 +26,6 @@ import com.huanghuang.rsintegration.crafting.graph.RootDemand;
 import com.huanghuang.rsintegration.crafting.planning.PlanningPreferences;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.util.PerformanceMonitor;
-import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.mods.farmersdelight.MinersDelightCopperPotSupport;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.mods.slashblade.SlashBladeRecipeHandler;
@@ -530,6 +529,7 @@ public final class CraftingResolver {
                 }
                 List<ResolutionContext.SupplySlice> consumed = new ArrayList<>();
                 Ingredient resolvedIngredient = spec.ingredient();
+                int rootMissingCheckpoint = ctx.missingCount();
                 boolean resolved;
                 if (singleVariantRoots) {
                     resolvedIngredient = StepExecutor.ensureSingleVariantMachineInput(
@@ -548,7 +548,9 @@ public final class CraftingResolver {
                         .mapToLong(ResolutionContext.SupplySlice::quantity)
                         .reduce(0L, SaturatingLongMath::add);
                 long missing = Math.max(0L, spec.count() - supplied);
-                if (!resolved && missingOut != null) missingOut.add(describeFirstItem(resolvedIngredient));
+                if (!resolved && ctx.missingCount() == rootMissingCheckpoint) {
+                    recordFailureMissing(ctx, resolvedIngredient, rootMissingCheckpoint);
+                }
                 roots.add(new RootDemand(resolvedIngredient, spec.count(), missing,
                         firstDisplayStack(resolvedIngredient), allocations, spec.role()));
                 if (!resolved && !bestEffort) break;
@@ -625,6 +627,7 @@ public final class CraftingResolver {
                                      EdgeTracker edges, @Nullable InputPortId consumer,
                                      @Nullable List<ResolutionContext.SupplySlice> consumedOut) {
         if (count <= 0) return true;
+        int missingCheckpoint = ctx.missingCount();
 
         int minReserve = RSIntegrationConfig.getProtectedReserve(ingredient);
         ResourceLocation forcedRecipeId = ctx.forcedRecipeFor(ingredient);
@@ -662,6 +665,7 @@ public final class CraftingResolver {
                     ctx, consumer, ingredient, count, "timeout-before-candidates")) {
                 return true;
             }
+            recordFailureMissing(ctx, ingredient, missingCheckpoint);
             return false;
         }
         if (++ctx.ensureCalls > maxEnsureCalls()) {
@@ -714,6 +718,7 @@ public final class CraftingResolver {
         if (remaining <= 0) {
             ResolutionContext.SupplyConsumption existing = ctx.consumeMatchingDetailed(ingredient, count);
             if (existing.complete()) recordSupplyConsumption(ctx, consumer, consumedOut, existing);
+            if (existing.complete()) ctx.truncateMissing(missingCheckpoint);
             return existing.complete();
         }
         if (ctx.isNoRecipe(ingredient)) {
@@ -731,6 +736,7 @@ public final class CraftingResolver {
                     ctx, consumer, ingredient, count, "no-recipe")) {
                 return true;
             }
+            recordFailureMissing(ctx, ingredient, missingCheckpoint);
             return false;
         }
 
@@ -751,6 +757,7 @@ public final class CraftingResolver {
             if (recordBestEffortUnresolved(ctx, consumer, ingredient, count, "no-candidates")) {
                 return true;
             }
+            recordFailureMissing(ctx, ingredient, missingCheckpoint);
             return false;
         }
 
@@ -809,6 +816,7 @@ public final class CraftingResolver {
             if (recordBestEffortUnresolved(ctx, consumer, ingredient, count, "no-viable-candidates")) {
                 return true;
             }
+            recordFailureMissing(ctx, ingredient, missingCheckpoint);
             return false;
         }
 
@@ -941,6 +949,7 @@ public final class CraftingResolver {
                             "timeout-after-craft-failure")) {
                         return true;
                     }
+                    recordFailureMissing(ctx, ingredient, missingCheckpoint);
                     return false;
                 }
                 continue;
@@ -952,6 +961,7 @@ public final class CraftingResolver {
             if (crafted.complete()) {
                 recordSupplyConsumption(ctx, consumer, consumedOut, crafted);
                 if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient OK " + a.entry.recipe().getId());
+                ctx.truncateMissing(missingCheckpoint);
                 ctx.commitUndo();
                 edges.commitUndo();
                 return true;
@@ -966,6 +976,7 @@ public final class CraftingResolver {
                         "timeout-after-consume-failure")) {
                     return true;
                 }
+                recordFailureMissing(ctx, ingredient, missingCheckpoint);
                 return false;
             }
                 }
@@ -980,6 +991,7 @@ public final class CraftingResolver {
         if (recordBestEffortUnresolved(ctx, consumer, ingredient, count, "candidates-exhausted")) {
             return true;
         }
+        recordFailureMissing(ctx, ingredient, missingCheckpoint);
         return false;
     }
 
@@ -1022,6 +1034,16 @@ public final class CraftingResolver {
         return true;
     }
 
+    /**
+     * 严格执行失败时只保留最深层缺料。若子配方已经记录了具体缺料，
+     * 父配方不再用自身名称覆盖它。
+     */
+    static void recordFailureMissing(ResolutionContext ctx, Ingredient ingredient,
+                                     int missingCheckpoint) {
+        if (ctx.missingOut == null || ctx.missingCount() > missingCheckpoint) return;
+        ctx.addMissing(describeFirstItem(ingredient));
+    }
+
     /** 严格规划超时应立即失败；尽力准备超时应保留当前部分图。 */
     static boolean shouldAbortOnTimeout(boolean bestEffort) {
         return !bestEffort;
@@ -1029,10 +1051,7 @@ public final class CraftingResolver {
 
     private static void recordUnresolved(ResolutionContext ctx, @Nullable InputPortId consumer,
                                          Ingredient ingredient, long quantity) {
-        if (ctx.missingOut != null) {
-            String missing = describeFirstItem(ingredient);
-            if (!ctx.missingOut.contains(missing)) ctx.missingOut.add(missing);
-        }
+        ctx.addMissing(describeFirstItem(ingredient));
         if (consumer != null) ctx.addUnresolved(consumer, ingredient, quantity);
     }
 
