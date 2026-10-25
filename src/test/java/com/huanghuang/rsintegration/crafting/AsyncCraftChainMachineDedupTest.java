@@ -3,9 +3,11 @@ package com.huanghuang.rsintegration.crafting;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
+import com.huanghuang.rsintegration.crafting.graph.OperationId;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry.BoundMachine;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
@@ -94,22 +96,20 @@ class AsyncCraftChainMachineDedupTest extends BootstrapTest {
     }
 
     @Test
-    void graphReservationScopesFollowStructuredMaterialEntries() {
+    void reusableMaterialEntriesFollowInputConsumption() {
         MaterialPlan plan = new MaterialPlan(List.of(
                 new MaterialPlan.Entry("reusable", new IngredientSpec(
                         Ingredient.of(Items.BUCKET), 1, DemandRole.CATALYST),
-                        MaterialPlan.Allocation.GRAPH, true, 0),
+                        MaterialPlan.Allocation.GRAPH, 0),
                 new MaterialPlan.Entry("direct", new IngredientSpec(
                         Ingredient.of(Items.IRON_INGOT), 1),
-                        MaterialPlan.Allocation.SUPPLEMENTAL, false, 1),
+                        MaterialPlan.Allocation.SUPPLEMENTAL, 1),
                 new MaterialPlan.Entry("consumed", new IngredientSpec(
                         Ingredient.of(Items.COAL), 1),
-                        MaterialPlan.Allocation.GRAPH, false, 2)));
+                        MaterialPlan.Allocation.GRAPH, 2)));
 
-        assertEquals(List.of(
-                        IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE,
-                        IBatchDelegate.MaterialReservationScope.PER_OPERATION),
-                AsyncCraftChain.materialReservationScopes(plan));
+        assertEquals(List.of("reusable"), plan.reusableEntries().stream()
+                .map(MaterialPlan.Entry::id).toList());
     }
 
     @Test
@@ -145,7 +145,8 @@ class AsyncCraftChainMachineDedupTest extends BootstrapTest {
                         yield new InputBufferPlan(operations,
                                 List.of(new InputBufferPlan.InputSlot(
                                         "legacy:material:0", 0,
-                                        new ItemStack(Items.IRON_ORE, operations), 1, false)),
+                                        new ItemStack(Items.IRON_ORE, operations), 1,
+                                        InputConsumption.consumed())),
                                 List.of());
                     }
                     default -> throw new UnsupportedOperationException(method.getName());
@@ -168,17 +169,17 @@ class AsyncCraftChainMachineDedupTest extends BootstrapTest {
 
     @Test
     void reusableWorkerCapacityIsLimitedByAvailableCatalysts() {
-        IngredientSpec catalyst = new IngredientSpec(Ingredient.of(Items.BUCKET), 1);
-        var scopes = List.of(IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE);
+        IngredientSpec catalyst = new IngredientSpec(
+                Ingredient.of(Items.BUCKET), 1, InputConsumption.catalyst());
         var twoBuckets = java.util.Map.of(
                 CraftingResolver.StackKey.of(new ItemStack(Items.BUCKET, 2), true), 2);
         var oneBucket = java.util.Map.of(
                 CraftingResolver.StackKey.of(new ItemStack(Items.BUCKET), true), 1);
 
         assertEquals(2, AsyncCraftChain.reusableWorkerCapacity(
-                List.of(catalyst), scopes, twoBuckets));
+                List.of(catalyst), twoBuckets));
         assertEquals(1, AsyncCraftChain.reusableWorkerCapacity(
-                List.of(catalyst), scopes, oneBucket));
+                List.of(catalyst), oneBucket));
     }
 
     @Test
@@ -207,7 +208,7 @@ class AsyncCraftChainMachineDedupTest extends BootstrapTest {
         MachineLeaseRegistry leases = new MachineLeaseRegistry();
         MachineLeaseRegistry.MachineKey busyKey = new MachineLeaseRegistry.MachineKey(
                 busy.dim(), busy.pos(), ModType.GENERIC.id());
-        leases.tryAcquire(busyKey, new MachineLeaseRegistry.Owner(
+        leases.tryAcquire(busyKey, new OperationId(
                 UUID.randomUUID(), new NodeId(0), 0));
 
         List<BoundMachine> result = MachineDispatchPlanner.filterUnleased(

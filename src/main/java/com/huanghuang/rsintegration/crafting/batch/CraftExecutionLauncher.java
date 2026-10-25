@@ -67,7 +67,8 @@ final class CraftExecutionLauncher {
             boolean inferMode, @Nullable ItemStack baseItem,
             @Nullable ItemStack targetOutput, OutputDestination outputDestination,
             MachineSelectionMode machineSelectionMode,
-            Map<String, ItemStack> materialLocks, RepeatRequester repeatRequester) {
+            Map<String, ItemStack> materialLocks, int remainingRepeats,
+            RepeatRequester repeatRequester) {
         AsyncCraftChain chain = new AsyncCraftChain(
                 player.getUUID(), player.getServer(), storageEndpoint, graph);
         if (!chain.isGraphExecution()) {
@@ -91,7 +92,8 @@ final class CraftExecutionLauncher {
         UUID playerId = player.getUUID();
         var server = player.getServer();
         chain.onDone(() -> ChainRepeatController.scheduleNext(
-                chain, server, playerId, 1, chain.getMachineCount(),
+                chain, server, playerId, Math.max(1, remainingRepeats),
+                chain.getMachineCount(),
                 repeatRequester::schedule));
         boolean completed = AsyncCraftManager.getInstance().submitAndAdvance(chain, server);
         if (!completed) {

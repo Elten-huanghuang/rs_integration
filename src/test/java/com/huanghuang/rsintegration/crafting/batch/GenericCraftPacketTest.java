@@ -8,6 +8,7 @@ import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.DirectMaterialAllocator;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.ScaledIngredientSpec;
 import com.huanghuang.rsintegration.crafting.OutputDestination;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
@@ -867,7 +868,7 @@ class GenericCraftPacketTest extends BootstrapTest {
 
     @Test
     void terminalInputGraphCoversWholeBatchWithoutScalingCatalysts() {
-        List<IngredientSpec> scaled = CraftIngredientPlanMath.scaleIngredientSpecs(List.of(
+        List<ScaledIngredientSpec> scaled = CraftIngredientPlanMath.scaleIngredientSpecs(List.of(
                 new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 1, DemandRole.CONSUMED),
                 new IngredientSpec(Ingredient.of(Items.BUCKET), 1, DemandRole.CATALYST)), 6);
 
@@ -880,7 +881,8 @@ class GenericCraftPacketTest extends BootstrapTest {
     @Test
     void selfAmplifyingTerminalScalesCostsButKeepsOneSeed() {
         ItemStack output = new ItemStack(Items.NETHERITE_UPGRADE_SMITHING_TEMPLATE, 2);
-        List<IngredientSpec> scaled = CraftIngredientPlanMath.scaleTerminalIngredientSpecs(List.of(
+        List<ScaledIngredientSpec> scaled =
+                CraftIngredientPlanMath.scaleTerminalIngredientSpecs(List.of(
                 new IngredientSpec(Ingredient.of(Items.NETHERITE_UPGRADE_SMITHING_TEMPLATE), 1),
                 new IngredientSpec(Ingredient.of(Items.DIAMOND), 7),
                 new IngredientSpec(Ingredient.of(Items.NETHERRACK), 1)), output, 6);
@@ -893,7 +895,8 @@ class GenericCraftPacketTest extends BootstrapTest {
     @Test
     void selfAmplifyingTerminalCannotBypassTheSeedChainPlanner() {
         ItemStack template = new ItemStack(Items.NETHERITE_UPGRADE_SMITHING_TEMPLATE, 2);
-        List<IngredientSpec> templateSpecs = CraftIngredientPlanMath.scaleTerminalIngredientSpecs(
+        List<ScaledIngredientSpec> templateSpecs =
+                CraftIngredientPlanMath.scaleTerminalIngredientSpecs(
                 List.of(
                         new IngredientSpec(
                                 Ingredient.of(Items.NETHERITE_UPGRADE_SMITHING_TEMPLATE), 1),
@@ -905,7 +908,8 @@ class GenericCraftPacketTest extends BootstrapTest {
                 templateSpecs, template));
 
         ItemStack planks = new ItemStack(Items.OAK_PLANKS, 4);
-        List<IngredientSpec> ordinarySpecs = CraftIngredientPlanMath.scaleTerminalIngredientSpecs(
+        List<ScaledIngredientSpec> ordinarySpecs =
+                CraftIngredientPlanMath.scaleTerminalIngredientSpecs(
                 List.of(new IngredientSpec(Ingredient.of(Items.OAK_LOG), 1)), planks, 16);
         assertTrue(CraftIngredientPlanMath.useDirectTerminalPlan(
                 new DirectMaterialAllocator.Result(true, List.of(), -1, 0),

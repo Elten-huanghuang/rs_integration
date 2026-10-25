@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
+import com.huanghuang.rsintegration.crafting.graph.OperationId;
 import com.huanghuang.rsintegration.crafting.graph.OperationBudget;
 import net.minecraft.world.item.ItemStack;
 
@@ -40,7 +41,15 @@ public final class OperationExecutionKernel {
                               OperationBudget craftBudget,
                               MachineLeaseRegistry.MachineKey machine,
                               @Nullable OperationResourceCoordinator.CaptureRequest capture) {
-        return tryPrepare(craftId, nodeId, operationId, craftBudget, List.of(machine), capture);
+        return tryPrepare(new OperationId(craftId, nodeId, operationId),
+                craftBudget, List.of(machine), capture);
+    }
+
+    @Nullable
+    public Session tryPrepare(OperationId operationId, OperationBudget craftBudget,
+                              MachineLeaseRegistry.MachineKey machine,
+                              @Nullable OperationResourceCoordinator.CaptureRequest capture) {
+        return tryPrepare(operationId, craftBudget, List.of(machine), capture);
     }
 
     @Nullable
@@ -48,8 +57,16 @@ public final class OperationExecutionKernel {
                               OperationBudget craftBudget,
                               List<MachineLeaseRegistry.MachineKey> machineScope,
                               @Nullable OperationResourceCoordinator.CaptureRequest capture) {
+        return tryPrepare(new OperationId(craftId, nodeId, operationId),
+                craftBudget, machineScope, capture);
+    }
+
+    @Nullable
+    public Session tryPrepare(OperationId operationId, OperationBudget craftBudget,
+                              List<MachineLeaseRegistry.MachineKey> machineScope,
+                              @Nullable OperationResourceCoordinator.CaptureRequest capture) {
         OperationResourceCoordinator.Scope scope = resources.tryAcquire(
-                craftId, nodeId, operationId, craftBudget, machineScope, capture);
+                operationId, craftBudget, machineScope, capture);
         return scope == null ? null : new Session(scope);
     }
 

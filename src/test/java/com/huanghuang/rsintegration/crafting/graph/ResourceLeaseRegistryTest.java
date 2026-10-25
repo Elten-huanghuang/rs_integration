@@ -25,9 +25,9 @@ class ResourceLeaseRegistryTest extends BootstrapTest {
         MachineLeaseRegistry registry = new MachineLeaseRegistry();
         MachineLeaseRegistry.MachineKey machine = new MachineLeaseRegistry.MachineKey(
                 new ResourceLocation("minecraft", "overworld"), new BlockPos(1, 64, 2), "furnace");
-        MachineLeaseRegistry.Owner firstOwner = new MachineLeaseRegistry.Owner(
+        OperationId firstOwner = new OperationId(
                 UUID.randomUUID(), new NodeId(0), 0);
-        MachineLeaseRegistry.Owner secondOwner = new MachineLeaseRegistry.Owner(
+        OperationId secondOwner = new OperationId(
                 UUID.randomUUID(), new NodeId(1), 0);
 
         MachineLeaseRegistry.Lease first = registry.tryAcquire(machine, firstOwner);
@@ -70,14 +70,14 @@ class ResourceLeaseRegistryTest extends BootstrapTest {
         CaptureLeaseRegistry registry = new CaptureLeaseRegistry();
         ResourceLocation dimension = new ResourceLocation("minecraft", "overworld");
         MaterialKey iron = MaterialKey.of(new ItemStack(Items.IRON_INGOT));
-        CaptureLeaseRegistry.Owner owner = new CaptureLeaseRegistry.Owner(
+        OperationId owner = new OperationId(
                 UUID.randomUUID(), new NodeId(0), 0);
 
         CaptureLeaseRegistry.Lease first = registry.tryAcquire(dimension,
                 new AABB(0, 0, 0, 2, 2, 2), iron, owner);
         CaptureLeaseRegistry.Lease conflict = registry.tryAcquire(dimension,
                 new AABB(1, 1, 1, 3, 3, 3), iron,
-                new CaptureLeaseRegistry.Owner(UUID.randomUUID(), new NodeId(1), 0));
+                new OperationId(UUID.randomUUID(), new NodeId(1), 0));
 
         assertNotNull(first);
         assertNull(conflict);
@@ -88,9 +88,9 @@ class ResourceLeaseRegistryTest extends BootstrapTest {
     void disjointOrProvablyDifferentCaptureCanProceed() {
         CaptureLeaseRegistry registry = new CaptureLeaseRegistry();
         ResourceLocation dimension = new ResourceLocation("minecraft", "overworld");
-        CaptureLeaseRegistry.Owner firstOwner = new CaptureLeaseRegistry.Owner(
+        OperationId firstOwner = new OperationId(
                 UUID.randomUUID(), new NodeId(0), 0);
-        CaptureLeaseRegistry.Owner secondOwner = new CaptureLeaseRegistry.Owner(
+        OperationId secondOwner = new OperationId(
                 UUID.randomUUID(), new NodeId(1), 0);
 
         assertNotNull(registry.tryAcquire(dimension, new AABB(0, 0, 0, 2, 2, 2),
@@ -104,7 +104,7 @@ class ResourceLeaseRegistryTest extends BootstrapTest {
     @Test
     void machineKeySeparatesDimensionPositionAndLogicalType() {
         MachineLeaseRegistry registry = new MachineLeaseRegistry();
-        MachineLeaseRegistry.Owner owner = machineOwner(0);
+        OperationId owner = machineOwner(0);
         ResourceLocation overworld = new ResourceLocation("minecraft", "overworld");
         ResourceLocation nether = new ResourceLocation("minecraft", "the_nether");
         BlockPos position = new BlockPos(1, 64, 2);
@@ -121,11 +121,24 @@ class ResourceLeaseRegistryTest extends BootstrapTest {
     }
 
     @Test
+    void logicalMachineTypeIsCanonicalAcrossLeaseAndRecoveryPaths() {
+        ResourceLocation dimension = new ResourceLocation("minecraft", "overworld");
+        BlockPos position = new BlockPos(1, 64, 2);
+        MachineLeaseRegistry.MachineKey canonical = new MachineLeaseRegistry.MachineKey(
+                dimension, position, "Furnace");
+        MachineLeaseRegistry.MachineKey equivalent = new MachineLeaseRegistry.MachineKey(
+                dimension, position, "  furnace  ");
+
+        assertEquals(canonical, equivalent);
+        assertEquals("furnace", canonical.logicalType());
+    }
+
+    @Test
     void machineReleaseRequiresBothGenerationAndOwner() {
         MachineLeaseRegistry registry = new MachineLeaseRegistry();
         MachineLeaseRegistry.MachineKey machine = new MachineLeaseRegistry.MachineKey(
                 new ResourceLocation("minecraft", "overworld"), new BlockPos(1, 64, 2), "furnace");
-        MachineLeaseRegistry.Owner owner = machineOwner(0);
+        OperationId owner = machineOwner(0);
         MachineLeaseRegistry.Lease lease = registry.tryAcquire(machine, owner);
         assertNotNull(lease);
 
@@ -230,12 +243,12 @@ class ResourceLeaseRegistryTest extends BootstrapTest {
         assertEquals(0, registry.size());
     }
 
-    private static MachineLeaseRegistry.Owner machineOwner(int nodeId) {
-        return new MachineLeaseRegistry.Owner(UUID.randomUUID(), new NodeId(nodeId), 0);
+    private static OperationId machineOwner(int nodeId) {
+        return new OperationId(UUID.randomUUID(), new NodeId(nodeId), 0);
     }
 
-    private static CaptureLeaseRegistry.Owner captureOwner(int nodeId) {
-        return new CaptureLeaseRegistry.Owner(UUID.randomUUID(), new NodeId(nodeId), 0);
+    private static OperationId captureOwner(int nodeId) {
+        return new OperationId(UUID.randomUUID(), new NodeId(nodeId), 0);
     }
 
     private static MaterialKey taggedDiamond(String variant) {

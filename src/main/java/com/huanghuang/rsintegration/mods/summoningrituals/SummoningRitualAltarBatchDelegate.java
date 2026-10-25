@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.ScaledIngredientSpec;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
@@ -494,6 +495,26 @@ public final class SummoningRitualAltarBatchDelegate extends AbstractBatchDelega
                 SummoningRitualRecipeHandler.catalyst(recipe));
     }
 
+    public static List<ScaledIngredientSpec> planningScaledMaterials(
+            ServerPlayer player, Recipe<?> recipe,
+            @Nullable ResourceLocation dim, @Nullable BlockPos pos,
+            List<ScaledIngredientSpec> requested) {
+        if (player == null || recipe == null || pos == null
+                || !SummoningRitualRecipeHandler.RECIPE_CLASS.equals(recipe.getClass().getName())) {
+            return requested == null ? List.of() : List.copyOf(requested);
+        }
+        ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
+        if (level == null || !level.isLoaded(pos)) {
+            return requested == null ? List.of() : List.copyOf(requested);
+        }
+        IItemHandler handler = itemHandler(level.getBlockEntity(pos));
+        if (!SummoningRitualInventoryOps.valid(handler)) {
+            return requested == null ? List.of() : List.copyOf(requested);
+        }
+        return calculateMissingScaled(handler, requested == null ? List.of() : requested,
+                SummoningRitualRecipeHandler.catalyst(recipe));
+    }
+
     static List<IngredientSpec> calculateMissing(IItemHandler handler,
                                                   List<IngredientSpec> requested,
                                                   Ingredient catalyst) {
@@ -530,6 +551,49 @@ public final class SummoningRitualAltarBatchDelegate extends AbstractBatchDelega
             IngredientSpec spec = requested.get(index);
             if (spec != null && !spec.isEmpty() && remaining[index] > 0) {
                 missing.add(new IngredientSpec(
+                        spec.ingredient(), remaining[index], spec.consumption()));
+            }
+        }
+        return List.copyOf(missing);
+    }
+
+    static List<ScaledIngredientSpec> calculateMissingScaled(
+            IItemHandler handler, List<ScaledIngredientSpec> requested,
+            Ingredient catalyst) {
+        if (!SummoningRitualInventoryOps.valid(handler)
+                || requested == null || requested.isEmpty()) {
+            return requested == null ? List.of() : List.copyOf(requested);
+        }
+        int catalystSlot = SummoningRitualInventoryOps.catalystSlot(handler);
+        List<ScaledIngredientSpec> missing = new ArrayList<>();
+        ItemStack installedCatalyst = catalystSlot < 0 ? ItemStack.EMPTY
+                : handler.getStackInSlot(catalystSlot);
+        boolean catalystPresent = catalyst == null || catalyst.isEmpty()
+                || IngredientMatcher.test(catalyst, installedCatalyst);
+        long[] remaining = new long[requested.size()];
+        for (int index = 0; index < requested.size(); index++) {
+            ScaledIngredientSpec spec = requested.get(index);
+            if (spec == null || spec.isEmpty()) continue;
+            if (spec.role() == DemandRole.CATALYST && catalystPresent) continue;
+            remaining[index] = spec.count();
+        }
+        for (int slot = 0; slot < catalystSlot; slot++) {
+            ItemStack existing = SummoningRitualInventoryOps.stackInSlot(handler, slot);
+            if (existing.isEmpty()) continue;
+            long available = existing.getCount();
+            for (int index = 0; index < requested.size() && available > 0; index++) {
+                ScaledIngredientSpec spec = requested.get(index);
+                if (remaining[index] <= 0L || spec == null || spec.role() == DemandRole.CATALYST
+                        || !IngredientMatcher.test(spec.ingredient(), existing)) continue;
+                long used = Math.min(available, remaining[index]);
+                remaining[index] -= used;
+                available -= used;
+            }
+        }
+        for (int index = 0; index < requested.size(); index++) {
+            ScaledIngredientSpec spec = requested.get(index);
+            if (spec != null && !spec.isEmpty() && remaining[index] > 0L) {
+                missing.add(new ScaledIngredientSpec(
                         spec.ingredient(), remaining[index], spec.consumption()));
             }
         }

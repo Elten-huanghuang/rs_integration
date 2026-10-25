@@ -54,7 +54,7 @@ public final class HandlerVirtualExchangeBatchDelegate extends VirtualExchangeBa
                     "rsi.generic.error.recipe_stage_missing"));
             return false;
         }
-        ModRecipeHandler resolvedHandler = ModRecipeHandlers.handlerFor(found);
+        ModRecipeHandler resolvedHandler = ModRecipeHandlers.claimFor(found).winner();
         if (!supportsExchange(found, resolvedHandler, player, level)) {
             return false;
         }

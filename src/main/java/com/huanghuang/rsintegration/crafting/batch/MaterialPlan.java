@@ -45,7 +45,9 @@ public record MaterialPlan(List<Entry> entries) {
     }
 
     public List<Entry> reusableEntries() {
-        return entries.stream().filter(Entry::reusable).toList();
+        return entries.stream()
+                .filter(entry -> entry.spec().consumption().reusableWithinWorkerBatch())
+                .toList();
     }
 
     /** Compatibility projection for graph-owned legacy reservations. */
@@ -103,17 +105,14 @@ public record MaterialPlan(List<Entry> entries) {
      * Builds a stable plan for a legacy ordered list. The physical placement index is
      * recorded only as a compatibility fallback; new delegates should declare slots explicitly.
      */
-    public static MaterialPlan fromLegacy(List<IngredientSpec> specs,
-                                          List<IBatchDelegate.MaterialReservationScope> scopes) {
+    public static MaterialPlan fromLegacy(List<IngredientSpec> specs) {
         if (specs == null || specs.isEmpty()) return none();
         List<Entry> entries = new ArrayList<>(specs.size());
         for (int index = 0; index < specs.size(); index++) {
             IngredientSpec spec = specs.get(index);
             if (spec == null || spec.isEmpty()) continue;
-            boolean reusable = scopes != null && index < scopes.size()
-                    && scopes.get(index) == IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE;
-            entries.add(new Entry("legacy:material:" + index, spec, Allocation.GRAPH,
-                    reusable, index));
+            entries.add(new Entry("legacy:material:" + index, spec,
+                    Allocation.GRAPH, index));
         }
         return new MaterialPlan(entries);
     }
@@ -127,8 +126,7 @@ public record MaterialPlan(List<Entry> entries) {
     public static MaterialPlan fromLegacyPartitions(
             List<IngredientSpec> orderedSpecs,
             List<IngredientSpec> graphSpecs,
-            List<IngredientSpec> supplementalSpecs,
-            List<IBatchDelegate.MaterialReservationScope> scopes) {
+            List<IngredientSpec> supplementalSpecs) {
         if (orderedSpecs == null || orderedSpecs.isEmpty()) return none();
         List<IngredientSpec> remainingGraph = compact(graphSpecs);
         List<IngredientSpec> remainingSupplemental = compact(supplementalSpecs);
@@ -143,9 +141,7 @@ public record MaterialPlan(List<Entry> entries) {
                 throw new IllegalArgumentException("legacy material at index " + index
                         + " is absent from graph and supplemental partitions");
             }
-            boolean reusable = scopes != null && index < scopes.size()
-                    && scopes.get(index) == IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE;
-            entries.add(new Entry("legacy:material:" + index, spec, allocation, reusable, index));
+            entries.add(new Entry("legacy:material:" + index, spec, allocation, index));
         }
         if (!remainingGraph.isEmpty() || !remainingSupplemental.isEmpty()) {
             throw new IllegalArgumentException("legacy reservation partitions contain "
@@ -171,7 +167,7 @@ public record MaterialPlan(List<Entry> entries) {
     }
 
     public record Entry(String id, IngredientSpec spec, Allocation allocation,
-                        boolean reusable, @Nullable Integer inputSlot) {
+                        @Nullable Integer inputSlot) {
         public Entry {
             if (id == null || id.isBlank()) {
                 throw new IllegalArgumentException("material entry id must not be blank");
@@ -183,6 +179,10 @@ public record MaterialPlan(List<Entry> entries) {
             if (inputSlot != null && inputSlot < 0) {
                 throw new IllegalArgumentException("input slot must be non-negative");
             }
+        }
+
+        public boolean reusable() {
+            return spec.consumption().reusableWithinWorkerBatch();
         }
     }
 }

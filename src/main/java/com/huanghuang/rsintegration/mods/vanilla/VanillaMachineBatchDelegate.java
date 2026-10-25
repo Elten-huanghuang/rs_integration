@@ -19,6 +19,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
@@ -435,8 +436,9 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         if (prototype.isEmpty()) return InputBufferContract.none();
         return new InputBufferContract(inputBufferOperationLimit(),
                 List.of(new InputBufferContract.InputSlot(
-                        "legacy:material:0", 0, prototype, 1, false,
-                        furnaceInputCapacity(ingredients.get(0)))),
+                        "legacy:material:0", 0, prototype, 1,
+                        furnaceInputCapacity(ingredients.get(0)),
+                        InputConsumption.consumed())),
                 outputContract().ports());
     }
 
@@ -1315,7 +1317,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         if (result == null || result.isEmpty()) return OutputContract.none();
         return new OutputContract(List.of(new OutputContract.Port(
                 "vanilla:primary", physicalPort, result, result.getCount(),
-                InputBufferPlan.OutputPort.Kind.PRIMARY, source)));
+                OutputContract.Kind.PRIMARY, source)));
     }
 
     @Nullable

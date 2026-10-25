@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
+import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
@@ -53,13 +54,13 @@ class ApprenticeCodexRecipeHandlerTest {
                 java.util.List.of(
                         new InputBufferContract.InputSlot(
                                 "catalyst", 0, new net.minecraft.world.item.ItemStack(Items.STONE),
-                                1, true, 1),
+                                1, 1, InputConsumption.catalyst()),
                         new InputBufferContract.InputSlot(
                                 "material", 1, new net.minecraft.world.item.ItemStack(Items.DIRT),
-                                1, false, 8)),
+                                1, 8, InputConsumption.consumed())),
                 java.util.List.of(new OutputContract.Port(
                         "primary", null, new net.minecraft.world.item.ItemStack(Items.DIAMOND), 1,
-                        InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.VIRTUAL)));
+                        OutputContract.Kind.PRIMARY, OutputContract.Source.VIRTUAL)));
         InputBufferPlan plan = contract.plan(8);
         assertEquals(8, plan.operations());
         assertEquals(1, plan.inputs().get(0).stack().getCount());
@@ -72,10 +73,7 @@ class ApprenticeCodexRecipeHandlerTest {
         var specs = java.util.List.of(
                 new IngredientSpec(Ingredient.of(Items.STONE), 1, DemandRole.CATALYST),
                 new IngredientSpec(Ingredient.of(Items.DIRT), 1));
-        MaterialPlan materialPlan = MaterialPlan.fromLegacy(specs,
-                java.util.List.of(
-                        com.huanghuang.rsintegration.crafting.batch.IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE,
-                        com.huanghuang.rsintegration.crafting.batch.IBatchDelegate.MaterialReservationScope.PER_OPERATION));
+        MaterialPlan materialPlan = MaterialPlan.fromLegacy(specs);
 
         assertEquals(ApprenticeCodexEssenceSmokerBatchDelegate.CATALYST_ENTRY_ID,
                 materialPlan.entries().get(0).id());

@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.ScaledIngredientSpec;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
@@ -28,6 +29,11 @@ public interface ModRecipeHandler {
 
     /** Quick check: does this handler claim responsibility for the given recipe? */
     boolean canHandle(@Nonnull Recipe<?> recipe);
+
+    /** 数值越大越优先；同优先级且同时命中时视为配方 claim 冲突。 */
+    default int claimPriority() {
+        return 0;
+    }
 
     /** Whether {@link #canHandle} depends only on the recipe class. */
     default boolean cacheByRecipeClass() {
@@ -65,12 +71,13 @@ public interface ModRecipeHandler {
     List<IngredientSpec> getIngredients(Recipe<?> recipe);
 
     /**
-     * 返回允许进入递归合成图的材料。运行时专用资源可以在这里移除，同时继续
+     * 返回允许进入递归合成图的整批材料。运行时专用资源可以在这里移除，同时继续
      * 保留在 {@link #getIngredients(Recipe)} 中，供实际预留和机器执行使用。
      */
     @Nonnull
-    default List<IngredientSpec> getRecursiveIngredients(
-            @Nonnull Recipe<?> recipe, @Nullable List<IngredientSpec> ingredients) {
+    default List<ScaledIngredientSpec> getRecursiveScaledIngredients(
+            @Nonnull Recipe<?> recipe,
+            @Nullable List<ScaledIngredientSpec> ingredients) {
         return ingredients == null ? List.of() : ingredients;
     }
 
@@ -139,8 +146,12 @@ public interface ModRecipeHandler {
         if (!hasDeterministicPrimaryOutput(recipe)) {
             return false;
         }
-        List<IngredientSpec> specs = getRecursiveIngredients(recipe, getIngredients(recipe));
-        return specs != null && !specs.isEmpty();
+        List<IngredientSpec> ingredients = getIngredients(recipe);
+        List<ScaledIngredientSpec> specs = getRecursiveScaledIngredients(recipe,
+                ingredients == null ? List.of() : ingredients.stream()
+                        .map(spec -> ScaledIngredientSpec.of(spec, spec.count()))
+                        .toList());
+        return !specs.isEmpty();
     }
 
     /**

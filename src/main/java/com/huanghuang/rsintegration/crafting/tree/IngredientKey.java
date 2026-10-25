@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.tree;
 
+import com.huanghuang.rsintegration.crafting.CanonicalNbt;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.world.item.Item;
@@ -26,7 +27,7 @@ public final class IngredientKey {
 
     private IngredientKey(Item item, @Nullable CompoundTag tag) {
         this.item = item;
-        this.tag = tag == null ? null : tag.copy();
+        this.tag = tag == null || tag.isEmpty() ? null : CanonicalNbt.canonicalCopy(tag);
     }
 
     public static IngredientKey of(ItemStack stack) {

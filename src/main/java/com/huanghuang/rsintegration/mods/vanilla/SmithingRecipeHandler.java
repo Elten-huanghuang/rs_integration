@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.api.ISmithingRecipeAccessor;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.ScaledIngredientSpec;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.item.ItemStack;
@@ -114,6 +115,19 @@ public final class SmithingRecipeHandler implements ModRecipeHandler {
         List<IngredientSpec> exact = new ArrayList<>(specs);
         IngredientSpec original = exact.get(1);
         exact.set(1, new IngredientSpec(StrictNBTIngredient.of(base.copyWithCount(1)),
+                original.count(), original.consumption()));
+        return List.copyOf(exact);
+    }
+
+    public static List<ScaledIngredientSpec> requireExactScaledBase(
+            SmithingTransformRecipe recipe, List<ScaledIngredientSpec> specs,
+            @Nullable ItemStack base) {
+        if (base == null || base.isEmpty() || !recipe.isBaseIngredient(base)
+                || specs.size() < 2) return specs;
+        List<ScaledIngredientSpec> exact = new ArrayList<>(specs);
+        ScaledIngredientSpec original = exact.get(1);
+        exact.set(1, new ScaledIngredientSpec(
+                StrictNBTIngredient.of(base.copyWithCount(1)),
                 original.count(), original.consumption()));
         return List.copyOf(exact);
     }

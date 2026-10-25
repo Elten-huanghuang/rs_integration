@@ -58,7 +58,7 @@ final class CraftMachineBindingSupport {
     }
 
     static boolean isRecipeAvailableForPlanning(ServerPlayer player, Recipe<?> recipe) {
-        ModRecipeHandler handler = ModRecipeHandlers.handlerFor(recipe);
+        ModRecipeHandler handler = ModRecipeHandlers.claimFor(recipe).winner();
         return handler == null || handler.isAvailableForPlanning(recipe, player);
     }
 

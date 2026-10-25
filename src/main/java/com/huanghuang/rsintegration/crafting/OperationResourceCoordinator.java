@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.crafting.graph.CaptureLeaseRegistry;
 import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
+import com.huanghuang.rsintegration.crafting.graph.OperationId;
 import com.huanghuang.rsintegration.crafting.graph.OperationBudget;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
@@ -53,6 +54,13 @@ public final class OperationResourceCoordinator {
     }
 
     @Nullable
+    public Scope tryAcquire(OperationId operationId, OperationBudget craftBudget,
+                            MachineLeaseRegistry.MachineKey machine,
+                            @Nullable CaptureRequest capture) {
+        return tryAcquire(operationId, craftBudget, List.of(machine), capture);
+    }
+
+    @Nullable
     public Scope tryAcquire(UUID craftId, NodeId nodeId, int operationId,
                             OperationBudget craftBudget,
                             List<MachineLeaseRegistry.MachineKey> machineScope,
@@ -65,23 +73,44 @@ public final class OperationResourceCoordinator {
             return null;
         }
         OperationBudget.Permit permit = OperationBudget.combine(craftPermit, globalPermit);
+        return tryAcquire(new OperationId(craftId, nodeId, operationId),
+                permit, machineScope, capture);
+    }
+
+    @Nullable
+    public Scope tryAcquire(OperationId operationId, OperationBudget craftBudget,
+                            List<MachineLeaseRegistry.MachineKey> machineScope,
+                            @Nullable CaptureRequest capture) {
+        Objects.requireNonNull(operationId, "operationId");
+        OperationBudget.Permit craftPermit = craftBudget.tryAcquire();
+        if (craftPermit == null) return null;
+        OperationBudget.Permit globalPermit = globalBudget.tryAcquire();
+        if (globalPermit == null) {
+            craftPermit.cancelBeforeStart();
+            return null;
+        }
+        OperationBudget.Permit permit = OperationBudget.combine(craftPermit, globalPermit);
+        return tryAcquire(operationId, permit, machineScope, capture);
+    }
+
+    @Nullable
+    private Scope tryAcquire(OperationId operationId, OperationBudget.Permit permit,
+                             List<MachineLeaseRegistry.MachineKey> machineScope,
+                             @Nullable CaptureRequest capture) {
         List<MachineLeaseRegistry.Lease> machineLeases = null;
         CaptureSession captureSession = null;
         CaptureLeaseRegistry.Lease captureLease = null;
         try {
-            MachineLeaseRegistry.Owner machineOwner = new MachineLeaseRegistry.Owner(
-                    craftId, nodeId, operationId);
-            machineLeases = machines.tryAcquireAll(machineScope, machineOwner);
+            machineLeases = machines.tryAcquireAll(machineScope, operationId);
             if (machineLeases == null) {
                 permit.cancelBeforeStart();
                 return null;
             }
 
             if (capture != null) {
-                CaptureLeaseRegistry.Owner captureOwner = new CaptureLeaseRegistry.Owner(
-                        craftId, nodeId, operationId);
                 captureLease = captures.tryAcquire(
-                        capture.dimension(), capture.region(), MaterialKey.of(capture.expected()), captureOwner,
+                        capture.dimension(), capture.region(),
+                        MaterialKey.of(capture.expected()), operationId,
                         capture.allowOverlappingOrigins());
                 if (captureLease == null) {
                     machines.releaseAll(machineLeases);

@@ -81,6 +81,23 @@ public final class MaterialLocks {
         return List.copyOf(narrowed);
     }
 
+    public static List<ScaledIngredientSpec> narrowScaledSpecs(
+            ResourceLocation recipeId, List<ScaledIngredientSpec> specs,
+            @Nullable Map<String, ItemStack> locks) {
+        if (specs == null || specs.isEmpty() || locks == null || locks.isEmpty()) return specs;
+        List<ScaledIngredientSpec> narrowed = new ArrayList<>(specs.size());
+        for (ScaledIngredientSpec spec : specs) {
+            if (spec == null || spec.isEmpty()) {
+                narrowed.add(spec);
+            } else {
+                narrowed.add(new ScaledIngredientSpec(
+                        narrow(recipeId, spec.ingredient(), locks),
+                        spec.count(), spec.consumption()));
+            }
+        }
+        return List.copyOf(narrowed);
+    }
+
     @Nullable
     public static ItemStack canonicalCandidate(Ingredient original, ItemStack requested) {
         boolean strictNbt = IngredientMatcher.requiresNbt(original);

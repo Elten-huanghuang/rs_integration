@@ -62,7 +62,7 @@ class AsyncCraftChainProductionTest extends BootstrapTest {
     void capturedWorldOutputUsesOnlyItsUniqueDeclaredPort() {
         OutputContract contract = new OutputContract(List.of(
                 new OutputContract.Port("world:primary", null, new ItemStack(Items.IRON_INGOT), 1,
-                        InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.WORLD)));
+                        OutputContract.Kind.PRIMARY, OutputContract.Source.WORLD)));
 
         List<OutputAccounting.CollectedOutput> outputs = AsyncCraftChain.capturedWorldOutputRecords(
                 contract, List.of(new ItemStack(Items.IRON_INGOT)));
@@ -76,9 +76,9 @@ class AsyncCraftChainProductionTest extends BootstrapTest {
     void ambiguousCapturedWorldOutputIsNotAssignedToEitherPort() {
         OutputContract contract = new OutputContract(List.of(
                 new OutputContract.Port("world:first", null, new ItemStack(Items.IRON_INGOT), 1,
-                        InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.WORLD),
+                        OutputContract.Kind.PRIMARY, OutputContract.Source.WORLD),
                 new OutputContract.Port("world:second", null, new ItemStack(Items.IRON_INGOT), 1,
-                        InputBufferPlan.OutputPort.Kind.SECONDARY, OutputContract.Source.WORLD)));
+                        OutputContract.Kind.SECONDARY, OutputContract.Source.WORLD)));
 
         List<OutputAccounting.CollectedOutput> outputs = AsyncCraftChain.capturedWorldOutputRecords(
                 contract, List.of(new ItemStack(Items.IRON_INGOT)));
@@ -124,8 +124,6 @@ class AsyncCraftChainProductionTest extends BootstrapTest {
                 List.of(new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 2),
                         new IngredientSpec(Ingredient.of(Items.BUCKET), 1,
                                 InputConsumption.catalyst())),
-                List.of(IBatchDelegate.MaterialReservationScope.PER_OPERATION,
-                        IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE),
                 3);
 
         assertEquals(6, scaled.get(0).count());
@@ -139,7 +137,6 @@ class AsyncCraftChainProductionTest extends BootstrapTest {
 
         List<IngredientSpec> scaled = AsyncCraftChain.scaleGraphSpecsForExecutions(
                 List.of(catalyst),
-                List.of(IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE),
                 12);
 
         assertEquals(1, scaled.get(0).count());
@@ -149,9 +146,11 @@ class AsyncCraftChainProductionTest extends BootstrapTest {
     @Test
     void findsEveryReusableMaterialInsteadOfOnlyTheFirst() {
         assertEquals(List.of(0, 2), AsyncCraftChain.reusableMaterialIndices(List.of(
-                IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE,
-                IBatchDelegate.MaterialReservationScope.PER_OPERATION,
-                IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE), 3));
+                new IngredientSpec(Ingredient.of(Items.BUCKET), 1,
+                        InputConsumption.catalyst()),
+                new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 1),
+                new IngredientSpec(Ingredient.of(Items.SHEARS), 1,
+                        InputConsumption.durability(1L))), 3));
     }
 
     @Test

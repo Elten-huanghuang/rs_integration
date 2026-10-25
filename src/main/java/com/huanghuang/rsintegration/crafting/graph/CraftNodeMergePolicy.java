@@ -29,7 +29,7 @@ public final class CraftNodeMergePolicy {
         if (ModType.GENERIC.id().equals(node.modTypeId())) return true;
         Recipe<?> recipe = level.getRecipeManager().byKey(node.recipeId()).orElse(null);
         if (recipe == null) return false;
-        ModRecipeHandler handler = ModRecipeHandlers.handlerFor(recipe);
+        ModRecipeHandler handler = ModRecipeHandlers.claimFor(recipe).winner();
         if (handler == null || !handler.modType().id().equals(node.modTypeId())) return false;
         return handler.instantRecipePolicy(recipe).enabled();
     }

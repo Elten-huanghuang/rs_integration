@@ -13,6 +13,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TerminalGraphComposerTest extends BootstrapTest {
 
@@ -116,6 +117,54 @@ class TerminalGraphComposerTest extends BootstrapTest {
                 new ItemStack(Items.SNIFFER_EGG));
 
         assertEquals(OutputKind.PRIMARY, result.nodes().get(0).outputs().get(0).kind());
+        CraftPlanValidator.validate(result);
+    }
+
+    @Test
+    void preservesSecondaryTerminalOutputsInTheExecutionGraph() {
+        MaterialKey geode = MaterialKey.of(new ItemStack(Items.PRISMARINE));
+        CraftPlanGraph base = new CraftPlanGraph(1, List.of(), List.of(), List.of(
+                new RootDemand(Ingredient.of(Items.PRISMARINE), 1, 0,
+                        new ItemStack(Items.PRISMARINE), List.of(new RootAllocation(
+                        new MaterialSource.InitialPool(geode), geode, 1)))), List.of(), List.of());
+
+        CraftPlanGraph result = TerminalGraphComposer.compose(base, step("known", 2),
+                List.of(
+                        new TerminalGraphComposer.TerminalOutput(
+                                MaterialKey.of(new ItemStack(Items.DIAMOND)), 2, OutputKind.PRIMARY),
+                        new TerminalGraphComposer.TerminalOutput(
+                                MaterialKey.of(new ItemStack(Items.EXPERIENCE_BOTTLE)),
+                                1, OutputKind.SECONDARY)));
+
+        CraftNode terminal = result.nodes().get(0);
+        assertEquals(2, terminal.outputs().size());
+        assertEquals(OutputKind.SECONDARY, terminal.outputs().get(1).kind());
+        assertEquals(2, terminal.outputs().get(1).quantity());
+        MaterialSource rootSource = result.rootDemands().get(0).allocations().get(0).source();
+        assertTrue(rootSource instanceof MaterialSource.ProducerOutput);
+        assertEquals(terminal.outputs().get(0).id(),
+                ((MaterialSource.ProducerOutput) rootSource).outputPort());
+        CraftPlanValidator.validate(result);
+    }
+
+    @Test
+    void probabilisticTerminalOutputKeepsZeroLowerBoundAndRetryBudget() {
+        MaterialKey geode = MaterialKey.of(new ItemStack(Items.PRISMARINE));
+        CraftPlanGraph base = new CraftPlanGraph(1, List.of(), List.of(), List.of(
+                new RootDemand(Ingredient.of(Items.PRISMARINE), 1, 0,
+                        new ItemStack(Items.PRISMARINE), List.of(new RootAllocation(
+                        new MaterialSource.InitialPool(geode), geode, 1)))), List.of(), List.of());
+        OutputProbability probability = OutputProbability.dynamic(null, 12, "terminal:test");
+
+        CraftPlanGraph result = TerminalGraphComposer.compose(base, step("probability", 1),
+                List.of(new TerminalGraphComposer.TerminalOutput(
+                        MaterialKey.of(new ItemStack(Items.DIAMOND)), 1,
+                        OutputKind.PRIMARY, probability, false)));
+
+        OutputDeclaration output = result.nodes().get(0).outputs().get(0);
+        assertEquals(0, output.minimumQuantity());
+        assertEquals(1, output.maximumQuantity());
+        assertEquals(probability, output.probability());
         CraftPlanValidator.validate(result);
     }
 

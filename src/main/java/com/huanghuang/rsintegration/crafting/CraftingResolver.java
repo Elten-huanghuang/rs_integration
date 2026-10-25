@@ -25,6 +25,7 @@ import com.huanghuang.rsintegration.crafting.graph.RootAllocation;
 import com.huanghuang.rsintegration.crafting.graph.RootDemand;
 import com.huanghuang.rsintegration.crafting.planning.PlanningPreferences;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
+import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.util.PerformanceMonitor;
 import com.huanghuang.rsintegration.mods.farmersdelight.MinersDelightCopperPotSupport;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
@@ -366,6 +367,66 @@ public final class CraftingResolver {
                 activeRoot, materialLocks, preferences.excludedRecipes(), preferences);
     }
 
+    public static CraftPlanGraph resolveGraphForScaledSpecsWithTypes(
+            List<ScaledIngredientSpec> needed, Map<StackKey, ? extends Number> availableKeyed,
+            Level level, @Nullable ServerPlayer player,
+            @Nullable CraftStorageEndpoint storageEndpoint,
+            @Nullable List<String> missingOut,
+            @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
+            boolean bestEffort, int timeoutMs, @Nullable ActiveRootRecipe activeRoot,
+            Map<String, ItemStack> materialLocks, PlanningPreferences preferences) {
+        List<RootSpec> roots = needed.stream()
+                .map(spec -> new RootSpec(spec.ingredient(), spec.count(), spec.consumption()))
+                .toList();
+        return resolveGraphForRootSpecs(roots, availableKeyed, level, player,
+                storageEndpoint, missingOut, forcedOverrides, bestEffort, false,
+                timeoutMs, activeRoot, materialLocks,
+                preferences.excludedRecipes(), preferences);
+    }
+
+    public static CraftPlanGraph resolveGraphForScaledSpecsWithTypes(
+            List<ScaledIngredientSpec> needed, Map<StackKey, ? extends Number> availableKeyed,
+            Level level, @Nullable ServerPlayer player,
+            @Nullable CraftStorageEndpoint storageEndpoint,
+            @Nullable List<String> missingOut,
+            @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
+            boolean bestEffort, int timeoutMs, @Nullable ActiveRootRecipe activeRoot,
+            Map<String, ItemStack> materialLocks) {
+        return resolveGraphForScaledSpecsWithTypes(needed, availableKeyed, level, player,
+                storageEndpoint, missingOut, forcedOverrides, bestEffort, timeoutMs,
+                activeRoot, materialLocks, PlanningPreferences.empty());
+    }
+
+    public static CraftPlanGraph resolveMachineGraphForScaledSpecsWithTypes(
+            List<ScaledIngredientSpec> needed, Map<StackKey, ? extends Number> availableKeyed,
+            Level level, @Nullable ServerPlayer player,
+            @Nullable CraftStorageEndpoint storageEndpoint,
+            @Nullable List<String> missingOut,
+            @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
+            boolean bestEffort, int timeoutMs, @Nullable ActiveRootRecipe activeRoot,
+            Map<String, ItemStack> materialLocks, PlanningPreferences preferences) {
+        List<RootSpec> roots = needed.stream()
+                .map(spec -> new RootSpec(spec.ingredient(), spec.count(), spec.consumption()))
+                .toList();
+        return resolveGraphForRootSpecs(roots, availableKeyed, level, player,
+                storageEndpoint, missingOut, forcedOverrides, bestEffort, true,
+                timeoutMs, activeRoot, materialLocks,
+                preferences.excludedRecipes(), preferences);
+    }
+
+    public static CraftPlanGraph resolveMachineGraphForScaledSpecsWithTypes(
+            List<ScaledIngredientSpec> needed, Map<StackKey, ? extends Number> availableKeyed,
+            Level level, @Nullable ServerPlayer player,
+            @Nullable CraftStorageEndpoint storageEndpoint,
+            @Nullable List<String> missingOut,
+            @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
+            boolean bestEffort, int timeoutMs, @Nullable ActiveRootRecipe activeRoot,
+            Map<String, ItemStack> materialLocks) {
+        return resolveMachineGraphForScaledSpecsWithTypes(needed, availableKeyed, level, player,
+                storageEndpoint, missingOut, forcedOverrides, bestEffort, timeoutMs,
+                activeRoot, materialLocks, PlanningPreferences.empty());
+    }
+
     /**
      * Resolve the root inputs of one machine recipe. Each {@link IngredientSpec}
      * represents one physical machine slot, so a tag demand must be backed by one
@@ -486,6 +547,24 @@ public final class CraftingResolver {
             boolean singleVariantRoots, int timeoutMs, @Nullable ActiveRootRecipe activeRoot,
             Map<String, ItemStack> materialLocks, Set<ResourceLocation> excludedRecipes,
             PlanningPreferences preferences) {
+        List<RootSpec> roots = needed.stream()
+                .filter(spec -> spec != null && !spec.isEmpty())
+                .map(spec -> new RootSpec(spec.ingredient(), spec.count(), spec.consumption()))
+                .toList();
+        return resolveGraphForRootSpecs(roots, availableKeyed, level, player,
+                storageEndpoint, missingOut, forcedOverrides, bestEffort,
+                singleVariantRoots, timeoutMs, activeRoot, materialLocks,
+                excludedRecipes, preferences);
+    }
+
+    private static CraftPlanGraph resolveGraphForRootSpecs(
+            List<RootSpec> needed, Map<StackKey, ? extends Number> availableKeyed, Level level,
+            @Nullable ServerPlayer player, @Nullable CraftStorageEndpoint storageEndpoint,
+            @Nullable List<String> missingOut,
+            @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides, boolean bestEffort,
+            boolean singleVariantRoots, int timeoutMs, @Nullable ActiveRootRecipe activeRoot,
+            Map<String, ItemStack> materialLocks, Set<ResourceLocation> excludedRecipes,
+            PlanningPreferences preferences) {
         Map<ResourceLocation, ResourceLocation> prefs = mergeForcedOverrides(level, forcedOverrides);
         Map<Item, List<RecipeIndex.Entry>> index = RecipeIndex.get(level);
         ResolutionContext ctx = timeoutMs > 0
@@ -509,21 +588,21 @@ public final class CraftingResolver {
         try {
             // Crafting-grid roots are fungible planning demand and may be coalesced.
             // Machine roots are physical input slots and must retain their boundaries.
-            List<IngredientSpec> rootsToResolve = singleVariantRoots
-                    ? StepExecutor.machineSpecsForGraph(needed)
-                    : coalesceRootSpecs(needed);
+            List<RootSpec> rootsToResolve = singleVariantRoots
+                    ? machineRootDemands(needed)
+                    : coalesceRootDemands(needed);
             if (!singleVariantRoots) {
                 // Resolve reusable catalysts after ordinary inputs. This lets an
                 // intermediate CraftTweaker recipe return a shared catalyst before
                 // the terminal root reserves it.
                 rootsToResolve = new ArrayList<>(rootsToResolve);
-                rootsToResolve.sort(StepExecutor.resolutionComparator());
+                rootsToResolve.sort(rootSpecComparator());
             }
             for (int rootIndex = 0; rootIndex < rootsToResolve.size(); rootIndex++) {
-                IngredientSpec spec = rootsToResolve.get(rootIndex);
+                RootSpec spec = rootsToResolve.get(rootIndex);
                 if (spec.isEmpty()) continue;
                 if (activeRoot != null) {
-                    spec = new IngredientSpec(ctx.lockedIngredient(
+                    spec = new RootSpec(ctx.lockedIngredient(
                             activeRoot.recipeId(), spec.ingredient()),
                             spec.count(), spec.consumption());
                 }
@@ -569,6 +648,61 @@ public final class CraftingResolver {
                 CraftNodeMergePolicy.forLevel(level));
         ctx.logGuardSummary();
         return graph;
+    }
+
+    private record RootSpec(Ingredient ingredient, long count, InputConsumption consumption) {
+        private RootSpec {
+            Objects.requireNonNull(ingredient, "ingredient");
+            Objects.requireNonNull(consumption, "consumption");
+        }
+
+        private boolean isEmpty() {
+            return ingredient.isEmpty() || count <= 0L;
+        }
+
+        private DemandRole role() {
+            return consumption.demandRole();
+        }
+    }
+
+    private record RootSpecKey(DemandRole role, String ingredientClass,
+                               String serializedIngredient, int fallbackIndex) {}
+
+    private static List<RootSpec> machineRootDemands(List<RootSpec> specs) {
+        return specs.stream().filter(spec -> !spec.isEmpty()).toList();
+    }
+
+    private static List<RootSpec> coalesceRootDemands(List<RootSpec> specs) {
+        Map<RootSpecKey, RootSpec> merged = new LinkedHashMap<>();
+        int fallbackIndex = 0;
+        for (RootSpec spec : specs) {
+            if (spec.isEmpty()) continue;
+            RootSpecKey key;
+            try {
+                key = new RootSpecKey(spec.role(), spec.ingredient().getClass().getName(),
+                        spec.ingredient().toJson().toString(), -1);
+            } catch (Exception ignored) {
+                key = new RootSpecKey(
+                        spec.role(), "", "", fallbackIndex++);
+            }
+            merged.compute(key, (ignored, existing) -> existing == null
+                    ? spec : new RootSpec(existing.ingredient(),
+                    SaturatingLongMath.add(existing.count(), spec.count()),
+                    existing.consumption()));
+        }
+        return List.copyOf(merged.values());
+    }
+
+    private static Comparator<RootSpec> rootSpecComparator() {
+        return Comparator
+                .comparingInt((RootSpec spec) -> spec.role() == DemandRole.CATALYST ? 1 : 0)
+                .thenComparingInt(spec -> {
+                    try {
+                        return spec.ingredient().getItems().length == 1 ? 0 : 1;
+                    } catch (RuntimeException | LinkageError ignored) {
+                        return 1;
+                    }
+                });
     }
 
     private static ItemStack firstDisplayStack(Ingredient ingredient) {
@@ -1243,7 +1377,8 @@ public final class CraftingResolver {
 
     private static List<IngredientSpec> recipeSpecs(RecipeIndex.Entry entry,
                                                      @Nullable RegistryAccess access) {
-        List<IngredientSpec> specs = CraftPacketUtils.extractRecursiveIngredientSpecs(entry.recipe());
+        List<IngredientSpec> specs =
+                CraftPacketUtils.extractSingleOperationRecursiveIngredientSpecs(entry.recipe());
         return MinersDelightCopperPotSupport.adaptIngredientSpecs(
                 entry.modType(), specs, entry.recipe(), access);
     }
@@ -1446,7 +1581,8 @@ public final class CraftingResolver {
 
     /** Output identity used by planning; runtime-derived NBT remains unspecified. */
     public static ItemStack resolveDeclaredOutput(Recipe<?> recipe, ItemStack staticResult) {
-        return resolveDeclaredOutput(recipe, staticResult, ModRecipeHandlers.handlerFor(recipe));
+        return resolveDeclaredOutput(recipe, staticResult,
+                ModRecipeHandlers.claimFor(recipe).winner());
     }
 
     static ItemStack resolveDeclaredOutput(
@@ -1574,12 +1710,13 @@ public final class CraftingResolver {
     }
 
     public record StackKey(Item item, @Nullable String tag) {
+        public StackKey {
+            tag = CanonicalNbt.normalizeSnbt(tag);
+        }
+
         static StackKey of(ItemStack stack, boolean includeNbt) {
             Item item = stack.getItem();
-            String tag = null;
-            if (includeNbt && stack.getTag() != null && !stack.getTag().isEmpty()) {
-                tag = stack.getTag().toString();
-            }
+            String tag = includeNbt ? CanonicalNbt.exactSnbt(stack.getTag()) : null;
             return new StackKey(item, tag);
         }
 

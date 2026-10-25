@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.graph.CaptureLeaseRegistry;
 import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.graph.OperationBudget;
+import com.huanghuang.rsintegration.crafting.graph.OperationId;
 import com.huanghuang.rsintegration.crafting.loadbalancer.OperationQueue;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.BlockPos;
@@ -203,10 +204,10 @@ class FlatParallelWindowTest extends BootstrapTest {
         var machines = new MachineLeaseRegistry();
         var key = new MachineLeaseRegistry.MachineKey(new ResourceLocation("minecraft", "overworld"),
                 BlockPos.ZERO, "botania_mana_pool");
-        var first = machines.tryAcquire(key, new MachineLeaseRegistry.Owner(UUID.randomUUID(), new NodeId(0), 0));
+        var first = machines.tryAcquire(key, new OperationId(UUID.randomUUID(), new NodeId(0), 0));
         assertNotNull(first);
         assertNull(machines.tryAcquire(key,
-                new MachineLeaseRegistry.Owner(UUID.randomUUID(), new NodeId(0), 1)));
+                new OperationId(UUID.randomUUID(), new NodeId(0), 1)));
         machines.releaseAll(List.of(first));
         assertEquals(0, machines.size());
     }

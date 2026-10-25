@@ -10,6 +10,7 @@ import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
 import com.huanghuang.rsintegration.crafting.graph.NodeAdmissionCoordinator;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.graph.NodeOutputAccumulator;
+import com.huanghuang.rsintegration.crafting.graph.OutputPortId;
 import com.huanghuang.rsintegration.crafting.loadbalancer.ParallelCraftGroup;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.resources.ResourceKey;
@@ -45,6 +46,9 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     private CaptureSession capture;
     @Nullable
     private NodeOutputAccumulator outputs;
+    @Nullable
+    private OutputPortId completionTargetPort;
+    private long completionTargetQuantity;
     private boolean dispatched;
     private boolean resourcesClosed;
     private List<ItemStack> confirmedOutputs = List.of();
@@ -58,6 +62,7 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     private boolean progressObserved;
     private boolean stopRequested;
     private String failureReason;
+    private CraftFailureCode failureCode = CraftFailureCode.NONE;
     private boolean terminal;
     private boolean reusableMaterialsRecovered;
     private List<ExtractionLedger.ReservationToken> reusableReservationTokens = List.of();
@@ -113,6 +118,11 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
                 ? outputs : null;
     }
 
+    void targetCompletion(OutputPortId port, long quantity) {
+        completionTargetPort = port;
+        completionTargetQuantity = Math.max(0L, quantity);
+    }
+
     List<NodeOutputAccumulator.Publication> drainIncrementalOutputs() {
         if (outputs == null) return List.of();
         List<ItemStack> actual = new ArrayList<>(drainSettledResults());
@@ -134,6 +144,11 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     }
 
     boolean outputsComplete() {
+        if (completionTargetPort != null && completionTargetQuantity > 0L) {
+            return outputs != null
+                    && outputs.publishedQuantity(completionTargetPort) >= completionTargetQuantity
+                    && outputs.shortages().isEmpty();
+        }
         return outputs == null || outputs.isComplete();
     }
 
@@ -163,11 +178,21 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     }
 
     void markStartFailed(String reason) {
+        markStartFailed(reason, CraftFailureCode.START_REJECTED);
+    }
+
+    void markStartFailed(String reason, CraftFailureCode code) {
         failureReason = reason;
+        failureCode = code == null ? CraftFailureCode.UNKNOWN : code;
     }
 
     void markCompletionFailed(String reason) {
+        markCompletionFailed(reason, CraftFailureCode.UNKNOWN);
+    }
+
+    void markCompletionFailed(String reason, CraftFailureCode code) {
         failureReason = reason;
+        failureCode = code == null ? CraftFailureCode.UNKNOWN : code;
     }
 
     String outputShortageDetail() {
@@ -287,6 +312,8 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
 
     String failureReason() { return failureReason; }
 
+    CraftFailureCode failureCode() { return failureCode; }
+
     int completedOperations() {
         return delegate instanceof ParallelCraftGroup group
                 ? group.getCompletedOperations()
@@ -334,6 +361,7 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
             ServerLevel observeLevel = resolveObservationLevel();
             if (observeLevel == null) {
                 failureReason = "graph observation level unavailable";
+                failureCode = CraftFailureCode.CHUNK_UNLOADED;
                 return ConcurrentNodeExecutor.Observation.FAILED;
             }
             IBatchDelegate.CraftObservation observation;
@@ -345,6 +373,7 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
                 // machine abort the whole graph worker thread.
                 failureReason = "machine observation crashed: "
                         + (error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage());
+                failureCode = CraftFailureCode.INTERNAL_ERROR;
                 RSIntegrationMod.LOGGER.error(
                         "[RSI] Graph node {} observation failed", nodeId, error);
                 return ConcurrentNodeExecutor.Observation.FAILED;
@@ -359,6 +388,7 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
             }
             if (observation.phase() == IBatchDelegate.CraftPhase.FAILED) {
                 failureReason = observation.detail();
+                failureCode = CraftFailureCode.UNKNOWN;
                 return ConcurrentNodeExecutor.Observation.FAILED;
             }
             List<ItemStack> capturedSnapshot = new ArrayList<>();
@@ -381,6 +411,7 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
                     || capturedWorldOutput) {
                 if (!delegate.validateExecutionContext(player)) {
                     failureReason = "execution context changed before output publication";
+                    failureCode = CraftFailureCode.RESOURCE_CONFLICT;
                     return ConcurrentNodeExecutor.Observation.FAILED;
                 }
                 doSucceed();
@@ -388,6 +419,7 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
             }
         } catch (Exception e) {
             failureReason = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            failureCode = CraftFailureCode.INTERNAL_ERROR;
             return ConcurrentNodeExecutor.Observation.FAILED;
         } finally {
             PerformanceMonitor.recordDelegateObserve(delegate.getClass().getSimpleName(),
@@ -401,12 +433,14 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
                 int drainLimit = Math.max(timeoutTicks * 4, 20 * 60);
                 if (drainingTicks > drainLimit) {
                     failureReason = "Timeout draining " + nodeLabel;
+                    failureCode = CraftFailureCode.TIMEOUT;
                     return ConcurrentNodeExecutor.Observation.FAILED;
                 }
                 waitTicks = 0;
                 return ConcurrentNodeExecutor.Observation.WORKING;
             }
             failureReason = "Timeout waiting for " + nodeLabel;
+            failureCode = CraftFailureCode.TIMEOUT;
             return ConcurrentNodeExecutor.Observation.FAILED;
         }
 

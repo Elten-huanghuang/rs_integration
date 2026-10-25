@@ -1,6 +1,5 @@
 package com.huanghuang.rsintegration.crafting;
 
-import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.world.item.Items;
@@ -20,7 +19,6 @@ class MaterialReservationPlannerTest extends BootstrapTest {
 
         List<IngredientSpec> scaled = MaterialReservationPlanner.scaleGraphSpecsForExecutions(
                 List.of(tool),
-                List.of(IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE),
                 300);
 
         assertEquals(2, scaled.get(0).count());
@@ -35,7 +33,6 @@ class MaterialReservationPlannerTest extends BootstrapTest {
 
         List<IngredientSpec> scaled = MaterialReservationPlanner.scaleGraphSpecsForExecutions(
                 List.of(catalyst),
-                List.of(IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE),
                 64);
 
         assertEquals(1, scaled.get(0).count());
@@ -48,9 +45,6 @@ class MaterialReservationPlannerTest extends BootstrapTest {
 
         List<IngredientSpec> scaled = MaterialReservationPlanner.scaleGraphSpecsForExecutions(
                 List.of(emptySlot, iron, emptySlot),
-                List.of(IBatchDelegate.MaterialReservationScope.PER_OPERATION,
-                        IBatchDelegate.MaterialReservationScope.PER_OPERATION,
-                        IBatchDelegate.MaterialReservationScope.PER_OPERATION),
                 3);
 
         assertEquals(3, scaled.size());

@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.endpoint;
 
 import com.huanghuang.rsintegration.crafting.MaterialSources;
+import com.huanghuang.rsintegration.crafting.RSICraftException;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.storage.disk.rs.UnifiedDiskAmountResolver;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
@@ -66,56 +67,77 @@ public final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint 
 
     @Override
     public StorageOperationResult insert(ItemStack stack, boolean simulate) {
-        ItemStack remainder = InkFluidSupport.isToken(stack) ? InkFluidSupport.insert(network, stack, simulate)
-                : network.insertItem(stack.copy(), stack.getCount(),
-                simulate ? com.refinedmods.refinedstorage.api.util.Action.SIMULATE
-                        : com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-        return StorageOperationResult.inserted(
-                simulate ? StorageOperationMode.SIMULATE
-                        : StorageOperationMode.PERFORM,
-                stack, remainder);
+        try {
+            ItemStack remainder = InkFluidSupport.isToken(stack)
+                    ? InkFluidSupport.insert(network, stack, simulate)
+                    : network.insertItem(stack.copy(), stack.getCount(),
+                    simulate ? com.refinedmods.refinedstorage.api.util.Action.SIMULATE
+                            : com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+            return StorageOperationResult.inserted(
+                    simulate ? StorageOperationMode.SIMULATE
+                            : StorageOperationMode.PERFORM,
+                    stack, remainder);
+        } catch (RuntimeException failure) {
+            throw classifyNetworkFailure(failure);
+        }
     }
 
     @Override
     public StorageOperationResult insert(Player player, ItemStack stack, boolean simulate) {
-        ItemStack remainder = InkFluidSupport.isToken(stack) ? InkFluidSupport.insert(network, stack, simulate)
-                : network.insertItem(stack.copy(), stack.getCount(),
-                simulate ? com.refinedmods.refinedstorage.api.util.Action.SIMULATE
-                        : com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-        if (!simulate && player != null) {
-            ItemStack accepted = stack.copy();
-            accepted.shrink(remainder.getCount());
-            if (!accepted.isEmpty()) {
-                if (InkFluidSupport.isToken(accepted)) {
-                    var tracker = network.getFluidStorageTracker();
-                    if (tracker != null) tracker.changed(player, InkFluidSupport.fluid(accepted));
-                } else {
-                    var tracker = network.getItemStorageTracker();
-                    if (tracker != null) tracker.changed(player, accepted);
-                }
-                if (player instanceof ServerPlayer serverPlayer) {
-                    MaterialSources.invalidateFor(serverPlayer, this);
-                    serverPlayer.containerMenu.broadcastChanges();
+        try {
+            ItemStack remainder = InkFluidSupport.isToken(stack)
+                    ? InkFluidSupport.insert(network, stack, simulate)
+                    : network.insertItem(stack.copy(), stack.getCount(),
+                    simulate ? com.refinedmods.refinedstorage.api.util.Action.SIMULATE
+                            : com.refinedmods.refinedstorage.api.util.Action.PERFORM);
+            if (!simulate && player != null) {
+                ItemStack accepted = stack.copy();
+                accepted.shrink(remainder.getCount());
+                if (!accepted.isEmpty()) {
+                    if (InkFluidSupport.isToken(accepted)) {
+                        var tracker = network.getFluidStorageTracker();
+                        if (tracker != null) tracker.changed(player, InkFluidSupport.fluid(accepted));
+                    } else {
+                        var tracker = network.getItemStorageTracker();
+                        if (tracker != null) tracker.changed(player, accepted);
+                    }
+                    if (player instanceof ServerPlayer serverPlayer) {
+                        MaterialSources.invalidateFor(serverPlayer, this);
+                        serverPlayer.containerMenu.broadcastChanges();
+                    }
                 }
             }
+            return StorageOperationResult.inserted(
+                    simulate ? StorageOperationMode.SIMULATE
+                            : StorageOperationMode.PERFORM,
+                    stack, remainder);
+        } catch (RuntimeException failure) {
+            throw classifyNetworkFailure(failure);
         }
-        return StorageOperationResult.inserted(
-                simulate ? StorageOperationMode.SIMULATE
-                        : StorageOperationMode.PERFORM,
-                stack, remainder);
     }
 
     @Override
     public StorageOperationResult extractExact(Player player, ItemStack template,
                                                long amount, boolean simulate) {
-        ItemStack result = InkFluidSupport.isToken(template)
-                ? InkFluidSupport.extract(network, template, Math.toIntExact(amount), simulate)
-                : RSIntegrationNetwork.extractExactFromNetwork(network, template,
-                Math.toIntExact(amount), player instanceof ServerPlayer sp ? sp : null, simulate);
-        return StorageOperationResult.extracted(
-                simulate ? StorageOperationMode.SIMULATE
-                        : StorageOperationMode.PERFORM,
-                amount, result.isEmpty() ? List.of() : List.of(result));
+        try {
+            ItemStack result = InkFluidSupport.isToken(template)
+                    ? InkFluidSupport.extract(network, template, Math.toIntExact(amount), simulate)
+                    : RSIntegrationNetwork.extractExactFromNetwork(network, template,
+                    Math.toIntExact(amount), player instanceof ServerPlayer sp ? sp : null, simulate);
+            return StorageOperationResult.extracted(
+                    simulate ? StorageOperationMode.SIMULATE
+                            : StorageOperationMode.PERFORM,
+                    amount, result.isEmpty() ? List.of() : List.of(result));
+        } catch (RuntimeException failure) {
+            throw classifyNetworkFailure(failure);
+        }
+    }
+
+    private RuntimeException classifyNetworkFailure(RuntimeException failure) {
+        if (network.getLevel() == null || network.getPosition() == null) {
+            return RSICraftException.networkUnavailable(failure);
+        }
+        return failure;
     }
 
     private static final class LegacyRsStorageSession implements StorageSession {

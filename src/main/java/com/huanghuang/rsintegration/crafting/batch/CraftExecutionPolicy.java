@@ -1,11 +1,13 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.crafting.SelfAmplifyingRecipePolicy;
+import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -79,6 +81,37 @@ public final class CraftExecutionPolicy {
     static boolean requiresExternalTerminalRepeat(@Nullable ResolutionStep step) {
         return step != null && step.executions() > 1
                 && isArcaneIteratorRecipe(step.recipeId());
+    }
+
+    /** 单终端图只描述一次物理启动，剩余执行次数由链完成回调续跑。 */
+    static ResolutionStep graphTerminalStep(CraftPlanGraph base, ResolutionStep terminalStep) {
+        if (base == null || base.nodes().isEmpty()) {
+            return requiresExternalTerminalRepeat(terminalStep)
+                    || terminalStep.productionTarget() != null
+                    ? singleExecution(terminalStep) : terminalStep;
+        }
+        return terminalStep;
+    }
+
+    static int graphRemainingRepeats(CraftPlanGraph graph, ResolutionStep terminalStep) {
+        if (terminalStep.productionTarget() != null
+                || !requiresExternalTerminalRepeat(terminalStep)
+                || graph == null || graph.nodes().size() != 1) return 1;
+        var node = graph.nodes().get(0);
+        if (!node.recipeId().equals(terminalStep.recipeId()) || node.executions() != 1) return 1;
+        return terminalStep.executions();
+    }
+
+    public static int probabilityAttemptLimit(ResolutionStep step) {
+        int multiplier = 16;
+        int maximum = 4096;
+        try {
+            multiplier = RSIntegrationConfig.CRAFTING_PROBABILISTIC_ATTEMPT_MULTIPLIER.get();
+            maximum = RSIntegrationConfig.CRAFTING_PROBABILISTIC_MAX_ATTEMPTS.get();
+        } catch (RuntimeException ignored) {
+        }
+        return Math.max(1, (int) Math.min(maximum,
+                (long) Math.max(1, step.executions()) * Math.max(1, multiplier)));
     }
 
     /** 将奥术迭代器终端步骤收窄为一次物理启动，其余执行语义保持不变。 */

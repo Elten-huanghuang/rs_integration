@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.CraftingPlanningTimeoutException;
+import com.huanghuang.rsintegration.crafting.RSICraftException;
 import com.huanghuang.rsintegration.crafting.plan.IntegrationDiagnostic;
 import com.huanghuang.rsintegration.crafting.plan.IntegrationDiagnosticCode;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
@@ -14,7 +15,6 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 
 import java.util.List;
-import java.util.Locale;
 
 /** 服务端失败到玩家可读文案/稳定诊断码的纯转换。 */
 final class CraftFailureMessages {
@@ -26,7 +26,7 @@ final class CraftFailureMessages {
                 return Component.translatable("rsi.plan.failure.catalog_loading");
             }
         }
-        if (containsNetworkNullFailure(failure)) {
+        if (hasReason(failure, RSICraftException.Reason.NETWORK_UNAVAILABLE)) {
             return Component.translatable("rsi.generic.error.network_unavailable");
         }
         if (containsPlanningTimeout(failure)) {
@@ -98,23 +98,18 @@ final class CraftFailureMessages {
         return result;
     }
 
-    private static boolean containsNetworkNullFailure(Throwable failure) {
+    private static boolean containsPlanningTimeout(Throwable failure) {
         for (Throwable current = failure; current != null; current = current.getCause()) {
-            String message = current.getMessage();
-            if (message == null) continue;
-            String normalized = message.toLowerCase(Locale.ROOT);
-            if (normalized.contains("network is null")
-                    || (normalized.contains("getitemstoragetracker")
-                    && normalized.contains("null"))) {
-                return true;
-            }
+            if (current instanceof CraftingPlanningTimeoutException) return true;
         }
         return false;
     }
 
-    private static boolean containsPlanningTimeout(Throwable failure) {
+    private static boolean hasReason(
+            Throwable failure, RSICraftException.Reason reason) {
         for (Throwable current = failure; current != null; current = current.getCause()) {
-            if (current instanceof CraftingPlanningTimeoutException) return true;
+            if (current instanceof RSICraftException exception
+                    && exception.reason() == reason) return true;
         }
         return false;
     }

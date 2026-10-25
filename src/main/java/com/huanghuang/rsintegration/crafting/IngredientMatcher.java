@@ -20,6 +20,7 @@ import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraft.nbt.NumericTag;
 import net.minecraftforge.common.crafting.PartialNBTIngredient;
 
+import javax.annotation.Nullable;
 import java.util.Objects;
 import java.util.HashSet;
 import java.util.Set;
@@ -207,6 +208,7 @@ public final class IngredientMatcher {
                 || expected.getItem() != actual.getItem()) return false;
         if (!expected.hasTag()) return true;
         if (ItemStack.isSameItemSameTags(expected, actual)) return true;
+        if (isDefaultDamageOnly(expected.getTag())) return isDefaultDamage(actual.getTag());
         if (matchesPotionIgnoringPurity(expected, actual)) return true;
         return expected.getMaxDamage() > 0 && isUnbreakable(expected.getTag())
                 && nbtMatches(expected.getTag(), actual.getTag(), true);
@@ -228,10 +230,15 @@ public final class IngredientMatcher {
                 || tag.contains("Unbreakable", Tag.TAG_INT)) && tag.getInt("Unbreakable") != 0;
     }
 
-    private static boolean isDefaultDamage(CompoundTag tag) {
-        if (!tag.contains("Damage")) return true;
+    private static boolean isDefaultDamage(@Nullable CompoundTag tag) {
+        if (tag == null || !tag.contains("Damage")) return true;
         return tag.contains("Damage", Tag.TAG_ANY_NUMERIC)
                 && ((NumericTag) tag.get("Damage")).getAsDouble() == 0;
+    }
+
+    private static boolean isDefaultDamageOnly(@Nullable CompoundTag tag) {
+        return tag != null && tag.size() == 1 && tag.contains("Damage", Tag.TAG_ANY_NUMERIC)
+                && isDefaultDamage(tag);
     }
 
     /** Iron 3.15 rewrote scroll-container NBT while retaining spell identity. */

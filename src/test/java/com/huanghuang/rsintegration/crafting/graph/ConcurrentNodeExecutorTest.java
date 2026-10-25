@@ -162,6 +162,36 @@ class ConcurrentNodeExecutorTest extends BootstrapTest {
     }
 
     @Test
+    void completionRetryReleasesAndRedispatchesTheNode() {
+        DagScheduler scheduler = new DagScheduler(singleNodeGraph());
+        AtomicInteger starts = new AtomicInteger();
+        AtomicInteger completions = new AtomicInteger();
+        ConcurrentNodeExecutor executor = new ConcurrentNodeExecutor(
+                scheduler,
+                (ConcurrentNodeExecutor.AdmissionWorkerFactory) nodeId -> {
+                    starts.incrementAndGet();
+                    return ConcurrentNodeExecutor.StartResult.started(
+                            new FakeWorker(ConcurrentNodeExecutor.Observation.SUCCEEDED));
+                },
+                1, nodeId -> false,
+                (nodeId, worker) -> completions.incrementAndGet() == 1
+                        ? ConcurrentNodeExecutor.CompletionStatus.RETRY
+                        : ConcurrentNodeExecutor.CompletionStatus.SUCCEEDED,
+                1, 10);
+
+        executor.tick();
+        executor.tick();
+
+        assertEquals(2, starts.get());
+        assertEquals(1, completions.get());
+        assertEquals(DagScheduler.NodeState.RUNNING, scheduler.state(new NodeId(0)));
+
+        executor.tick();
+        assertEquals(2, completions.get());
+        assertEquals(DagScheduler.NodeState.SUCCEEDED, scheduler.state(new NodeId(0)));
+    }
+
+    @Test
     void perTickDispatchBudgetSpreadsReadyNodesAcrossTicks() {
         DagScheduler scheduler = new DagScheduler(forkJoinGraph());
         Map<NodeId, FakeWorker> workers = new HashMap<>();
@@ -354,6 +384,20 @@ class ConcurrentNodeExecutorTest extends BootstrapTest {
                         new ItemStack(Items.DIAMOND), List.of(new RootAllocation(
                         new MaterialSource.ProducerOutput(joinOutput), result, 1)))),
                 List.of(), List.of(leftId, rightId, joinId));
+    }
+
+    private static CraftPlanGraph singleNodeGraph() {
+        NodeId nodeId = new NodeId(0);
+        MaterialKey iron = MaterialKey.of(new ItemStack(Items.IRON_INGOT));
+        OutputPortId output = new OutputPortId(nodeId, 0);
+        CraftNode only = node(nodeId, "only", List.of(),
+                List.of(new OutputDeclaration(output, iron, 1, OutputKind.PRIMARY)));
+        return new CraftPlanGraph(1, List.of(only), List.of(),
+                List.of(new RootDemand(Ingredient.of(Items.IRON_INGOT), 1, 0,
+                        new ItemStack(Items.IRON_INGOT),
+                        List.of(new RootAllocation(
+                                new MaterialSource.ProducerOutput(output), iron, 1)))),
+                List.of(), List.of(nodeId));
     }
 
     private static CraftPlanGraph threeLeafJoinGraph() {

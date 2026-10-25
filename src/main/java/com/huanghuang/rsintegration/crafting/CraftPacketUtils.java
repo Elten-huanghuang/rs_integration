@@ -918,7 +918,7 @@ public final class CraftPacketUtils {
             if (kubeJsSpecs != null) return kubeJsSpecs;
         }
         if (recipe instanceof Recipe<?> r) {
-            var handler = ModRecipeHandlers.handlerFor(r);
+            var handler = ModRecipeHandlers.claimFor(r).winner();
             if (handler != null && handler.preferHandlerIngredients()) {
                 List<IngredientSpec> result = handler.getIngredients(r);
                 if (result != null) return result;
@@ -930,7 +930,7 @@ public final class CraftPacketUtils {
 
         // Try registered handler first (explicit per-mod logic)
         if (recipe instanceof Recipe<?> r) {
-            var handler = ModRecipeHandlers.handlerFor(r);
+            var handler = ModRecipeHandlers.claimFor(r).winner();
             if (handler != null) {
                 List<IngredientSpec> result = handler.getIngredients(r);
                 if (result != null) return result;
@@ -957,20 +957,25 @@ public final class CraftPacketUtils {
      * 被通用规划器当成普通材料自动制作。
      */
     @Nullable
-    public static List<IngredientSpec> extractRecursiveIngredientSpecs(Object recipe) {
+    public static List<IngredientSpec> extractSingleOperationRecursiveIngredientSpecs(
+            Object recipe) {
         List<IngredientSpec> ingredients = extractIngredientSpecs(recipe);
         if (!(recipe instanceof Recipe<?> typedRecipe)) return ingredients;
-        var handler = ModRecipeHandlers.handlerFor(typedRecipe);
-        return handler == null
-                ? ingredients
-                : handler.getRecursiveIngredients(typedRecipe, ingredients);
+        var handler = ModRecipeHandlers.claimFor(typedRecipe).winner();
+        if (handler == null || ingredients == null) return ingredients;
+        return handler.getRecursiveScaledIngredients(typedRecipe, ingredients.stream()
+                        .map(spec -> ScaledIngredientSpec.of(spec, spec.count()))
+                        .toList()).stream()
+                .map(spec -> new IngredientSpec(spec.ingredient(),
+                        SaturatingLongMath.clampToInt(spec.count()), spec.consumption()))
+                .toList();
     }
 
     /** 规划时读取已绑定机器的可复用部件，例如压印锤中已安装的正确印模。 */
     public static List<IngredientSpec> applyPlanningIngredientContext(
             Recipe<?> recipe, @Nullable ServerPlayer player, @Nullable List<IngredientSpec> ingredients) {
         if (ingredients == null) return null;
-        var handler = ModRecipeHandlers.handlerFor(recipe);
+        var handler = ModRecipeHandlers.claimFor(recipe).winner();
         return handler == null ? ingredients
                 : handler.getPlanningIngredients(recipe, player, ingredients);
     }
@@ -979,7 +984,7 @@ public final class CraftPacketUtils {
         // Some machine recipes implement CraftingRecipe only so JEI can display
         // them.  Give their registered handler a chance to preserve semantics
         // such as reusable catalysts before applying vanilla or script probes.
-        var handler = ModRecipeHandlers.handlerFor(recipe);
+        var handler = ModRecipeHandlers.claimFor(recipe).winner();
         if (handler != null && handler.preferHandlerIngredients()) {
             List<IngredientSpec> handled = handler.getIngredients(recipe);
             if (handled != null) return handled;

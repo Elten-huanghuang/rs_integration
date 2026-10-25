@@ -90,8 +90,10 @@ class MaterialMatcherTest extends BootstrapTest {
         ItemStack damaged = pristine.copy();
         damaged.setDamageValue(1);
 
-        assertNull(declaration.tag());
+        assertNotNull(declaration.tag());
         assertTrue(MaterialMatcher.matchesOutputDeclaration(declaration, runtimeOutput));
+        assertFalse(MaterialMatcher.matchesExact(declaration, runtimeOutput));
+        assertFalse(MaterialMatcher.matchesOutputDeclaration(declaration, damaged));
         assertNotNull(MaterialKey.of(damaged).tag());
     }
 

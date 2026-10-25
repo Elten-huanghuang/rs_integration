@@ -24,6 +24,7 @@ import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.util.PerformanceMonitor;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector;
 import com.huanghuang.rsintegration.crafting.planning.PlanningThreadContext;
@@ -504,7 +505,7 @@ public final class RecipeIndex {
                                             BuildTiming timing, Recipe<?> recipe) {
         if (!seen.add(recipe.getId())) return IndexOutcome.DUPLICATE;
 
-        ModRecipeHandler handler = ModRecipeHandlers.handlerFor(recipe);
+        ModRecipeHandler handler = ModRecipeHandlers.claimFor(recipe).winner();
         ModType type;
         ItemStack result;
         if (handler != null) {
@@ -566,8 +567,14 @@ public final class RecipeIndex {
             }
         } else if (isTypedPureProjectionCandidate(handler, type, recipe)) {
             long graphStarted = System.nanoTime();
-            List<IngredientSpec> typedSpecs = handler.getRecursiveIngredients(
-                    recipe, handler.getIngredients(recipe));
+            List<IngredientSpec> declaredSpecs = handler.getIngredients(recipe);
+            List<IngredientSpec> typedSpecs = declaredSpecs == null ? null
+                    : handler.getRecursiveScaledIngredients(recipe, declaredSpecs.stream()
+                            .map(spec -> ScaledIngredientSpec.of(spec, spec.count()))
+                            .toList()).stream()
+                    .map(spec -> new IngredientSpec(spec.ingredient(),
+                            SaturatingLongMath.clampToInt(spec.count()), spec.consumption()))
+                    .toList();
             boolean runtimeNbt = handler.hasRuntimeDependentPrimaryNbt(recipe);
             ImmutableRecipeGraph.RecipeNode node = typedSpecs == null ? null
                     : ImmutableRecipeGraphProjector.projectRecipe(
@@ -612,7 +619,7 @@ public final class RecipeIndex {
     /** Returns whether the immutable recipe graph can represent this recipe's inputs. */
     public static boolean isBackgroundProjectable(Recipe<?> recipe) {
         if (recipe == null) return false;
-        ModRecipeHandler handler = ModRecipeHandlers.handlerFor(recipe);
+        ModRecipeHandler handler = ModRecipeHandlers.claimFor(recipe).winner();
         ModType type = ModType.classifyRecipe(recipe);
         if (type == null && handler != null) type = handler.modType();
         return handler != null && type != null
@@ -1158,7 +1165,7 @@ public final class RecipeIndex {
         if (recipe instanceof CraftingRecipe) {
             return ModRecipeHandlers.tryGetResultItem(recipe, access);
         }
-        var handler = ModRecipeHandlers.handlerFor(recipe);
+        var handler = ModRecipeHandlers.claimFor(recipe).winner();
         if (handler != null && DISPATCH_GUARD.get() != recipe.getClass()) {
             Class<?> prev = DISPATCH_GUARD.get();
             DISPATCH_GUARD.set(recipe.getClass());

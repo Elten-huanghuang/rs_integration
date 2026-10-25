@@ -341,18 +341,19 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         ItemStack catalyst = ingredientPrototype(specs.get(0));
         if (catalyst.isEmpty()) return InputBufferContract.none();
         inputs.add(new InputBufferContract.InputSlot(
-                CATALYST_ENTRY_ID, 0, catalyst, specs.get(0).count(), true,
-                Math.max(1, specs.get(0).count())));
+                CATALYST_ENTRY_ID, 0, catalyst, specs.get(0).count(),
+                Math.max(1, specs.get(0).count()), specs.get(0).consumption()));
         for (int i = 1; i < specs.size(); i++) {
             ItemStack spirit = ingredientPrototype(specs.get(i));
             int capacity = spiritCapacity(i - 1, spirit);
             inputs.add(new InputBufferContract.InputSlot(
-                    spiritEntryId(i - 1), i, spirit, specs.get(i).count(), false, capacity));
+                    spiritEntryId(i - 1), i, spirit, specs.get(i).count(), capacity,
+                    specs.get(i).consumption()));
         }
         return new InputBufferContract(malumCrucibleInputBufferLimit(), inputs,
                 List.of(new OutputContract.Port(
                         "malum:primary", null, expectedOutput, expectedOutput.getCount(),
-                        InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.WORLD)));
+                        OutputContract.Kind.PRIMARY, OutputContract.Source.WORLD)));
     }
 
     @Override
@@ -369,7 +370,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         if (plan.operations() <= 0 || plan.inputs().size() != specs.size()) return false;
         InputBufferPlan.InputSlot catalyst = plan.inputs().stream()
                 .filter(input -> CATALYST_ENTRY_ID.equals(input.entryId())).findFirst().orElse(null);
-        if (catalyst == null || !catalyst.reusable()
+        if (catalyst == null || !catalyst.consumption().reusableWithinWorkerBatch()
                 || catalyst.stack().getCount() != specs.get(0).count()) return false;
         List<ItemStack> spirits = new ArrayList<>(specs.size() - 1);
         for (int i = 1; i < specs.size(); i++) {
@@ -378,7 +379,8 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
                     .filter(candidate -> entryId.equals(candidate.entryId()))
                     .findFirst().orElse(null);
             int expected = Math.multiplyExact(specs.get(i).count(), plan.operations());
-            if (input == null || input.reusable() || input.perOperation() != specs.get(i).count()
+            if (input == null || input.consumption().reusableWithinWorkerBatch()
+                    || input.perOperation() != specs.get(i).count()
                     || input.stack().getCount() != expected) return false;
             spirits.add(input.stack().copy());
         }
@@ -410,7 +412,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         if (!supportsInputBuffer() || expectedOutput.isEmpty()) return OutputContract.none();
         return new OutputContract(List.of(new OutputContract.Port(
                 "malum:primary", null, expectedOutput, expectedOutput.getCount(),
-                InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.WORLD)));
+                OutputContract.Kind.PRIMARY, OutputContract.Source.WORLD)));
     }
 
     @Override
@@ -434,10 +436,9 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             IngredientSpec spec = specs.get(i);
             if (spec == null || spec.isEmpty()) continue;
             boolean primarySlot = i == 0;
-            boolean reusable = primarySlot && spec.consumption().reusableWithinWorkerBatch();
             entries.add(new MaterialPlan.Entry(
                     primarySlot ? CATALYST_ENTRY_ID : spiritEntryId(i - 1),
-                    spec, MaterialPlan.Allocation.GRAPH, reusable, i));
+                    spec, MaterialPlan.Allocation.GRAPH, i));
         }
         return new MaterialPlan(entries);
     }
@@ -479,7 +480,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     @Override
     public List<IngredientSpec> getRequiredMaterials() {
         if (recipe == null) return null;
-        var handler = ModRecipeHandlers.handlerFor(recipe);
+        var handler = ModRecipeHandlers.claimFor(recipe).winner();
         if (handler != null) {
             List<IngredientSpec> specs = handler.getIngredients(recipe);
             if (specs != null && !specs.isEmpty()) return specs;
@@ -533,13 +534,6 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     }
 
     @Override
-    public List<IBatchDelegate.MaterialReservationScope>
-    getMaterialReservationScopes() {
-        List<IngredientSpec> specs = getRequiredMaterials();
-        return materialReservationScopes(specs);
-    }
-
-    @Override
     public BatchConcurrencyCapabilities concurrencyCapabilities() {
         return new BatchConcurrencyCapabilities(
                 BatchConcurrencyCapabilities.MaterialOwnership.CHAIN_RESERVED,
@@ -553,20 +547,6 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     @Override
     public boolean allowsOverlappingOutputCaptureOrigins() {
         return true;
-    }
-
-    static List<IBatchDelegate.MaterialReservationScope> materialReservationScopes(
-            @Nullable List<IngredientSpec> specs) {
-        if (specs == null || specs.isEmpty()) return List.of();
-        List<IBatchDelegate.MaterialReservationScope> scopes =
-                new ArrayList<>(specs.size());
-        scopes.add(specs.get(0).consumption().reusableWithinWorkerBatch()
-                ? IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE
-                : IBatchDelegate.MaterialReservationScope.PER_OPERATION);
-        for (int i = 1; i < specs.size(); i++) {
-            scopes.add(IBatchDelegate.MaterialReservationScope.PER_OPERATION);
-        }
-        return scopes;
     }
 
     // ── Internal: extraction + placement ─────────────────────────

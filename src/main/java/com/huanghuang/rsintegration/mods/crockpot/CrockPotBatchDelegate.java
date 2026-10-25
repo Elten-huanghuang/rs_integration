@@ -162,7 +162,7 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
                     recipe, storageEndpoint(), player, myLevel, myPos);
         }
 
-        var handler = ModRecipeHandlers.handlerFor(recipe);
+        var handler = ModRecipeHandlers.claimFor(recipe).winner();
         if (handler != null) {
             return handler.getIngredients(recipe);
         }

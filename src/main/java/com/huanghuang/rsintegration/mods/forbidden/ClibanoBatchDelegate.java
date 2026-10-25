@@ -205,10 +205,10 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
         return new InputBufferContract(operations,
                 List.of(new InputBufferContract.InputSlot(
                         "legacy:material:0", inputSlot, prototype,
-                        spec.count(), false, inputCapacity)),
+                        spec.count(), inputCapacity, spec.consumption())),
                 List.of(new OutputContract.Port(
                         "forbidden_arcanus:clibano:output", outputSlot, expectedOutput,
-                        expectedOutput.getCount(), InputBufferPlan.OutputPort.Kind.PRIMARY,
+                        expectedOutput.getCount(), OutputContract.Kind.PRIMARY,
                         OutputContract.Source.SLOT)));
     }
 
@@ -227,7 +227,8 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
         IngredientSpec spec = getRequiredMaterials().get(0);
         long required = (long) spec.count() * plan.operations();
         if (!"legacy:material:0".equals(input.entryId())
-                || input.slot() != availableInputSlot() || input.reusable()
+                || input.slot() != availableInputSlot()
+                || input.consumption().reusableWithinWorkerBatch()
                 || input.perOperation() != spec.count() || required > Integer.MAX_VALUE
                 || input.stack().getCount() != (int) required) return false;
         InputBufferPlan expected = inputBufferPlan(plan.operations());
@@ -402,7 +403,7 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
                 new OutputContract.Port("forbidden_arcanus:clibano:output",
                         ClibanoInventoryLogic.pairedOutputSlot(inputSlot), expectedOutput,
                         expectedOutput.getCount(),
-                        InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.SLOT)));
+                        OutputContract.Kind.PRIMARY, OutputContract.Source.SLOT)));
     }
 
     @Override

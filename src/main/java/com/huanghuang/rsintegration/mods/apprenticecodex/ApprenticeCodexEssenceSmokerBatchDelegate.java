@@ -73,7 +73,7 @@ public final class ApprenticeCodexEssenceSmokerBatchDelegate extends AbstractBat
 
     @Override public List<IngredientSpec> getRequiredMaterials() {
         if (recipe == null) return null;
-        var handler = ModRecipeHandlers.handlerFor(recipe);
+        var handler = ModRecipeHandlers.claimFor(recipe).winner();
         return handler != null ? handler.getIngredients(recipe)
                 : CraftPacketUtils.extractIngredientSpecs(recipe);
     }
@@ -117,13 +117,14 @@ public final class ApprenticeCodexEssenceSmokerBatchDelegate extends AbstractBat
                 apprenticeInputBufferLimit(),
                 List.of(
                         new InputBufferContract.InputSlot(
-                                CATALYST_ENTRY_ID, 0, catalyst, 1, true, 1),
+                                CATALYST_ENTRY_ID, 0, catalyst, 1, 1,
+                                specs.get(0).consumption()),
                         new InputBufferContract.InputSlot(
-                                MATERIAL_ENTRY_ID, 1, material, 1, false,
-                                apprenticeInputBufferLimit())),
+                                MATERIAL_ENTRY_ID, 1, material, 1,
+                                apprenticeInputBufferLimit(), specs.get(1).consumption())),
                 List.of(new OutputContract.Port(
                         "apprenticecodex:primary", null, expected, expected.getCount(),
-                        InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.VIRTUAL)));
+                        OutputContract.Kind.PRIMARY, OutputContract.Source.VIRTUAL)));
     }
 
     @Override
@@ -143,7 +144,8 @@ public final class ApprenticeCodexEssenceSmokerBatchDelegate extends AbstractBat
                 .filter(input -> MATERIAL_ENTRY_ID.equals(input.entryId())).findFirst().orElse(null);
         if (catalyst == null || material == null || catalyst.stack().isEmpty()
                 || material.stack().isEmpty() || catalyst.stack().getCount() != 1
-                || catalyst.reusable() != true || material.perOperation() != 1
+                || !catalyst.consumption().reusableWithinWorkerBatch()
+                || material.perOperation() != 1
                 || material.stack().getCount() != plan.operations()) return false;
         InputBufferPlan expectedPlan = inputBufferPlan(plan.operations());
         if (!expectedPlan.enabled() || expectedPlan.operations() != plan.operations()) return false;
@@ -159,7 +161,7 @@ public final class ApprenticeCodexEssenceSmokerBatchDelegate extends AbstractBat
         if (!supportsInputBuffer() || expected.isEmpty()) return OutputContract.none();
         return new OutputContract(List.of(new OutputContract.Port(
                 "apprenticecodex:primary", null, expected, expected.getCount(),
-                InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.VIRTUAL)));
+                OutputContract.Kind.PRIMARY, OutputContract.Source.VIRTUAL)));
     }
 
     @Override

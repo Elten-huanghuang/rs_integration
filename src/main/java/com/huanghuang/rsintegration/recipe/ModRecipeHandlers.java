@@ -30,6 +30,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
@@ -37,9 +38,7 @@ import org.slf4j.Logger;
 /**
  * Registry of {@link ModRecipeHandler} instances, keyed by {@link ModType}.
  *
- * <p>Call {@link #handlerFor(Recipe)} to get the handler for any recipe.
- * Handlers are queried in registration order; the first whose
- * {@link ModRecipeHandler#canHandle} returns true wins.</p>
+ * <p>Call {@link #claimFor(Recipe)} for explicit winner/ambiguity semantics.</p>
  */
 public final class ModRecipeHandlers {
     private static final Logger RESULT_LOGGER = LogUtils.getLogger();
@@ -55,19 +54,14 @@ public final class ModRecipeHandlers {
     private static final Map<ResourceLocation, ItemStack> GLOBAL_RESULT_CACHE = new ConcurrentHashMap<>();
     private static final Set<ResourceLocation> GLOBAL_EMPTY_CACHE = ConcurrentHashMap.newKeySet();
     private static final Set<Class<?>> CLIENT_UNSAFE_RESULT_LOGGED = ConcurrentHashMap.newKeySet();
-    private static final Map<Class<?>, ModRecipeHandler> HANDLER_CACHE = new ConcurrentHashMap<>();
+    private static final Map<Class<?>, Claim> CLAIM_CACHE = new ConcurrentHashMap<>();
+    private static final Set<ResourceLocation> AMBIGUOUS_CLAIMS_LOGGED =
+            ConcurrentHashMap.newKeySet();
     /** Prevents infinite recursion when a handler's getResultItem() calls back into tryGetResultItem(). */
     private static final ThreadLocal<Class<?>> DISPATCH_GUARD = new ThreadLocal<>();
-    /** Sentinel stored in HANDLER_CACHE for recipe classes that have no registered handler. */
-    private static final ModRecipeHandler NO_HANDLER = new ModRecipeHandler() {
-        @Override public ModType modType() { return ModType.byId("generic"); }
-        @Override public boolean canHandle(Recipe<?> recipe) { return false; }
-        @Override public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) { return ItemStack.EMPTY; }
-        @Nullable
-        @Override public List<IngredientSpec> getIngredients(Recipe<?> recipe) { return null; }
-    };
 
     private static final List<ModRecipeHandler> HANDLERS = new ArrayList<>();
+    private static final List<ModRecipeHandler> CLASS_HANDLERS = new ArrayList<>();
     private static final List<ModRecipeHandler> RECIPE_SENSITIVE_HANDLERS = new ArrayList<>();
 
     static {
@@ -77,6 +71,20 @@ public final class ModRecipeHandlers {
         HANDLERS.add(new VanillaBrewingRecipeHandler());
         HANDLERS.add(new FluidContainerRecipeHandler());
         HANDLERS.add(new MarketRecipeHandler());
+        for (ModRecipeHandler handler : HANDLERS) {
+            if (handler.cacheByRecipeClass()) CLASS_HANDLERS.add(handler);
+        }
+    }
+
+    public record Claim(@Nullable ModRecipeHandler winner,
+                        List<ModRecipeHandler> candidates) {
+        public Claim {
+            candidates = candidates == null ? List.of() : List.copyOf(candidates);
+        }
+
+        public boolean ambiguous() {
+            return candidates.size() > 1;
+        }
     }
 
     /**
@@ -85,34 +93,52 @@ public final class ModRecipeHandlers {
      */
     public static void register(ModRecipeHandler handler) {
         HANDLERS.add(handler);
-        if (!handler.cacheByRecipeClass()) RECIPE_SENSITIVE_HANDLERS.add(handler);
-        HANDLER_CACHE.clear(); // Invalidate — new handler may cover previously-unknown classes
+        if (handler.cacheByRecipeClass()) CLASS_HANDLERS.add(handler);
+        else RECIPE_SENSITIVE_HANDLERS.add(handler);
+        CLAIM_CACHE.clear();
+        AMBIGUOUS_CLAIMS_LOGGED.clear();
     }
 
     private ModRecipeHandlers() {}
 
     // ── dispatch ──────────────────────────────────────────────────
 
-    @Nullable
-    public static ModRecipeHandler handlerFor(Recipe<?> recipe) {
-        for (int i = RECIPE_SENSITIVE_HANDLERS.size() - 1; i >= 0; i--) {
-            ModRecipeHandler handler = RECIPE_SENSITIVE_HANDLERS.get(i);
-            if (handler.canHandle(recipe)) return handler;
+    /** 返回同一配方在最高优先级上的唯一 winner，供 typed/pure 路径共享。 */
+    public static Claim claimFor(Recipe<?> recipe) {
+        Objects.requireNonNull(recipe, "recipe");
+        List<ModRecipeHandler> matching = new ArrayList<>(
+                CLAIM_CACHE.computeIfAbsent(recipe.getClass(), ignored -> {
+                    List<ModRecipeHandler> classMatches = new ArrayList<>();
+                    for (ModRecipeHandler handler : CLASS_HANDLERS) {
+                        if (handler.canHandle(recipe)) classMatches.add(handler);
+                    }
+                    return selectClaim(classMatches);
+                }).candidates());
+        for (ModRecipeHandler handler : RECIPE_SENSITIVE_HANDLERS) {
+            if (handler.canHandle(recipe)) matching.add(handler);
         }
-        Class<?> clazz = recipe.getClass();
-        ModRecipeHandler cached = HANDLER_CACHE.get(clazz);
-        if (cached != null) return cached == NO_HANDLER ? null : cached;
-        // Iterate in reverse so mod-specific handlers (registered later)
-        // take priority over GenericRecipeHandler registered first.
-        for (int i = HANDLERS.size() - 1; i >= 0; i--) {
-            ModRecipeHandler h = HANDLERS.get(i);
-            if (h.canHandle(recipe)) {
-                HANDLER_CACHE.put(clazz, h);
-                return h;
-            }
+        Claim claim = selectClaim(matching);
+        if (claim.ambiguous() && AMBIGUOUS_CLAIMS_LOGGED.add(recipe.getId())) {
+            RESULT_LOGGER.warn("[RSI] Ambiguous recipe handlers for {}: {}",
+                    recipe.getId(), claim.candidates().stream()
+                            .map(handler -> handler.getClass().getName()
+                                    + "#priority=" + handler.claimPriority())
+                            .toList());
         }
-        HANDLER_CACHE.put(clazz, NO_HANDLER);
-        return null;
+        return claim;
+    }
+
+    static Claim selectClaim(List<ModRecipeHandler> matching) {
+        if (matching == null || matching.isEmpty()) return new Claim(null, List.of());
+        int highest = Integer.MIN_VALUE;
+        for (ModRecipeHandler handler : matching) {
+            highest = Math.max(highest, handler.claimPriority());
+        }
+        List<ModRecipeHandler> candidates = new ArrayList<>();
+        for (ModRecipeHandler handler : matching) {
+            if (handler.claimPriority() == highest) candidates.add(handler);
+        }
+        return new Claim(candidates.size() == 1 ? candidates.get(0) : null, candidates);
     }
 
     @Nullable
@@ -253,7 +279,7 @@ public final class ModRecipeHandlers {
         // tryGetResultItem() for the same recipe class, skip handler dispatch
         // and fall through to reflection to avoid StackOverflowError.
         if (DISPATCH_GUARD.get() != recipe.getClass()) {
-            ModRecipeHandler handler = handlerFor(recipe);
+            ModRecipeHandler handler = claimFor(recipe).winner();
             if (handler != null) {
                 Class<?> prev = DISPATCH_GUARD.get();
                 DISPATCH_GUARD.set(recipe.getClass());

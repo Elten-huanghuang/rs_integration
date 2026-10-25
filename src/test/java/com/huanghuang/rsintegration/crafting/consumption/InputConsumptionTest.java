@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting.consumption;
 
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -47,5 +49,17 @@ class InputConsumptionTest {
                 () -> new InputConsumption(InputConsumption.Kind.DURABILITY, 0L));
         assertThrows(IllegalArgumentException.class,
                 () -> new InputConsumption(InputConsumption.Kind.CONSUMED, 1L));
+        assertThrows(IllegalArgumentException.class,
+                () -> new InputConsumption(InputConsumption.Kind.CONSUMED, 0L,
+                        new ResourceLocation("test", "returned")));
+    }
+
+    @Test
+    void linkedOutputIsPartOfTheAuthoritativeConsumption() {
+        ResourceLocation returnPort = new ResourceLocation("test", "empty_bucket");
+        InputConsumption consumption = InputConsumption.containerReturned(returnPort);
+
+        assertEquals(returnPort, consumption.linkedOutputPortId());
+        assertEquals(DemandRole.CONTAINER_RETURNING, consumption.demandRole());
     }
 }

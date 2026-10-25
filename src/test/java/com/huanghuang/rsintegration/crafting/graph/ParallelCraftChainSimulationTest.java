@@ -122,7 +122,7 @@ class ParallelCraftChainSimulationTest extends BootstrapTest {
                         new MachineLeaseRegistry.MachineKey(
                                 new ResourceLocation("minecraft", "overworld"),
                                 new BlockPos(lane, 64, layer), "layered_machine"),
-                        new MachineLeaseRegistry.Owner(UUID.randomUUID(), node, 0));
+                        new OperationId(UUID.randomUUID(), node, 0));
                 assertNotNull(lease);
                 leases.add(lease);
                 OperationBudget.Permit permit = budget.tryAcquire();

@@ -349,7 +349,9 @@ class EmbersMiniBoilerBatchDelegateTest extends BootstrapTest {
             try (MockedStatic<CraftPacketUtils> context = mockStatic(CraftPacketUtils.class);
                  MockedStatic<ModRecipeHandlers> handlers = mockStatic(ModRecipeHandlers.class)) {
                 context.when(() -> CraftPacketUtils.resolveLevel(player.server, null, player)).thenReturn(level);
-                handlers.when(() -> ModRecipeHandlers.handlerFor(recipe)).thenReturn(new EmbersBoilingRecipeHandler());
+                EmbersBoilingRecipeHandler handler = new EmbersBoilingRecipeHandler();
+                handlers.when(() -> ModRecipeHandlers.claimFor(recipe))
+                        .thenReturn(new ModRecipeHandlers.Claim(handler, List.of(handler)));
                 return delegate.prepare(player, recipe.getId(), null, pos);
             }
         }

@@ -15,6 +15,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.crafting.consumption.FuelMath;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.mods.immortalersdelight.EnchantalCoolerRecipeHandler;
@@ -157,7 +158,7 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
     @Nullable
     @Override
     public List<IngredientSpec> getRequiredMaterials() {
-        var handler = ModRecipeHandlers.handlerFor(recipe);
+        var handler = ModRecipeHandlers.claimFor(recipe).winner();
         if (handler != null) {
             return handler.getIngredients(recipe);
         }
@@ -226,14 +227,15 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
             ItemStack prototype = ingredientPrototype(spec);
             int capacity = Math.min(handler.getSlotLimit(slot), prototype.getMaxStackSize());
             inputs.add(new InputBufferContract.InputSlot("legacy:material:" + materialIndex++,
-                    slot, prototype, spec.count(), false, capacity));
+                    slot, prototype, spec.count(), capacity, spec.consumption()));
         }
         ItemStack container = EnchantalCoolerRecipeHandler.getContainerItem(recipe);
         if (!container.isEmpty()) {
             int capacity = Math.min(handler.getSlotLimit(CONTAINER_SLOT),
                     container.getMaxStackSize());
             inputs.add(new InputBufferContract.InputSlot("legacy:material:" + materialIndex,
-                    CONTAINER_SLOT, container, 1, false, capacity));
+                    CONTAINER_SLOT, container, 1, capacity,
+                    InputConsumption.consumed()));
         }
         ItemStack output = resultItem();
         int outputCapacity = Math.min(handler.getSlotLimit(OUTPUT_SLOT), output.getMaxStackSize());
@@ -246,7 +248,7 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         return new InputBufferContract(operationLimit, inputs,
                 List.of(new OutputContract.Port("immortalers_delight:cooler:output",
                         OUTPUT_SLOT, output, output.getCount(),
-                        InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.SLOT)));
+                        OutputContract.Kind.PRIMARY, OutputContract.Source.SLOT)));
     }
 
     @Override
@@ -268,7 +270,8 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
                     .filter(candidate -> id.equals(candidate.entryId()))
                     .findFirst().orElse(null);
             long required = (long) specs.get(i).count() * plan.operations();
-            if (input == null || input.reusable() || input.perOperation() != specs.get(i).count()
+            if (input == null || input.consumption().reusableWithinWorkerBatch()
+                    || input.perOperation() != specs.get(i).count()
                     || required > Integer.MAX_VALUE
                     || input.stack().getCount() != (int) required) return false;
             ordered.add(input.stack().copy());
@@ -768,7 +771,7 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         ItemStack result = resultItem();
         return result.isEmpty() ? OutputContract.none() : new OutputContract(List.of(
                 new OutputContract.Port("immortalers_delight:cooler:output", OUTPUT_SLOT,
-                        result, result.getCount(), InputBufferPlan.OutputPort.Kind.PRIMARY,
+                        result, result.getCount(), OutputContract.Kind.PRIMARY,
                         OutputContract.Source.SLOT)));
     }
 

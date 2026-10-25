@@ -5,5 +5,9 @@ public enum OutputKind {
     SECONDARY,
     REMAINDER,
     SYNTHETIC,
-    DYNAMIC
+    DYNAMIC,
+    CONTAINER,
+    TRANSFORMED,
+    CATALYST_RETURN,
+    DURABILITY_RETURN
 }

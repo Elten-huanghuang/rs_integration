@@ -212,7 +212,8 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
         if (capacity <= 0) return InputBufferContract.none();
         List<InputBufferContract.InputSlot> inputs = List.of(
                 new InputBufferContract.InputSlot(
-                        "yhk:steamer:input", 0, prototype, 1, false, capacity));
+                        "yhk:steamer:input", 0, prototype, 1, capacity,
+                        getRequiredMaterials().get(0).consumption()));
 
         ItemStack output = getRecipeResult();
         if (output.isEmpty()) return InputBufferContract.none();
@@ -221,7 +222,7 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
         return new InputBufferContract(operations, inputs,
                 List.of(new OutputContract.Port(outputPortId(), null, output,
                         Math.max(1, output.getCount()),
-                        InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.VIRTUAL)));
+                        OutputContract.Kind.PRIMARY, OutputContract.Source.VIRTUAL)));
     }
 
     @Override
@@ -250,7 +251,8 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
         if (plan.inputs().size() != 1 || plan.outputs().size() != 1) return false;
         InputBufferPlan.InputSlot input = plan.inputs().get(0);
         long required = plan.operations();
-        if (input.reusable() || required > Integer.MAX_VALUE
+        if (input.consumption().reusableWithinWorkerBatch()
+                || required > Integer.MAX_VALUE
                 || input.stack().getCount() != (int) required
                 || !recipe.getIngredients().get(0).test(input.stack())) {
             return false;
@@ -275,7 +277,7 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
         // 蒸笼格的产物由 collectResult 读取，并非世界掉落，因此这里声明为虚拟端口。
         return new OutputContract(List.of(new OutputContract.Port(outputPortId(), null, output,
                 Math.max(1, output.getCount()),
-                InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.VIRTUAL)));
+                OutputContract.Kind.PRIMARY, OutputContract.Source.VIRTUAL)));
     }
 
     /** 批量结算用的输出端口标识。 */

@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
+import com.huanghuang.rsintegration.crafting.CanonicalNbt;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.magic.MagicResourceCost;
 import net.minecraft.resources.ResourceLocation;
@@ -44,7 +45,8 @@ public record ImmutableRecipeGraph(Map<MaterialRef, List<RecipeNode>> recipesByO
 
         public MaterialRef {
             if (itemId == null) throw new IllegalArgumentException("itemId");
-            nbt = nbt == null ? "" : nbt;
+            String normalized = CanonicalNbt.normalizeSnbt(nbt);
+            nbt = normalized == null ? "" : normalized;
             if (runtimeNbt && !nbt.isEmpty()) throw new IllegalArgumentException("unknown output NBT");
             if (constrainedNbt && (runtimeNbt || nbt.isEmpty())) {
                 throw new IllegalArgumentException("missing constrained output NBT");

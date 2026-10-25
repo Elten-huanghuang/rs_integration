@@ -99,13 +99,12 @@ class FlatMaterialBatchTest extends BootstrapTest {
         assertEquals(1, SelfAmplifyingRecipePolicy.scaleTargetInputs(
                 specs, new ItemStack(Items.DIAMOND, 2), 100).get(0).count());
         assertEquals(16, AsyncCraftChain.scaleGraphSpecsForExecutions(
-                specs, List.of(), 16).get(0).count());
+                specs, 16).get(0).count());
     }
 
     @Test
-    void reservationFailureIsNotClassifiedAsMachineStartRejection() {
+    void reservationFailureHasItsOwnStructuredReason() {
         assertEquals(CraftProgressSnapshot.Reason.MATERIAL_EXTRACTION_FAILED,
-                AsyncCraftChain.progressReasonForDetail(
-                        "Material reservation failed before machine start: recipe=botania:kjs/test"));
+                CraftFailureCode.MATERIAL_EXTRACTION_FAILED.progressReason());
     }
 }

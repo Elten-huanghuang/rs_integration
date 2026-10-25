@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
+import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
@@ -63,7 +64,7 @@ class CookingPotInputBufferTest extends BootstrapTest {
                     ? "miners_delight:copper_pot:output" : "farmersdelight:cooking_pot:output";
             OutputContract contract = new OutputContract(List.of(new OutputContract.Port(
                     portId, copperPot ? 6 : 8, new ItemStack(Items.APPLE), 1,
-                    InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.SLOT)));
+                    OutputContract.Kind.PRIMARY, OutputContract.Source.SLOT)));
             ServerPlayer player = mock(ServerPlayer.class);
             doReturn(contract).when(delegate).outputContract();
             doReturn(new ItemStack(Items.APPLE, 6)).when(delegate).collectResult(player);
@@ -79,6 +80,6 @@ class CookingPotInputBufferTest extends BootstrapTest {
     private static InputBufferContract.InputSlot slot(String id, int slot,
                                                        int perOperation, int capacity) {
         return new InputBufferContract.InputSlot(id, slot, new ItemStack(Items.APPLE),
-                perOperation, false, capacity);
+                perOperation, capacity, InputConsumption.consumed());
     }
 }

@@ -1,6 +1,5 @@
 package com.huanghuang.rsintegration.crafting;
 
-import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import net.minecraft.world.item.ItemStack;
 
 import java.util.ArrayList;
@@ -38,7 +37,6 @@ final class MaterialReservationPlanner {
 
     static List<IngredientSpec> scaleGraphSpecsForExecutions(
             List<IngredientSpec> specs,
-            List<IBatchDelegate.MaterialReservationScope> scopes,
             int executions) {
         int multiplier = Math.max(1, executions);
         List<IngredientSpec> scaledSpecs = new ArrayList<>(specs.size());
@@ -57,11 +55,11 @@ final class MaterialReservationPlanner {
     }
 
     static List<Integer> reusableMaterialIndices(
-            List<IBatchDelegate.MaterialReservationScope> scopes, int specCount) {
+            List<IngredientSpec> specs, int specCount) {
         List<Integer> indices = new ArrayList<>();
-        int limit = Math.min(Math.max(0, specCount), scopes.size());
+        int limit = Math.min(Math.max(0, specCount), specs.size());
         for (int i = 0; i < limit; i++) {
-            if (scopes.get(i) == IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE) {
+            if (specs.get(i).consumption().reusableWithinWorkerBatch()) {
                 indices.add(i);
             }
         }

@@ -96,6 +96,12 @@ class RecipeIndexBuildSessionTest extends BootstrapTest {
             Recipe<?> third = recipe("third");
             doReturn(List.of(first, second, third)).when(manager).getRecipes();
             try (var handlers = mockStatic(ModRecipeHandlers.class)) {
+                handlers.when(() -> ModRecipeHandlers.claimFor(first))
+                        .thenReturn(new ModRecipeHandlers.Claim(null, List.of()));
+                handlers.when(() -> ModRecipeHandlers.claimFor(second))
+                        .thenReturn(new ModRecipeHandlers.Claim(null, List.of()));
+                handlers.when(() -> ModRecipeHandlers.claimFor(third))
+                        .thenReturn(new ModRecipeHandlers.Claim(null, List.of()));
                 RecipeIndex.BuildSession session = newSession(level);
                 AtomicLong clock = new AtomicLong();
                 assertFalse(session.advance(2L, clock::getAndIncrement));

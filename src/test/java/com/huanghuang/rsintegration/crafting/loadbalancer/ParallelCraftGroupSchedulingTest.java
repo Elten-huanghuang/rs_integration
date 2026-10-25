@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.crafting.batch.RepeatedOperationPlan;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
@@ -82,10 +83,9 @@ class ParallelCraftGroupSchedulingTest extends BootstrapTest {
     @Test
     void reusableWorkerBatchAggregatesConsumablesButNotCatalyst() {
         MaterialPlan materials = MaterialPlan.fromLegacy(
-                List.of(new IngredientSpec(Ingredient.of(Items.DIAMOND), 1),
-                        new IngredientSpec(Ingredient.of(Items.CLAY_BALL), 2)),
-                List.of(IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE,
-                        IBatchDelegate.MaterialReservationScope.PER_OPERATION));
+                List.of(new IngredientSpec(Ingredient.of(Items.DIAMOND), 1,
+                                DemandRole.CATALYST),
+                        new IngredientSpec(Ingredient.of(Items.CLAY_BALL), 2)));
         RepeatedOperationPlan repeated = new RepeatedOperationPlan(materials, 3, 2,
                 List.of(new ItemStack(Items.DIAMOND), new ItemStack(Items.CLAY_BALL, 2),
                         new ItemStack(Items.DIAMOND), new ItemStack(Items.CLAY_BALL, 2),

@@ -166,18 +166,8 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
     @Override
     public List<IngredientSpec> getRequiredMaterials() {
         if (recipe == null || !RECIPE_CLASS.equals(recipe.getClass().getName())) return null;
-        var handler = ModRecipeHandlers.handlerFor(recipe);
+        var handler = ModRecipeHandlers.claimFor(recipe).winner();
         return handler == null ? null : handler.getIngredients(recipe);
-    }
-
-    @Override
-    public List<MaterialReservationScope> getMaterialReservationScopes() {
-        List<IngredientSpec> specs = getRequiredMaterials();
-        if (specs == null || specs.size() != 2) return List.of();
-        return List.of(MaterialReservationScope.PER_OPERATION,
-                specs.get(1).consumption().reusableWithinWorkerBatch()
-                        ? MaterialReservationScope.PER_WORKER_REUSABLE
-                        : MaterialReservationScope.PER_OPERATION);
     }
 
     @Override

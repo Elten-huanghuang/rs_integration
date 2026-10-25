@@ -2,8 +2,6 @@ package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
-import com.huanghuang.rsintegration.crafting.graph.DemandRole;
-import com.huanghuang.rsintegration.crafting.graph.InputDemand;
 import net.minecraft.resources.ResourceLocation;
 
 import java.util.Collection;
@@ -15,7 +13,6 @@ final class GraphExecutionPolicy {
         GRAPH_COMPLETE,
         APPENDED_TERMINAL_NOT_IN_GRAPH,
         MOD_REQUIRES_FLAT_EXECUTION,
-        STATEFUL_GENERIC_REUSE_REQUIRES_FLAT,
         SEQUENTIAL_MACHINE_BATCH_REQUIRES_FLAT
     }
 
@@ -66,10 +63,6 @@ final class GraphExecutionPolicy {
             return new Decision(false, Reason.SEQUENTIAL_MACHINE_BATCH_REQUIRES_FLAT,
                     "Arcane Iterator executes repeated operations sequentially");
         }
-        if (requiresFlatStatefulReuse(graph)) {
-            return new Decision(false, Reason.STATEFUL_GENERIC_REUSE_REQUIRES_FLAT,
-                    "generic catalyst or durability input requires ordered reuse");
-        }
         return decide(false, (ModTypeConstraint) null);
     }
 
@@ -90,15 +83,6 @@ final class GraphExecutionPolicy {
         return recipeId != null && "wizards_reborn".equals(recipeId.getNamespace())
                 && (recipeId.getPath().equals("arcane_iterator")
                 || recipeId.getPath().startsWith("arcane_iterator/"));
-    }
-
-    static boolean requiresFlatStatefulReuse(CraftPlanGraph graph) {
-        if (graph == null) return false;
-        return graph.nodes().stream().anyMatch(node ->
-                ModType.GENERIC.id().equals(node.modTypeId())
-                        && node.inputs().stream().map(InputDemand::role)
-                        .anyMatch(role -> role == DemandRole.CATALYST
-                                || role == DemandRole.DURABILITY));
     }
 
     private static String constraintReason(ModType type) {

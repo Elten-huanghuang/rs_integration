@@ -192,7 +192,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
     @Nullable
     @Override
     public List<IngredientSpec> getRequiredMaterials() {
-        var handler = ModRecipeHandlers.handlerFor(recipe);
+        var handler = ModRecipeHandlers.claimFor(recipe).winner();
         if (handler != null) {
             return handler.getIngredients(recipe);
         }
@@ -260,11 +260,11 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         if (operations <= 0) return InputBufferContract.none();
         return new InputBufferContract(operations,
                 List.of(new InputBufferContract.InputSlot(
-                        "legacy:material:0", 0, prototype, input.count(), false,
-                        inputCapacity)),
+                        "legacy:material:0", 0, prototype, input.count(),
+                        inputCapacity, input.consumption())),
                 List.of(new OutputContract.Port(
                         "aether:furnace:output", 2, output, output.getCount(),
-                        InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.SLOT)));
+                        OutputContract.Kind.PRIMARY, OutputContract.Source.SLOT)));
     }
 
     private int fuelBufferOperationCapacity(BlockEntity be, IItemHandler handler) {
@@ -296,7 +296,8 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         IngredientSpec spec = getRequiredMaterials().get(0);
         long required = (long) spec.count() * plan.operations();
         if (!"legacy:material:0".equals(input.entryId()) || input.slot() != 0
-                || input.reusable() || input.perOperation() != spec.count()
+                || input.consumption().reusableWithinWorkerBatch()
+                || input.perOperation() != spec.count()
                 || required > Integer.MAX_VALUE || input.stack().getCount() != (int) required) {
             return false;
         }
@@ -620,7 +621,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         ItemStack result = resultItem();
         return result.isEmpty() ? OutputContract.none() : new OutputContract(List.of(
                 new OutputContract.Port("aether:furnace:output", 2, result,
-                        result.getCount(), InputBufferPlan.OutputPort.Kind.PRIMARY,
+                        result.getCount(), OutputContract.Kind.PRIMARY,
                         OutputContract.Source.SLOT)));
     }
 

@@ -145,12 +145,6 @@ public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
 
     @Nonnull
     @Override
-    public List<MaterialReservationScope> getMaterialReservationScopes() {
-        return active().getMaterialReservationScopes();
-    }
-
-    @Nonnull
-    @Override
     public List<IngredientSpec> getGraphSpecs() {
         return active().getGraphSpecs();
     }

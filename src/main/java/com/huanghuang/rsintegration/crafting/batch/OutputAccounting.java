@@ -24,10 +24,11 @@ public final class OutputAccounting {
         }
     }
 
-    public record PortSettlement(OutputContract.Port port, int expected, int actual,
+    public record PortSettlement(OutputContract.Port port, long expected, long actual,
                                  boolean matchingOutput) {
         public boolean complete() {
-            return matchingOutput && actual >= expected;
+            return matchingOutput
+                    && (!port.requiresExactProduction() || actual >= expected);
         }
     }
 
@@ -102,7 +103,7 @@ public final class OutputAccounting {
         return List.copyOf(merged);
     }
 
-    public static Settlement assess(OutputContract contract, int operations,
+    public static Settlement assess(OutputContract contract, long operations,
                                     List<CollectedOutput> actualOutputs) {
         OutputContract safeContract = contract == null ? OutputContract.none() : contract;
         List<CollectedOutput> actual = actualOutputs == null ? List.of() : actualOutputs;
@@ -115,7 +116,7 @@ public final class OutputAccounting {
         List<CollectedOutput> unexpected = new ArrayList<>();
         for (OutputContract.Port port : safeContract.ports()) {
             List<CollectedOutput> collected = byPort.remove(port.portId());
-            int actualCount = 0;
+            long actualCount = 0L;
             boolean matching = true;
             if (collected != null) {
                 for (CollectedOutput output : collected) {
@@ -126,7 +127,7 @@ public final class OutputAccounting {
                         unexpected.add(output);
                         continue;
                     }
-                    actualCount = Math.addExact(actualCount, output.stack().getCount());
+                    actualCount = Math.addExact(actualCount, (long) output.stack().getCount());
                 }
             }
             settlements.add(new PortSettlement(port, port.expectedCount(operations), actualCount, matching));

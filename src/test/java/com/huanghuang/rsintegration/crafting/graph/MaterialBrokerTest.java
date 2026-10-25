@@ -44,8 +44,8 @@ class MaterialBrokerTest extends BootstrapTest {
         broker.publish(source, diamond, Integer.MAX_VALUE);
         broker.publish(source, diamond, Integer.MAX_VALUE);
 
-        assertEquals(Integer.MAX_VALUE, broker.available(source, diamond));
-        assertEquals(Integer.MAX_VALUE, broker.totalAvailable());
+        assertEquals((long) Integer.MAX_VALUE * 2L, broker.available(source, diamond));
+        assertEquals((long) Integer.MAX_VALUE * 2L, broker.totalAvailable());
 
         MaterialBroker.ReservationToken first = broker.reserve(new NodeId(0),
                 List.of(new MaterialBroker.Request(source, diamond, Integer.MAX_VALUE)));
@@ -55,7 +55,32 @@ class MaterialBrokerTest extends BootstrapTest {
         assertNotNull(first);
         assertNotNull(second);
         assertEquals(0, broker.available(source, diamond));
-        assertEquals(Integer.MAX_VALUE, broker.heldBy(new NodeId(0)));
+        assertEquals((long) Integer.MAX_VALUE * 2L, broker.heldBy(new NodeId(0)));
+    }
+
+    @Test
+    void shortagesOnlyExposeUnmetUnitsAndOutstandingIncludesEveryLiveClaim() {
+        MaterialBroker broker = brokerWithDiamonds(3);
+        MaterialKey diamond = MaterialKey.of(new ItemStack(Items.DIAMOND));
+        MaterialSource source = new MaterialSource.InitialPool(diamond);
+        MaterialBroker.Request request =
+                new MaterialBroker.Request(source, diamond, 5);
+
+        assertNull(broker.reserve(new NodeId(0), List.of(request)));
+        assertEquals(List.of(new MaterialBroker.Request(source, diamond, 2)),
+                broker.shortages(List.of(request)));
+
+        MaterialBroker.ReservationToken token = broker.reserve(new NodeId(0),
+                List.of(new MaterialBroker.Request(source, diamond, 1)));
+        broker.commit(token);
+
+        assertEquals(3, broker.outstanding(source, diamond));
+        assertEquals(List.of(new MaterialBroker.Request(source, diamond, 3)),
+                broker.shortages(List.of(request)));
+        broker.settle(token);
+        assertEquals(2, broker.outstanding(source, diamond));
+        assertEquals(List.of(new MaterialBroker.Request(source, diamond, 3)),
+                broker.shortages(List.of(request)));
     }
 
     @Test

@@ -32,7 +32,7 @@ public final class MaterialBroker {
         REFUNDED
     }
 
-    public record Request(MaterialSource source, MaterialKey material, int quantity) {
+    public record Request(MaterialSource source, MaterialKey material, long quantity) {
         public Request {
             Objects.requireNonNull(source, "source");
             Objects.requireNonNull(material, "material");
@@ -88,9 +88,17 @@ public final class MaterialBroker {
     private long nextLotId;
     private long nextToken;
 
-    public long publish(MaterialSource source, MaterialKey material, int quantity) {
+    public long publish(MaterialSource source, MaterialKey material, long quantity) {
         if (quantity <= 0) throw new IllegalArgumentException("published quantity must be positive");
-        return publishActual(source, material, material.toStack(quantity));
+        long firstLot = -1L;
+        long remaining = quantity;
+        while (remaining > 0L) {
+            int chunk = (int) Math.min(Integer.MAX_VALUE, remaining);
+            long lotId = publishActual(source, material, material.toStack(chunk));
+            if (firstLot < 0L) firstLot = lotId;
+            remaining -= chunk;
+        }
+        return firstLot;
     }
 
     /** Publish the exact runtime fragment owned by this source. */
@@ -119,6 +127,29 @@ public final class MaterialBroker {
         return plan(List.copyOf(requests)) != null;
     }
 
+    /**
+     * 返回当前资产池尚不能满足的请求。调用方必须只补发这些差额，
+     * 不能把完整请求再次发布成资产。
+     */
+    public List<Request> shortages(List<Request> requests) {
+        requireOwnerThread();
+        Objects.requireNonNull(requests, "requests");
+        List<Request> shortages = new ArrayList<>();
+        for (Request request : requests) {
+            long remaining = request.quantity();
+            for (AssetLot lot : lots.values()) {
+                if (remaining <= 0L) break;
+                if (!lot.source.equals(request.source())
+                        || !lot.material.equals(request.material())) continue;
+                remaining -= Math.min(remaining, lot.available);
+            }
+            if (remaining > 0L) {
+                shortages.add(new Request(request.source(), request.material(), remaining));
+            }
+        }
+        return List.copyOf(shortages);
+    }
+
     public ReservationToken reserve(NodeId owner, List<Request> requests) {
         requireOwnerThread();
         Objects.requireNonNull(owner, "owner");
@@ -129,11 +160,11 @@ public final class MaterialBroker {
             return token;
         }
 
-        Map<Long, Integer> planned = plan(immutableRequests);
+        Map<Long, Long> planned = plan(immutableRequests);
         if (planned == null) return null;
 
         List<Claim> claims = new ArrayList<>(planned.size());
-        for (Map.Entry<Long, Integer> entry : planned.entrySet()) {
+        for (Map.Entry<Long, Long> entry : planned.entrySet()) {
             AssetLot lot = lots.get(entry.getKey());
             lot.available -= entry.getValue();
             lot.reserved += entry.getValue();
@@ -202,11 +233,11 @@ public final class MaterialBroker {
         for (Claim claim : reservation.claims) {
             AssetLot lot = lots.get(claim.lotId);
             if (!(lot.source instanceof MaterialSource.ProducerOutput) || lot.committed <= 0) continue;
-            int refundable = Math.min(claim.quantity, lot.committed);
+            long refundable = Math.min(claim.quantity, lot.committed);
             for (ItemStack stack : remaining) {
                 if (refundable <= 0) break;
                 if (stack.isEmpty() || !MaterialMatcher.sameRuntimeFragment(lot.stack, stack)) continue;
-                int giveBack = Math.min(refundable, stack.getCount());
+                int giveBack = (int) Math.min(refundable, stack.getCount());
                 stack.shrink(giveBack);
                 lot.committed -= giveBack;
                 lot.available += giveBack;
@@ -231,11 +262,11 @@ public final class MaterialBroker {
         for (Claim claim : reservation.claims) {
             AssetLot lot = lots.get(claim.lotId);
             if (!(lot.source instanceof MaterialSource.ProducerOutput) || lot.committed <= 0) continue;
-            int refundable = Math.min(claim.quantity, lot.committed);
+            long refundable = Math.min(claim.quantity, lot.committed);
             for (ItemStack stack : remaining) {
                 if (refundable <= 0) break;
                 if (stack.isEmpty() || !MaterialMatcher.sameRuntimeFragment(lot.stack, stack)) continue;
-                int giveBack = Math.min(refundable, stack.getCount());
+                int giveBack = (int) Math.min(refundable, stack.getCount());
                 stack.shrink(giveBack);
                 lot.committed -= giveBack;
                 lot.available += giveBack;
@@ -245,17 +276,17 @@ public final class MaterialBroker {
         }
     }
 
-    private Map<Long, Integer> plan(List<Request> requests) {
-        Map<Long, Integer> planned = new LinkedHashMap<>();
+    private Map<Long, Long> plan(List<Request> requests) {
+        Map<Long, Long> planned = new LinkedHashMap<>();
         for (Request request : requests) {
-            int remaining = request.quantity();
+            long remaining = request.quantity();
             for (AssetLot lot : lots.values()) {
                 if (remaining <= 0) break;
                 if (!lot.source.equals(request.source()) || !lot.material.equals(request.material())) continue;
-                int available = lot.available - planned.getOrDefault(lot.id, 0);
+                long available = lot.available - planned.getOrDefault(lot.id, 0L);
                 if (available <= 0) continue;
-                int take = Math.min(available, remaining);
-                planned.merge(lot.id, take, Integer::sum);
+                long take = Math.min(available, remaining);
+                planned.merge(lot.id, take, Long::sum);
                 remaining -= take;
             }
             if (remaining > 0) return null;
@@ -276,7 +307,7 @@ public final class MaterialBroker {
         for (Claim claim : reservation.claims) {
             AssetLot lot = lots.get(claim.lotId);
             fragments.add(new Fragment(lot.source, lot.material,
-                    lot.stack.copyWithCount(claim.quantity)));
+                    lot.stack.copyWithCount(Math.toIntExact(claim.quantity))));
         }
         return new Checkout(fragments);
     }
@@ -287,9 +318,9 @@ public final class MaterialBroker {
         return reservation == null ? null : reservation.state;
     }
 
-    public int available(MaterialSource source, MaterialKey material) {
+    public long available(MaterialSource source, MaterialKey material) {
         requireOwnerThread();
-        int total = 0;
+        long total = 0L;
         for (AssetLot lot : lots.values()) {
             if (lot.source.equals(source) && lot.material.equals(material)) {
                 total = saturatingAdd(total, lot.available);
@@ -298,9 +329,22 @@ public final class MaterialBroker {
         return total;
     }
 
-    public int heldBy(NodeId owner) {
+    /** 已发布但尚未物理结算的资产，包括可用、预留和已提交。 */
+    public long outstanding(MaterialSource source, MaterialKey material) {
         requireOwnerThread();
-        int total = 0;
+        long total = 0L;
+        for (AssetLot lot : lots.values()) {
+            if (!lot.source.equals(source) || !lot.material.equals(material)) continue;
+            total = saturatingAdd(total, lot.available);
+            total = saturatingAdd(total, lot.reserved);
+            total = saturatingAdd(total, lot.committed);
+        }
+        return total;
+    }
+
+    public long heldBy(NodeId owner) {
+        requireOwnerThread();
+        long total = 0L;
         for (Reservation reservation : reservations.values()) {
             if (!reservation.owner.equals(owner)) continue;
             if (reservation.state == ReservationState.RESERVED
@@ -318,7 +362,7 @@ public final class MaterialBroker {
      * settled units are never returned, so downstream-owned producer output
      * cannot also be delivered as surplus.
      */
-    public int takeAvailable(MaterialSource source, MaterialKey material, int quantity) {
+    public long takeAvailable(MaterialSource source, MaterialKey material, long quantity) {
         return count(drainAvailable(source, material, quantity));
     }
 
@@ -326,17 +370,17 @@ public final class MaterialBroker {
      * Return exact available fragments for delivery. Reserved, committed and
      * settled units are excluded by construction.
      */
-    public List<ItemStack> drainAvailable(MaterialSource source, MaterialKey material, int quantity) {
+    public List<ItemStack> drainAvailable(MaterialSource source, MaterialKey material, long quantity) {
         requireOwnerThread();
         Objects.requireNonNull(source, "source");
         Objects.requireNonNull(material, "material");
         if (quantity <= 0) throw new IllegalArgumentException("take quantity must be positive");
-        int remaining = quantity;
+        long remaining = quantity;
         List<ItemStack> drained = new ArrayList<>();
         for (AssetLot lot : lots.values()) {
             if (remaining <= 0) break;
             if (!lot.source.equals(source) || !lot.material.equals(material)) continue;
-            int take = Math.min(lot.available, remaining);
+            int take = (int) Math.min(lot.available, remaining);
             if (take <= 0) continue;
             drained.add(lot.stack.copyWithCount(take));
             lot.available -= take;
@@ -360,7 +404,7 @@ public final class MaterialBroker {
         for (Claim claim : reservation.claims) {
             AssetLot lot = lots.get(claim.lotId);
             if (lot.source instanceof MaterialSource.ProducerOutput) {
-                fragments.add(lot.stack.copyWithCount(claim.quantity));
+                fragments.add(lot.stack.copyWithCount(Math.toIntExact(claim.quantity)));
             }
         }
         return List.copyOf(fragments);
@@ -372,25 +416,25 @@ public final class MaterialBroker {
         List<ItemStack> drained = new ArrayList<>();
         for (AssetLot lot : lots.values()) {
             if (!(lot.source instanceof MaterialSource.ProducerOutput) || lot.available <= 0) continue;
-            drained.add(lot.stack.copyWithCount(lot.available));
+            drained.add(lot.stack.copyWithCount(Math.toIntExact(lot.available)));
             lot.delivered += lot.available;
             lot.available = 0;
         }
         return List.copyOf(drained);
     }
 
-    public int totalAvailable() {
+    public long totalAvailable() {
         requireOwnerThread();
-        int total = 0;
+        long total = 0L;
         for (AssetLot lot : lots.values()) {
             total = saturatingAdd(total, lot.available);
         }
         return total;
     }
 
-    private static int saturatingAdd(int left, int right) {
+    private static long saturatingAdd(long left, long right) {
         if (right <= 0) return left;
-        return right > Integer.MAX_VALUE - left ? Integer.MAX_VALUE : left + right;
+        return right > Long.MAX_VALUE - left ? Long.MAX_VALUE : left + right;
     }
 
     private void requireOwnerThread() {
@@ -415,11 +459,11 @@ public final class MaterialBroker {
         final MaterialSource source;
         final MaterialKey material;
         final ItemStack stack;
-        int available;
-        int reserved;
-        int committed;
-        int settled;
-        int delivered;
+        long available;
+        long reserved;
+        long committed;
+        long settled;
+        long delivered;
 
         AssetLot(long id, MaterialSource source, MaterialKey material, ItemStack stack) {
             this.id = id;
@@ -430,17 +474,17 @@ public final class MaterialBroker {
         }
     }
 
-    private static int count(List<ItemStack> stacks) {
-        int total = 0;
-        for (ItemStack stack : stacks) total += stack.getCount();
+    private static long count(List<ItemStack> stacks) {
+        long total = 0L;
+        for (ItemStack stack : stacks) total = saturatingAdd(total, stack.getCount());
         return total;
     }
 
     private static final class Claim {
         final long lotId;
-        int quantity;
+        long quantity;
 
-        Claim(long lotId, int quantity) {
+        Claim(long lotId, long quantity) {
             this.lotId = lotId;
             this.quantity = quantity;
         }

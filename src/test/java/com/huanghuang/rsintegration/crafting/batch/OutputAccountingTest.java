@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
+import com.huanghuang.rsintegration.crafting.graph.OutputProbability;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.Item;
@@ -16,6 +17,21 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class OutputAccountingTest extends BootstrapTest {
+
+    @Test
+    void optionalProbabilityPortDoesNotRequireAFixedCount() {
+        OutputContract.Port bonusPort = new OutputContract.Port(
+                "bonus", 3, new ItemStack(Items.DIAMOND), 0,
+                OutputContract.Kind.SECONDARY, OutputContract.Source.SLOT,
+                0, 2, OutputProbability.probabilistic(0.25D, 4, "bonus"),
+                false, null);
+
+        OutputAccounting.Settlement settlement = OutputAccounting.assess(
+                new OutputContract(List.of(bonusPort)), 8, List.of());
+
+        assertTrue(settlement.complete());
+        assertEquals(0, settlement.ports().get(0).expected());
+    }
 
     @Test
     void capturedProductionWaitsForTheBatchInsteadOfTheSingleDropPrototype() {
@@ -73,9 +89,9 @@ class OutputAccountingTest extends BootstrapTest {
     void settlesPrimaryAndSecondaryPortsIndependently() {
         OutputContract contract = new OutputContract(List.of(
                 port("product", 0, Items.IRON_INGOT, 4,
-                        InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.SLOT),
+                        OutputContract.Kind.PRIMARY, OutputContract.Source.SLOT),
                 port("slag", 1, Items.FLINT, 1,
-                        InputBufferPlan.OutputPort.Kind.SECONDARY, OutputContract.Source.WORLD)));
+                        OutputContract.Kind.SECONDARY, OutputContract.Source.WORLD)));
 
         OutputAccounting.Settlement settlement = OutputAccounting.assess(contract, 2, List.of(
                 output("product", OutputContract.Source.SLOT, Items.IRON_INGOT, 8),
@@ -90,9 +106,9 @@ class OutputAccountingTest extends BootstrapTest {
     void rejectsShortOrWrongSourceOutputWithoutCrossPortSubstitution() {
         OutputContract contract = new OutputContract(List.of(
                 port("product", 0, Items.IRON_INGOT, 4,
-                        InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.SLOT),
+                        OutputContract.Kind.PRIMARY, OutputContract.Source.SLOT),
                 port("slag", 1, Items.FLINT, 1,
-                        InputBufferPlan.OutputPort.Kind.SECONDARY, OutputContract.Source.WORLD)));
+                        OutputContract.Kind.SECONDARY, OutputContract.Source.WORLD)));
 
         OutputAccounting.Settlement settlement = OutputAccounting.assess(contract, 2, List.of(
                 output("product", OutputContract.Source.SLOT, Items.IRON_INGOT, 7),
@@ -109,7 +125,7 @@ class OutputAccountingTest extends BootstrapTest {
     void keepsUnknownPortOutputUnexpectedAndAllowsRuntimeNbtOnTaglessDeclaration() {
         OutputContract contract = new OutputContract(List.of(
                 port("product", null, Items.IRON_INGOT, 1,
-                        InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.VIRTUAL)));
+                        OutputContract.Kind.PRIMARY, OutputContract.Source.VIRTUAL)));
         ItemStack runtimeVariant = new ItemStack(Items.IRON_INGOT);
         CompoundTag tag = new CompoundTag();
         tag.putInt("runtime_value", 7);
@@ -168,7 +184,7 @@ class OutputAccountingTest extends BootstrapTest {
     }
 
     private static OutputContract.Port port(String id, Integer physicalPort, Item item,
-                                            int perOperation, InputBufferPlan.OutputPort.Kind kind,
+                                            int perOperation, OutputContract.Kind kind,
                                             OutputContract.Source source) {
         return new OutputContract.Port(id, physicalPort, new ItemStack(item), perOperation, kind, source);
     }

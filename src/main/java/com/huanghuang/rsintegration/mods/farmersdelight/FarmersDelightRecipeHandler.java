@@ -8,6 +8,7 @@ import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.ScaledIngredientSpec;
 import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import net.minecraft.core.RegistryAccess;
@@ -16,6 +17,7 @@ import net.minecraft.world.item.crafting.CampfireCookingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
@@ -185,14 +187,17 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
                 new IngredientSpec(tool, 1, InputConsumption.durability(1L)));
     }
 
-    @Nullable
+    @Nonnull
     @Override
-    public List<IngredientSpec> getRecursiveIngredients(
-            Recipe<?> recipe, @Nullable List<IngredientSpec> ingredients) {
+    public List<ScaledIngredientSpec> getRecursiveScaledIngredients(
+            Recipe<?> recipe, @Nullable List<ScaledIngredientSpec> ingredients) {
         if (recipe == null || !CUTTING_BOARD_CLASS.equals(recipe.getClass().getName())) {
-            return ingredients;
+            return ingredients == null ? List.of() : ingredients;
         }
-        return cuttingBoardGraphIngredients(ingredients);
+        if (ingredients == null || ingredients.isEmpty()) return List.of();
+        return ingredients.stream()
+                .filter(spec -> spec != null && !spec.isEmpty())
+                .toList();
     }
 
     /** 砧板输入和耐久工具都进入递归图；执行阶段仍按实际耐久消耗结算。 */

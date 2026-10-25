@@ -255,36 +255,13 @@ public interface IBatchDelegate {
             return MaterialPlan.none();
         }
         try {
-            return MaterialPlan.fromLegacyPartitions(required, graph, supplemental,
-                    getMaterialReservationScopes());
+            return MaterialPlan.fromLegacyPartitions(required, graph, supplemental);
         } catch (IllegalArgumentException ignored) {
             // A legacy delegate may recreate non-equal Ingredient instances on
             // each getter call. Preserve its former all-graph behavior until it
             // declares stable MaterialPlan entries explicitly.
-            return MaterialPlan.fromLegacy(required, getMaterialReservationScopes());
+            return MaterialPlan.fromLegacy(required);
         }
-    }
-
-    /**
-     * Classifies required material slots for parallel execution. Reusable slots
-     * are reserved once per worker and remain installed while that worker drains
-     * its queued operations. Legacy delegates conservatively consume every slot
-     * for every operation.
-     */
-    enum MaterialReservationScope {
-        PER_OPERATION,
-        PER_WORKER_REUSABLE
-    }
-
-    @Nonnull
-    default List<MaterialReservationScope> getMaterialReservationScopes() {
-        List<IngredientSpec> specs = getRequiredMaterials();
-        if (specs == null || specs.isEmpty()) return List.of();
-        return specs.stream()
-                .map(spec -> spec.consumption().reusableWithinWorkerBatch()
-                        ? MaterialReservationScope.PER_WORKER_REUSABLE
-                        : MaterialReservationScope.PER_OPERATION)
-                .toList();
     }
 
     /** Configure source preferences before this delegate's materials are reserved. */

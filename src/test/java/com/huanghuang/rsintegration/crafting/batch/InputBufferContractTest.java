@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
+import com.huanghuang.rsintegration.crafting.graph.OutputProbability;
+import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -15,20 +17,45 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class InputBufferContractTest extends BootstrapTest {
 
     @Test
+    void keepsProbabilisticOutputMetadataWhenBuildingDispatchPlan() {
+        InputBufferContract contract = new InputBufferContract(16,
+                List.of(new InputBufferContract.InputSlot(
+                        "input", 0, new ItemStack(Items.IRON_INGOT), 1, 64,
+                        InputConsumption.consumed())),
+                List.of(new OutputContract.Port(
+                        "bonus", 2, new ItemStack(Items.DIAMOND), 0,
+                        OutputContract.Kind.SECONDARY,
+                        OutputContract.Source.SLOT, 0, 2,
+                        OutputProbability.probabilistic(0.25D, 4, "bonus"),
+                        false, null)));
+
+        OutputContract.Port output = contract.plan(4).outputs().get(0);
+
+        assertEquals(2, output.maximumPerOperation());
+        assertEquals(OutputProbability.Mode.PROBABILISTIC, output.probability().mode());
+    }
+
+    @Test
     void contractPlansSlotAndPortIdentities() {
         InputBufferContract contract = new InputBufferContract(64,
                 List.of(
                         new InputBufferContract.InputSlot(
-                                "ore", 0, new ItemStack(Items.IRON_INGOT), 1, false, 64),
+                                "ore", 0, new ItemStack(Items.IRON_INGOT), 1, 64,
+                                InputConsumption.consumed()),
                         new InputBufferContract.InputSlot(
-                                "catalyst", 4, new ItemStack(Items.BUCKET), 1, true, 1)),
+                                "catalyst", 4, new ItemStack(Items.BUCKET), 1, 1,
+                                InputConsumption.catalyst())),
                 List.of(
                         new OutputContract.Port(
                                 "product", 2, new ItemStack(Items.IRON_NUGGET), 9,
-                                InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.SLOT),
+                                OutputContract.Kind.PRIMARY,
+                                OutputContract.Source.SLOT, 9, 9,
+                                OutputProbability.guaranteed(), false, null),
                         new OutputContract.Port(
                                 "byproduct", 6, new ItemStack(Items.FLINT), 1,
-                                InputBufferPlan.OutputPort.Kind.SECONDARY, OutputContract.Source.WORLD)));
+                                OutputContract.Kind.SECONDARY,
+                                OutputContract.Source.WORLD, 1, 1,
+                                OutputProbability.guaranteed(), false, null)));
 
         InputBufferPlan plan = contract.plan(8);
 
@@ -36,11 +63,15 @@ class InputBufferContractTest extends BootstrapTest {
         assertEquals(8, plan.operations());
         assertEquals("ore", plan.inputs().get(0).entryId());
         assertEquals(8, plan.inputs().get(0).stack().getCount());
+        assertEquals(InputConsumption.Kind.CONSUMED,
+                plan.inputs().get(0).consumption().kind());
         assertEquals("catalyst", plan.inputs().get(1).entryId());
         assertEquals(1, plan.inputs().get(1).stack().getCount());
+        assertEquals(InputConsumption.Kind.CATALYST,
+                plan.inputs().get(1).consumption().kind());
         assertEquals("product", plan.outputs().get(0).portId());
-        assertEquals(72, plan.outputs().get(0).expected().getCount());
-        assertEquals(InputBufferPlan.OutputPort.Kind.SECONDARY, plan.outputs().get(1).kind());
+        assertEquals(72, plan.outputs().get(0).perOperation() * plan.operations());
+        assertEquals(OutputContract.Kind.SECONDARY, plan.outputs().get(1).kind());
         assertEquals(OutputContract.Source.WORLD, plan.outputs().get(1).source());
 
         OutputContract outputContract = OutputContract.fromPlan(plan);
@@ -60,9 +91,11 @@ class InputBufferContractTest extends BootstrapTest {
         assertThrows(IllegalArgumentException.class, () -> new InputBufferContract(2,
                 List.of(
                         new InputBufferContract.InputSlot(
-                                "first", 0, new ItemStack(Items.IRON_INGOT), 1, false, 64),
+                                "first", 0, new ItemStack(Items.IRON_INGOT), 1, 64,
+                                InputConsumption.consumed()),
                         new InputBufferContract.InputSlot(
-                                "second", 0, new ItemStack(Items.COAL), 1, false, 64)),
+                                "second", 0, new ItemStack(Items.COAL), 1, 64,
+                                InputConsumption.consumed())),
                 List.of()));
     }
 
@@ -70,7 +103,8 @@ class InputBufferContractTest extends BootstrapTest {
     void resolvedInputsKeepThePlannedSlotsAndRejectCountMismatch() {
         InputBufferPlan plan = new InputBufferPlan(4,
                 List.of(new InputBufferPlan.InputSlot(
-                        "ore", 0, new ItemStack(Items.IRON_INGOT, 4), 1, false)),
+                        "ore", 0, new ItemStack(Items.IRON_INGOT, 4), 1,
+                        InputConsumption.consumed())),
                 List.of());
 
         InputBufferPlan resolved = plan.withResolvedInputs(

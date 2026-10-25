@@ -1,10 +1,12 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
 import com.google.gson.JsonElement;
+import com.huanghuang.rsintegration.crafting.CanonicalNbt;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.CraftPlanningRevision;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.ScaledIngredientSpec;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.plan.MagicResourceCostCatalog;
@@ -816,14 +818,22 @@ public final class ImmutableRecipeGraphProjector {
     }
 
     public static IngredientRef projectIngredient(IngredientSpec spec) {
+        return projectIngredient(spec.ingredient(), spec.count(), spec.role());
+    }
+
+    public static IngredientRef projectIngredient(ScaledIngredientSpec spec) {
+        return projectIngredient(spec.ingredient(), spec.count(), spec.role());
+    }
+
+    private static IngredientRef projectIngredient(
+            Ingredient ingredient, long count, DemandRole role) {
         // Replacement containers still consume one full input per execution; their
         // remainder is emitted by the real crafting executor. Catalysts are retained as
         // non-consuming demands by the immutable planner. Transformed inputs still need
         // typed execution semantics and therefore cannot be projected.
-        if (spec.role() != DemandRole.CONSUMED
-                && spec.role() != DemandRole.CONTAINER_RETURNING
-                && spec.role() != DemandRole.CATALYST) return null;
-        Ingredient ingredient = spec.ingredient();
+        if (role != DemandRole.CONSUMED
+                && role != DemandRole.CONTAINER_RETURNING
+                && role != DemandRole.CATALYST) return null;
         if (SlashBladeRecipeHandler.isSlashBladeIngredient(ingredient)) {
             CompoundTag requirement = SlashBladePlanning.requirement(ingredient);
             if (requirement == null) return null;
@@ -834,7 +844,7 @@ public final class ImmutableRecipeGraphProjector {
                         BuiltInRegistries.ITEM.getKey(candidate.getItem()), nbt));
             }
             return alternatives.isEmpty() ? null : new IngredientRef(List.copyOf(alternatives),
-                    spec.count(), NbtMatchMode.SLASHBLADE, spec.role());
+                    count, NbtMatchMode.SLASHBLADE, role);
         }
         boolean strictNbt = IngredientMatcher.requiresNbt(ingredient);
         NbtMatchMode matchMode = nbtMatchMode(ingredient);
@@ -843,8 +853,7 @@ public final class ImmutableRecipeGraphProjector {
             if (!candidate.isEmpty()) alternatives.add(material(candidate, strictNbt));
         }
         return alternatives.isEmpty() ? null
-                : new IngredientRef(List.copyOf(alternatives), spec.count(), matchMode,
-                spec.role());
+                : new IngredientRef(List.copyOf(alternatives), count, matchMode, role);
     }
 
     private static boolean isPartialNbtIngredient(Ingredient ingredient) {
@@ -893,8 +902,8 @@ public final class ImmutableRecipeGraphProjector {
     public static MaterialRef material(ItemStack stack, boolean includeNbt) {
         ResourceLocation id = BuiltInRegistries.ITEM.getKey(stack.getItem());
         if (id == null) throw new IllegalArgumentException("Unregistered item in planning snapshot");
-        return new MaterialRef(id,
-                includeNbt && stack.getTag() != null ? stack.getTag().toString() : "");
+        String nbt = includeNbt ? CanonicalNbt.exactSnbt(stack.getTag()) : null;
+        return new MaterialRef(id, nbt == null ? "" : nbt);
     }
 
     private record CachedProjection(RecipeManager source, long revision,

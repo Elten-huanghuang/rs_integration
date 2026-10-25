@@ -113,8 +113,8 @@ class RecipeIndexProjectionPolicyTest extends BootstrapTest {
             @Override public List<IngredientSpec> getIngredients(Recipe<?> ignored) {
                 return List.of(new IngredientSpec(Ingredient.of(Items.IRON_SWORD), 1));
             }
-            @Override public List<IngredientSpec> getRecursiveIngredients(
-                    Recipe<?> ignored, List<IngredientSpec> ingredients) {
+            @Override public List<ScaledIngredientSpec> getRecursiveScaledIngredients(
+                    Recipe<?> ignored, List<ScaledIngredientSpec> ingredients) {
                 return List.of();
             }
         };

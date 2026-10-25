@@ -421,7 +421,7 @@ public final class AltarBindingRegistry {
     public static boolean isRecipeBindingCompatible(
             Recipe<?> recipe,
             ModType type, @Nullable String blockKey) {
-        ModRecipeHandler handler = ModRecipeHandlers.handlerFor(recipe);
+        ModRecipeHandler handler = ModRecipeHandlers.claimFor(recipe).winner();
         if (handler == null || handler.modType() == ModType.GENERIC) {
             handler = ModRecipeHandlers.handlerFor(type);
         }

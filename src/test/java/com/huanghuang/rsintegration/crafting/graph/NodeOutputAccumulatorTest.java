@@ -168,6 +168,21 @@ class NodeOutputAccumulatorTest extends BootstrapTest {
         assertTrue(accumulator.isComplete());
     }
 
+    @Test
+    void probabilisticOutputIsObservedWithoutBeingRequired() {
+        OutputDeclaration declaration = new OutputDeclaration(
+                new OutputPortId(new NodeId(8), 0),
+                MaterialKey.of(new ItemStack(Items.DIAMOND)),
+                0, OutputKind.SECONDARY, 0, 2,
+                OutputProbability.probabilistic(0.25D, 4, "diamond_bonus"),
+                false, null);
+        NodeOutputAccumulator accumulator = new NodeOutputAccumulator(List.of(declaration));
+
+        assertTrue(accumulator.isComplete());
+        assertTrue(accumulator.add(List.of(new ItemStack(Items.DIAMOND, 2))).isEmpty());
+        assertEquals(2, accumulator.drainSurplus().get(0).getCount());
+    }
+
     private static ItemStack tagged(String variant, int count) {
         ItemStack stack = new ItemStack(Items.DIAMOND, count);
         CompoundTag tag = new CompoundTag();

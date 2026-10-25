@@ -161,11 +161,12 @@ public final class CursedInfuserBatchDelegate extends AbstractBatchDelegate {
         return new InputBufferContract(
                 Math.min(preparedCapacity, goetyInputBufferLimit()),
                 List.of(new InputBufferContract.InputSlot(
-                        "legacy:material:0", 0, prototype, 1, false,
-                        Math.min(preparedCapacity, goetyInputBufferLimit()))),
+                        "legacy:material:0", 0, prototype, 1,
+                        Math.min(preparedCapacity, goetyInputBufferLimit()),
+                        specs.get(0).consumption())),
                 List.of(new OutputContract.Port(
                         "goety:primary", null, expected, expected.getCount(),
-                        InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.WORLD)));
+                        OutputContract.Kind.PRIMARY, OutputContract.Source.WORLD)));
     }
 
     @Override
@@ -211,7 +212,7 @@ public final class CursedInfuserBatchDelegate extends AbstractBatchDelegate {
         if (!supportsInputBuffer() || expected.isEmpty()) return OutputContract.none();
         return new OutputContract(List.of(new OutputContract.Port(
                 "goety:primary", null, expected, expected.getCount(),
-                InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.WORLD)));
+                OutputContract.Kind.PRIMARY, OutputContract.Source.WORLD)));
     }
 
     @Override
@@ -224,7 +225,7 @@ public final class CursedInfuserBatchDelegate extends AbstractBatchDelegate {
     @Nullable
     @Override
     public List<IngredientSpec> getRequiredMaterials() {
-        var handler = ModRecipeHandlers.handlerFor(recipe);
+        var handler = ModRecipeHandlers.claimFor(recipe).winner();
         return handler == null ? null : handler.getIngredients(recipe);
     }
 

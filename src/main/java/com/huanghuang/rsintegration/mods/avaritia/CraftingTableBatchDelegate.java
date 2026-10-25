@@ -103,7 +103,7 @@ public final class CraftingTableBatchDelegate extends InstantBatchDelegate {
             // so a pattern is inserted at its original coordinates.
             return fixedSlotLayout(recipe.getIngredients());
         }
-        var handler = ModRecipeHandlers.handlerFor(recipe);
+        var handler = ModRecipeHandlers.claimFor(recipe).winner();
         if (handler != null) {
             return handler.getIngredients(recipe);
         }

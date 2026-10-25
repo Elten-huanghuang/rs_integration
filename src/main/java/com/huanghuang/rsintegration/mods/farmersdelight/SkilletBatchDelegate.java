@@ -146,7 +146,7 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
     @Nullable
     @Override
     public List<IngredientSpec> getRequiredMaterials() {
-        var handler = ModRecipeHandlers.handlerFor(recipe);
+        var handler = ModRecipeHandlers.claimFor(recipe).winner();
         if (handler != null) {
             return handler.getIngredients(recipe);
         }

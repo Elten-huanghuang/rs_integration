@@ -468,7 +468,7 @@ public final class DebugCommand {
             ModType type = ModType.classifyRecipe(recipe);
             if (type == null) continue;
             total++;
-            var handler = ModRecipeHandlers.handlerFor(recipe);
+            var handler = ModRecipeHandlers.claimFor(recipe).winner();
             if (handler != null && handler.getIngredients(recipe) != null) {
                 handled++;
             } else {

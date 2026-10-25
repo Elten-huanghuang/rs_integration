@@ -77,10 +77,15 @@ public final class NodeOutputAccumulator {
         return shortages().isEmpty();
     }
 
+    public long publishedQuantity(OutputPortId port) {
+        return published.getOrDefault(port, 0L);
+    }
+
     public List<Shortage> shortages() {
         List<Shortage> shortages = new ArrayList<>();
         for (OutputDeclaration declaration : declarations) {
-            if (declaration.kind() == OutputKind.DYNAMIC) continue;
+            if (declaration.kind() == OutputKind.DYNAMIC
+                    || !declaration.probability().isGuaranteed()) continue;
             long actual = published.get(declaration.id());
             if (actual < declaration.quantity()) {
                 shortages.add(new Shortage(declaration.id(), declaration.kind(),

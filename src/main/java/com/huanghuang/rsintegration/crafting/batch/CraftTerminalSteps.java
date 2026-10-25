@@ -8,6 +8,9 @@ import com.huanghuang.rsintegration.crafting.ExecutionEquivalence;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraphCompactor;
 import com.huanghuang.rsintegration.crafting.graph.CraftNodeMergePolicy;
+import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
+import com.huanghuang.rsintegration.crafting.graph.OutputKind;
+import com.huanghuang.rsintegration.crafting.graph.OutputProbability;
 import com.huanghuang.rsintegration.crafting.graph.TerminalGraphComposer;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
@@ -64,11 +67,13 @@ final class CraftTerminalSteps {
     static CraftPlanGraph composeEquivalentTerminalGraph(
             CraftPlanGraph inputGraph, ResolutionStep terminalStep, ItemStack output,
             Level level) {
+        ResolutionStep graphTerminal =
+                CraftExecutionPolicy.graphTerminalStep(inputGraph, terminalStep);
         CraftPlanGraph completeGraph = TerminalGraphComposer.compose(
-                inputGraph, terminalStep, output);
+                inputGraph, graphTerminal, terminalOutputs(graphTerminal, output, level));
         List<ResolutionStep> expectedFlat = new ArrayList<>(
                 ExecutionEquivalence.projectFlatSteps(inputGraph));
-        expectedFlat.add(terminalStep);
+        expectedFlat.add(graphTerminal);
         ExecutionEquivalence.Report equivalence =
                 ExecutionEquivalence.compare(completeGraph, expectedFlat);
         if (!equivalence.equivalent()) {
@@ -82,7 +87,42 @@ final class CraftTerminalSteps {
     static ItemStack selectTerminalGraphOutput(
             Recipe<?> recipe, ItemStack recipeOutput, @Nullable ItemStack clickedOutput) {
         return selectTerminalGraphOutput(
-                recipe, recipeOutput, clickedOutput, ModRecipeHandlers.handlerFor(recipe));
+                recipe, recipeOutput, clickedOutput,
+                ModRecipeHandlers.claimFor(recipe).winner());
+    }
+
+    private static List<TerminalGraphComposer.TerminalOutput> terminalOutputs(
+            ResolutionStep terminalStep, ItemStack primary, Level level) {
+        List<TerminalGraphComposer.TerminalOutput> outputs = new ArrayList<>();
+        Recipe<?> recipe = level.getRecipeManager()
+                .byKey(terminalStep.recipeId()).orElse(null);
+        ModRecipeHandler handler = recipe == null
+                ? null : ModRecipeHandlers.claimFor(recipe).winner();
+        ItemStack primaryDeclaration = terminalStep.productionTarget() == null
+                ? primary : terminalStep.productionTarget().material().toStack(
+                (int) Math.min(Integer.MAX_VALUE,
+                        Math.max(1L, terminalStep.productionTarget().quantity())));
+        boolean deterministic = handler == null || handler.hasDeterministicPrimaryOutput(recipe);
+        OutputProbability probability = deterministic
+                ? OutputProbability.guaranteed()
+                : OutputProbability.dynamic(null,
+                CraftExecutionPolicy.probabilityAttemptLimit(terminalStep),
+                "terminal:" + terminalStep.recipeId());
+        boolean dynamicIdentity = handler != null
+                && recipe != null && handler.hasRuntimeDependentPrimaryNbt(recipe);
+        outputs.add(new TerminalGraphComposer.TerminalOutput(
+                MaterialKey.of(primaryDeclaration), primaryDeclaration.getCount(),
+                OutputKind.PRIMARY, probability, dynamicIdentity));
+        if (recipe == null) return List.copyOf(outputs);
+        List<ItemStack> secondaries = handler == null
+                ? ModRecipeHandlers.tryGetSecondaryOutputs(recipe, level.registryAccess())
+                : handler.getSecondaryOutputs(recipe, level.registryAccess());
+        for (ItemStack secondary : secondaries) {
+            if (secondary == null || secondary.isEmpty()) continue;
+            outputs.add(new TerminalGraphComposer.TerminalOutput(
+                    MaterialKey.of(secondary), secondary.getCount(), OutputKind.SECONDARY));
+        }
+        return List.copyOf(outputs);
     }
 
     static ItemStack selectTerminalGraphOutput(

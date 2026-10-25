@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
+import com.huanghuang.rsintegration.crafting.graph.OperationId;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry.BoundMachine;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
@@ -60,7 +61,7 @@ class BrewingMachineConcurrencyTest {
         return new MachineLeaseRegistry.MachineKey(machine.dim(), machine.pos(), BREWING.id());
     }
 
-    private static MachineLeaseRegistry.Owner owner(int node) {
-        return new MachineLeaseRegistry.Owner(UUID.randomUUID(), new NodeId(node), 0);
+    private static OperationId owner(int node) {
+        return new OperationId(UUID.randomUUID(), new NodeId(node), 0);
     }
 }

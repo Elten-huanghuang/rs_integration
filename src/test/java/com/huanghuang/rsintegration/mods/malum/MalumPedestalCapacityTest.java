@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.world.item.Item;
@@ -55,13 +56,13 @@ class MalumPedestalCapacityTest extends BootstrapTest {
         InputBufferContract contract = new InputBufferContract(64, List.of(
                 new InputBufferContract.InputSlot(
                         "malum:altar:center", 0, new ItemStack(Items.IRON_INGOT),
-                        1, false, 64),
+                        1, 64, InputConsumption.consumed()),
                 new InputBufferContract.InputSlot(
                         "malum:altar:pedestal:0", 1, new ItemStack(Items.REDSTONE),
-                        2, false, 64),
+                        2, 64, InputConsumption.consumed()),
                 new InputBufferContract.InputSlot(
                         "malum:altar:spirit:0", 16, new ItemStack(Items.BLAZE_POWDER),
-                        4, false, 64)), List.of());
+                        4, 64, InputConsumption.consumed())), List.of());
 
         InputBufferPlan plan = contract.plan(64);
 

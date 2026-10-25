@@ -12,6 +12,7 @@ import com.huanghuang.rsintegration.crafting.graph.MaterialSource;
 import com.huanghuang.rsintegration.crafting.graph.NodeAdmissionCoordinator;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.graph.OperationBudget;
+import com.huanghuang.rsintegration.crafting.graph.OperationId;
 import com.huanghuang.rsintegration.crafting.graph.RootAllocation;
 import com.huanghuang.rsintegration.crafting.graph.RootDemand;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
@@ -71,7 +72,7 @@ class GraphDispatchCompositionTest extends BootstrapTest {
     void machineConflictReleasesMaterialAndCanRetryWithoutConsumingStartBudget() {
         Harness harness = new Harness();
         MachineLeaseRegistry.Lease blocker = harness.machines.tryAcquire(harness.machine,
-                new MachineLeaseRegistry.Owner(UUID.randomUUID(), new NodeId(9), 0));
+                new OperationId(UUID.randomUUID(), new NodeId(9), 0));
         assertNotNull(blocker);
         NodeAdmissionCoordinator.Admission first = harness.admit();
         assertNotNull(first);

@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
@@ -257,17 +258,19 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             ItemStack prototype = ingredientPrototype(spec);
             if (prototype.isEmpty()) return InputBufferContract.none();
             inputs.add(new InputBufferContract.InputSlot(
-                    "yhk:material:" + i, i, prototype, Math.max(1, spec.count()), false,
+                    "yhk:material:" + i, i, prototype, Math.max(1, spec.count()),
                     CookingPotBatchConfig.effectiveSlotCapacity(
-                            handler.getSlotLimit(i), prototype.getMaxStackSize())));
+                            handler.getSlotLimit(i), prototype.getMaxStackSize()),
+                    spec.consumption()));
         }
         if (!bowls.isEmpty()) {
             ItemStack prototype = bowls.copyWithCount(1);
             inputs.add(new InputBufferContract.InputSlot(
                     "yhk:container", CONTAINER_SLOT, prototype,
-                    Math.max(1, bowls.getCount()), false,
+                    Math.max(1, bowls.getCount()),
                     CookingPotBatchConfig.effectiveSlotCapacity(
-                            handler.getSlotLimit(CONTAINER_SLOT), prototype.getMaxStackSize())));
+                            handler.getSlotLimit(CONTAINER_SLOT), prototype.getMaxStackSize()),
+                    InputConsumption.consumed()));
         }
 
         ItemStack output = getRecipeResult(recipe);
@@ -277,7 +280,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         return new InputBufferContract(operations, inputs,
                 List.of(new OutputContract.Port(outputPortId(), OUTPUT_SLOT,
                         output, Math.max(1, output.getCount()),
-                        InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.SLOT)));
+                        OutputContract.Kind.PRIMARY, OutputContract.Source.SLOT)));
     }
 
     @Override
@@ -302,7 +305,8 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
                     ? "yhk:container" : "yhk:material:" + i;
             InputBufferPlan.InputSlot input = inputByEntryId(plan, entryId);
             long required = (long) Math.max(1, spec.count()) * plan.operations();
-            if (input == null || input.reusable() || required > Integer.MAX_VALUE
+            if (input == null || input.consumption().reusableWithinWorkerBatch()
+                    || required > Integer.MAX_VALUE
                     || input.stack().getCount() != (int) required
                     || !spec.ingredient().test(input.stack())) {
                 return false;
@@ -322,7 +326,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         if (output.isEmpty()) return OutputContract.none();
         return new OutputContract(List.of(new OutputContract.Port(outputPortId(), OUTPUT_SLOT,
                 output, Math.max(1, output.getCount()),
-                InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.SLOT)));
+                OutputContract.Kind.PRIMARY, OutputContract.Source.SLOT)));
     }
 
     /** 批量结算用的输出端口标识，各锅子类可覆盖以区分来源。 */

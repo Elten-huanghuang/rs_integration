@@ -8,29 +8,21 @@ import java.util.Objects;
 final class TerminalGraphExecutionPolicy {
     enum Reason {
         COMPOSABLE,
-        INFER_MODE,
         DYNAMIC_INPUTS,
-        UNKNOWN_OUTPUT,
-        NONDETERMINISTIC_OUTPUT,
-        SELF_AMPLIFYING_INPUT
+        UNKNOWN_OUTPUT
     }
 
     record Decision(boolean composable, Reason reason) {}
 
     private TerminalGraphExecutionPolicy() {}
 
-    static Decision decide(boolean inferMode, boolean hasStaticInputs, ItemStack output,
-                           boolean deterministicOutput, boolean selfAmplifying) {
+    static Decision decide(boolean hasStaticInputs, boolean hasSyntheticContext,
+                           ItemStack output) {
         Objects.requireNonNull(output, "output");
-        if (inferMode) return new Decision(false, Reason.INFER_MODE);
-        if (!hasStaticInputs) return new Decision(false, Reason.DYNAMIC_INPUTS);
+        if (!hasStaticInputs && !hasSyntheticContext) {
+            return new Decision(false, Reason.DYNAMIC_INPUTS);
+        }
         if (output.isEmpty()) return new Decision(false, Reason.UNKNOWN_OUTPUT);
-        if (!deterministicOutput) {
-            return new Decision(false, Reason.NONDETERMINISTIC_OUTPUT);
-        }
-        if (selfAmplifying) {
-            return new Decision(false, Reason.SELF_AMPLIFYING_INPUT);
-        }
         return new Decision(true, Reason.COMPOSABLE);
     }
 }

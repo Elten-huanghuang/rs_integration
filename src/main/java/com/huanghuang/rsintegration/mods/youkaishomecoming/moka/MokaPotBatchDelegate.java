@@ -192,8 +192,8 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
             IngredientSpec spec = specs.get(i);
             ItemStack prototype = ingredientPrototype(spec);
             inputs.add(new InputBufferContract.InputSlot(
-                    "legacy:material:" + i, i, prototype, spec.count(), false,
-                    slotCapacity(handler, i, prototype)));
+                    "legacy:material:" + i, i, prototype, spec.count(),
+                    slotCapacity(handler, i, prototype), spec.consumption()));
         }
         if (!container.isEmpty()) {
             int index = specs.size() - 1;
@@ -201,7 +201,8 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
             ItemStack prototype = ingredientPrototype(spec);
             inputs.add(new InputBufferContract.InputSlot(
                     "legacy:material:" + index, CONTAINER_SLOT, prototype,
-                    spec.count(), false, slotCapacity(handler, CONTAINER_SLOT, prototype)));
+                    spec.count(), slotCapacity(handler, CONTAINER_SLOT, prototype),
+                    spec.consumption()));
         }
         ItemStack output = expectedResult();
         int operations = bufferedOperationCapacity(mokaInputBufferLimit(), inputs,
@@ -210,7 +211,7 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
         return new InputBufferContract(operations, inputs,
                 List.of(new OutputContract.Port("youkaishomecoming:moka:output",
                         OUTPUT_SLOT, output, output.getCount(),
-                        InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.SLOT)));
+                        OutputContract.Kind.PRIMARY, OutputContract.Source.SLOT)));
     }
 
     @Override
@@ -233,7 +234,8 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
             int expectedSlot = !container.isEmpty() && i == specs.size() - 1
                     ? CONTAINER_SLOT : i;
             long required = (long) spec.count() * plan.operations();
-            if (input == null || input.slot() != expectedSlot || input.reusable()
+            if (input == null || input.slot() != expectedSlot
+                    || input.consumption().reusableWithinWorkerBatch()
                     || input.perOperation() != spec.count() || required > Integer.MAX_VALUE
                     || input.stack().getCount() != (int) required
                     || !spec.ingredient().test(input.stack())) return false;
@@ -251,7 +253,7 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
         ItemStack output = expectedResult();
         return output.isEmpty() ? OutputContract.none() : new OutputContract(List.of(
                 new OutputContract.Port("youkaishomecoming:moka:output", OUTPUT_SLOT,
-                        output, output.getCount(), InputBufferPlan.OutputPort.Kind.PRIMARY,
+                        output, output.getCount(), OutputContract.Kind.PRIMARY,
                         OutputContract.Source.SLOT)));
     }
 

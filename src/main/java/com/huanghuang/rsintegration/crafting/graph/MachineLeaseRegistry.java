@@ -6,6 +6,7 @@ import net.minecraft.resources.ResourceLocation;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -18,24 +19,25 @@ public final class MachineLeaseRegistry {
             Objects.requireNonNull(dimension, "dimension");
             Objects.requireNonNull(position, "position");
             Objects.requireNonNull(logicalType, "logicalType");
+            logicalType = normalizeLogicalType(logicalType);
             position = position.immutable();
         }
-    }
 
-    public record Owner(UUID craftId, NodeId nodeId, int operationId) {
-        public Owner {
-            Objects.requireNonNull(craftId, "craftId");
-            Objects.requireNonNull(nodeId, "nodeId");
-            if (operationId < 0) throw new IllegalArgumentException("operation id must be non-negative");
+        private static String normalizeLogicalType(String value) {
+            String normalized = value.trim().toLowerCase(Locale.ROOT);
+            if (normalized.isEmpty() || normalized.chars().anyMatch(Character::isWhitespace)) {
+                throw new IllegalArgumentException("logical machine type must be one stable token");
+            }
+            return normalized;
         }
     }
 
-    public record Lease(MachineKey machine, Owner owner, long generation) {}
+    public record Lease(MachineKey machine, OperationId owner, long generation) {}
 
     private final Map<MachineKey, Lease> leases = new HashMap<>();
     private long nextGeneration;
 
-    public synchronized Lease tryAcquire(MachineKey machine, Owner owner) {
+    public synchronized Lease tryAcquire(MachineKey machine, OperationId owner) {
         Objects.requireNonNull(machine, "machine");
         Objects.requireNonNull(owner, "owner");
         List<Lease> acquired = tryAcquireAll(List.of(machine), owner);
@@ -43,7 +45,7 @@ public final class MachineLeaseRegistry {
     }
 
     /** Acquire a complete machine/support scope without leaving partial leases. */
-    public synchronized List<Lease> tryAcquireAll(List<MachineKey> scope, Owner owner) {
+    public synchronized List<Lease> tryAcquireAll(List<MachineKey> scope, OperationId owner) {
         Objects.requireNonNull(scope, "scope");
         Objects.requireNonNull(owner, "owner");
         if (scope.isEmpty()) throw new IllegalArgumentException("machine scope must not be empty");

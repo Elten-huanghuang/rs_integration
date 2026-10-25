@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.planning;
 
 import com.huanghuang.rsintegration.config.CraftingPreviewPolicy;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.crafting.CraftPlanningRevision;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import net.minecraft.resources.ResourceLocation;
@@ -92,10 +93,32 @@ public final class PlanCache {
      * snapshot before executing it.
      */
     public Entry takeForExecution(Key key) {
+        Entry entry = peekForExecution(key);
+        if (entry == null) return null;
+        return consumeForExecution(key, entry) ? entry : null;
+    }
+
+    /**
+     * 查看当前执行租约但不消费。调用方必须先复验返回条目携带的完整快照，
+     * 再调用 {@link #consumeForExecution(Key, Entry)}。
+     */
+    public Entry peekForExecution(Key key) {
         Key executionKey = key.withoutPreferences();
         ExecutionLease lease = executionLeases.get(executionKey.playerId());
         if (lease == null || !lease.key().equals(executionKey)) return null;
-        return executionLeases.remove(key.playerId(), lease) ? lease.entry() : null;
+        return lease.entry();
+    }
+
+    /** 仅消费调用方已经复验过的同一个缓存条目。 */
+    public boolean consumeForExecution(Key key, Entry expectedEntry) {
+        if (expectedEntry == null) return false;
+        Key executionKey = key.withoutPreferences();
+        ExecutionLease lease = executionLeases.get(executionKey.playerId());
+        if (lease == null || !lease.key().equals(executionKey)
+                || lease.entry() != expectedEntry) {
+            return false;
+        }
+        return executionLeases.remove(key.playerId(), lease);
     }
 
     /**
@@ -176,19 +199,27 @@ public final class PlanCache {
     public record Key(UUID playerId, ResourceLocation recipeId,
                       Map<String, String> forcedRecipes, int repeatCount,
                       String clickedOutputToken, Map<String, String> materialLocks,
-                      PlanningPreferences preferences) {
+                      PlanningPreferences preferences, long recipeRevision) {
         public Key(UUID playerId, ResourceLocation recipeId,
                    Map<String, String> forcedRecipes, int repeatCount,
                    String clickedOutputToken) {
             this(playerId, recipeId, forcedRecipes, repeatCount, clickedOutputToken,
-                    Map.of(), PlanningPreferences.empty());
+                    Map.of(), PlanningPreferences.empty(), CraftPlanningRevision.current());
         }
 
         public Key(UUID playerId, ResourceLocation recipeId,
                    Map<String, String> forcedRecipes, int repeatCount,
                    String clickedOutputToken, Map<String, String> materialLocks) {
             this(playerId, recipeId, forcedRecipes, repeatCount, clickedOutputToken,
-                    materialLocks, PlanningPreferences.empty());
+                    materialLocks, PlanningPreferences.empty(), CraftPlanningRevision.current());
+        }
+
+        public Key(UUID playerId, ResourceLocation recipeId,
+                   Map<String, String> forcedRecipes, int repeatCount,
+                   String clickedOutputToken, Map<String, String> materialLocks,
+                   PlanningPreferences preferences) {
+            this(playerId, recipeId, forcedRecipes, repeatCount, clickedOutputToken,
+                    materialLocks, preferences, CraftPlanningRevision.current());
         }
 
         public Key {
@@ -196,12 +227,16 @@ public final class PlanCache {
             materialLocks = Map.copyOf(materialLocks);
             preferences = preferences == null
                     ? PlanningPreferences.empty() : preferences;
+            if (recipeRevision <= 0L) {
+                throw new IllegalArgumentException("recipe revision must be positive");
+            }
         }
 
         private Key withoutPreferences() {
             if (preferences.isEmpty()) return this;
             return new Key(playerId, recipeId, forcedRecipes, repeatCount,
-                    clickedOutputToken, materialLocks, PlanningPreferences.empty());
+                    clickedOutputToken, materialLocks, PlanningPreferences.empty(),
+                    recipeRevision);
         }
     }
 
@@ -209,5 +244,14 @@ public final class PlanCache {
                         PureRecipePlanner.Result purePlan,
                         CraftPlanGraph resolvedGraph, long createdNanos) {}
 
-    private record ExecutionLease(Key key, Entry entry) {}
+    /**
+     * 租约直接持有完整 PlanningSnapshot，不能由调用方用部分 key 重新构造。
+     */
+    private record ExecutionLease(Key key, Entry entry) {
+        private ExecutionLease {
+            if (entry == null || entry.snapshot() == null) {
+                throw new IllegalArgumentException("execution lease requires a full snapshot");
+            }
+        }
+    }
 }

@@ -8,6 +8,7 @@ import net.minecraft.world.item.Items;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.crafting.graph.CraftNode;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.graph.InputDemand;
@@ -222,7 +223,7 @@ final class StepExecutor {
             }
         }
 
-        var handler = ModRecipeHandlers.handlerFor(entry.recipe());
+        var handler = ModRecipeHandlers.claimFor(entry.recipe()).winner();
         ItemStack result = goetyDynamic
                 ? GoetyDynamicRitualRecipe.validatedOutput(entry.recipe(), demandedOutput)
                 : ItemStack.EMPTY;
@@ -291,7 +292,9 @@ final class StepExecutor {
             if (!CraftingResolver.ensureIngredient(ingredient, quantity, ctx, depth + 1, edges, port, null)) {
                 return null;
             }
-            inputs.add(new InputDemand(port, ingredient, quantity, demandRole(ingredient), firstDisplay(ingredient)));
+            inputs.add(new InputDemand(port, ingredient, quantity,
+                    InputConsumption.fromDemandRole(demandRole(ingredient)),
+                    firstDisplay(ingredient)));
         }
         return inputs;
     }
@@ -316,7 +319,7 @@ final class StepExecutor {
         resolutionOrder.sort(Comparator
                 .comparingInt((Integer i) -> physicalSpecs.get(i).role() == DemandRole.CATALYST ? 1 : 0)
                 .thenComparingInt(i -> ingredientBreadthClass(physicalSpecs.get(i).ingredient())));
-        var handler = ModRecipeHandlers.handlerFor(recipe);
+        var handler = ModRecipeHandlers.claimFor(recipe).winner();
         boolean bladeCrafting = SlashBladeRecipeHandler.isShapedBladeRecipe(recipe);
         for (int originalIndex : resolutionOrder) {
             IngredientSpec spec = physicalSpecs.get(originalIndex);
@@ -338,7 +341,7 @@ final class StepExecutor {
                 return null;
             }
             inputs.add(new InputDemand(port, plannedIngredient, quantity,
-                    effectiveDemandRole(spec), firstDisplay(plannedIngredient)));
+                    effectiveConsumption(spec), firstDisplay(plannedIngredient)));
         }
         return inputs;
     }
@@ -352,7 +355,7 @@ final class StepExecutor {
      */
     @Nullable
     static Ingredient ensureSingleVariantMachineInput(
-            Ingredient ingredient, int quantity, ResolutionContext ctx, int depth,
+            Ingredient ingredient, long quantity, ResolutionContext ctx, int depth,
             CraftingResolver.EdgeTracker edges, @Nullable InputPortId port,
             @Nullable List<ResolutionContext.SupplySlice> consumedOut) {
         List<ItemStack> variants = Arrays.stream(ingredient.getItems())
@@ -488,6 +491,12 @@ final class StepExecutor {
     private static DemandRole effectiveDemandRole(IngredientSpec spec) {
         return spec.role() == DemandRole.CONSUMED
                 ? demandRole(spec.ingredient()) : spec.role();
+    }
+
+    private static InputConsumption effectiveConsumption(IngredientSpec spec) {
+        DemandRole role = effectiveDemandRole(spec);
+        return role == spec.role()
+                ? spec.consumption() : InputConsumption.fromDemandRole(role);
     }
 
     private static int remainderBatches(ItemStack remainder, List<IngredientSpec> specs, int batches) {

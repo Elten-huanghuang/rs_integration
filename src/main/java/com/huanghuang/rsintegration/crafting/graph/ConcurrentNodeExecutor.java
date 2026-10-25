@@ -37,6 +37,7 @@ public final class ConcurrentNodeExecutor {
 
     public enum CompletionStatus {
         SUCCEEDED,
+        RETRY,
         FAILED
     }
 
@@ -227,7 +228,6 @@ public final class ConcurrentNodeExecutor {
             switch (result.observation) {
                 case WORKING -> { }
                 case SUCCEEDED -> {
-                    running.remove(result.nodeId);
                     CompletionStatus completion;
                     try {
                         completion = Objects.requireNonNull(
@@ -237,9 +237,13 @@ public final class ConcurrentNodeExecutor {
                                 "Graph node completion check failed: {}", result.nodeId, exception);
                         completion = CompletionStatus.FAILED;
                     }
+                    running.remove(result.nodeId);
                     if (completion == CompletionStatus.SUCCEEDED
                             && result.epoch == scheduler.epoch() && !scheduler.isStopping()) {
                         scheduler.succeed(result.nodeId);
+                    } else if (completion == CompletionStatus.RETRY
+                            && result.epoch == scheduler.epoch() && !scheduler.isStopping()) {
+                        scheduler.releaseClaim(result.nodeId);
                     } else if (completion == CompletionStatus.SUCCEEDED && scheduler.isStopping()) {
                         // Stale/in-flight completions may settle resources in the handler,
                         // but cannot unlock dependents after the epoch advances.

@@ -99,7 +99,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
     public boolean validateExecutionContext(@Nullable ServerPlayer player) {
         if (recipe == null) return false;
         if (recipe instanceof FluidContainerRecipe conversion) return FluidContainerCatalog.isValid(conversion);
-        ModRecipeHandler handler = ModRecipeHandlers.handlerFor(recipe);
+        ModRecipeHandler handler = ModRecipeHandlers.claimFor(recipe).winner();
         if (handler == null) {
             return !recipe.getClass().getName().startsWith("snownee.lychee.item_inside.");
         }
@@ -316,7 +316,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
 
     private InstantRecipePolicy simulatedInstantPolicy() {
         if (recipe == null) return InstantRecipePolicy.none();
-        ModRecipeHandler handler = ModRecipeHandlers.handlerFor(recipe);
+        ModRecipeHandler handler = ModRecipeHandlers.claimFor(recipe).winner();
         if (handler == null) return InstantRecipePolicy.none();
         InstantRecipePolicy policy = handler.instantRecipePolicy(recipe);
         return policy.simulatedAssembly() ? policy : InstantRecipePolicy.none();
@@ -375,7 +375,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
                         smithing, operationMaterials, player.serverLevel().registryAccess());
                 if (assembled.isEmpty()) return false;
                 int executions = materialExecutions(
-                        getRequiredMaterials(), getMaterialReservationScopes(), materials,
+                        getRequiredMaterials(), materials,
                         preparedGraphExecutions);
                 if (executions <= 0) return false;
                 assembled.setCount(Math.multiplyExact(assembled.getCount(), executions));
@@ -394,7 +394,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
                         smithing, operationMaterials, player.serverLevel().registryAccess());
                 if (assembled.isEmpty()) return false;
                 int executions = materialExecutions(
-                        getRequiredMaterials(), getMaterialReservationScopes(), materials,
+                        getRequiredMaterials(), materials,
                         preparedGraphExecutions);
                 if (executions <= 0) return false;
                 assembled.setCount(Math.multiplyExact(assembled.getCount(), executions));
@@ -403,7 +403,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
                         recipe, player.serverLevel().registryAccess()));
             } else {
                 int executions = materialExecutions(
-                        getRequiredMaterials(), getMaterialReservationScopes(), materials,
+                        getRequiredMaterials(), materials,
                         preparedGraphExecutions);
                 if (executions <= 0) return false;
                 pendingResult.setCount(Math.multiplyExact(pendingResult.getCount(), executions));
@@ -436,19 +436,18 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
             List<ItemStack> materials, ServerPlayer player) {
         List<IngredientSpec> specs = getRequiredMaterials();
         return captureRepeatedCraftingOutputs(
-                craftingRecipe, specs, getMaterialReservationScopes(), materials,
+                craftingRecipe, specs, materials,
                 preparedGraphExecutions, player.serverLevel().registryAccess());
     }
 
     boolean captureRepeatedCraftingOutputs(
             CraftingRecipe craftingRecipe,
             List<IngredientSpec> specs,
-            List<MaterialReservationScope> scopes,
             List<ItemStack> materials,
             int expectedExecutions,
             RegistryAccess registryAccess) {
         int executions = materialExecutions(
-                specs, scopes, materials, expectedExecutions);
+                specs, materials, expectedExecutions);
         if (executions <= 0) return false;
 
         RepeatedCraftingOutputAccumulator outputs = new RepeatedCraftingOutputAccumulator();
@@ -459,8 +458,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
             List<ItemStack> operationMaterials = new ArrayList<>(materials.size());
             for (int i = 0; i < specs.size(); i++) {
                 IngredientSpec spec = specs.get(i);
-                boolean reusable = i < scopes.size()
-                        && scopes.get(i) == MaterialReservationScope.PER_WORKER_REUSABLE;
+                boolean reusable = spec.consumption().reusableWithinWorkerBatch();
                 ItemStack material = reusable ? reusableState.get(i) : materials.get(i);
                 operationMaterials.add(spec.isEmpty() || material == null || material.isEmpty()
                         ? ItemStack.EMPTY : material.copyWithCount(spec.count()));
@@ -483,8 +481,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
             for (int i = 0; i < specs.size(); i++) {
                 ItemStack remainder = i < remainders.size()
                         ? remainders.get(i) : ItemStack.EMPTY;
-                boolean reusable = i < scopes.size()
-                        && scopes.get(i) == MaterialReservationScope.PER_WORKER_REUSABLE;
+                boolean reusable = specs.get(i).consumption().reusableWithinWorkerBatch();
                 if (reusable) {
                     if (remainder.isEmpty()) {
                         boolean exhaustedGoetyTotem = operation + 1 == executions
@@ -506,8 +503,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
             }
         }
         for (int i = 0; i < specs.size(); i++) {
-            boolean reusable = i < scopes.size()
-                    && scopes.get(i) == MaterialReservationScope.PER_WORKER_REUSABLE;
+            boolean reusable = specs.get(i).consumption().reusableWithinWorkerBatch();
             if (reusable && !reusableState.get(i).isEmpty()) {
                 pendingSecondary.add(reusableState.get(i).copy());
             }
@@ -518,7 +514,6 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
 
     static int materialExecutions(
             List<IngredientSpec> specs,
-            List<MaterialReservationScope> scopes,
             List<ItemStack> materials,
             int expectedExecutions) {
         if (specs == null || specs.size() != materials.size()) return -1;
@@ -528,8 +523,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
             if (spec.isEmpty()) continue;
             ItemStack material = materials.get(i);
             if (material == null || material.isEmpty() || spec.count() <= 0) return -1;
-            boolean reusable = i < scopes.size()
-                    && scopes.get(i) == MaterialReservationScope.PER_WORKER_REUSABLE;
+            boolean reusable = spec.consumption().reusableWithinWorkerBatch();
             int required = reusable
                     ? spec.count()
                     : Math.multiplyExact(spec.count(), executions);

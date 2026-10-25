@@ -16,6 +16,7 @@ import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -62,7 +63,7 @@ class PlanCacheTest extends BootstrapTest {
             PlanCache.Key key = new PlanCache.Key(UUID.randomUUID(),
                     new ResourceLocation("test", "capacity_" + index), Map.of(), 1, "");
             if (index == 0) first = key;
-            PlanningSnapshot snapshot = new PlanningSnapshot(key.playerId(), 1, 1,
+            PlanningSnapshot snapshot = new PlanningSnapshot(key.playerId(), 1, key.recipeRevision(),
                     key.recipeId(), Map.of(), Map.of(), new ImmutableRecipeGraph(Map.of()),
                     "", "", false);
             cache.put(key, plan, snapshot, index);
@@ -91,7 +92,9 @@ class PlanCacheTest extends BootstrapTest {
         PlanCache cache = new PlanCache(10);
         PlanCache.Key key = new PlanCache.Key(UUID.randomUUID(), new ResourceLocation("test", "r"), Map.of(), 1, "");
         PlanResponse plan = new PlanResponse(false, "", ItemStack.EMPTY, java.util.List.of(), Map.of(), java.util.List.of(), "", null, null, 0, 0, 0, java.util.List.of(), 1);
-        PlanningSnapshot snapshot = new PlanningSnapshot(key.playerId(), 1, 1, key.recipeId(), Map.of(), Map.of(), new ImmutableRecipeGraph(Map.of()), "", "", false);
+        PlanningSnapshot snapshot = new PlanningSnapshot(key.playerId(), 1, key.recipeRevision(),
+                key.recipeId(), Map.of(), Map.of(), new ImmutableRecipeGraph(Map.of()),
+                "", "", false);
         cache.put(key, plan, snapshot, 100);
         assertNotNull(cache.get(key, 105));
         assertNull(cache.get(key, 111));
@@ -131,6 +134,36 @@ class PlanCacheTest extends BootstrapTest {
         // execution lease must stay consumed.
         assertNotNull(cache.get(key, 100));
         assertNull(cache.takeForExecution(key));
+    }
+
+    @Test
+    void executionLeaseMustBeValidatedBeforeItsExactEntryIsConsumed() {
+        PlanCache cache = new PlanCache(10);
+        PlanCache.Key key = key("validated_lease");
+        cache.put(key, plan(), snapshot(key), 100);
+
+        PlanCache.Entry previewed = cache.peekForExecution(key);
+
+        assertNotNull(previewed);
+        assertNotNull(cache.peekForExecution(key));
+        assertTrue(cache.consumeForExecution(key, previewed));
+        assertNull(cache.peekForExecution(key));
+        assertNull(cache.takeForExecution(key));
+    }
+
+    @Test
+    void unrelatedEntryCannotConsumeAnotherPlayersExecutionLease() {
+        PlanCache cache = new PlanCache(10);
+        PlanCache.Key key = key("lease_identity");
+        cache.put(key, plan(), snapshot(key), 100);
+        PlanCache.Entry unrelated = new PlanCache.Entry(
+                plan(), snapshot(key), null, null, 99);
+
+        assertNotNull(cache.peekForExecution(key));
+        assertFalse(cache.consumeForExecution(key, unrelated));
+        assertNotNull(cache.peekForExecution(key));
+        assertTrue(cache.consumeForExecution(key, cache.peekForExecution(key)));
+        assertNull(cache.peekForExecution(key));
     }
 
     @Test
@@ -179,6 +212,21 @@ class PlanCacheTest extends BootstrapTest {
         assertSame(pure, cache.get(key, 2).purePlan());
     }
 
+    @Test
+    void executionLeaseIsBoundToRecipeRevision() {
+        PlanCache cache = new PlanCache(100);
+        PlanCache.Key current = key("revisioned");
+        PlanCache.Key stale = new PlanCache.Key(
+                current.playerId(), current.recipeId(), current.forcedRecipes(),
+                current.repeatCount(), current.clickedOutputToken(), current.materialLocks(),
+                current.preferences(), current.recipeRevision() + 1L);
+
+        cache.put(current, plan(), snapshot(current), 1);
+
+        assertNull(cache.takeForExecution(stale));
+        assertNotNull(cache.takeForExecution(current));
+    }
+
     private static PlanCache.Key key(String path) {
         return new PlanCache.Key(UUID.randomUUID(),
                 new ResourceLocation("test", path), Map.of(), 1, "");
@@ -209,7 +257,7 @@ class PlanCacheTest extends BootstrapTest {
     }
 
     private static PlanningSnapshot snapshot(PlanCache.Key key) {
-        return new PlanningSnapshot(key.playerId(), 1, 1, key.recipeId(), Map.of(), Map.of(),
-                new ImmutableRecipeGraph(Map.of()), "", "", false);
+        return new PlanningSnapshot(key.playerId(), 1, key.recipeRevision(), key.recipeId(),
+                Map.of(), Map.of(), new ImmutableRecipeGraph(Map.of()), "", "", false);
     }
 }

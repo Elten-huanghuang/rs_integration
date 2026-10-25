@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.crafting.progress;
 
 import com.google.gson.JsonParser;
-import com.huanghuang.rsintegration.crafting.AsyncCraftChain;
+import com.huanghuang.rsintegration.crafting.CraftFailureCode;
 import com.huanghuang.rsintegration.crafting.batch.CraftStartedPacket;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.network.chat.Component;
@@ -25,18 +25,19 @@ class CraftFailureDiagnosticsTest extends BootstrapTest {
     void clearTracker() { CraftProgressTracker.clear(); }
 
     @Test
-    void outputShortageAndTimeoutAreNotMisreportedAsMissingInputs() {
-        assertEquals(Reason.OUTPUT_MISSING, AsyncCraftChain.progressReasonForDetail(
-                "Output shortage: minecraft:diamond missing=1"));
-        assertEquals(Reason.TIMEOUT, AsyncCraftChain.progressReasonForDetail("Timeout waiting for output"));
-        assertEquals(Reason.TIMEOUT, AsyncCraftChain.progressReasonForDetail("Exceeded global time limit"));
+    void internalFailureCodesProjectWithoutInspectingExceptionText() {
+        assertEquals(Reason.OUTPUT_MISSING,
+                CraftFailureCode.OUTPUT_MISSING.progressReason());
+        assertEquals(Reason.TIMEOUT, CraftFailureCode.TIMEOUT.progressReason());
         assertEquals(Reason.MATERIAL_EXTRACTION_FAILED,
-                AsyncCraftChain.progressReasonForDetail("missing material minecraft:iron_ingot"));
+                CraftFailureCode.MATERIAL_EXTRACTION_FAILED.progressReason());
         assertEquals(Reason.NETWORK_UNAVAILABLE,
-                AsyncCraftChain.progressReasonForDetail("network unavailable"));
-        assertEquals(Reason.START_REJECTED, AsyncCraftChain.progressReasonForDetail(
-                "Enchanting Apparatus preparation rejected: requires 3 Arcane Pedestals, found 0"));
-        assertEquals(Reason.UNKNOWN, AsyncCraftChain.progressReasonForDetail("unrecognized failure"));
+                CraftFailureCode.NETWORK_UNAVAILABLE.progressReason());
+        assertEquals(Reason.START_REJECTED,
+                CraftFailureCode.START_REJECTED.progressReason());
+        assertEquals(Reason.UNKNOWN, CraftFailureCode.UNKNOWN.progressReason());
+        assertTrue(CraftFailureCode.WAITING_MATERIALS.retryable());
+        assertFalse(CraftFailureCode.OUTPUT_MISSING.retryable());
     }
 
     @Test

@@ -103,7 +103,7 @@ public final class FleshAltarBatchDelegate extends AbstractBatchDelegate {
             int capacity = Math.min(64, inventory.getMaxStackSize());
             for (ItemStack candidate : candidates) capacity = Math.min(capacity, candidate.getMaxStackSize());
             inputs.add(new InputBufferContract.InputSlot("legacy:material:" + slot, slot,
-                    candidates[0], spec.count(), false, capacity));
+                    candidates[0], spec.count(), capacity, spec.consumption()));
         }
         int outputLimit = Math.min(inventory.getMaxStackSize(), result.getMaxStackSize()) / result.getCount();
         int timeoutSeconds;
@@ -134,7 +134,8 @@ public final class FleshAltarBatchDelegate extends AbstractBatchDelegate {
                 || inputBufferPlan(plan.operations()).operations() != plan.operations()) return false;
         for (int i = 0; i < 2; i++) {
             InputBufferPlan.InputSlot input = plan.inputs().get(i);
-            if (input.slot() != i || input.reusable() || input.perOperation() != specs.get(i).count()) return false;
+            if (input.slot() != i || input.consumption().reusableWithinWorkerBatch()
+                    || input.perOperation() != specs.get(i).count()) return false;
         }
         return startShared(plan.inputs().stream().map(InputBufferPlan.InputSlot::stack).toList(),
                 plan.operations(), sharedLedger);
@@ -246,7 +247,7 @@ public final class FleshAltarBatchDelegate extends AbstractBatchDelegate {
     @Override public OutputContract outputContract() {
         if (result.isEmpty() || hasRemainders()) return OutputContract.none();
         return new OutputContract(List.of(new OutputContract.Port(PRIMARY_PORT, 2, result,
-                result.getCount(), InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.SLOT)));
+                result.getCount(), OutputContract.Kind.PRIMARY, OutputContract.Source.SLOT)));
     }
 
     @Override public ItemStack collectResult(ServerPlayer player) {

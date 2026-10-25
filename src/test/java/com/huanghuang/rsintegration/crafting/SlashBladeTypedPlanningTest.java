@@ -64,7 +64,9 @@ class SlashBladeTypedPlanningTest extends BootstrapTest {
              MockedStatic<ModRecipeHandlers> handlers = mockStatic(ModRecipeHandlers.class)) {
             index.when(() -> RecipeIndex.reusableCatalystRoutes(level)).thenReturn(Map.of());
             blades.when(() -> SlashBladeRecipeHandler.isShapedBladeRecipe(recipe)).thenReturn(true);
-            handlers.when(() -> ModRecipeHandlers.handlerFor(recipe)).thenReturn(new SlashBladeRecipeHandler());
+            SlashBladeRecipeHandler handler = new SlashBladeRecipeHandler();
+            handlers.when(() -> ModRecipeHandlers.claimFor(recipe))
+                    .thenReturn(new ModRecipeHandlers.Claim(handler, List.of(handler)));
             handlers.when(() -> ModRecipeHandlers.tryGetResultItem(recipe, RegistryAccess.EMPTY)).thenReturn(declared);
             ResolutionContext context = new ResolutionContext(level, Map.of(), Map.of(weak, 1, strong, 1),
                     null, false, null, Long.MAX_VALUE, false);

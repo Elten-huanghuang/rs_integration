@@ -11,27 +11,19 @@ import java.util.UUID;
 /** Conservative exclusive leases for overlapping world-output capture regions. */
 public final class CaptureLeaseRegistry {
 
-    public record Owner(UUID craftId, NodeId nodeId, int operationId) {
-        public Owner {
-            Objects.requireNonNull(craftId, "craftId");
-            Objects.requireNonNull(nodeId, "nodeId");
-            if (operationId < 0) throw new IllegalArgumentException("operation id must be non-negative");
-        }
-    }
-
     public record Lease(long id, ResourceLocation dimension, AABB region,
-                        MaterialKey expectedMaterial, Owner owner) {}
+                        MaterialKey expectedMaterial, OperationId owner) {}
 
     private final Map<Long, Lease> leases = new HashMap<>();
     private long nextId;
 
     public synchronized Lease tryAcquire(ResourceLocation dimension, AABB region,
-                            MaterialKey expectedMaterial, Owner owner) {
+                            MaterialKey expectedMaterial, OperationId owner) {
         return tryAcquire(dimension, region, expectedMaterial, owner, false);
     }
 
     public synchronized Lease tryAcquire(ResourceLocation dimension, AABB region,
-                            MaterialKey expectedMaterial, Owner owner,
+                            MaterialKey expectedMaterial, OperationId owner,
                             boolean allowOverlappingOrigins) {
         Objects.requireNonNull(dimension, "dimension");
         Objects.requireNonNull(region, "region");

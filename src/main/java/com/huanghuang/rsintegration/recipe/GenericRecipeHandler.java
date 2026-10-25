@@ -23,6 +23,11 @@ final class GenericRecipeHandler extends AbstractRecipeHandler {
     }
 
     @Override
+    public int claimPriority() {
+        return -1_000;
+    }
+
+    @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
         if (recipe instanceof CraftingRecipe cr) {
             return cr.getResultItem(access);

@@ -441,27 +441,27 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         List<InputBufferContract.InputSlot> inputs = new ArrayList<>(specs.size());
         ItemStack center = ingredientPrototype(specs.get(0));
         inputs.add(new InputBufferContract.InputSlot(
-                CENTER_ENTRY_ID, 0, center, specs.get(0).count(), false,
-                handlerSlotCapacity(invMain, 0, center)));
+                CENTER_ENTRY_ID, 0, center, specs.get(0).count(),
+                handlerSlotCapacity(invMain, 0, center), specs.get(0).consumption()));
         for (int i = 0; i < extraCount; i++) {
             IngredientSpec spec = specs.get(1 + i);
             ItemStack prototype = ingredientPrototype(spec);
             inputs.add(new InputBufferContract.InputSlot(
-                    extraEntryId(i), EXTRA_SLOT_BASE + i, prototype, spec.count(), false,
-                    pedestalCapacity(i, prototype)));
+                    extraEntryId(i), EXTRA_SLOT_BASE + i, prototype, spec.count(),
+                    pedestalCapacity(i, prototype), spec.consumption()));
         }
         for (int i = 0; i < spiritCount; i++) {
             IngredientSpec spec = specs.get(1 + extraCount + i);
             ItemStack prototype = ingredientPrototype(spec);
             inputs.add(new InputBufferContract.InputSlot(
-                    spiritEntryId(i), SPIRIT_SLOT_BASE + i, prototype, spec.count(), false,
-                    handlerSlotCapacity(invSpirit, i, prototype)));
+                    spiritEntryId(i), SPIRIT_SLOT_BASE + i, prototype, spec.count(),
+                    handlerSlotCapacity(invSpirit, i, prototype), spec.consumption()));
         }
         ItemStack expected = getExpectedOutput();
         return new InputBufferContract(malumAltarInputBufferLimit(), inputs,
                 List.of(new OutputContract.Port(
                         "malum:altar:primary", null, expected, expected.getCount(),
-                        InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.WORLD)));
+                        OutputContract.Kind.PRIMARY, OutputContract.Source.WORLD)));
     }
 
     @Override
@@ -517,15 +517,15 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         }
         List<MaterialPlan.Entry> entries = new ArrayList<>(specs.size());
         entries.add(new MaterialPlan.Entry(CENTER_ENTRY_ID, specs.get(0),
-                MaterialPlan.Allocation.GRAPH, false, 0));
+                MaterialPlan.Allocation.GRAPH, 0));
         for (int i = 0; i < extraCount; i++) {
             entries.add(new MaterialPlan.Entry(extraEntryId(i), specs.get(1 + i),
-                    MaterialPlan.Allocation.GRAPH, false, EXTRA_SLOT_BASE + i));
+                    MaterialPlan.Allocation.GRAPH, EXTRA_SLOT_BASE + i));
         }
         for (int i = 0; i < spiritCount; i++) {
             entries.add(new MaterialPlan.Entry(spiritEntryId(i),
                     specs.get(1 + extraCount + i), MaterialPlan.Allocation.GRAPH,
-                    false, SPIRIT_SLOT_BASE + i));
+                    SPIRIT_SLOT_BASE + i));
         }
         return new MaterialPlan(entries);
     }
@@ -584,7 +584,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         if (expected == null || expected.isEmpty()) return OutputContract.none();
         return new OutputContract(List.of(new OutputContract.Port(
                 "malum:altar:primary", null, expected, expected.getCount(),
-                InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.WORLD)));
+                OutputContract.Kind.PRIMARY, OutputContract.Source.WORLD)));
     }
 
     @Override
@@ -798,7 +798,8 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
 
     private static boolean validBufferedInput(@Nullable InputBufferPlan.InputSlot input,
                                               IngredientSpec spec, int operations) {
-        if (input == null || input.reusable() || input.stack().isEmpty()
+        if (input == null || input.consumption().reusableWithinWorkerBatch()
+                || input.stack().isEmpty()
                 || input.perOperation() != spec.count()) return false;
         long expected = (long) spec.count() * operations;
         return expected <= Integer.MAX_VALUE && input.stack().getCount() == (int) expected;

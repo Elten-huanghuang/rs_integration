@@ -49,12 +49,8 @@ class GenericBatchDelegateTest extends BootstrapTest {
         List<IngredientSpec> specs = List.of(
                 new IngredientSpec(Ingredient.of(Items.SHEARS), 1, DemandRole.CATALYST),
                 new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 1, DemandRole.CONSUMED));
-        List<IBatchDelegate.MaterialReservationScope> scopes = List.of(
-                IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE,
-                IBatchDelegate.MaterialReservationScope.PER_OPERATION);
-
         assertTrue(delegate.captureRepeatedCraftingOutputs(
-                recipe, specs, scopes,
+                recipe, specs,
                 List.of(new ItemStack(Items.SHEARS), new ItemStack(Items.IRON_INGOT, 3)),
                 3, RegistryAccess.EMPTY));
 
@@ -73,14 +69,11 @@ class GenericBatchDelegateTest extends BootstrapTest {
         List<IngredientSpec> specs = List.of(
                 new IngredientSpec(Ingredient.of(Items.SHEARS), 1, DemandRole.CATALYST),
                 new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 1, DemandRole.CONSUMED));
-        List<IBatchDelegate.MaterialReservationScope> scopes = List.of(
-                IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE,
-                IBatchDelegate.MaterialReservationScope.PER_OPERATION);
         ItemStack catalyst = new ItemStack(Items.SHEARS);
         catalyst.getOrCreateTag().putInt("uses", 0);
 
         assertTrue(delegate.captureRepeatedCraftingOutputs(
-                recipe, specs, scopes,
+                recipe, specs,
                 List.of(catalyst, new ItemStack(Items.IRON_INGOT, 3)),
                 3, RegistryAccess.EMPTY));
 

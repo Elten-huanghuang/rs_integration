@@ -139,7 +139,7 @@ class MonsterPotCompatibilityTest extends BootstrapTest {
         InputBufferPlan plan = fixture.delegate.inputBufferPlan(64);
         assertEquals(32, plan.operations(), "双份产物与双份碗限制单批操作数");
         assertEquals(7, plan.inputs().get(1).slot());
-        assertEquals(8, plan.outputs().get(0).port());
+        assertEquals(8, plan.outputs().get(0).physicalPort());
         assertEquals(10, fixture.delegate.preferredParallelBatchSize(30, 3));
         assertEquals(32, fixture.delegate.prepareFlatBatch(64));
         plan = fixture.delegate.inputBufferPlan(4);

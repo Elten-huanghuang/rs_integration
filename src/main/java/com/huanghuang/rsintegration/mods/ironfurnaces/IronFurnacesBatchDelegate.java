@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
@@ -141,8 +142,8 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
         if (prototype.isEmpty()) return InputBufferContract.none();
         return new InputBufferContract(batchProfile().physicalCapacity(),
                 List.of(new InputBufferContract.InputSlot(
-                        "legacy:material:0", INPUT, prototype, 1, false,
-                        batchProfile().laneCapacity())),
+                        "legacy:material:0", INPUT, prototype, 1,
+                        batchProfile().laneCapacity(), InputConsumption.consumed())),
                 List.of());
     }
 

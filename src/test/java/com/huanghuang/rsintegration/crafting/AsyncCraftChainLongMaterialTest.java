@@ -23,9 +23,8 @@ class AsyncCraftChainLongMaterialTest extends BootstrapTest {
 
         AsyncCraftChain.addBrokerRequests(requests, source, diamond, requested);
 
-        assertEquals(2, requests.size());
-        assertEquals(Integer.MAX_VALUE, requests.get(0).quantity());
-        assertEquals(5, requests.get(1).quantity());
+        assertEquals(1, requests.size());
+        assertEquals(requested, requests.get(0).quantity());
         assertEquals(requested, requests.stream()
                 .mapToLong(MaterialBroker.Request::quantity).sum());
     }

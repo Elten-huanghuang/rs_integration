@@ -24,10 +24,10 @@ class MaterialPlanTest extends BootstrapTest {
         MaterialPlan plan = new MaterialPlan(List.of(
                 new MaterialPlan.Entry("ore", new IngredientSpec(
                         Ingredient.of(Items.IRON_INGOT), 2, DemandRole.CONSUMED),
-                        MaterialPlan.Allocation.GRAPH, false, 0),
+                        MaterialPlan.Allocation.GRAPH, 0),
                 new MaterialPlan.Entry("catalyst", new IngredientSpec(
                         Ingredient.of(Items.BUCKET), 1, DemandRole.CATALYST),
-                        MaterialPlan.Allocation.SUPPLEMENTAL, true, 5)));
+                        MaterialPlan.Allocation.SUPPLEMENTAL, 5)));
 
         assertEquals(List.of("ore"), plan.graphEntries().stream()
                 .map(MaterialPlan.Entry::id).toList());
@@ -43,9 +43,7 @@ class MaterialPlanTest extends BootstrapTest {
     void legacyProjectionUsesStableCompatibilityIds() {
         MaterialPlan plan = MaterialPlan.fromLegacy(List.of(
                 new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 1),
-                new IngredientSpec(Ingredient.of(Items.BUCKET), 1, DemandRole.CATALYST)),
-                List.of(IBatchDelegate.MaterialReservationScope.PER_OPERATION,
-                        IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE));
+                new IngredientSpec(Ingredient.of(Items.BUCKET), 1, DemandRole.CATALYST)));
 
         assertEquals(List.of("legacy:material:0", "legacy:material:1"),
                 plan.entries().stream().map(MaterialPlan.Entry::id).toList());
@@ -59,8 +57,8 @@ class MaterialPlanTest extends BootstrapTest {
     void rejectsDuplicateMaterialIdentity() {
         IngredientSpec spec = new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 1);
         assertThrows(IllegalArgumentException.class, () -> new MaterialPlan(List.of(
-                new MaterialPlan.Entry("same", spec, MaterialPlan.Allocation.GRAPH, false, 0),
-                new MaterialPlan.Entry("same", spec, MaterialPlan.Allocation.GRAPH, false, 1))));
+                new MaterialPlan.Entry("same", spec, MaterialPlan.Allocation.GRAPH, 0),
+                new MaterialPlan.Entry("same", spec, MaterialPlan.Allocation.GRAPH, 1))));
     }
 
     @Test
@@ -73,10 +71,7 @@ class MaterialPlanTest extends BootstrapTest {
         MaterialPlan plan = MaterialPlan.fromLegacyPartitions(
                 List.of(tablet, aspect, input),
                 List.of(tablet, input),
-                List.of(aspect),
-                List.of(IBatchDelegate.MaterialReservationScope.PER_WORKER_REUSABLE,
-                        IBatchDelegate.MaterialReservationScope.PER_OPERATION,
-                        IBatchDelegate.MaterialReservationScope.PER_OPERATION));
+                List.of(aspect));
 
         assertEquals(List.of(tablet, aspect, input), plan.legacySpecs());
         assertEquals(List.of(tablet, input), plan.legacyGraphSpecs());
@@ -96,7 +91,7 @@ class MaterialPlanTest extends BootstrapTest {
         IngredientSpec extra = new IngredientSpec(Ingredient.of(Items.COAL), 1);
 
         assertThrows(IllegalArgumentException.class, () -> MaterialPlan.fromLegacyPartitions(
-                List.of(ordered), List.of(ordered, extra), List.of(), List.of()));
+                List.of(ordered), List.of(ordered, extra), List.of()));
     }
 
     @Test

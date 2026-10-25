@@ -119,7 +119,7 @@ public final class DeepFryingPanBatchDelegate extends AbstractBatchDelegate {
     @Override
     public List<IngredientSpec> getRequiredMaterials() {
         if (!isSupportedRecipe(recipe)) return null;
-        var handler = ModRecipeHandlers.handlerFor(recipe);
+        var handler = ModRecipeHandlers.claimFor(recipe).winner();
         return handler == null ? null : handler.getIngredients(recipe);
     }
 
@@ -189,9 +189,9 @@ public final class DeepFryingPanBatchDelegate extends AbstractBatchDelegate {
         ItemStack result = resultItem();
         return new InputBufferContract(capacity,
                 List.of(new InputBufferContract.InputSlot(INPUT_ID, INPUT_SLOT,
-                        prototype, 1, false, capacity)),
+                        prototype, 1, capacity, spec.consumption())),
                 List.of(new OutputContract.Port(OUTPUT_ID, null, result,
-                        result.getCount(), InputBufferPlan.OutputPort.Kind.PRIMARY,
+                        result.getCount(), OutputContract.Kind.PRIMARY,
                         OutputContract.Source.WORLD)));
     }
 
@@ -210,7 +210,8 @@ public final class DeepFryingPanBatchDelegate extends AbstractBatchDelegate {
                 .findFirst().orElse(null);
         List<IngredientSpec> specs = getRequiredMaterials();
         if (input == null || specs == null || specs.size() != 1
-                || input.reusable() || input.perOperation() != 1
+                || input.consumption().reusableWithinWorkerBatch()
+                || input.perOperation() != 1
                 || input.stack().getCount() != plan.operations()
                 || !specs.get(0).ingredient().test(input.stack())) return false;
         plannedOperations = plan.operations();
@@ -302,7 +303,7 @@ public final class DeepFryingPanBatchDelegate extends AbstractBatchDelegate {
         ItemStack result = resultItem();
         return result.isEmpty() ? OutputContract.none() : new OutputContract(List.of(
                 new OutputContract.Port(OUTPUT_ID, null, result, result.getCount(),
-                        InputBufferPlan.OutputPort.Kind.PRIMARY, OutputContract.Source.WORLD)));
+                        OutputContract.Kind.PRIMARY, OutputContract.Source.WORLD)));
     }
 
     @Override

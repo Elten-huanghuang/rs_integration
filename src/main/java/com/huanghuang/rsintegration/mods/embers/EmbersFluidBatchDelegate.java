@@ -68,7 +68,7 @@ abstract class EmbersFluidBatchDelegate extends AbstractBatchDelegate {
             return PreparationResult.fatal("余烬机器结构不完整或绑定位置不正确",
                     Component.translatable("rsi.embers_machine.error.structure"));
         }
-        var handler = ModRecipeHandlers.handlerFor(found);
+        var handler = ModRecipeHandlers.claimFor(found).winner();
         if (handler == null) return PreparationResult.fatal("余烬配方处理器未注册",
                 Component.translatable("rsi.embers_machine.error.recipe"));
         List<IngredientSpec> specs = handler.getIngredients(found);

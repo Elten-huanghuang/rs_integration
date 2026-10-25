@@ -98,7 +98,7 @@ public final class ApotheosisFletchingBatchDelegate extends InstantBatchDelegate
     @Override
     public List<IngredientSpec> getRequiredMaterials() {
         if (recipe == null) return null;
-        var handler = ModRecipeHandlers.handlerFor(recipe);
+        var handler = ModRecipeHandlers.claimFor(recipe).winner();
         return handler != null ? handler.getIngredients(recipe) : null;
     }
 

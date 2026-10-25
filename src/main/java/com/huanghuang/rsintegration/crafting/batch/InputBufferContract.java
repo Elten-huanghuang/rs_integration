@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.crafting.InputBufferPlanner;
+import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import net.minecraft.world.item.ItemStack;
 
 import java.util.HashSet;
@@ -33,8 +34,7 @@ public record InputBufferContract(
     public InputBufferPlan plan(int requestedOperations) {
         if (!enabled()) return InputBufferPlan.none();
         return InputBufferPlanner.plan(requestedOperations, operationLimit,
-                inputs.stream().map(InputSlot::asPlannerSpec).toList(),
-                outputs.stream().map(InputBufferContract::asPlannerSpec).toList());
+                inputs, outputs);
     }
 
     public static InputBufferContract none() {
@@ -42,7 +42,8 @@ public record InputBufferContract(
     }
 
     public record InputSlot(String entryId, int slot, ItemStack prototype,
-                            int perOperation, boolean reusable, int capacity) {
+                            int perOperation, int capacity,
+                            InputConsumption consumption) {
         public InputSlot {
             if (entryId == null || entryId.isBlank()) {
                 throw new IllegalArgumentException("input entry id must not be blank");
@@ -52,13 +53,12 @@ public record InputBufferContract(
                 throw new IllegalArgumentException("input per-operation count must be non-negative");
             }
             if (capacity <= 0) throw new IllegalArgumentException("input capacity must be positive");
+            if (consumption == null) {
+                throw new IllegalArgumentException("input consumption is required");
+            }
             prototype = prototype == null ? ItemStack.EMPTY : prototype.copyWithCount(1);
         }
 
-        private InputBufferPlanner.InputSlotSpec asPlannerSpec() {
-            return new InputBufferPlanner.InputSlotSpec(
-                    entryId, slot, prototype, perOperation, reusable, capacity);
-        }
     }
 
     private static void validateUniqueInputs(List<InputSlot> slots) {
@@ -72,10 +72,5 @@ public record InputBufferContract(
                 throw new IllegalArgumentException("duplicate input slot " + slot.slot());
             }
         }
-    }
-
-    private static InputBufferPlanner.OutputPortSpec asPlannerSpec(OutputContract.Port port) {
-        return new InputBufferPlanner.OutputPortSpec(port.portId(), port.physicalPort(),
-                port.prototype(), port.perOperation(), port.kind(), port.source());
     }
 }

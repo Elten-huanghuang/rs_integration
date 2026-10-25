@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
@@ -164,7 +165,7 @@ public final class SoulCookingPotBatchDelegate extends AbstractBatchDelegate {
     @Override
     public List<IngredientSpec> getRequiredMaterials() {
         if (recipe == null) return null;
-        var handler = ModRecipeHandlers.handlerFor(recipe);
+        var handler = ModRecipeHandlers.claimFor(recipe).winner();
         return handler != null ? handler.getIngredients(recipe) : null;
     }
 
@@ -266,13 +267,14 @@ public final class SoulCookingPotBatchDelegate extends AbstractBatchDelegate {
         for (int i = 0; i < ingredientCount; i++) {
             ItemStack prototype = ingredientPrototype(specs.get(i));
             inputs.add(new InputBufferContract.InputSlot("legacy:material:" + i, i, prototype,
-                    1, false, slotCapacity(handler, i, prototype)));
+                    1, slotCapacity(handler, i, prototype), specs.get(i).consumption()));
         }
         if (!container.isEmpty()) {
             inputs.add(new InputBufferContract.InputSlot(
                     "legacy:material:" + ingredientCount, CONTAINER_SLOT,
-                    container.copyWithCount(1), 1, false,
-                    slotCapacity(handler, CONTAINER_SLOT, container)));
+                    container.copyWithCount(1), 1,
+                    slotCapacity(handler, CONTAINER_SLOT, container),
+                    InputConsumption.consumed()));
         }
         ItemStack output = resultItem();
         int outputCapacity = slotCapacity(handler, OUTPUT_SLOT, output);
@@ -281,7 +283,7 @@ public final class SoulCookingPotBatchDelegate extends AbstractBatchDelegate {
         if (operations <= 0) return InputBufferContract.none();
         return new InputBufferContract(operations, inputs,
                 List.of(new OutputContract.Port(outputPortId(), OUTPUT_SLOT, output,
-                        output.getCount(), InputBufferPlan.OutputPort.Kind.PRIMARY,
+                        output.getCount(), OutputContract.Kind.PRIMARY,
                         OutputContract.Source.SLOT)));
     }
 
@@ -302,7 +304,8 @@ public final class SoulCookingPotBatchDelegate extends AbstractBatchDelegate {
         for (int i = 0; i < specs.size(); i++) {
             InputBufferPlan.InputSlot input = inputByEntryId(plan, "legacy:material:" + i);
             long required = (long) specs.get(i).count() * plan.operations();
-            if (input == null || input.reusable() || input.perOperation() != specs.get(i).count()
+            if (input == null || input.consumption().reusableWithinWorkerBatch()
+                    || input.perOperation() != specs.get(i).count()
                     || required > Integer.MAX_VALUE
                     || input.stack().getCount() != (int) required
                     || !specs.get(i).ingredient().test(input.stack())) return false;
@@ -694,7 +697,7 @@ public final class SoulCookingPotBatchDelegate extends AbstractBatchDelegate {
         ItemStack result = resultItem();
         if (result.isEmpty()) return OutputContract.none();
         return new OutputContract(List.of(new OutputContract.Port(outputPortId(), OUTPUT_SLOT,
-                result, result.getCount(), InputBufferPlan.OutputPort.Kind.PRIMARY,
+                result, result.getCount(), OutputContract.Kind.PRIMARY,
                 OutputContract.Source.SLOT)));
     }
 

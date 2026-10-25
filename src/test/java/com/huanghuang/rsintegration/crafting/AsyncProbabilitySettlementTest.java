@@ -116,7 +116,8 @@ class AsyncProbabilitySettlementTest extends BootstrapTest {
         try (MockedStatic<ModRecipeHandlers> handlers = mockStatic(ModRecipeHandlers.class);
              MockedStatic<MaterialSources> sources = mockStatic(MaterialSources.class);
              MockedStatic<CraftingResolver> resolver = mockStatic(CraftingResolver.class)) {
-            handlers.when(() -> ModRecipeHandlers.handlerFor(recipe)).thenReturn(handler);
+            handlers.when(() -> ModRecipeHandlers.claimFor(recipe))
+                    .thenReturn(new ModRecipeHandlers.Claim(handler, List.of(handler)));
             sources.when(() -> MaterialSources.listAllAvailable(fixture.player, (CraftStorageEndpoint) null))
                     .thenReturn(Map.of());
             resolver.when(() -> CraftingResolver.resolveSupplementalGraph(anyList(), anyMap(), any(),

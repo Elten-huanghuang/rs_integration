@@ -161,7 +161,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
     @Nullable
     private List<IngredientSpec> getRecipeIngredientSpecs() {
-        var handler = ModRecipeHandlers.handlerFor(recipe);
+        var handler = ModRecipeHandlers.claimFor(recipe).winner();
         return handler != null
                 ? handler.getIngredients(recipe)
                 : CraftPacketUtils.extractIngredientSpecs(recipe);
@@ -243,15 +243,16 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             IngredientSpec spec = specs.get(i);
             ItemStack prototype = ingredientPrototype(spec);
             inputs.add(new InputBufferContract.InputSlot(
-                    "legacy:material:" + i, i, prototype, spec.count(), false,
-                    slotCapacity(handler, i, prototype)));
+                    "legacy:material:" + i, i, prototype, spec.count(),
+                    slotCapacity(handler, i, prototype), spec.consumption()));
         }
         if (!container.isEmpty()) {
             IngredientSpec spec = specs.get(specs.size() - 1);
             ItemStack prototype = ingredientPrototype(spec);
             inputs.add(new InputBufferContract.InputSlot(
                     "legacy:material:" + (specs.size() - 1), containerSlot(), prototype,
-                    spec.count(), false, slotCapacity(handler, containerSlot(), prototype)));
+                    spec.count(), slotCapacity(handler, containerSlot(), prototype),
+                    spec.consumption()));
         }
         ItemStack output = getExpectedRecipeResult(recipe, myLevel.registryAccess());
         int outputCapacity = slotCapacity(handler, outputSlot(), output);
@@ -261,7 +262,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         return new InputBufferContract(operations, inputs,
                 List.of(new OutputContract.Port(
                         outputPortId(), outputSlot(), output,
-                        output.getCount(), InputBufferPlan.OutputPort.Kind.PRIMARY,
+                        output.getCount(), OutputContract.Kind.PRIMARY,
                         OutputContract.Source.SLOT)));
     }
 
@@ -295,7 +296,8 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
                     && !getRequiredContainer(recipe, myLevel.registryAccess()).isEmpty()
                     ? containerSlot() : i;
             long required = (long) spec.count() * plan.operations();
-            if (input == null || input.slot() != expectedSlot || input.reusable()
+            if (input == null || input.slot() != expectedSlot
+                    || input.consumption().reusableWithinWorkerBatch()
                     || input.perOperation() != spec.count() || required > Integer.MAX_VALUE
                     || input.stack().getCount() != (int) required
                     || !spec.ingredient().test(input.stack())) {
@@ -324,7 +326,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         ItemStack output = getExpectedRecipeResult(recipe, myLevel.registryAccess());
         return output.isEmpty() ? OutputContract.none() : new OutputContract(List.of(
                 new OutputContract.Port(outputPortId(), outputSlot(),
-                        output, output.getCount(), InputBufferPlan.OutputPort.Kind.PRIMARY,
+                        output, output.getCount(), OutputContract.Kind.PRIMARY,
                         OutputContract.Source.SLOT)));
     }
 

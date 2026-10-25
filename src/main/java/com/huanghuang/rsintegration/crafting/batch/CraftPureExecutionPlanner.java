@@ -12,6 +12,7 @@ import com.huanghuang.rsintegration.crafting.MachineSelectionMode;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.crafting.OutputDestination;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
+import com.huanghuang.rsintegration.crafting.ScaledIngredientSpec;
 import com.huanghuang.rsintegration.crafting.SelfAmplifyingRecipePolicy;
 import com.huanghuang.rsintegration.crafting.planning.AsyncPlanningCoordinator.StalePlanningResultException;
 import com.huanghuang.rsintegration.crafting.planning.AsyncPurePlanningService;
@@ -100,7 +101,8 @@ final class CraftPureExecutionPlanner {
             @Nullable ItemStack baseItem, @Nullable ItemStack targetOutput,
             OutputDestination outputDestination, MachineSelectionMode machineSelectionMode,
             @Nullable CraftStorageEndpoint storageEndpoint,
-            @Nullable StorageReference storageReference, List<IngredientSpec> scaledSpecs,
+            @Nullable StorageReference storageReference,
+            List<ScaledIngredientSpec> scaledSpecs,
             ItemStack recipeOutput, ModType terminalType,
             Map<String, ItemStack> materialLocks) {
         if (storageEndpoint == null
@@ -146,10 +148,10 @@ final class CraftPureExecutionPlanner {
     @Nullable
     static List<ImmutableRecipeGraph.IngredientRef> physicalRootInputs(
             ImmutableRecipeGraph baseGraph, ResourceLocation recipeId,
-            List<IngredientSpec> scaledSpecs, int repeatCount) {
+            List<ScaledIngredientSpec> scaledSpecs, int repeatCount) {
         List<ImmutableRecipeGraph.IngredientRef> inputs = new ArrayList<>();
         boolean projectable = true;
-        for (IngredientSpec spec : scaledSpecs) {
+        for (ScaledIngredientSpec spec : scaledSpecs) {
             if (spec.isEmpty()) continue;
             ImmutableRecipeGraph.IngredientRef projected =
                     ImmutableRecipeGraphProjector.projectIngredient(spec);

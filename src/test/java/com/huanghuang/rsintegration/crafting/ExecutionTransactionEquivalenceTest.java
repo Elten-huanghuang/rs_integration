@@ -105,5 +105,5 @@ class ExecutionTransactionEquivalenceTest extends BootstrapTest {
                 broker.available(catalystSource, bucket), 0);
     }
 
-    private record Outcome(int iron, int catalyst, int output) {}
+    private record Outcome(long iron, long catalyst, long output) {}
 }

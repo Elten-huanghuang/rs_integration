@@ -15,6 +15,7 @@ import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.graph.GraphConcurrencyPolicy;
 import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
+import com.huanghuang.rsintegration.crafting.graph.OperationId;
 import com.huanghuang.rsintegration.crafting.graph.OperationBudget;
 import com.huanghuang.rsintegration.magic.MagicResourceTaskReservation;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
@@ -106,6 +107,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     private OperationExecutionKernel operationKernel;
     private UUID craftId;
     private NodeId nodeId;
+    private int operationSequenceBase;
     private boolean sharedMaterialMode;
     private boolean started;
     private boolean draining;
@@ -273,7 +275,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     /** Stable material declaration for one row of the outer operation matrix. */
     public MaterialPlan operationMaterialPlan() {
         if (baseSpecs == null || baseSpecs.isEmpty()) return MaterialPlan.none();
-        return MaterialPlan.fromLegacy(baseSpecs, getMaterialReservationScopes());
+        return MaterialPlan.fromLegacy(baseSpecs);
     }
 
     @Override
@@ -345,11 +347,6 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         return List.copyOf(merged);
     }
 
-    public List<IBatchDelegate.MaterialReservationScope> getMaterialReservationScopes() {
-        if (workers.isEmpty() || workers.get(0).delegate == null) return List.of();
-        return workers.get(0).delegate.getMaterialReservationScopes();
-    }
-
     /**
      * Preserve the child's private-ledger graph contract when this group is
      * used as the graph node delegate.  Some machines (for example Arcane
@@ -407,10 +404,21 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     public void setOperationKernel(OperationExecutionKernel kernel,
                                    UUID craftId, NodeId nodeId,
                                    OperationBudget craftBudget) {
+        setOperationKernel(kernel, craftId, nodeId, craftBudget, 0);
+    }
+
+    public void setOperationKernel(OperationExecutionKernel kernel,
+                                   UUID craftId, NodeId nodeId,
+                                   OperationBudget craftBudget,
+                                   int operationSequenceBase) {
         this.operationKernel = kernel;
         this.craftId = craftId;
         this.nodeId = nodeId;
         this.craftOperationBudget = craftBudget;
+        if (operationSequenceBase < 0) {
+            throw new IllegalArgumentException("operation sequence base must be non-negative");
+        }
+        this.operationSequenceBase = operationSequenceBase;
     }
 
     @Override
@@ -589,16 +597,16 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     private boolean canAggregateOperationMaterials(int firstOperation, int operationCount) {
         if (operationCount <= 0 || baseSpecs == null || baseSpecs.isEmpty()) return false;
         int perOperation = baseSpecs.size();
-        List<IBatchDelegate.MaterialReservationScope> scopes = getMaterialReservationScopes();
         for (int materialIndex = 0; materialIndex < perOperation; materialIndex++) {
+            boolean reusable = baseSpecs.get(materialIndex)
+                    .consumption().reusableWithinWorkerBatch();
             ItemStack first = ItemStack.EMPTY;
             for (int offset = 0; offset < operationCount; offset++) {
                 ItemStack stack = operationMaterialAt(firstOperation + offset, materialIndex);
                 if (stack == null || stack.isEmpty()) continue;
                 if (first.isEmpty()) first = stack;
                 else if (!MaterialMatcher.equivalentRuntimeFragment(first, stack)) return false;
-                if (materialIndex < scopes.size()
-                        && scopes.get(materialIndex) == MaterialReservationScope.PER_WORKER_REUSABLE
+                if (reusable
                         && first.getCount() != stack.getCount()) return false;
             }
         }
@@ -1221,7 +1229,8 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         }
         try {
             worker.operationSession = operationKernel.tryPrepare(
-                    craftId, nodeId, operationId, craftOperationBudget, machineScope, capture);
+                    new OperationId(craftId, nodeId, operationSequenceBase + operationId),
+                    craftOperationBudget, machineScope, capture);
             return worker.operationSession != null;
         } catch (RuntimeException exception) {
             worker.operationSession = null;

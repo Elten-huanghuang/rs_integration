@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.Ingredient;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -21,26 +22,44 @@ public final class DirectMaterialAllocator {
 
     public static Result allocate(List<IngredientSpec> specs,
                                   Map<StackKey, ? extends Number> supplied) {
+        List<IndexedDemand> demands = new ArrayList<>();
+        for (int i = 0; i < specs.size(); i++) {
+            IngredientSpec spec = specs.get(i);
+            if (spec == null || spec.isEmpty()) continue;
+            demands.add(new IndexedDemand(i, spec.ingredient(), spec.count()));
+        }
+        return allocateDemands(demands, supplied);
+    }
+
+    public static Result allocateScaled(List<ScaledIngredientSpec> specs,
+                                        Map<StackKey, ? extends Number> supplied) {
+        List<IndexedDemand> demands = new ArrayList<>();
+        for (int i = 0; i < specs.size(); i++) {
+            ScaledIngredientSpec spec = specs.get(i);
+            if (spec == null || spec.isEmpty()) continue;
+            demands.add(new IndexedDemand(i, spec.ingredient(), spec.count()));
+        }
+        return allocateDemands(demands, supplied);
+    }
+
+    private static Result allocateDemands(List<IndexedDemand> demands,
+                                          Map<StackKey, ? extends Number> supplied) {
         Map<StackKey, Long> available = new LinkedHashMap<>();
         supplied.forEach((key, count) -> {
             if (key != null && count != null && count.longValue() > 0L) {
                 available.put(key, count.longValue());
             }
         });
-        List<IndexedSpec> demands = new ArrayList<>();
         long totalDemand = 0L;
-        for (int i = 0; i < specs.size(); i++) {
-            IngredientSpec spec = specs.get(i);
-            if (spec == null || spec.isEmpty()) continue;
-            demands.add(new IndexedSpec(i, spec));
-            totalDemand += spec.count();
+        for (IndexedDemand demand : demands) {
+            totalDemand = saturatedAdd(totalDemand, demand.count());
         }
         if (demands.isEmpty()) return new Result(true, List.of(), -1, 0);
 
         Set<Item> relevantItems = new LinkedHashSet<>();
         boolean requiresFullScan = false;
-        for (IndexedSpec demand : demands) {
-            ItemStack[] candidates = candidateItems(demand.spec());
+        for (IndexedDemand demand : demands) {
+            ItemStack[] candidates = candidateItems(demand.ingredient());
             if (candidates.length == 0) {
                 requiresFullScan = true;
                 break;
@@ -70,12 +89,12 @@ public final class DirectMaterialAllocator {
         List<DemandEdges> demandEdges = new ArrayList<>(demands.size());
 
         for (int i = 0; i < demands.size(); i++) {
-            IndexedSpec indexed = demands.get(i);
+            IndexedDemand indexed = demands.get(i);
             int demandNode = demandStart + i;
-            Edge sourceEdge = flow.addEdge(source, demandNode, indexed.spec().count());
+            Edge sourceEdge = flow.addEdge(source, demandNode, indexed.count());
             List<AllocationEdge> allocations = new ArrayList<>();
             Set<Integer> candidateSupplyIndices = new LinkedHashSet<>();
-            ItemStack[] candidates = candidateItems(indexed.spec());
+            ItemStack[] candidates = candidateItems(indexed.ingredient());
             if (candidates.length == 0) {
                 for (int j = 0; j < supplies.size(); j++) candidateSupplyIndices.add(j);
             } else {
@@ -96,12 +115,12 @@ public final class DirectMaterialAllocator {
                 StackKey material = supplies.get(j).getKey();
                 boolean matches;
                 try {
-                    matches = IngredientMatcher.test(indexed.spec().ingredient(), material);
+                    matches = IngredientMatcher.test(indexed.ingredient(), material);
                 } catch (RuntimeException | LinkageError ignored) {
                     matches = false;
                 }
                 if (!matches) continue;
-                Edge edge = flow.addEdge(demandNode, supplyStart + j, indexed.spec().count());
+                Edge edge = flow.addEdge(demandNode, supplyStart + j, indexed.count());
                 allocations.add(new AllocationEdge(material, edge));
             }
             demandEdges.add(new DemandEdges(indexed, sourceEdge, allocations));
@@ -134,9 +153,9 @@ public final class DirectMaterialAllocator {
         return new Result(true, List.copyOf(result), -1, 0);
     }
 
-    private static ItemStack[] candidateItems(IngredientSpec spec) {
+    private static ItemStack[] candidateItems(Ingredient ingredient) {
         try {
-            return spec.ingredient().getItems();
+            return ingredient.getItems();
         } catch (RuntimeException | LinkageError ignored) {
             return new ItemStack[0];
         }
@@ -151,10 +170,15 @@ public final class DirectMaterialAllocator {
         }
     }
 
-    private record IndexedSpec(int index, IngredientSpec spec) {}
+    private record IndexedDemand(int index, Ingredient ingredient, long count) {}
     private record AllocationEdge(StackKey material, Edge edge) {}
-    private record DemandEdges(IndexedSpec indexed, Edge sourceEdge,
+    private record DemandEdges(IndexedDemand indexed, Edge sourceEdge,
                                List<AllocationEdge> allocations) {}
+
+    private static long saturatedAdd(long left, long right) {
+        if (right <= 0L) return left;
+        return right > Long.MAX_VALUE - left ? Long.MAX_VALUE : left + right;
+    }
 
     private static final class Dinic {
         private final List<List<Edge>> graph;

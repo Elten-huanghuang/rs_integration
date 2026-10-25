@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.crafting.CraftPlanningRevision;
 import com.huanghuang.rsintegration.crafting.MaterialLocks;
 import com.huanghuang.rsintegration.crafting.planning.PlanCache;
 import com.huanghuang.rsintegration.crafting.planning.PlanningPreferences;
@@ -43,7 +44,8 @@ final class CraftPlanCacheKeys {
         return new PlanCache.Key(playerId, recipeId, forcedRecipes, repeatCount,
                 clickedOutputToken(clickedOutput) + "|"
                         + (terminalType == null ? "generic" : terminalType.id()),
-                MaterialLocks.cacheTokens(materialLocks), preferences);
+                MaterialLocks.cacheTokens(materialLocks), preferences,
+                CraftPlanningRevision.current());
     }
 
     private static String clickedOutputToken(@Nullable ItemStack clicked) {

@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.batch.InstantBatchDelegate;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.util.PlayerUtils;
@@ -76,8 +77,9 @@ final class BiomancyBatchDelegate extends InstantBatchDelegate {
     @Nullable
     @Override
     public List<IngredientSpec> getRequiredMaterials() {
-        return recipe == null ? null : ModRecipeHandlers.handlerFor(recipe) == null
-                ? null : ModRecipeHandlers.handlerFor(recipe).getIngredients(recipe);
+        ModRecipeHandler handler = recipe == null
+                ? null : ModRecipeHandlers.claimFor(recipe).winner();
+        return handler == null ? null : handler.getIngredients(recipe);
     }
 
     @Override

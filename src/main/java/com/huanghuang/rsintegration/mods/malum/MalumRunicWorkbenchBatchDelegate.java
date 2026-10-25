@@ -102,7 +102,7 @@ public final class MalumRunicWorkbenchBatchDelegate extends InstantBatchDelegate
     @Override
     public List<IngredientSpec> getRequiredMaterials() {
         if (recipe == null) return null;
-        var handler = ModRecipeHandlers.handlerFor(recipe);
+        var handler = ModRecipeHandlers.claimFor(recipe).winner();
         if (handler != null) {
             return handler.getIngredients(recipe);
         }

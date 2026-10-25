@@ -83,7 +83,7 @@ public final class EmbersStamperBatchDelegate extends AbstractBatchDelegate {
             return PreparationResult.fatal("压印底座下方不能放置收集箱",
                     Component.translatable("rsi.embers_machine.error.stamper_collector"));
         }
-        var handler = ModRecipeHandlers.handlerFor(found);
+        var handler = ModRecipeHandlers.claimFor(found).winner();
         List<IngredientSpec> specs = handler == null ? null : handler.getIngredients(found);
         ItemStack result = handler == null ? ItemStack.EMPTY
                 : handler.getResultItem(found, level.registryAccess());

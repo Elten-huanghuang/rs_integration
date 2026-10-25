@@ -1,6 +1,10 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
+import com.huanghuang.rsintegration.crafting.batch.OutputContract;
+import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
+import com.huanghuang.rsintegration.crafting.graph.OutputProbability;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -14,24 +18,20 @@ class InputBufferPlannerTest extends BootstrapTest {
     @Test
     void plansSingleInputBatch() {
         InputBufferPlan plan = InputBufferPlanner.plan(64, 64,
-                List.of(new InputBufferPlanner.InputSlotSpec(
-                        0, new ItemStack(Items.IRON_INGOT), 1, false, 64)),
-                List.of(new InputBufferPlanner.OutputPortSpec(
-                        0, new ItemStack(Items.IRON_NUGGET), 9)));
+                List.of(consumedInput(0, new ItemStack(Items.IRON_INGOT), 1, 64)),
+                List.of(output(0, new ItemStack(Items.IRON_NUGGET), 9)));
 
         assertEquals(64, plan.operations());
         assertEquals(64, plan.inputs().get(0).stack().getCount());
-        assertEquals(576, plan.outputs().get(0).expected().getCount());
+        assertEquals(576, plan.outputs().get(0).perOperation() * plan.operations());
     }
 
     @Test
     void multiInputUsesTheTightestSlotCapacity() {
         InputBufferPlan plan = InputBufferPlanner.plan(64, 64,
                 List.of(
-                        new InputBufferPlanner.InputSlotSpec(
-                                0, new ItemStack(Items.IRON_INGOT), 1, false, 64),
-                        new InputBufferPlanner.InputSlotSpec(
-                                1, new ItemStack(Items.COAL), 1, false, 8)),
+                        consumedInput(0, new ItemStack(Items.IRON_INGOT), 1, 64),
+                        consumedInput(1, new ItemStack(Items.COAL), 1, 8)),
                 List.of());
 
         assertEquals(8, plan.operations());
@@ -42,12 +42,11 @@ class InputBufferPlannerTest extends BootstrapTest {
     @Test
     void reusableInputIsInstalledOnce() {
         InputBufferPlan plan = InputBufferPlanner.plan(32, 32,
-                List.of(new InputBufferPlanner.InputSlotSpec(
-                        2, new ItemStack(Items.BUCKET), 1, true, 1)),
+                List.of(reusableInput(2, new ItemStack(Items.BUCKET), 1, 1)),
                 List.of());
 
         assertEquals(32, plan.operations());
-        assertTrue(plan.inputs().get(0).reusable());
+        assertTrue(plan.inputs().get(0).consumption().reusableWithinWorkerBatch());
         assertEquals(1, plan.inputs().get(0).stack().getCount());
     }
 
@@ -55,20 +54,16 @@ class InputBufferPlannerTest extends BootstrapTest {
     void preservesExplicitInputSlotsAndOutputPorts() {
         InputBufferPlan plan = InputBufferPlanner.plan(4, 4,
                 List.of(
-                        new InputBufferPlanner.InputSlotSpec(
-                                3, new ItemStack(Items.WHEAT), 2, false, 64),
-                        new InputBufferPlanner.InputSlotSpec(
-                                7, new ItemStack(Items.WATER_BUCKET), 1, true, 1)),
+                        consumedInput(3, new ItemStack(Items.WHEAT), 2, 64),
+                        reusableInput(7, new ItemStack(Items.WATER_BUCKET), 1, 1)),
                 List.of(
-                        new InputBufferPlanner.OutputPortSpec(
-                                5, new ItemStack(Items.BREAD), 1),
-                        new InputBufferPlanner.OutputPortSpec(
-                                9, new ItemStack(Items.WHEAT), 1)));
+                        output(5, new ItemStack(Items.BREAD), 1),
+                        output(9, new ItemStack(Items.WHEAT), 1)));
 
         assertEquals(List.of(3, 7), plan.inputs().stream()
                 .map(InputBufferPlan.InputSlot::slot).toList());
         assertEquals(List.of(5, 9), plan.outputs().stream()
-                .map(InputBufferPlan.OutputPort::port).toList());
+                .map(OutputContract.Port::physicalPort).toList());
         assertEquals(8, plan.inputs().get(0).stack().getCount());
         assertEquals(1, plan.inputs().get(1).stack().getCount());
     }
@@ -77,25 +72,28 @@ class InputBufferPlannerTest extends BootstrapTest {
     void rejectsDuplicatePhysicalSlots() {
         assertThrows(IllegalArgumentException.class, () -> InputBufferPlanner.plan(2, 2,
                 List.of(
-                        new InputBufferPlanner.InputSlotSpec(
-                                0, new ItemStack(Items.IRON_INGOT), 1, false, 64),
-                        new InputBufferPlanner.InputSlotSpec(
-                                0, new ItemStack(Items.COAL), 1, false, 64)),
+                        consumedInput(0, new ItemStack(Items.IRON_INGOT), 1, 64),
+                        consumedInput(0, new ItemStack(Items.COAL), 1, 64)),
                 List.of()));
     }
 
     @Test
     void preservesStableMaterialAndOutputIdentities() {
         InputBufferPlan plan = InputBufferPlanner.plan(3, 3,
-                List.of(new InputBufferPlanner.InputSlotSpec(
-                        "ore", 4, new ItemStack(Items.IRON_INGOT), 2, false, 64)),
+                List.of(new InputBufferContract.InputSlot(
+                        "ore", 4, new ItemStack(Items.IRON_INGOT), 2, 64,
+                        InputConsumption.consumed())),
                 List.of(
-                        new InputBufferPlanner.OutputPortSpec(
+                        new OutputContract.Port(
                                 "product", 1, new ItemStack(Items.IRON_NUGGET), 1,
-                                InputBufferPlan.OutputPort.Kind.PRIMARY),
-                        new InputBufferPlanner.OutputPortSpec(
+                                OutputContract.Kind.PRIMARY,
+                                OutputContract.Source.SLOT, 1, 1,
+                                OutputProbability.guaranteed(), false, null),
+                        new OutputContract.Port(
                                 "slag", 2, new ItemStack(Items.FLINT), 1,
-                                InputBufferPlan.OutputPort.Kind.SECONDARY)));
+                                OutputContract.Kind.SECONDARY,
+                                OutputContract.Source.SLOT, 1, 1,
+                                OutputProbability.guaranteed(), false, null)));
 
         InputBufferPlan.InputSlot input = plan.inputs().get(0);
         assertEquals("ore", input.entryId());
@@ -104,19 +102,41 @@ class InputBufferPlannerTest extends BootstrapTest {
 
         assertEquals("product", plan.outputs().get(0).portId());
         assertEquals(1, plan.outputs().get(0).perOperation());
-        assertEquals(InputBufferPlan.OutputPort.Kind.PRIMARY, plan.outputs().get(0).kind());
+        assertEquals(OutputContract.Kind.PRIMARY, plan.outputs().get(0).kind());
         assertEquals("slag", plan.outputs().get(1).portId());
-        assertEquals(InputBufferPlan.OutputPort.Kind.SECONDARY, plan.outputs().get(1).kind());
+        assertEquals(OutputContract.Kind.SECONDARY, plan.outputs().get(1).kind());
     }
 
     @Test
     void rejectsDuplicateStableInputIdentity() {
         assertThrows(IllegalArgumentException.class, () -> InputBufferPlanner.plan(2, 2,
                 List.of(
-                        new InputBufferPlanner.InputSlotSpec(
-                                "same", 0, new ItemStack(Items.IRON_INGOT), 1, false, 64),
-                        new InputBufferPlanner.InputSlotSpec(
-                                "same", 1, new ItemStack(Items.COAL), 1, false, 64)),
+                        new InputBufferContract.InputSlot(
+                                "same", 0, new ItemStack(Items.IRON_INGOT), 1, 64,
+                                InputConsumption.consumed()),
+                        new InputBufferContract.InputSlot(
+                                "same", 1, new ItemStack(Items.COAL), 1, 64,
+                                InputConsumption.consumed())),
                 List.of()));
+    }
+
+    private static InputBufferContract.InputSlot consumedInput(
+            int slot, ItemStack stack, int perOperation, int capacity) {
+        return new InputBufferContract.InputSlot("legacy:input:" + slot, slot,
+                stack, perOperation, capacity, InputConsumption.consumed());
+    }
+
+    private static InputBufferContract.InputSlot reusableInput(
+            int slot, ItemStack stack, int perOperation, int capacity) {
+        return new InputBufferContract.InputSlot("legacy:input:" + slot, slot,
+                stack, perOperation, capacity, InputConsumption.catalyst());
+    }
+
+    private static OutputContract.Port output(
+            int port, ItemStack stack, int perOperation) {
+        return new OutputContract.Port("legacy:output:" + port, port,
+                stack, perOperation, OutputContract.Kind.PRIMARY,
+                OutputContract.Source.SLOT, perOperation, perOperation,
+                OutputProbability.guaranteed(), false, null);
     }
 }

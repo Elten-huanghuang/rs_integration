@@ -18,10 +18,8 @@ import java.util.stream.Collectors;
 public final class LegacyExecutionMetrics {
     public enum Reason {
         MOD_REQUIRES_FLAT_EXECUTION,
-        INFER_MODE,
         RUNTIME_SELECTED_INPUTS,
         UNKNOWN_OUTPUT,
-        NONDETERMINISTIC_OUTPUT,
         SELF_AMPLIFYING_TERMINAL,
         TAINT_SYNTHETIC_STEP,
         DIRECT_TERMINAL_RESERVATION,
@@ -36,11 +34,8 @@ public final class LegacyExecutionMetrics {
 
     static Reason fromTerminalDecision(TerminalGraphExecutionPolicy.Reason reason) {
         return switch (reason) {
-            case INFER_MODE -> Reason.INFER_MODE;
             case DYNAMIC_INPUTS -> Reason.RUNTIME_SELECTED_INPUTS;
             case UNKNOWN_OUTPUT -> Reason.UNKNOWN_OUTPUT;
-            case NONDETERMINISTIC_OUTPUT -> Reason.NONDETERMINISTIC_OUTPUT;
-            case SELF_AMPLIFYING_INPUT -> Reason.SELF_AMPLIFYING_TERMINAL;
             case COMPOSABLE -> Reason.GRAPH_COMPOSITION_REJECTED;
         };
     }

@@ -108,7 +108,7 @@ final class CandidateEngine {
                     continue;
                 }
                 if (entry.modType() != ModType.GENERIC) {
-                    var handler = ModRecipeHandlers.handlerFor(entry.recipe());
+                    var handler = ModRecipeHandlers.claimFor(entry.recipe()).winner();
                     if (handler != null
                             && !handler.isAvailableForPlanning(entry.recipe(), ctx.player)) {
                         if (diag != null) logDiag(diag, item, entry, 0, entry.modType(), true,
@@ -679,7 +679,8 @@ final class CandidateEngine {
 
     private static List<IngredientSpec> ingredientSpecs(RecipeIndex.Entry entry,
                                                         ResolutionContext ctx) {
-        List<IngredientSpec> specs = CraftPacketUtils.extractRecursiveIngredientSpecs(entry.recipe());
+        List<IngredientSpec> specs =
+                CraftPacketUtils.extractSingleOperationRecursiveIngredientSpecs(entry.recipe());
         specs = CraftPacketUtils.applyPlanningIngredientContext(entry.recipe(), ctx.player, specs);
         return MinersDelightCopperPotSupport.adaptIngredientSpecs(
                 entry.modType(), specs, entry.recipe(), ctx.level.registryAccess());

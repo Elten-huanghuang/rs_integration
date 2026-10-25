@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.ScaledIngredientSpec;
+import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
@@ -99,8 +101,9 @@ class CraftGraphPreparationTest extends BootstrapTest {
                 new ResourceLocation("emxarms", "attachments/stock_emx_reentrantlock"),
                 output, 1, List.of(new IngredientRef(List.of(brick), 1)));
         ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(output, List.of(target)));
-        List<IngredientSpec> runtimeOnly = List.of(new IngredientSpec(
-                Ingredient.of(Items.IRON_INGOT), 1, DemandRole.TRANSFORMED));
+        List<ScaledIngredientSpec> runtimeOnly = List.of(new ScaledIngredientSpec(
+                Ingredient.of(Items.IRON_INGOT), 1,
+                InputConsumption.fromDemandRole(DemandRole.TRANSFORMED)));
 
         List<IngredientRef> inputs = CraftPureExecutionPlanner.physicalRootInputs(
                 graph, target.recipeId(), runtimeOnly, 2);

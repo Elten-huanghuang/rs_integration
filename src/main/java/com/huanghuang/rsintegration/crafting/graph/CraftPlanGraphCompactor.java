@@ -21,6 +21,8 @@ import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.function.Predicate;
 
+import javax.annotation.Nullable;
+
 /**
  * 合并结构完全相同、且执行契约允许的重复配方节点。只压缩可在不改变
  * 材料、NBT、端口、依赖和替代配方语义时安全合并的节点；任何校验失败
@@ -162,6 +164,12 @@ public final class CraftPlanGraphCompactor {
         if (first.inputs().stream().anyMatch(input -> input.role() == DemandRole.CATALYST)) {
             return false;
         }
+        if (first.outputs().stream().anyMatch(output ->
+                !output.probability().isGuaranteed()
+                        || output.dynamicIdentity()
+                        || output.sourceInput() != null)) {
+            return false;
+        }
         long executions = 0L;
         Set<NodeId> ids = new HashSet<>();
         for (CraftNode node : group) {
@@ -191,16 +199,22 @@ public final class CraftPlanGraphCompactor {
                 quantity = SaturatingLongMath.add(quantity, matching.quantity());
             }
             inputs.add(new InputDemand(input.id(), input.ingredient(), quantity,
-                    input.role(), input.displayHint()));
+                    input.consumption(), input.displayHint()));
         }
         List<OutputDeclaration> outputs = new ArrayList<>(first.outputs().size());
         for (OutputDeclaration output : first.outputs()) {
             long quantity = 0L;
+            long minimum = 0L;
+            long maximum = 0L;
             for (CraftNode member : members) {
                 OutputDeclaration matching = outputForPort(member, output.id().index());
                 quantity = SaturatingLongMath.add(quantity, matching.quantity());
+                minimum = SaturatingLongMath.add(minimum, matching.minimumQuantity());
+                maximum = SaturatingLongMath.add(maximum, matching.maximumQuantity());
             }
-            outputs.add(new OutputDeclaration(output.id(), output.material(), quantity, output.kind()));
+            outputs.add(new OutputDeclaration(output.id(), output.material(), quantity, output.kind(),
+                    minimum, maximum, output.probability(), output.dynamicIdentity(),
+                    output.sourceInput()));
         }
         return new CraftNode(first.id(), first.recipeId(), first.modTypeId(),
                 first.recipeTypeId(), executions, first.alternativeIds(),
@@ -218,10 +232,15 @@ public final class CraftPlanGraphCompactor {
         int executions = Math.max(1, node.executions());
         for (InputDemand input : node.inputs()) {
             if (input.role() == DemandRole.CATALYST) return false;
+            if (input.role() == DemandRole.FUEL || input.role() == DemandRole.DURABILITY) {
+                return false;
+            }
             if (input.quantity() % executions != 0L) return false;
         }
         for (OutputDeclaration output : node.outputs()) {
             if (output.quantity() % executions != 0L) return false;
+            if (output.minimumQuantity() % executions != 0L
+                    || output.maximumQuantity() % executions != 0L) return false;
         }
         return true;
     }
@@ -290,10 +309,16 @@ public final class CraftPlanGraphCompactor {
     }
 
     private record OutputSignature(int port, MaterialKey material, long perExecution,
-                                   OutputKind kind) {
+                                   long minimumPerExecution, long maximumPerExecution,
+                                   OutputKind kind, OutputProbability probability,
+                                   boolean dynamicIdentity, @Nullable InputPortId sourceInput) {
         private static OutputSignature from(OutputDeclaration output, int executions) {
             return new OutputSignature(output.id().index(), output.material(),
-                    output.quantity() / Math.max(1, executions), output.kind());
+                    output.quantity() / Math.max(1, executions),
+                    output.minimumQuantity() / Math.max(1, executions),
+                    output.maximumQuantity() / Math.max(1, executions),
+                    output.kind(), output.probability(), output.dynamicIdentity(),
+                    output.sourceInput());
         }
     }
 

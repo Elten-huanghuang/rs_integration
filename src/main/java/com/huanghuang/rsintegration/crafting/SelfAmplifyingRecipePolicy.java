@@ -72,6 +72,42 @@ public final class SelfAmplifyingRecipePolicy {
         return List.copyOf(scaled);
     }
 
+    public static List<ScaledIngredientSpec> scaleTargetInputsScaled(
+            List<ScaledIngredientSpec> specs, ItemStack output, long executions) {
+        long multiplier = Math.max(1L, executions);
+        boolean amplification = isScaledSelfAmplifying(specs, output);
+        List<ScaledIngredientSpec> scaled = new ArrayList<>(specs.size());
+        for (ScaledIngredientSpec spec : specs) {
+            if (spec.isEmpty()) continue;
+            ScaledIngredientSpec effective = amplification
+                    ? spec : excludeNonProductiveSelfCandidate(spec, output);
+            long count = amplification && isConsumedSelfInput(spec, output)
+                    ? spec.count() : saturatingMultiply(spec.count(), multiplier);
+            scaled.add(new ScaledIngredientSpec(
+                    effective.ingredient(), count, spec.consumption()));
+        }
+        return List.copyOf(scaled);
+    }
+
+    public static List<ScaledIngredientSpec> scaleTargetInputsLong(
+            List<IngredientSpec> specs, ItemStack output, long executions) {
+        long multiplier = Math.max(1L, executions);
+        boolean amplification = isSelfAmplifying(specs, output);
+        List<ScaledIngredientSpec> scaled = new ArrayList<>(specs.size());
+        for (IngredientSpec spec : specs) {
+            if (spec.isEmpty()) continue;
+            ScaledIngredientSpec effective = amplification
+                    ? ScaledIngredientSpec.of(spec, spec.count())
+                    : excludeNonProductiveSelfCandidate(
+                            ScaledIngredientSpec.of(spec, spec.count()), output);
+            long count = amplification && isConsumedSelfInput(spec, output)
+                    ? spec.count() : CraftPacketUtils.requiredCount(spec, multiplier);
+            scaled.add(new ScaledIngredientSpec(
+                    effective.ingredient(), count, spec.consumption()));
+        }
+        return List.copyOf(scaled);
+    }
+
     /**
      * A broad terminal ingredient may contain the recipe's own output (for
      * example the wooden-chests tag accepts a trapped chest). Consuming that
@@ -95,6 +131,21 @@ public final class SelfAmplifyingRecipePolicy {
                 spec.count(), spec.consumption());
     }
 
+    public static ScaledIngredientSpec excludeNonProductiveSelfCandidate(
+            ScaledIngredientSpec spec, ItemStack output) {
+        if (spec == null || spec.isEmpty() || output == null || output.isEmpty()
+                || spec.role() == DemandRole.CATALYST) return spec;
+        ItemStack[] candidates = spec.ingredient().getItems();
+        if (candidates.length < 2 || !spec.ingredient().test(output)) return spec;
+        List<ItemStack> filtered = Stream.of(candidates)
+                .filter(stack -> !MaterialMatcher.equivalentRuntimeFragment(stack, output))
+                .map(stack -> stack.copyWithCount(1))
+                .toList();
+        if (filtered.isEmpty() || filtered.size() == candidates.length) return spec;
+        return new ScaledIngredientSpec(
+                Ingredient.of(filtered.stream()), spec.count(), spec.consumption());
+    }
+
     public static boolean isSelfAmplifying(RecipeNode recipe) {
         long selfConsumed = selfConsumed(recipe.inputs(), recipe.output());
         return selfConsumed > 0 && recipe.outputCount() > selfConsumed;
@@ -109,7 +160,25 @@ public final class SelfAmplifyingRecipePolicy {
         return selfConsumed > 0L && output.getCount() > selfConsumed;
     }
 
+    public static boolean isScaledSelfAmplifying(
+            List<ScaledIngredientSpec> specs, ItemStack output) {
+        if (output == null || output.isEmpty()) return false;
+        long selfConsumed = 0L;
+        for (ScaledIngredientSpec spec : specs) {
+            if (isConsumedSelfInput(spec, output)) {
+                selfConsumed = saturatingAdd(selfConsumed, spec.count());
+            }
+        }
+        return selfConsumed > 0L && output.getCount() > selfConsumed;
+    }
+
     private static boolean isConsumedSelfInput(IngredientSpec spec, ItemStack output) {
+        return !spec.isEmpty() && spec.role() != DemandRole.CATALYST
+                && IngredientMatcher.test(spec.ingredient(), output);
+    }
+
+    private static boolean isConsumedSelfInput(
+            ScaledIngredientSpec spec, ItemStack output) {
         return !spec.isEmpty() && spec.role() != DemandRole.CATALYST
                 && IngredientMatcher.test(spec.ingredient(), output);
     }
@@ -142,9 +211,14 @@ public final class SelfAmplifyingRecipePolicy {
                 && referencesOutput(input, output);
     }
 
-    private static long saturatingMultiply(long count, int multiplier) {
+    private static long saturatingMultiply(long count, long multiplier) {
         if (count <= 0L || multiplier <= 0) return 0L;
         return count > Long.MAX_VALUE / multiplier
                 ? Long.MAX_VALUE : count * multiplier;
+    }
+
+    private static long saturatingAdd(long left, long right) {
+        if (right <= 0L) return left;
+        return right > Long.MAX_VALUE - left ? Long.MAX_VALUE : left + right;
     }
 }

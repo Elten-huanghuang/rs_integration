@@ -67,6 +67,7 @@ import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.ExecutionEquivalence;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
+import com.huanghuang.rsintegration.crafting.ScaledIngredientSpec;
 import com.huanghuang.rsintegration.network.machine.OpenBoundMachineGuiPacket;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
@@ -201,15 +202,18 @@ public final class GenericCraftPacket {
     }
 
     private static DirectReservationCheck probeDirectTerminalReservation(
-            ServerPlayer player, ResourceLocation recipeId, List<IngredientSpec> specs,
+            ServerPlayer player, ResourceLocation recipeId,
+            List<ScaledIngredientSpec> specs,
             Map<StackKey, Long> available, @Nullable CraftStorageEndpoint endpoint) {
         if (specs.stream().noneMatch(spec -> spec != null && !spec.isEmpty())) {
             return new DirectReservationCheck(false, "no-fixed-inputs", "unknown");
         }
-        DirectMaterialAllocator.Result allocation = DirectMaterialAllocator.allocate(specs, available);
+        DirectMaterialAllocator.Result allocation =
+                DirectMaterialAllocator.allocateScaled(specs, available);
         if (!allocation.feasible()) {
             int index = allocation.missingIngredientIndex();
-            IngredientSpec missing = index >= 0 && index < specs.size() ? specs.get(index) : null;
+            ScaledIngredientSpec missing =
+                    index >= 0 && index < specs.size() ? specs.get(index) : null;
             String material = missing == null ? "unknown"
                     : CraftPacketUtils.describeIngredient(missing.ingredient()).getString();
             String nbtMode = missing == null ? "unknown"
@@ -904,7 +908,8 @@ public final class GenericCraftPacket {
             if (!ModIds.ID_EMBERS_STAMPER.equals(node.modTypeId())) continue;
             Recipe<?> recipe = CraftRecipeResolver.resolve(player.serverLevel(), node.recipeId());
             if (recipe == null) continue;
-            List<IngredientSpec> declared = CraftPacketUtils.extractRecursiveIngredientSpecs(recipe);
+            List<IngredientSpec> declared =
+                    CraftPacketUtils.extractSingleOperationRecursiveIngredientSpecs(recipe);
             if (declared == null || declared.isEmpty()) continue;
             List<IngredientSpec> contextual = CraftPacketUtils.applyPlanningIngredientContext(
                     recipe, player, declared);
@@ -937,23 +942,34 @@ public final class GenericCraftPacket {
             Map<String, ItemStack> materialLocks) {
         PlanCache.Key exactKey = CraftPlanCacheKeys.key(player.getUUID(), recipeId,
                 forcedRecipes, repeatCount, targetOutput, modType, materialLocks);
-        PlanCache.Entry entry = CraftPlanningRuntime.planCache().takeForExecution(exactKey);
+        PlanCache cache = CraftPlanningRuntime.planCache();
+        PlanCache.Key leaseKey = exactKey;
+        PlanCache.Entry entry = cache.peekForExecution(leaseKey);
         if (entry == null && (targetOutput == null || targetOutput.isEmpty()
                 || !targetOutput.hasTag())) {
             PlanCache.Key fallbackKey = CraftPlanCacheKeys.key(player.getUUID(), recipeId,
                     forcedRecipes, repeatCount, null, modType, materialLocks);
-            entry = CraftPlanningRuntime.planCache().takeForExecution(fallbackKey);
+            leaseKey = fallbackKey;
+            entry = cache.peekForExecution(leaseKey);
         }
-        if (entry == null || !entry.plan().success() || stampStateAffectsPlan(modType, entry.plan())) {
-            return null;
-        }
+        if (entry == null) return null;
         ResourceKey<Level> levelKey = dimension != null
                 ? ResourceKey.create(
                 Registries.DIMENSION, dimension)
                 : player.serverLevel().dimension();
         BlockPos lookupPos = position != null ? position : player.blockPosition();
-        if (!PlanningStateValidator.revalidateForExecution(player, entry.snapshot(), entry.plan(),
-                levelKey, lookupPos, storageReference)) {
+        boolean valid = entry.plan().success()
+                && !stampStateAffectsPlan(modType, entry.plan())
+                && PlanningStateValidator.revalidateForExecution(
+                player, entry.snapshot(), entry.plan(),
+                levelKey, lookupPos, storageReference);
+        if (!cache.consumeForExecution(leaseKey, entry)) {
+            RSIntegrationMod.debug(
+                    "[RSI-Generic] Execution lease changed before validation completed: recipeId={}",
+                    recipeId);
+            return null;
+        }
+        if (!valid) {
             RSIntegrationMod.debug("[RSI-Generic] Rejected execution cache state: recipeId={} reason=state-or-required-supply",
                     recipeId);
             return null;
@@ -970,7 +986,7 @@ public final class GenericCraftPacket {
             @Nullable CraftStorageEndpoint storageEndpoint,
             PlanCache.Entry cached, Map<String, ItemStack> materialLocks) {
         ModType terminalType = modTypeForCachedExecution(recipe);
-        ModRecipeHandler terminalHandler = ModRecipeHandlers.handlerFor(recipe);
+        ModRecipeHandler terminalHandler = ModRecipeHandlers.claimFor(recipe).winner();
         if (terminalHandler != null && !terminalHandler.hasDeterministicPrimaryOutput(recipe)) return false;
         if (canUsePureExecutionPlan(cached.purePlan(), terminalType)) {
             List<ResolutionStep> steps = new ArrayList<>(PurePlanAdapter.toResolutionSteps(
@@ -1162,7 +1178,8 @@ public final class GenericCraftPacket {
 
     private static boolean tryPrepareIntermediateMaterials(
             ServerPlayer player, ResourceLocation recipeId, Recipe<?> recipe,
-            @Nullable ModType modType, List<IngredientSpec> specs, ItemStack recipeOutput,
+            @Nullable ModType modType, List<ScaledIngredientSpec> specs,
+            ItemStack recipeOutput,
             @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
             CraftStorageEndpoint storageEndpoint,
             MachineSelectionMode machineSelectionMode,
@@ -1173,11 +1190,11 @@ public final class GenericCraftPacket {
         CraftPlanGraph graph;
         try {
             graph = CraftExecutionPolicy.isPhysicalMachineRecipe(recipe, modType)
-                    ? CraftingResolver.resolveMachineGraphForSpecsWithTypes(
+                    ? CraftingResolver.resolveMachineGraphForScaledSpecsWithTypes(
                             specs, available, player.serverLevel(), player, storageEndpoint, missing,
                             forcedOverrides, true, compatibilityResolverBudgetMs(),
                             new CraftingResolver.ActiveRootRecipe(recipeId, recipeOutput), materialLocks)
-                    : CraftingResolver.resolveGraphForSpecsWithTypes(
+                    : CraftingResolver.resolveGraphForScaledSpecsWithTypes(
                             specs, available, player.serverLevel(), player, storageEndpoint, missing,
                             forcedOverrides, true, compatibilityResolverBudgetMs(),
                             new CraftingResolver.ActiveRootRecipe(recipeId, recipeOutput), materialLocks);
@@ -1277,10 +1294,12 @@ public final class GenericCraftPacket {
                                                MachineSelectionMode machineSelectionMode, Map<String, ItemStack> materialLocks) {
         final StorageReference repeatReference = storageEndpoint == null
                 ? null : storageEndpoint.session().reference();
+        int remainingRepeats =
+                CraftExecutionPolicy.graphRemainingRepeats(graph, terminalStep);
         CraftExecutionLauncher.launchGraph(
                 player, graph, terminalStep, storageEndpoint, recipeId,
                 forcedRecipes, dim, pos, inferMode, baseItem, targetOutput,
-                outputDestination, machineSelectionMode, materialLocks,
+                outputDestination, machineSelectionMode, materialLocks, remainingRepeats,
                 (p, rem) -> queueExecutionRequest(p,
                         next -> tryResolve(next, recipeId, forcedRecipes, dim, pos, rem,
                                 inferMode, baseItem, targetOutput, outputDestination,
@@ -1497,7 +1516,7 @@ public final class GenericCraftPacket {
             return;
         }
         if (!partialPreparation && modType != null && modType.isVirtual()) {
-            ModRecipeHandler virtualHandler = ModRecipeHandlers.handlerFor(recipe);
+            ModRecipeHandler virtualHandler = ModRecipeHandlers.claimFor(recipe).winner();
             if (virtualHandler == null || virtualHandler.modType() != modType
                     || !virtualHandler.isAvailableForPlanning(recipe, player)) {
                 player.sendSystemMessage(Component.translatable(
@@ -1637,7 +1656,8 @@ public final class GenericCraftPacket {
             ItemStack preparationOutput = CraftMachineBindingSupport.routeRecipeOutput(modType,
                     ModRecipeHandlers.tryGetResultItem(
                             recipe, player.serverLevel().registryAccess()));
-            List<IngredientSpec> preparationSpecs = CraftIngredientPlanMath.scaleTerminalIngredientSpecs(
+            List<ScaledIngredientSpec> preparationSpecs =
+                    CraftIngredientPlanMath.scaleTerminalIngredientSpecs(
                     recipe, specs, preparationOutput, repeatCount);
             if (preparationSpecs.isEmpty()) {
                 player.sendSystemMessage(Component.translatable(
@@ -1704,14 +1724,15 @@ public final class GenericCraftPacket {
                         cachedMachinePlan, materialLocks)) {
                     return;
                 }
-                List<IngredientSpec> graphSpecs = CraftIngredientPlanMath.scaleTerminalIngredientSpecs(
+                List<ScaledIngredientSpec> graphSpecs =
+                        CraftIngredientPlanMath.scaleTerminalIngredientSpecs(
                         recipe, executionSpecs, recipeOutput, repeatCount);
-                ModRecipeHandler graphHandler = ModRecipeHandlers.handlerFor(recipe);
+                ModRecipeHandler graphHandler = ModRecipeHandlers.claimFor(recipe).winner();
                 if (graphHandler != null) {
-                    graphSpecs = graphHandler.getRecursiveIngredients(recipe, graphSpecs);
+                    graphSpecs = graphHandler.getRecursiveScaledIngredients(recipe, graphSpecs);
                 }
                 if (ModIds.ID_SUMMONING_RITUALS.equals(modType.id())) {
-                    graphSpecs = SummoningRitualAltarBatchDelegate.planningMaterials(
+                    graphSpecs = SummoningRitualAltarBatchDelegate.planningScaledMaterials(
                             player, recipe, effectiveDim, effectivePos, graphSpecs);
                 }
                 Map<StackKey, Long> avail = listAvailable(player, storageEndpoint);
@@ -1744,12 +1765,12 @@ public final class GenericCraftPacket {
                 CraftPlanGraph inputGraph;
                 try {
                     inputGraph = CraftExecutionPolicy.usesPhysicalMachineInputSlots(recipe)
-                            ? CraftingResolver.resolveMachineGraphForSpecsWithTypes(
+                            ? CraftingResolver.resolveMachineGraphForScaledSpecsWithTypes(
                                     graphSpecs, avail, player.serverLevel(), player, storageEndpoint, missing,
                                     forcedOverrides, false, compatibilityResolverBudgetMs(),
                                     new CraftingResolver.ActiveRootRecipe(recipeId, recipeOutput),
                                     materialLocks, safePreferences)
-                            : CraftingResolver.resolveGraphForSpecsWithTypes(
+                            : CraftingResolver.resolveGraphForScaledSpecsWithTypes(
                                     graphSpecs, avail, player.serverLevel(), player, storageEndpoint, missing,
                                     forcedOverrides, false, compatibilityResolverBudgetMs(),
                                     new CraftingResolver.ActiveRootRecipe(recipeId, recipeOutput),
@@ -1782,15 +1803,12 @@ public final class GenericCraftPacket {
                 ResolutionStep terminalStep = new ResolutionStep(recipeId, modType, recipeId,
                         List.of(), List.of(), inferMode, repeatCount);
                 recipeOutput = CraftTerminalSteps.selectTerminalGraphOutput(recipe, recipeOutput, targetOutput);
-                ModRecipeHandler recipeHandler = ModRecipeHandlers.handlerFor(recipe);
-                boolean deterministicPrimary = recipeHandler == null
-                        || recipeHandler.hasDeterministicPrimaryOutput(recipe);
                 TerminalGraphExecutionPolicy.Decision graphDecision =
                         TerminalGraphExecutionPolicy.decide(
-                                inferMode, !graphSpecs.isEmpty(), recipeOutput,
-                                deterministicPrimary,
-                                CraftExecutionPolicy.isSelfAmplifyingRecipe(
-                                        recipe, player.serverLevel().registryAccess()));
+                                !graphSpecs.isEmpty(),
+                                terminalStep.syntheticInput() != null
+                                        || terminalStep.syntheticOutput() != null,
+                                recipeOutput);
                 if (graphDecision.composable()) {
                     try {
                         CraftPlanGraph completeGraph = CraftTerminalSteps.composeEquivalentTerminalGraph(
@@ -1843,7 +1861,8 @@ public final class GenericCraftPacket {
                     recipe, player.serverLevel().registryAccess())) {
                 ItemStack directOutput = ModRecipeHandlers.tryGetResultItem(
                         recipe, player.serverLevel().registryAccess());
-                List<IngredientSpec> directSpecs = CraftIngredientPlanMath.scaleTerminalIngredientSpecs(
+                List<ScaledIngredientSpec> directSpecs =
+                        CraftIngredientPlanMath.scaleTerminalIngredientSpecs(
                         recipe, CraftIngredientPlanMath.extractPlanIngredientSpecs(craftingRecipe), directOutput, repeatCount);
                 Map<StackKey, Long> directAvailable = listAvailable(
                         player, storageEndpoint);
@@ -1902,13 +1921,14 @@ public final class GenericCraftPacket {
                     cachedPreResolved, materialLocks)) {
                 return;
             }
-            List<IngredientSpec> graphSpecs = CraftIngredientPlanMath.scaleTerminalIngredientSpecs(
+            List<ScaledIngredientSpec> graphSpecs =
+                    CraftIngredientPlanMath.scaleTerminalIngredientSpecs(
                     recipe, CraftIngredientPlanMath.extractPlanIngredientSpecs(cr), recipeOutput, repeatCount);
             Map<StackKey, Long> available = listAvailable(player, storageEndpoint);
             List<String> graphMissing = new ArrayList<>();
             CraftPlanGraph inputGraph;
             try {
-                inputGraph = CraftingResolver.resolveGraphForSpecsWithTypes(
+                inputGraph = CraftingResolver.resolveGraphForScaledSpecsWithTypes(
                         graphSpecs, available, player.serverLevel(), player, storageEndpoint,
                         graphMissing, null, false, compatibilityResolverBudgetMs(),
                         new CraftingResolver.ActiveRootRecipe(recipeId, recipeOutput),
@@ -1937,22 +1957,23 @@ public final class GenericCraftPacket {
                             "rsi.generic.error.network_unavailable"));
                     return;
                 }
-                if (physicalSteps && !legacySyntheticStep && !selfAmplifying) {
-                    ResolutionStep terminalStep = CraftTerminalSteps.genericTerminalStep(recipeId, repeatCount);
-                    recipeOutput = CraftTerminalSteps.selectTerminalGraphOutput(recipe, recipeOutput, targetOutput);
-                    try {
-                        CraftPlanGraph completeGraph = CraftTerminalSteps.composeEquivalentTerminalGraph(
-                                inputGraph, terminalStep, recipeOutput,
-                                player.serverLevel());
-                        launchGraphAsyncChain(player, completeGraph, terminalStep,
-                                storageEndpoint, repeatCount, recipeId, forcedRecipes, dim, pos,
-                                inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode, materialLocks);
-                        return;
-                    } catch (IllegalArgumentException | ArithmeticException exception) {
-                        RSIntegrationMod.LOGGER.warn(
-                                "[RSI-Craft] pre-resolved terminal graph composition rejected recipe={} reason={}",
-                                recipeId, exception.getMessage());
-                    }
+                ResolutionStep terminalStep = CraftTerminalSteps.genericTerminalStep(
+                        recipeId, repeatCount);
+                recipeOutput = CraftTerminalSteps.selectTerminalGraphOutput(
+                        recipe, recipeOutput, targetOutput);
+                try {
+                    CraftPlanGraph completeGraph = CraftTerminalSteps.composeEquivalentTerminalGraph(
+                            inputGraph, terminalStep, recipeOutput,
+                            player.serverLevel());
+                    launchGraphAsyncChain(player, completeGraph, terminalStep,
+                            storageEndpoint, repeatCount, recipeId, forcedRecipes, dim, pos,
+                            inferMode, baseItem, targetOutput, outputDestination,
+                            machineSelectionMode, materialLocks);
+                    return;
+                } catch (IllegalArgumentException | ArithmeticException exception) {
+                    RSIntegrationMod.LOGGER.warn(
+                            "[RSI-Craft] pre-resolved terminal graph composition rejected recipe={} reason={}",
+                            recipeId, exception.getMessage());
                 }
                 if (physicalSteps || legacySyntheticStep) {
                     List<ResolutionStep> execSteps = CraftTerminalSteps.genericExecutionSteps(
@@ -1998,11 +2019,12 @@ public final class GenericCraftPacket {
             List<String> missingCheck = new ArrayList<>();
             ItemStack recipeOutput = cr2.getResultItem(
                     player.serverLevel().registryAccess()).copy();
-            List<IngredientSpec> scaledSpecs = CraftIngredientPlanMath.scaleTerminalIngredientSpecs(
+            List<ScaledIngredientSpec> scaledSpecs =
+                    CraftIngredientPlanMath.scaleTerminalIngredientSpecs(
                     recipe, CraftPacketUtils.extractIngredientSpecs(cr2), recipeOutput, repeatCount);
             CraftPlanGraph inputGraph;
             try {
-                inputGraph = CraftingResolver.resolveGraphForSpecsWithTypes(
+                inputGraph = CraftingResolver.resolveGraphForScaledSpecsWithTypes(
                         scaledSpecs, avail, player.serverLevel(),
                         player, storageEndpoint, missingCheck, forcedOverrides, false,
                         compatibilityResolverBudgetMs(),
@@ -2035,21 +2057,21 @@ public final class GenericCraftPacket {
                             "rsi.generic.error.network_unavailable"));
                     return;
                 }
-                if (physicalSteps && !legacySyntheticStep && !selfAmplifying) {
-                    recipeOutput = CraftTerminalSteps.selectTerminalGraphOutput(recipe, recipeOutput, targetOutput);
-                    try {
-                        CraftPlanGraph completeGraph = CraftTerminalSteps.composeEquivalentTerminalGraph(
-                                inputGraph, terminalStep, recipeOutput,
-                                player.serverLevel());
-                        launchGraphAsyncChain(player, completeGraph, terminalStep,
-                                storageEndpoint, repeatCount, recipeId, forcedRecipes, dim, pos,
-                                inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode, materialLocks);
-                        return;
-                    } catch (IllegalArgumentException | ArithmeticException exception) {
-                        RSIntegrationMod.LOGGER.warn(
-                                "[RSI-Craft] crafting terminal graph composition rejected recipe={} reason={}",
-                                recipeId, exception.getMessage());
-                    }
+                recipeOutput = CraftTerminalSteps.selectTerminalGraphOutput(
+                        recipe, recipeOutput, targetOutput);
+                try {
+                    CraftPlanGraph completeGraph = CraftTerminalSteps.composeEquivalentTerminalGraph(
+                            inputGraph, terminalStep, recipeOutput,
+                            player.serverLevel());
+                    launchGraphAsyncChain(player, completeGraph, terminalStep,
+                            storageEndpoint, repeatCount, recipeId, forcedRecipes, dim, pos,
+                            inferMode, baseItem, targetOutput, outputDestination,
+                            machineSelectionMode, materialLocks);
+                    return;
+                } catch (IllegalArgumentException | ArithmeticException exception) {
+                    RSIntegrationMod.LOGGER.warn(
+                            "[RSI-Craft] crafting terminal graph composition rejected recipe={} reason={}",
+                            recipeId, exception.getMessage());
                 }
                 launchAsyncChain(player, execSteps2,
                         physicalSteps || selfAmplifying
@@ -2102,7 +2124,8 @@ public final class GenericCraftPacket {
                 && RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING.get()) {
             ItemStack smithingOutput = ModRecipeHandlers.tryGetResultItem(
                     recipe, player.serverLevel().registryAccess());
-            List<IngredientSpec> smithingSpecs = CraftIngredientPlanMath.scaleTerminalIngredientSpecs(
+            List<ScaledIngredientSpec> smithingSpecs =
+                    CraftIngredientPlanMath.scaleTerminalIngredientSpecs(
                     recipe, specs, smithingOutput, repeatCount);
             if (!smithingSpecs.isEmpty()) {
                 Map<StackKey, Long> avail = listAvailable(player, storageEndpoint);
@@ -2123,7 +2146,7 @@ public final class GenericCraftPacket {
                     List<String> missing = new ArrayList<>();
                     CraftPlanGraph smithingInputGraph;
                     try {
-                        smithingInputGraph = CraftingResolver.resolveGraphForSpecsWithTypes(
+                        smithingInputGraph = CraftingResolver.resolveGraphForScaledSpecsWithTypes(
                         smithingSpecs, avail, player.serverLevel(), player, storageEndpoint, missing,
                                 forcedOverrides, false, compatibilityResolverBudgetMs(), null,
                                 materialLocks, safePreferences);
@@ -2150,23 +2173,23 @@ public final class GenericCraftPacket {
                                 step -> step.modType() != ModType.GENERIC);
                         boolean selfAmplifying = CraftExecutionPolicy.isSelfAmplifyingRecipe(
                                 recipe, player.serverLevel().registryAccess());
-                        if (physicalSteps && !legacySyntheticStep && !selfAmplifying) {
-                            ItemStack recipeOutput = ModRecipeHandlers.tryGetResultItem(
-                                    recipe, player.serverLevel().registryAccess());
-                            recipeOutput = CraftTerminalSteps.selectTerminalGraphOutput(recipe, recipeOutput, targetOutput);
-                            try {
-                                CraftPlanGraph completeGraph = CraftTerminalSteps.composeEquivalentTerminalGraph(
-                                        smithingInputGraph, terminalStep, recipeOutput,
-                                        player.serverLevel());
-                                launchGraphAsyncChain(player, completeGraph, terminalStep,
-                                        storageEndpoint, repeatCount, recipeId, forcedRecipes, dim, pos,
-                                        inferMode, baseItem, targetOutput, outputDestination, machineSelectionMode, materialLocks);
-                                return;
-                            } catch (IllegalArgumentException | ArithmeticException exception) {
-                                RSIntegrationMod.LOGGER.warn(
-                                        "[RSI-Craft] smithing terminal graph composition rejected recipe={} reason={}",
-                                        recipeId, exception.getMessage());
-                            }
+                        ItemStack recipeOutput = ModRecipeHandlers.tryGetResultItem(
+                                recipe, player.serverLevel().registryAccess());
+                        recipeOutput = CraftTerminalSteps.selectTerminalGraphOutput(
+                                recipe, recipeOutput, targetOutput);
+                        try {
+                            CraftPlanGraph completeGraph = CraftTerminalSteps.composeEquivalentTerminalGraph(
+                                    smithingInputGraph, terminalStep, recipeOutput,
+                                    player.serverLevel());
+                            launchGraphAsyncChain(player, completeGraph, terminalStep,
+                                    storageEndpoint, repeatCount, recipeId, forcedRecipes, dim, pos,
+                                    inferMode, baseItem, targetOutput, outputDestination,
+                                    machineSelectionMode, materialLocks);
+                            return;
+                        } catch (IllegalArgumentException | ArithmeticException exception) {
+                            RSIntegrationMod.LOGGER.warn(
+                                    "[RSI-Craft] smithing terminal graph composition rejected recipe={} reason={}",
+                                    recipeId, exception.getMessage());
                         }
                         List<ResolutionStep> asyncSteps = new ArrayList<>(interSteps);
                         asyncSteps.add(terminalStep);
@@ -2623,7 +2646,7 @@ public final class GenericCraftPacket {
         }
 
         // Determine ingredients, output, and mod type for both vanilla and mod recipes
-        List<IngredientSpec> recipeSpecs;
+        List<ScaledIngredientSpec> recipeSpecs;
         ItemStack targetOutput;
         ModType recipeModType = previewModType;
 
@@ -2827,7 +2850,7 @@ public final class GenericCraftPacket {
         }
 
         targetOutput = CraftMachineBindingSupport.routeRecipeOutput(recipeModType, targetOutput);
-        recipeSpecs = MaterialLocks.narrowSpecs(recipeId, recipeSpecs, materialLocks);
+        recipeSpecs = MaterialLocks.narrowScaledSpecs(recipeId, recipeSpecs, materialLocks);
 
         // ── Arcane Iterator per-level chain detection ──
         // All levels of one enchant share this recipeId and declare no static output,
@@ -2964,13 +2987,14 @@ public final class GenericCraftPacket {
             selectedSmithingBase = SmithingRecipeHandler.selectAvailableBase(
                     smithingRecipe, available, repeatCount);
             if (!selectedSmithingBase.isEmpty()) {
-                recipeSpecs = SmithingRecipeHandler.requireExactBase(
+                recipeSpecs = SmithingRecipeHandler.requireExactScaledBase(
                         smithingRecipe, recipeSpecs, selectedSmithingBase);
                 displayIngredients = recipeSpecs.stream()
                         .filter(spec -> !spec.isEmpty())
-                        .map(IngredientSpec::ingredient)
+                        .map(ScaledIngredientSpec::ingredient)
                         .toList();
-                displayInputRoles = CraftIngredientPlanMath.nonEmptyInputRoles(recipeSpecs);
+                displayInputRoles =
+                        CraftIngredientPlanMath.nonEmptyScaledInputRoles(recipeSpecs);
                 ItemStack assembled = SmithingRecipeHandler.assembleWithBase(
                         smithingRecipe, selectedSmithingBase,
                         player.serverLevel().registryAccess());
@@ -3016,7 +3040,7 @@ public final class GenericCraftPacket {
         DirectMaterialAllocator.Result directPreviewAllocation =
                 executionMachineAvailable && effectiveOverrides.isEmpty()
                 && hasFixedTerminalInputs
-                ? DirectMaterialAllocator.allocate(recipeSpecs, available)
+                        ? DirectMaterialAllocator.allocateScaled(recipeSpecs, available)
                 : new DirectMaterialAllocator.Result(false, List.of(), -1, 0);
         boolean directTerminalPlan = CraftIngredientPlanMath.useDirectTerminalPlan(
                 directPreviewAllocation, recipeSpecs, planTargetOutput);
@@ -3247,14 +3271,14 @@ public final class GenericCraftPacket {
         // Build plan via CraftingResolver
         List<String> missing = new ArrayList<>();
 
-        ModRecipeHandler recursiveHandler = ModRecipeHandlers.handlerFor(recipe);
-        List<IngredientSpec> recursiveRecipeSpecs = recursiveHandler == null
+        ModRecipeHandler recursiveHandler = ModRecipeHandlers.claimFor(recipe).winner();
+        List<ScaledIngredientSpec> recursiveRecipeSpecs = recursiveHandler == null
                 ? recipeSpecs
-                : recursiveHandler.getRecursiveIngredients(recipe, recipeSpecs);
+                : recursiveHandler.getRecursiveScaledIngredients(recipe, recipeSpecs);
         boolean directRecursiveTerminalPlan = !effectiveOverrides.isEmpty()
                 ? false
                 : CraftIngredientPlanMath.useDirectTerminalPlan(
-                        DirectMaterialAllocator.allocate(recursiveRecipeSpecs, available),
+                DirectMaterialAllocator.allocateScaled(recursiveRecipeSpecs, available),
                         recursiveRecipeSpecs, planTargetOutput);
 
         List<ResolutionStep> resolutionSteps = null;
@@ -3300,11 +3324,11 @@ public final class GenericCraftPacket {
                 CraftingResolver.ActiveRootRecipe activeRoot =
                         new CraftingResolver.ActiveRootRecipe(recipeId, targetOutput);
                 planGraph = CraftExecutionPolicy.usesPhysicalMachineInputSlots(recipe)
-                        ? CraftingResolver.resolveMachineGraphForSpecsWithTypes(
+                        ? CraftingResolver.resolveMachineGraphForScaledSpecsWithTypes(
                                 recursiveRecipeSpecs, available, player.serverLevel(),
                                 player, planningEndpoint, missing, forcedOverrides, true, typedTimeoutMs,
                                 activeRoot, materialLocks, safePreferences)
-                        : CraftingResolver.resolveGraphForSpecsWithTypes(
+                        : CraftingResolver.resolveGraphForScaledSpecsWithTypes(
                                 recursiveRecipeSpecs, available, player.serverLevel(),
                                 player, planningEndpoint, missing, forcedOverrides, true, typedTimeoutMs,
                                 activeRoot, materialLocks, safePreferences);
@@ -3540,7 +3564,7 @@ public final class GenericCraftPacket {
                         player.serverLevel().registryAccess());
                 modSpecs = MaterialLocks.narrowSpecs(stepId, modSpecs, materialLocks);
                 if (modSpecs != null) {
-                    ModRecipeHandler stepHandler = ModRecipeHandlers.handlerFor(stepRecipe);
+                    ModRecipeHandler stepHandler = ModRecipeHandlers.claimFor(stepRecipe).winner();
                     int stepInputIndex = 0;
                     for (IngredientSpec spec : modSpecs) {
                         if (spec.isEmpty()) continue;
@@ -3632,7 +3656,7 @@ public final class GenericCraftPacket {
         // Also seed raw materials (leaf items not produced by any step) as depth 0
         // so steps that consume them can propagate depth correctly.
         Map<Item, Integer> depthByItem = new HashMap<>();
-        for (IngredientSpec spec : recipeSpecs) {
+        for (ScaledIngredientSpec spec : recipeSpecs) {
             if (spec.isEmpty()) continue;
             for (ItemStack stack : spec.ingredient().getItems()) {
                 if (!stack.isEmpty()) depthByItem.putIfAbsent(stack.getItem(), 0);
@@ -3744,7 +3768,7 @@ public final class GenericCraftPacket {
                             smithingRecipe, targetSpecs, selectedSmithingBase);
                 }
                 if (targetSpecs != null) {
-                    ModRecipeHandler targetHandler = ModRecipeHandlers.handlerFor(recipe);
+                    ModRecipeHandler targetHandler = ModRecipeHandlers.claimFor(recipe).winner();
                     int targetInputIndex = 0;
                     for (IngredientSpec spec : targetSpecs) {
                         if (spec.isEmpty()) continue;
@@ -3887,7 +3911,7 @@ public final class GenericCraftPacket {
         Map<Item, Long> matAvailable = new HashMap<>(itemAvailable);
         Map<Item, Long> neededCounts = new LinkedHashMap<>();
         Map<Item, Ingredient> itemSource = new HashMap<>();
-        for (IngredientSpec spec : recipeSpecs) {
+        for (ScaledIngredientSpec spec : recipeSpecs) {
             if (spec.isEmpty()) continue;
             Map<Item, Long> consumed = CraftIngredientPlanMath.consumeIngredientCountInPlace(
                     spec.ingredient(), spec.count(), matAvailable);
@@ -3917,7 +3941,7 @@ public final class GenericCraftPacket {
                     : CraftPacketUtils.extractIngredientSpecs(stepRecipe);
             specs = CraftPacketUtils.applyPlanningIngredientContext(stepRecipe, player, specs);
             if (specs != null) {
-                ModRecipeHandler stepHandler = ModRecipeHandlers.handlerFor(stepRecipe);
+                ModRecipeHandler stepHandler = ModRecipeHandlers.claimFor(stepRecipe).winner();
                 int stepInputIndex = 0;
                 for (IngredientSpec spec : specs) {
                     if (spec.isEmpty()) continue;
@@ -3978,7 +4002,8 @@ public final class GenericCraftPacket {
             for (ResolutionStep step : resolutionSteps) {
                 if (step.productionTarget() == null) continue;
                 Recipe<?> plannedRecipe = CraftRecipeResolver.resolve(player.serverLevel(), step.recipeId());
-                ModRecipeHandler handler = plannedRecipe == null ? null : ModRecipeHandlers.handlerFor(plannedRecipe);
+                ModRecipeHandler handler = plannedRecipe == null ? null
+                        : ModRecipeHandlers.claimFor(plannedRecipe).winner();
                 if (handler == null || !handler.requiresTargetedProduction(plannedRecipe,
                         step.productionTarget().material().toStack(1))) continue;
                 Component warning = Component.translatable("rsi.plan.probability.estimate",

@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.mods.crockpot.ParrotFeedingRecipeHandler;
 import com.huanghuang.rsintegration.reflection.probes.CrockPotReflection;
@@ -110,7 +111,9 @@ public final class BirdcageBatchDelegate extends AbstractBatchDelegate {
     @Override
     @Nullable
     public List<IngredientSpec> getRequiredMaterials() {
-        return recipe == null ? null : ModRecipeHandlers.handlerFor(recipe).getIngredients(recipe);
+        ModRecipeHandler handler = recipe == null
+                ? null : ModRecipeHandlers.claimFor(recipe).winner();
+        return handler == null ? null : handler.getIngredients(recipe);
     }
 
     @Override

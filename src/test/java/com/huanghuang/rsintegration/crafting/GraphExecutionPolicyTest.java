@@ -77,18 +77,17 @@ class GraphExecutionPolicyTest extends BootstrapTest {
     }
 
     @Test
-    void genericCatalystOrDurabilityInputsRequireOrderedFlatExecution() {
+    void genericCatalystOrDurabilityInputsStayInGraphExecution() {
         CraftPlanGraph catalystGraph = graphWithRole(DemandRole.CATALYST);
         GraphExecutionPolicy.Decision catalyst = GraphExecutionPolicy.decide(
                 false, List.of(ModType.GENERIC), catalystGraph);
-        assertFalse(catalyst.useGraphExecutor());
-        assertEquals(GraphExecutionPolicy.Reason.STATEFUL_GENERIC_REUSE_REQUIRES_FLAT,
-                catalyst.reason());
+        assertTrue(catalyst.useGraphExecutor());
+        assertEquals(GraphExecutionPolicy.Reason.GRAPH_COMPLETE, catalyst.reason());
 
-        assertFalse(GraphExecutionPolicy.requiresFlatStatefulReuse(
-                graphWithRole(DemandRole.CONSUMED)));
-        assertTrue(GraphExecutionPolicy.requiresFlatStatefulReuse(
-                graphWithRole(DemandRole.DURABILITY)));
+        GraphExecutionPolicy.Decision durability = GraphExecutionPolicy.decide(
+                false, List.of(ModType.GENERIC), graphWithRole(DemandRole.DURABILITY));
+        assertTrue(durability.useGraphExecutor());
+        assertEquals(GraphExecutionPolicy.Reason.GRAPH_COMPLETE, durability.reason());
     }
 
     @Test
