@@ -198,6 +198,10 @@ public final class ConsumerCraftingRuntime {
         ConsumerResult<ConsumerInspectionTicket> rejected =
                 validateMainThread(player);
         if (rejected != null) return rejected;
+        prunePlans(
+                player.serverLevel().getGameTime(),
+                capabilities.planTtlTicks()
+        );
         if (!RecipeIndex.isReady(player.serverLevel())) {
             return reject(
                     ConsumerDiagnosticCode.CATALOG_NOT_READY,
@@ -332,6 +336,10 @@ public final class ConsumerCraftingRuntime {
         ConsumerResult<ConsumerInspectionPage> rejected =
                 validateMainThread(player);
         if (rejected != null) return rejected;
+        prunePlans(
+                player.serverLevel().getGameTime(),
+                capabilities.planTtlTicks()
+        );
         Session session = sessions.get(ticketId);
         ConsumerResult<ConsumerInspectionPage> invalid =
                 validateSession(player, session, capabilities);
@@ -1104,6 +1112,14 @@ public final class ConsumerCraftingRuntime {
                     "recursive planner could not construct an executable plan"
             ));
         }
+        if (session.closed) {
+            return InspectionEntry.result(unavailable(
+                    key,
+                    ConsumerCraftabilityStatus.INTERNAL_ERROR,
+                    ConsumerDiagnosticCode.SESSION_EXPIRED,
+                    "inspection session closed during planning"
+            ));
+        }
         if (plans.size() >= MAX_PLAN_ENTRIES) {
             return InspectionEntry.result(unavailable(
                     key,
@@ -1414,6 +1430,14 @@ public final class ConsumerCraftingRuntime {
                     ConsumerCraftabilityStatus.RECIPE_UNSUPPORTED,
                     ConsumerDiagnosticCode.RECIPE_UNSUPPORTED,
                     "typed plan has no executable steps"
+            );
+        }
+        if (session.closed) {
+            return unavailable(
+                    key,
+                    ConsumerCraftabilityStatus.INTERNAL_ERROR,
+                    ConsumerDiagnosticCode.SESSION_EXPIRED,
+                    "inspection session closed during typed planning"
             );
         }
         if (plans.size() >= MAX_PLAN_ENTRIES) {
@@ -2089,6 +2113,11 @@ public final class ConsumerCraftingRuntime {
                 });
     }
 
+    private void prunePlans(long gameTime, long ttlTicks) {
+        plans.entrySet().removeIf(entry ->
+                gameTime - entry.getValue().createdGameTime > ttlTicks);
+    }
+
     private void pruneOrders() {
         if (orders.size() <= MAX_ORDER_ENTRIES) return;
         for (Map.Entry<ConsumerOrderId, OrderRecord> entry
@@ -2192,7 +2221,7 @@ public final class ConsumerCraftingRuntime {
         private final ConsumerInspectionRequest request;
         private final Capture capture;
         private final long createdGameTime;
-        private boolean closed;
+        private volatile boolean closed;
         private int nextOffset;
         private int futureOffset;
         private int futureEnd;

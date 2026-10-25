@@ -211,7 +211,8 @@ public final class DefaultRSICraftConsumerApi
 
     public void tick(ServerLevel level) {
         if (state == ConsumerServiceState.CREATED
-                || state == ConsumerServiceState.INDEXING) {
+                || state == ConsumerServiceState.INDEXING
+                || state == ConsumerServiceState.READY) {
             state = RecipeIndex.isReady(level)
                     ? ConsumerServiceState.READY
                     : ConsumerServiceState.INDEXING;
