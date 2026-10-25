@@ -84,11 +84,14 @@ import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -982,13 +985,9 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             }
             long remaining = Math.min(
                     Integer.MAX_VALUE, output.amount().max());
-            for (var port : descriptor.fluidPorts()) {
-                if (remaining <= 0L
-                        || port.direction() != InputOutputAccess.OUTPUT
-                        || !output.outputGroup().equals(
-                        port.outputGroup())) {
-                    continue;
-                }
+            for (MachineFluidPort port : fluidOutputPorts(
+                    output.outputGroup())) {
+                if (remaining <= 0L) break;
                 FluidStack current = getFluid(port);
                 if (current.isEmpty()
                         || !matchesFluid(current, output.resource())) {
@@ -1087,8 +1086,12 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     ) {
         List<MachineItemPort> ports = descriptor.itemPorts().stream()
                 .filter(port -> port.direction() == InputOutputAccess.INPUT)
-                .filter(port -> requirement.inputGroup().equals(
-                        port.inputGroup()))
+                .filter(port -> matchesGroup(
+                        port.inputGroup(), requirement.inputGroup()))
+                .sorted(groupPriority(
+                        MachineItemPort::portId,
+                        MachineItemPort::inputGroup,
+                        requirement.inputGroup()))
                 .toList();
         if (ports.isEmpty()) return stack;
         ItemStack remainder = stack;
@@ -1197,13 +1200,18 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     ) {
         if (descriptor == null || fluid.isEmpty()) return fluid.getAmount();
         long remaining = fluid.getAmount();
-        for (var port : descriptor.fluidPorts()) {
+        List<MachineFluidPort> ports = descriptor.fluidPorts().stream()
+                .filter(port -> port.direction() == InputOutputAccess.INPUT)
+                .filter(port -> matchesGroup(
+                        port.inputGroup(), requirement.inputGroup()))
+                .filter(port -> port.access() != FluidPortAccess.CUSTOM)
+                .sorted(groupPriority(
+                        MachineFluidPort::portId,
+                        MachineFluidPort::inputGroup,
+                        requirement.inputGroup()))
+                .toList();
+        for (MachineFluidPort port : ports) {
             if (remaining <= 0L) break;
-            if (port.direction() != InputOutputAccess.INPUT
-                    || !requirement.inputGroup().equals(port.inputGroup())
-                    || port.access() == FluidPortAccess.CUSTOM) {
-                continue;
-            }
             IFluidHandler handler = fluidHandler(port.side());
             if (handler == null) continue;
             int chunk = (int) Math.min(
@@ -1253,7 +1261,8 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         int available = 0;
         for (MachineItemPort port : descriptor.itemPorts()) {
             if (port.direction() != InputOutputAccess.INPUT
-                    || !requirement.inputGroup().equals(port.inputGroup())) {
+                    || !matchesGroup(
+                    port.inputGroup(), requirement.inputGroup())) {
                 continue;
             }
             ItemStack current = get(port, null);
@@ -1327,12 +1336,8 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                         Math.min(Integer.MAX_VALUE, maximum)
                 );
                 long capacity = 0L;
-                for (MachineFluidPort port : descriptor.fluidPorts()) {
-                    if (port.direction() != InputOutputAccess.OUTPUT
-                            || !output.outputGroup().equals(
-                            port.outputGroup())) {
-                        continue;
-                    }
+                for (MachineFluidPort port : fluidOutputPorts(
+                        output.outputGroup())) {
                     capacity += fluidCapacityFor(port, expected);
                     if (capacity >= maximum) break;
                 }
@@ -1359,8 +1364,41 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     private List<MachineItemPort> outputPorts(String outputGroup) {
         return descriptor.itemPorts().stream()
                 .filter(port -> port.direction() == InputOutputAccess.OUTPUT)
-                .filter(port -> outputGroup.equals(port.outputGroup()))
+                .filter(port -> matchesGroup(port.outputGroup(), outputGroup))
+                .sorted(groupPriority(
+                        MachineItemPort::portId,
+                        MachineItemPort::outputGroup,
+                        outputGroup))
                 .toList();
+    }
+
+    private List<MachineFluidPort> fluidOutputPorts(String outputGroup) {
+        return descriptor.fluidPorts().stream()
+                .filter(port -> port.direction() == InputOutputAccess.OUTPUT)
+                .filter(port -> matchesGroup(port.outputGroup(), outputGroup))
+                .sorted(groupPriority(
+                        MachineFluidPort::portId,
+                        MachineFluidPort::outputGroup,
+                        outputGroup))
+                .toList();
+    }
+
+    private static boolean matchesGroup(
+            @Nullable String configured,
+            String required
+    ) {
+        return configured == null || configured.equals(required);
+    }
+
+    private static <T> Comparator<T> groupPriority(
+            Function<T, String> portId,
+            Function<T, String> group,
+            String required
+    ) {
+        return Comparator
+                .comparingInt((T value) ->
+                        Objects.equals(group.apply(value), required) ? 0 : 1)
+                .thenComparing(portId);
     }
 
     private boolean hasNewExpectedOutput() {
@@ -1388,12 +1426,8 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                     != IntegrationResourceKey.ResourceKind.FLUID) {
                 continue;
             }
-            for (MachineFluidPort port : descriptor.fluidPorts()) {
-                if (port.direction() != InputOutputAccess.OUTPUT
-                        || !output.outputGroup().equals(
-                        port.outputGroup())) {
-                    continue;
-                }
+            for (MachineFluidPort port : fluidOutputPorts(
+                    output.outputGroup())) {
                 FluidStack current = getFluid(port);
                 FluidStack before = fluidOutputBaseline.get(
                         new FluidSlotKey(port));
@@ -1678,7 +1712,8 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         for (MaterialRequirement material : view.materials()) {
             boolean matched = descriptor.itemPorts().stream().anyMatch(port ->
                     port.direction() == InputOutputAccess.INPUT
-                            && material.inputGroup().equals(port.inputGroup())
+                            && matchesGroup(
+                            port.inputGroup(), material.inputGroup())
                             && port.access() != ItemPortAccess.CUSTOM);
             if (!matched) {
                 failures.add(new IntegrationDiagnosticMessage(
@@ -1692,7 +1727,8 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             }
             boolean matched = descriptor.itemPorts().stream().anyMatch(port ->
                     port.direction() == InputOutputAccess.OUTPUT
-                            && output.outputGroup().equals(port.outputGroup())
+                            && matchesGroup(
+                            port.outputGroup(), output.outputGroup())
                             && port.access() != ItemPortAccess.CUSTOM);
             if (!matched) {
                 failures.add(new IntegrationDiagnosticMessage(
@@ -1702,7 +1738,8 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         for (FluidRequirement fluid : view.fluids()) {
             boolean matched = descriptor.fluidPorts().stream().anyMatch(port ->
                     port.direction() == InputOutputAccess.INPUT
-                            && fluid.inputGroup().equals(port.inputGroup())
+                            && matchesGroup(
+                            port.inputGroup(), fluid.inputGroup())
                             && port.access() != FluidPortAccess.CUSTOM);
             if (!matched) {
                 failures.add(new IntegrationDiagnosticMessage(
@@ -1717,7 +1754,8 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             }
             boolean matched = descriptor.fluidPorts().stream().anyMatch(port ->
                     port.direction() == InputOutputAccess.OUTPUT
-                            && output.outputGroup().equals(port.outputGroup())
+                            && matchesGroup(
+                            port.outputGroup(), output.outputGroup())
                             && port.access() != FluidPortAccess.CUSTOM);
             if (!matched) {
                 failures.add(new IntegrationDiagnosticMessage(

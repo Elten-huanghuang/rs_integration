@@ -107,7 +107,7 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
             return null;
         }).when(container).setItem(anyInt(), any());
         when(container.getMaxStackSize()).thenReturn(64);
-        when(container.getContainerSize()).thenReturn(2);
+        when(container.getContainerSize()).thenReturn(3);
 
         when(level.hasChunkAt(position)).thenReturn(true);
         when(level.getBlockEntity(position)).thenReturn(blockEntity);
@@ -291,6 +291,16 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
                                     ItemPortAccess.CONTAINER,
                                     null,
                                     "output",
+                                    64
+                            ),
+                            new MachineItemPort(
+                                    "fallback_input",
+                                    2,
+                                    null,
+                                    InputOutputAccess.INPUT,
+                                    ItemPortAccess.CONTAINER,
+                                    null,
+                                    null,
                                     64
                             )
                     ),
