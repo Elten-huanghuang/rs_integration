@@ -14,6 +14,7 @@ import com.huanghuang.rsintegration.crafting.graph.OutputProbability;
 import com.huanghuang.rsintegration.crafting.graph.TerminalGraphComposer;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+import com.huanghuang.rsintegration.recipe.RecipeOutputSpec;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Recipe;
@@ -98,6 +99,71 @@ final class CraftTerminalSteps {
                 .byKey(terminalStep.recipeId()).orElse(null);
         ModRecipeHandler handler = recipe == null
                 ? null : ModRecipeHandlers.claimFor(recipe).winner();
+        if (recipe != null && handler != null) {
+            List<RecipeOutputSpec> declared = handler.getDeclaredOutputs(
+                    recipe, level.registryAccess());
+            List<TerminalGraphComposer.TerminalOutput> declaredOutputs =
+                    new ArrayList<>(declared.size());
+            boolean primaryHandled = false;
+            for (RecipeOutputSpec output : declared) {
+                MaterialKey material = output.material();
+                int expected = output.expectedPerOperation();
+                int minimum = output.minimumPerOperation();
+                int maximum = output.maximumPerOperation();
+                OutputProbability probability = output.probability();
+                boolean dynamicIdentity = output.dynamicIdentity();
+                if (!primaryHandled
+                        && output.kind() == OutputKind.PRIMARY
+                        && terminalStep.productionTarget() != null) {
+                    ItemStack target =
+                            terminalStep.productionTarget().material().toStack(
+                                    (int) Math.min(
+                                            Integer.MAX_VALUE,
+                                            Math.max(
+                                                    1L,
+                                                    terminalStep
+                                                            .productionTarget()
+                                                            .quantity()
+                                            )
+                                    )
+                            );
+                    material = MaterialKey.of(target);
+                    expected = target.getCount();
+                    minimum = expected;
+                    maximum = expected;
+                    primaryHandled = true;
+                }
+                if (output.kind() == OutputKind.PRIMARY
+                        && !handler.hasStructuredOutputContract(recipe)) {
+                    probability =
+                            handler.hasDeterministicPrimaryOutput(recipe)
+                                    ? OutputProbability.guaranteed()
+                                    : OutputProbability.dynamic(
+                                    null,
+                                    CraftExecutionPolicy
+                                            .probabilityAttemptLimit(
+                                                    terminalStep),
+                                    "terminal:" + terminalStep.recipeId()
+                            );
+                    dynamicIdentity =
+                            handler.hasRuntimeDependentPrimaryNbt(recipe);
+                }
+                declaredOutputs.add(new TerminalGraphComposer.TerminalOutput(
+                        material,
+                        expected,
+                        minimum,
+                        maximum,
+                        output.kind(),
+                        probability,
+                        dynamicIdentity,
+                        output.sourceInputIndex()
+                ));
+            }
+            if (declaredOutputs.stream().anyMatch(output ->
+                    output.kind() == OutputKind.PRIMARY)) {
+                return List.copyOf(declaredOutputs);
+            }
+        }
         ItemStack primaryDeclaration = terminalStep.productionTarget() == null
                 ? primary : terminalStep.productionTarget().material().toStack(
                 (int) Math.min(Integer.MAX_VALUE,

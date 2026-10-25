@@ -183,6 +183,38 @@ final class ExternalRecipeProjection {
         return view.outputs().stream().anyMatch(OutputDeclaration::targetProducing);
     }
 
+    static com.huanghuang.rsintegration.crafting.graph.OutputKind kind(
+            OutputDeclaration output
+    ) {
+        return com.huanghuang.rsintegration.crafting.graph.OutputKind.valueOf(
+                output.outputKind().name());
+    }
+
+    static com.huanghuang.rsintegration.crafting.graph.OutputProbability probability(
+            OutputDeclaration output
+    ) {
+        var probability = output.probability();
+        return switch (probability.mode()) {
+            case GUARANTEED ->
+                    com.huanghuang.rsintegration.crafting.graph
+                            .OutputProbability.guaranteed();
+            case PROBABILISTIC ->
+                    com.huanghuang.rsintegration.crafting.graph
+                            .OutputProbability.probabilistic(
+                            probability.chance(),
+                            probability.maxAttempts(),
+                            probability.rollGroup()
+                    );
+            case DYNAMIC ->
+                    com.huanghuang.rsintegration.crafting.graph
+                            .OutputProbability.dynamic(
+                            probability.chance(),
+                            probability.maxAttempts(),
+                            probability.rollGroup()
+                    );
+        };
+    }
+
     static Ingredient ingredient(ItemIngredientView view) {
         List<ItemStack> templates = view.alternatives().stream()
                 .map(ItemAlternative::resource)

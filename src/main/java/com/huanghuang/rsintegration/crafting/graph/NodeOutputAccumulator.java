@@ -35,7 +35,10 @@ public final class NodeOutputAccumulator {
         List<Publication> publications = new ArrayList<>();
         for (OutputDeclaration declaration : declarations) {
             if (declaration.kind() == OutputKind.DYNAMIC) continue;
-            long remaining = declaration.quantity() - published.get(declaration.id());
+            long limit = declaration.probability().isGuaranteed()
+                    ? declaration.maximumQuantity()
+                    : declaration.quantity();
+            long remaining = limit - published.get(declaration.id());
             if (remaining <= 0L) continue;
             for (ItemStack stack : pending) {
                 if (remaining <= 0L) break;
@@ -87,9 +90,9 @@ public final class NodeOutputAccumulator {
             if (declaration.kind() == OutputKind.DYNAMIC
                     || !declaration.probability().isGuaranteed()) continue;
             long actual = published.get(declaration.id());
-            if (actual < declaration.quantity()) {
+            if (actual < declaration.minimumQuantity()) {
                 shortages.add(new Shortage(declaration.id(), declaration.kind(),
-                        declaration.material(), declaration.quantity(), actual));
+                        declaration.material(), declaration.minimumQuantity(), actual));
             }
         }
         return List.copyOf(shortages);

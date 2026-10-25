@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.api.diagnostic.IntegrationDiagnostic;
 import com.huanghuang.rsintegration.api.recipe.MaterialRequirement;
 import com.huanghuang.rsintegration.api.recipe.OutputDeclaration;
+import com.huanghuang.rsintegration.api.recipe.OutputProbabilityMode;
 import com.huanghuang.rsintegration.api.recipe.RecipeAvailability;
 import com.huanghuang.rsintegration.api.recipe.RecipeAvailabilityContext;
 import com.huanghuang.rsintegration.api.recipe.RecipeAvailabilityProvider;
@@ -17,9 +18,11 @@ import com.huanghuang.rsintegration.crafting.CraftPlanningRevision;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.ScaledIngredientSpec;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
+import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.storage.StorageCapability;
 import com.huanghuang.rsintegration.storage.StorageFluidKey;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
+import com.huanghuang.rsintegration.recipe.RecipeOutputSpec;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
@@ -219,6 +222,57 @@ final class ExternalRecipeHandler implements ModRecipeHandler {
         ExternalRecipeProjection.Result projection = project(recipe);
         return projection.available()
                 && ExternalRecipeProjection.runtimeDependentPrimary(projection.view());
+    }
+
+    @Override
+    public List<RecipeOutputSpec> getDeclaredOutputs(
+            Recipe<?> recipe,
+            RegistryAccess access
+    ) {
+        ExternalRecipeProjection.Result projection = project(recipe, access);
+        if (!projection.available()) return List.of();
+        Map<ResourceLocation, Integer> inputIndexes = new LinkedHashMap<>();
+        for (int index = 0;
+             index < projection.view().materials().size();
+             index++) {
+            inputIndexes.put(
+                    projection.view().materials().get(index).entryId(), index);
+        }
+        List<RecipeOutputSpec> outputs = new ArrayList<>();
+        for (OutputDeclaration output : projection.view().outputs()) {
+            if (output.resource().kind()
+                    != IntegrationResourceKey.ResourceKind.ITEM) {
+                continue;
+            }
+            int minimum = (int) Math.min(
+                    Integer.MAX_VALUE, output.amount().min());
+            int maximum = (int) Math.min(
+                    Integer.MAX_VALUE, output.amount().max());
+            boolean probabilistic =
+                    output.probability().mode()
+                            != OutputProbabilityMode.GUARANTEED;
+            int expected = probabilistic ? 0 : minimum;
+            Integer sourceInput = output.sourceInputEntryId() == null
+                    ? null
+                    : inputIndexes.get(output.sourceInputEntryId());
+            outputs.add(new RecipeOutputSpec(
+                    MaterialKey.of(ExternalRecipeProjection.toStack(
+                            output.resource(), Math.max(1, maximum))),
+                    expected,
+                    probabilistic ? 0 : minimum,
+                    maximum,
+                    ExternalRecipeProjection.kind(output),
+                    ExternalRecipeProjection.probability(output),
+                    output.dynamicIdentity(),
+                    sourceInput
+            ));
+        }
+        return List.copyOf(outputs);
+    }
+
+    @Override
+    public boolean hasStructuredOutputContract(Recipe<?> recipe) {
+        return true;
     }
 
     @Override

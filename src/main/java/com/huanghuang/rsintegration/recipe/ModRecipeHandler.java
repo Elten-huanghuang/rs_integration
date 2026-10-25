@@ -6,10 +6,13 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.ScaledIngredientSpec;
-import net.minecraft.core.RegistryAccess;
+import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
+import com.huanghuang.rsintegration.crafting.graph.OutputKind;
+import java.util.ArrayList;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.core.RegistryAccess;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -122,6 +125,40 @@ public interface ModRecipeHandler {
     @Nonnull
     default List<ItemStack> getSecondaryOutputs(@Nonnull Recipe<?> recipe, @Nonnull RegistryAccess access) {
         return List.of();
+    }
+
+    /**
+     * 声明单次操作的完整输出合同。默认实现把主产物和副产物投影为确定输出，
+     * 新处理器可以覆盖该方法保留概率、数量范围和动态身份。
+     */
+    @Nonnull
+    default List<RecipeOutputSpec> getDeclaredOutputs(
+            @Nonnull Recipe<?> recipe,
+            @Nonnull RegistryAccess access
+    ) {
+        List<RecipeOutputSpec> outputs = new ArrayList<>();
+        ItemStack primary = getResultItem(recipe, access);
+        if (!primary.isEmpty()) {
+            outputs.add(new RecipeOutputSpec(
+                    MaterialKey.of(primary),
+                    primary.getCount(),
+                    OutputKind.PRIMARY
+            ));
+        }
+        for (ItemStack secondary : getSecondaryOutputs(recipe, access)) {
+            if (secondary == null || secondary.isEmpty()) continue;
+            outputs.add(new RecipeOutputSpec(
+                    MaterialKey.of(secondary),
+                    secondary.getCount(),
+                    OutputKind.SECONDARY
+            ));
+        }
+        return List.copyOf(outputs);
+    }
+
+    /** 是否由处理器提供完整声明输出，而不是仅依赖主产物/副产物兼容投影。 */
+    default boolean hasStructuredOutputContract(@Nonnull Recipe<?> recipe) {
+        return false;
     }
 
     /** Whether one execution is guaranteed to produce the item returned by {@link #getResultItem}. */

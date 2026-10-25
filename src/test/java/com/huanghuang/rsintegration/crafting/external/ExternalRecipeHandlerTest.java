@@ -22,6 +22,7 @@ import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Recipe;
@@ -64,6 +65,61 @@ class ExternalRecipeHandlerTest extends BootstrapTest {
         assertEquals(Items.STICK,
                 handler.getResultItem(recipe, RegistryAccess.EMPTY).getItem());
         assertEquals(1, inspections.get());
+    }
+
+    @Test
+    void declaredOutputsPreserveProbabilityAndQuantityRange() {
+        IntegrationResourceKey input = new IntegrationResourceKey(
+                IntegrationResourceKey.ResourceKind.ITEM,
+                BuiltInRegistries.ITEM.getKey(Items.DIAMOND),
+                new CompoundTag()
+        );
+        MaterialRequirement material = new MaterialRequirement(
+                id("input"),
+                new ItemIngredientView(
+                        List.of(new ItemAlternative(input)),
+                        ResourceMatchMode.ANY_IDENTITY
+                ),
+                1L,
+                InputConsumption.consumed(),
+                "ingredients",
+                0,
+                true
+        );
+        OutputDeclaration primary = output(
+                "primary", Items.STICK, OutputAmount.exactly(1L),
+                OutputProbability.guaranteed(), OutputKind.PRIMARY
+        );
+        OutputDeclaration secondary = output(
+                "secondary", Items.APPLE, new OutputAmount(1L, 3L),
+                OutputProbability.probabilistic(
+                        0.25D, 4, "bonus"), OutputKind.SECONDARY
+        );
+        RecipeView view = new RecipeView(
+                id("recipe"),
+                id("process"),
+                List.of(material),
+                List.of(),
+                List.of(primary, secondary),
+                new RecipeFlags(
+                        true, false, false, false,
+                        false, true, false)
+        );
+        ExternalRecipeHandler handler = new ExternalRecipeHandler(
+                new StubIntegration(view, new AtomicInteger()),
+                ModType.EXTERNAL_INTEGRATION,
+                1,
+                recipe -> true
+        );
+
+        var outputs = handler.getDeclaredOutputs(
+                mock(Recipe.class), RegistryAccess.EMPTY);
+
+        assertEquals(2, outputs.size());
+        assertEquals(0, outputs.get(1).minimumPerOperation());
+        assertEquals(3, outputs.get(1).maximumPerOperation());
+        assertEquals(0, outputs.get(1).expectedPerOperation());
+        assertEquals(0.25D, outputs.get(1).probability().chance());
     }
 
     private static RecipeView view() {
@@ -113,6 +169,30 @@ class ExternalRecipeHandlerTest extends BootstrapTest {
 
     private static ResourceLocation id(String path) {
         return new ResourceLocation("test", path);
+    }
+
+    private static OutputDeclaration output(
+            String port,
+            Item item,
+            OutputAmount amount,
+            OutputProbability probability,
+            OutputKind kind
+    ) {
+        return new OutputDeclaration(
+                id(port),
+                "output",
+                new IntegrationResourceKey(
+                        IntegrationResourceKey.ResourceKind.ITEM,
+                        BuiltInRegistries.ITEM.getKey(item),
+                        new CompoundTag()
+                ),
+                amount,
+                kind,
+                probability,
+                false,
+                false,
+                null
+        );
     }
 
     private record StubIntegration(

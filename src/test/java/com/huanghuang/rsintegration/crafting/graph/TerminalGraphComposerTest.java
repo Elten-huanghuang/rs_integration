@@ -169,6 +169,39 @@ class TerminalGraphComposerTest extends BootstrapTest {
     }
 
     @Test
+    void terminalOutputRangeAndSourceInputArePreservedByExecutionGraph() {
+        MaterialKey geode = MaterialKey.of(new ItemStack(Items.PRISMARINE));
+        CraftPlanGraph base = new CraftPlanGraph(1, List.of(), List.of(), List.of(
+                new RootDemand(Ingredient.of(Items.PRISMARINE), 1, 0,
+                        new ItemStack(Items.PRISMARINE), List.of(new RootAllocation(
+                        new MaterialSource.InitialPool(geode), geode, 1)))),
+                List.of(), List.of());
+
+        CraftPlanGraph result = TerminalGraphComposer.compose(
+                base,
+                step("range", 2),
+                List.of(new TerminalGraphComposer.TerminalOutput(
+                        MaterialKey.of(new ItemStack(Items.DIAMOND)),
+                        2,
+                        1,
+                        3,
+                        OutputKind.PRIMARY,
+                        OutputProbability.guaranteed(),
+                        false,
+                        0
+                ))
+        );
+
+        CraftNode terminal = result.nodes().get(0);
+        OutputDeclaration output = terminal.outputs().get(0);
+        assertEquals(4L, output.quantity());
+        assertEquals(2L, output.minimumQuantity());
+        assertEquals(6L, output.maximumQuantity());
+        assertEquals(terminal.inputs().get(0).id(), output.sourceInput());
+        CraftPlanValidator.validate(result);
+    }
+
+    @Test
     void rejectsUnresolvedOrUnknownTerminalShape() {
         MaterialKey iron = MaterialKey.of(new ItemStack(Items.IRON_INGOT));
         CraftPlanGraph unresolved = new CraftPlanGraph(1, List.of(), List.of(), List.of(

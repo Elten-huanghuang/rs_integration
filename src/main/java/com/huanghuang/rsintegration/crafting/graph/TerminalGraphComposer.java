@@ -8,21 +8,60 @@ import net.minecraft.world.item.crafting.Ingredient;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import javax.annotation.Nullable;
 
 /** Converts a resolved terminal-input graph into a self-contained executable graph. */
 public final class TerminalGraphComposer {
 
     private TerminalGraphComposer() {}
 
-    public record TerminalOutput(MaterialKey material, int perOperation,
-                                 OutputKind kind, OutputProbability probability,
-                                 boolean dynamicIdentity) {
+    public record TerminalOutput(
+            MaterialKey material,
+            int perOperation,
+            int minimumPerOperation,
+            int maximumPerOperation,
+            OutputKind kind,
+            OutputProbability probability,
+            boolean dynamicIdentity,
+            @Nullable Integer sourceInputIndex
+    ) {
         public TerminalOutput {
-            if (material == null || perOperation <= 0) {
+            if (material == null || maximumPerOperation <= 0) {
                 throw new IllegalArgumentException("terminal output must be non-empty");
             }
             Objects.requireNonNull(kind, "kind");
             Objects.requireNonNull(probability, "probability");
+            if (perOperation < 0
+                    || minimumPerOperation < 0
+                    || maximumPerOperation < minimumPerOperation
+                    || perOperation < minimumPerOperation
+                    || perOperation > maximumPerOperation) {
+                throw new IllegalArgumentException(
+                        "invalid terminal output range");
+            }
+            if (sourceInputIndex != null && sourceInputIndex < 0) {
+                throw new IllegalArgumentException(
+                        "invalid source input index");
+            }
+        }
+
+        public TerminalOutput(
+                MaterialKey material,
+                int perOperation,
+                OutputKind kind,
+                OutputProbability probability,
+                boolean dynamicIdentity
+        ) {
+            this(
+                    material,
+                    perOperation,
+                    probability.isGuaranteed() ? perOperation : 0,
+                    perOperation,
+                    kind,
+                    probability,
+                    dynamicIdentity,
+                    null
+            );
         }
 
         public TerminalOutput(MaterialKey material, int perOperation, OutputKind kind) {
@@ -85,12 +124,35 @@ public final class TerminalGraphComposer {
         OutputDeclaration primary = null;
         for (int index = 0; index < terminalOutputs.size(); index++) {
             TerminalOutput output = terminalOutputs.get(index);
-            long total = Math.multiplyExact(
+            long expectedTotal = Math.multiplyExact(
                     (long) output.perOperation(), terminalStep.executions());
+            long minimumTotal = Math.multiplyExact(
+                    (long) output.minimumPerOperation(),
+                    terminalStep.executions()
+            );
+            long maximumTotal = Math.multiplyExact(
+                    (long) output.maximumPerOperation(),
+                    terminalStep.executions()
+            );
+            InputPortId sourceInput = null;
+            if (output.sourceInputIndex() != null) {
+                if (output.sourceInputIndex() >= inputs.size()) {
+                    throw new IllegalArgumentException(
+                            "terminal output source input is out of range");
+                }
+                sourceInput = inputs.get(output.sourceInputIndex()).id();
+            }
             OutputDeclaration declaration = new OutputDeclaration(
-                    new OutputPortId(terminalId, index), output.material(), total, output.kind(),
-                    output.probability().isGuaranteed() ? total : 0L, total,
-                    output.probability(), output.dynamicIdentity(), null);
+                    new OutputPortId(terminalId, index),
+                    output.material(),
+                    expectedTotal,
+                    output.kind(),
+                    minimumTotal,
+                    maximumTotal,
+                    output.probability(),
+                    output.dynamicIdentity(),
+                    sourceInput
+            );
             outputs.add(declaration);
             if (primary == null && output.kind() == OutputKind.PRIMARY) primary = declaration;
         }
