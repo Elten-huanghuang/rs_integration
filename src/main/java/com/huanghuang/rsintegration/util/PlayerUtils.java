@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
+import com.huanghuang.rsintegration.storage.StorageOperationResult;
 import com.huanghuang.rsintegration.storage.StorageNetworkLocation;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.core.BlockPos;
@@ -17,7 +18,6 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.common.util.FakePlayer;
-import net.minecraftforge.items.ItemHandlerHelper;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -89,17 +89,16 @@ public final class PlayerUtils {
         }
     }
 
-    /**
-     * Safely gives an item to a player, with fallbacks when the player's chunk
-     * is unloaded (which would silently void items). Falls back to storage
-     * insertion, then to a physical drop.
-     */
+    /** 先尝试玩家背包，只把真实剩余量写入存储，存储也无法接收时才掉落。 */
     public static void safeGiveToPlayer(ServerPlayer player, ItemStack stack, @Nullable INetwork network) {
         safeGiveToStorage(player, stack,
                 network == null ? null : CraftStorageEndpoints.fromLegacyNetwork(network));
     }
 
-    /** 后端无关版本：玩家背包不可用时优先存入所选存储端点。 */
+    /**
+     * 后端无关的安全交付：玩家背包优先，背包满或区块未加载时写入所选存储端点。
+     * 存储仍无法接收的剩余物才进入世界掉落，绝不把“背包满”直接当成最终结果。
+     */
     public static void safeGiveToStorage(ServerPlayer player, ItemStack stack,
                                          @Nullable CraftStorageEndpoint endpoint) {
         if (stack.isEmpty()) return;
@@ -107,56 +106,53 @@ public final class PlayerUtils {
             CraftFluidRecovery.retainToEndpoint(player, stack, endpoint);
             return;
         }
-        if (player.level().hasChunkAt(player.blockPosition())) {
-            List<ItemStack> before = snapshotInventory(player);
-            // Split large stacks into max-size chunks to avoid spawning an
-            // excessive number of item entities when the player's inventory
-            // is full (e.g. batch crafting 1000 planks → 16 entities, not 1000).
-            while (!stack.isEmpty()) {
-                int split = Math.min(stack.getMaxStackSize(), stack.getCount());
-                ItemStack chunk = stack.split(split);
-                ItemHandlerHelper.giveItemToPlayer(player, chunk);
-            }
-            player.getInventory().setChanged();
-            MaterialSources.invalidateFor(player);
-            // ItemHandlerHelper updates the inventory, but an already-open custom
-            // container is not guaranteed to observe that mutation until its next
-            // scheduled sync. Broadcast now so chained crafts can use the result
-            // immediately and the client does not render a stale stack.
-            broadcastInventoryChanges(player, before);
-            return;
+
+        ItemStack leftover = stack.copy();
+        boolean playerChunkLoaded = player.level().hasChunkAt(player.blockPosition());
+        if (playerChunkLoaded) {
+            leftover = insertIntoPlayerInventory(player, leftover);
         }
-        if (endpoint != null) {
-            // insertItem returns whatever the network could not store; if we
-            // discard it (storage full / no matching storage) those items are voided.
-            ItemStack remainder = endpoint.insert(player, stack, false)
-                    .remainder().orElse(ItemStack.EMPTY);
-            int stored = stack.getCount() - remainder.getCount();
+
+        if (!leftover.isEmpty() && endpoint != null) {
+            StorageOperationResult result = endpoint.insert(player, leftover, false);
+            if (result.remainder().isEmpty()) {
+                RSIntegrationMod.LOGGER.error(
+                        "[RSI] Storage outcome is unknown; not retrying to avoid duplication: {} x{}",
+                        ItemStackUtils.registryId(leftover), leftover.getCount());
+                return;
+            }
+            ItemStack before = leftover.copy();
+            leftover = result.remainder().orElseThrow();
+            int stored = before.getCount() - leftover.getCount();
             if (stored > 0) {
-                RSIntegrationMod.LOGGER.warn("[RSI] Refund redirected to storage (player chunk unloaded): {} x{}",
-                    ItemStackUtils.registryId(stack), stored);
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI] Player inventory could not accept item; redirected {} x{} to storage",
+                        ItemStackUtils.registryId(before), stored);
             }
-            // Fall through to world-spawn drop for anything the network rejected.
-            stack = remainder;
         }
-        if (!stack.isEmpty()) {
-            ServerLevel dropLevel = endpoint == null ? null
-                    : endpoint.location()
-                    .flatMap(location -> location.level(player.getServer()))
-                    .orElse(null);
-            BlockPos dropPos = endpoint == null ? null
-                    : endpoint.location().map(StorageNetworkLocation::position).orElse(null);
+
+        if (!leftover.isEmpty()) {
+            ServerLevel dropLevel = playerChunkLoaded ? player.serverLevel() : null;
+            BlockPos dropPos = playerChunkLoaded ? player.blockPosition() : null;
+            if (!playerChunkLoaded && endpoint != null) {
+                dropLevel = endpoint.location()
+                        .flatMap(location -> location.level(player.getServer()))
+                        .orElse(null);
+                dropPos = endpoint.location()
+                        .map(StorageNetworkLocation::position)
+                        .orElse(null);
+            }
             if (dropLevel == null || dropPos == null) {
                 dropLevel = player.getServer().overworld();
                 if (dropLevel == null) return;
                 dropPos = dropLevel.getSharedSpawnPos();
             }
             dropLevel.addFreshEntity(new ItemEntity(dropLevel,
-                    dropPos.getX() + 0.5, dropPos.getY() + 0.5, dropPos.getZ() + 0.5, stack));
+                    dropPos.getX() + 0.5, dropPos.getY() + 0.5, dropPos.getZ() + 0.5, leftover));
             RSIntegrationMod.LOGGER.warn(
-                    "[RSI] Refund dropped at {} (player {} has unloaded chunk): {} x{}",
+                    "[RSI] Item dropped at {} (player inventory and storage both rejected it): {} x{}",
                     dropPos, player.getGameProfile().getName(),
-                    ItemStackUtils.registryId(stack), stack.getCount());
+                    ItemStackUtils.registryId(leftover), leftover.getCount());
         }
     }
 

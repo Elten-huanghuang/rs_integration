@@ -1,7 +1,14 @@
 package com.huanghuang.rsintegration.util;
 
+import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.storage.StorageOperationMode;
+import com.huanghuang.rsintegration.storage.StorageOperationResult;
+import com.huanghuang.rsintegration.storage.StorageSession;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.NonNullList;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.game.ClientboundContainerSetContentPacket;
@@ -19,10 +26,14 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.level.Level;
+import net.minecraftforge.eventbus.api.IEventBus;
+import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.MockedStatic;
 
 import java.lang.reflect.Field;
 import java.util.ArrayList;
@@ -33,8 +44,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class PlayerUtilsTest extends BootstrapTest {
@@ -46,6 +61,20 @@ class PlayerUtilsTest extends BootstrapTest {
     private AbstractContainerMenu clientMenu;
     private final List<ClientboundContainerSetSlotPacket> slotPackets = new ArrayList<>();
     private ItemStack clientCarried;
+
+    @BeforeAll
+    static void initializeRuntime() throws Exception {
+        CommentedConfig config = CommentedConfig.inMemory();
+        RSIntegrationConfig.SERVER_SPEC.correct(config);
+        RSIntegrationConfig.SERVER_SPEC.setConfig(config);
+        FMLJavaModLoadingContext context = mock(FMLJavaModLoadingContext.class);
+        when(context.getModEventBus()).thenReturn(mock(IEventBus.class));
+        try (MockedStatic<FMLJavaModLoadingContext> loading =
+                     mockStatic(FMLJavaModLoadingContext.class)) {
+            loading.when(FMLJavaModLoadingContext::get).thenReturn(context);
+            Class.forName("com.huanghuang.rsintegration.RSIntegrationMod");
+        }
+    }
 
     @BeforeEach
     void setUp() throws ReflectiveOperationException {
@@ -125,6 +154,28 @@ class PlayerUtilsTest extends BootstrapTest {
         assertEquals(130, remainder.getCount());
         assertTrue(remainder.is(Items.IRON_INGOT));
         assertFalse(slotPackets.stream().anyMatch(packet -> packet.getItem().is(Items.IRON_INGOT)));
+    }
+
+    @Test
+    void fullInventoryRefundOverflowIsInsertedIntoStorage() {
+        fillMainInventory();
+        Level level = mock(Level.class);
+        when(player.level()).thenReturn(level);
+        when(player.blockPosition()).thenReturn(BlockPos.ZERO);
+        when(level.hasChunkAt(BlockPos.ZERO)).thenReturn(true);
+        StorageSession session = mock(StorageSession.class);
+        when(session.insert(eq(player), any(ItemStack.class), eq(false)))
+                .thenAnswer(call -> {
+                    ItemStack stack = call.getArgument(1);
+                    return StorageOperationResult.inserted(
+                            StorageOperationMode.PERFORM, stack, ItemStack.EMPTY);
+                });
+        CraftStorageEndpoint endpoint = () -> session;
+
+        PlayerUtils.safeGiveToStorage(player, new ItemStack(Items.IRON_INGOT, 3), endpoint);
+
+        verify(session).insert(eq(player), argThat(stack ->
+                stack.is(Items.IRON_INGOT) && stack.getCount() == 3), eq(false));
     }
 
     @Test

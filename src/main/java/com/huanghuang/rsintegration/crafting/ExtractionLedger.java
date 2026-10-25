@@ -994,17 +994,17 @@ public final class ExtractionLedger implements AutoCloseable {
             case RESONANCE_DISK -> {
                 Entry entry = entriesById.get(rec.entryId);
                 if (entry == null || entry.resonanceView == null) {
-                    PlayerUtils.safeGiveToStorage(player, s, null);
+                    PlayerUtils.safeGiveToStorage(player, s, destination);
                     return;
                 }
                 ItemStack remainder = entry.resonanceView.insertView(
                         entry.resonanceSlot, s, s.getCount(), false);
                 entry.resonanceView.markDirty(player);
                 if (!remainder.isEmpty()) {
-                    PlayerUtils.safeGiveToStorage(player, remainder, null);
+                    PlayerUtils.safeGiveToStorage(player, remainder, destination);
                 }
             }
-            case PLAYER_INVENTORY -> PlayerUtils.safeGiveToStorage(player, s, null);
+            case PLAYER_INVENTORY -> PlayerUtils.safeGiveToStorage(player, s, destination);
         }
     }
 
