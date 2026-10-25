@@ -151,6 +151,8 @@ public final class AsyncCraftChain {
     private final CraftStorageEndpoint storageEndpoint;
     private final List<CraftingResolver.ResolutionStep> steps;
     private final List<ItemStack> virtualInventory = new ArrayList<>();
+    private final List<ItemStack> deliveredFinalOutputs = new ArrayList<>();
+    private final List<ItemStack> recoveryFinalOutputs = new ArrayList<>();
     /**
      * Snapshot of {@link #virtualInventory} at the last <i>settled</i> commit
      * boundary -i.e. the set of intermediate products whose backing inputs were
@@ -3152,6 +3154,16 @@ public final class AsyncCraftChain {
     public ExtractionLedger ledger() { return ledger; }
     public List<ItemStack> virtualInventory() { return virtualInventory; }
 
+    /** Final outputs fully accepted by the player inventory or selected storage. */
+    public List<ItemStack> deliveredFinalOutputs() {
+        return StackCopies.excludingEmpty(deliveredFinalOutputs);
+    }
+
+    /** Final outputs retained in recovery or dropped because no safe sink accepted them. */
+    public List<ItemStack> recoveryFinalOutputs() {
+        return StackCopies.excludingEmpty(recoveryFinalOutputs);
+    }
+
     public boolean belongsTo(UUID playerId) {
         return this.playerId.equals(playerId);
     }
@@ -4589,9 +4601,12 @@ public final class AsyncCraftChain {
         for (ItemStack s : disarmOutputCapture()) {
             if (s.isEmpty()) continue;
             if (online != null) {
-                safeGiveToPlayer(online, s);
+                recordFinalDelivery(
+                        s, safeGiveToPlayer(online, s));
             } else {
-                insertOrDropAtSpawn(s);
+                boolean handled = insertOrDropAtSpawn(s);
+                recordFinalDelivery(
+                        s, handled && !InkFluidSupport.isToken(s));
             }
         }
     }
@@ -4808,15 +4823,26 @@ public final class AsyncCraftChain {
             if (online != null) {
                 ItemStack leftover = owed.copy();
                 leftover = insertIntoStorage(online, owed);
-                if (!leftover.isEmpty()) safeGiveToPlayer(online, leftover);
-            } else if (!insertOrDropAtSpawn(owed.copy())) {
-                // Drop throttle tripped (network full/absent, player offline,
-                // >20 drops this chain). insertOrDropAtSpawn already logged the
-                // discard. Do NOT clear the rest silently -surface it as CRITICAL
-                // so the docstring's "never silently lost" promise isn't a lie.
-                RSIntegrationMod.LOGGER.error(ctx.format(
-                        "CRITICAL: drop throttle tripped during committed-product recovery; "
-                        + "remaining owed products cannot be delivered for player {}"), playerId);
+                boolean delivered = leftover.isEmpty();
+                if (!delivered) {
+                    delivered = safeGiveToPlayer(online, leftover);
+                }
+                recordFinalDelivery(owed, delivered);
+            } else {
+                boolean handled = insertOrDropAtSpawn(owed.copy());
+                if (!handled) {
+                    // Drop throttle tripped (network full/absent, player offline,
+                    // >20 drops this chain). insertOrDropAtSpawn already logged the
+                    // discard. Do NOT clear the rest silently -surface it as CRITICAL
+                    // so the docstring's "never silently lost" promise isn't a lie.
+                    RSIntegrationMod.LOGGER.error(ctx.format(
+                            "CRITICAL: drop throttle tripped during committed-product recovery; "
+                            + "remaining owed products cannot be delivered for player {}"), playerId);
+                    recordFinalDelivery(owed, false);
+                } else {
+                    recordFinalDelivery(
+                            owed, !InkFluidSupport.isToken(owed));
+                }
             }
         }
         committedVirtual.clear();
@@ -4954,6 +4980,7 @@ public final class AsyncCraftChain {
                         finalSettlementCursor--;
                         return false;
                     }
+                    recordFinalDelivery(vi, true);
                     continue;
                 }
                 if (storageEndpoint != null) {
@@ -4971,7 +4998,12 @@ public final class AsyncCraftChain {
                         leftover = insertIntoStorage(online, rsCandidate);
                     }
                     if (!leftover.isEmpty()) {
-                        safeGiveToPlayer(online, leftover);
+                        recordFinalDelivery(
+                                vi,
+                                safeGiveToPlayer(online, leftover)
+                        );
+                    } else {
+                        recordFinalDelivery(vi, true);
                     }
                 } else {
                     // Keep the standalone path identical to the RS player's
@@ -4981,7 +5013,11 @@ public final class AsyncCraftChain {
                     // the full stack to it after insertion leaves a client-side
                     // duplicate until the equipped slot is clicked.
                     ItemStack leftover = insertIntoPlayerInventory(online, vi.copy());
-                    if (!leftover.isEmpty()) safeGiveToPlayer(online, leftover);
+                    boolean delivered = leftover.isEmpty();
+                    if (!delivered) {
+                        delivered = safeGiveToPlayer(online, leftover);
+                    }
+                    recordFinalDelivery(vi, delivered);
                 }
             }
         }
@@ -5616,8 +5652,17 @@ public final class AsyncCraftChain {
 
     //  safe item give
 
-    private void safeGiveToPlayer(ServerPlayer player, ItemStack stack) {
-        PlayerUtils.safeGiveToStorage(player, stack, storageEndpoint);
+    private boolean safeGiveToPlayer(ServerPlayer player, ItemStack stack) {
+        return PlayerUtils.safeGiveToStorage(
+                player, stack, storageEndpoint);
+    }
+
+    private void recordFinalDelivery(ItemStack stack, boolean delivered) {
+        if (stack == null || stack.isEmpty()) return;
+        addToInventory(
+                delivered ? deliveredFinalOutputs : recoveryFinalOutputs,
+                stack.copy()
+        );
     }
 
     //  debug helpers

@@ -1917,11 +1917,17 @@ public final class ConsumerCraftingRuntime {
         order.totalOperations = Math.max(
                 order.totalOperations, snapshot.totalNodes());
         order.runningOperations = 0L;
-        order.outputs = observedOutputs(
-                order.chain.virtualInventory(),
+        List<ConsumerOutputResult> delivered = observedOutputs(
+                order.chain.deliveredFinalOutputs(),
                 order.destination,
-                order.state == ConsumerOrderState.SUCCEEDED
+                true
         );
+        List<ConsumerOutputResult> recovery = observedOutputs(
+                order.chain.recoveryFinalOutputs(),
+                order.destination,
+                false
+        );
+        order.outputs = List.copyOf(concat(delivered, recovery));
         if (order.state == ConsumerOrderState.FAILED) {
             order.failureReason = failureReason(snapshot.reason());
         }
@@ -1951,6 +1957,15 @@ public final class ConsumerCraftingRuntime {
                         delivered
                 ))
                 .toList();
+    }
+
+    private static <T> List<T> concat(List<T> first, List<T> second) {
+        if (second.isEmpty()) return first;
+        List<T> combined = new ArrayList<>(
+                first.size() + second.size());
+        combined.addAll(first);
+        combined.addAll(second);
+        return List.copyOf(combined);
     }
 
     private static FailureReason failureReason(

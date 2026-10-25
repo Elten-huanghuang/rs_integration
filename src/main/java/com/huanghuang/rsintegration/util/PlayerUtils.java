@@ -90,8 +90,12 @@ public final class PlayerUtils {
     }
 
     /** 先尝试玩家背包，只把真实剩余量写入存储，存储也无法接收时才掉落。 */
-    public static void safeGiveToPlayer(ServerPlayer player, ItemStack stack, @Nullable INetwork network) {
-        safeGiveToStorage(player, stack,
+    public static boolean safeGiveToPlayer(
+            ServerPlayer player,
+            ItemStack stack,
+            @Nullable INetwork network
+    ) {
+        return safeGiveToStorage(player, stack,
                 network == null ? null : CraftStorageEndpoints.fromLegacyNetwork(network));
     }
 
@@ -99,12 +103,15 @@ public final class PlayerUtils {
      * 后端无关的安全交付：玩家背包优先，背包满或区块未加载时写入所选存储端点。
      * 存储仍无法接收的剩余物才进入世界掉落，绝不把“背包满”直接当成最终结果。
      */
-    public static void safeGiveToStorage(ServerPlayer player, ItemStack stack,
-                                         @Nullable CraftStorageEndpoint endpoint) {
-        if (stack.isEmpty()) return;
+    public static boolean safeGiveToStorage(
+            ServerPlayer player,
+            ItemStack stack,
+            @Nullable CraftStorageEndpoint endpoint
+    ) {
+        if (stack.isEmpty()) return true;
         if (InkFluidSupport.isToken(stack)) {
             CraftFluidRecovery.retainToEndpoint(player, stack, endpoint);
-            return;
+            return false;
         }
 
         ItemStack leftover = stack.copy();
@@ -119,7 +126,7 @@ public final class PlayerUtils {
                 RSIntegrationMod.LOGGER.error(
                         "[RSI] Storage outcome is unknown; not retrying to avoid duplication: {} x{}",
                         ItemStackUtils.registryId(leftover), leftover.getCount());
-                return;
+                return false;
             }
             ItemStack before = leftover.copy();
             leftover = result.remainder().orElseThrow();
@@ -144,7 +151,7 @@ public final class PlayerUtils {
             }
             if (dropLevel == null || dropPos == null) {
                 dropLevel = player.getServer().overworld();
-                if (dropLevel == null) return;
+                if (dropLevel == null) return false;
                 dropPos = dropLevel.getSharedSpawnPos();
             }
             dropLevel.addFreshEntity(new ItemEntity(dropLevel,
@@ -153,7 +160,9 @@ public final class PlayerUtils {
                     "[RSI] Item dropped at {} (player inventory and storage both rejected it): {} x{}",
                     dropPos, player.getGameProfile().getName(),
                     ItemStackUtils.registryId(leftover), leftover.getCount());
+            return false;
         }
+        return true;
     }
 
     /** 无修改前快照时同步全部背包槽，扣料和退款也不能只依赖当前菜单的槽位。 */

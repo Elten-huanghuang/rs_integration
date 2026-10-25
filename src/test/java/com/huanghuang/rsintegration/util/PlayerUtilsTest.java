@@ -172,7 +172,8 @@ class PlayerUtilsTest extends BootstrapTest {
                 });
         CraftStorageEndpoint endpoint = () -> session;
 
-        PlayerUtils.safeGiveToStorage(player, new ItemStack(Items.IRON_INGOT, 3), endpoint);
+        assertTrue(PlayerUtils.safeGiveToStorage(
+                player, new ItemStack(Items.IRON_INGOT, 3), endpoint));
 
         verify(session).insert(eq(player), argThat(stack ->
                 stack.is(Items.IRON_INGOT) && stack.getCount() == 3), eq(false));
