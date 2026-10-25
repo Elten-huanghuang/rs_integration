@@ -593,6 +593,11 @@ public final class BindingEventHandler {
                     String regStr = regKey.toString();
                     for (String key : blockRegistryKeys) {
                         if (regStr.equals(key)) return true;
+                        if (key.endsWith(":*")
+                                && regStr.startsWith(key.substring(
+                                0, key.length() - 1))) {
+                            return true;
+                        }
                     }
                 }
             }

@@ -81,6 +81,7 @@ import com.huanghuang.rsintegration.feature.ftbquests.StorageQuestScanService;
 import com.huanghuang.rsintegration.crafting.CraftOutputInterceptor;
 import com.huanghuang.rsintegration.crafting.CraftPlanningRevision;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
+import com.huanghuang.rsintegration.crafting.external.ExternalIntegrationRuntime;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
 import com.huanghuang.rsintegration.network.craftingstation.CraftingStationModePacket;
@@ -125,6 +126,9 @@ import com.huanghuang.rsintegration.feature.villager.VillagerRestockNetworkHandl
 import com.huanghuang.rsintegration.feature.villager.client.VillagerRestockClient;
 import com.huanghuang.rsintegration.feature.villager.tradelock.VillagerTradeLockService;
 import com.huanghuang.rsintegration.feature.villager.tradelock.VillagerTradeLockSnapshotPacket;
+import com.huanghuang.rsintegration.api.RSIIntegrationApi;
+import com.huanghuang.rsintegration.api.RSIIntegrationRegistrationEvent;
+import com.huanghuang.rsintegration.api.RSIIntegrationServices;
             // Stonecutter
 import java.util.List;
 import java.util.Optional;
@@ -319,6 +323,7 @@ public final class RSIntegrationMod {
     );
 
     public RSIntegrationMod() {
+        RSIIntegrationServices.initialize();
         RSIntegrationConfig.register();
         RSStorageConfig.register();
         MOD_BUS.addListener((ModConfigEvent.Loading e) -> {
@@ -391,6 +396,8 @@ public final class RSIntegrationMod {
         MOD_BUS.addListener(this::onClientSetup);
 
         FMLJavaModLoadingContext.get().getModEventBus().addListener(this::onCommonSetup);
+        MinecraftForge.EVENT_BUS.addListener(
+                (ServerStoppingEvent event) -> RSIIntegrationServices.stop());
         MinecraftForge.EVENT_BUS.register(
                 ExternalItemProgressBridge.class);
         if (ModList.get().isLoaded(ModIds.FTB_QUESTS)) {
@@ -470,6 +477,16 @@ public final class RSIntegrationMod {
     }
 
     private void onCommonSetup(final FMLCommonSetupEvent event) {
+        event.enqueueWork(() -> {
+            RSIIntegrationServices.beginRegistration();
+            try {
+                MOD_BUS.post(new RSIIntegrationRegistrationEvent(
+                        RSIIntegrationApi.get().orElseThrow()));
+            } finally {
+                RSIIntegrationServices.freezeRegistration();
+            }
+            ExternalIntegrationRuntime.initialize();
+        });
         event.enqueueWork(() -> CraftingHelper.register(new UnifiedDiskEnabledCondition.Serializer()));
         StorageBackendLoadResult rsBackend = STORAGE_BACKENDS.load(
                 StorageBackendDescriptors.REFINED_STORAGE);

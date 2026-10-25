@@ -110,6 +110,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import java.util.IdentityHashMap;
 import java.util.Set;
@@ -1336,6 +1337,14 @@ public final class AsyncCraftChain {
         return attempt == null ? 0 : attempt.attempts;
     }
 
+    private UUID publicOperationId(OperationId operationId) {
+        String identity = operationId.craftId()
+                + "|" + operationId.nodeId().value()
+                + "|" + operationId.sequence();
+        return UUID.nameUUIDFromBytes(
+                identity.getBytes(StandardCharsets.UTF_8));
+    }
+
     @Nullable
     private ProbabilisticProduction probabilityTarget(CraftingResolver.ResolutionStep step, ServerPlayer player) {
         ProbabilisticProduction existing = probabilityTargets.get(step);
@@ -1953,6 +1962,7 @@ public final class AsyncCraftChain {
         if (storageEndpoint != null) nodeLedger.setStorageEndpoint(storageEndpoint);
         IBatchDelegate delegate = prepared.delegate();
         OperationExecutionKernel.Session operationSession = null;
+        OperationId operationIdentity = null;
         boolean ownershipTransferred = false;
         boolean terminalCleanupInvoked = false;
         try {
@@ -2094,8 +2104,10 @@ public final class AsyncCraftChain {
                                 prepared.step().modType().id() + ":support"));
                     }
                 }
+                operationIdentity = new OperationId(
+                        craftId, nodeId, nextGraphOperationSequence(nodeId));
                 operationSession = operationKernel.tryPrepare(
-                        new OperationId(craftId, nodeId, nextGraphOperationSequence(nodeId)),
+                        operationIdentity,
                         craftOperationBudget, machineScope, capture);
                 if (operationSession == null) {
                     return GraphDispatchResult.retry("operation budget, machine, or capture is temporarily unavailable");
@@ -2109,6 +2121,13 @@ public final class AsyncCraftChain {
                 return GraphDispatchResult.retry("node ledger commit did not complete");
             }
             if (delegate instanceof AbstractBatchDelegate abd) abd.useSharedLedger(nodeLedger);
+            if (operationIdentity != null) {
+                startContext = startContext.withOperationIdentity(
+                        operationIdentity.craftId(),
+                        publicOperationId(operationIdentity),
+                        operationIdentity.sequence() + 1
+                );
+            }
             attachMagicReservation(delegate);
 
             CraftNodeRuntime runtime = new CraftNodeRuntime(nodeId,
@@ -2128,13 +2147,15 @@ public final class AsyncCraftChain {
             ownershipTransferred = true;
             IBatchDelegate startDelegate = delegate;
             List<ItemStack> startMaterials = materials;
+            OperationStartContext operationStartContext = startContext;
             RSIntegrationMod.LOGGER.debug(ctx.format(
                     "Graph node dispatching: node={} recipe={} delegate={} machine={} materials={}"),
                     nodeId, prepared.step().recipeId(), delegate.getClass().getSimpleName(),
                     prepared.machine().pos(), startMaterials.size());
             boolean accepted = operationSession != null
-                    ? operationSession.tryStart(() -> startDelegate.startOperation(startContext))
-                    : startDelegate.startOperation(startContext);
+                    ? operationSession.tryStart(() ->
+                            startDelegate.startOperation(operationStartContext))
+                    : startDelegate.startOperation(operationStartContext);
             if (!accepted) {
                 RSIntegrationMod.LOGGER.warn(ctx.format(
                         "Graph node delegate rejected start: node={} recipe={} delegate={} machine={}"),

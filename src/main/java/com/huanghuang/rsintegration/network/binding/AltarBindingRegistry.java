@@ -401,7 +401,8 @@ public final class AltarBindingRegistry {
             return !getBoundMachinesForRecipe(player, type, recipe.getId()).isEmpty();
         }
 
-        String subType = recipeMachineSubType(recipe, type);
+        String subType = type == ModType.EXTERNAL_INTEGRATION
+                ? null : recipeMachineSubType(recipe, type);
 
         TickCache cache = getTickCache(player);
         if (!cache.modTypeIds.contains(type.id())) return false;
@@ -646,9 +647,11 @@ public final class AltarBindingRegistry {
             boolean includeBlocked) {
         Recipe<?> recipe = player.serverLevel()
                 .getRecipeManager().byKey(recipeId).orElse(null);
-        String subType = recipe != null
-                ? recipeMachineSubType(recipe, type)
-                : recipeSubTypeHint(recipeId);
+        String subType = type == ModType.EXTERNAL_INTEGRATION
+                ? null
+                : recipe != null
+                        ? recipeMachineSubType(recipe, type)
+                        : recipeSubTypeHint(recipeId);
         Set<MachineFavoriteKey> blocked = includeBlocked
                 ? Set.of() : blockedMachines(player);
         return getBoundMachinesForType(

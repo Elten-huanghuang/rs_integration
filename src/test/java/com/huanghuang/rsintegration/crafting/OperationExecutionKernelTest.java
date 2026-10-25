@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.crafting.graph.CaptureLeaseRegistry;
 import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.graph.OperationBudget;
+import com.huanghuang.rsintegration.crafting.graph.OperationId;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
@@ -46,6 +47,8 @@ class OperationExecutionKernelTest extends BootstrapTest {
         OperationExecutionKernel.Session session = harness.prepare(0);
 
         assertNotNull(session);
+        assertEquals(new OperationId(
+                harness.craftId, new NodeId(0), 0), session.operationId());
         session.close();
 
         assertEquals(0, harness.craft.active());

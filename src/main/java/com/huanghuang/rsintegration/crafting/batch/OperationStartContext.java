@@ -10,6 +10,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 import javax.annotation.Nullable;
@@ -27,7 +28,10 @@ public record OperationStartContext(
         MaterialPlan materialPlan,
         List<ReservedMaterial> materials,
         @Nullable InputBufferPlan inputBufferPlan,
-        @Nullable RepeatedOperationPlan repeatedOperationPlan) {
+        @Nullable RepeatedOperationPlan repeatedOperationPlan,
+        @Nullable UUID transactionId,
+        @Nullable UUID operationId,
+        int attempt) {
 
     public enum MaterialOwnership {
         CHAIN_RESERVED,
@@ -41,6 +45,11 @@ public record OperationStartContext(
                 ? MaterialOwnership.CHAIN_RESERVED : materialOwnership;
         materialPlan = materialPlan == null ? MaterialPlan.none() : materialPlan;
         materials = materials == null ? List.of() : List.copyOf(materials);
+        if (attempt < 1) throw new IllegalArgumentException("attempt must be positive");
+        if ((transactionId == null) != (operationId == null)) {
+            throw new IllegalArgumentException(
+                    "transaction and operation ids must be provided together");
+        }
         validateMaterialReferences(materialPlan, materials);
         if (repeatedOperationPlan != null && (materialOwnership != MaterialOwnership.CHAIN_RESERVED
                 || !materialPlan.entries().isEmpty() || !materials.isEmpty()
@@ -48,6 +57,30 @@ public record OperationStartContext(
             throw new IllegalArgumentException(
                     "repeated operation plan must be the sole chain-reserved material payload");
         }
+    }
+
+    public OperationStartContext(
+            ServerPlayer player,
+            ExtractionLedger ledger,
+            MaterialOwnership materialOwnership,
+            MaterialPlan materialPlan,
+            List<ReservedMaterial> materials,
+            @Nullable InputBufferPlan inputBufferPlan,
+            @Nullable RepeatedOperationPlan repeatedOperationPlan
+    ) {
+        this(player, ledger, materialOwnership, materialPlan, materials,
+                inputBufferPlan, repeatedOperationPlan, null, null, 1);
+    }
+
+    public OperationStartContext withOperationIdentity(
+            UUID transactionId,
+            UUID operationId,
+            int attempt
+    ) {
+        return new OperationStartContext(
+                player, ledger, materialOwnership, materialPlan, materials,
+                inputBufferPlan, repeatedOperationPlan,
+                transactionId, operationId, attempt);
     }
 
     public boolean buffered() {

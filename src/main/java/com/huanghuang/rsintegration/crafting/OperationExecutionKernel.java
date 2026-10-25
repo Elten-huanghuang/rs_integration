@@ -33,7 +33,7 @@ public final class OperationExecutionKernel {
     @Nullable
     public Session tryPrepareBudget(OperationBudget craftBudget) {
         OperationResourceCoordinator.Scope scope = resources.tryAcquireBudget(craftBudget);
-        return scope == null ? null : new Session(scope);
+        return scope == null ? null : new Session(scope, null);
     }
 
     @Nullable
@@ -67,12 +67,12 @@ public final class OperationExecutionKernel {
                               @Nullable OperationResourceCoordinator.CaptureRequest capture) {
         OperationResourceCoordinator.Scope scope = resources.tryAcquire(
                 operationId, craftBudget, machineScope, capture);
-        return scope == null ? null : new Session(scope);
+        return scope == null ? null : new Session(scope, operationId);
     }
 
     /** Create a lifecycle-only session for synchronous operations with no physical resource scope. */
     public Session prepareLogical() {
-        return new Session(null);
+        return new Session(null, null);
     }
 
     @FunctionalInterface
@@ -98,13 +98,24 @@ public final class OperationExecutionKernel {
     public static final class Session implements AutoCloseable {
         @Nullable
         private OperationResourceCoordinator.Scope scope;
+        @Nullable
+        private final OperationId operationId;
         private boolean closed;
         private boolean committed;
         private boolean startAttempted;
         private boolean settled;
 
-        private Session(@Nullable OperationResourceCoordinator.Scope scope) {
+        private Session(
+                @Nullable OperationResourceCoordinator.Scope scope,
+                @Nullable OperationId operationId
+        ) {
             this.scope = scope;
+            this.operationId = operationId;
+        }
+
+        @Nullable
+        public OperationId operationId() {
+            return operationId;
         }
 
         public boolean commit(CommitAction action) {

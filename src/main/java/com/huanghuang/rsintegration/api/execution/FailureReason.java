@@ -1,0 +1,15 @@
+package com.huanghuang.rsintegration.api.execution;
+
+public enum FailureReason {
+    MACHINE_INVALID,
+    MACHINE_DESCRIPTOR_CHANGED,
+    MACHINE_NOT_LOADED,
+    MACHINE_REMOVED,
+    RECIPE_CHANGED,
+    PLAYER_OFFLINE,
+    TIMEOUT,
+    EXECUTION_EXCEPTION,
+    OUTPUT_INVALID,
+    SETTLEMENT_REJECTED,
+    UNKNOWN
+}

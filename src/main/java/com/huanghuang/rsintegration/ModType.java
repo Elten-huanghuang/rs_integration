@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.HandlerVirtualExchangeBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.external.ExternalIntegrationBatchDelegate;
 import com.huanghuang.rsintegration.mods.forbidden.FaRitualWrapper;
 import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeWrapper;
 import com.huanghuang.rsintegration.util.ModIds;
@@ -63,6 +64,7 @@ public final class ModType {
     public static final ModType FLUID_CONTAINER;
     public static final ModType CUSTOM_GUI;
     public static final ModType FARMINGFORBLOCKHEADS_MARKET;
+    public static final ModType EXTERNAL_INTEGRATION;
 
     static {
         GENERIC = register("generic",
@@ -96,6 +98,16 @@ public final class ModType {
                 new String[][]{{"farmingforblockheads:market", "market"}},
                 new String[][]{{"net.blay09.mods.farmingforblockheads.", "farmingforblockheads"}},
                 "gui.rs_integration.jei.market_craft");
+
+        EXTERNAL_INTEGRATION = register(
+                "integration_api",
+                new String[0],
+                new String[0],
+                new String[]{"integration_api"},
+                ExternalIntegrationBatchDelegate::new
+        );
+        EXTERNAL_INTEGRATION.confirmGraphExecution(
+                "公共 API 机器由图节点内的标准 I/O 或自定义执行器完成");
     }
 
     private ModType(String id, String[] recipePrefixes, String[] blockKeyKeywords,
