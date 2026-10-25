@@ -220,6 +220,7 @@ public final class DefaultRSICraftConsumerApi
 
     public void stop() {
         state = ConsumerServiceState.STOPPING;
+        runtime.expireTransientState();
         state = ConsumerServiceState.STOPPED;
     }
 

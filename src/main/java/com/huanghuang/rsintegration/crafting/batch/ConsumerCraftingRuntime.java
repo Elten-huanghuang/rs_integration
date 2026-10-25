@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.batch;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.api.consumer.ConsumerAck;
+import com.huanghuang.rsintegration.api.consumer.ConsumerApiCodecs;
 import com.huanghuang.rsintegration.api.consumer.ConsumerBatchOrderEntry;
 import com.huanghuang.rsintegration.api.consumer.ConsumerBatchOrderReceipt;
 import com.huanghuang.rsintegration.api.consumer.ConsumerBatchOrderRequest;
@@ -66,26 +67,34 @@ import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.storage.StorageReference;
+import io.netty.buffer.ByteBufUtil;
+import io.netty.buffer.Unpooled;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.nbt.TagParser;
+import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.saveddata.SavedData;
 import org.jetbrains.annotations.ApiStatus;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -96,6 +105,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Function;
 
 /**
  * Consumer 检查会话、一次性计划租约和订单启动适配器。
@@ -110,6 +120,8 @@ public final class ConsumerCraftingRuntime {
     private static final int MAX_PLAN_ENTRIES = 8192;
     private static final int MAX_ORDER_ENTRIES = 4096;
     private static final int PLANNING_THREADS = 2;
+    private static final String JOURNAL_NAME =
+            "rs_integration_consumer_orders";
 
     private final ConcurrentHashMap<ConsumerInspectionTicketId, Session> sessions =
             new ConcurrentHashMap<>();
@@ -127,6 +139,8 @@ public final class ConsumerCraftingRuntime {
             new ConcurrentHashMap<>();
     private final ConcurrentHashMap<ConsumerStorageId, StorageBinding>
             storageBindings = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<MinecraftServer, Journal> journals =
+            new ConcurrentHashMap<>();
     private final ExecutorService planner = Executors.newFixedThreadPool(
             PLANNING_THREADS,
             runnable -> {
@@ -236,6 +250,15 @@ public final class ConsumerCraftingRuntime {
         if (capture.failure != null) {
             return ConsumerResult.rejected(capture.failure);
         }
+        if (request.outputDestination()
+                == ConsumerOutputDestination.RS_NETWORK
+                && capture.capture.storageReference == null) {
+            return reject(
+                    ConsumerDiagnosticCode.OUTPUT_UNAVAILABLE,
+                    "requested network output has no selected storage endpoint",
+                    true
+            );
+        }
         ConsumerInspectionTicket ticket = new ConsumerInspectionTicket(
                 new ConsumerInspectionTicketId(UUID.randomUUID()),
                 player.getUUID(),
@@ -288,11 +311,11 @@ public final class ConsumerCraftingRuntime {
                         false
                 );
             }
-            if (!session.capture.revisionCurrent()) {
+            if (session.capture.stale(player)) {
                 session.closed = true;
                 return reject(
                         ConsumerDiagnosticCode.INSPECTION_SNAPSHOT_STALE,
-                        "recipe revision changed during inspection",
+                        "recipe, storage or machine binding changed during inspection",
                         true
                 );
             }
@@ -423,6 +446,7 @@ public final class ConsumerCraftingRuntime {
         ConsumerResult<ConsumerOrderReceipt> rejected =
                 validateMainThread(player);
         if (rejected != null) return rejected;
+        Journal journal = ensureJournal(player);
         SubmitKey key = new SubmitKey(
                 player.getUUID(),
                 request.consumerId(),
@@ -437,25 +461,35 @@ public final class ConsumerCraftingRuntime {
                         false
                 );
             }
-            return replay(previous.result());
+            return replayOrder(previous.result());
         }
         if (activeOrderCount(player.getUUID())
                 >= capabilities.maxConcurrentOrdersPerPlayer()) {
-            return reject(
+            ConsumerResult<ConsumerOrderReceipt> limited = reject(
                     ConsumerDiagnosticCode.ORDER_LIMIT_REACHED,
                     "player has too many active consumer orders",
                     true
             );
+            SubmissionRecord record = new SubmissionRecord(
+                    request.planId(), limited);
+            submissions.put(key, record);
+            journal.putSubmission(key, record);
+            return limited;
         }
 
         PlanLease plan = plans.get(request.planId());
         if (plan == null || !plan.playerId.equals(player.getUUID())
                 || !plan.consumerId.equals(request.consumerId())) {
-            return reject(
+            ConsumerResult<ConsumerOrderReceipt> missing = reject(
                     ConsumerDiagnosticCode.PLAN_NOT_FOUND,
                     "consumer plan was not found",
                     false
             );
+            SubmissionRecord record = new SubmissionRecord(
+                    request.planId(), missing);
+            submissions.put(key, record);
+            journal.putSubmission(key, record);
+            return missing;
         }
         if (!plan.consumed.compareAndSet(false, true)) {
             return reject(
@@ -471,7 +505,10 @@ public final class ConsumerCraftingRuntime {
                     "consumer plan has expired",
                     true
             );
-            submissions.put(key, new SubmissionRecord(request.planId(), expired));
+            SubmissionRecord record =
+                    new SubmissionRecord(request.planId(), expired);
+            submissions.put(key, record);
+            journal.putSubmission(key, record);
             return expired;
         }
         if (!CraftPlanningRevision.isCurrent(plan.revision)) {
@@ -480,7 +517,10 @@ public final class ConsumerCraftingRuntime {
                     "recipe revision changed before submission",
                     true
             );
-            submissions.put(key, new SubmissionRecord(request.planId(), stale));
+            SubmissionRecord record =
+                    new SubmissionRecord(request.planId(), stale);
+            submissions.put(key, record);
+            journal.putSubmission(key, record);
             return stale;
         }
 
@@ -496,8 +536,10 @@ public final class ConsumerCraftingRuntime {
                     "selected storage endpoint is no longer available",
                     true
             );
-            submissions.put(key, new SubmissionRecord(
-                    request.planId(), rejectedStorage));
+            SubmissionRecord record = new SubmissionRecord(
+                    request.planId(), rejectedStorage);
+            submissions.put(key, record);
+            journal.putSubmission(key, record);
             return rejectedStorage;
         }
         if (!PlanningStateValidator.revalidateForExecution(
@@ -512,7 +554,10 @@ public final class ConsumerCraftingRuntime {
                     "inventory, machine binding or network changed",
                     true
             );
-            submissions.put(key, new SubmissionRecord(request.planId(), stale));
+            SubmissionRecord record =
+                    new SubmissionRecord(request.planId(), stale);
+            submissions.put(key, record);
+            journal.putSubmission(key, record);
             return stale;
         }
 
@@ -526,7 +571,10 @@ public final class ConsumerCraftingRuntime {
                     "stored consumer plan cannot be projected into execution",
                     false
             );
-            submissions.put(key, new SubmissionRecord(request.planId(), invalid));
+            SubmissionRecord record =
+                    new SubmissionRecord(request.planId(), invalid);
+            submissions.put(key, record);
+            journal.putSubmission(key, record);
             return invalid;
         }
 
@@ -541,6 +589,7 @@ public final class ConsumerCraftingRuntime {
                 player.serverLevel().getGameTime()
         );
         orders.put(orderId, order);
+        journal.putOrder(order);
         try {
             AsyncCraftChain chain = CraftExecutionService.launch(
                     player,
@@ -559,19 +608,27 @@ public final class ConsumerCraftingRuntime {
                                 plan.dimension,
                                 plan.position
                         );
-                        running.onDone(() -> markOrderTerminal(order));
+                        running.onDone(() -> {
+                            markOrderTerminal(order);
+                            journal.putOrder(order);
+                        });
                     }
             );
             order.chain = chain;
         } catch (RuntimeException failure) {
             order.state = ConsumerOrderState.FAILED;
             order.failureReason = FailureReason.UNKNOWN;
+            journal.putOrder(order);
         }
         ConsumerOrderReceipt receipt = new ConsumerOrderReceipt(
                 orderId, order.currentState());
         ConsumerResult<ConsumerOrderReceipt> result =
                 ConsumerResult.success(receipt);
-        submissions.put(key, new SubmissionRecord(request.planId(), result));
+        SubmissionRecord record = new SubmissionRecord(
+                request.planId(), result);
+        submissions.put(key, record);
+        journal.putSubmission(key, record);
+        journal.putOrder(order);
         pruneOrders();
         return result;
     }
@@ -584,6 +641,7 @@ public final class ConsumerCraftingRuntime {
         ConsumerResult<ConsumerBatchOrderReceipt> rejected =
                 validateMainThread(player);
         if (rejected != null) return rejected;
+        Journal journal = ensureJournal(player);
         if (request.orders().size() > capabilities.maxOrdersPerBatch()) {
             return reject(
                     ConsumerDiagnosticCode.BATCH_LIMIT_EXCEEDED,
@@ -612,7 +670,7 @@ public final class ConsumerCraftingRuntime {
                         false
                 );
             }
-            return replay(previous.result());
+            return replayBatch(previous.result());
         }
 
         List<ConsumerBatchOrderEntry> entries = new ArrayList<>();
@@ -626,8 +684,10 @@ public final class ConsumerCraftingRuntime {
                 request.batchRequestId(), entries);
         ConsumerResult<ConsumerBatchOrderReceipt> result =
                 ConsumerResult.success(receipt);
-        batchSubmissions.put(key, new BatchSubmissionRecord(
-                List.copyOf(request.orders()), result));
+        BatchSubmissionRecord record = new BatchSubmissionRecord(
+                List.copyOf(request.orders()), result);
+        batchSubmissions.put(key, record);
+        journal.putBatch(key, record);
         return result;
     }
 
@@ -639,6 +699,7 @@ public final class ConsumerCraftingRuntime {
         ConsumerResult<ConsumerOrderStatus> rejected =
                 validateMainThread(player);
         if (rejected != null) return rejected;
+        ensureJournal(player);
         OrderRecord order = orders.get(orderId);
         if (order == null || !order.playerId.equals(player.getUUID())
                 || !order.consumerId.equals(consumerId)) {
@@ -660,6 +721,7 @@ public final class ConsumerCraftingRuntime {
         ConsumerResult<ConsumerCancelResult> rejected =
                 validateMainThread(player);
         if (rejected != null) return rejected;
+        Journal journal = ensureJournal(player);
         OrderRecord order = orders.get(orderId);
         if (order == null || !order.playerId.equals(player.getUUID())
                 || !order.consumerId.equals(consumerId)) {
@@ -691,7 +753,10 @@ public final class ConsumerCraftingRuntime {
                     "consumer order is already delivering or terminal",
                     false
             );
-            cancellations.put(key, new CancelRecord(orderId, notCancellable));
+            CancelRecord record =
+                    new CancelRecord(orderId, notCancellable);
+            cancellations.put(key, record);
+            journal.putCancel(key, record);
             return notCancellable;
         }
         if (order.chain != null && !order.chain.isDone()) {
@@ -703,7 +768,10 @@ public final class ConsumerCraftingRuntime {
         ConsumerResult<ConsumerCancelResult> result =
                 ConsumerResult.success(new ConsumerCancelResult(
                         orderId, ConsumerOrderState.CANCELLED));
-        cancellations.put(key, new CancelRecord(orderId, result));
+        CancelRecord record = new CancelRecord(orderId, result);
+        cancellations.put(key, record);
+        journal.putCancel(key, record);
+        journal.putOrder(order);
         return result;
     }
 
@@ -721,6 +789,14 @@ public final class ConsumerCraftingRuntime {
                 entry.getValue().playerId.equals(playerId));
         storageBindings.entrySet().removeIf(entry ->
                 entry.getValue().playerId().equals(playerId));
+    }
+
+    public void expireTransientState() {
+        sessions.values().forEach(session -> session.closed = true);
+        sessions.clear();
+        inspectionRequests.clear();
+        plans.clear();
+        storageBindings.clear();
     }
 
     private List<ConsumerCraftability> inspectPage(
@@ -1410,11 +1486,46 @@ public final class ConsumerCraftingRuntime {
         );
     }
 
+    private ConsumerResult<ConsumerOrderReceipt> replayOrder(
+            ConsumerResult<ConsumerOrderReceipt> previous
+    ) {
+        if (!previous.successful()) return replay(previous);
+        ConsumerOrderReceipt receipt = previous.value();
+        OrderRecord order = orders.get(receipt.orderId());
+        ConsumerOrderState state = order == null
+                ? receipt.state() : order.currentState();
+        return ConsumerResult.replay(new ConsumerOrderReceipt(
+                receipt.orderId(), state));
+    }
+
+    private ConsumerResult<ConsumerBatchOrderReceipt> replayBatch(
+            ConsumerResult<ConsumerBatchOrderReceipt> previous
+    ) {
+        if (!previous.successful()) return replay(previous);
+        ConsumerBatchOrderReceipt batch = previous.value();
+        List<ConsumerBatchOrderEntry> entries = batch.entries().stream()
+                .map(entry -> new ConsumerBatchOrderEntry(
+                        entry.externalRequestId(),
+                        replayOrder(entry.result())
+                ))
+                .toList();
+        return ConsumerResult.replay(new ConsumerBatchOrderReceipt(
+                batch.batchRequestId(), entries));
+    }
+
     private static long deadlineAfterMillis(long millis) {
         long now = System.nanoTime();
         long budget = Math.max(1L, millis) * 1_000_000L;
         long deadline = now + budget;
         return deadline < now ? Long.MAX_VALUE : deadline;
+    }
+
+    private Journal ensureJournal(ServerPlayer player) {
+        MinecraftServer server = player.server;
+        Journal journal = journals.computeIfAbsent(
+                server, Journal::get);
+        journal.mergeInto(this);
+        return journal;
     }
 
     private void pruneSessions(int maximum) {
@@ -1474,6 +1585,23 @@ public final class ConsumerCraftingRuntime {
 
         private boolean revisionCurrent() {
             return CraftPlanningRevision.isCurrent(revision);
+        }
+
+        private boolean stale(ServerPlayer player) {
+            if (!revisionCurrent()) return true;
+            if (storageReference != null
+                    && CraftStorageEndpoints.resolve(
+                    storageReference, player).isEmpty()) {
+                return true;
+            }
+            String currentBinding =
+                    PlanningStateValidator.bindingFingerprint(
+                            player,
+                            ResourceKey.create(
+                                    Registries.DIMENSION, dimension),
+                            position
+                    );
+            return !bindingFingerprint.equals(currentBinding);
         }
     }
 
@@ -1558,7 +1686,7 @@ public final class ConsumerCraftingRuntime {
         }
     }
 
-    private static final class OrderRecord {
+    static final class OrderRecord {
         private final ConsumerOrderId id;
         private final UUID playerId;
         private final ResourceLocation consumerId;
@@ -1574,7 +1702,7 @@ public final class ConsumerCraftingRuntime {
         private volatile long runningOperations;
         private volatile FailureReason failureReason;
 
-        private OrderRecord(
+        OrderRecord(
                 ConsumerOrderId id,
                 UUID playerId,
                 ResourceLocation consumerId,
@@ -1616,7 +1744,7 @@ public final class ConsumerCraftingRuntime {
             return ConsumerOrderState.RUNNING;
         }
 
-        private ConsumerOrderStatus status() {
+        ConsumerOrderStatus status() {
             ConsumerOrderState current = currentState();
             long completed = completedOperations;
             long total = totalOperations;
@@ -1652,43 +1780,63 @@ public final class ConsumerCraftingRuntime {
                             : List.of()
             );
         }
+
+        ConsumerOrderStatus persistedStatus() {
+            return new ConsumerOrderStatus(
+                    id,
+                    consumerId,
+                    recipeId,
+                    currentState(),
+                    completedOperations,
+                    totalOperations,
+                    runningOperations,
+                    List.<ConsumerOutputResult>of(),
+                    failureReason,
+                    state == ConsumerOrderState.FAILED
+                            ? List.of(publicDiagnostic(
+                            IntegrationDiagnosticCode.INTEGRATION_REPORTED_FAILURE,
+                            "consumer order failed"
+                    ))
+                            : List.of()
+            );
+        }
     }
 
-    private record InspectionRequestKey(
+    record InspectionRequestKey(
             UUID playerId,
             ResourceLocation consumerId,
             UUID requestId
     ) {}
 
-    private record SubmitKey(
+    record SubmitKey(
             UUID playerId,
             ResourceLocation consumerId,
             UUID requestId
     ) {}
 
-    private record BatchSubmitKey(
+    record BatchSubmitKey(
             UUID playerId,
             ResourceLocation consumerId,
             UUID requestId
     ) {}
 
-    private record CancelKey(
+    record CancelKey(
             UUID playerId,
             ResourceLocation consumerId,
             UUID requestId
     ) {}
 
-    private record SubmissionRecord(
+    record SubmissionRecord(
             ConsumerPlanId planId,
             ConsumerResult<ConsumerOrderReceipt> result
     ) {}
 
-    private record BatchSubmissionRecord(
+    record BatchSubmissionRecord(
             List<ConsumerOrderRequest> orders,
             ConsumerResult<ConsumerBatchOrderReceipt> result
     ) {}
 
-    private record CancelRecord(
+    record CancelRecord(
             ConsumerOrderId orderId,
             ConsumerResult<ConsumerCancelResult> result
     ) {}
@@ -1697,4 +1845,458 @@ public final class ConsumerCraftingRuntime {
             UUID playerId,
             @Nullable StorageReference reference
     ) {}
+
+    static final class Journal extends SavedData {
+        private static final int FORMAT_VERSION = 1;
+        private static final int MAX_RESULTS = 8192;
+        final Map<ConsumerOrderId, OrderRecord> orders =
+                new LinkedHashMap<>();
+        final Map<SubmitKey, SubmissionRecord> submissions =
+                new LinkedHashMap<>();
+        final Map<BatchSubmitKey, BatchSubmissionRecord> batches =
+                new LinkedHashMap<>();
+        final Map<CancelKey, CancelRecord> cancellations =
+                new LinkedHashMap<>();
+        private boolean loadedIntoRuntime;
+
+        Journal() {}
+
+        Journal(CompoundTag tag) {
+            if (tag.getInt("version") != FORMAT_VERSION) {
+                return;
+            }
+            for (Tag value : tag.getList("orders", Tag.TAG_COMPOUND)) {
+                try {
+                    OrderRecord order = readOrder((CompoundTag) value);
+                    if (order != null) orders.put(order.id, order);
+                } catch (RuntimeException ignored) {
+                    // 单条损坏记录不能阻止其他订单恢复。
+                }
+            }
+            for (Tag value : tag.getList(
+                    "submissions", Tag.TAG_COMPOUND)) {
+                try {
+                    SubmissionEntry entry =
+                            readSubmission((CompoundTag) value);
+                    if (entry != null) {
+                        submissions.put(entry.key(), entry.record());
+                    }
+                } catch (RuntimeException ignored) {
+                    // 忽略损坏的幂等记录。
+                }
+            }
+            for (Tag value : tag.getList("batches", Tag.TAG_COMPOUND)) {
+                try {
+                    BatchEntry entry = readBatch((CompoundTag) value);
+                    if (entry != null) {
+                        batches.put(entry.key(), entry.record());
+                    }
+                } catch (RuntimeException ignored) {
+                    // 忽略损坏的批级幂等记录。
+                }
+            }
+            for (Tag value : tag.getList("cancels", Tag.TAG_COMPOUND)) {
+                try {
+                    CancelEntry entry = readCancel((CompoundTag) value);
+                    if (entry != null) {
+                        cancellations.put(entry.key(), entry.record());
+                    }
+                } catch (RuntimeException ignored) {
+                    // 忽略损坏的取消幂等记录。
+                }
+            }
+        }
+
+        private static Journal get(MinecraftServer server) {
+            return server.overworld().getDataStorage().computeIfAbsent(
+                    Journal::new,
+                    Journal::new,
+                    JOURNAL_NAME
+            );
+        }
+
+        private synchronized void mergeInto(
+                ConsumerCraftingRuntime runtime
+        ) {
+            if (loadedIntoRuntime) return;
+            orders.forEach((id, order) ->
+                    runtime.orders.putIfAbsent(id, order));
+            submissions.forEach((key, record) ->
+                    runtime.submissions.putIfAbsent(key, record));
+            batches.forEach((key, record) ->
+                    runtime.batchSubmissions.putIfAbsent(key, record));
+            cancellations.forEach((key, record) ->
+                    runtime.cancellations.putIfAbsent(key, record));
+            loadedIntoRuntime = true;
+        }
+
+        synchronized void putOrder(OrderRecord order) {
+            orders.put(order.id, order);
+            while (orders.size() > MAX_RESULTS) {
+                ConsumerOrderId removable = orders.values().stream()
+                        .filter(candidate ->
+                                terminal(candidate.currentState()))
+                        .map(candidate -> candidate.id)
+                        .findFirst().orElse(null);
+                if (removable == null) break;
+                orders.remove(removable);
+            }
+            setDirty();
+        }
+
+        synchronized void putSubmission(
+                SubmitKey key,
+                SubmissionRecord record
+        ) {
+            submissions.put(key, record);
+            trimOldest(submissions);
+            setDirty();
+        }
+
+        synchronized void putBatch(
+                BatchSubmitKey key,
+                BatchSubmissionRecord record
+        ) {
+            batches.put(key, record);
+            trimOldest(batches);
+            setDirty();
+        }
+
+        synchronized void putCancel(
+                CancelKey key,
+                CancelRecord record
+        ) {
+            cancellations.put(key, record);
+            trimOldest(cancellations);
+            setDirty();
+        }
+
+        private static void trimOldest(Map<?, ?> values) {
+            while (values.size() > MAX_RESULTS) {
+                Object oldest = values.keySet().iterator().next();
+                values.remove(oldest);
+            }
+        }
+
+        @Override
+        public synchronized CompoundTag save(CompoundTag tag) {
+            tag.putInt("version", FORMAT_VERSION);
+            ListTag storedOrders = new ListTag();
+            orders.values().stream()
+                    .limit(MAX_RESULTS)
+                    .map(Journal::writeOrder)
+                    .forEach(storedOrders::add);
+            tag.put("orders", storedOrders);
+
+            ListTag storedSubmissions = new ListTag();
+            submissions.entrySet().stream()
+                    .limit(MAX_RESULTS)
+                    .map(Journal::writeSubmission)
+                    .forEach(storedSubmissions::add);
+            tag.put("submissions", storedSubmissions);
+
+            ListTag storedBatches = new ListTag();
+            batches.entrySet().stream()
+                    .limit(MAX_RESULTS)
+                    .map(Journal::writeBatch)
+                    .forEach(storedBatches::add);
+            tag.put("batches", storedBatches);
+
+            ListTag storedCancels = new ListTag();
+            cancellations.entrySet().stream()
+                    .limit(MAX_RESULTS)
+                    .map(Journal::writeCancel)
+                    .forEach(storedCancels::add);
+            tag.put("cancels", storedCancels);
+            return tag;
+        }
+
+        private static CompoundTag writeOrder(OrderRecord order) {
+            CompoundTag tag = new CompoundTag();
+            tag.putUUID("id", order.id.value());
+            tag.putUUID("player", order.playerId);
+            tag.putString("consumer", order.consumerId.toString());
+            tag.putUUID("external", order.externalRequestId.value());
+            tag.putString(
+                    "destination", order.destination.name());
+            tag.putLong("created", order.createdGameTime);
+            tag.putByteArray("status", encode(buffer ->
+                    ConsumerApiCodecs.writeOrderStatus(
+                            buffer, order.persistedStatus())));
+            return tag;
+        }
+
+        @Nullable
+        private static OrderRecord readOrder(CompoundTag tag) {
+            if (!tag.hasUUID("id") || !tag.hasUUID("player")
+                    || !tag.hasUUID("external")
+                    || !tag.contains("status", Tag.TAG_BYTE_ARRAY)) {
+                return null;
+            }
+            ResourceLocation consumer = ResourceLocation.tryParse(
+                    tag.getString("consumer"));
+            if (consumer == null) return null;
+            ConsumerOrderStatus status = decode(
+                    tag.getByteArray("status"),
+                    ConsumerApiCodecs::readOrderStatus
+            );
+            ConsumerOrderState state = status.terminal()
+                    ? status.state()
+                    : ConsumerOrderState.FAILED;
+            FailureReason failure = status.terminal()
+                    ? status.failureReason()
+                    : FailureReason.UNKNOWN;
+            ConsumerOutputDestination destination;
+            try {
+                destination = ConsumerOutputDestination.valueOf(
+                        tag.getString("destination"));
+            } catch (IllegalArgumentException exception) {
+                destination = ConsumerOutputDestination.RS_NETWORK;
+            }
+            OrderRecord order = new OrderRecord(
+                    status.orderId(),
+                    tag.getUUID("player"),
+                    consumer,
+                    new ConsumerExternalRequestId(
+                            tag.getUUID("external")),
+                    status.recipeId(),
+                    destination,
+                    tag.getLong("created")
+            );
+            order.state = state;
+            order.completedOperations = status.completedOperations();
+            order.totalOperations = status.totalOperations();
+            order.runningOperations = status.runningOperations();
+            order.failureReason = failure;
+            return order;
+        }
+
+        private static CompoundTag writeSubmission(
+                Map.Entry<SubmitKey, SubmissionRecord> entry
+        ) {
+            CompoundTag tag = writeSubmitKey(entry.getKey());
+            tag.putUUID("plan", entry.getValue().planId().value());
+            tag.putByteArray("result", encode(buffer ->
+                    ConsumerApiCodecs.writeResult(
+                            buffer,
+                            entry.getValue().result(),
+                            ConsumerApiCodecs::writeOrderReceipt
+                    )));
+            return tag;
+        }
+
+        @Nullable
+        private static SubmissionEntry readSubmission(CompoundTag tag) {
+            SubmitKey key = readSubmitKey(tag);
+            if (key == null || !tag.hasUUID("plan")
+                    || !tag.contains("result", Tag.TAG_BYTE_ARRAY)) {
+                return null;
+            }
+            ConsumerResult<ConsumerOrderReceipt> result = decode(
+                    tag.getByteArray("result"),
+                    buffer -> ConsumerApiCodecs.readResult(
+                            buffer, ConsumerApiCodecs::readOrderReceipt)
+            );
+            return new SubmissionEntry(
+                    key,
+                    new SubmissionRecord(
+                            new ConsumerPlanId(tag.getUUID("plan")),
+                            result
+                    )
+            );
+        }
+
+        private static CompoundTag writeBatch(
+                Map.Entry<BatchSubmitKey, BatchSubmissionRecord> entry
+        ) {
+            CompoundTag tag = new CompoundTag();
+            tag.putUUID("player", entry.getKey().playerId());
+            tag.putString(
+                    "consumer", entry.getKey().consumerId().toString());
+            tag.putUUID("request", entry.getKey().requestId());
+            tag.putByteArray("orders", encode(buffer ->
+                    writeOrderRequests(
+                            buffer, entry.getValue().orders())));
+            tag.putByteArray("result", encode(buffer ->
+                    ConsumerApiCodecs.writeResult(
+                            buffer,
+                            entry.getValue().result(),
+                            ConsumerApiCodecs::writeBatchOrderReceipt
+                    )));
+            return tag;
+        }
+
+        @Nullable
+        private static BatchEntry readBatch(CompoundTag tag) {
+            if (!tag.hasUUID("player") || !tag.hasUUID("request")
+                    || !tag.contains("orders", Tag.TAG_BYTE_ARRAY)
+                    || !tag.contains("result", Tag.TAG_BYTE_ARRAY)) {
+                return null;
+            }
+            ResourceLocation consumer = ResourceLocation.tryParse(
+                    tag.getString("consumer"));
+            if (consumer == null) return null;
+            List<ConsumerOrderRequest> requests = decode(
+                    tag.getByteArray("orders"),
+                    Journal::readOrderRequests
+            );
+            ConsumerResult<ConsumerBatchOrderReceipt> result = decode(
+                    tag.getByteArray("result"),
+                    buffer -> ConsumerApiCodecs.readResult(
+                            buffer,
+                            ConsumerApiCodecs::readBatchOrderReceipt
+                    )
+            );
+            return new BatchEntry(
+                    new BatchSubmitKey(
+                            tag.getUUID("player"),
+                            consumer,
+                            tag.getUUID("request")
+                    ),
+                    new BatchSubmissionRecord(requests, result)
+            );
+        }
+
+        private static CompoundTag writeCancel(
+                Map.Entry<CancelKey, CancelRecord> entry
+        ) {
+            CompoundTag tag = new CompoundTag();
+            tag.putUUID("player", entry.getKey().playerId());
+            tag.putString(
+                    "consumer", entry.getKey().consumerId().toString());
+            tag.putUUID("request", entry.getKey().requestId());
+            tag.putUUID(
+                    "order", entry.getValue().orderId().value());
+            tag.putByteArray("result", encode(buffer ->
+                    ConsumerApiCodecs.writeResult(
+                            buffer,
+                            entry.getValue().result(),
+                            ConsumerApiCodecs::writeCancelResult
+                    )));
+            return tag;
+        }
+
+        @Nullable
+        private static CancelEntry readCancel(CompoundTag tag) {
+            if (!tag.hasUUID("player") || !tag.hasUUID("request")
+                    || !tag.hasUUID("order")
+                    || !tag.contains("result", Tag.TAG_BYTE_ARRAY)) {
+                return null;
+            }
+            ResourceLocation consumer = ResourceLocation.tryParse(
+                    tag.getString("consumer"));
+            if (consumer == null) return null;
+            ConsumerResult<ConsumerCancelResult> result = decode(
+                    tag.getByteArray("result"),
+                    buffer -> ConsumerApiCodecs.readResult(
+                            buffer, ConsumerApiCodecs::readCancelResult)
+            );
+            return new CancelEntry(
+                    new CancelKey(
+                            tag.getUUID("player"),
+                            consumer,
+                            tag.getUUID("request")
+                    ),
+                    new CancelRecord(
+                            new ConsumerOrderId(tag.getUUID("order")),
+                            result
+                    )
+            );
+        }
+
+        private static CompoundTag writeSubmitKey(SubmitKey key) {
+            CompoundTag tag = new CompoundTag();
+            tag.putUUID("player", key.playerId());
+            tag.putString(
+                    "consumer", key.consumerId().toString());
+            tag.putUUID("request", key.requestId());
+            return tag;
+        }
+
+        @Nullable
+        private static SubmitKey readSubmitKey(CompoundTag tag) {
+            if (!tag.hasUUID("player") || !tag.hasUUID("request")) {
+                return null;
+            }
+            ResourceLocation consumer = ResourceLocation.tryParse(
+                    tag.getString("consumer"));
+            return consumer == null ? null : new SubmitKey(
+                    tag.getUUID("player"),
+                    consumer,
+                    tag.getUUID("request")
+            );
+        }
+
+        private static void writeOrderRequests(
+                FriendlyByteBuf buffer,
+                List<ConsumerOrderRequest> requests
+        ) {
+            buffer.writeVarInt(requests.size());
+            for (ConsumerOrderRequest request : requests) {
+                ConsumerApiCodecs.writeOrderRequest(buffer, request);
+            }
+        }
+
+        private static List<ConsumerOrderRequest> readOrderRequests(
+                FriendlyByteBuf buffer
+        ) {
+            int size = buffer.readVarInt();
+            if (size < 0 || size > 64) {
+                throw new IllegalArgumentException(
+                        "invalid persisted batch size");
+            }
+            List<ConsumerOrderRequest> requests =
+                    new ArrayList<>(size);
+            for (int index = 0; index < size; index++) {
+                requests.add(ConsumerApiCodecs.readOrderRequest(buffer));
+            }
+            return List.copyOf(requests);
+        }
+
+        private static byte[] encode(BinaryWriter writer) {
+            FriendlyByteBuf buffer =
+                    new FriendlyByteBuf(Unpooled.buffer());
+            try {
+                writer.write(buffer);
+                return ByteBufUtil.getBytes(
+                        buffer, buffer.readerIndex(),
+                        buffer.readableBytes(), false);
+            } finally {
+                buffer.release();
+            }
+        }
+
+        private static <T> T decode(
+                byte[] payload,
+                Function<FriendlyByteBuf, T> reader
+        ) {
+            FriendlyByteBuf buffer = new FriendlyByteBuf(
+                    Unpooled.wrappedBuffer(payload));
+            try {
+                return reader.apply(buffer);
+            } finally {
+                buffer.release();
+            }
+        }
+
+        @FunctionalInterface
+        private interface BinaryWriter {
+            void write(FriendlyByteBuf buffer);
+        }
+
+        private record SubmissionEntry(
+                SubmitKey key,
+                SubmissionRecord record
+        ) {}
+
+        private record BatchEntry(
+                BatchSubmitKey key,
+                BatchSubmissionRecord record
+        ) {}
+
+        private record CancelEntry(
+                CancelKey key,
+                CancelRecord record
+        ) {}
+    }
 }
