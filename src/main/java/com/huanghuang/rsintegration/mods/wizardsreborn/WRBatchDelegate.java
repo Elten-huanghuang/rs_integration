@@ -139,21 +139,33 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         }
         if (insufficientWissenRequired > 0
                 && insufficientWissenCurrent < insufficientWissenRequired) {
-            String current = String.format("%,d", Math.max(0, insufficientWissenCurrent));
-            String required = String.format("%,d", insufficientWissenRequired);
-            return PreparationResult.fatal(
-                    "Insufficient Wissen energy (have " + current + ", need " + required + ")",
-                    Component.translatable("rsi.wr.error.insufficient_wissen", current, required));
+            return waitingForWissen(
+                    insufficientWissenCurrent, insufficientWissenRequired);
         }
         if (insufficientXpRequired > 0
                 && insufficientXpCurrent < insufficientXpRequired) {
-            return PreparationResult.fatal(
-                    "Insufficient XP levels (have " + insufficientXpCurrent
-                            + ", need " + insufficientXpRequired + ")",
-                    Component.translatable("rsi.wr.error.insufficient_xp",
-                            insufficientXpCurrent, insufficientXpRequired));
+            return waitingForExperience(
+                    insufficientXpCurrent, insufficientXpRequired);
         }
         return PreparationResult.retry("WR machine is temporarily unavailable");
+    }
+
+    static PreparationResult waitingForWissen(int current, int required) {
+        String currentText = String.format("%,d", Math.max(0, current));
+        String requiredText = String.format("%,d", Math.max(0, required));
+        return PreparationResult.waiting(
+                "Insufficient Wissen energy (have " + currentText
+                        + ", need " + requiredText + ")",
+                Component.translatable("rsi.wr.info.waiting_wissen",
+                        currentText, requiredText));
+    }
+
+    static PreparationResult waitingForExperience(int current, int required) {
+        return PreparationResult.waiting(
+                "Insufficient XP levels (have " + Math.max(0, current)
+                        + ", need " + Math.max(0, required) + ")",
+                Component.translatable("rsi.wr.info.waiting_xp",
+                        Math.max(0, current), Math.max(0, required)));
     }
 
     @Override

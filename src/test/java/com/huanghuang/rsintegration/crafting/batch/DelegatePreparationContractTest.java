@@ -55,6 +55,19 @@ class DelegatePreparationContractTest {
     }
 
     @Test
+    void genericWaitingPreparationIsRetryableAndCarriesItsReason() {
+        Component message = Component.translatable(
+                "rsi.wr.info.waiting_wissen", "0", "1,000");
+        IBatchDelegate.PreparationResult result =
+                IBatchDelegate.PreparationResult.waiting(
+                        "machine requires more energy", message);
+
+        assertEquals(IBatchDelegate.PreparationState.RETRY, result.state());
+        assertEquals("machine requires more energy", result.detail());
+        assertEquals(message, result.userMessage());
+    }
+
+    @Test
     void operationLeaseUsesDelegatesPhysicalMachinePosition() {
         IBatchDelegate delegate = new StubDelegate(true);
         assertEquals(BlockPos.ZERO,

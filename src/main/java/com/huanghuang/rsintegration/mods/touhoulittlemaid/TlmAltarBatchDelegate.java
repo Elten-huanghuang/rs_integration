@@ -318,8 +318,8 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
             if (current != null && current < cost) {
                 int available = countPowerPointItems(player, dim, pos, storageEndpoint());
                 if (available < powerItemsNeeded(current, cost)) {
-                    return PreparationResult.fatal("insufficient altar power",
-                            Component.translatable("rsi.tlm.warn.insufficient_power_bind",
+                    return PreparationResult.waiting("insufficient altar power",
+                            Component.translatable("rsi.tlm.info.waiting_power",
                                     String.format("%.1f", current), String.format("%.1f", cost)));
                 }
             }

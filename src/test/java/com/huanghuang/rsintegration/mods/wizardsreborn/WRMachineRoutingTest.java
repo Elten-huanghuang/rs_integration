@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mods.wizardsreborn;
 
+import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.mods.wizardsreborn.WRRecipeHandler;
 import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
@@ -82,6 +83,28 @@ class WRMachineRoutingTest {
         assertEquals(60, WRWissenSupport.transferAmount(40, 100, 80, 10_000));
         assertEquals(10, WRWissenSupport.transferAmount(9_990, 10_000, 100, 10_000));
         assertEquals(0, WRWissenSupport.transferAmount(100, 100, 500, 10_000));
+    }
+
+    @Test
+    void insufficientWissenWaitsInsteadOfFailingPermanently() {
+        IBatchDelegate.PreparationResult result =
+                WRBatchDelegate.waitingForWissen(615, 1_000);
+
+        assertEquals(IBatchDelegate.PreparationState.RETRY, result.state());
+        assertTrue(result.detail().contains("615"));
+        assertTrue(result.detail().contains("1,000"));
+        assertTrue(result.userMessage() != null);
+    }
+
+    @Test
+    void insufficientExperienceAlsoUsesGenericWaitingSemantics() {
+        IBatchDelegate.PreparationResult result =
+                WRBatchDelegate.waitingForExperience(3, 5);
+
+        assertEquals(IBatchDelegate.PreparationState.RETRY, result.state());
+        assertTrue(result.detail().contains("3"));
+        assertTrue(result.detail().contains("5"));
+        assertTrue(result.userMessage() != null);
     }
 
     private static class ArcaneWorkbenchRecipe {}

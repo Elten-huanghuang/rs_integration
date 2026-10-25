@@ -231,8 +231,8 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
         PreparationResult state = validateMachine(ironFurnace, cooking);
         if (state.state() != PreparationState.READY) return state;
         if (ironFurnace.isFactory() && ironFurnace.getEnergy() <= 0) {
-            return PreparationResult.fatal("Iron Furnace factory has no energy",
-                    Component.translatable("rsi.ironfurnaces.error.factory_no_energy"));
+            return PreparationResult.waiting("Iron Furnace factory has no energy",
+                    Component.translatable("rsi.ironfurnaces.info.waiting_energy"));
         }
         resolveStorageEndpointIfMissing(() -> CraftPacketUtils
                 .resolveEndpointForCraft(player, target.dimension(), pos).orElse(null));

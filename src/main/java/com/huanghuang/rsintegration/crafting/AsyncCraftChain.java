@@ -184,6 +184,7 @@ public final class AsyncCraftChain {
     private final TerminationService terminationService = new TerminationService();
     private int machineCount = 1;
     private boolean waitingForMachineLease;
+    private final MachineWaitNotifier machineWaitNotifier = new MachineWaitNotifier();
     private int machineLeaseWaitTicks;
     @Nullable
     private Component machineWaitMessage;
@@ -941,6 +942,7 @@ public final class AsyncCraftChain {
             if (currentDelegate == null) {
                 if (waitingForMachineLease) {
                     machineLeaseWaitTicks++;
+                    machineWaitNotifier.notifyWait(online, machineWaitMessage);
                     int timeoutTicks = RSIntegrationConfig.MULTIBLOCK_CRAFT_TIMEOUT_SECONDS.get() * 20;
                     if (machineLeaseWaitTicks > timeoutTicks) {
                         abort("Timeout waiting for an available multi-block machine: "
@@ -1499,6 +1501,10 @@ public final class AsyncCraftChain {
             return new PreparationResult(PreparationState.RETRY, null, detail, null);
         }
 
+        static PreparationResult waiting(String detail, @Nullable Component userMessage) {
+            return new PreparationResult(PreparationState.RETRY, null, detail, userMessage);
+        }
+
         static PreparationResult fatal(String detail) {
             return fatal(detail, null);
         }
@@ -1597,6 +1603,7 @@ public final class AsyncCraftChain {
         }
         PreparationResult preparation = prepareGraphNode(nodeId, step, online);
         if (preparation.state() == PreparationState.RETRY) {
+            machineWaitNotifier.notifyWait(online, preparation.userMessage());
             return graphRetry(nodeId, preparation.detail(),
                     graphRequests.getOrDefault(nodeId, List.of()));
         }
@@ -1755,6 +1762,7 @@ public final class AsyncCraftChain {
         boolean protectionRejection = false;
         String fatalDetail = "";
         Component fatalUserMessage = null;
+        Component retryUserMessage = null;
         for (BoundMachine machine : available) {
             IBatchDelegate candidate = null;
             boolean retained = false;
@@ -1797,6 +1805,9 @@ public final class AsyncCraftChain {
                     eligible.add(machine);
                 } else if (result.state() == IBatchDelegate.PreparationState.RETRY) {
                     retryableRejection = true;
+                    if (retryUserMessage == null) {
+                        retryUserMessage = result.userMessage();
+                    }
                 } else if (fatalDetail.isEmpty()) {
                     fatalDetail = result.detail();
                     fatalUserMessage = result.userMessage();
@@ -1817,9 +1828,12 @@ public final class AsyncCraftChain {
             if (!retryableRejection && !validationThrew && !fatalDetail.isEmpty()) {
                 return PreparationResult.fatal(fatalDetail, fatalUserMessage);
             }
-            return PreparationResult.retry(validationThrew
+            String retryDetail = validationThrew
                     ? "delegate validation temporarily failed on every available machine"
-                    : "no available machine currently accepts the recipe");
+                    : "no available machine currently accepts the recipe";
+            return retryUserMessage == null
+                    ? PreparationResult.retry(retryDetail)
+                    : PreparationResult.waiting(retryDetail, retryUserMessage);
         }
         int desiredOperations = Math.max(1, step.executions());
         int availableOperations = Math.min(craftOperationBudget.availableCapacity(),
@@ -3396,8 +3410,10 @@ public final class AsyncCraftChain {
     //  multi-block step execution
 
     private IBatchDelegate startModStep(CraftingResolver.ResolutionStep step, ServerPlayer online) {
-        machineWaitMessage = null;
-        machineWaitDetail = null;
+        if (!waitingForMachineLease) {
+            machineWaitMessage = null;
+            machineWaitDetail = null;
+        }
         machineStartFailureMessage = null;
         machineStartFailureDetail = null;
         machineStartFailureLabel = "";

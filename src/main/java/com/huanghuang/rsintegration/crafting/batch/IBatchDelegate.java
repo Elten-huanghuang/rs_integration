@@ -86,6 +86,14 @@ public interface IBatchDelegate {
             return new PreparationResult(PreparationState.RETRY, detail, userMessage);
         }
 
+        /**
+         * 可恢复的机器运行条件尚未满足，例如能量、经验或可补充的 Catalysts 不足。
+         * 调度器会等待并重复探测，同时只向玩家提示一次具体原因。
+         */
+        public static PreparationResult waiting(String detail, Component userMessage) {
+            return retry(detail, userMessage);
+        }
+
         public static PreparationResult fatal(String detail) {
             return new PreparationResult(PreparationState.FATAL, detail);
         }
