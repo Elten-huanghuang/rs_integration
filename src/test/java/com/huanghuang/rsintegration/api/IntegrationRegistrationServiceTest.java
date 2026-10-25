@@ -84,6 +84,23 @@ class IntegrationRegistrationServiceTest {
         assertFalse(event.isCancelable());
     }
 
+    @Test
+    void stoppedApiResumesFrozenWithoutLosingRegistrations() {
+        DefaultRSIIntegrationApi api = new DefaultRSIIntegrationApi();
+        StubRecipeIntegration recipe = new StubRecipeIntegration("recipe", 0);
+        api.beginRegistration();
+        api.registerRecipe(recipe);
+        api.freezeRegistration();
+
+        api.stop();
+        assertEquals(RegistrationPhase.STOPPED, api.phase());
+        api.resumeAfterStop();
+
+        assertEquals(RegistrationPhase.FROZEN, api.phase());
+        assertSame(recipe, api.recipes().find(mock(Recipe.class))
+                .orElseThrow());
+    }
+
     private static final class StubRecipeIntegration
             implements RecipeIntegration<Recipe<?>> {
         private final ResourceLocation id;

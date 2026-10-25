@@ -31,6 +31,10 @@ public final class RSIIntegrationServices {
         API.stop();
     }
 
+    public static void resumeAfterStop() {
+        API.resumeAfterStop();
+    }
+
     /**
      * 仅供 RSI 内部适配器读取已冻结的配方注册，不属于第三方扩展面。
      */

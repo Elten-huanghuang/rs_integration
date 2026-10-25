@@ -918,8 +918,10 @@ public final class RSIntegrationMod {
             }
         });
         // 启动分片采集会话；完整配方扫描由后续 tick 逐步推进。
-        MinecraftForge.EVENT_BUS.addListener((ServerStartedEvent e) ->
-                RecipeIndex.warmUp(e.getServer().overworld()));
+        MinecraftForge.EVENT_BUS.addListener((ServerStartedEvent e) -> {
+            RSIIntegrationServices.resumeAfterStop();
+            RecipeIndex.warmUp(e.getServer().overworld());
+        });
         // /reload fires this event after the new recipes have been applied and
         // before they are sent to clients. Rebuild against that completed revision.
         MinecraftForge.EVENT_BUS.addListener((OnDatapackSyncEvent e) -> {

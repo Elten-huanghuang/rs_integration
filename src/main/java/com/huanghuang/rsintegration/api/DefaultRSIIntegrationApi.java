@@ -105,6 +105,12 @@ public final class DefaultRSIIntegrationApi implements RSIIntegrationApi {
         phase = RegistrationPhase.STOPPED;
     }
 
+    public synchronized void resumeAfterStop() {
+        if (phase == RegistrationPhase.STOPPED) {
+            phase = RegistrationPhase.FROZEN;
+        }
+    }
+
     synchronized List<RSIIntegrationServices.RecipeRegistration>
     recipeRegistrations() {
         return recipes.stream()
