@@ -35,9 +35,7 @@ public final class NodeOutputAccumulator {
         List<Publication> publications = new ArrayList<>();
         for (OutputDeclaration declaration : declarations) {
             if (declaration.kind() == OutputKind.DYNAMIC) continue;
-            long limit = declaration.probability().isGuaranteed()
-                    ? declaration.maximumQuantity()
-                    : declaration.quantity();
+            long limit = declaration.maximumQuantity();
             long remaining = limit - published.get(declaration.id());
             if (remaining <= 0L) continue;
             for (ItemStack stack : pending) {

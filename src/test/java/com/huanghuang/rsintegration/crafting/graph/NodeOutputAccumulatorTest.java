@@ -179,8 +179,33 @@ class NodeOutputAccumulatorTest extends BootstrapTest {
         NodeOutputAccumulator accumulator = new NodeOutputAccumulator(List.of(declaration));
 
         assertTrue(accumulator.isComplete());
-        assertTrue(accumulator.add(List.of(new ItemStack(Items.DIAMOND, 2))).isEmpty());
-        assertEquals(2, accumulator.drainSurplus().get(0).getCount());
+        List<NodeOutputAccumulator.Publication> publications =
+                accumulator.add(List.of(new ItemStack(Items.DIAMOND, 2)));
+
+        assertEquals(1, publications.size());
+        assertEquals(2, publications.get(0).stack().getCount());
+        assertEquals(2, accumulator.publishedQuantity(declaration.id()));
+        assertTrue(accumulator.isComplete());
+        assertTrue(accumulator.drainSurplus().isEmpty());
+    }
+
+    @Test
+    void probabilisticOutputPublishesNoMoreThanItsMaximumQuantity() {
+        OutputDeclaration declaration = new OutputDeclaration(
+                new OutputPortId(new NodeId(9), 0),
+                MaterialKey.of(new ItemStack(Items.DIAMOND)),
+                0, OutputKind.SECONDARY, 0, 2,
+                OutputProbability.probabilistic(0.25D, 4, "diamond_bonus"),
+                false, null);
+        NodeOutputAccumulator accumulator = new NodeOutputAccumulator(List.of(declaration));
+
+        List<NodeOutputAccumulator.Publication> publications =
+                accumulator.add(List.of(new ItemStack(Items.DIAMOND, 5)));
+
+        assertEquals(1, publications.size());
+        assertEquals(2, publications.get(0).stack().getCount());
+        assertEquals(3, accumulator.drainSurplus().get(0).getCount());
+        assertEquals(2, accumulator.publishedQuantity(declaration.id()));
     }
 
     private static ItemStack tagged(String variant, int count) {
