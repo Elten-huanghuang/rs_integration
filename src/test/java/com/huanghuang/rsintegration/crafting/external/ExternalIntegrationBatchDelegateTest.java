@@ -77,8 +77,10 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
                 new StubRecipeIntegration(view),
                 new RegistrationOptions(10, Map.of())
         );
+        StubMachineIntegration machineIntegration =
+                new StubMachineIntegration(processId);
         api.registerMachine(
-                new StubMachineIntegration(processId),
+                machineIntegration,
                 new RegistrationOptions(10, Map.of())
         );
         api.freezeRegistration();
@@ -105,6 +107,7 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
             return null;
         }).when(container).setItem(anyInt(), any());
         when(container.getMaxStackSize()).thenReturn(64);
+        when(container.getContainerSize()).thenReturn(2);
 
         when(level.hasChunkAt(position)).thenReturn(true);
         when(level.getBlockEntity(position)).thenReturn(blockEntity);
@@ -137,6 +140,12 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
         ));
         assertEquals(Items.DIAMOND, inputSlot.get().getItem());
         assertEquals(2, inputSlot.get().getCount());
+
+        machineIntegration.revision = 2L;
+        var changed = delegate.observeCraft(level);
+        assertEquals(IBatchDelegate.CraftPhase.FAILED, changed.phase());
+        assertTrue(changed.detail().contains("MACHINE_DESCRIPTOR_CHANGED"));
+        machineIntegration.revision = 1L;
 
         outputSlot.set(new ItemStack(Items.STICK, 1));
         List<ItemStack> outputs = delegate.collectAllResults(player);
@@ -235,9 +244,15 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
         }
     }
 
-    private record StubMachineIntegration(
-            ResourceLocation processId
-    ) implements MachineIntegration {
+    private static final class StubMachineIntegration
+            implements MachineIntegration {
+        private final ResourceLocation processId;
+        private long revision = 1L;
+
+        private StubMachineIntegration(ResourceLocation processId) {
+            this.processId = processId;
+        }
+
         @Override
         public ResourceLocation id() {
             return resource("machine_integration");
@@ -255,7 +270,7 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
         ) {
             return MachineDescriptorResult.ready(new MachineDescriptor(
                     resource("machine"),
-                    1L,
+                    revision,
                     Set.of(processId),
                     List.of(
                             new MachineItemPort(

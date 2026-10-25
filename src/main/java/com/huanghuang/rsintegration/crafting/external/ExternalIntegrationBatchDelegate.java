@@ -195,6 +195,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                     "RSI Integration machine chunk is not loaded");
             return false;
         }
+        machinePos = pos.immutable();
         BlockEntity blockEntity = level.getBlockEntity(pos);
         if (blockEntity == null || blockEntity.isRemoved()) {
             preparationFailure = Component.literal(
@@ -475,6 +476,10 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             BlockEntity blockEntity
     ) {
         if (!operationStarted) return workingObservation();
+        String descriptorFailure = validateCurrentDescriptor();
+        if (descriptorFailure != null) {
+            return failObservation(descriptorFailure);
+        }
         if (executionKind == RecipeExecutionKind.CUSTOM) {
             return observeCustomOperation(level);
         }
@@ -1720,7 +1725,82 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                                 + output.outputGroup()));
             }
         }
+        for (MachineItemPort port : descriptor.itemPorts()) {
+            String unavailable = validateItemPortBinding(port);
+            if (unavailable != null) {
+                failures.add(new IntegrationDiagnosticMessage(unavailable));
+            }
+        }
+        for (MachineFluidPort port : descriptor.fluidPorts()) {
+            String unavailable = validateFluidPortBinding(port);
+            if (unavailable != null) {
+                failures.add(new IntegrationDiagnosticMessage(unavailable));
+            }
+        }
         return List.copyOf(failures);
+    }
+
+    @Nullable
+    private String validateCurrentDescriptor() {
+        if (machineIntegration == null || descriptor == null) {
+            return "machine descriptor context is missing";
+        }
+        BlockEntity blockEntity = blockEntity();
+        if (blockEntity == null || blockEntity.isRemoved()) {
+            return "machine block entity is missing";
+        }
+        MachineContext context = new MachineContext(
+                machineIntegration.id(),
+                level,
+                machinePos,
+                operationStartContext == null
+                        ? null : operationStartContext.player()
+        );
+        MachineDescriptorResult current;
+        try {
+            current = machineIntegration.describe(context, blockEntity);
+        } catch (RuntimeException | LinkageError failure) {
+            return "machine describe failed during operation";
+        }
+        if (current.descriptor() == null) {
+            return "machine descriptor became unavailable";
+        }
+        MachineDescriptor next = current.descriptor();
+        if (next.descriptorRevision() != descriptor.descriptorRevision()
+                || !next.descriptorFingerprint().equals(
+                descriptor.descriptorFingerprint())) {
+            return IntegrationDiagnosticCode.MACHINE_DESCRIPTOR_CHANGED.name();
+        }
+        return null;
+    }
+
+    @Nullable
+    private String validateItemPortBinding(MachineItemPort port) {
+        if (port.access() == ItemPortAccess.CUSTOM) {
+            return "custom item port requires custom execution";
+        }
+        if (port.access() == ItemPortAccess.CONTAINER) {
+            Container container = container();
+            return container != null
+                    && port.slot() < container.getContainerSize()
+                    ? null
+                    : "item container port unavailable: " + port.portId();
+        }
+        IItemHandler handler = itemHandler(port.side());
+        return handler != null && port.slot() < handler.getSlots()
+                ? null
+                : "item handler port unavailable: " + port.portId();
+    }
+
+    @Nullable
+    private String validateFluidPortBinding(MachineFluidPort port) {
+        if (port.access() == FluidPortAccess.CUSTOM) {
+            return "custom fluid port requires custom execution";
+        }
+        IFluidHandler handler = fluidHandler(port.side());
+        return handler != null && port.tank() < handler.getTanks()
+                ? null
+                : "fluid handler port unavailable: " + port.portId();
     }
 
     private OutputProbability probability(OutputDeclaration output) {
