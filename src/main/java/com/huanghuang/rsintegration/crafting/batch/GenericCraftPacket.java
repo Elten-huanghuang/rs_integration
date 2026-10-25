@@ -869,7 +869,7 @@ public final class GenericCraftPacket {
                 Set.copyOf(blockedOutputs));
     }
 
-    private static BindingAwareGraph bindingAwareGraph(
+    static BindingAwareGraph bindingAwareGraph(
             ServerPlayer player, ImmutableRecipeGraph graph) {
         Map<ResourceLocation, Optional<Recipe<?>>> recipes = new HashMap<>();
         Function<ResourceLocation, Recipe<?>> resolve = recipeId ->

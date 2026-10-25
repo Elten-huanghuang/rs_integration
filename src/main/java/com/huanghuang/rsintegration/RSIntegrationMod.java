@@ -915,6 +915,8 @@ public final class RSIntegrationMod {
                         .onPlayerLogout(sp.getUUID());
                 VillagerTradeLockService
                         .remove(sp.getUUID());
+                RSIIntegrationServices.clearPlayer(
+                        sp.getUUID());
             }
         });
         // 启动分片采集会话；完整配方扫描由后续 tick 逐步推进。
@@ -934,6 +936,8 @@ public final class RSIntegrationMod {
         MinecraftForge.EVENT_BUS.addListener((TickEvent.ServerTickEvent e) -> {
             if (e.phase == TickEvent.Phase.END) {
                 RecipeIndex.tickWarmUp(e.getServer().overworld());
+                RSIIntegrationServices.tick(
+                        e.getServer().overworld());
                 if ((e.getServer().getTickCount() & 3) == 0) {
                     MagicResourceTaskLedger.get(e.getServer()).tick(e.getServer());
                 }

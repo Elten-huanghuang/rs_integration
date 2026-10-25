@@ -1,22 +1,30 @@
 package com.huanghuang.rsintegration.api;
 
+import com.huanghuang.rsintegration.api.consumer.DefaultRSICraftConsumerApi;
+import com.huanghuang.rsintegration.api.consumer.RSIConsumerServices;
 import com.huanghuang.rsintegration.api.machine.MachineIntegration;
 import com.huanghuang.rsintegration.api.recipe.RecipeIntegration;
+import net.minecraft.server.level.ServerLevel;
 import org.jetbrains.annotations.ApiStatus;
 
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 
 @ApiStatus.Internal
 public final class RSIIntegrationServices {
     private static final DefaultRSIIntegrationApi API = new DefaultRSIIntegrationApi();
+    private static final DefaultRSICraftConsumerApi CONSUMER =
+            new DefaultRSICraftConsumerApi();
     private static volatile boolean initialized;
 
     private RSIIntegrationServices() {}
 
     public static synchronized void initialize() {
         initialized = true;
+        RSIConsumerServices.install(CONSUMER);
+        CONSUMER.markIndexing();
     }
 
     public static void beginRegistration() {
@@ -29,10 +37,22 @@ public final class RSIIntegrationServices {
 
     public static void stop() {
         API.stop();
+        CONSUMER.stop();
     }
 
     public static void resumeAfterStop() {
         API.resumeAfterStop();
+        CONSUMER.markIndexing();
+    }
+
+    public static void tick(ServerLevel level) {
+        if (initialized) {
+            CONSUMER.tick(level);
+        }
+    }
+
+    public static void clearPlayer(UUID playerId) {
+        CONSUMER.clearPlayer(playerId);
     }
 
     /**

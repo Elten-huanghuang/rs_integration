@@ -51,6 +51,38 @@ public final class PureRecipePlanner {
                 DEFAULT_MAX_MEMOIZED_FAILURES);
     }
 
+    /**
+     * 使用调用方提供的完整偏好和有界预算执行搜索。
+     *
+     * <p>Consumer 检查会话需要固定 search state、截止时间以及请求级 forced/excluded
+     * 语义，不能依赖每玩家“最新请求”槽位。</p>
+     */
+    public static Result resolveConfigured(
+            ImmutableRecipeGraph graph,
+            Map<MaterialRef, ? extends Number> available,
+            List<IngredientRef> roots,
+            int maxSteps,
+            int maxSearchStates,
+            int maxMemoizedFailures,
+            long deadlineNanos,
+            Map<ResourceLocation, ResourceLocation> forcedRecipes,
+            PlanningPreferences preferences
+    ) {
+        return resolve(
+                graph,
+                available,
+                roots,
+                maxSteps,
+                maxSearchStates,
+                maxMemoizedFailures,
+                deadlineNanos,
+                System::nanoTime,
+                Set.of(),
+                forcedRecipes,
+                preferences
+        );
+    }
+
     static Result resolve(ImmutableRecipeGraph graph,
                           Map<MaterialRef, ? extends Number> available,
                           List<IngredientRef> roots, int maxSteps, int maxSearchStates) {
