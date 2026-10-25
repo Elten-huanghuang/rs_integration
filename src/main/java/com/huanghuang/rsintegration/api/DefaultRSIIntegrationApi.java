@@ -238,7 +238,9 @@ public final class DefaultRSIIntegrationApi implements RSIIntegrationApi {
         public List<RecipeIntegration<?>> findAll(Recipe<?> recipe) {
             List<Registered<RecipeIntegration<?>>> matches = new ArrayList<>();
             for (Registered<RecipeIntegration<?>> entry : recipes) {
-                if (entry.integration().supports(recipe)) matches.add(entry);
+                if (supportsRecipe(entry.integration(), recipe)) {
+                    matches.add(entry);
+                }
             }
             matches.sort(Comparator
                     .comparingInt((Registered<RecipeIntegration<?>> entry) ->
@@ -250,11 +252,20 @@ public final class DefaultRSIIntegrationApi implements RSIIntegrationApi {
         @Override
         public RecipeClaim claim(Recipe<?> recipe) {
             List<Registered<RecipeIntegration<?>>> matches = new ArrayList<>();
+            List<IntegrationDiagnostic> diagnostics = new ArrayList<>();
             for (Registered<RecipeIntegration<?>> entry : recipes) {
-                if (entry.integration().supports(recipe)) matches.add(entry);
+                try {
+                    if (entry.integration().supports(recipe)) matches.add(entry);
+                } catch (RuntimeException | LinkageError failure) {
+                    diagnostics.add(failureDiagnostic(
+                            IntegrationDiagnosticCode.RECIPE_INSPECTION_FAILED,
+                            entry.id(),
+                            failure
+                    ));
+                }
             }
             if (matches.isEmpty()) {
-                return new RecipeClaim(null, List.of(), List.of());
+                return new RecipeClaim(null, List.of(), diagnostics);
             }
             int highest = matches.stream()
                     .mapToInt(entry -> entry.options().priority())
@@ -266,7 +277,8 @@ public final class DefaultRSIIntegrationApi implements RSIIntegrationApi {
             List<RecipeIntegration<?>> candidates = top.stream()
                     .map(Registered::integration).toList();
             if (top.size() == 1) {
-                return new RecipeClaim(candidates.get(0), candidates, List.of());
+                return new RecipeClaim(
+                        candidates.get(0), candidates, diagnostics);
             }
             ResourceLocation recipeId = recipe.getId();
             IntegrationDiagnostic diagnostic = new IntegrationDiagnostic(
@@ -278,24 +290,38 @@ public final class DefaultRSIIntegrationApi implements RSIIntegrationApi {
                             "priority", Integer.toString(highest)
                     )
             );
-            return new RecipeClaim(null, candidates, List.of(diagnostic));
+            diagnostics.add(diagnostic);
+            return new RecipeClaim(null, candidates, diagnostics);
+        }
+
+        private boolean supportsRecipe(
+                RecipeIntegration<?> integration,
+                Recipe<?> recipe
+        ) {
+            try {
+                return integration.supports(recipe);
+            } catch (RuntimeException | LinkageError failure) {
+                return false;
+            }
         }
     }
 
     private final class DefaultMachineRegistry implements MachineIntegrationRegistry {
         @Override
         public List<MachineIntegration> findAll(BlockEntity blockEntity) {
-            return matchingMachines(blockEntity).stream()
+            return scanMachines(blockEntity).matches().stream()
                     .map(Registered::integration)
                     .toList();
         }
 
         @Override
         public MachineClaim claim(BlockEntity blockEntity) {
-            List<Registered<MachineIntegration>> matches =
-                    matchingMachines(blockEntity);
+            MachineScan scan = scanMachines(blockEntity);
+            List<Registered<MachineIntegration>> matches = scan.matches();
+            List<IntegrationDiagnostic> diagnostics =
+                    new ArrayList<>(scan.diagnostics());
             if (matches.isEmpty()) {
-                return new MachineClaim(null, List.of(), List.of());
+                return new MachineClaim(null, List.of(), diagnostics);
             }
             int highest = matches.stream()
                     .mapToInt(entry -> entry.options().priority())
@@ -308,7 +334,8 @@ public final class DefaultRSIIntegrationApi implements RSIIntegrationApi {
                     .map(Registered::integration)
                     .toList();
             if (top.size() == 1) {
-                return new MachineClaim(candidates.get(0), candidates, List.of());
+                return new MachineClaim(
+                        candidates.get(0), candidates, diagnostics);
             }
             IntegrationDiagnostic diagnostic = new IntegrationDiagnostic(
                     IntegrationDiagnosticCode.MACHINE_CLAIM_AMBIGUOUS,
@@ -319,22 +346,40 @@ public final class DefaultRSIIntegrationApi implements RSIIntegrationApi {
                             "priority", Integer.toString(highest)
                     )
             );
-            return new MachineClaim(null, candidates, List.of(diagnostic));
+            diagnostics.add(diagnostic);
+            return new MachineClaim(null, candidates, diagnostics);
         }
 
-        private List<Registered<MachineIntegration>> matchingMachines(
+        private MachineScan scanMachines(
                 BlockEntity blockEntity
         ) {
             List<Registered<MachineIntegration>> matches = new ArrayList<>();
+            List<IntegrationDiagnostic> diagnostics = new ArrayList<>();
             for (Registered<MachineIntegration> entry : machines) {
-                if (entry.integration().supports(blockEntity)) matches.add(entry);
+                try {
+                    if (entry.integration().supports(blockEntity)) {
+                        matches.add(entry);
+                    }
+                } catch (RuntimeException | LinkageError failure) {
+                    diagnostics.add(failureDiagnostic(
+                            IntegrationDiagnosticCode.MACHINE_UNSUPPORTED,
+                            entry.id(),
+                            failure
+                    ));
+                }
             }
             matches.sort(Comparator
                     .comparingInt((Registered<MachineIntegration> entry) ->
                             entry.options().priority()).reversed()
                     .thenComparing(entry -> entry.id().toString()));
-            return matches;
+            return new MachineScan(
+                    List.copyOf(matches), List.copyOf(diagnostics));
         }
+
+        private record MachineScan(
+                List<Registered<MachineIntegration>> matches,
+                List<IntegrationDiagnostic> diagnostics
+        ) {}
     }
 
     private final class DefaultExecutionRegistry
@@ -344,17 +389,21 @@ public final class DefaultRSIIntegrationApi implements RSIIntegrationApi {
                 RecipeView recipe,
                 MachineContext machine
         ) {
-            return matchingExecutions(recipe, machine).stream()
+            return scanExecutions(recipe, machine).matches().stream()
                     .map(Registered::integration)
                     .toList();
         }
 
         @Override
         public ExecutionClaim claim(RecipeView recipe, MachineContext machine) {
+            ExecutionScan scan = scanExecutions(recipe, machine);
             List<Registered<RecipeExecutionIntegration>> matches =
-                    matchingExecutions(recipe, machine);
+                    scan.matches();
+            List<IntegrationDiagnostic> diagnostics =
+                    new ArrayList<>(scan.diagnostics());
             if (matches.isEmpty()) {
-                return new ExecutionClaim(null, List.of(), List.of());
+                return new ExecutionClaim(
+                        null, List.of(), diagnostics);
             }
             int highest = matches.stream()
                     .mapToInt(entry -> entry.options().priority())
@@ -367,7 +416,8 @@ public final class DefaultRSIIntegrationApi implements RSIIntegrationApi {
                     .map(Registered::integration)
                     .toList();
             if (top.size() == 1) {
-                return new ExecutionClaim(candidates.get(0), candidates, List.of());
+                return new ExecutionClaim(
+                        candidates.get(0), candidates, diagnostics);
             }
             IntegrationDiagnostic diagnostic = new IntegrationDiagnostic(
                     IntegrationDiagnosticCode.EXECUTION_CLAIM_AMBIGUOUS,
@@ -379,25 +429,55 @@ public final class DefaultRSIIntegrationApi implements RSIIntegrationApi {
                             "priority", Integer.toString(highest)
                     )
             );
-            return new ExecutionClaim(null, candidates, List.of(diagnostic));
+            diagnostics.add(diagnostic);
+            return new ExecutionClaim(
+                    null, candidates, diagnostics);
         }
 
-        private List<Registered<RecipeExecutionIntegration>> matchingExecutions(
+        private ExecutionScan scanExecutions(
                 RecipeView recipe,
                 MachineContext machine
         ) {
             List<Registered<RecipeExecutionIntegration>> matches =
                     new ArrayList<>();
+            List<IntegrationDiagnostic> diagnostics = new ArrayList<>();
             for (Registered<RecipeExecutionIntegration> entry : executions) {
-                if (entry.integration().supports(recipe, machine)) {
-                    matches.add(entry);
+                try {
+                    if (entry.integration().supports(recipe, machine)) {
+                        matches.add(entry);
+                    }
+                } catch (RuntimeException | LinkageError failure) {
+                    diagnostics.add(failureDiagnostic(
+                            IntegrationDiagnosticCode.EXECUTION_CONTRACT_VIOLATION,
+                            entry.id(),
+                            failure
+                    ));
                 }
             }
             matches.sort(Comparator
                     .comparingInt((Registered<RecipeExecutionIntegration> entry) ->
                             entry.options().priority()).reversed()
                     .thenComparing(entry -> entry.id().toString()));
-            return matches;
+            return new ExecutionScan(
+                    List.copyOf(matches), List.copyOf(diagnostics));
         }
+
+        private record ExecutionScan(
+                List<Registered<RecipeExecutionIntegration>> matches,
+                List<IntegrationDiagnostic> diagnostics
+        ) {}
+    }
+
+    private static IntegrationDiagnostic failureDiagnostic(
+            IntegrationDiagnosticCode code,
+            ResourceLocation integrationId,
+            Throwable failure
+    ) {
+        return new IntegrationDiagnostic(
+                code,
+                IntegrationSeverity.ERROR,
+                integrationId,
+                Map.of("failure", failure.getClass().getName())
+        );
     }
 }

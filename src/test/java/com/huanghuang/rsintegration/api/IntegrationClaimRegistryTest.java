@@ -14,6 +14,7 @@ import com.huanghuang.rsintegration.api.machine.MachineContext;
 import com.huanghuang.rsintegration.api.machine.MachineDescriptorResult;
 import com.huanghuang.rsintegration.api.machine.MachineIntegration;
 import com.huanghuang.rsintegration.api.recipe.RecipeFlags;
+import com.huanghuang.rsintegration.api.recipe.RecipeContext;
 import com.huanghuang.rsintegration.api.recipe.RecipeInspectionResult;
 import com.huanghuang.rsintegration.api.recipe.RecipeIntegration;
 import com.huanghuang.rsintegration.api.recipe.RecipeView;
@@ -92,6 +93,55 @@ class IntegrationClaimRegistryTest {
                 ambiguous.diagnostics().get(0).code());
     }
 
+    @Test
+    void failingCandidateDoesNotAbortMachineOrExecutionScan() {
+        DefaultRSIIntegrationApi api = new DefaultRSIIntegrationApi();
+        BlockEntity blockEntity = mock(BlockEntity.class);
+        api.beginRegistration();
+        api.registerMachine(
+                new StubMachine("throwing_machine", true, true),
+                new RegistrationOptions(100, Map.of())
+        );
+        StubMachine machine = new StubMachine("working_machine", true);
+        api.registerMachine(machine);
+        api.registerExecution(
+                new StubExecution("throwing_execution", true, true),
+                new RegistrationOptions(100, Map.of())
+        );
+        StubExecution execution = new StubExecution(
+                "working_execution", true);
+        api.registerExecution(execution);
+
+        MachineClaim machineClaim = api.machines().claim(blockEntity);
+        ExecutionClaim executionClaim = api.executions().claim(
+                recipeView(), machineContext());
+
+        assertSame(machine, machineClaim.winner());
+        assertSame(execution, executionClaim.winner());
+        assertEquals(IntegrationDiagnosticCode.MACHINE_UNSUPPORTED,
+                machineClaim.diagnostics().get(0).code());
+        assertEquals(IntegrationDiagnosticCode.EXECUTION_CONTRACT_VIOLATION,
+                executionClaim.diagnostics().get(0).code());
+    }
+
+    @Test
+    void failingRecipeCandidateDoesNotAbortClaimScan() {
+        DefaultRSIIntegrationApi api = new DefaultRSIIntegrationApi();
+        api.beginRegistration();
+        api.registerRecipe(
+                new StubRecipe("throwing_recipe", true),
+                new RegistrationOptions(100, Map.of())
+        );
+        StubRecipe recipe = new StubRecipe("working_recipe", false);
+        api.registerRecipe(recipe);
+
+        var claim = api.recipes().claim(mock(Recipe.class));
+
+        assertSame(recipe, claim.winner());
+        assertEquals(IntegrationDiagnosticCode.RECIPE_INSPECTION_FAILED,
+                claim.diagnostics().get(0).code());
+    }
+
     private static RecipeView recipeView() {
         return new RecipeView(
                 new ResourceLocation("test", "recipe"),
@@ -117,10 +167,20 @@ class IntegrationClaimRegistryTest {
     private static final class StubMachine implements MachineIntegration {
         private final ResourceLocation id;
         private final boolean supports;
+        private final boolean throwing;
 
         private StubMachine(String path, boolean supports) {
+            this(path, supports, false);
+        }
+
+        private StubMachine(
+                String path,
+                boolean supports,
+                boolean throwing
+        ) {
             this.id = new ResourceLocation("test", path);
             this.supports = supports;
+            this.throwing = throwing;
         }
 
         @Override
@@ -130,6 +190,7 @@ class IntegrationClaimRegistryTest {
 
         @Override
         public boolean supports(BlockEntity blockEntity) {
+            if (throwing) throw new IllegalStateException("machine failure");
             return supports;
         }
 
@@ -143,14 +204,55 @@ class IntegrationClaimRegistryTest {
         }
     }
 
+    private static final class StubRecipe
+            implements RecipeIntegration<Recipe<?>> {
+        private final ResourceLocation id;
+        private final boolean throwing;
+
+        private StubRecipe(String path, boolean throwing) {
+            this.id = new ResourceLocation("test", path);
+            this.throwing = throwing;
+        }
+
+        @Override
+        public ResourceLocation id() {
+            return id;
+        }
+
+        @Override
+        public boolean supports(Recipe<?> recipe) {
+            if (throwing) throw new IllegalStateException("recipe failure");
+            return true;
+        }
+
+        @Override
+        public RecipeInspectionResult inspect(
+                RecipeContext context,
+                Recipe<?> recipe
+        ) {
+            return RecipeInspectionResult.rejected(IntegrationDiagnostic.error(
+                    IntegrationDiagnosticCode.RECIPE_INSPECTION_FAILED));
+        }
+    }
+
     private static final class StubExecution
             implements RecipeExecutionIntegration {
         private final ResourceLocation id;
         private final boolean supports;
+        private final boolean throwing;
 
         private StubExecution(String path, boolean supports) {
+            this(path, supports, false);
+        }
+
+        private StubExecution(
+                String path,
+                boolean supports,
+                boolean throwing
+        ) {
             this.id = new ResourceLocation("test", path);
             this.supports = supports;
+            this.throwing = throwing;
         }
 
         @Override
@@ -160,6 +262,7 @@ class IntegrationClaimRegistryTest {
 
         @Override
         public boolean supports(RecipeView recipe, MachineContext machine) {
+            if (throwing) throw new IllegalStateException("execution failure");
             return supports;
         }
 
