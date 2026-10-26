@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.api.diagnostic.IntegrationDiagnostic;
 import com.huanghuang.rsintegration.api.diagnostic.IntegrationDiagnosticCode;
 import com.huanghuang.rsintegration.api.diagnostic.IntegrationSeverity;
 import com.huanghuang.rsintegration.api.execution.CollectedOutput;
+import com.huanghuang.rsintegration.api.execution.CancelReason;
 import com.huanghuang.rsintegration.api.execution.ExecutionClaim;
 import com.huanghuang.rsintegration.api.execution.ExecutionPlan;
 import com.huanghuang.rsintegration.api.execution.ExecutionPlanResult;
@@ -20,6 +21,7 @@ import com.huanghuang.rsintegration.api.execution.MaterialOutcome;
 import com.huanghuang.rsintegration.api.execution.OperationCleanupResult;
 import com.huanghuang.rsintegration.api.execution.OperationCollection;
 import com.huanghuang.rsintegration.api.execution.OperationContext;
+import com.huanghuang.rsintegration.api.execution.OutputPort;
 import com.huanghuang.rsintegration.api.execution.RecipeExecutionIntegration;
 import com.huanghuang.rsintegration.api.execution.ReservedMaterial;
 import com.huanghuang.rsintegration.api.execution.ReservedMaterialView;
@@ -59,6 +61,7 @@ import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.crafting.graph.OutputProbability;
+import com.huanghuang.rsintegration.feature.unifiedgrid.UnifiedGridFluidRecovery;
 import com.huanghuang.rsintegration.storage.StorageFluidKey;
 import com.huanghuang.rsintegration.storage.StorageFluidOperationResult;
 import com.huanghuang.rsintegration.storage.StorageFluidSnapshot;
@@ -71,6 +74,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Container;
@@ -88,12 +92,14 @@ import net.minecraftforge.registries.ForgeRegistries;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -121,9 +127,15 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     private RunningOperation runningOperation;
     private OperationStartContext operationStartContext;
     private ReservedMaterialView customMaterials;
+    private final Map<String, List<FluidStack>> customReservedFluids =
+            new LinkedHashMap<>();
     private MachineContext customMachineContext;
+    @Nullable
+    private UUID customOwnerId;
     private boolean customStartPending;
     private boolean customPendingRefundSafe;
+    @Nullable
+    private CancelReason customCancelReason;
     private long lastCustomStateRevision = -1L;
     private long lastCollectionSequence;
     private long recipeRevision;
@@ -352,9 +364,12 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         this.runningOperation = null;
         this.operationStartContext = null;
         this.customMaterials = null;
+        this.customReservedFluids.clear();
+        this.customOwnerId = null;
         this.customMachineContext = null;
         this.customStartPending = false;
         this.customPendingRefundSafe = false;
+        this.customCancelReason = null;
         this.lastCustomStateRevision = -1L;
         this.lastCollectionSequence = 0L;
         this.recipeRevision = projection.revision();
@@ -602,6 +617,14 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     }
 
     @Override
+    public void prepareCancellation(
+            @Nullable ServerPlayer player,
+            CancelReason reason
+    ) {
+        this.customCancelReason = reason;
+    }
+
+    @Override
     public String reportedResourceFailure() {
         return reportedResourceFailure;
     }
@@ -774,6 +797,13 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             }
         }
         flushPendingInputRefunds(player);
+        if (!customReservedFluids.isEmpty()) {
+            retainCustomFluids(
+                    Map.copyOf(customReservedFluids), player);
+            customReservedFluids.clear();
+        }
+        customOwnerId = null;
+        customCancelReason = null;
         uninsertedMaterials.clear();
         pendingInputRefunds.clear();
         releaseReusableMaterials(player);
@@ -804,6 +834,9 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             return false;
         }
         this.ledger = sharedLedger;
+        this.customOwnerId = player.getUUID();
+        this.customReservedFluids.clear();
+        this.customCancelReason = null;
         List<ReservedMaterial> reserved = new ArrayList<>();
         for (int index = 0; index < recipeView.materials().size(); index++) {
             MaterialRequirement requirement = recipeView.materials().get(index);
@@ -820,6 +853,9 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                     stack.getCount(),
                     requirement.consumption()
             ));
+        }
+        if (!reserveCustomFluids(player, reserved)) {
+            return false;
         }
         ReservedMaterialView materialView = new ReservedMaterials(reserved);
         MachineContext machineContext = new MachineContext(
@@ -947,6 +983,98 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                 descriptor.descriptorFingerprint())) {
             return "RSI custom plan snapshot is stale";
         }
+        return validateCustomPlanAgainstRecipe(
+                recipeView, customMaterials, plan);
+    }
+
+    static String validateCustomPlanAgainstRecipe(
+            RecipeView recipeView,
+            ReservedMaterialView materials,
+            ExecutionPlan plan
+    ) {
+        Map<String, MaterialRequirement> itemRequirements =
+                new LinkedHashMap<>();
+        for (MaterialRequirement requirement : recipeView.materials()) {
+            itemRequirements.put(
+                    requirement.entryId().toString(), requirement);
+        }
+        for (var route : plan.itemInputs()) {
+            MaterialRequirement requirement =
+                    itemRequirements.get(route.entryId());
+            if (requirement == null) {
+                return "custom plan contains an unknown item entry: "
+                        + route.entryId();
+            }
+            if (!route.inputGroup().equals(requirement.inputGroup())) {
+                return "custom item route group mismatch: "
+                        + route.entryId();
+            }
+            ReservedMaterial reserved =
+                    materials.find(route.entryId()).orElse(null);
+            if (reserved == null
+                    || reserved.resource().kind()
+                    != IntegrationResourceKey.ResourceKind.ITEM
+                    || route.amount() > reserved.amount()) {
+                return "custom item route exceeds its reservation: "
+                        + route.entryId();
+            }
+        }
+
+        Map<String, FluidRequirement> fluidRequirements =
+                new LinkedHashMap<>();
+        for (FluidRequirement requirement : recipeView.fluids()) {
+            fluidRequirements.put(
+                    requirement.entryId().toString(), requirement);
+        }
+        for (var route : plan.fluidInputs()) {
+            FluidRequirement requirement =
+                    fluidRequirements.get(route.entryId());
+            if (requirement == null) {
+                return "custom plan contains an unknown fluid entry: "
+                        + route.entryId();
+            }
+            if (!route.inputGroup().equals(requirement.inputGroup())) {
+                return "custom fluid route group mismatch: "
+                        + route.entryId();
+            }
+            ReservedMaterial reserved =
+                    materials.find(route.entryId()).orElse(null);
+            if (reserved == null
+                    || reserved.resource().kind()
+                    != IntegrationResourceKey.ResourceKind.FLUID
+                    || route.amount() > reserved.amount()) {
+                return "custom fluid route exceeds its reservation: "
+                        + route.entryId();
+            }
+        }
+
+        Map<ResourceLocation, OutputDeclaration> declaredOutputs =
+                new LinkedHashMap<>();
+        for (OutputDeclaration output : recipeView.outputs()) {
+            declaredOutputs.put(output.portId(), output);
+        }
+        if (declaredOutputs.size() != plan.outputPorts().size()) {
+            return "custom plan output port set does not match the recipe";
+        }
+        for (var port : plan.outputPorts()) {
+            OutputDeclaration declared = declaredOutputs.get(port.portId());
+            if (declared == null) {
+                return "custom plan contains an unknown output port: "
+                        + port.portId();
+            }
+            if (!Objects.equals(port.outputGroup(), declared.outputGroup())
+                    || !Objects.equals(port.resource(), declared.resource())
+                    || !Objects.equals(port.amount(), declared.amount())
+                    || port.outputKind() != declared.outputKind()
+                    || !Objects.equals(port.probability(), declared.probability())
+                    || port.dynamicIdentity() != declared.dynamicIdentity()
+                    || port.targetProducing() != declared.targetProducing()
+                    || !Objects.equals(port.sourceInputEntryId(),
+                    declared.sourceInputEntryId())) {
+                return "custom output declaration mismatch: "
+                        + port.portId();
+            }
+        }
         return null;
     }
 
@@ -1008,15 +1136,49 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         }
         lastCollectionSequence = collection.collectionSequence();
         if (!collection.complete()) return List.of();
+        if (executionPlan == null) return List.of();
+        Map<ResourceLocation, OutputPort> declaredPorts =
+                new LinkedHashMap<>();
+        for (var port : executionPlan.outputPorts()) {
+            declaredPorts.put(port.portId(), port);
+        }
         Map<ItemStackKey, ItemStack> collected = new LinkedHashMap<>();
         for (CollectedOutput output : collection.outputs()) {
-            if (output.resource().kind()
-                    != IntegrationResourceKey.ResourceKind.ITEM) {
+            var declared = declaredPorts.get(output.portId());
+            if (declared == null
+                    || declared.resource().kind() != output.resource().kind()
+                    || !declared.resource().id().equals(output.resource().id())) {
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-API] custom collection returned undeclared output {}",
+                        output.portId());
                 return List.of();
             }
-            merge(collected, ExternalRecipeProjection.toStack(
-                    output.resource(), output.amount()));
+            if (output.resource().kind()
+                    == IntegrationResourceKey.ResourceKind.ITEM) {
+                merge(collected, ExternalRecipeProjection.toStack(
+                        output.resource(), output.amount()));
+            } else if (output.resource().kind()
+                    == IntegrationResourceKey.ResourceKind.FLUID) {
+                reportedResources.add(output);
+            } else {
+                return List.of();
+            }
         }
+        for (MaterialDisposition disposition : collection.materials()) {
+            ReservedMaterial declared =
+                    customMaterials.find(disposition.material().entryId())
+                            .orElse(null);
+            if (declared == null
+                    || declared.resource().kind()
+                    != disposition.material().resource().kind()
+                    || declared.amount() != disposition.material().amount()) {
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-API] custom collection returned an undeclared material disposition {}",
+                        disposition.material().entryId());
+                return List.of();
+            }
+        }
+        settleCustomFluidInputs(collection.materials(), player);
         resultsCollected = true;
         return collected.values().stream()
                 .map(ItemStack::copy)
@@ -1156,6 +1318,8 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         RunningOperation operation = runningOperation;
         runningOperation = null;
         if (operation == null) {
+            returnOrRetainCustomFluids(customReservedFluids, player);
+            customReservedFluids.clear();
             if (customStartPending && customMaterials != null) {
                 List<ItemStack> reserved = new ArrayList<>();
                 for (ReservedMaterial material : customMaterials.materials()) {
@@ -1173,8 +1337,11 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             return;
         }
         try {
-            OperationCleanupResult cleanup = operation.onFailure(
-                    FailureReason.EXECUTION_EXCEPTION, player);
+            OperationCleanupResult cleanup = customCancelReason == null
+                    ? operation.onFailure(
+                    FailureReason.EXECUTION_EXCEPTION, player)
+                    : operation.onCancel(customCancelReason, player);
+            customCancelReason = null;
             List<ItemStack> recovered = new ArrayList<>();
             for (MaterialDisposition disposition : cleanup.materials()) {
                 if (disposition.outcome() != MaterialOutcome.RECOVERED
@@ -1188,12 +1355,108 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                 ));
             }
             recordFailureRecoveredInputs(recovered);
+            settleCustomFluidInputs(cleanup.materials(), player);
         } catch (RuntimeException | LinkageError exception) {
             RSIntegrationMod.LOGGER.warn(
                     "[RSI-API] custom cleanup failed for {}",
                     recipe == null ? "unknown" : recipe.getId(),
                     exception
             );
+            if (!customReservedFluids.isEmpty()) {
+                retainCustomFluids(
+                        Map.copyOf(customReservedFluids), player);
+                customReservedFluids.clear();
+            }
+        }
+    }
+
+    private void settleCustomFluidInputs(
+            List<MaterialDisposition> dispositions,
+            @Nullable ServerPlayer player
+    ) {
+        if (customReservedFluids.isEmpty()) return;
+        Set<String> handled = new HashSet<>();
+        for (MaterialDisposition disposition : dispositions) {
+            ReservedMaterial material = disposition.material();
+            if (material.resource().kind()
+                    != IntegrationResourceKey.ResourceKind.FLUID) {
+                continue;
+            }
+            String entryId = material.entryId();
+            List<FluidStack> reserved = customReservedFluids.get(entryId);
+            if (reserved == null || !handled.add(entryId)) continue;
+            switch (disposition.outcome()) {
+                case CONSUMED -> {
+                    // 已由 custom operation 明确消费。
+                }
+                case RECOVERED ->
+                        returnOrRetainCustomFluids(
+                                Map.of(entryId, reserved), player);
+                case UNCERTAIN -> retainCustomFluids(
+                        Map.of(entryId, reserved), player);
+            }
+            customReservedFluids.remove(entryId);
+        }
+        if (!customReservedFluids.isEmpty()) {
+            retainCustomFluids(
+                    Map.copyOf(customReservedFluids), player);
+            customReservedFluids.clear();
+        }
+    }
+
+    private void returnOrRetainCustomFluids(
+            Map<String, List<FluidStack>> fluids,
+            @Nullable ServerPlayer player
+    ) {
+        if (!hasStorageAccess() || player == null) {
+            retainCustomFluids(fluids, player);
+            return;
+        }
+        Map<String, List<FluidStack>> unreturned =
+                new LinkedHashMap<>();
+        for (Map.Entry<String, List<FluidStack>> entry : fluids.entrySet()) {
+            List<FluidStack> remainder = new ArrayList<>();
+            for (FluidStack fluid : entry.getValue()) {
+                StorageFluidOperationResult inserted =
+                        storageEndpoint().session().insertFluid(
+                                player, fluid.copy(), false);
+                if (inserted.remainder() != null
+                        && !inserted.remainder().isEmpty()) {
+                    remainder.add(inserted.remainder().copy());
+                }
+            }
+            if (!remainder.isEmpty()) {
+                unreturned.put(entry.getKey(), List.copyOf(remainder));
+            }
+        }
+        if (!unreturned.isEmpty()) {
+            retainCustomFluids(unreturned, player);
+        }
+    }
+
+    private void retainCustomFluids(
+            Map<String, List<FluidStack>> fluids,
+            @Nullable ServerPlayer player
+    ) {
+        MinecraftServer server = player != null
+                ? player.server
+                : level == null ? null : level.getServer();
+        if (server == null || customOwnerId == null) {
+            RSIntegrationMod.LOGGER.error(
+                    "[RSI-API] custom fluid recovery is unavailable for {} entries",
+                    fluids.size());
+            return;
+        }
+        UnifiedGridFluidRecovery recovery =
+                UnifiedGridFluidRecovery.get(server);
+        for (List<FluidStack> fragments : fluids.values()) {
+            for (FluidStack fluid : fragments) {
+                recovery.retainRaw(
+                        customOwnerId,
+                        fluid.writeToNBT(new CompoundTag()),
+                        null
+                );
+            }
         }
     }
 
@@ -1310,6 +1573,90 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             }
         }
         return true;
+    }
+
+    private boolean reserveCustomFluids(
+            ServerPlayer player,
+            List<ReservedMaterial> reservedMaterials
+    ) {
+        if (recipeView.fluids().isEmpty()) return true;
+        if (!hasStorageAccess()
+                || !storageEndpoint().session().supports(
+                StorageCapability.FLUID_STORAGE)) {
+            preparationFailure = Component.literal(
+                    "RSI Integration custom execution requires fluid storage");
+            return false;
+        }
+        var snapshotResult = storageEndpoint().session().snapshotFluids(player);
+        if (!snapshotResult.successful()) {
+            preparationFailure = Component.literal(
+                    "RSI Integration custom fluid snapshot failed: "
+                            + snapshotResult.status());
+            return false;
+        }
+        StorageFluidSnapshot snapshot =
+                snapshotResult.snapshotValue().orElseThrow();
+        Map<StorageFluidKey, Long> selected = new LinkedHashMap<>();
+        for (FluidRequirement requirement : recipeView.fluids()) {
+            StorageFluidKey key = ExternalFluidMatcher.find(
+                    requirement, snapshot, selected);
+            if (key == null) {
+                refundCustomFluids(player);
+                preparationFailure = Component.literal(
+                        "RSI Integration custom fluid is unavailable: "
+                                + requirement.entryId());
+                return false;
+            }
+            ExternalFluidMatcher.reserve(
+                    selected, key, requirement.amount());
+            StorageFluidOperationResult simulated =
+                    storageEndpoint().session().extractFluidExact(
+                            player, key, requirement.amount(), true);
+            if (simulated.status() != StorageOperationStatus.SUCCESS
+                    || simulated.transferredAmountExact().orElse(-1L)
+                    != requirement.amount()) {
+                refundCustomFluids(player);
+                preparationFailure = Component.literal(
+                        "RSI Integration custom fluid preflight failed: "
+                                + requirement.entryId());
+                return false;
+            }
+            StorageFluidOperationResult extracted =
+                    storageEndpoint().session().extractFluidExact(
+                            player, key, requirement.amount(), false);
+            if (extracted.status() != StorageOperationStatus.SUCCESS
+                    || extracted.transferredAmountExact().orElse(-1L)
+                    != requirement.amount()
+                    || extracted.transferredFluids().isEmpty()) {
+                refundFluids(player, extracted.transferredFluids());
+                refundCustomFluids(player);
+                preparationFailure = Component.literal(
+                        "RSI Integration custom fluid extraction failed: "
+                                + requirement.entryId());
+                return false;
+            }
+            List<FluidStack> fragments = extracted.transferredFluids()
+                    .stream().map(FluidStack::copy).toList();
+            customReservedFluids.put(
+                    requirement.entryId().toString(), fragments);
+            reservedMaterials.add(new ReservedMaterial(
+                    requirement.entryId().toString(),
+                    IntegrationResourceKey.fluid(fragments.get(0)),
+                    requirement.amount(),
+                    requirement.consumption()
+            ));
+        }
+        return true;
+    }
+
+    private void refundCustomFluids(@Nullable ServerPlayer player) {
+        if (customReservedFluids.isEmpty()) return;
+        List<FluidStack> fluids = customReservedFluids.values().stream()
+                .flatMap(List::stream)
+                .map(FluidStack::copy)
+                .toList();
+        customReservedFluids.clear();
+        refundFluids(player, fluids);
     }
 
     private long insertFluidIntoMachine(

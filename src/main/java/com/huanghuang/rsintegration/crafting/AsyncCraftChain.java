@@ -3,6 +3,7 @@ import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot;
 import com.huanghuang.rsintegration.api.execution.CollectedOutput;
+import com.huanghuang.rsintegration.api.execution.CancelReason;
 
 
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;import java.lang.reflect.Field;
@@ -5300,6 +5301,18 @@ public final class AsyncCraftChain {
         abortOffline(reason);
     }
 
+    @Nullable
+    private static CancelReason cancellationReason(
+            TerminationCoordinator.Cause cause
+    ) {
+        return switch (cause) {
+            case CANCELLED -> CancelReason.PLAYER_REQUEST;
+            case SERVER_STOP -> CancelReason.SERVER_STOP;
+            case OFFLINE -> CancelReason.UNKNOWN;
+            case FAILURE, INTERNAL_ERROR -> null;
+        };
+    }
+
     /**
      * Unified terminal-abort skeleton. All three former {@code abort*} variants
      * funnel through here; {@code policy} selects the refund/delivery/silence
@@ -5333,6 +5346,10 @@ public final class AsyncCraftChain {
         List<ItemStack> flatFailureRecoveredInputs = null;
         if (currentDelegate != null) {
             try {
+                CancelReason cancelReason = cancellationReason(cause);
+                if (cancelReason != null) {
+                    currentDelegate.prepareCancellation(online, cancelReason);
+                }
                 currentDelegate.onBatchFailed(online, reason);
                 flatFailureRecoveredInputs = currentDelegate.failureRecoveredInputs();
                 if (flatPhysicalCleanupRequired
@@ -5354,6 +5371,7 @@ public final class AsyncCraftChain {
             }
             currentDelegate = null;
         }
+
         OperationExecutionKernel.TerminalClass flatTerminalClass = flatOperationSession == null
                 ? null : flatOperationSession.terminalClass();
         if (flatTerminalClass == OperationExecutionKernel.TerminalClass.IN_FLIGHT

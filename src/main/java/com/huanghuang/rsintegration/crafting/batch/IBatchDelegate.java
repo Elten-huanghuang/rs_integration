@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.batch;
 import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.api.execution.CollectedOutput;
+import com.huanghuang.rsintegration.api.execution.CancelReason;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import net.minecraft.core.BlockPos;
@@ -444,6 +445,13 @@ public interface IBatchDelegate {
     @Nullable
     default String reportedResourceFailure() {
         return null;
+    }
+
+    /** 在统一失败清理前标记取消原因；不知道取消语义的 delegate 保持原行为。 */
+    default void prepareCancellation(
+            @Nullable ServerPlayer player,
+            @Nonnull CancelReason reason
+    ) {
     }
 
     /**

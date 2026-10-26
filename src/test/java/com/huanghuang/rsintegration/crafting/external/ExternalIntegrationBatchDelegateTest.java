@@ -17,6 +17,8 @@ import com.huanghuang.rsintegration.api.machine.SupportScope;
 import com.huanghuang.rsintegration.api.recipe.InputConsumption;
 import com.huanghuang.rsintegration.api.recipe.ItemAlternative;
 import com.huanghuang.rsintegration.api.recipe.ItemIngredientView;
+import com.huanghuang.rsintegration.api.recipe.FluidIngredientView;
+import com.huanghuang.rsintegration.api.recipe.FluidRequirement;
 import com.huanghuang.rsintegration.api.recipe.MaterialRequirement;
 import com.huanghuang.rsintegration.api.recipe.OutputAmount;
 import com.huanghuang.rsintegration.api.recipe.OutputDeclaration;
@@ -28,6 +30,12 @@ import com.huanghuang.rsintegration.api.recipe.RecipeInspectionResult;
 import com.huanghuang.rsintegration.api.recipe.RecipeIntegration;
 import com.huanghuang.rsintegration.api.recipe.RecipeExecutionKind;
 import com.huanghuang.rsintegration.api.recipe.RecipeView;
+import com.huanghuang.rsintegration.api.execution.ExecutionPlan;
+import com.huanghuang.rsintegration.api.execution.FluidRoute;
+import com.huanghuang.rsintegration.api.execution.InputRoute;
+import com.huanghuang.rsintegration.api.execution.OutputPort;
+import com.huanghuang.rsintegration.api.execution.ReservedMaterial;
+import com.huanghuang.rsintegration.api.execution.ReservedMaterialView;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
@@ -47,12 +55,16 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.material.Fluids;
+import net.minecraftforge.fluids.FluidStack;
+import net.minecraftforge.registries.ForgeRegistries;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -172,6 +184,187 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
         assertEquals(Items.STICK, outputs.get(0).getItem());
         assertTrue(outputSlot.get().isEmpty());
         delegate.onBatchFinished(player);
+    }
+
+    @Test
+    void customPlanRoutesCannotExceedReservedMaterialsOrChangeOutputs() {
+        ResourceLocation recipeId = resource("custom_recipe");
+        RecipeView view = recipeView(recipeId, resource("custom_process"));
+        MaterialRequirement input = view.materials().get(0);
+        OutputDeclaration output = view.outputs().get(0);
+        ReservedMaterial reserved = new ReservedMaterial(
+                input.entryId().toString(),
+                IntegrationResourceKey.item(new ItemStack(Items.DIAMOND, 2)),
+                2L,
+                input.consumption()
+        );
+        ReservedMaterialView materials =
+                new StubReservedMaterials(List.of(reserved));
+
+        ExecutionPlan valid = customPlan(
+                view,
+                List.of(new InputRoute(
+                        input.entryId().toString(),
+                        0,
+                        input.inputGroup(),
+                        2L
+                )),
+                List.of(outputPort(output))
+        );
+        assertEquals(null, ExternalIntegrationBatchDelegate
+                .validateCustomPlanAgainstRecipe(view, materials, valid));
+
+        ExecutionPlan excessive = customPlan(
+                view,
+                List.of(new InputRoute(
+                        input.entryId().toString(),
+                        0,
+                        input.inputGroup(),
+                        3L
+                )),
+                List.of(outputPort(output))
+        );
+        assertTrue(ExternalIntegrationBatchDelegate
+                .validateCustomPlanAgainstRecipe(view, materials, excessive)
+                .contains("exceeds"));
+
+        ExecutionPlan missingOutput = customPlan(
+                view,
+                List.of(),
+                List.of()
+        );
+        assertTrue(ExternalIntegrationBatchDelegate
+                .validateCustomPlanAgainstRecipe(
+                        view, materials, missingOutput)
+                .contains("output port set"));
+    }
+
+    @Test
+    void customFluidRoutesMustStayWithinTheConcreteFluidReservation() {
+        ResourceLocation recipeId = resource("custom_fluid_recipe");
+        RecipeView base = recipeView(
+                recipeId, resource("custom_fluid_process"));
+        FluidStack template = new FluidStack(Fluids.WATER, 1);
+        IntegrationResourceKey water =
+                IntegrationResourceKey.fluid(template);
+        FluidRequirement requirement = new FluidRequirement(
+                resource("water_input"),
+                new FluidIngredientView(
+                        List.of(water),
+                        ResourceMatchMode.EXACT_IDENTITY
+                ),
+                500L,
+                InputConsumption.consumed(),
+                "fluids",
+                0,
+                true
+        );
+        RecipeView view = new RecipeView(
+                base.recipeId(),
+                base.processId(),
+                List.of(),
+                List.of(requirement),
+                base.outputs(),
+                base.flags()
+        );
+        ReservedMaterial reserved = new ReservedMaterial(
+                requirement.entryId().toString(),
+                water,
+                500L,
+                requirement.consumption()
+        );
+        ReservedMaterialView materials =
+                new StubReservedMaterials(List.of(reserved));
+
+        ExecutionPlan valid = customPlan(
+                view,
+                List.of(),
+                List.of(new FluidRoute(
+                        requirement.entryId().toString(),
+                        0,
+                        requirement.inputGroup(),
+                        400L
+                )),
+                List.of(outputPort(view.outputs().get(0)))
+        );
+        assertEquals(null, ExternalIntegrationBatchDelegate
+                .validateCustomPlanAgainstRecipe(view, materials, valid));
+
+        ExecutionPlan excessive = customPlan(
+                view,
+                List.of(),
+                List.of(new FluidRoute(
+                        requirement.entryId().toString(),
+                        0,
+                        requirement.inputGroup(),
+                        600L
+                )),
+                List.of(outputPort(view.outputs().get(0)))
+        );
+        assertTrue(ExternalIntegrationBatchDelegate
+                .validateCustomPlanAgainstRecipe(
+                        view, materials, excessive)
+                .contains("fluid route exceeds"));
+    }
+
+    private static ExecutionPlan customPlan(
+            RecipeView view,
+            List<InputRoute> inputs,
+            List<OutputPort> outputs
+    ) {
+        return customPlan(view, inputs, List.of(), outputs);
+    }
+
+    private static ExecutionPlan customPlan(
+            RecipeView view,
+            List<InputRoute> inputs,
+            List<FluidRoute> fluids,
+            List<OutputPort> outputs
+    ) {
+        return new ExecutionPlan(
+                UUID.randomUUID(),
+                view.recipeId(),
+                resource("machine"),
+                resource("recipe_integration"),
+                resource("machine_integration"),
+                resource("execution_integration"),
+                1L,
+                1L,
+                view.definitionFingerprint(),
+                "descriptor",
+                inputs,
+                fluids,
+                List.of(),
+                20,
+                outputs,
+                new SupportScope(List.of(), List.of(), false),
+                ConcurrencyCapabilities.unknown()
+        );
+    }
+
+    private static OutputPort outputPort(OutputDeclaration output) {
+        return new OutputPort(
+                output.portId(),
+                output.outputGroup(),
+                output.resource(),
+                output.amount(),
+                output.outputKind(),
+                output.probability(),
+                output.dynamicIdentity(),
+                output.targetProducing(),
+                output.sourceInputEntryId()
+        );
+    }
+
+    private record StubReservedMaterials(
+            List<ReservedMaterial> materials
+    ) implements ReservedMaterialView {
+        @Override
+        public Optional<ReservedMaterial> find(String entryId) {
+            return materials.stream()
+                    .filter(material -> material.entryId().equals(entryId))
+                    .findFirst();
+        }
     }
 
     private static RecipeView recipeView(
