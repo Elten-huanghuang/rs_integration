@@ -12,9 +12,12 @@ import com.huanghuang.rsintegration.api.diagnostic.IntegrationDiagnostic;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraftforge.eventbus.api.BusBuilder;
+import net.minecraftforge.eventbus.api.IEventBus;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -82,6 +85,20 @@ class IntegrationRegistrationServiceTest {
         assertSame(api, event.api());
         assertEquals(new ApiVersion(1, 0, 0), event.api().version());
         assertFalse(event.isCancelable());
+    }
+
+    @Test
+    void forgeEventBusDeliversThePublicRegistrationEntryPoint() {
+        DefaultRSIIntegrationApi api = new DefaultRSIIntegrationApi();
+        AtomicReference<RSIIntegrationRegistrationEvent> received =
+                new AtomicReference<>();
+        IEventBus bus = BusBuilder.builder().build();
+        bus.addListener((RSIIntegrationRegistrationEvent event) ->
+                received.set(event));
+
+        bus.post(new RSIIntegrationRegistrationEvent(api));
+
+        assertSame(api, received.get().api());
     }
 
     @Test
