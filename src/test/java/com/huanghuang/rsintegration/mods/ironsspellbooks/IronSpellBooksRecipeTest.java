@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.ironsspellbooks;
 
+import com.huanghuang.rsintegration.api.IntegrationResourceKey;
+import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -12,6 +14,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.lang.reflect.Method;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -92,6 +95,42 @@ class IronSpellBooksRecipeTest extends BootstrapTest {
         assertFalse(handler.hasDeterministicPrimaryOutput(recipe));
         assertTrue(handler.supportsTargetedProduction(recipe));
         assertTrue(handler.requiresTargetedProduction(recipe, ink));
+        IntegrationResourceKey fluid = handler.getPrimaryOutputResource(
+                recipe, RegistryAccess.EMPTY);
+        assertTrue(fluid != null);
+        assertEquals(
+                IntegrationResourceKey.ResourceKind.FLUID,
+                fluid.kind());
+        assertEquals(250L, handler.getPrimaryOutputUnits(
+                recipe, RegistryAccess.EMPTY));
+        assertTrue(handler.requiresTargetedProduction(
+                recipe, fluid));
+        assertTrue(handler.hasFluidOutputs(recipe));
+    }
+
+    @Test
+    void alchemistReportsCollectedInkAsFluidProduction()
+            throws ReflectiveOperationException {
+        ItemStack ink = InkFluidSupport.token(
+                InkFluidTestFixtures.tokenItem(),
+                new FluidStack(Fluids.WATER, 250)
+        );
+        IronAlchemistBatchDelegate delegate =
+                new IronAlchemistBatchDelegate();
+        Method record = IronAlchemistBatchDelegate.class
+                .getDeclaredMethod(
+                        "recordObservedFluid", ItemStack.class);
+        record.setAccessible(true);
+
+        record.invoke(delegate, ink);
+        var observed = delegate.drainObservedProduction();
+
+        assertEquals(1, observed.size());
+        assertEquals(
+                IntegrationResourceKey.ResourceKind.FLUID,
+                observed.get(0).resource().kind());
+        assertEquals(250L, observed.get(0).amount());
+        assertTrue(delegate.drainObservedProduction().isEmpty());
     }
 
     @Test

@@ -76,6 +76,7 @@ import com.huanghuang.rsintegration.crafting.planning.PurePlanAdapter;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
@@ -1319,16 +1320,6 @@ public final class ConsumerCraftingRuntime {
                     "recipe has no executable handler"
             );
         }
-        if (key.targetOutput() != null
-                && key.targetOutput().kind()
-                != IntegrationResourceKey.ResourceKind.ITEM) {
-            return unavailable(
-                    key,
-                    ConsumerCraftabilityStatus.RECIPE_UNSUPPORTED,
-                    ConsumerDiagnosticCode.RECIPE_UNSUPPORTED,
-                    "typed execution cannot represent a fluid production target"
-            );
-        }
         ItemStack declaredTarget;
         try {
             declaredTarget = handler.getResultItem(
@@ -1337,17 +1328,50 @@ public final class ConsumerCraftingRuntime {
         } catch (RuntimeException failure) {
             declaredTarget = ItemStack.EMPTY;
         }
-        ItemStack target = key.targetOutput() == null
-                ? declaredTarget.copy()
-                : itemStack(key.targetOutput());
+        IntegrationResourceKey declaredResource;
+        try {
+            declaredResource = handler.getPrimaryOutputResource(
+                    recipe,
+                    player.serverLevel().registryAccess());
+        } catch (RuntimeException failure) {
+            declaredResource = null;
+        }
+        if (declaredResource == null && !declaredTarget.isEmpty()) {
+            declaredResource =
+                    IntegrationResourceKey.item(declaredTarget);
+        }
+        IntegrationResourceKey targetResource =
+                key.targetOutput() == null
+                        ? declaredResource
+                        : key.targetOutput();
+        if (targetResource == null) {
+            return unavailable(
+                    key,
+                    ConsumerCraftabilityStatus.RECIPE_UNSUPPORTED,
+                    ConsumerDiagnosticCode.RECIPE_UNSUPPORTED,
+                    "typed recipe has no stable resource target"
+            );
+        }
+        ItemStack target = targetResource.kind()
+                == IntegrationResourceKey.ResourceKind.ITEM
+                ? itemStack(targetResource)
+                : InkFluidSupport.tokenFor(targetResource, 1);
         ModType type = ModType.byId(handler.modType().id());
-        target = CraftMachineBindingSupport.routeRecipeOutput(type, target);
+        if (targetResource.kind()
+                == IntegrationResourceKey.ResourceKind.ITEM) {
+            target = CraftMachineBindingSupport.routeRecipeOutput(
+                    type, target);
+            if (!target.isEmpty()) {
+                targetResource =
+                        IntegrationResourceKey.item(target);
+            }
+        }
         if (target.isEmpty()) {
             return unavailable(
                     key,
                     ConsumerCraftabilityStatus.RECIPE_UNSUPPORTED,
                     ConsumerDiagnosticCode.RECIPE_UNSUPPORTED,
-                    "typed recipe has no stable item target"
+                    "typed recipe target is not registered"
             );
         }
         List<IngredientSpec> declared = handler.getIngredients(recipe);
@@ -1373,16 +1397,27 @@ public final class ConsumerCraftingRuntime {
         ItemStack routedDeclaredTarget =
                 CraftMachineBindingSupport.routeRecipeOutput(
                         type, declaredTarget);
-        long perOperationUnits = Math.max(
-                1,
+        long declaredUnits;
+        try {
+            declaredUnits = handler.getPrimaryOutputUnits(
+                    recipe,
+                    player.serverLevel().registryAccess());
+        } catch (RuntimeException failure) {
+            declaredUnits = 0L;
+        }
+        long perOperationUnits = targetResource.kind()
+                == IntegrationResourceKey.ResourceKind.ITEM
+                ? Math.max(
+                1L,
                 routedDeclaredTarget.isEmpty()
                         ? target.getCount()
-                        : routedDeclaredTarget.getCount()
-        );
+                        : routedDeclaredTarget.getCount())
+                : Math.max(1L, declaredUnits);
         long requestedUnits = outputsRequestedCount(
                 key, perOperationUnits);
         boolean targetedProduction =
-                handler.requiresTargetedProduction(recipe, target);
+                handler.requiresTargetedProduction(
+                        recipe, targetResource);
         int executions;
         if (key.amount()
                 instanceof ConsumerRequestAmount.Executions count) {
@@ -1393,7 +1428,7 @@ public final class ConsumerCraftingRuntime {
             executions = SaturatingLongMath.clampToInt(
                     SaturatingLongMath.ceilDiv(
                             quantity,
-                            Math.max(1, target.getCount())
+                            perOperationUnits
                     )
             );
         }
@@ -1427,8 +1462,12 @@ public final class ConsumerCraftingRuntime {
         });
         Map<ResourceLocation, ResourceLocation> forced =
                 forcedRecipes(key.preferences());
-        forced.put(BuiltInRegistries.ITEM.getKey(target.getItem()),
-                key.recipeId());
+        if (targetResource.kind()
+                == IntegrationResourceKey.ResourceKind.ITEM) {
+            forced.put(
+                    BuiltInRegistries.ITEM.getKey(target.getItem()),
+                    key.recipeId());
+        }
         PlanningPreferences preferences =
                 planningPreferences(key.preferences());
         CraftStorageEndpoint endpoint = session.capture.storageReference
@@ -1507,7 +1546,8 @@ public final class ConsumerCraftingRuntime {
             );
         }
         if (!graph.unresolvedDemands().isEmpty() || !missing.isEmpty()) {
-            ItemStack fallbackTarget = target;
+            IntegrationResourceKey fallbackResource =
+                    targetResource;
             List<ConsumerResourceShortage> shortages =
                     graph.unresolvedDemands().stream()
                             .limit(64)
@@ -1522,7 +1562,7 @@ public final class ConsumerCraftingRuntime {
                                 }
                                 IntegrationResourceKey resource =
                                         display.isEmpty()
-                                                ? itemTarget(fallbackTarget)
+                                                ? fallbackResource
                                                 : IntegrationResourceKey
                                                 .item(display);
                                 return new ConsumerResourceShortage(
@@ -1534,7 +1574,7 @@ public final class ConsumerCraftingRuntime {
                             .toList();
             if (shortages.isEmpty()) {
                 shortages = List.of(new ConsumerResourceShortage(
-                        itemTarget(target), 1L, 0L));
+                        fallbackResource, 1L, 0L));
             }
             return new ConsumerCraftability(
                     key,
@@ -1565,6 +1605,7 @@ public final class ConsumerCraftingRuntime {
                 recipe,
                 type,
                 executions,
+                targetResource,
                 target,
                 requestedUnits,
                 targetedProduction
@@ -1611,8 +1652,10 @@ public final class ConsumerCraftingRuntime {
                 session.capture.graph,
                 steps,
                 key.recipeId(),
-                itemTarget(target),
-                target,
+                targetResource,
+                targetResource.kind()
+                        == IntegrationResourceKey.ResourceKind.ITEM
+                        ? target : null,
                 requested,
                 requested,
                 type.id(),
@@ -1648,12 +1691,35 @@ public final class ConsumerCraftingRuntime {
             long requestedUnits,
             boolean targetedProduction
     ) {
+        return typedTerminalStep(
+                recipeId,
+                recipe,
+                type,
+                executions,
+                IntegrationResourceKey.item(target),
+                target,
+                requestedUnits,
+                targetedProduction
+        );
+    }
+
+    static CraftingResolver.ResolutionStep typedTerminalStep(
+            ResourceLocation recipeId,
+            Recipe<?> recipe,
+            ModType type,
+            int executions,
+            IntegrationResourceKey targetResource,
+            ItemStack target,
+            long requestedUnits,
+            boolean targetedProduction
+    ) {
         ResourceLocation recipeTypeId = recipe.getType() == null
                 ? recipeId
                 : ForgeRegistries.RECIPE_TYPES.getKey(recipe.getType());
         if (recipeTypeId == null) recipeTypeId = recipeId;
         ProductionTarget productionTarget = targetedProduction
-                ? ProductionTarget.of(target, requestedUnits)
+                ? ProductionTarget.of(
+                        targetResource, requestedUnits)
                 : null;
         return new CraftingResolver.ResolutionStep(
                 recipeId,
@@ -1664,7 +1730,9 @@ public final class ConsumerCraftingRuntime {
                 false,
                 executions,
                 null,
-                target,
+                targetResource.kind()
+                        == IntegrationResourceKey.ResourceKind.ITEM
+                        ? target : null,
                 productionTarget,
                 MagicResourceCostCatalog.costsFor(recipe)
         );
@@ -1711,14 +1779,6 @@ public final class ConsumerCraftingRuntime {
         return graph.recipesByOutput().values().stream()
                 .flatMap(List::stream)
                 .anyMatch(RecipeNode::hasFluidOutputs);
-    }
-
-    private static IntegrationResourceKey itemTarget(ItemStack target) {
-        if (target == null || target.isEmpty()) {
-            throw new IllegalArgumentException(
-                    "missing material has no display item");
-        }
-        return IntegrationResourceKey.item(target);
     }
 
     private MaterialResolution material(
@@ -2223,8 +2283,11 @@ public final class ConsumerCraftingRuntime {
         Map<IntegrationResourceKey, Long> amounts = new LinkedHashMap<>();
         for (ItemStack stack : stacks) {
             if (stack == null || stack.isEmpty()) continue;
-            IntegrationResourceKey key =
-                    IntegrationResourceKey.item(stack);
+            IntegrationResourceKey fluid =
+                    InkFluidSupport.resource(stack);
+            IntegrationResourceKey key = fluid == null
+                    ? IntegrationResourceKey.item(stack)
+                    : fluid;
             amounts.merge(
                     key,
                     (long) stack.getCount(),

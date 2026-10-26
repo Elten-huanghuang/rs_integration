@@ -53,6 +53,7 @@ final class SupplementalMaterialPlan {
     /** 与下游保护取并集，避免同一份产物被重复预留或被补做配方重新消耗。 */
     static void protectProduced(Map<StackKey, Long> available, Map<StackKey, Long> usable,
                                 ProductionTarget target, long produced) {
+        if (target.material() == null) return;
         long protect = produced;
         for (Map.Entry<StackKey, Long> entry : available.entrySet()) {
             if (protect <= 0L) break;

@@ -66,4 +66,32 @@ class ProbabilisticProductionTest extends BootstrapTest {
         assertEquals(500L, progress.produced());
         assertEquals(250L, progress.remaining());
     }
+
+    @Test
+    void observedButNotYetDeliveredFluidCanAdvanceAttemptProgress() {
+        IntegrationResourceKey water =
+                IntegrationResourceKey.fluid(
+                        new FluidStack(Fluids.WATER, 1));
+        ProbabilisticProduction progress =
+                new ProbabilisticProduction(
+                        ProductionTarget.of(water, 750L),
+                        8
+                );
+
+        progress.started();
+        progress.settle(
+                List.of(),
+                List.of(),
+                List.of(new CollectedOutput(
+                        water,
+                        250L,
+                        OutputKind.PRIMARY,
+                        new ResourceLocation(
+                                "test", "observed_water")
+                ))
+        );
+
+        assertEquals(250L, progress.produced());
+        assertEquals(500L, progress.remaining());
+    }
 }

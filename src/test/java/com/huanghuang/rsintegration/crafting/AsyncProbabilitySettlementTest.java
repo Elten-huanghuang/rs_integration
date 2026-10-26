@@ -93,6 +93,42 @@ class AsyncProbabilitySettlementTest extends BootstrapTest {
     }
 
     @Test
+    void fluidProductionTargetUsesResourceContractInsteadOfMaterial()
+            throws Exception {
+        IntegrationResourceKey water =
+                IntegrationResourceKey.fluid(
+                        new FluidStack(Fluids.WATER, 1));
+        Fixture fixture = fixture(
+                ProductionTarget.of(water, 750L), 1);
+        Recipe<?> recipe = mock(Recipe.class);
+        RecipeManager recipes = mock(RecipeManager.class);
+        when(fixture.player.getServer().getRecipeManager())
+                .thenReturn(recipes);
+        doReturn(Optional.of(recipe))
+                .when(recipes)
+                .byKey(fixture.step.recipeId());
+        ModRecipeHandler handler = mock(ModRecipeHandler.class);
+        when(handler.requiresTargetedProduction(recipe, water))
+                .thenReturn(true);
+
+        try (MockedStatic<ModRecipeHandlers> handlers =
+                     mockStatic(ModRecipeHandlers.class)) {
+            handlers.when(() -> ModRecipeHandlers.claimFor(recipe))
+                    .thenReturn(new ModRecipeHandlers.Claim(
+                            handler, List.of(handler)));
+            Method requires = AsyncCraftChain.class
+                    .getDeclaredMethod(
+                            "requiresTargetedProduction",
+                            CraftingResolver.ResolutionStep.class
+                    );
+            requires.setAccessible(true);
+
+            assertEquals(true,
+                    requires.invoke(fixture.chain, fixture.step));
+        }
+    }
+
+    @Test
     void flatChainAdvancesFluidProgressFromReportedResources()
             throws Exception {
         FluidStack water = new FluidStack(Fluids.WATER, 1);
@@ -127,6 +163,37 @@ class AsyncProbabilitySettlementTest extends BootstrapTest {
                 )
         ));
         assertEquals(1, field(fixture.chain, "currentStepIdx"));
+        assertTrue(progress.complete());
+    }
+
+    @Test
+    void flatChainAdvancesFluidProgressFromObservedProduction()
+            throws Exception {
+        IntegrationResourceKey water =
+                IntegrationResourceKey.fluid(
+                        new FluidStack(Fluids.WATER, 1));
+        Fixture fixture = fixture(
+                ProductionTarget.of(water, 250L), 1);
+        ProbabilisticProduction progress =
+                new ProbabilisticProduction(
+                        fixture.step.productionTarget(), 16);
+        targets(fixture.chain).put(fixture.step, progress);
+
+        progress.started();
+        settle(
+                fixture,
+                List.of(),
+                List.of(),
+                List.of(new CollectedOutput(
+                        water,
+                        250L,
+                        OutputKind.PRIMARY,
+                        new ResourceLocation("test", "water")
+                ))
+        );
+
+        assertEquals(1, field(fixture.chain, "currentStepIdx"));
+        assertEquals(250L, progress.produced());
         assertTrue(progress.complete());
     }
 
@@ -201,7 +268,7 @@ class AsyncProbabilitySettlementTest extends BootstrapTest {
     }
 
     private void settle(Fixture fixture, List<ItemStack> outputs) throws Exception {
-        settle(fixture, outputs, List.of());
+        settle(fixture, outputs, List.of(), List.of());
     }
 
     private void settle(
@@ -209,11 +276,21 @@ class AsyncProbabilitySettlementTest extends BootstrapTest {
             List<ItemStack> outputs,
             List<CollectedOutput> reported
     ) throws Exception {
+        settle(fixture, outputs, reported, List.of());
+    }
+
+    private void settle(
+            Fixture fixture,
+            List<ItemStack> outputs,
+            List<CollectedOutput> reported,
+            List<CollectedOutput> observed
+    ) throws Exception {
         IBatchDelegate delegate = mock(IBatchDelegate.class);
         when(delegate.observeCraft(any())).thenReturn(new IBatchDelegate.CraftObservation(IBatchDelegate.CraftPhase.DONE));
         when(delegate.validateExecutionContext(fixture.player)).thenReturn(true);
         when(delegate.collectAllResults(fixture.player)).thenReturn(outputs);
         when(delegate.drainReportedResources()).thenReturn(reported);
+        when(delegate.drainObservedProduction()).thenReturn(observed);
         when(delegate.collectsPhysicalSecondaryOutputs()).thenReturn(true);
         set(fixture.chain, "currentDelegate", delegate);
         assertFalse(fixture.chain.tick());

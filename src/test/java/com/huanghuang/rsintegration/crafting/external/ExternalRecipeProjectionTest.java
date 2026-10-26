@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.external;
 
+import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.api.ResourceMatchMode;
 import com.huanghuang.rsintegration.api.diagnostic.IntegrationDiagnosticCode;
@@ -318,6 +319,63 @@ class ExternalRecipeProjectionTest extends BootstrapTest {
         assertTrue(nodes.get(0).output().runtimeNbt());
         assertTrue(nodes.get(0).dynamicIdentityTargetable());
         assertEquals("", nodes.get(0).output().nbt());
+    }
+
+    @Test
+    void probabilisticFluidPrimaryParticipatesInTypedTargeting() {
+        IntegrationResourceKey water =
+                IntegrationResourceKey.fluid(
+                        new FluidStack(Fluids.WATER, 1));
+        OutputDeclaration output = new OutputDeclaration(
+                id("water"),
+                "output",
+                water,
+                OutputAmount.exactly(250L),
+                OutputKind.PRIMARY,
+                new OutputProbability(
+                        OutputProbabilityMode.PROBABILISTIC,
+                        0.25D,
+                        16,
+                        "water_roll"
+                ),
+                false,
+                false,
+                null
+        );
+        RecipeView view = new RecipeView(
+                id("fluid_probability"),
+                id("fluid_probability_process"),
+                List.of(),
+                List.of(),
+                List.of(output),
+                new RecipeFlags(
+                        true,
+                        false,
+                        false,
+                        false,
+                        false,
+                        true,
+                        false
+                )
+        );
+        Recipe<?> recipe = mock(Recipe.class);
+        when(recipe.getId()).thenReturn(view.recipeId());
+        ExternalRecipeHandler handler = new ExternalRecipeHandler(
+                new StubIntegration(view),
+                ModType.EXTERNAL_INTEGRATION,
+                0,
+                ignored -> true
+        );
+
+        assertEquals(water,
+                handler.getPrimaryOutputResource(
+                        recipe, RegistryAccess.EMPTY));
+        assertEquals(250L,
+                handler.getPrimaryOutputUnits(
+                        recipe, RegistryAccess.EMPTY));
+        assertTrue(handler.supportsTargetedProduction(recipe));
+        assertTrue(handler.requiresTargetedProduction(
+                recipe, water));
     }
 
     private static ExternalRecipeProjection.Result inspect(RecipeView view) {

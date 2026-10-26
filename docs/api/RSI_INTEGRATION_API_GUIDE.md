@@ -115,6 +115,13 @@ snapshot / resume
 
 `cleanupComplete=false` 或存在 `UNCERTAIN` 时，RSI 会拒绝自动退款并保留持久审计记录。
 
+概率输出的物品与流体语义一致：
+
+- 声明只描述一次成功触发后的资源和数量范围，不承诺规划期库存。
+- 进度只按真实观测到的 ItemStack 或 `CollectedOutput` 数量增加。
+- 流体必须保持 `FLUID + fluidId + NBT` 身份，不能把内部存储凭证当成普通物品交付。
+- 已观测产出与已安全入库是两个阶段；前者可推进概率尝试，后者才计入订单已交付结果。
+
 ## 6. snapshot / resume
 
 `OperationSnapshot` 只能包含 primitive、NBT 和稳定 metadata：

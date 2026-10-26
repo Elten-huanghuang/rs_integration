@@ -4004,10 +4004,18 @@ public final class GenericCraftPacket {
                 Recipe<?> plannedRecipe = CraftRecipeResolver.resolve(player.serverLevel(), step.recipeId());
                 ModRecipeHandler handler = plannedRecipe == null ? null
                         : ModRecipeHandlers.claimFor(plannedRecipe).winner();
-                if (handler == null || !handler.requiresTargetedProduction(plannedRecipe,
-                        step.productionTarget().material().toStack(1))) continue;
+                if (handler == null) continue;
+                boolean targeted = step.productionTarget().resource() != null
+                        ? handler.requiresTargetedProduction(
+                                plannedRecipe,
+                                step.productionTarget().resource())
+                        : step.productionTarget().material() != null
+                        && handler.requiresTargetedProduction(
+                                plannedRecipe,
+                                step.productionTarget().material().toStack(1));
+                if (!targeted) continue;
                 Component warning = Component.translatable("rsi.plan.probability.estimate",
-                        step.productionTarget().material().toStack(1).getHoverName(),
+                        step.productionTarget().displayStack().getHoverName(),
                         step.productionTarget().quantity());
                 stepIssues.put(step.recipeId(), new PlanResponse.StepIssue(List.of(warning), false));
                 modWarnings.add(warning);

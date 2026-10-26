@@ -3,6 +3,7 @@ import com.huanghuang.rsintegration.recipe.InstantRecipePolicy;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.ScaledIngredientSpec;
@@ -11,8 +12,10 @@ import com.huanghuang.rsintegration.crafting.graph.OutputKind;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
 import java.util.ArrayList;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.core.RegistryAccess;
 
@@ -190,6 +193,27 @@ public interface ModRecipeHandler {
         return true;
     }
 
+    /** 主产物在递归与消费者语义中的真实资源身份。 */
+    @Nullable
+    default IntegrationResourceKey getPrimaryOutputResource(
+            @Nonnull Recipe<?> recipe,
+            @Nonnull RegistryAccess access
+    ) {
+        ItemStack result = getResultItem(recipe, access);
+        return result.isEmpty()
+                ? null
+                : IntegrationResourceKey.item(result);
+    }
+
+    /** 一次物理操作声明的主产物单位数，流体使用 mB。 */
+    default long getPrimaryOutputUnits(
+            @Nonnull Recipe<?> recipe,
+            @Nonnull RegistryAccess access
+    ) {
+        ItemStack result = getResultItem(recipe, access);
+        return result.isEmpty() ? 0L : result.getCount();
+    }
+
     /** 显式声明允许按实际产物补做；手动仪式等非确定行为不能自动加入。 */
     default boolean supportsTargetedProduction(@Nonnull Recipe<?> recipe) {
         return false;
@@ -198,6 +222,25 @@ public interface ModRecipeHandler {
     /** 指定目标是否需要实际产量门槛，包括概率副产物。 */
     default boolean requiresTargetedProduction(@Nonnull Recipe<?> recipe, @Nonnull ItemStack output) {
         return supportsTargetedProduction(recipe) && !hasDeterministicPrimaryOutput(recipe);
+    }
+
+    /** 指定资源目标是否需要按真实产量重试，包括纯流体目标。 */
+    default boolean requiresTargetedProduction(
+            @Nonnull Recipe<?> recipe,
+            @Nonnull IntegrationResourceKey output
+    ) {
+        if (output.kind() == IntegrationResourceKey.ResourceKind.FLUID) {
+            return supportsTargetedProduction(recipe)
+                    && !hasDeterministicPrimaryOutput(recipe);
+        }
+        var item = BuiltInRegistries.ITEM.get(output.id());
+        if (item == Items.AIR) return false;
+        ItemStack stack = new ItemStack(item);
+        var identity = output.identity();
+        if (!identity.isEmpty()) {
+            stack.setTag(identity);
+        }
+        return requiresTargetedProduction(recipe, stack);
     }
 
     /** Whether the primary output copies or otherwise derives NBT from runtime inputs. */

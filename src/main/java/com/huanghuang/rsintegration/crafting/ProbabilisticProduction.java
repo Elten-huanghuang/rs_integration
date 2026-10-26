@@ -41,16 +41,31 @@ final class ProbabilisticProduction {
             List<ItemStack> outputs,
             List<CollectedOutput> reportedResources
     ) {
+        settle(outputs, reportedResources, List.of());
+    }
+
+    void settle(
+            List<ItemStack> outputs,
+            List<CollectedOutput> reportedResources,
+            List<CollectedOutput> observedProduction
+    ) {
         for (ItemStack output : outputs) {
             if (target.matchesItem(output)) {
                 produced = SaturatingLongMath.add(produced, output.getCount());
             }
         }
         for (CollectedOutput output : reportedResources) {
-            if (target.matchesFluid(output)) {
-                produced = SaturatingLongMath.add(
-                        produced, output.amount());
-            }
+            addFluidProgress(output);
+        }
+        for (CollectedOutput output : observedProduction) {
+            addFluidProgress(output);
+        }
+    }
+
+    private void addFluidProgress(CollectedOutput output) {
+        if (target.matchesFluid(output)) {
+            produced = SaturatingLongMath.add(
+                    produced, output.amount());
         }
     }
 }

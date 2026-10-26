@@ -16,6 +16,8 @@ import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.Mater
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
 import com.huanghuang.rsintegration.crafting.planning.PlanningPreferences;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidTestFixtures;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -31,6 +33,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
@@ -103,6 +106,27 @@ class ConsumerCraftingRuntimeTest extends BootstrapTest {
     }
 
     @Test
+    void observedInkTokensAreProjectedAsFluidOutputs() {
+        ItemStack ink = InkFluidSupport.token(
+                InkFluidTestFixtures.tokenItem(),
+                new FluidStack(Fluids.WATER, 250)
+        );
+
+        List<ConsumerOutputResult> outputs =
+                ConsumerCraftingRuntime.observedOutputs(
+                        List.of(ink),
+                        ConsumerOutputDestination.RS_NETWORK,
+                        true
+                );
+
+        assertEquals(1, outputs.size());
+        assertEquals(
+                IntegrationResourceKey.ResourceKind.FLUID,
+                outputs.get(0).resource().kind());
+        assertEquals(250L, outputs.get(0).amount());
+    }
+
+    @Test
     void reportedFluidOutputsRemainFluidResourcesInOrderStatus() {
         IntegrationResourceKey water = IntegrationResourceKey.fluid(
                 new FluidStack(Fluids.WATER, 1));
@@ -149,6 +173,32 @@ class ConsumerCraftingRuntimeTest extends BootstrapTest {
         assertEquals(1, step.executions());
         assertEquals(17L, step.productionTarget().quantity());
         assertEquals(Items.DIAMOND, step.syntheticOutput().getItem());
+    }
+
+    @Test
+    void typedTerminalCanRepresentAProbabilisticFluidTarget() {
+        IntegrationResourceKey water =
+                IntegrationResourceKey.fluid(
+                        new FluidStack(Fluids.WATER, 1));
+        Recipe<?> recipe = mock(Recipe.class);
+        CraftingResolver.ResolutionStep step =
+                ConsumerCraftingRuntime.typedTerminalStep(
+                        resource("fluid_terminal"),
+                        recipe,
+                        ModType.EXTERNAL_INTEGRATION,
+                        1,
+                        water,
+                        new ItemStack(Items.PAPER),
+                        750L,
+                        true
+                );
+
+        assertNull(step.syntheticOutput());
+        assertEquals(
+                IntegrationResourceKey.ResourceKind.FLUID,
+                step.productionTarget().resource().kind());
+        assertEquals(750L,
+                step.productionTarget().quantity());
     }
 
     @Test

@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting;
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.api.execution.CollectedOutput;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.ItemStack;
 
@@ -67,6 +68,14 @@ public record ProductionTarget(
                 && (resource.identity().isEmpty()
                 || resource.identity().equals(
                 output.resource().identity()));
+    }
+
+    /** 仅用于进度、失败提示和内部循环身份，不代表真实物品产物。 */
+    public ItemStack displayStack() {
+        if (material != null) return material.toStack(1);
+        return resource == null
+                ? ItemStack.EMPTY
+                : InkFluidSupport.tokenFor(resource, 1);
     }
 
     private static MaterialKey itemMaterial(

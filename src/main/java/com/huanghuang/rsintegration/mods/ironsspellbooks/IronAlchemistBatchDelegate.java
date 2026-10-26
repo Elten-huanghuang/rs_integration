@@ -1,5 +1,8 @@
 package com.huanghuang.rsintegration.mods.ironsspellbooks;
 
+import com.huanghuang.rsintegration.api.IntegrationResourceKey;
+import com.huanghuang.rsintegration.api.execution.CollectedOutput;
+import com.huanghuang.rsintegration.api.recipe.OutputKind;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
@@ -34,6 +37,11 @@ import java.util.function.Function;
 
 /** 在真实炼金锅内执行回收和酿造，装瓶消耗账本实际提取的流体和玻璃瓶。 */
 public final class IronAlchemistBatchDelegate extends AbstractBatchDelegate {
+    private static final ResourceLocation FLUID_OUTPUT_PORT =
+            new ResourceLocation(
+                    "irons_spellbooks",
+                    "alchemist_cauldron/fluid_output"
+            );
     private ServerLevel level;
     private BlockPos pos;
     private IronSpellBooksRecipe recipe;
@@ -48,6 +56,8 @@ public final class IronAlchemistBatchDelegate extends AbstractBatchDelegate {
     private List<ItemStack> heldInputs = List.of();
     private ServerPlayer owner;
     private List<ItemStack> secondaryResults = List.of();
+    private final List<CollectedOutput> observedProduction =
+            new ArrayList<>();
 
     @Override
     public boolean validateAndInit(@Nonnull ServerPlayer player, @Nonnull ResourceLocation recipeId,
@@ -78,6 +88,7 @@ public final class IronAlchemistBatchDelegate extends AbstractBatchDelegate {
         outputStoragePreflightDone = false;
         outputStoragePreflightPassed = false;
         outputStorageWarningSent = false;
+        observedProduction.clear();
         this.machineDim = resolved.dimension().location();
         this.machineServer = player.server;
         return true;
@@ -440,6 +451,7 @@ public final class IronAlchemistBatchDelegate extends AbstractBatchDelegate {
                 }
                 return ItemStack.EMPTY;
             }
+            recordObservedFluid(collected);
             result = ItemStack.EMPTY;
             return collected;
         }
@@ -465,6 +477,9 @@ public final class IronAlchemistBatchDelegate extends AbstractBatchDelegate {
         outputs.addAll(secondaryResults);
         List<ItemStack> collected = collectBrewOutputs(tank, (Container) tile, storageEndpoint(), player, outputs);
         if (collected.isEmpty()) return List.of();
+        collected.stream()
+                .filter(InkFluidSupport::isToken)
+                .forEach(this::recordObservedFluid);
         result = ItemStack.EMPTY;
         secondaryResults = List.of();
         return collected;
@@ -537,6 +552,7 @@ public final class IronAlchemistBatchDelegate extends AbstractBatchDelegate {
         outputStoragePreflightDone = false;
         outputStoragePreflightPassed = false;
         outputStorageWarningSent = false;
+        observedProduction.clear();
         owner = null;
         resetState();
     }
@@ -548,8 +564,28 @@ public final class IronAlchemistBatchDelegate extends AbstractBatchDelegate {
         outputStoragePreflightDone = false;
         outputStoragePreflightPassed = false;
         outputStorageWarningSent = false;
+        observedProduction.clear();
         owner = null;
         resetState();
+    }
+    @Override
+    public List<CollectedOutput> drainObservedProduction() {
+        if (observedProduction.isEmpty()) return List.of();
+        List<CollectedOutput> result =
+                List.copyOf(observedProduction);
+        observedProduction.clear();
+        return result;
+    }
+    private void recordObservedFluid(ItemStack stack) {
+        IntegrationResourceKey resource =
+                InkFluidSupport.resource(stack);
+        if (resource == null) return;
+        observedProduction.add(new CollectedOutput(
+                resource,
+                stack.getCount(),
+                OutputKind.PRIMARY,
+                FLUID_OUTPUT_PORT
+        ));
     }
     @Override public BlockPos getMachinePos() { return pos; }
 }

@@ -116,7 +116,7 @@ final class CraftTerminalSteps {
                         && output.kind() == OutputKind.PRIMARY
                         && terminalStep.productionTarget() != null) {
                     ItemStack target =
-                            terminalStep.productionTarget().material().toStack(
+                            terminalStep.productionTarget().displayStack().copyWithCount(
                                     (int) Math.min(
                                             Integer.MAX_VALUE,
                                             Math.max(
@@ -165,7 +165,7 @@ final class CraftTerminalSteps {
             }
         }
         ItemStack primaryDeclaration = terminalStep.productionTarget() == null
-                ? primary : terminalStep.productionTarget().material().toStack(
+                ? primary : terminalStep.productionTarget().displayStack().copyWithCount(
                 (int) Math.min(Integer.MAX_VALUE,
                         Math.max(1L, terminalStep.productionTarget().quantity())));
         boolean deterministic = handler == null || handler.hasDeterministicPrimaryOutput(recipe);

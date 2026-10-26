@@ -157,6 +157,31 @@ final class ExternalRecipeHandler implements ModRecipeHandler {
 
     @Nullable
     @Override
+    public IntegrationResourceKey getPrimaryOutputResource(
+            Recipe<?> recipe,
+            RegistryAccess access
+    ) {
+        ExternalRecipeProjection.Result projection = project(recipe, access);
+        if (!projection.available()) return null;
+        OutputDeclaration primary =
+                ExternalRecipeProjection.primaryOutput(projection.view());
+        return primary == null ? null : primary.resource();
+    }
+
+    @Override
+    public long getPrimaryOutputUnits(
+            Recipe<?> recipe,
+            RegistryAccess access
+    ) {
+        ExternalRecipeProjection.Result projection = project(recipe, access);
+        if (!projection.available()) return 0L;
+        OutputDeclaration primary =
+                ExternalRecipeProjection.primaryOutput(projection.view());
+        return primary == null ? 0L : primary.amount().min();
+    }
+
+    @Nullable
+    @Override
     public List<IngredientSpec> getIngredients(Recipe<?> recipe) {
         ExternalRecipeProjection.Result projection = project(recipe);
         if (!projection.available()) return null;
@@ -216,8 +241,31 @@ final class ExternalRecipeHandler implements ModRecipeHandler {
     @Override
     public boolean supportsTargetedProduction(Recipe<?> recipe) {
         ExternalRecipeProjection.Result projection = project(recipe);
-        return projection.available()
-                && ExternalRecipeProjection.targetProducing(projection.view());
+        if (!projection.available()) return false;
+        OutputDeclaration primary =
+                ExternalRecipeProjection.primaryOutput(projection.view());
+        return ExternalRecipeProjection.targetProducing(projection.view())
+                || (primary != null
+                && primary.probability().mode()
+                != OutputProbabilityMode.GUARANTEED);
+    }
+
+    @Override
+    public boolean requiresTargetedProduction(
+            Recipe<?> recipe,
+            IntegrationResourceKey output
+    ) {
+        ExternalRecipeProjection.Result projection = project(recipe);
+        if (!projection.available()) return false;
+        OutputDeclaration primary =
+                ExternalRecipeProjection.primaryOutput(projection.view());
+        if (primary == null
+                || !matchesTarget(primary.resource(), output)) {
+            return false;
+        }
+        return primary.targetProducing()
+                || primary.probability().mode()
+                != OutputProbabilityMode.GUARANTEED;
     }
 
     @Override
@@ -392,6 +440,16 @@ final class ExternalRecipeHandler implements ModRecipeHandler {
         RSIntegrationMod.LOGGER.warn(
                 "[RSI-API] recipe {} projection from {} failed: {}",
                 recipe.getId(), integration.id(), exception.getMessage());
+    }
+
+    private static boolean matchesTarget(
+            IntegrationResourceKey declared,
+            IntegrationResourceKey target
+    ) {
+        return declared.kind() == target.kind()
+                && declared.id().equals(target.id())
+                && (target.identity().isEmpty()
+                || declared.identity().equals(target.identity()));
     }
 
     private record ProjectionKey(

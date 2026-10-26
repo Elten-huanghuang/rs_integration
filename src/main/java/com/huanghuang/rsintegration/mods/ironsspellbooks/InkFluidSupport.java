@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.ironsspellbooks;
 
 import com.huanghuang.rsintegration.ModItems;
+import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.resources.ResourceLocation;
@@ -9,9 +10,11 @@ import net.minecraft.network.FriendlyByteBuf;
 import io.netty.handler.codec.DecoderException;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.material.Fluids;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.registries.ForgeRegistries;
 
+import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -61,6 +64,37 @@ public final class InkFluidSupport {
         identity.setAmount(1);
         result.setTag(identity.writeToNBT(new CompoundTag()));
         return result;
+    }
+
+    /** 将公共流体身份映射为内部账本使用的显示/传输凭证。 */
+    public static ItemStack tokenFor(
+            IntegrationResourceKey resource,
+            int amount
+    ) {
+        if (resource == null
+                || resource.kind()
+                != IntegrationResourceKey.ResourceKind.FLUID
+                || amount <= 0
+                || !ModItems.ALCHEMIST_INK_FLUID.isPresent()) {
+            return ItemStack.EMPTY;
+        }
+        var fluid = ForgeRegistries.FLUIDS.getValue(resource.id());
+        if (fluid == null || fluid == Fluids.EMPTY) {
+            return ItemStack.EMPTY;
+        }
+        FluidStack stack = new FluidStack(fluid, amount);
+        CompoundTag identity = resource.identity();
+        if (!identity.isEmpty()) stack.setTag(identity);
+        return token(stack);
+    }
+
+    /** 凭证只在内部存储边界出现，公共资源身份必须恢复成流体。 */
+    @Nullable
+    public static IntegrationResourceKey resource(ItemStack stack) {
+        FluidStack fluid = fluid(stack);
+        return fluid.isEmpty()
+                ? null
+                : IntegrationResourceKey.fluid(fluid);
     }
 
     public static boolean isInk(FluidStack fluid) {

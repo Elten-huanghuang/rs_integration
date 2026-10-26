@@ -430,13 +430,23 @@ public final class AsyncCraftChain {
             int dispatchOperationLimit = configuredOperationsPerDispatch();
             boolean oversizedNode = requiresFlatExecutionForOversizedNode(
                     steps, atomicVanillaLimit, dispatchOperationLimit);
-            this.useGraphExecution = executionDecision.useGraphExecutor() && !oversizedNode;
+            boolean fluidProductionTarget = steps.stream().anyMatch(step ->
+                    step.productionTarget() != null
+                            && step.productionTarget().resource() != null
+                            && step.productionTarget().resource().kind()
+                            == IntegrationResourceKey.ResourceKind.FLUID);
+            this.useGraphExecution = executionDecision.useGraphExecutor()
+                    && !oversizedNode
+                    && !fluidProductionTarget;
             RSIntegrationMod.LOGGER.debug(ctx.format(
                     "Using {} execution for self-contained graph: reason={} detail={}"),
                     useGraphExecution ? "graph" : "flat",
-                    oversizedNode ? "NODE_REQUIRES_TICK_SLICING"
+                    fluidProductionTarget ? "FLUID_TARGET_REQUIRES_FLAT"
+                            : oversizedNode ? "NODE_REQUIRES_TICK_SLICING"
                             : executionDecision.reason(),
-                    oversizedNode
+                    fluidProductionTarget
+                            ? "fluid production targets are observed on the flat executor"
+                            : oversizedNode
                             ? "node exceeds its atomic dispatch limit (vanilla="
                                     + atomicVanillaLimit + ", machine=" + dispatchOperationLimit + ")"
                             : executionDecision.detail());
@@ -794,6 +804,8 @@ public final class AsyncCraftChain {
                             currentDelegate, online, disarmOutputCapture());
                     List<CollectedOutput> reported =
                             recordReportedResources(currentDelegate);
+                    List<CollectedOutput> observed =
+                            recordObservedProduction(currentDelegate);
                     closeFlatOperationScope();
                     List<ItemStack> actualResults = collectedOutputs.stacks();
                     for (ItemStack result : actualResults) addToVirtualInventory(result);
@@ -812,7 +824,8 @@ public final class AsyncCraftChain {
                     }
                     ProbabilisticProduction probability = probabilityTargets.get(steps.get(currentStepIdx));
                     if (probability != null) {
-                        probability.settle(actualResults, reported);
+                        probability.settle(
+                                actualResults, reported, observed);
                     }
 
                     IBatchDelegate.ExpectedProduction expected = currentDelegate.getExpectedProduction();
@@ -1303,8 +1316,15 @@ public final class AsyncCraftChain {
         if (step.productionTarget() == null) return false;
         Recipe<?> recipe = recipeForStep(step);
         ModRecipeHandler handler = recipe == null ? null : ModRecipeHandlers.claimFor(recipe).winner();
-        return handler != null && handler.requiresTargetedProduction(recipe,
-                step.productionTarget().material().toStack(1));
+        if (handler == null) return false;
+        ProductionTarget target = step.productionTarget();
+        if (target.resource() != null) {
+            return handler.requiresTargetedProduction(
+                    recipe, target.resource());
+        }
+        return target.material() != null
+                && handler.requiresTargetedProduction(
+                recipe, target.material().toStack(1));
     }
 
     @Nullable
@@ -1416,7 +1436,8 @@ public final class AsyncCraftChain {
         ProbabilisticProduction progress = new ProbabilisticProduction(step.productionTarget(), Math.max(1, limit));
         probabilityTargets.put(step, progress);
         player.sendSystemMessage(Component.translatable("rsi.async.probability.started",
-                step.productionTarget().material().toStack(1).getHoverName(), step.productionTarget().quantity(), limit));
+                step.productionTarget().displayStack().getHoverName(),
+                step.productionTarget().quantity(), limit));
         return progress;
     }
 
@@ -1469,7 +1490,9 @@ public final class AsyncCraftChain {
             supplemental = CraftingResolver.resolveSupplementalGraph(inputs, usable,
                     player.serverLevel(), player, storageEndpoint, missing, excluded,
                     supplementalForcedRecipes, supplementalMaterialLocks,
-                    new CraftingResolver.ActiveRootRecipe(step.recipeId(), progress.target().material().toStack(1)));
+                    new CraftingResolver.ActiveRootRecipe(
+                            step.recipeId(),
+                            progress.target().displayStack()));
         } catch (CraftingPlanningTimeoutException timeout) {
             abort("Probabilistic supplemental planning timed out: " + step.recipeId(),
                     Component.translatable("rsi.async.probability.planning_timeout", progress.remaining()));
@@ -3192,7 +3215,7 @@ public final class AsyncCraftChain {
     private ItemStack displayOutput(CraftingResolver.ResolutionStep step) {
         if (step.productionTarget() != null) {
             // 展示材料身份即可，避免把整单需求量当作普通物品堆叠数量发送。
-            return step.productionTarget().material().toStack(1);
+            return step.productionTarget().displayStack();
         }
         if (step.syntheticOutput() != null && !step.syntheticOutput().isEmpty()) {
             return step.syntheticOutput().copy();
@@ -4095,7 +4118,7 @@ public final class AsyncCraftChain {
                                        ServerPlayer player) {
         ItemStack output = step.syntheticOutput();
         if ((output == null || output.isEmpty()) && step.productionTarget() != null) {
-            output = step.productionTarget().material().toStack(1);
+            output = step.productionTarget().displayStack();
         }
         if (output == null || output.isEmpty()) {
             Recipe<?> recipe = player.serverLevel().getRecipeManager()
@@ -4737,6 +4760,19 @@ public final class AsyncCraftChain {
             recorded.add(output);
         }
         return List.copyOf(recorded);
+    }
+
+    private List<CollectedOutput> recordObservedProduction(
+            IBatchDelegate delegate
+    ) {
+        if (delegate == null) return List.of();
+        List<CollectedOutput> observed = new ArrayList<>();
+        for (CollectedOutput output
+                : delegate.drainObservedProduction()) {
+            if (output == null || output.amount() <= 0L) continue;
+            observed.add(output);
+        }
+        return List.copyOf(observed);
     }
 
     public List<CollectedOutput> reportedResources() {

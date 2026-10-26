@@ -1,11 +1,14 @@
 package com.huanghuang.rsintegration.mods.ironsspellbooks;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Recipe;
+
+import javax.annotation.Nullable;
 import java.util.ArrayList;
 import net.minecraft.world.item.crafting.Ingredient;
 
@@ -23,6 +26,57 @@ public final class IronSpellBooksRecipeHandler implements ModRecipeHandler {
     }
     @Override public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
         return recipe.getResultItem(access).copy();
+    }
+    @Nullable
+    @Override public IntegrationResourceKey getPrimaryOutputResource(
+            Recipe<?> recipe,
+            RegistryAccess access
+    ) {
+        ItemStack result = recipe.getResultItem(access);
+        if (recipe instanceof IronSpellBooksRecipe ironRecipe
+                && (ironRecipe.isScrollRecycling() || ironRecipe.isBrewing())
+                && InkFluidSupport.isToken(result)) {
+            return InkFluidSupport.resource(result);
+        }
+        return ModRecipeHandler.super.getPrimaryOutputResource(
+                recipe, access);
+    }
+    @Override public long getPrimaryOutputUnits(
+            Recipe<?> recipe,
+            RegistryAccess access
+    ) {
+        ItemStack result = recipe.getResultItem(access);
+        return result.isEmpty()
+                ? 0L
+                : InkFluidSupport.isToken(result)
+                ? result.getCount()
+                : ModRecipeHandler.super.getPrimaryOutputUnits(
+                        recipe, access);
+    }
+    @Override public boolean requiresTargetedProduction(
+            Recipe<?> recipe,
+            IntegrationResourceKey output
+    ) {
+        if (recipe instanceof IronSpellBooksRecipe ironRecipe
+                && ironRecipe.isScrollRecycling()
+                && output.kind()
+                == IntegrationResourceKey.ResourceKind.FLUID) {
+            IntegrationResourceKey declared =
+                    getPrimaryOutputResource(
+                            recipe, RegistryAccess.EMPTY);
+            return declared != null
+                    && declared.kind() == output.kind()
+                    && declared.id().equals(output.id())
+                    && (output.identity().isEmpty()
+                    || declared.identity().equals(output.identity()));
+        }
+        return ModRecipeHandler.super.requiresTargetedProduction(
+                recipe, output);
+    }
+    @Override public boolean hasFluidOutputs(Recipe<?> recipe) {
+        return recipe instanceof IronSpellBooksRecipe ironRecipe
+                && (ironRecipe.isScrollRecycling()
+                || ironRecipe.isBrewing());
     }
     @Override public List<ItemStack> getSecondaryOutputs(Recipe<?> recipe, RegistryAccess access) {
         return ((IronSpellBooksRecipe) recipe).secondaryOutputs();

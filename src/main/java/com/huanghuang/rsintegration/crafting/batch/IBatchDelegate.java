@@ -441,6 +441,15 @@ public interface IBatchDelegate {
         return List.of();
     }
 
+    /**
+     * 取出本次操作已经真实产生、但尚未完成最终存储投递的资源。
+     * 这些资源只能推进概率进度，不能计入已交付订单输出。
+     */
+    @Nonnull
+    default List<CollectedOutput> drainObservedProduction() {
+        return List.of();
+    }
+
     /** 直接资源交付失败时返回稳定详情，使订单不能伪装成成功。 */
     @Nullable
     default String reportedResourceFailure() {
