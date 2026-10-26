@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting;
 
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.graph.CraftNode;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
@@ -26,6 +27,8 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeManager;
+import net.minecraft.world.level.material.Fluids;
+import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import org.junit.jupiter.api.BeforeAll;
@@ -131,6 +134,29 @@ class AsyncCraftDisplayTargetTest extends BootstrapTest {
         displayed.setCount(1);
         displayed.getTag().putString("variant", "changed");
         assertTrue(ItemStack.matches(clicked, chain.displayTarget()));
+    }
+
+    @Test
+    void fluidTargetRemainsAResourceInsteadOfBecomingAFakeItem()
+            throws Exception {
+        AsyncCraftChain chain = chain(server(), List.of(step(
+                ModType.GENERIC,
+                new ItemStack(Items.IRON_INGOT),
+                null
+        )));
+        IntegrationResourceKey water = IntegrationResourceKey.fluid(
+                new FluidStack(Fluids.WATER, 1));
+
+        chain.setTargetResource(water);
+
+        Field itemTarget = AsyncCraftChain.class
+                .getDeclaredField("targetOutput");
+        itemTarget.setAccessible(true);
+        assertNull(itemTarget.get(chain));
+        Field resourceTarget = AsyncCraftChain.class
+                .getDeclaredField("targetResource");
+        resourceTarget.setAccessible(true);
+        assertEquals(water, resourceTarget.get(chain));
     }
 
     @Test

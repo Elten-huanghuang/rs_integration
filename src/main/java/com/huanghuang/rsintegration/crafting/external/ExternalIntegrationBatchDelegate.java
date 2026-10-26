@@ -60,6 +60,7 @@ import com.huanghuang.rsintegration.crafting.MaterialMatcher;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
+import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.crafting.graph.OutputProbability;
@@ -130,6 +131,8 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     private RecipeExecutionKind executionKind;
     private RecipeExecutionIntegration executionIntegration;
     private ExecutionPlan executionPlan;
+    @Nullable
+    private IntegrationResourceKey targetResource;
     private RunningOperation runningOperation;
     private OperationStartContext operationStartContext;
     private ReservedMaterialView customMaterials;
@@ -164,6 +167,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     private long startedAtTick;
     @Nullable
     private Component preparationFailure;
+    private boolean preparationRetryable;
     private final Map<SlotKey, ItemStack> inputBaseline = new LinkedHashMap<>();
     private final Map<SlotKey, ItemStack> outputBaseline = new LinkedHashMap<>();
     private final Map<FluidSlotKey, FluidStack> fluidInputBaseline =
@@ -180,6 +184,28 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
 
     public ExternalIntegrationBatchDelegate() {
         this(() -> RSIIntegrationApi.get().orElse(null), true);
+    }
+
+    @Override
+    public void setTargetOutput(@Nullable ItemStack target) {
+        super.setTargetOutput(target);
+        targetResource = target == null || target.isEmpty()
+                ? null
+                : IntegrationResourceKey.item(target);
+    }
+
+    @Override
+    public void setTargetResource(
+            @Nullable IntegrationResourceKey target
+    ) {
+        targetResource = target;
+        super.setTargetOutput(
+                target != null
+                        && target.kind()
+                        == IntegrationResourceKey.ResourceKind.ITEM
+                        ? ExternalRecipeProjection.toStack(target, 1L)
+                        : null
+        );
     }
 
     ExternalIntegrationBatchDelegate(RSIIntegrationApi api) {
@@ -208,13 +234,17 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             BlockPos pos
     ) {
         preparationFailure = null;
+        preparationRetryable = false;
         if (validateAndInit(player, recipeId, dim, pos)) {
             return PreparationResult.ready();
         }
         Component message = preparationFailure != null
                 ? preparationFailure
                 : Component.literal("RSI Integration machine is not ready");
-        return PreparationResult.waiting(
+        return preparationRetryable
+                ? PreparationResult.waiting(
+                "integration_machine_preparation_failed", message)
+                : PreparationResult.fatal(
                 "integration_machine_preparation_failed", message);
     }
 
@@ -227,12 +257,14 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     ) {
         RSIIntegrationApi api = apiProvider.get();
         if (api == null) {
+            preparationRetryable = true;
             preparationFailure = Component.literal(
                     "RSI Integration API is unavailable");
             return false;
         }
         level = CraftPacketUtils.resolveLevel(player.server, dim, player);
         if (level == null || !level.hasChunkAt(pos)) {
+            preparationRetryable = true;
             preparationFailure = Component.literal(
                     "RSI Integration machine chunk is not loaded");
             return false;
@@ -283,12 +315,14 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         try {
             described = machine.describe(machineContext, blockEntity);
         } catch (RuntimeException | LinkageError failure) {
+            preparationRetryable = true;
             preparationFailure = Component.literal(
                     "RSI Integration machine describe failed: "
                             + failure.getClass().getSimpleName());
             return false;
         }
         if (described.descriptor() == null) {
+            preparationRetryable = true;
             preparationFailure = firstDiagnostic(
                     described.diagnostics(),
                     "RSI Integration machine descriptor is unavailable");
@@ -352,18 +386,18 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                                 projection.view(),
                                 player,
                                 machineContext,
-                                targetOutput == null || targetOutput.isEmpty()
-                                        ? null
-                                        : IntegrationResourceKey.item(targetOutput)
+                                targetResource
                         )
                 );
                 if (!result.executionAvailable()) {
+                    preparationRetryable = true;
                     preparationFailure = firstDiagnostic(
                             result.diagnostics(),
                             "RSI Integration recipe is temporarily unavailable");
                     return false;
                 }
             } catch (RuntimeException | LinkageError failure) {
+                preparationRetryable = true;
                 preparationFailure = Component.literal(
                         "RSI Integration availability callback failed: "
                                 + failure.getClass().getSimpleName());
@@ -628,6 +662,83 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         return collected.values().stream()
                 .map(ItemStack::copy)
                 .toList();
+    }
+
+    @Override
+    public List<OutputAccounting.CollectedOutput> collectStructuredResults(
+            ServerPlayer player
+    ) {
+        if (resultsCollected || recipeView == null) return List.of();
+        if (executionKind == RecipeExecutionKind.CUSTOM) {
+            if (!customCollectionComplete) return List.of();
+            List<OutputAccounting.CollectedOutput> collected =
+                    new ArrayList<>();
+            for (CollectedOutput output
+                    : customCollectedOutputs) {
+                if (output.resource().kind()
+                        != IntegrationResourceKey.ResourceKind.ITEM) {
+                    continue;
+                }
+                appendStructuredItemOutput(
+                        collected,
+                        output.portId(),
+                        output.resource(),
+                        output.amount()
+                );
+            }
+            resultsCollected = true;
+            return List.copyOf(collected);
+        }
+
+        List<OutputAccounting.CollectedOutput> collected =
+                new ArrayList<>();
+        for (OutputDeclaration output : recipeView.outputs()) {
+            if (output.resource().kind()
+                    != IntegrationResourceKey.ResourceKind.ITEM) {
+                continue;
+            }
+            long remaining = Math.min(
+                    Integer.MAX_VALUE, output.amount().max());
+            for (MachineItemPort port : outputPorts(
+                    output.outputGroup())) {
+                if (remaining <= 0L) break;
+                ItemStack actual = extractMatching(
+                        port,
+                        output,
+                        (int) Math.min(
+                                Integer.MAX_VALUE, remaining),
+                        player
+                );
+                if (actual.isEmpty()) continue;
+                collected.add(new OutputAccounting.CollectedOutput(
+                        output.portId().toString(),
+                        OutputContract.Source.SLOT,
+                        actual
+                ));
+                remaining -= actual.getCount();
+            }
+        }
+        resultsCollected = true;
+        return List.copyOf(collected);
+    }
+
+    private void appendStructuredItemOutput(
+            List<OutputAccounting.CollectedOutput> target,
+            ResourceLocation portId,
+            IntegrationResourceKey resource,
+            long amount
+    ) {
+        long remaining = amount;
+        while (remaining > 0L) {
+            int chunk = (int) Math.min(
+                    Integer.MAX_VALUE, remaining);
+            target.add(new OutputAccounting.CollectedOutput(
+                    portId.toString(),
+                    OutputContract.Source.SLOT,
+                    ExternalRecipeProjection.toStack(resource, chunk)
+            ));
+            remaining -= chunk;
+        }
     }
 
     @Override
@@ -909,9 +1020,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                             operationStartContext.transactionId(),
                             operationStartContext.operationId(),
                             operationStartContext.attempt(),
-                            targetOutput == null || targetOutput.isEmpty()
-                                    ? null
-                                    : IntegrationResourceKey.item(targetOutput)
+                            targetResource
                     )
             );
         } catch (RuntimeException | LinkageError failure) {

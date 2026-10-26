@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.loadbalancer;
 
+import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.crafting.MaterialMatcher;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.ModVersionDelegateRegistry;
@@ -102,6 +103,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     private List<IngredientSpec> requiredSpecsView;
     private List<IngredientSpec> supplementalSpecsView = List.of();
     private ItemStack targetOutput;
+    private IntegrationResourceKey targetResource;
     private OperationBudget craftOperationBudget;
     private OperationBudget globalOperationBudget;
     private OperationExecutionKernel operationKernel;
@@ -1119,6 +1121,16 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         refreshMaterialSpecs();
     }
 
+    public void setTargetResource(
+            @Nullable IntegrationResourceKey targetResource
+    ) {
+        this.targetResource = targetResource;
+        for (WorkerSlot worker : workers) {
+            configureDelegate(worker.delegate, worker.machine);
+        }
+        refreshMaterialSpecs();
+    }
+
     private void refreshMaterialSpecs() {
         if (workers.isEmpty()) {
             baseSpecs = null;
@@ -1182,6 +1194,9 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         if (machineServer != null) abstractDelegate.setMachineServer(machineServer);
         abstractDelegate.setMagicResourceTaskReservation(magicResourceTaskReservation);
         if (targetOutput != null) abstractDelegate.setTargetOutput(targetOutput);
+        if (targetResource != null) {
+            abstractDelegate.setTargetResource(targetResource);
+        }
     }
 
     private boolean acquireOperationResources(WorkerSlot worker, IBatchDelegate delegate,

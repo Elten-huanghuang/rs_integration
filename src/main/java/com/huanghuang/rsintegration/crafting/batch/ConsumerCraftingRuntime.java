@@ -665,11 +665,13 @@ public final class ConsumerCraftingRuntime {
                     steps,
                     LegacyExecutionMetrics.Reason.PLANNED_CHAIN,
                     plan.recipeId,
+                    plan.targetResource,
                     plan.targetOutput,
                     outputDestination(plan.destination),
                     running -> {
                         order.chain = running;
-                        running.setTargetOutput(plan.targetOutput);
+                        running.setTargetResource(
+                                plan.targetResource);
                         running.setMachineSelection(
                                 plan.recipeId,
                                 plan.machineSelectionMode,

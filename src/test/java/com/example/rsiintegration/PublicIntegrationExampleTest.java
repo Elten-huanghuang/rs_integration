@@ -1,7 +1,10 @@
 package com.example.rsiintegration;
 
-import com.huanghuang.rsintegration.api.DefaultRSIIntegrationApi;
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
+import com.huanghuang.rsintegration.api.RSIIntegrationApi;
+import com.huanghuang.rsintegration.api.RSIIntegrationRegistrationEvent;
+import com.huanghuang.rsintegration.api.RSIIntegrationServices;
+import com.huanghuang.rsintegration.api.RegistrationResult;
 import com.huanghuang.rsintegration.api.ResourceMatchMode;
 import com.huanghuang.rsintegration.api.diagnostic.IntegrationDiagnostic;
 import com.huanghuang.rsintegration.api.diagnostic.IntegrationDiagnosticCode;
@@ -46,14 +49,19 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraftforge.eventbus.api.BusBuilder;
+import net.minecraftforge.eventbus.api.IEventBus;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
 class PublicIntegrationExampleTest extends BootstrapTest {
@@ -62,7 +70,6 @@ class PublicIntegrationExampleTest extends BootstrapTest {
 
     @Test
     void thirdPartyExampleOnlyUsesThePublicIntegrationApi() {
-        DefaultRSIIntegrationApi api = new DefaultRSIIntegrationApi();
         ExampleRecipeIntegration recipeIntegration =
                 new ExampleRecipeIntegration();
         ExampleMachineIntegration machineIntegration =
@@ -70,11 +77,41 @@ class PublicIntegrationExampleTest extends BootstrapTest {
         ExampleExecutionIntegration executionIntegration =
                 new ExampleExecutionIntegration();
 
-        api.beginRegistration();
-        api.registerRecipe(recipeIntegration);
-        api.registerMachine(machineIntegration);
-        api.registerExecution(executionIntegration);
-        api.freezeRegistration();
+        RSIIntegrationServices.initialize();
+        RSIIntegrationServices.beginRegistration();
+        IEventBus bus = BusBuilder.builder().build();
+        AtomicBoolean delivered = new AtomicBoolean();
+        AtomicReference<RegistrationResult>
+                recipeResult = new AtomicReference<>();
+        bus.addListener(
+                (RSIIntegrationRegistrationEvent event) -> {
+                    delivered.set(true);
+                    recipeResult.set(
+                            event.api().registerRecipe(recipeIntegration));
+                    event.api().registerMachine(machineIntegration);
+                    event.api().registerExecution(executionIntegration);
+                });
+        try {
+            RSIIntegrationApi api = RSIIntegrationApi.get()
+                    .orElseThrow();
+            bus.post(
+                    new RSIIntegrationRegistrationEvent(api));
+            assertTrue(delivered.get());
+            assertTrue(recipeResult.get().accepted(),
+                    () -> recipeResult.get().diagnostics().toString());
+            assertClaims(api, recipeIntegration, machineIntegration,
+                    executionIntegration);
+        } finally {
+            RSIIntegrationServices.freezeRegistration();
+        }
+    }
+
+    private static void assertClaims(
+            RSIIntegrationApi api,
+            ExampleRecipeIntegration recipeIntegration,
+            ExampleMachineIntegration machineIntegration,
+            ExampleExecutionIntegration executionIntegration
+    ) {
 
         Recipe<?> recipe = mock(Recipe.class);
         BlockEntity blockEntity = mock(BlockEntity.class);

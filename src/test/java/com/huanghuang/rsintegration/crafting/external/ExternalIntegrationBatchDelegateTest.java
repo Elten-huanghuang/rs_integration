@@ -52,6 +52,7 @@ import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
+import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.RegistryAccess;
@@ -97,6 +98,43 @@ import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.withSettings;
 
 class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
+    @Test
+    void preparationSeparatesTransientAndPermanentFailures() {
+        DefaultRSIIntegrationApi api =
+                new DefaultRSIIntegrationApi();
+        api.beginRegistration();
+        api.freezeRegistration();
+        ServerLevel level = mock(ServerLevel.class);
+        ServerPlayer player = mock(ServerPlayer.class);
+        MinecraftServer server = mock(MinecraftServer.class);
+        BlockPos position = new BlockPos(1, 64, 1);
+        when(player.level()).thenReturn(level);
+        setServer(player, server);
+
+        ExternalIntegrationBatchDelegate delegate =
+                new ExternalIntegrationBatchDelegate(api);
+        var unloaded = delegate.prepare(
+                player, resource("missing_recipe"), null, position);
+        assertEquals(
+                IBatchDelegate.PreparationState.RETRY,
+                unloaded.state());
+
+        when(level.hasChunkAt(position)).thenReturn(true);
+        when(level.getBlockEntity(position)).thenReturn(
+                mock(BlockEntity.class));
+        RecipeManager recipeManager = mock(RecipeManager.class);
+        when(recipeManager.byKey(resource("missing_recipe")))
+                .thenReturn(Optional.empty());
+        when(level.getRecipeManager()).thenReturn(recipeManager);
+        when(level.registryAccess()).thenReturn(RegistryAccess.EMPTY);
+
+        var missingRecipe = delegate.prepare(
+                player, resource("missing_recipe"), null, position);
+        assertEquals(
+                IBatchDelegate.PreparationState.FATAL,
+                missingRecipe.state());
+    }
+
     @Test
     void publicItemMachineMovesReservedInputsAndCollectsRealOutputs() {
         ResourceLocation recipeId = resource("recipe");
@@ -197,10 +235,14 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
         machineIntegration.revision = 1L;
 
         outputSlot.set(new ItemStack(Items.STICK, 1));
-        List<ItemStack> outputs = delegate.collectAllResults(player);
+        List<OutputAccounting.CollectedOutput> outputs =
+                delegate.collectStructuredResults(player);
 
         assertEquals(1, outputs.size());
-        assertEquals(Items.STICK, outputs.get(0).getItem());
+        assertEquals(
+                resource("output").toString(),
+                outputs.get(0).portId());
+        assertEquals(Items.STICK, outputs.get(0).stack().getItem());
         assertTrue(outputSlot.get().isEmpty());
         delegate.onBatchFinished(player);
     }

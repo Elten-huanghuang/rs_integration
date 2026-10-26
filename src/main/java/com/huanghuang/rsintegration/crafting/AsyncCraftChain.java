@@ -76,6 +76,7 @@ import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.loadbalancer.LoadBalancer;
 import com.huanghuang.rsintegration.mods.ironfurnaces.IronFurnaceMachinePriority;
@@ -218,6 +219,8 @@ public final class AsyncCraftChain {
      */
     @Nullable
     private ItemStack targetOutput;
+    @Nullable
+    private IntegrationResourceKey targetResource;
     private OutputDestination outputDestination = OutputDestination.RS_NETWORK;
     @Nullable
     private MachinePreference machinePreference;
@@ -518,6 +521,32 @@ public final class AsyncCraftChain {
      */
     public void setTargetOutput(@Nullable ItemStack target) {
         this.targetOutput = target != null && !target.isEmpty() ? target.copy() : null;
+        this.targetResource = this.targetOutput == null
+                ? null
+                : IntegrationResourceKey.item(this.targetOutput);
+    }
+
+    public void setTargetResource(
+            @Nullable IntegrationResourceKey target
+    ) {
+        this.targetResource = target;
+        this.targetOutput = target != null
+                && target.kind()
+                == IntegrationResourceKey.ResourceKind.ITEM
+                ? itemStack(target)
+                : null;
+    }
+
+    private static ItemStack itemStack(
+            IntegrationResourceKey resource
+    ) {
+        ItemStack stack = new ItemStack(
+                BuiltInRegistries.ITEM.get(resource.id()), 1);
+        if (stack.isEmpty()) return ItemStack.EMPTY;
+        if (!resource.identity().isEmpty()) {
+            stack.setTag(resource.identity());
+        }
+        return stack;
     }
 
     public void setOutputDestination(@Nullable OutputDestination destination) {
@@ -590,8 +619,13 @@ public final class AsyncCraftChain {
         ItemStack planned = steps.get(currentStepIdx).syntheticOutput();
         if (planned != null && !planned.isEmpty()) {
             abd.setTargetOutput(planned);
+            abd.setTargetResource(IntegrationResourceKey.item(planned));
         } else if (targetOutput != null && isPrimaryStep(currentStepIdx)) {
             abd.setTargetOutput(targetOutput);
+            abd.setTargetResource(targetResource);
+        } else if (isPrimaryStep(currentStepIdx)
+                && targetResource != null) {
+            abd.setTargetResource(targetResource);
         }
     }
 
@@ -1760,8 +1794,14 @@ public final class AsyncCraftChain {
                     ItemStack nodeTarget = graphNodeTargetOutput(graphNodes.get(nodeId));
                     if (!nodeTarget.isEmpty()) {
                         abd.setTargetOutput(nodeTarget);
+                        abd.setTargetResource(
+                                IntegrationResourceKey.item(nodeTarget));
                     } else if (targetOutput != null && isGraphTerminalNode(nodeId)) {
                         abd.setTargetOutput(targetOutput);
+                        abd.setTargetResource(targetResource);
+                    } else if (isGraphTerminalNode(nodeId)
+                            && targetResource != null) {
+                        abd.setTargetResource(targetResource);
                     }
                 }
             } catch (RuntimeException exception) {
@@ -1823,8 +1863,14 @@ public final class AsyncCraftChain {
                         ItemStack nodeTarget = graphNodeTargetOutput(graphNodes.get(nodeId));
                         if (!nodeTarget.isEmpty()) {
                             abd.setTargetOutput(nodeTarget);
+                            abd.setTargetResource(
+                                    IntegrationResourceKey.item(nodeTarget));
                         } else if (targetOutput != null && isGraphTerminalNode(nodeId)) {
                             abd.setTargetOutput(targetOutput);
+                            abd.setTargetResource(targetResource);
+                        } else if (isGraphTerminalNode(nodeId)
+                                && targetResource != null) {
+                            abd.setTargetResource(targetResource);
                         }
                     }
                     if (eligible.isEmpty()) {
@@ -2010,8 +2056,14 @@ public final class AsyncCraftChain {
                     ItemStack nodeTarget = graphNodeTargetOutput(graphNodes.get(nodeId));
                     if (!nodeTarget.isEmpty()) {
                         group.setTargetOutput(nodeTarget);
+                        group.setTargetResource(
+                                IntegrationResourceKey.item(nodeTarget));
                     } else if (targetOutput != null && isGraphTerminalNode(nodeId)) {
                         group.setTargetOutput(targetOutput);
+                        group.setTargetResource(targetResource);
+                    } else if (isGraphTerminalNode(nodeId)
+                            && targetResource != null) {
+                        group.setTargetResource(targetResource);
                     }
                 } else {
                     return GraphDispatchResult.retry(
@@ -4187,8 +4239,14 @@ public final class AsyncCraftChain {
         group.setMachineServer(server);
         if (step.syntheticOutput() != null && !step.syntheticOutput().isEmpty()) {
             group.setTargetOutput(step.syntheticOutput());
+            group.setTargetResource(
+                    IntegrationResourceKey.item(step.syntheticOutput()));
         } else if (targetOutput != null && isPrimaryStep(currentStepIdx)) {
             group.setTargetOutput(targetOutput);
+            group.setTargetResource(targetResource);
+        } else if (isPrimaryStep(currentStepIdx)
+                && targetResource != null) {
+            group.setTargetResource(targetResource);
         }
         IBatchDelegate started = startParallelStep(group, step, online);
         if (started != null) {

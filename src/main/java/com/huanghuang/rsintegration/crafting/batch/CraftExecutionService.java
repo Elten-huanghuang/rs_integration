@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.crafting.AsyncCraftChain;
 import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
@@ -28,6 +29,19 @@ public final class CraftExecutionService {
             LegacyExecutionMetrics.Reason reason, ResourceLocation recipeId,
             @Nullable ItemStack targetOutput, OutputDestination outputDestination,
             Consumer<AsyncCraftChain> completionWiring) {
+        return launch(
+                player, storageEndpoint, steps, reason, recipeId,
+                null, targetOutput, outputDestination, completionWiring);
+    }
+
+    public static AsyncCraftChain launch(
+            ServerPlayer player, @Nullable CraftStorageEndpoint storageEndpoint,
+            List<CraftingResolver.ResolutionStep> steps,
+            LegacyExecutionMetrics.Reason reason, ResourceLocation recipeId,
+            @Nullable IntegrationResourceKey targetResource,
+            @Nullable ItemStack targetOutput,
+            OutputDestination outputDestination,
+            Consumer<AsyncCraftChain> completionWiring) {
         Objects.requireNonNull(player, "player");
         Objects.requireNonNull(steps, "steps");
         Objects.requireNonNull(reason, "reason");
@@ -47,7 +61,9 @@ public final class CraftExecutionService {
 
         AsyncCraftChain chain = new AsyncCraftChain(
                 player.getUUID(), player.getServer(), storageEndpoint, chainSteps);
-        return submit(player, chain, chainSteps.size(), recipeId, targetOutput,
+        return submit(
+                player, chain, chainSteps.size(), recipeId,
+                targetResource, targetOutput,
                 outputDestination, completionWiring);
     }
 
@@ -66,16 +82,22 @@ public final class CraftExecutionService {
                 recipeId, reason, terminalStep.modType().id(), inputGraph.nodes().size());
         AsyncCraftChain chain = new AsyncCraftChain(player.getUUID(), player.getServer(),
                 storageEndpoint, inputGraph, terminalStep, repeatCount);
-        return submit(player, chain, chain.stepsCount(), recipeId, targetOutput,
-                outputDestination, completionWiring);
+        return submit(
+                player, chain, chain.stepsCount(), recipeId,
+                null, targetOutput, outputDestination, completionWiring);
     }
 
     private static AsyncCraftChain submit(
             ServerPlayer player, AsyncCraftChain chain, int displayedSteps,
             ResourceLocation recipeId,
+            @Nullable IntegrationResourceKey targetResource,
             @Nullable ItemStack targetOutput, OutputDestination outputDestination,
             Consumer<AsyncCraftChain> completionWiring) {
-        chain.setTargetOutput(targetOutput);
+        if (targetResource != null) {
+            chain.setTargetResource(targetResource);
+        } else {
+            chain.setTargetOutput(targetOutput);
+        }
         chain.setOutputDestination(outputDestination);
         completionWiring.accept(chain);
         boolean completed = AsyncCraftManager.getInstance().submitAndAdvance(

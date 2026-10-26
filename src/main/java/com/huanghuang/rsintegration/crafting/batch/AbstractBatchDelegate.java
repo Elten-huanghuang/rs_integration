@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
+import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.crafting.MaterialMatcher;
 import java.util.ArrayList;
 import net.minecraft.core.registries.Registries;
@@ -408,6 +409,12 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
      */
     public void setTargetOutput(@Nullable ItemStack target) {
         this.targetOutput = target != null && !target.isEmpty() ? target.copy() : null;
+    }
+
+    public void setTargetResource(
+            @Nullable IntegrationResourceKey target
+    ) {
+        // 旧执行器只支持物品目标，需要流体目标的适配器自行覆盖。
     }
 
     /** The concrete output the player asked for, or null if none was supplied. */
