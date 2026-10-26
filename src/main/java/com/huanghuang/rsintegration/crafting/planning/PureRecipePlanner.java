@@ -1353,6 +1353,7 @@ public final class PureRecipePlanner {
 
         private final ImmutableRecipeGraph graph;
         private final Map<MaterialRef, Long> stock = new HashMap<>();
+        private final Map<ResourceLocation, Set<MaterialRef>> stockByItem = new HashMap<>();
         private final int maxSteps;
         private final List<PlannedStep> steps = new ArrayList<>();
         private final Set<MaterialRef> visiting = new HashSet<>();
@@ -1373,7 +1374,9 @@ public final class PureRecipePlanner {
                                    PlanningPreferences preferences) {
             this.graph = graph;
             available.forEach((material, count) -> {
-                if (material != null && count != null && count > 0) stock.put(material, count);
+                if (material != null && count != null && count > 0) {
+                    addStock(material, count);
+                }
             });
             this.maxSteps = Math.max(1, maxSteps);
             visiting.addAll(activeRootOutputs);
@@ -1446,8 +1449,7 @@ public final class PureRecipePlanner {
                 long surplus = recipe.outputCount() * batches
                         - (ingredient.role() == DemandRole.CATALYST ? 0L : remaining);
                 if (surplus > 0L) {
-                    stock.merge(recipe.output(), surplus,
-                            PureRecipePlanner::saturatedAdd);
+                    addStock(recipe.output(), surplus);
                 }
                 return covered;
             }
@@ -1458,9 +1460,21 @@ public final class PureRecipePlanner {
 
         private long consumeAvailable(IngredientRef ingredient) {
             long remaining = ingredient.count();
-            List<MaterialRef> ordered = stock.keySet().stream()
-                    .filter(material -> ImmutableRecipeGraphProjector.matchesIngredient(material, ingredient))
-                    .collect(Collectors.toCollection(ArrayList::new));
+            Set<ResourceLocation> itemIds = new LinkedHashSet<>();
+            for (MaterialRef alternative : ingredient.alternatives()) {
+                itemIds.add(alternative.itemId());
+            }
+            Set<MaterialRef> candidates = new LinkedHashSet<>();
+            for (ResourceLocation itemId : itemIds) {
+                for (MaterialRef material : stockByItem.getOrDefault(itemId, Set.of())) {
+                    if (stock.getOrDefault(material, 0L) <= 0L) continue;
+                    budgetCheck.run();
+                    if (ImmutableRecipeGraphProjector.matchesIngredient(material, ingredient)) {
+                        candidates.add(material);
+                    }
+                }
+            }
+            List<MaterialRef> ordered = new ArrayList<>(candidates);
             ordered.sort(Comparator
                     .comparingLong((MaterialRef material) -> stock.getOrDefault(material, 0L))
                     .reversed());
@@ -1476,6 +1490,13 @@ public final class PureRecipePlanner {
                 if (remaining == 0L) break;
             }
             return remaining;
+        }
+
+        private void addStock(MaterialRef material, long count) {
+            if (count <= 0L) return;
+            stock.merge(material, count, PureRecipePlanner::saturatedAdd);
+            stockByItem.computeIfAbsent(material.itemId(), ignored -> new LinkedHashSet<>())
+                    .add(material);
         }
 
         private List<PartialChoice> choicesFor(IngredientRef ingredient) {

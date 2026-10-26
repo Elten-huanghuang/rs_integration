@@ -30,6 +30,8 @@ class PlanningLookupCacheTest extends BootstrapTest {
     private static final PlanningLookupCache.Limits UNCACHED = new PlanningLookupCache.Limits(0, 0, 0, 0);
     private static final ResourceLocation TOOL = id("tool");
     private static final ResourceLocation POTION = new ResourceLocation("minecraft", "potion");
+    private static final ResourceLocation EARTH_HEART =
+            new ResourceLocation("enigmaticlegacy", "earth_heart");
     private static final String REQUIRED = "{Unbreakable:1}";
     private static final String STOCKED = "{Damage:0,Unbreakable:1b}";
     private static final String AWKWARD_POTION = "{Potion:\"minecraft:awkward\"}";
@@ -123,6 +125,34 @@ class PlanningLookupCacheTest extends BootstrapTest {
         IngredientRef exactHealing = new IngredientRef(List.of(healing), 1, NbtMatchMode.EXACT);
         PlanningLookupCache.run(() -> {
             assertFalse(ImmutableRecipeGraphProjector.matchesIngredient(tagged, exactHealing));
+            return null;
+        });
+    }
+
+    @Test
+    void identicalEarthHeartExactMatchUsesStringFastPathBeforeTaintedFallback() {
+        MaterialRef actual = new MaterialRef(EARTH_HEART, "{isTainted:1b}");
+        IngredientRef ingredient = new IngredientRef(
+                List.of(new MaterialRef(EARTH_HEART, "{isTainted:1b}")), 1, NbtMatchMode.EXACT);
+
+        PlanningLookupCache.run(() -> {
+            assertTrue(ImmutableRecipeGraphProjector.matchesIngredient(actual, ingredient));
+            assertEquals(0, PlanningLookupCache.currentStats().nbtParses());
+            return null;
+        });
+    }
+
+    @Test
+    void taintedEarthHeartFallbackUsesPlanningNbtCacheAcrossNumericTagTypes() {
+        MaterialRef expected = new MaterialRef(EARTH_HEART, "{isTainted:1}");
+        MaterialRef actual = new MaterialRef(EARTH_HEART, "{isTainted:1b}");
+        IngredientRef exact = new IngredientRef(List.of(expected), 1, NbtMatchMode.EXACT);
+
+        PlanningLookupCache.run(() -> {
+            assertTrue(ImmutableRecipeGraphProjector.matchesIngredient(actual, exact));
+            PlanningLookupCache.Stats stats = PlanningLookupCache.currentStats();
+            assertEquals(2, stats.nbtParses());
+            assertTrue(stats.nbtCacheHits() > 0);
             return null;
         });
     }

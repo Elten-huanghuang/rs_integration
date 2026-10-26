@@ -31,7 +31,6 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import java.util.ArrayDeque;
 import java.util.function.Supplier;
-import net.minecraft.nbt.TagParser;
 import net.minecraftforge.common.crafting.PartialNBTIngredient;
 
 import javax.annotation.Nullable;
@@ -696,10 +695,10 @@ public final class ImmutableRecipeGraphProjector {
             }
             // 继承数值的下限不能冒充实际输出的完整 NBT。
             if (actual.constrainedNbt()) continue;
-            if (isTaintedEarthHeart(actual, expected)) return true;
             if (ingredient.nbtMatchMode() == NbtMatchMode.EXACT
                     ? exactNbtMatches(expected.nbt(), actual.nbt())
                     : partialNbtMatches(expected.nbt(), actual.nbt())) return true;
+            if (isTaintedEarthHeart(actual, expected)) return true;
             // Purity 只补偿普通 NBT 精确比较无法表达的元数据差异，必须放在
             // 普通比较之后，避免为完全相同的药水重复构建和解析状态。
             if (ingredient.nbtMatchMode() == NbtMatchMode.EXACT
@@ -728,13 +727,11 @@ public final class ImmutableRecipeGraphProjector {
     private static boolean isTaintedEarthHeart(MaterialRef actual, MaterialRef expected) {
         if (!"enigmaticlegacy".equals(actual.itemId().getNamespace())
                 || !"earth_heart".equals(actual.itemId().getPath())) return false;
-        try {
-            var expectedTag = TagParser.parseTag(expected.nbt());
-            var actualTag = TagParser.parseTag(actual.nbt());
-            return expectedTag.getBoolean("isTainted") && actualTag.getBoolean("isTainted");
-        } catch (Exception ignored) {
-            return false;
-        }
+        CompoundTag expectedTag = PlanningLookupCache.readOnlyTag(expected.nbt());
+        CompoundTag actualTag = PlanningLookupCache.readOnlyTag(actual.nbt());
+        return expectedTag != null && actualTag != null
+                && expectedTag.getBoolean("isTainted")
+                && actualTag.getBoolean("isTainted");
     }
 
     static RecipeNode withDemandedOutput(RecipeNode recipe, MaterialRef wanted,
