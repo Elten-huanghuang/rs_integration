@@ -289,7 +289,7 @@ public final class IngredientMatcher {
         if (hasPurity(expected)
                 && (!hasPurity(actual) || !Objects.equals(expected.getTag().get("Purity"),
                 actual.getTag().get("Purity")))) return false;
-        return potionTagsEqualIgnoringPurity(expected, actual);
+        return potionTagsEqualIgnoringPurity(expected.getTag(), actual.getTag());
     }
 
     /** Match an exact vanilla potion state while ignoring Thirst's non-brewing Purity metadata. */
@@ -301,19 +301,34 @@ public final class IngredientMatcher {
         if (hasPurity(expected)
                 && (!hasPurity(actual) || !Objects.equals(expected.getTag().get("Purity"),
                 actual.getTag().get("Purity")))) return false;
-        return potionTagsEqualIgnoringPurity(expected, actual);
+        return potionTagsEqualIgnoringPurity(expected.getTag(), actual.getTag());
+    }
+
+    /**
+     * 精确 NBT 比较失败后，仅桥接实际堆栈多出的 Thirst {@code Purity} 元数据。
+     * 调用方必须已完成物品类型和普通 NBT 匹配。
+     */
+    public static boolean matchesPotionPurityBridge(@Nullable CompoundTag expectedTag,
+                                                    @Nullable CompoundTag actualTag) {
+        if (hasPurity(expectedTag) || !hasPurity(actualTag)) return false;
+        return potionTagsEqualIgnoringPurity(expectedTag, actualTag);
     }
 
     private static boolean hasPurity(ItemStack stack) {
-        return stack.getTag() != null && stack.getTag().contains("Purity", Tag.TAG_ANY_NUMERIC);
+        return hasPurity(stack.getTag());
     }
 
-    private static boolean potionTagsEqualIgnoringPurity(ItemStack expected, ItemStack actual) {
-        var expectedTag = expected.getTag() == null ? null : expected.getTag().copy();
-        var actualTag = actual.getTag() == null ? null : actual.getTag().copy();
-        if (expectedTag != null) expectedTag.remove("Purity");
-        if (actualTag != null) actualTag.remove("Purity");
-        return Objects.equals(expectedTag, actualTag);
+    private static boolean hasPurity(@Nullable CompoundTag tag) {
+        return tag != null && tag.contains("Purity", Tag.TAG_ANY_NUMERIC);
+    }
+
+    private static boolean potionTagsEqualIgnoringPurity(@Nullable CompoundTag expectedTag,
+                                                         @Nullable CompoundTag actualTag) {
+        CompoundTag expectedCopy = expectedTag == null ? null : expectedTag.copy();
+        CompoundTag actualCopy = actualTag == null ? null : actualTag.copy();
+        if (expectedCopy != null) expectedCopy.remove("Purity");
+        if (actualCopy != null) actualCopy.remove("Purity");
+        return Objects.equals(expectedCopy, actualCopy);
     }
 
     private static boolean isVanillaPotionContainer(ItemStack stack) {

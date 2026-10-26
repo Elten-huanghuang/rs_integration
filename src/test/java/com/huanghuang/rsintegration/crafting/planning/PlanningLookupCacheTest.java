@@ -29,8 +29,10 @@ import static org.junit.jupiter.api.Assertions.*;
 class PlanningLookupCacheTest extends BootstrapTest {
     private static final PlanningLookupCache.Limits UNCACHED = new PlanningLookupCache.Limits(0, 0, 0, 0);
     private static final ResourceLocation TOOL = id("tool");
+    private static final ResourceLocation POTION = new ResourceLocation("minecraft", "potion");
     private static final String REQUIRED = "{Unbreakable:1}";
     private static final String STOCKED = "{Damage:0,Unbreakable:1b}";
+    private static final String AWKWARD_POTION = "{Potion:\"minecraft:awkward\"}";
 
     @Test
     void cachedNbtMatchesUncachedReferenceIncludingMalformedAndOrdinaryTags() {
@@ -85,6 +87,42 @@ class PlanningLookupCacheTest extends BootstrapTest {
             PlanningLookupCache.Stats stats = PlanningLookupCache.currentStats();
             assertEquals(2, stats.nbtParses());
             assertEquals(0, stats.nbtCacheHits());
+            return null;
+        });
+    }
+
+    @Test
+    void identicalPotionExactMatchUsesStringFastPathBeforePurityFallback() {
+        MaterialRef actual = new MaterialRef(POTION, AWKWARD_POTION);
+        IngredientRef ingredient = new IngredientRef(
+                List.of(new MaterialRef(POTION, AWKWARD_POTION)), 1, NbtMatchMode.EXACT);
+
+        PlanningLookupCache.run(() -> {
+            assertTrue(ImmutableRecipeGraphProjector.matchesIngredient(actual, ingredient));
+            assertEquals(0, PlanningLookupCache.currentStats().nbtParses());
+            return null;
+        });
+    }
+
+    @Test
+    void potionPurityFallbackUsesPlanningNbtCacheWithoutChangingExactSemantics() {
+        MaterialRef plain = new MaterialRef(POTION, AWKWARD_POTION);
+        MaterialRef tagged = new MaterialRef(POTION,
+                "{Potion:\"minecraft:awkward\",Purity:2}");
+        IngredientRef exactPlain = new IngredientRef(List.of(plain), 1, NbtMatchMode.EXACT);
+
+        PlanningLookupCache.run(() -> {
+            assertTrue(ImmutableRecipeGraphProjector.matchesIngredient(tagged, exactPlain));
+            PlanningLookupCache.Stats stats = PlanningLookupCache.currentStats();
+            assertEquals(2, stats.nbtParses());
+            assertTrue(stats.nbtCacheHits() > 0);
+            return null;
+        });
+
+        MaterialRef healing = new MaterialRef(POTION, "{Potion:\"minecraft:healing\"}");
+        IngredientRef exactHealing = new IngredientRef(List.of(healing), 1, NbtMatchMode.EXACT);
+        PlanningLookupCache.run(() -> {
+            assertFalse(ImmutableRecipeGraphProjector.matchesIngredient(tagged, exactHealing));
             return null;
         });
     }

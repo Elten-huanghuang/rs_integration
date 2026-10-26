@@ -23,9 +23,7 @@ import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.Resou
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.RecipeManager;
@@ -699,10 +697,13 @@ public final class ImmutableRecipeGraphProjector {
             // 继承数值的下限不能冒充实际输出的完整 NBT。
             if (actual.constrainedNbt()) continue;
             if (isTaintedEarthHeart(actual, expected)) return true;
-            if (matchesPotionPuritySemantics(expected, actual)) return true;
             if (ingredient.nbtMatchMode() == NbtMatchMode.EXACT
                     ? exactNbtMatches(expected.nbt(), actual.nbt())
                     : partialNbtMatches(expected.nbt(), actual.nbt())) return true;
+            // Purity 只补偿普通 NBT 精确比较无法表达的元数据差异，必须放在
+            // 普通比较之后，避免为完全相同的药水重复构建和解析状态。
+            if (ingredient.nbtMatchMode() == NbtMatchMode.EXACT
+                    && matchesPotionPuritySemantics(expected, actual)) return true;
         }
         return false;
     }
@@ -712,25 +713,9 @@ public final class ImmutableRecipeGraphProjector {
                 || expected.runtimeNbt() || actual.runtimeNbt()
                 || !isVanillaPotionId(expected.itemId())
                 || !expected.itemId().equals(actual.itemId())) return false;
-        ItemStack expectedStack = materialStack(expected);
-        ItemStack actualStack = materialStack(actual);
-        return !expectedStack.isEmpty() && !actualStack.isEmpty()
-                && IngredientMatcher.matchesPotionIgnoringPurity(expectedStack, actualStack);
-    }
-
-    private static ItemStack materialStack(MaterialRef material) {
-        if (!material.isItem()) return ItemStack.EMPTY;
-        Item item = BuiltInRegistries.ITEM.get(material.itemId());
-        if (item == Items.AIR) return ItemStack.EMPTY;
-        ItemStack stack = new ItemStack(item);
-        if (!material.nbt().isEmpty()) {
-            try {
-                stack.setTag(TagParser.parseTag(material.nbt()));
-            } catch (Exception ignored) {
-                return ItemStack.EMPTY;
-            }
-        }
-        return stack;
+        return IngredientMatcher.matchesPotionPurityBridge(
+                PlanningLookupCache.readOnlyTag(expected.nbt()),
+                PlanningLookupCache.readOnlyTag(actual.nbt()));
     }
 
     private static boolean isVanillaPotionId(ResourceLocation itemId) {
