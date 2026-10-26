@@ -167,6 +167,19 @@ class PlanCacheTest extends BootstrapTest {
     }
 
     @Test
+    void latestExecutionLeaseCanBeConsumedAfterSemanticValidation() {
+        PlanCache cache = new PlanCache(10);
+        PlanCache.Key key = key("semantic_lease");
+        cache.put(key, plan(), snapshot(key), 100);
+
+        PlanCache.Entry previewed = cache.peekLatestForExecution(key.playerId());
+
+        assertNotNull(previewed);
+        assertTrue(cache.consumeLatestForExecution(key.playerId(), previewed));
+        assertNull(cache.peekLatestForExecution(key.playerId()));
+    }
+
+    @Test
     void aNewPreviewResponseGrantsAnotherSingleExecutionLease() {
         PlanCache cache = new PlanCache(10);
         PlanCache.Key key = key("reissued_lease");

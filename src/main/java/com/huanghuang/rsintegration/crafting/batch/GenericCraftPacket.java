@@ -23,6 +23,7 @@ import com.huanghuang.rsintegration.crafting.plan.PlanOutcome;
 import com.huanghuang.rsintegration.crafting.plan.IntegrationDiagnostic;
 import com.huanghuang.rsintegration.crafting.plan.IntegrationDiagnosticCode;
 import com.huanghuang.rsintegration.util.InsertedStackDelta;
+import com.huanghuang.rsintegration.util.Diagnostics;
 import com.huanghuang.rsintegration.feature.ftbquests.QuestSubmissionTargetIds;
 import com.huanghuang.rsintegration.recipe.viewer.RecipeIdNormalizer;
 import com.huanghuang.rsintegration.recipe.viewer.LongTravailCrownRecipes;
@@ -963,7 +964,24 @@ public final class GenericCraftPacket {
                 forcedRecipes, repeatCount, targetOutput, modType, materialLocks);
         PlanCache cache = CraftPlanningRuntime.planCache();
         PlanCache.Entry entry = cache.peekForExecution(exactKey);
-        if (entry == null) return null;
+        boolean semanticLease = false;
+        if (entry == null && materialLocks.isEmpty()) {
+            PlanCache.Entry latest = cache.peekLatestForExecution(player.getUUID());
+            if (latest != null && matchesExecutionLease(
+                    latest, player, recipeId, forcedRecipes, repeatCount,
+                    targetOutput, modType)) {
+                entry = latest;
+                semanticLease = true;
+            }
+        }
+        if (entry == null) {
+            if (Diagnostics.isEnabled()) {
+                RSIntegrationMod.LOGGER.info(
+                        "[RSI-Diag] execution cache miss recipe={} terminal={}",
+                        recipeId, modType == null ? "generic" : modType.id());
+            }
+            return null;
+        }
         ResourceKey<Level> levelKey = dimension != null
                 ? ResourceKey.create(
                 Registries.DIMENSION, dimension)
@@ -974,18 +992,59 @@ public final class GenericCraftPacket {
                 && PlanningStateValidator.revalidateForExecution(
                 player, entry.snapshot(), entry.plan(),
                 levelKey, lookupPos, storageReference);
-        if (!cache.consumeForExecution(exactKey, entry)) {
+        boolean consumed = semanticLease
+                ? cache.consumeLatestForExecution(player.getUUID(), entry)
+                : cache.consumeForExecution(exactKey, entry);
+        if (!consumed) {
             RSIntegrationMod.debug(
                     "[RSI-Generic] Execution lease changed before validation completed: recipeId={}",
                     recipeId);
             return null;
         }
         if (!valid) {
+            if (Diagnostics.isEnabled()) {
+                RSIntegrationMod.LOGGER.info(
+                        "[RSI-Diag] execution cache state rejected recipe={} terminal={}",
+                        recipeId, modType == null ? "generic" : modType.id());
+            }
             RSIntegrationMod.debug("[RSI-Generic] Rejected execution cache state: recipeId={} reason=state-or-required-supply",
                     recipeId);
             return null;
         }
+        if (Diagnostics.isEnabled()) {
+            RSIntegrationMod.LOGGER.info(
+                    "[RSI-Diag] execution cache accepted recipe={} terminal={} graphRoots={}",
+                    recipeId, modType == null ? "generic" : modType.id(),
+                    entry.resolvedGraph() == null ? -1 : entry.resolvedGraph().rootDemands().size());
+        }
         return entry;
+    }
+
+    private static boolean matchesExecutionLease(
+            PlanCache.Entry entry, ServerPlayer player, ResourceLocation recipeId,
+            Map<String, String> forcedRecipes, int repeatCount,
+            @Nullable ItemStack targetOutput, @Nullable ModType modType) {
+        if (entry == null || entry.plan() == null || entry.snapshot() == null
+                || !entry.plan().success() || entry.resolvedGraph() == null) return false;
+        if (!entry.snapshot().playerId().equals(player.getUUID())
+                || !entry.snapshot().recipeId().equals(recipeId)
+                || entry.snapshot().recipeRevision() != CraftPlanningRevision.current()) return false;
+        Map<ResourceLocation, ResourceLocation> forcedOverrides =
+                CraftForcedRecipeOverrides.resolve(player, forcedRecipes).overrides();
+        if (forcedOverrides == null
+                || !entry.snapshot().forcedRecipes().equals(forcedOverrides)) return false;
+        PlanResponse plan = entry.plan();
+        if (!recipeId.toString().equals(plan.recipeId())
+                || plan.repeatCount() != repeatCount) return false;
+        String expectedType = modType == null ? "generic" : modType.id();
+        if (plan.executionModTypeId() != null
+                && !expectedType.equals(plan.executionModTypeId())) return false;
+        ItemStack plannedOutput = plan.clickedOutput();
+        if (plannedOutput == null || plannedOutput.isEmpty()) {
+            return targetOutput == null || targetOutput.isEmpty();
+        }
+        return targetOutput != null && !targetOutput.isEmpty()
+                && ItemStack.isSameItemSameTags(plannedOutput, targetOutput);
     }
 
     private static boolean tryExecuteCachedCraftingPlan(
@@ -1019,7 +1078,7 @@ public final class GenericCraftPacket {
                     player.serverLevel());
             List<ResolutionStep> steps = ExecutionEquivalence.projectFlatSteps(completeGraph);
             RSIntegrationMod.debug(
-                    "[RSI-Generic] Executing revalidated typed preview graph for {} nodes={}",
+                    "[RSI-Generic] Executing revalidated preview input graph for {} nodes={}",
                     recipeId, completeGraph.nodes().size());
             launchGraphAsyncChain(player, completeGraph, storageEndpoint,
                     recipeId, forcedRecipes, dim, pos,
@@ -2900,23 +2959,31 @@ public final class GenericCraftPacket {
         List<ScaledIngredientSpec> recursiveRecipeSpecs = recursiveHandler == null
                 ? recipeSpecs
                 : recursiveHandler.getRecursiveScaledIngredients(recipe, recipeSpecs);
+        DirectMaterialAllocator.Result directRecursiveAllocation = effectiveOverrides.isEmpty()
+                ? DirectMaterialAllocator.allocateScaled(recursiveRecipeSpecs, available)
+                : new DirectMaterialAllocator.Result(false, List.of(), -1, 0);
         boolean directRecursiveTerminalPlan = !effectiveOverrides.isEmpty()
                 ? false
                 : CraftIngredientPlanMath.useDirectTerminalPlan(
-                DirectMaterialAllocator.allocateScaled(recursiveRecipeSpecs, available),
-                        recursiveRecipeSpecs, planTargetOutput);
+                        directRecursiveAllocation, recursiveRecipeSpecs, planTargetOutput);
 
         List<ResolutionStep> resolutionSteps = null;
         CraftPlanGraph planGraph = null;
+        CraftPlanGraph cacheInputGraph = null;
         List<ResourceLocation> stepIds;
         boolean usedPurePlan = false;
 
         boolean selectedTypedResolver = false;
         boolean selectedDirectTerminalResolver = false;
-        if ((directTerminalPlan || directRecursiveTerminalPlan) && selectedPureResolver) {
+        if (directTerminalPlan) {
             resolutionSteps = List.of();
+            cacheInputGraph = CraftIngredientPlanMath.directTerminalInputGraph(
+                    recipeSpecs, directPreviewAllocation);
+            selectedDirectTerminalResolver = true;
         } else if (directRecursiveTerminalPlan) {
             resolutionSteps = List.of();
+            cacheInputGraph = CraftIngredientPlanMath.directTerminalInputGraph(
+                    recursiveRecipeSpecs, directRecursiveAllocation);
             selectedDirectTerminalResolver = true;
         } else if (CraftPlanDecisionRules.canUsePrecomputedPlan(precomputedPlan)
                 && selectedPureResolver) {
@@ -3871,7 +3938,8 @@ public final class GenericCraftPacket {
         int responseStepCount = steps.size();
         int responseGraphNodes = planGraphView != null ? planGraphView.nodes().size() : 0;
         boolean responseFeasible = feasible;
-        CraftPlanGraph resolvedGraphForCache = planGraph;
+        CraftPlanGraph resolvedGraphForCache =
+                cacheInputGraph != null ? cacheInputGraph : planGraph;
         CraftPlanResponseFinalizer.submit(
                 player, recipeId, previewGeneration, planningSnapshot, responseDraft,
                 planDimKey, planLookupPos, planStorageReference, cacheKey,

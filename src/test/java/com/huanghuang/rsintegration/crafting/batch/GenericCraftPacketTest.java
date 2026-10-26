@@ -23,8 +23,10 @@ import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.graph.OutputDeclaration;
 import com.huanghuang.rsintegration.crafting.graph.OutputKind;
 import com.huanghuang.rsintegration.crafting.graph.OutputPortId;
+import com.huanghuang.rsintegration.crafting.graph.OutputProbability;
 import com.huanghuang.rsintegration.crafting.graph.RootAllocation;
 import com.huanghuang.rsintegration.crafting.graph.RootDemand;
+import com.huanghuang.rsintegration.crafting.graph.TerminalGraphComposer;
 import com.huanghuang.rsintegration.crafting.graph.UnresolvedDemand;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
 import com.huanghuang.rsintegration.crafting.planning.PureDemandTreeInspector;
@@ -853,6 +855,62 @@ class GenericCraftPacketTest extends BootstrapTest {
         assertTrue(CraftIngredientPlanMath.useDirectTerminalPlan(
                 new DirectMaterialAllocator.Result(true, List.of(), -1, 0),
                 ordinarySpecs, planks));
+    }
+
+    @Test
+    void directTerminalInputGraphPreservesPreviewAllocationsForExecution() {
+        List<ScaledIngredientSpec> specs = List.of(
+                ScaledIngredientSpec.of(
+                        new IngredientSpec(Ingredient.of(Items.DIAMOND), 1),
+                        2));
+        DirectMaterialAllocator.Result allocation = DirectMaterialAllocator.allocateScaled(
+                specs,
+                Map.of(new CraftingResolver.StackKey(Items.DIAMOND, null), 2L));
+
+        CraftPlanGraph graph = CraftIngredientPlanMath.directTerminalInputGraph(
+                specs, allocation);
+
+        assertEquals(1, graph.rootDemands().size());
+        assertEquals(2L, graph.rootDemands().get(0).quantity());
+        assertEquals(2L, graph.rootDemands().get(0).allocations().stream()
+                .mapToLong(RootAllocation::quantity)
+                .sum());
+        assertTrue(graph.nodes().isEmpty());
+        assertTrue(graph.unresolvedDemands().isEmpty());
+    }
+
+    @Test
+    void directTerminalInputGraphComposesOnlyThePreviewedTerminalNode() {
+        ItemStack output = new ItemStack(Items.DIAMOND);
+        List<ScaledIngredientSpec> specs = List.of(
+                ScaledIngredientSpec.of(
+                        new IngredientSpec(Ingredient.of(Items.COAL), 1),
+                        1));
+        DirectMaterialAllocator.Result allocation = DirectMaterialAllocator.allocateScaled(
+                specs,
+                Map.of(new CraftingResolver.StackKey(Items.COAL, null), 1L));
+        CraftPlanGraph inputGraph = CraftIngredientPlanMath.directTerminalInputGraph(
+                specs, allocation);
+        ResolutionStep terminal = new ResolutionStep(
+                new ResourceLocation("test", "direct_terminal"), ModType.GENERIC,
+                new ResourceLocation("minecraft", "crafting"),
+                List.of(), List.of(), false, 1);
+
+        CraftPlanGraph complete = TerminalGraphComposer.compose(
+                inputGraph,
+                terminal,
+                List.of(TerminalGraphComposer.TerminalOutput.item(
+                        MaterialKey.of(output),
+                        output.getCount(),
+                        OutputKind.PRIMARY,
+                        OutputProbability.guaranteed(),
+                        false)));
+
+        assertEquals(1, complete.nodes().size());
+        assertEquals(terminal.recipeId(), complete.nodes().get(0).recipeId());
+        assertEquals(List.of(terminal.recipeId()), complete.nodes().stream()
+                .map(CraftNode::recipeId)
+                .toList());
     }
 
     @Test

@@ -5,7 +5,14 @@ import com.huanghuang.rsintegration.crafting.DirectMaterialAllocator;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.ScaledIngredientSpec;
 import com.huanghuang.rsintegration.crafting.SelfAmplifyingRecipePolicy;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
+import com.huanghuang.rsintegration.crafting.graph.CraftPlanValidator;
+import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
+import com.huanghuang.rsintegration.crafting.graph.MaterialSource;
+import com.huanghuang.rsintegration.crafting.graph.RootAllocation;
+import com.huanghuang.rsintegration.crafting.graph.RootDemand;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraft.world.item.Item;
@@ -95,6 +102,74 @@ public final class CraftIngredientPlanMath {
         return allocation.feasible()
                 && !SelfAmplifyingRecipePolicy.isScaledSelfAmplifying(
                         scaledSpecs, output);
+    }
+
+    /**
+     * 将已完成的直接材料分配固化为终端输入图，供预览缓存和确认执行共用。
+     * 该图只包含初始库存分配，不包含额外生产节点。
+     */
+    static CraftPlanGraph directTerminalInputGraph(
+            List<ScaledIngredientSpec> specs,
+            DirectMaterialAllocator.Result allocation) {
+        if (!allocation.feasible()) {
+            throw new IllegalArgumentException("direct terminal allocation must be feasible");
+        }
+        Map<Integer, List<RootAllocation>> allocationsByIngredient = new LinkedHashMap<>();
+        for (DirectMaterialAllocator.Allocation fragment : allocation.allocations()) {
+            ItemStack material = fragment.material().toStack();
+            MaterialKey key = MaterialKey.of(material);
+            allocationsByIngredient.computeIfAbsent(
+                    fragment.ingredientIndex(), ignored -> new ArrayList<>())
+                    .add(new RootAllocation(
+                            new MaterialSource.InitialPool(key), key, fragment.count()));
+        }
+
+        List<RootDemand> roots = new ArrayList<>();
+        for (int index = 0; index < specs.size(); index++) {
+            ScaledIngredientSpec spec = specs.get(index);
+            if (spec == null || spec.isEmpty()) continue;
+            List<RootAllocation> allocations =
+                    allocationsByIngredient.getOrDefault(index, List.of());
+            long allocated = allocations.stream()
+                    .mapToLong(RootAllocation::quantity)
+                    .reduce(0L, SaturatingLongMath::add);
+            if (allocated != spec.count()) {
+                throw new IllegalArgumentException(
+                        "direct terminal allocation mismatch at input " + index);
+            }
+            roots.add(new RootDemand(
+                    spec.ingredient(),
+                    spec.count(),
+                    0L,
+                    firstDisplayStack(spec.ingredient()),
+                    allocations,
+                    spec.consumption().demandRole()));
+        }
+        if (roots.isEmpty()) {
+            throw new IllegalArgumentException("direct terminal plan has no inputs");
+        }
+        CraftPlanGraph graph = new CraftPlanGraph(
+                CraftPlanGraph.CURRENT_VERSION,
+                List.of(),
+                List.of(),
+                roots,
+                List.of(),
+                List.of());
+        CraftPlanValidator.validate(graph);
+        return graph;
+    }
+
+    private static ItemStack firstDisplayStack(Ingredient ingredient) {
+        try {
+            for (ItemStack candidate : ingredient.getItems()) {
+                if (candidate != null && !candidate.isEmpty()) {
+                    return candidate.copyWithCount(1);
+                }
+            }
+        } catch (RuntimeException | LinkageError ignored) {
+            // 自定义 Ingredient 无法展开时由根需求的原始谓词继续承载语义。
+        }
+        return ItemStack.EMPTY;
     }
 
     static List<DemandRole> nonEmptyInputRoles(List<IngredientSpec> specs) {

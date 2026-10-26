@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.util.PerformanceMonitor;
+import com.huanghuang.rsintegration.util.Diagnostics;
 import com.huanghuang.rsintegration.crafting.CraftPlanningRevision;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.plan.IntegrationDiagnostic;
@@ -73,6 +74,15 @@ final class CraftPlanResponseFinalizer {
                             CraftPlanDecisionRules.canUsePrecomputedPlan(precomputedPlan)
                                     ? precomputedPlan : null,
                             resolvedGraphForCache, System.nanoTime());
+                    if (Diagnostics.isEnabled()) {
+                        RSIntegrationMod.LOGGER.info(
+                                "[RSI-Diag] preview cache stored recipe={} graphRoots={} graphNodes={}",
+                                recipeId,
+                                resolvedGraphForCache == null
+                                        ? -1 : resolvedGraphForCache.rootDemands().size(),
+                                resolvedGraphForCache == null
+                                        ? -1 : resolvedGraphForCache.nodes().size());
+                    }
                     RSIntegrationMod.debug(
                             "[RSI-tryBuildPlan] SENDING PlanResponsePacket: "
                                     + "recipeId={} steps={} graphNodes={} feasible={} player={}",

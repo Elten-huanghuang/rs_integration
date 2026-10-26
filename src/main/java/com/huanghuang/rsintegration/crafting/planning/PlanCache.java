@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import net.minecraft.resources.ResourceLocation;
 
+import javax.annotation.Nullable;
 import java.util.Comparator;
 import java.util.Map;
 import java.util.UUID;
@@ -73,10 +74,8 @@ public final class PlanCache {
     }
 
     /**
-     * Stores the server-authoritative graph produced by the typed resolver as
-     * well as the client response.  Confirming a preview can then reuse this
-     * graph after state revalidation instead of running the bounded resolver
-     * again on the server thread.
+     * 保存与客户端响应同源的权威终端输入图，包括 typed 解析结果和直接材料分配图。
+     * 确认预览后可在状态复验通过时复用它，避免重新搜索并选择另一条生产路线。
      */
     public void put(Key key, PlanResponse plan, PlanningSnapshot snapshot,
                     PureRecipePlanner.Result purePlan, CraftPlanGraph resolvedGraph, long now) {
@@ -109,6 +108,13 @@ public final class PlanCache {
         return lease.entry();
     }
 
+    /** 查看玩家当前展示的租约，调用方必须按业务字段和完整快照自行复验。 */
+    @Nullable
+    public Entry peekLatestForExecution(UUID playerId) {
+        ExecutionLease lease = executionLeases.get(playerId);
+        return lease == null ? null : lease.entry();
+    }
+
     /** 仅消费调用方已经复验过的同一个缓存条目。 */
     public boolean consumeForExecution(Key key, Entry expectedEntry) {
         if (expectedEntry == null) return false;
@@ -119,6 +125,14 @@ public final class PlanCache {
             return false;
         }
         return executionLeases.remove(key.playerId(), lease);
+    }
+
+    /** 消费已经按业务字段和完整快照复验过的玩家当前租约。 */
+    public boolean consumeLatestForExecution(UUID playerId, Entry expectedEntry) {
+        if (expectedEntry == null) return false;
+        ExecutionLease lease = executionLeases.get(playerId);
+        if (lease == null || lease.entry() != expectedEntry) return false;
+        return executionLeases.remove(playerId, lease);
     }
 
     /**
