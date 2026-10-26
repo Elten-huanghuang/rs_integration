@@ -95,7 +95,13 @@ sourceSets {
         compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
         runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
     }
+    apismoke {
+        compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+        runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
+    }
 }
+sourceSets.test.compileClasspath += sourceSets.apismoke.output
+sourceSets.test.runtimeClasspath += sourceSets.apismoke.output
 
 minecraft {
     runs {
@@ -104,12 +110,18 @@ minecraft {
                 rsi_integration_example {
                     source sourceSets.examplemod
                 }
+                rsi_api_smoke {
+                    source sourceSets.apismoke
+                }
             }
         }
         server {
             mods {
                 rsi_integration_example {
                     source sourceSets.examplemod
+                }
+                rsi_api_smoke {
+                    source sourceSets.apismoke
                 }
             }
         }
@@ -308,6 +320,7 @@ tasks.register('verifyNoForcedChunkLoads') {
 
 check.dependsOn tasks.named('verifyNoForcedChunkLoads')
 check.dependsOn tasks.named('compileExamplemodJava')
+check.dependsOn tasks.named('apismokeClasses')
 
 test {
     useJUnitPlatform()
@@ -332,6 +345,10 @@ compileTestJava {
 }
 
 compileExamplemodJava {
+    options.encoding = 'UTF-8'
+}
+
+compileApismokeJava {
     options.encoding = 'UTF-8'
 }
 

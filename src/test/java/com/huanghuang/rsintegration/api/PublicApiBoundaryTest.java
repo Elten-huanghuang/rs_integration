@@ -22,6 +22,8 @@ class PublicApiBoundaryTest {
             Path.of("src/main/java/com/huanghuang/rsintegration/api");
     private static final Path LEGACY_MAGIC_API =
             PUBLIC_API_ROOT.resolve("magic");
+    private static final Path API_SMOKE_ROOT =
+            Path.of("src/apismoke/java");
 
     @Test
     void thirdPartyExampleOnlyImportsThePublicApiSurface() throws Exception {
@@ -73,6 +75,26 @@ class PublicApiBoundaryTest {
                                     "internal import in public API "
                                             + sourceFile + ": " + line);
                         });
+            }
+        }
+    }
+
+    @Test
+    void apiSmokeModOnlyImportsThePublicRsiSurface() throws Exception {
+        try (var files = Files.walk(API_SMOKE_ROOT)) {
+            for (Path sourceFile : files
+                    .filter(path -> path.toString().endsWith(".java"))
+                    .toList()) {
+                Files.readString(sourceFile)
+                        .lines()
+                        .filter(line -> line.startsWith(
+                                "import com.huanghuang.rsintegration."))
+                        .forEach(line -> assertTrue(
+                                line.startsWith(
+                                        "import com.huanghuang.rsintegration.api."),
+                                () -> "internal RSI import in API smoke mod "
+                                        + sourceFile + ": " + line
+                        ));
             }
         }
     }
