@@ -169,7 +169,7 @@ final class IronAlchemistCauldronIntegration {
                             16,
                             "irons_spellbooks_scroll_recycle"),
                     false,
-                    true,
+                    false,
                     INPUT_ID
             );
             return new RecipeInspectionResult(
@@ -181,7 +181,7 @@ final class IronAlchemistCauldronIntegration {
                             List.of(output),
                             new RecipeFlags(
                                     true,
-                                    true,
+                                    false,
                                     false,
                                     false,
                                     false,

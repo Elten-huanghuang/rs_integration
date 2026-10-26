@@ -62,6 +62,7 @@ import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
+import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.crafting.graph.OutputProbability;
 import com.huanghuang.rsintegration.feature.unifiedgrid.UnifiedGridFluidRecovery;
@@ -166,6 +167,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     private boolean resultsCollected;
     private long lastStateRevision = -1L;
     private long startedAtTick;
+    private int plannedBatchOperations = 1;
     @Nullable
     private Component preparationFailure;
     private boolean preparationRetryable;
@@ -219,6 +221,48 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     ) {
         this.apiProvider = apiProvider;
         this.retainChunks = retainChunks;
+    }
+
+    @Override
+    public void prepareGraphBatch(int executions) {
+        plannedBatchOperations = Math.max(1, executions);
+    }
+
+    @Override
+    public int prepareFlatBatch(int remainingOperations) {
+        int requested = Math.max(0, remainingOperations);
+        if (requested <= 1) {
+            plannedBatchOperations = 1;
+            return requested;
+        }
+        int limit = batchOperationLimit(recipeView, descriptor);
+        int batch = limit <= 1 ? 1 : Math.min(requested, limit);
+        plannedBatchOperations = Math.max(1, batch);
+        return batch;
+    }
+
+    @Override
+    public int flatBatchOperationLimit(int configuredLimit) {
+        int limit = batchOperationLimit(recipeView, descriptor);
+        return limit <= 1
+                ? Math.max(1, configuredLimit)
+                : Math.max(Math.max(1, configuredLimit), limit);
+    }
+
+    @Override
+    public boolean expandsFlatBatchOperationLimit() {
+        return batchOperationLimit(recipeView, descriptor) > 1;
+    }
+
+    @Override
+    public int preferredParallelBatchSize(
+            int totalOperations,
+            int workerCount
+    ) {
+        int limit = batchOperationLimit(recipeView, descriptor);
+        if (limit <= 1 || totalOperations <= 1) return 1;
+        return ParallelBatchSizing.boundedEvenShare(
+                totalOperations, workerCount, limit);
     }
 
     @Override
@@ -446,6 +490,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         this.recipe = found;
         this.recipeIntegration = recipeClaim.winner();
         this.recipeView = projection.view();
+        this.plannedBatchOperations = 1;
         this.descriptor = machineDescriptor;
         this.stateProvider = provider;
         this.executionKind = executionKind;
@@ -705,7 +750,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                     == IntegrationResourceKey.ResourceKind.FLUID) {
                 continue;
             }
-            long requested = output.amount().max();
+            long requested = plannedOutputMaximum(output);
             long remaining = Math.min(Integer.MAX_VALUE, requested);
             for (MachineItemPort port : outputPorts(output.outputGroup())) {
                 if (remaining <= 0L) break;
@@ -757,7 +802,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                 continue;
             }
             long remaining = Math.min(
-                    Integer.MAX_VALUE, output.amount().max());
+                    Integer.MAX_VALUE, plannedOutputMaximum(output));
             for (MachineItemPort port : outputPorts(
                     output.outputGroup())) {
                 if (remaining <= 0L) break;
@@ -2644,7 +2689,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         for (OutputDeclaration output : recipeView.outputs()) {
             if (output.resource().kind()
                     == IntegrationResourceKey.ResourceKind.FLUID) {
-                long maximum = output.amount().max();
+                long maximum = plannedOutputMaximum(output);
                 FluidStack expected = fluidStack(
                         output.resource(),
                         Math.min(Integer.MAX_VALUE, maximum)
@@ -2662,7 +2707,8 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                     != IntegrationResourceKey.ResourceKind.ITEM) {
                 continue;
             }
-            long maximum = Math.min(Integer.MAX_VALUE, output.amount().max());
+            long maximum = Math.min(
+                    Integer.MAX_VALUE, plannedOutputMaximum(output));
             ItemStack expected = ExternalRecipeProjection.toStack(
                     output.resource(), maximum);
             long capacity = 0L;
@@ -2704,6 +2750,78 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         return configured == null || configured.equals(required);
     }
 
+    static int batchOperationLimit(
+            @Nullable RecipeView recipe,
+            @Nullable MachineDescriptor descriptor
+    ) {
+        if (recipe == null || descriptor == null
+                || !recipe.flags().supportsBatching()
+                || !recipe.flags().deterministicOutput()
+                || !recipe.fluids().isEmpty()
+                || descriptor.executionMode()
+                == MachineExecutionMode.CUSTOM) {
+            return 1;
+        }
+        for (OutputDeclaration output : recipe.outputs()) {
+            if (output.resource().kind()
+                    != IntegrationResourceKey.ResourceKind.ITEM
+                    || output.dynamicIdentity()
+                    || output.probability().mode()
+                    != OutputProbabilityMode.GUARANTEED) {
+                return 1;
+            }
+        }
+        long limit = Integer.MAX_VALUE;
+        for (MaterialRequirement material : recipe.materials()) {
+            if (material.amount() <= 0L
+                    || material.amount() > Integer.MAX_VALUE) {
+                return 1;
+            }
+            long capacity = 0L;
+            for (MachineItemPort port : descriptor.itemPorts()) {
+                if (port.direction() != InputOutputAccess.INPUT
+                        || !matchesGroup(
+                        port.inputGroup(), material.inputGroup())) {
+                    continue;
+                }
+                capacity += port.capacity();
+            }
+            if (capacity <= 0L) return 1;
+            limit = Math.min(limit, capacity / material.amount());
+        }
+        for (OutputDeclaration output : recipe.outputs()) {
+            long perOperation = Math.max(1L, output.amount().min());
+            long capacity = 0L;
+            for (MachineItemPort port : descriptor.itemPorts()) {
+                if (port.direction() != InputOutputAccess.OUTPUT
+                        || !matchesGroup(
+                        port.outputGroup(), output.outputGroup())) {
+                    continue;
+                }
+                capacity += port.capacity();
+            }
+            if (capacity <= 0L) return 1;
+            limit = Math.min(limit, capacity / perOperation);
+        }
+        return (int) Math.max(1L, Math.min(Integer.MAX_VALUE, limit));
+    }
+
+    private long plannedOutputMinimum(OutputDeclaration output) {
+        return multiplySaturating(
+                output.amount().min(), plannedBatchOperations);
+    }
+
+    private long plannedOutputMaximum(OutputDeclaration output) {
+        return multiplySaturating(
+                output.amount().max(), plannedBatchOperations);
+    }
+
+    private static long multiplySaturating(long value, int multiplier) {
+        if (value <= 0L || multiplier <= 1) return value;
+        return value > Long.MAX_VALUE / multiplier
+                ? Long.MAX_VALUE : value * multiplier;
+    }
+
     private static <T> Comparator<T> groupPriority(
             Function<T, String> portId,
             Function<T, String> group,
@@ -2716,22 +2834,26 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     }
 
     private boolean hasNewExpectedOutput() {
+        boolean sawOutput = false;
         for (OutputDeclaration output : recipeView.outputs()) {
             if (output.resource().kind()
                     != IntegrationResourceKey.ResourceKind.ITEM) {
                 continue;
             }
+            sawOutput = true;
+            long produced = 0L;
             for (MachineItemPort port : outputPorts(output.outputGroup())) {
                 ItemStack current = get(port, null);
                 ItemStack before = outputBaseline.get(new SlotKey(port));
                 int baseline = before == null ? 0 : before.getCount();
-                if (current.getCount() > baseline
-                        && matches(current, output)) {
-                    return true;
+                if (matches(current, output)) {
+                    produced += Math.max(
+                            0, current.getCount() - baseline);
                 }
             }
+            if (produced < plannedOutputMinimum(output)) return false;
         }
-        return false;
+        return sawOutput;
     }
 
     private boolean hasNewExpectedFluidOutput() {

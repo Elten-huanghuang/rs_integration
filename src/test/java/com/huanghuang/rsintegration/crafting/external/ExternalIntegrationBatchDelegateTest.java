@@ -113,6 +113,54 @@ import static org.mockito.Mockito.withSettings;
 
 class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
     @Test
+    void oneShotBatchLimitUsesDeclaredInputAndOutputCapacity() {
+        RecipeView view = recipeView(
+                resource("batch_recipe"),
+                resource("batch_process")
+        );
+        MachineDescriptor descriptor = new MachineDescriptor(
+                resource("machine"),
+                1L,
+                Set.of(view.processId()),
+                List.of(
+                        new MachineItemPort(
+                                "input",
+                                0,
+                                null,
+                                InputOutputAccess.INPUT,
+                                ItemPortAccess.CONTAINER,
+                                "ingredients",
+                                null,
+                                16
+                        ),
+                        new MachineItemPort(
+                                "output",
+                                1,
+                                null,
+                                InputOutputAccess.OUTPUT,
+                                ItemPortAccess.CONTAINER,
+                                null,
+                                "output",
+                                16
+                        )
+                ),
+                List.of(),
+                List.of(),
+                MachineExecutionMode.OUTPUT_DELTA_ONLY,
+                false,
+                ConcurrencyCapabilities.machineSlot(),
+                new SupportScope(List.of(), List.of(), false),
+                false
+        );
+
+        assertEquals(
+                8,
+                ExternalIntegrationBatchDelegate.batchOperationLimit(
+                        view, descriptor)
+        );
+    }
+
+    @Test
     void preparationSeparatesTransientAndPermanentFailures() {
         DefaultRSIIntegrationApi api =
                 new DefaultRSIIntegrationApi();
@@ -250,16 +298,17 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
                 ),
                 concurrency.supportOffsets()
         );
+        delegate.prepareGraphBatch(2);
         assertTrue(delegate.startPreparedOperation(
                 player,
                 List.of(
-                        new ItemStack(Items.DIAMOND),
-                        new ItemStack(Items.DIAMOND)
+                        new ItemStack(Items.DIAMOND, 2),
+                        new ItemStack(Items.DIAMOND, 2)
                 ),
                 new ExtractionLedger()
         ));
         assertEquals(Items.DIAMOND, inputSlot.get().getItem());
-        assertEquals(2, inputSlot.get().getCount());
+        assertEquals(4, inputSlot.get().getCount());
 
         machineIntegration.revision = 2L;
         var changed = delegate.observeCraft(level);
@@ -268,6 +317,15 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
         machineIntegration.revision = 1L;
 
         outputSlot.set(new ItemStack(Items.STICK, 1));
+        assertEquals(
+                IBatchDelegate.CraftPhase.WORKING,
+                delegate.observeCraft(level).phase()
+        );
+        outputSlot.set(new ItemStack(Items.STICK, 2));
+        assertEquals(
+                IBatchDelegate.CraftPhase.DONE,
+                delegate.observeCraft(level).phase()
+        );
         List<OutputAccounting.CollectedOutput> outputs =
                 delegate.collectStructuredResults(player);
 
@@ -276,6 +334,7 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
                 resource("output").toString(),
                 outputs.get(0).portId());
         assertEquals(Items.STICK, outputs.get(0).stack().getItem());
+        assertEquals(2, outputs.get(0).stack().getCount());
         assertTrue(outputSlot.get().isEmpty());
         delegate.onBatchFinished(player);
     }

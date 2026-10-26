@@ -405,8 +405,12 @@ public final class MySmeltingRecipeIntegration
 | `deterministicOutput` | 存在概率输出时必须为 `false` |
 | `runtimeDependentIdentity` | 是否存在运行时决定身份的输出 |
 | `requiresFuel` | 是否存在 `InputConsumption.Kind.FUEL` |
-| `supportsBatching` | 该配方能否安全批量提交 |
+| `supportsBatching` | 机器能否接收一次性聚合投料并累计完成全部确定性输出 |
 | `orderedInputs` | 槽位顺序是否属于配方语义 |
+
+`supportsBatching=true` 时，RSI 会在输入端口容量允许的范围内把多个操作的材料合并成
+一次机器投料，并等待所有保证输出累计出现后才完成这批操作。机器必须真的能处理聚合
+后的堆叠数量；如果只能逐次投一个材料，应保持 `false`。
 
 ## 5. RecipeView 语义
 

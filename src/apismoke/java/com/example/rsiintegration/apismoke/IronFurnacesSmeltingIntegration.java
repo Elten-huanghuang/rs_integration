@@ -152,7 +152,7 @@ final class IronFurnacesSmeltingIntegration {
                             true,
                             false,
                             true,
-                            false,
+                            true,
                             true
                     )
             ), List.of());

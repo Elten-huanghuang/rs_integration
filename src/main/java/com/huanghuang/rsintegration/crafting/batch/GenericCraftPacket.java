@@ -2626,7 +2626,13 @@ public final class GenericCraftPacket {
                             : BuiltInRegistries.ITEM.getKey(targetOutput.getItem()),
                     targetOutput.getCount(), targetOutput.isEmpty(),
                     recipeModType != null ? recipeModType.id() : "null");
+            ModRecipeHandler previewHandler =
+                    ModRecipeHandlers.claimFor(recipe).winner();
+            boolean structuredEmptyOutput =
+                    previewHandler != null
+                            && previewHandler.hasStructuredOutputContract(recipe);
             if (targetOutput.isEmpty() && recipeModType != null
+                    && !structuredEmptyOutput
                     && !ModIds.ID_EMBERS_ALCHEMY.equals(recipeModType.id())
                     && !ModIds.ID_AETHERWORKS_ANVIL.equals(recipeModType.id())
                     && !ModIds.TOUHOU_LITTLE_MAID.equals(recipeModType.id())

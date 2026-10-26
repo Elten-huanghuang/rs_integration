@@ -81,7 +81,7 @@ class IronAlchemistCauldronIntegrationTest
                 integration.recipe().executionKind()
         );
         assertTrue(view.flags().recursivePlanning());
-        assertTrue(view.flags().targetProduction());
+        assertFalse(view.flags().targetProduction());
         assertFalse(view.flags().deterministicOutput());
         assertEquals(1, view.materials().size());
         assertEquals(1, view.outputs().size());
@@ -89,7 +89,7 @@ class IronAlchemistCauldronIntegrationTest
                 OutputProbabilityMode.PROBABILISTIC,
                 view.outputs().get(0).probability().mode()
         );
-        assertTrue(view.outputs().get(0).targetProducing());
+        assertFalse(view.outputs().get(0).targetProducing());
         assertEquals(
                 new ResourceLocation("minecraft", "water"),
                 view.outputs().get(0).resource().id()

@@ -88,6 +88,7 @@ class IronFurnacesSmeltingIntegrationTest extends BootstrapTest {
                 InputConsumption.Kind.FUEL,
                 view.materials().get(1).consumption().kind()
         );
+        assertTrue(view.flags().supportsBatching());
         assertEquals(1, view.outputs().size());
         assertEquals(
                 new ResourceLocation("minecraft", "iron_ingot"),
