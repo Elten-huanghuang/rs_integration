@@ -72,6 +72,13 @@ public final class ArsNouveauRecipeHandler extends AbstractRecipeHandler {
     }
 
     @Override
+    public boolean cacheByRecipeClass() {
+        // 同一 Java 配方类可能对应 apparatus、reactive_enchantment 等不同
+        // RecipeType，能否处理必须按具体配方判定，不能按类缓存。
+        return false;
+    }
+
+    @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
         String typeId = ArsTileAccess.recipeTypeId(recipe);
 

@@ -152,6 +152,7 @@ public final class ModRecipeHandlers {
         GLOBAL_RESULT_CACHE.clear();
         GLOBAL_EMPTY_CACHE.clear();
         CLIENT_UNSAFE_RESULT_LOGGED.clear();
+        CLAIM_CACHE.clear();
         RecipeResultMethodSafety.clear();
     }
 

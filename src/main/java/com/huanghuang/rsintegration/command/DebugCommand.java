@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.util.CuriosAccess;
+import com.huanghuang.rsintegration.util.Diagnostics;
 import com.huanghuang.rsintegration.util.PerformanceMonitor;
 import net.minecraft.world.item.crafting.Ingredient;
 
@@ -88,6 +89,13 @@ public final class DebugCommand {
                         .executes(DebugCommand::perfSnapshot)
                         .then(Commands.literal("reset")
                                 .executes(DebugCommand::perfReset)))
+                .then(Commands.literal("diagnostics")
+                        .then(Commands.literal("on")
+                                .executes(DebugCommand::enableDiagnostics))
+                        .then(Commands.literal("off")
+                                .executes(DebugCommand::disableDiagnostics))
+                        .then(Commands.literal("dump")
+                                .executes(DebugCommand::dumpDiagnostics)))
                 .then(Commands.literal("magic")
                         .then(Commands.literal("route")
                                 .executes(DebugCommand::magicRoute)))
@@ -353,6 +361,14 @@ public final class DebugCommand {
             if (d.skipped()) continue;
             var recipe = rm.byKey(d.recipeId()).orElse(null);
             if (recipe == null) continue;
+            ItemStack result = ModRecipeHandlers.tryGetResultItem(
+                    recipe, player.serverLevel().registryAccess());
+            String resultDescription = result.isEmpty()
+                    ? "EMPTY"
+                    : result.getCount() + "x " + ForgeRegistries.ITEMS.getKey(result.getItem())
+                    + (result.hasTag() ? " tag=" + result.getTag() : "");
+            ctx.getSource().sendSuccess(() -> Component.literal(
+                    "  " + d.recipeId() + ": result " + resultDescription), false);
             List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(recipe);
             if (specs == null || specs.isEmpty()) {
                 ctx.getSource().sendSuccess(() -> Component.literal(
@@ -531,6 +547,27 @@ public final class DebugCommand {
         RecipeBrowserSlowCallDiagnostics.reset();
         ctx.getSource().sendSuccess(() -> Component.literal(
                 "已清理有界配方浏览器慢调用去重状态。"), false);
+        return 1;
+    }
+
+    private static int enableDiagnostics(CommandContext<CommandSourceStack> ctx) {
+        Diagnostics.clear();
+        Diagnostics.setEnabled(true);
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "已开启 RSI 诊断；复现合成后执行 /rsi_debug diagnostics dump"), false);
+        return 1;
+    }
+
+    private static int disableDiagnostics(CommandContext<CommandSourceStack> ctx) {
+        Diagnostics.setEnabled(false);
+        ctx.getSource().sendSuccess(() -> Component.literal("已关闭 RSI 诊断"), false);
+        return 1;
+    }
+
+    private static int dumpDiagnostics(CommandContext<CommandSourceStack> ctx) {
+        Diagnostics.dumpToLog();
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "RSI 诊断已写入 latest.log"), false);
         return 1;
     }
 

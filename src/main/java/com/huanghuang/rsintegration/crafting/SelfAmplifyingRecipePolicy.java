@@ -174,13 +174,13 @@ public final class SelfAmplifyingRecipePolicy {
 
     private static boolean isConsumedSelfInput(IngredientSpec spec, ItemStack output) {
         return !spec.isEmpty() && spec.role() != DemandRole.CATALYST
-                && IngredientMatcher.test(spec.ingredient(), output);
+                && CraftingResolver.consumesOutput(spec.ingredient(), output);
     }
 
     private static boolean isConsumedSelfInput(
             ScaledIngredientSpec spec, ItemStack output) {
         return !spec.isEmpty() && spec.role() != DemandRole.CATALYST
-                && IngredientMatcher.test(spec.ingredient(), output);
+                && CraftingResolver.consumesOutput(spec.ingredient(), output);
     }
 
     private static long selfConsumed(List<IngredientRef> inputs, MaterialRef output) {
@@ -196,15 +196,15 @@ public final class SelfAmplifyingRecipePolicy {
     }
 
     private static boolean referencesOutput(IngredientRef input, MaterialRef output) {
+        if (input.alternatives().isEmpty()) return false;
         for (MaterialRef alternative : input.alternatives()) {
             if (alternative.kind() != output.kind()
-                    || !alternative.resourceId().equals(output.resourceId())) continue;
+                    || !alternative.resourceId().equals(output.resourceId())) return false;
             if (output.runtimeNbt() || alternative.runtimeNbt()
-                    || alternative.equals(output)) {
-                return true;
-            }
+                    || alternative.equals(output)) continue;
+            return false;
         }
-        return false;
+        return true;
     }
 
     public static boolean isSelfInput(IngredientRef input, MaterialRef output) {

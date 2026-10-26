@@ -255,6 +255,7 @@ public final class CraftingResolver {
                 missingOut.add(describeFirstItem(ingredient));
             }
         }
+        ctx.dumpDiagnostics();
         return new ArrayList<>(ctx.steps);
     }
 
@@ -375,9 +376,7 @@ public final class CraftingResolver {
             @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
             boolean bestEffort, int timeoutMs, @Nullable ActiveRootRecipe activeRoot,
             Map<String, ItemStack> materialLocks, PlanningPreferences preferences) {
-        List<RootSpec> roots = needed.stream()
-                .map(spec -> new RootSpec(spec.ingredient(), spec.count(), spec.consumption()))
-                .toList();
+        List<RootSpec> roots = rootSpecs(needed);
         return resolveGraphForRootSpecs(roots, availableKeyed, level, player,
                 storageEndpoint, missingOut, forcedOverrides, bestEffort, false,
                 timeoutMs, activeRoot, materialLocks,
@@ -405,9 +404,7 @@ public final class CraftingResolver {
             @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
             boolean bestEffort, int timeoutMs, @Nullable ActiveRootRecipe activeRoot,
             Map<String, ItemStack> materialLocks, PlanningPreferences preferences) {
-        List<RootSpec> roots = needed.stream()
-                .map(spec -> new RootSpec(spec.ingredient(), spec.count(), spec.consumption()))
-                .toList();
+        List<RootSpec> roots = rootSpecs(needed);
         return resolveGraphForRootSpecs(roots, availableKeyed, level, player,
                 storageEndpoint, missingOut, forcedOverrides, bestEffort, true,
                 timeoutMs, activeRoot, materialLocks,
@@ -547,14 +544,33 @@ public final class CraftingResolver {
             boolean singleVariantRoots, int timeoutMs, @Nullable ActiveRootRecipe activeRoot,
             Map<String, ItemStack> materialLocks, Set<ResourceLocation> excludedRecipes,
             PlanningPreferences preferences) {
-        List<RootSpec> roots = needed.stream()
-                .filter(spec -> spec != null && !spec.isEmpty())
-                .map(spec -> new RootSpec(spec.ingredient(), spec.count(), spec.consumption()))
-                .toList();
+        List<RootSpec> roots = ingredientRootSpecs(needed);
         return resolveGraphForRootSpecs(roots, availableKeyed, level, player,
                 storageEndpoint, missingOut, forcedOverrides, bestEffort,
                 singleVariantRoots, timeoutMs, activeRoot, materialLocks,
                 excludedRecipes, preferences);
+    }
+
+    private static List<RootSpec> rootSpecs(List<ScaledIngredientSpec> needed) {
+        List<RootSpec> roots = new ArrayList<>(needed.size());
+        for (int index = 0; index < needed.size(); index++) {
+            ScaledIngredientSpec spec = needed.get(index);
+            if (spec == null || spec.isEmpty()) continue;
+            roots.add(new RootSpec(
+                    spec.ingredient(), spec.count(), spec.consumption(), index));
+        }
+        return List.copyOf(roots);
+    }
+
+    private static List<RootSpec> ingredientRootSpecs(List<IngredientSpec> needed) {
+        List<RootSpec> roots = new ArrayList<>(needed.size());
+        for (int index = 0; index < needed.size(); index++) {
+            IngredientSpec spec = needed.get(index);
+            if (spec == null || spec.isEmpty()) continue;
+            roots.add(new RootSpec(
+                    spec.ingredient(), spec.count(), spec.consumption(), index));
+        }
+        return List.copyOf(roots);
     }
 
     private static CraftPlanGraph resolveGraphForRootSpecs(
@@ -578,7 +594,7 @@ public final class CraftingResolver {
         ctx.withMaterialLocks(materialLocks);
         ctx.withPreferences(preferences);
         EdgeTracker edges = new EdgeTracker();
-        List<RootDemand> roots = new ArrayList<>();
+        Map<Integer, RootDemand> rootsByOrder = new TreeMap<>();
 
         boolean rootActive = activeRoot != null && !activeRoot.output().isEmpty();
         if (rootActive) {
@@ -604,7 +620,7 @@ public final class CraftingResolver {
                 if (activeRoot != null) {
                     spec = new RootSpec(ctx.lockedIngredient(
                             activeRoot.recipeId(), spec.ingredient()),
-                            spec.count(), spec.consumption());
+                            spec.count(), spec.consumption(), spec.order());
                 }
                 List<ResolutionContext.SupplySlice> consumed = new ArrayList<>();
                 Ingredient resolvedIngredient = spec.ingredient();
@@ -630,7 +646,8 @@ public final class CraftingResolver {
                 if (!resolved && ctx.missingCount() == rootMissingCheckpoint) {
                     recordFailureMissing(ctx, resolvedIngredient, rootMissingCheckpoint);
                 }
-                roots.add(new RootDemand(resolvedIngredient, spec.count(), missing,
+                rootsByOrder.put(spec.order(), new RootDemand(
+                        resolvedIngredient, spec.count(), missing,
                         firstDisplayStack(resolvedIngredient), allocations, spec.role()));
                 if (!resolved && !bestEffort) break;
             }
@@ -639,6 +656,7 @@ public final class CraftingResolver {
                 ctx.recipeCycles.leave(activeRoot.recipeId(), activeRoot.output());
             }
         }
+        List<RootDemand> roots = new ArrayList<>(rootsByOrder.values());
 
         CraftPlanGraph graph = new CraftPlanGraph(CraftPlanGraph.CURRENT_VERSION,
                 ctx.graphNodes, ctx.graphAllocations, roots, ctx.graphUnresolved,
@@ -647,10 +665,12 @@ public final class CraftingResolver {
         graph = CraftPlanGraphCompactor.compact(graph,
                 CraftNodeMergePolicy.forLevel(level));
         ctx.logGuardSummary();
+        ctx.dumpDiagnostics();
         return graph;
     }
 
-    private record RootSpec(Ingredient ingredient, long count, InputConsumption consumption) {
+    private record RootSpec(Ingredient ingredient, long count,
+                            InputConsumption consumption, int order) {
         private RootSpec {
             Objects.requireNonNull(ingredient, "ingredient");
             Objects.requireNonNull(consumption, "consumption");
@@ -669,7 +689,18 @@ public final class CraftingResolver {
                                String serializedIngredient, int fallbackIndex) {}
 
     private static List<RootSpec> machineRootDemands(List<RootSpec> specs) {
-        return specs.stream().filter(spec -> !spec.isEmpty()).toList();
+        List<RootSpec> ordered = new ArrayList<>(
+                specs.stream().filter(spec -> !spec.isEmpty()).toList());
+        // 仅改变解析顺序；order 会把结果放回原始机器槽位。
+        ordered.sort(rootSpecComparator());
+        return List.copyOf(ordered);
+    }
+
+    /** Test seam: machine roots resolve by dependency complexity, not slot order. */
+    static List<Integer> machineRootResolutionOrder(List<IngredientSpec> specs) {
+        return machineRootDemands(ingredientRootSpecs(specs)).stream()
+                .map(RootSpec::order)
+                .toList();
     }
 
     private static List<RootSpec> coalesceRootDemands(List<RootSpec> specs) {
@@ -688,7 +719,7 @@ public final class CraftingResolver {
             merged.compute(key, (ignored, existing) -> existing == null
                     ? spec : new RootSpec(existing.ingredient(),
                     SaturatingLongMath.add(existing.count(), spec.count()),
-                    existing.consumption()));
+                    existing.consumption(), existing.order()));
         }
         return List.copyOf(merged.values());
     }
@@ -919,10 +950,20 @@ public final class CraftingResolver {
             out = CandidateEngine.inheritSmithingBaseTag(candidate.recipe(), out, ingredient, ctx);
             out = MinersDelightCopperPotSupport.adaptResult(candidate.modType(), out);
             if (out.isEmpty() || out.getCount() <= 0) {
+                if (ctx.diagnosticsEnabled()) {
+                    ctx.diag("ensureIngredient REJECT " + candidate.recipe().getId()
+                            + ": empty output class=" + candidate.recipe().getClass().getName());
+                }
                 continue;
             }
             int ng = netGainPerBatch(candidate, out, ctx.level.registryAccess());
             if (ng <= 0) {
+                if (ctx.diagnosticsEnabled()) {
+                    ctx.diag("ensureIngredient REJECT " + candidate.recipe().getId()
+                            + ": non-positive net gain output=" + out.getCount()
+                            + " selfConsumed=" + selfConsumedPerBatch(
+                            candidate, out, ctx.level.registryAccess()));
+                }
                 continue;
             }
             alive.add(new AliveCandidate(candidate, out, ng));
@@ -1295,7 +1336,7 @@ public final class CraftingResolver {
             List<ItemStack> repaired = getRepairedInputStacks(entry.recipe(), ctx.level.registryAccess());
             for (ItemStack stack : repaired) {
                 Ingredient ing = ingredientOf(stack, stack.hasTag());
-                if (IngredientMatcher.test(ing, output) && ctx.countMatching(ing) <= 0) return true;
+                if (consumesOutput(ing, output) && ctx.countMatching(ing) <= 0) return true;
             }
             return false;
         }
@@ -1308,7 +1349,7 @@ public final class CraftingResolver {
         int selfConsumed = 0;
         for (IngredientSpec spec : specs) {
             if (spec.isEmpty()) continue;
-            if (spec.role() != DemandRole.CATALYST && IngredientMatcher.test(spec.ingredient(), output)) {
+            if (spec.role() != DemandRole.CATALYST && consumesOutput(spec.ingredient(), output)) {
                 selfConsumed += spec.count();
             }
         }
@@ -1316,7 +1357,8 @@ public final class CraftingResolver {
 
         for (IngredientSpec spec : specs) {
             if (spec.isEmpty()) continue;
-            if (IngredientMatcher.test(spec.ingredient(), output) && ctx.countMatching(spec.ingredient()) <= 0)
+            if (consumesOutput(spec.ingredient(), output)
+                    && ctx.countMatching(spec.ingredient()) <= 0)
                 return true;
         }
         return false;
@@ -1327,7 +1369,7 @@ public final class CraftingResolver {
         boolean anyMissing = false;
         for (IngredientSpec spec : CraftPacketUtils.extractCraftingIngredientSpecs(recipe)) {
             if (spec.isEmpty()) continue;
-            if (IngredientMatcher.test(spec.ingredient(), output)) {
+            if (consumesOutput(spec.ingredient(), output)) {
                 if (spec.role() != DemandRole.CATALYST) selfConsumed += spec.count();
                 if (ctx.countMatching(spec.ingredient()) <= 0) anyMissing = true;
             }
@@ -1338,9 +1380,32 @@ public final class CraftingResolver {
         return anyMissing;
     }
 
-    private static int netGainPerBatch(RecipeIndex.Entry entry, ItemStack output,
-                                        RegistryAccess access) {
-        return output.getCount() - selfConsumedPerBatch(entry, output, access);
+    static int netGainPerBatch(RecipeIndex.Entry entry, ItemStack output,
+                               RegistryAccess access) {
+        long produced = declaredOutputCount(entry, output, access);
+        long consumed = selfConsumedPerBatch(entry, output, access);
+        long net = produced - consumed;
+        return net <= 0L ? 0 : SaturatingLongMath.clampToInt(net);
+    }
+
+    static long declaredOutputCount(RecipeIndex.Entry entry, ItemStack output,
+                                    RegistryAccess access) {
+        ModRecipeHandler handler = ModRecipeHandlers.claimFor(entry.recipe()).winner();
+        if (handler != null) {
+            long total = 0L;
+            for (var declaration : handler.getDeclaredOutputs(entry.recipe(), access)) {
+                MaterialKey material = declaration.material();
+                if (material == null
+                        || !MaterialMatcher.equivalentRuntimeFragment(
+                        material.toStack(1), output)) continue;
+                long credited = declaration.probability().isGuaranteed()
+                        ? declaration.minimumPerOperation()
+                        : declaration.expectedPerOperation();
+                total = SaturatingLongMath.add(total, credited);
+            }
+            if (total > 0L) return total;
+        }
+        return output.getCount();
     }
 
     private static int selfConsumedPerBatch(RecipeIndex.Entry entry, ItemStack output,
@@ -1349,7 +1414,7 @@ public final class CraftingResolver {
             int selfConsumed = 0;
             for (IngredientSpec spec : CraftPacketUtils.extractCraftingIngredientSpecs(cr)) {
                 if (spec.isEmpty() || spec.role() == DemandRole.CATALYST) continue;
-                if (IngredientMatcher.test(spec.ingredient(), output)) {
+                if (consumesOutput(spec.ingredient(), output)) {
                     selfConsumed += spec.count();
                 }
             }
@@ -1361,7 +1426,7 @@ public final class CraftingResolver {
             List<ItemStack> repaired = getRepairedInputStacks(entry.recipe(), access);
             for (ItemStack stack : repaired) {
                 Ingredient ing = ingredientOf(stack, stack.hasTag());
-                if (IngredientMatcher.test(ing, output)) selfConsumed += stack.getCount();
+                if (consumesOutput(ing, output)) selfConsumed += stack.getCount();
             }
             return selfConsumed;
         }
@@ -1369,10 +1434,31 @@ public final class CraftingResolver {
         int selfConsumed = 0;
         for (IngredientSpec spec : specs) {
             if (spec.isEmpty()) continue;
-            if (spec.role() != DemandRole.CATALYST && IngredientMatcher.test(spec.ingredient(), output))
+            if (spec.role() != DemandRole.CATALYST
+                    && consumesOutput(spec.ingredient(), output))
                 selfConsumed += spec.count();
         }
         return selfConsumed;
+    }
+
+    /**
+     * 只有输入标签的全部可选物都是该输出时，才视为自消耗。
+     * 例如 forge:seeds 同时包含 magebloom_crop 和普通种子，
+     * seed -> magebloom_crop 不是净收益为零的循环。
+     */
+    static boolean consumesOutput(Ingredient ingredient, ItemStack output) {
+        if (ingredient == null || ingredient.isEmpty()
+                || output == null || output.isEmpty()) return false;
+        if (!IngredientMatcher.hasCompleteItemList(ingredient)) {
+            return IngredientMatcher.test(ingredient, output);
+        }
+        int candidates = 0;
+        for (ItemStack template : ingredient.getItems()) {
+            if (template.isEmpty()) continue;
+            candidates++;
+            if (template.getItem() != output.getItem()) return false;
+        }
+        return candidates > 0;
     }
 
     private static List<IngredientSpec> recipeSpecs(RecipeIndex.Entry entry,
@@ -1539,6 +1625,13 @@ public final class CraftingResolver {
                               List<ResourceLocation> alternativeIds,
                               List<String> alternativeModTypes) {
             this(recipeId, modType, recipeTypeId, alternativeIds, alternativeModTypes, false, 1, null, null);
+        }
+
+        public ResolutionStep withExecutions(int updatedExecutions) {
+            if (updatedExecutions == executions) return this;
+            return new ResolutionStep(recipeId, modType, recipeTypeId,
+                    alternativeIds, alternativeModTypes, inferMode, updatedExecutions,
+                    syntheticInput, syntheticOutput, productionTarget, magicCosts);
         }
     }
 

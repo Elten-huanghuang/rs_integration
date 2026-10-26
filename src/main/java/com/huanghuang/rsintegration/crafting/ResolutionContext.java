@@ -36,6 +36,8 @@ import java.util.*;
  */
 final class ResolutionContext {
 
+    private static final int MAX_DIAGNOSTIC_LINES = 4096;
+
     static final long MAX_RESOLVE_NANOS =
             RSIntegrationConfig.DEFAULT_CRAFTING_RESOLVE_TIMEOUT_MS * 1_000_000L;
 
@@ -98,6 +100,7 @@ final class ResolutionContext {
     boolean bestEffortFallbackPass;
     @Nullable final List<String> missingOut;
     @Nullable final List<String> diagLog;
+    int droppedDiagnosticLines;
 
     // Inverted index: Item → pre-cached stacks, built once from initial inventory.
     // Eliminates the O(N) scan of all 546+ inventory types inside countMatching.
@@ -374,7 +377,23 @@ final class ResolutionContext {
     }
 
     void diag(String msg) {
-        if (diagLog != null) diagLog.add(msg);
+        if (diagLog == null) return;
+        if (diagLog.size() < MAX_DIAGNOSTIC_LINES) {
+            diagLog.add(msg);
+        } else {
+            droppedDiagnosticLines++;
+        }
+    }
+
+    void dumpDiagnostics() {
+        if (diagLog == null || diagLog.isEmpty()) return;
+        RSIntegrationMod.LOGGER.info("[RSI-Diag] resolver trace lines={} dropped={}",
+                diagLog.size(), droppedDiagnosticLines);
+        for (String line : diagLog) {
+            RSIntegrationMod.LOGGER.info("[RSI-Diag] {}", line);
+        }
+        diagLog.clear();
+        droppedDiagnosticLines = 0;
     }
 
     void pushConversionFamily(Set<Item> family) {
