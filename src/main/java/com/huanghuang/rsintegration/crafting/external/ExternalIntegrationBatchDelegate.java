@@ -56,10 +56,12 @@ import com.huanghuang.rsintegration.api.recipe.RecipeView;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.MaterialMatcher;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
+import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.crafting.graph.OutputProbability;
 import com.huanghuang.rsintegration.feature.unifiedgrid.UnifiedGridFluidRecovery;
 import com.huanghuang.rsintegration.storage.StorageFluidKey;
@@ -72,6 +74,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
@@ -132,6 +135,13 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     private ReservedMaterialView customMaterials;
     private final Map<String, List<FluidStack>> customReservedFluids =
             new LinkedHashMap<>();
+    private final Map<ResourceLocation, Long> customCollectedOutputTotals =
+            new LinkedHashMap<>();
+    private final Map<String, Long> customCollectedMaterialTotals =
+            new LinkedHashMap<>();
+    private final List<ItemStack> customCollectedItems = new ArrayList<>();
+    private final List<MaterialDisposition> customCollectedDispositions =
+            new ArrayList<>();
     private MachineContext customMachineContext;
     @Nullable
     private UUID customOwnerId;
@@ -144,6 +154,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     private long lastCustomSnapshotSequence = -1L;
     private long lastCustomStateRevision = -1L;
     private long lastCollectionSequence;
+    private boolean customCollectionComplete;
     private long recipeRevision;
     private boolean operationStarted;
     private boolean resultsCollected;
@@ -379,6 +390,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         this.customSnapshot = null;
         this.lastCustomSnapshotSequence = -1L;
         this.lastCustomStateRevision = -1L;
+        resetCustomCollectionState();
         this.lastCollectionSequence = 0L;
         this.recipeRevision = projection.revision();
         this.operationStarted = false;
@@ -814,6 +826,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         customCancelReason = null;
         customSnapshot = null;
         lastCustomSnapshotSequence = -1L;
+        resetCustomCollectionState();
         uninsertedMaterials.clear();
         pendingInputRefunds.clear();
         releaseReusableMaterials(player);
@@ -849,6 +862,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         this.customCancelReason = null;
         this.customSnapshot = null;
         this.lastCustomSnapshotSequence = -1L;
+        resetCustomCollectionState();
         List<ReservedMaterial> reserved = new ArrayList<>();
         for (int index = 0; index < recipeView.materials().size(); index++) {
             MaterialRequirement requirement = recipeView.materials().get(index);
@@ -1128,14 +1142,198 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         return switch (observation.phase()) {
             case QUEUED, PREPARING, WAITING_FOR_MACHINE, WORKING ->
                     workingObservation();
-            case READY_TO_COLLECT, COLLECTING, SETTLING, SUCCEEDED ->
-                    doneObservation();
+            case READY_TO_COLLECT, COLLECTING -> {
+                String failure = collectCustomStep();
+                if (failure != null) {
+                    yield failObservation(failure);
+                }
+                captureCustomSnapshot();
+                yield customCollectionComplete
+                        ? doneObservation() : workingObservation();
+            }
+            case SETTLING, SUCCEEDED -> customCollectionComplete
+                    ? doneObservation()
+                    : failObservation(
+                    "custom operation left collection before reporting completion");
             case FAILED, CANCELLED ->
                     failObservation("custom operation reported "
                             + observation.phase());
             case CANCELLING ->
                     failObservation("custom operation is cancelling");
         };
+    }
+
+    @Nullable
+    private String collectCustomStep() {
+        if (customCollectionComplete) return null;
+        if (runningOperation == null
+                || customMaterials == null
+                || executionPlan == null
+                || operationStartContext == null) {
+            return "custom collection context is missing";
+        }
+        OperationCollection collection;
+        try {
+            collection = runningOperation.collect(
+                    operationStartContext.player());
+        } catch (RuntimeException | LinkageError failure) {
+            LOGGER.warn(
+                    "[RSI-API] custom collect failed for {}",
+                    recipe == null ? "unknown" : recipe.getId(),
+                    failure
+            );
+            return "custom collect callback failed";
+        }
+        if (collection.collectionSequence()
+                < lastCollectionSequence) {
+            return "custom collection sequence moved backwards";
+        }
+        if (collection.collectionSequence()
+                == lastCollectionSequence) {
+            return null;
+        }
+        String validationFailure = validateCustomCollection(collection);
+        if (validationFailure != null) {
+            reportedResourceFailure = validationFailure;
+            return validationFailure;
+        }
+        lastCollectionSequence = collection.collectionSequence();
+        return null;
+    }
+
+    @Nullable
+    private String validateCustomCollection(
+            OperationCollection collection
+    ) {
+        Map<ResourceLocation, OutputPort> declaredPorts =
+                new LinkedHashMap<>();
+        for (OutputPort port : executionPlan.outputPorts()) {
+            declaredPorts.put(port.portId(), port);
+        }
+        Map<ResourceLocation, Long> nextOutputTotals =
+                new LinkedHashMap<>(customCollectedOutputTotals);
+        Map<String, Long> nextMaterialTotals =
+                new LinkedHashMap<>(customCollectedMaterialTotals);
+        List<CollectedOutput> acceptedOutputs =
+                new ArrayList<>(collection.outputs().size());
+        List<MaterialDisposition> acceptedDispositions =
+                new ArrayList<>(collection.materials().size());
+
+        for (CollectedOutput output : collection.outputs()) {
+            OutputPort declared = declaredPorts.get(output.portId());
+            if (declared == null) {
+                return "custom collection returned undeclared output "
+                        + output.portId();
+            }
+            long previous = nextOutputTotals.getOrDefault(
+                    output.portId(), 0L);
+            String failure = validateCollectedOutputAgainstPort(
+                    declared, output, previous);
+            if (failure != null) return failure;
+            long total;
+            try {
+                total = Math.addExact(previous, output.amount());
+            } catch (ArithmeticException exception) {
+                return "custom output total overflowed: "
+                        + output.portId();
+            }
+            nextOutputTotals.put(output.portId(), total);
+            acceptedOutputs.add(output);
+        }
+
+        for (MaterialDisposition disposition : collection.materials()) {
+            ReservedMaterial reserved = customMaterials.find(
+                    disposition.material().entryId()).orElse(null);
+            if (reserved == null) {
+                return "custom collection returned an undeclared material: "
+                        + disposition.material().entryId();
+            }
+            long previous = nextMaterialTotals.getOrDefault(
+                    reserved.entryId(), 0L);
+            String failure = validateMaterialDispositionAgainstReservation(
+                    reserved, disposition, previous);
+            if (failure != null) return failure;
+            long total;
+            try {
+                total = Math.addExact(
+                        previous, disposition.material().amount());
+            } catch (ArithmeticException exception) {
+                return "custom material disposition overflowed: "
+                        + reserved.entryId();
+            }
+            nextMaterialTotals.put(reserved.entryId(), total);
+            acceptedDispositions.add(disposition);
+        }
+
+        if (collection.complete()) {
+            for (OutputPort port : executionPlan.outputPorts()) {
+                long total = nextOutputTotals.getOrDefault(
+                        port.portId(), 0L);
+                if (port.probability().mode()
+                        == OutputProbabilityMode.GUARANTEED
+                        && total < port.amount().min()) {
+                    return "custom output " + port.portId()
+                            + " is below its guaranteed minimum";
+                }
+            }
+            for (ReservedMaterial material : customMaterials.materials()) {
+                long total = nextMaterialTotals.getOrDefault(
+                        material.entryId(), 0L);
+                if (total != material.amount()) {
+                    return "custom collection did not account for reserved material "
+                            + material.entryId();
+                }
+            }
+            if (acceptedDispositions.stream().anyMatch(disposition ->
+                    disposition.outcome() == MaterialOutcome.UNCERTAIN)
+                    || customCollectedDispositions.stream().anyMatch(disposition ->
+                    disposition.outcome() == MaterialOutcome.UNCERTAIN)) {
+                return "completed custom collection contains uncertain materials";
+            }
+        }
+
+        customCollectedOutputTotals.clear();
+        customCollectedOutputTotals.putAll(nextOutputTotals);
+        customCollectedMaterialTotals.clear();
+        customCollectedMaterialTotals.putAll(nextMaterialTotals);
+        customCollectedDispositions.addAll(acceptedDispositions);
+        for (CollectedOutput output : acceptedOutputs) {
+            if (output.resource().kind()
+                    == IntegrationResourceKey.ResourceKind.ITEM) {
+                appendItemOutput(output.resource(), output.amount());
+            } else {
+                reportedResources.add(output);
+            }
+        }
+        if (collection.complete()) {
+            customCollectionComplete = true;
+            settleCustomFluidInputs(
+                    customCollectedDispositions,
+                    operationStartContext.player());
+        }
+        return null;
+    }
+
+    private void appendItemOutput(
+            IntegrationResourceKey resource,
+            long amount
+    ) {
+        long remaining = amount;
+        while (remaining > 0L) {
+            int chunk = (int) Math.min(
+                    Integer.MAX_VALUE, remaining);
+            customCollectedItems.add(
+                    ExternalRecipeProjection.toStack(resource, chunk));
+            remaining -= chunk;
+        }
+    }
+
+    private void resetCustomCollectionState() {
+        customCollectedOutputTotals.clear();
+        customCollectedMaterialTotals.clear();
+        customCollectedItems.clear();
+        customCollectedDispositions.clear();
+        customCollectionComplete = false;
     }
 
     private boolean resumeCustomOperation(ServerLevel currentLevel) {
@@ -1219,68 +1417,11 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     }
 
     private List<ItemStack> collectCustomResults(ServerPlayer player) {
-        if (runningOperation == null) return List.of();
-        OperationCollection collection;
-        try {
-            collection = runningOperation.collect(player);
-        } catch (RuntimeException | LinkageError failure) {
-            LOGGER.warn(
-                    "[RSI-API] custom collect failed for {}",
-                    recipe == null ? "unknown" : recipe.getId(),
-                    failure
-            );
+        if (!customCollectionComplete || resultsCollected) {
             return List.of();
         }
-        if (collection.collectionSequence() <= lastCollectionSequence) {
-            return List.of();
-        }
-        lastCollectionSequence = collection.collectionSequence();
-        if (!collection.complete()) return List.of();
-        if (executionPlan == null) return List.of();
-        Map<ResourceLocation, OutputPort> declaredPorts =
-                new LinkedHashMap<>();
-        for (var port : executionPlan.outputPorts()) {
-            declaredPorts.put(port.portId(), port);
-        }
-        Map<ItemStackKey, ItemStack> collected = new LinkedHashMap<>();
-        for (CollectedOutput output : collection.outputs()) {
-            var declared = declaredPorts.get(output.portId());
-            if (declared == null
-                    || declared.resource().kind() != output.resource().kind()
-                    || !declared.resource().id().equals(output.resource().id())) {
-                LOGGER.warn(
-                        "[RSI-API] custom collection returned undeclared output {}",
-                        output.portId());
-                return List.of();
-            }
-            if (output.resource().kind()
-                    == IntegrationResourceKey.ResourceKind.ITEM) {
-                merge(collected, ExternalRecipeProjection.toStack(
-                        output.resource(), output.amount()));
-            } else if (output.resource().kind()
-                    == IntegrationResourceKey.ResourceKind.FLUID) {
-                reportedResources.add(output);
-            } else {
-                return List.of();
-            }
-        }
-        for (MaterialDisposition disposition : collection.materials()) {
-            ReservedMaterial declared =
-                    customMaterials.find(disposition.material().entryId())
-                            .orElse(null);
-            if (declared == null
-                    || declared.resource().kind()
-                    != disposition.material().resource().kind()
-                    || declared.amount() != disposition.material().amount()) {
-                LOGGER.warn(
-                        "[RSI-API] custom collection returned an undeclared material disposition {}",
-                        disposition.material().entryId());
-                return List.of();
-            }
-        }
-        settleCustomFluidInputs(collection.materials(), player);
         resultsCollected = true;
-        return collected.values().stream()
+        return customCollectedItems.stream()
                 .map(ItemStack::copy)
                 .toList();
     }
@@ -1414,6 +1555,115 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                         ? new CompoundTag() : stack.getTag());
     }
 
+    @Nullable
+    static String validateCollectedOutputAgainstPort(
+            OutputPort declared,
+            CollectedOutput output,
+            long alreadyCollected
+    ) {
+        if (!declared.portId().equals(output.portId())) {
+            return "custom output port mismatch: " + output.portId();
+        }
+        if (declared.resource().kind() != output.resource().kind()
+                || !declared.resource().id().equals(output.resource().id())
+                || !matchesDeclaredIdentity(declared, output.resource())) {
+            return "custom output identity mismatch: " + output.portId();
+        }
+        long total;
+        try {
+            total = Math.addExact(alreadyCollected, output.amount());
+        } catch (ArithmeticException exception) {
+            return "custom output total overflowed: " + output.portId();
+        }
+        if (total > declared.amount().max()) {
+            return "custom output exceeds declared maximum: "
+                    + output.portId();
+        }
+        return null;
+    }
+
+    private static boolean matchesDeclaredIdentity(
+            OutputPort declared,
+            IntegrationResourceKey actual
+    ) {
+        if (declared.resource().kind()
+                == IntegrationResourceKey.ResourceKind.ITEM) {
+            ItemStack expected = ExternalRecipeProjection.toStack(
+                    declared.resource(), 1L);
+            ItemStack actualStack = ExternalRecipeProjection.toStack(
+                    actual, 1L);
+            return MaterialMatcher.matchesOutputDeclaration(
+                    MaterialKey.of(expected), actualStack);
+        }
+        CompoundTag declaredIdentity = declared.resource().identity();
+        CompoundTag actualIdentity = actual.identity();
+        if (declared.dynamicIdentity()) {
+            return compoundContains(actualIdentity, declaredIdentity);
+        }
+        return declaredIdentity.isEmpty()
+                || declaredIdentity.equals(actualIdentity);
+    }
+
+    @Nullable
+    static String validateMaterialDispositionAgainstReservation(
+            ReservedMaterial reserved,
+            MaterialDisposition disposition,
+            long alreadyDisposed
+    ) {
+        ReservedMaterial candidate = disposition.material();
+        if (!reserved.entryId().equals(candidate.entryId())) {
+            return "custom material entry mismatch: "
+                    + candidate.entryId();
+        }
+        if (!reserved.resource().equals(candidate.resource())) {
+            return "custom material identity mismatch: "
+                    + candidate.entryId();
+        }
+        if (!reserved.consumption().equals(candidate.consumption())) {
+            return "custom material consumption mismatch: "
+                    + candidate.entryId();
+        }
+        if (candidate.amount() <= 0L) {
+            return "custom material disposition amount must be positive: "
+                    + candidate.entryId();
+        }
+        long total;
+        try {
+            total = Math.addExact(alreadyDisposed, candidate.amount());
+        } catch (ArithmeticException exception) {
+            return "custom material disposition overflowed: "
+                    + candidate.entryId();
+        }
+        if (total > reserved.amount()) {
+            return "custom material disposition exceeds reservation: "
+                    + candidate.entryId();
+        }
+        return null;
+    }
+
+    private static boolean compoundContains(
+            CompoundTag actual,
+            CompoundTag expected
+    ) {
+        for (String key : expected.getAllKeys()) {
+            Tag required = expected.get(key);
+            Tag present = actual.get(key);
+            if (present == null
+                    || present.getId() != required.getId()) {
+                return false;
+            }
+            if (required instanceof CompoundTag requiredCompound
+                    && present instanceof CompoundTag presentCompound) {
+                if (!compoundContains(presentCompound, requiredCompound)) {
+                    return false;
+                }
+            } else if (!present.equals(required)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private void clearCustomOperation(@Nullable ServerPlayer player) {
         RunningOperation operation = runningOperation;
         runningOperation = null;
@@ -1442,6 +1692,16 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                     FailureReason.EXECUTION_EXCEPTION, player)
                     : operation.onCancel(customCancelReason, player);
             customCancelReason = null;
+            String cleanupFailure = validateCustomCleanup(cleanup);
+            if (cleanupFailure != null) {
+                LOGGER.warn(
+                        "[RSI-API] custom cleanup is not safe for {}: {}",
+                        operationStartContext.operationId(),
+                        cleanupFailure
+                );
+                retainAllCustomFluids(player);
+                return;
+            }
             List<ItemStack> recovered = new ArrayList<>();
             for (MaterialDisposition disposition : cleanup.materials()) {
                 if (disposition.outcome() != MaterialOutcome.RECOVERED
@@ -1462,12 +1722,54 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                     recipe == null ? "unknown" : recipe.getId(),
                     exception
             );
-            if (!customReservedFluids.isEmpty()) {
-                retainCustomFluids(
-                        Map.copyOf(customReservedFluids), player);
-                customReservedFluids.clear();
+            retainAllCustomFluids(player);
+        }
+    }
+
+    @Nullable
+    private String validateCustomCleanup(
+            OperationCleanupResult cleanup
+    ) {
+        if (!cleanup.cleanupComplete()) {
+            return "cleanupComplete=false";
+        }
+        Map<String, Long> totals = new LinkedHashMap<>();
+        for (MaterialDisposition disposition : cleanup.materials()) {
+            ReservedMaterial reserved = customMaterials.find(
+                    disposition.material().entryId()).orElse(null);
+            if (reserved == null) {
+                return "undeclared material "
+                        + disposition.material().entryId();
+            }
+            long previous = totals.getOrDefault(
+                    reserved.entryId(), 0L);
+            String failure = validateMaterialDispositionAgainstReservation(
+                    reserved, disposition, previous);
+            if (failure != null) return failure;
+            long total;
+            try {
+                total = Math.addExact(
+                        previous, disposition.material().amount());
+            } catch (ArithmeticException exception) {
+                return "material disposition overflowed: "
+                        + reserved.entryId();
+            }
+            totals.put(reserved.entryId(), total);
+        }
+        for (ReservedMaterial material : customMaterials.materials()) {
+            if (totals.getOrDefault(material.entryId(), 0L)
+                    != material.amount()) {
+                return "cleanup did not account for reserved material "
+                        + material.entryId();
             }
         }
+        return null;
+    }
+
+    private void retainAllCustomFluids(@Nullable ServerPlayer player) {
+        if (customReservedFluids.isEmpty()) return;
+        retainCustomFluids(Map.copyOf(customReservedFluids), player);
+        customReservedFluids.clear();
     }
 
     private void settleCustomFluidInputs(

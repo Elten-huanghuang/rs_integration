@@ -35,8 +35,13 @@ import com.huanghuang.rsintegration.api.execution.ExecutionResult;
 import com.huanghuang.rsintegration.api.execution.FluidRoute;
 import com.huanghuang.rsintegration.api.execution.InputRoute;
 import com.huanghuang.rsintegration.api.execution.LifecyclePhase;
+import com.huanghuang.rsintegration.api.execution.CollectedOutput;
+import com.huanghuang.rsintegration.api.execution.MaterialDisposition;
+import com.huanghuang.rsintegration.api.execution.MaterialOutcome;
 import com.huanghuang.rsintegration.api.execution.OutputPort;
 import com.huanghuang.rsintegration.api.execution.OperationContext;
+import com.huanghuang.rsintegration.api.execution.OperationCleanupResult;
+import com.huanghuang.rsintegration.api.execution.OperationCollection;
 import com.huanghuang.rsintegration.api.execution.OperationSnapshot;
 import com.huanghuang.rsintegration.api.execution.RecipeExecutionIntegration;
 import com.huanghuang.rsintegration.api.execution.ReservedMaterial;
@@ -78,6 +83,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -374,6 +380,281 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
         resume.setAccessible(true);
         assertTrue((Boolean) resume.invoke(delegate, level));
         assertEquals(resumed, getField(delegate, "runningOperation"));
+    }
+
+    @Test
+    void customCollectedOutputMustMatchDeclaredIdentityAndMaximum() {
+        CompoundTag expectedIdentity = new CompoundTag();
+        expectedIdentity.putInt("level", 2);
+        IntegrationResourceKey declaredResource =
+                new IntegrationResourceKey(
+                        IntegrationResourceKey.ResourceKind.ITEM,
+                        BuiltInRegistries.ITEM.getKey(Items.STICK),
+                        expectedIdentity
+                );
+        OutputDeclaration declaration = new OutputDeclaration(
+                resource("strict_output"),
+                "output",
+                declaredResource,
+                new OutputAmount(1L, 1L),
+                OutputKind.PRIMARY,
+                OutputProbability.guaranteed(),
+                false,
+                false,
+                null
+        );
+        OutputPort port = outputPort(declaration);
+
+        CompoundTag wrongIdentity = new CompoundTag();
+        wrongIdentity.putInt("level", 1);
+        CollectedOutput wrong = new CollectedOutput(
+                new IntegrationResourceKey(
+                        IntegrationResourceKey.ResourceKind.ITEM,
+                        BuiltInRegistries.ITEM.getKey(Items.STICK),
+                        wrongIdentity
+                ),
+                1L,
+                OutputKind.PRIMARY,
+                declaration.portId()
+        );
+        assertTrue(ExternalIntegrationBatchDelegate
+                .validateCollectedOutputAgainstPort(port, wrong, 0L)
+                .contains("identity"));
+
+        CollectedOutput excessive = new CollectedOutput(
+                declaredResource,
+                2L,
+                OutputKind.PRIMARY,
+                declaration.portId()
+        );
+        assertTrue(ExternalIntegrationBatchDelegate
+                .validateCollectedOutputAgainstPort(port, excessive, 0L)
+                .contains("maximum"));
+    }
+
+    @Test
+    void customMaterialDispositionMustPreserveResourceAndReservationLimit() {
+        ReservedMaterial reserved = new ReservedMaterial(
+                "input",
+                IntegrationResourceKey.item(new ItemStack(Items.DIAMOND, 2)),
+                2L,
+                InputConsumption.consumed()
+        );
+        MaterialDisposition wrongResource = new MaterialDisposition(
+                new ReservedMaterial(
+                        "input",
+                        IntegrationResourceKey.item(new ItemStack(Items.STICK, 2)),
+                        2L,
+                        InputConsumption.consumed()
+                ),
+                MaterialOutcome.RECOVERED
+        );
+        assertTrue(ExternalIntegrationBatchDelegate
+                .validateMaterialDispositionAgainstReservation(
+                        reserved, wrongResource, 0L)
+                .contains("identity"));
+
+        MaterialDisposition excessive = new MaterialDisposition(
+                new ReservedMaterial(
+                        "input",
+                        reserved.resource(),
+                        3L,
+                        reserved.consumption()
+                ),
+                MaterialOutcome.RECOVERED
+        );
+        assertTrue(ExternalIntegrationBatchDelegate
+                .validateMaterialDispositionAgainstReservation(
+                        reserved, excessive, 0L)
+                .contains("exceeds"));
+    }
+
+    @Test
+    void uncertainCustomCleanupDoesNotBecomeRefundable()
+            throws ReflectiveOperationException {
+        RecipeView view = recipeView(
+                resource("cleanup_recipe"), resource("cleanup_process"));
+        MaterialRequirement input = view.materials().get(0);
+        ReservedMaterial reserved = new ReservedMaterial(
+                input.entryId().toString(),
+                IntegrationResourceKey.item(new ItemStack(Items.DIAMOND, 2)),
+                2L,
+                input.consumption()
+        );
+        RunningOperation operation = mock(RunningOperation.class);
+        when(operation.onFailure(any(), any())).thenReturn(
+                new OperationCleanupResult(
+                        false,
+                        List.of(new MaterialDisposition(
+                                reserved, MaterialOutcome.UNCERTAIN)),
+                        List.of(),
+                        List.of()
+                )
+        );
+        ExternalIntegrationBatchDelegate delegate =
+                new ExternalIntegrationBatchDelegate(
+                        new DefaultRSIIntegrationApi());
+        setField(delegate, "runningOperation", operation);
+        setField(delegate, "customMaterials",
+                new StubReservedMaterials(List.of(reserved)));
+        setField(delegate, "operationStartContext",
+                new OperationStartContext(
+                        mock(ServerPlayer.class),
+                        new ExtractionLedger(),
+                        OperationStartContext.MaterialOwnership.CHAIN_RESERVED,
+                        MaterialPlan.none(),
+                        List.of(),
+                        null,
+                        null,
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        1
+                ));
+
+        Method clear = ExternalIntegrationBatchDelegate.class
+                .getDeclaredMethod(
+                        "clearCustomOperation", ServerPlayer.class);
+        clear.setAccessible(true);
+        clear.invoke(delegate, (ServerPlayer) null);
+
+        assertNull(delegate.failureRecoveredInputs());
+        assertEquals(false,
+                delegate.physicalFailureCleanupCompleted());
+    }
+
+    @Test
+    void completeCustomCleanupRecordsOnlyValidatedRecoveredMaterials()
+            throws ReflectiveOperationException {
+        RecipeView view = recipeView(
+                resource("complete_cleanup_recipe"),
+                resource("complete_cleanup_process"));
+        MaterialRequirement input = view.materials().get(0);
+        ReservedMaterial reserved = new ReservedMaterial(
+                input.entryId().toString(),
+                IntegrationResourceKey.item(new ItemStack(Items.DIAMOND, 2)),
+                2L,
+                input.consumption()
+        );
+        RunningOperation operation = mock(RunningOperation.class);
+        when(operation.onFailure(any(), any())).thenReturn(
+                new OperationCleanupResult(
+                        true,
+                        List.of(new MaterialDisposition(
+                                reserved, MaterialOutcome.RECOVERED)),
+                        List.of(),
+                        List.of()
+                )
+        );
+        ExternalIntegrationBatchDelegate delegate =
+                new ExternalIntegrationBatchDelegate(
+                        new DefaultRSIIntegrationApi());
+        setField(delegate, "runningOperation", operation);
+        setField(delegate, "customMaterials",
+                new StubReservedMaterials(List.of(reserved)));
+        setField(delegate, "operationStartContext",
+                new OperationStartContext(
+                        mock(ServerPlayer.class),
+                        new ExtractionLedger(),
+                        OperationStartContext.MaterialOwnership.CHAIN_RESERVED,
+                        MaterialPlan.none(),
+                        List.of(),
+                        null,
+                        null,
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        1
+                ));
+
+        Method clear = ExternalIntegrationBatchDelegate.class
+                .getDeclaredMethod(
+                        "clearCustomOperation", ServerPlayer.class);
+        clear.setAccessible(true);
+        clear.invoke(delegate, (ServerPlayer) null);
+
+        List<ItemStack> recovered = delegate.failureRecoveredInputs();
+        assertEquals(1, recovered.size());
+        assertEquals(Items.DIAMOND, recovered.get(0).getItem());
+        assertEquals(2, recovered.get(0).getCount());
+    }
+
+    @Test
+    void customCollectionAccumulatesPartialSequencesBeforeCompletion()
+            throws ReflectiveOperationException {
+        RecipeView view = recipeView(
+                resource("partial_recipe"), resource("partial_process"));
+        MaterialRequirement input = view.materials().get(0);
+        OutputDeclaration output = view.outputs().get(0);
+        ReservedMaterial reserved = new ReservedMaterial(
+                input.entryId().toString(),
+                IntegrationResourceKey.item(new ItemStack(Items.DIAMOND, 2)),
+                2L,
+                input.consumption()
+        );
+        ServerPlayer player = mock(ServerPlayer.class);
+        RunningOperation operation = mock(RunningOperation.class);
+        when(operation.collect(player)).thenReturn(
+                new OperationCollection(
+                        1L,
+                        List.of(new CollectedOutput(
+                                output.resource(),
+                                1L,
+                                output.outputKind(),
+                                output.portId()
+                        )),
+                        List.of(),
+                        false,
+                        List.of()
+                ),
+                new OperationCollection(
+                        2L,
+                        List.of(),
+                        List.of(new MaterialDisposition(
+                                reserved,
+                                MaterialOutcome.CONSUMED
+                        )),
+                        true,
+                        List.of()
+                )
+        );
+        ExternalIntegrationBatchDelegate delegate =
+                new ExternalIntegrationBatchDelegate(
+                        new DefaultRSIIntegrationApi());
+        setField(delegate, "runningOperation", operation);
+        setField(delegate, "customMaterials",
+                new StubReservedMaterials(List.of(reserved)));
+        setField(delegate, "recipeView", view);
+        setField(delegate, "executionKind", RecipeExecutionKind.CUSTOM);
+        setField(delegate, "executionPlan", customPlan(
+                view,
+                List.of(),
+                List.of(outputPort(output))
+        ));
+        setField(delegate, "operationStartContext",
+                new OperationStartContext(
+                        player,
+                        new ExtractionLedger(),
+                        OperationStartContext.MaterialOwnership.CHAIN_RESERVED,
+                        MaterialPlan.none(),
+                        List.of(),
+                        null,
+                        null,
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        1
+                ));
+
+        Method collectStep = ExternalIntegrationBatchDelegate.class
+                .getDeclaredMethod("collectCustomStep");
+        collectStep.setAccessible(true);
+        assertNull(collectStep.invoke(delegate));
+        assertNull(collectStep.invoke(delegate));
+        assertEquals(true, getField(
+                delegate, "customCollectionComplete"));
+
+        List<ItemStack> results = delegate.collectAllResults(player);
+        assertEquals(1, results.size());
+        assertEquals(Items.STICK, results.get(0).getItem());
+        assertEquals(1, results.get(0).getCount());
     }
 
     private static ExecutionPlan customPlan(
