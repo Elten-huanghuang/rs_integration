@@ -49,6 +49,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
+import java.util.HashMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.item.crafting.ShapedRecipe;
@@ -195,10 +196,12 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 public final class GenericCraftPacket {
+    @Nullable
+    private static volatile Map<String, Set<Item>> itemTypesByDescriptionIdCache;
 
     private static Map<StackKey, Long> listAvailable(ServerPlayer player,
                                                           @Nullable CraftStorageEndpoint endpoint) {
-        return MaterialSources.listAllAvailable(player, endpoint);
+        return MaterialSources.listAllAvailableFresh(player, endpoint);
     }
 
     private static DirectReservationCheck probeDirectTerminalReservation(
@@ -1741,17 +1744,28 @@ public final class GenericCraftPacket {
                 List<String> missing = new ArrayList<>();
                 CraftPlanGraph inputGraph;
                 try {
-                    inputGraph = CraftExecutionPolicy.usesPhysicalMachineInputSlots(recipe)
-                            ? CraftingResolver.resolveMachineGraphForScaledSpecsWithTypes(
-                                    graphSpecs, avail, player.serverLevel(), player, storageEndpoint, missing,
-                                    forcedOverrides, false, typedResolverBudgetMs(),
-                                    new CraftingResolver.ActiveRootRecipe(recipeId, recipeOutput),
-                                    materialLocks, safePreferences)
-                            : CraftingResolver.resolveGraphForScaledSpecsWithTypes(
-                                    graphSpecs, avail, player.serverLevel(), player, storageEndpoint, missing,
-                                    forcedOverrides, false, typedResolverBudgetMs(),
-                                    new CraftingResolver.ActiveRootRecipe(recipeId, recipeOutput),
-                                    materialLocks, safePreferences);
+                    inputGraph = null;
+                    for (int attempt = 0; attempt < 2; attempt++) {
+                        missing.clear();
+                        inputGraph = CraftExecutionPolicy.usesPhysicalMachineInputSlots(recipe)
+                                ? CraftingResolver.resolveMachineGraphForScaledSpecsWithTypes(
+                                        graphSpecs, avail, player.serverLevel(), player,
+                                        storageEndpoint, missing, forcedOverrides, false,
+                                        typedResolverBudgetMs(),
+                                        new CraftingResolver.ActiveRootRecipe(recipeId, recipeOutput),
+                                        materialLocks, safePreferences)
+                                : CraftingResolver.resolveGraphForScaledSpecsWithTypes(
+                                        graphSpecs, avail, player.serverLevel(), player,
+                                        storageEndpoint, missing, forcedOverrides, false,
+                                        typedResolverBudgetMs(),
+                                        new CraftingResolver.ActiveRootRecipe(recipeId, recipeOutput),
+                                        materialLocks, safePreferences);
+                        if (missing.isEmpty()) break;
+                        Map<StackKey, Long> refreshed = refreshMissingAvailability(
+                                player, storageEndpoint, missing, avail);
+                        if (refreshed == null) break;
+                        avail = refreshed;
+                    }
                 } catch (CraftingPlanningTimeoutException timeout) {
                     if (!typedGraphOnly && safePreferences.isEmpty()
                             && CraftPureExecutionPlanner.queuePhysical(player, recipe, recipeId,
@@ -1764,6 +1778,7 @@ public final class GenericCraftPacket {
                     throw timeout;
                 }
                 if (!missing.isEmpty()) {
+                    logAvailabilityAudit(recipeId, storageEndpoint, missing, avail);
                     RSIntegrationMod.LOGGER.warn(
                             "[RSI-Craft] physical planning failed recipe={} modType={} missing={} "
                                     + "cache={} cachedPure={} pureQueued={} endpoint={} forced={} dim={} pos={}",
@@ -2110,6 +2125,85 @@ public final class GenericCraftPacket {
         }
         RSIntegrationMod.LOGGER.debug("[RSI-ExecAvail] recipe={} keys={} tea={} oak_planks={}",
                 recipeId, available.size(), tea, oak);
+    }
+
+    private static void logAvailabilityAudit(
+            ResourceLocation recipeId,
+            @Nullable CraftStorageEndpoint endpoint,
+            List<String> missing,
+            Map<StackKey, Long> available) {
+        Set<String> missingIds = new HashSet<>(missing);
+        List<String> matching = new ArrayList<>();
+        for (Map.Entry<StackKey, Long> entry : available.entrySet()) {
+            String descriptionId = entry.getKey().item().getDescriptionId();
+            if (!missingIds.contains(descriptionId)) continue;
+            ResourceLocation itemId = BuiltInRegistries.ITEM.getKey(entry.getKey().item());
+            matching.add(itemId + " x" + entry.getValue()
+                    + (entry.getKey().tag() == null ? "" : " tag=" + entry.getKey().tag()));
+        }
+        String reference = "none";
+        if (endpoint != null) {
+            try {
+                reference = endpoint.session().reference().toString();
+            } catch (RuntimeException exception) {
+                reference = "unavailable:" + exception.getClass().getSimpleName();
+            }
+        }
+        RSIntegrationMod.LOGGER.warn(
+                "[RSI-ExecAvailAudit] recipe={} endpoint={} missing={} matchingKeys={}",
+                recipeId, reference, missing,
+                matching.isEmpty() ? "<none>" : matching);
+    }
+
+    @Nullable
+    static Map<StackKey, Long> refreshMissingAvailability(
+            ServerPlayer player,
+            @Nullable CraftStorageEndpoint endpoint,
+            List<String> missing,
+            Map<StackKey, Long> available) {
+        if (endpoint == null || missing.isEmpty()) return null;
+        Set<Item> itemTypes = new HashSet<>();
+        Map<String, Set<Item>> index = itemTypesByDescriptionId();
+        for (String descriptionId : missing) {
+            itemTypes.addAll(index.getOrDefault(descriptionId, Set.of()));
+        }
+        if (itemTypes.isEmpty()) return null;
+        Map<StackKey, Long> updates = new HashMap<>();
+        for (Map.Entry<StackKey, Long> entry : MaterialSources.listAvailableForTypes(
+                player, endpoint, itemTypes).entrySet()) {
+            if (entry.getValue() == null || entry.getValue() <= 0L) continue;
+            Long previous = available.get(entry.getKey());
+            if (previous == null || !previous.equals(entry.getValue())) {
+                updates.put(entry.getKey(), entry.getValue());
+            }
+        }
+        if (updates.isEmpty()) return null;
+        Map<StackKey, Long> refreshed = new HashMap<>(available);
+        refreshed.putAll(updates);
+        RSIntegrationMod.LOGGER.info(
+                "[RSI-ExecAvail] refreshed missing types through narrow snapshot recipeTypes={}",
+                itemTypes.stream()
+                        .map(item -> BuiltInRegistries.ITEM.getKey(item).toString())
+                        .sorted()
+                        .toList());
+        return Map.copyOf(refreshed);
+    }
+
+    private static Map<String, Set<Item>> itemTypesByDescriptionId() {
+        Map<String, Set<Item>> cached = itemTypesByDescriptionIdCache;
+        if (cached != null) return cached;
+        synchronized (GenericCraftPacket.class) {
+            if (itemTypesByDescriptionIdCache != null) return itemTypesByDescriptionIdCache;
+            // 物品注册表在游戏启动后不再变化，缺料字符串到物品类型的索引只需构建一次。
+            Map<String, Set<Item>> built = new HashMap<>();
+            for (Item item : BuiltInRegistries.ITEM) {
+                built.computeIfAbsent(item.getDescriptionId(), ignored -> new HashSet<>())
+                        .add(item);
+            }
+            built.replaceAll((ignored, items) -> Set.copyOf(items));
+            itemTypesByDescriptionIdCache = Map.copyOf(built);
+            return itemTypesByDescriptionIdCache;
+        }
     }
 
     private static final class IngredientNeed {

@@ -131,12 +131,27 @@ public final class MaterialSources {
             if (!normalized.equals(cached)) cache.put(cacheKey, normalized);
             return normalized;
         }
+        AvailabilityLoad loaded = loadAllAvailable(player, endpoint);
+        if (!loaded.snapshotSuccessful()) return loaded.counts();
+        Map<StackKey, Long> snapshot = Map.copyOf(loaded.counts());
+        cache.putIfAbsent(cacheKey, snapshot);
+        return snapshot;
+    }
 
+    /**
+     * 执行阶段使用的新鲜视图。玩家或后端刚修改库存时，同一 tick 的缓存
+     * 不能作为最终下单依据。
+     */
+    public static Map<StackKey, Long> listAllAvailableFresh(
+            ServerPlayer player, @Nullable CraftStorageEndpoint endpoint) {
+        return Map.copyOf(loadAllAvailable(player, endpoint).counts());
+    }
+
+    private static AvailabilityLoad loadAllAvailable(
+            ServerPlayer player, @Nullable CraftStorageEndpoint endpoint) {
         Map<StackKey, Long> available = new HashMap<>(toLongCounts(countInventory(player)));
         if (endpoint == null) {
-            Map<StackKey, Long> snapshot = Map.copyOf(available);
-            cache.putIfAbsent(cacheKey, snapshot);
-            return snapshot;
+            return new AvailabilityLoad(available, true);
         }
         var snapshotResult = endpoint.snapshot(player);
         snapshotResult.snapshot().ifPresent(snapshot -> snapshot.items().forEach(item ->
@@ -168,13 +183,11 @@ public final class MaterialSources {
                     snapshotResult.snapshot().map(s -> s.items().size()).orElse(0),
                     available.size(), exact);
         }
-        // A failed backend snapshot must not be cached as an inventory-only
-        // result: a transient backend failure can recover within this tick.
-        if (!snapshotResult.successful()) return available;
-        Map<StackKey, Long> snapshot = Map.copyOf(available);
-        cache.putIfAbsent(cacheKey, snapshot);
-        return snapshot;
+        return new AvailabilityLoad(available, snapshotResult.successful());
     }
+
+    private record AvailabilityLoad(Map<StackKey, Long> counts,
+                                    boolean snapshotSuccessful) {}
 
     /**
      * Fresh narrow snapshot used when a completed plan only needs its concrete

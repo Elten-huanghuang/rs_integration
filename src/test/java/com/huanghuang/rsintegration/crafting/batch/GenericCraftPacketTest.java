@@ -2,9 +2,11 @@ package com.huanghuang.rsintegration.crafting.batch;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
+import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.DirectMaterialAllocator;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -34,14 +36,24 @@ import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.planning.PlanningSnapshot;
 import com.huanghuang.rsintegration.crafting.planning.PlanningPreferences;
 import com.huanghuang.rsintegration.crafting.plan.RecipeChoice;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.mods.embers.EreAlchemyRSModule;
 import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketRecipeWrapper;
+import com.huanghuang.rsintegration.storage.StorageBackendId;
+import com.huanghuang.rsintegration.storage.StorageItemKey;
+import com.huanghuang.rsintegration.storage.StorageSession;
+import com.huanghuang.rsintegration.storage.StorageSnapshot;
+import com.huanghuang.rsintegration.storage.StorageSnapshotResult;
+import com.huanghuang.rsintegration.storage.StoredItem;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import com.huanghuang.rsintegration.util.ModIds;
 import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.nbt.CompoundTag;
@@ -52,9 +64,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeAll;
 import org.mockito.MockedStatic;
 import net.minecraftforge.fml.ModList;
+import net.minecraftforge.eventbus.api.IEventBus;
+import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 
 import java.util.List;
 import java.util.Map;
+import java.util.AbstractMap;
 import java.util.HashMap;
 import java.util.ArrayList;
 import java.util.Set;
@@ -65,6 +80,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anySet;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.when;
@@ -78,6 +97,73 @@ class GenericCraftPacketTest extends BootstrapTest {
         assertFalse(GenericCraftPacket.hasSelectedCraftingPlanner(false, false, false));
     }
 
+    @Test
+    void missingTypeRefreshReturnsANewImmutableAvailabilityMap() {
+        ServerPlayer player = mock(ServerPlayer.class);
+        when(player.getInventory()).thenReturn(new Inventory(mock(Player.class)));
+        StorageSession session = mock(StorageSession.class);
+        when(session.countDerivedContainer(any(), any())).thenReturn(0L);
+        CraftStorageEndpoint endpoint = mock(CraftStorageEndpoint.class);
+        when(endpoint.session()).thenReturn(session);
+        StorageBackendId backend = new StorageBackendId("test");
+        when(endpoint.snapshot(eq(player), anySet())).thenReturn(
+                StorageSnapshotResult.success(new StorageSnapshot(backend, List.of(
+                        new StoredItem(StorageItemKey.fromItemStack(
+                                backend, new ItemStack(Items.BRICK, 2)), 2L)))));
+
+        Map<StackKey, Long> immutableAvailable = Map.copyOf(Map.of(
+                new StackKey(Items.STICK, null), 4L));
+        ModList modList = mock(ModList.class);
+        when(modList.isLoaded("sophisticatedbackpacks")).thenReturn(false);
+        try (MockedStatic<ModList> mods = mockStatic(ModList.class)) {
+            mods.when(ModList::get).thenReturn(modList);
+            Map<StackKey, Long> refreshed = GenericCraftPacket.refreshMissingAvailability(
+                    player, endpoint, List.of(Items.BRICK.getDescriptionId()),
+                    immutableAvailable);
+
+            assertNotNull(refreshed);
+            assertEquals(4L, refreshed.get(
+                    new StackKey(Items.STICK, null)));
+            assertEquals(2L, refreshed.get(
+                    new StackKey(Items.BRICK, null)));
+            assertThrows(UnsupportedOperationException.class,
+                    () -> refreshed.put(new StackKey(Items.APPLE, null), 1L));
+        }
+    }
+
+    @Test
+    void missingTypeRefreshDoesNotCopyAvailabilityWhenStillMissing() {
+        ServerPlayer player = mock(ServerPlayer.class);
+        when(player.getInventory()).thenReturn(new Inventory(mock(Player.class)));
+        StorageSession session = mock(StorageSession.class);
+        when(session.countDerivedContainer(any(), any())).thenReturn(0L);
+        CraftStorageEndpoint endpoint = mock(CraftStorageEndpoint.class);
+        when(endpoint.session()).thenReturn(session);
+        StorageBackendId backend = new StorageBackendId("test");
+        when(endpoint.snapshot(eq(player), anySet())).thenReturn(
+                StorageSnapshotResult.success(new StorageSnapshot(backend, List.of())));
+
+        Map<StackKey, Long> copyGuard = new AbstractMap<>() {
+            @Override
+            public Long get(Object key) {
+                return new StackKey(Items.STICK, null).equals(key) ? 4L : null;
+            }
+
+            @Override
+            public Set<Map.Entry<StackKey, Long>> entrySet() {
+                throw new AssertionError("仍缺料时不应复制整张可用材料表");
+            }
+        };
+        ModList modList = mock(ModList.class);
+        when(modList.isLoaded("sophisticatedbackpacks")).thenReturn(false);
+        try (MockedStatic<ModList> mods = mockStatic(ModList.class)) {
+            mods.when(ModList::get).thenReturn(modList);
+            assertNull(GenericCraftPacket.refreshMissingAvailability(
+                    player, endpoint, List.of(Items.BRICK.getDescriptionId()),
+                    copyGuard));
+        }
+    }
+
 
     @BeforeAll
     static void loadServerConfig() {
@@ -85,6 +171,13 @@ class GenericCraftPacketTest extends BootstrapTest {
         RSIntegrationConfig.SERVER_SPEC.correct(config);
         RSIntegrationConfig.SERVER_SPEC.setConfig(config);
         EreAlchemyRSModule.INSTANCE.registerModType();
+        FMLJavaModLoadingContext context = mock(FMLJavaModLoadingContext.class);
+        when(context.getModEventBus()).thenReturn(mock(IEventBus.class));
+        try (MockedStatic<FMLJavaModLoadingContext> loading =
+                     mockStatic(FMLJavaModLoadingContext.class)) {
+            loading.when(FMLJavaModLoadingContext::get).thenReturn(context);
+            assertNotNull(RSIntegrationMod.LOGGER);
+        }
     }
 
     @Test
