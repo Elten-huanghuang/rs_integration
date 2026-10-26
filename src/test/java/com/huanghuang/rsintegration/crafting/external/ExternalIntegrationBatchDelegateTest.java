@@ -13,6 +13,8 @@ import com.huanghuang.rsintegration.api.machine.MachineDescriptorResult;
 import com.huanghuang.rsintegration.api.machine.MachineExecutionMode;
 import com.huanghuang.rsintegration.api.machine.MachineIntegration;
 import com.huanghuang.rsintegration.api.machine.MachineItemPort;
+import com.huanghuang.rsintegration.api.machine.MachineState;
+import com.huanghuang.rsintegration.api.machine.MachineStateProvider;
 import com.huanghuang.rsintegration.api.machine.SupportScope;
 import com.huanghuang.rsintegration.api.recipe.InputConsumption;
 import com.huanghuang.rsintegration.api.recipe.ItemAlternative;
@@ -209,6 +211,21 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
                 () -> preparation.detail() + " / "
                         + preparation.userMessage()
         );
+        machineIntegration.stateProvider =
+                (context, ignored) -> new MachineState(
+                        true,
+                        true,
+                        true,
+                        1,
+                        10,
+                        recipeId,
+                        processId,
+                        1L,
+                        null
+                );
+        var busy = delegate.prepare(player, recipeId, null, position);
+        assertEquals(IBatchDelegate.PreparationState.RETRY, busy.state());
+        machineIntegration.stateProvider = null;
         BatchConcurrencyCapabilities concurrency =
                 delegate.concurrencyCapabilities();
         assertEquals(
@@ -1058,6 +1075,7 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
             implements MachineIntegration {
         private final ResourceLocation processId;
         private long revision = 1L;
+        private MachineStateProvider stateProvider;
 
         private StubMachineIntegration(ResourceLocation processId) {
             this.processId = processId;
@@ -1126,6 +1144,11 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
                     ),
                     false
             ));
+        }
+
+        @Override
+        public Optional<MachineStateProvider> stateProvider() {
+            return Optional.ofNullable(stateProvider);
         }
     }
 }

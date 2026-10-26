@@ -350,6 +350,41 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                     "RSI Integration recipe and machine use different execution modes");
             return false;
         }
+        MachineStateProvider provider = machine.stateProvider().orElse(null);
+        if (!customRecipe && provider != null) {
+            MachineState state;
+            try {
+                state = provider.readState(machineContext, blockEntity);
+            } catch (RuntimeException | LinkageError failure) {
+                preparationRetryable = true;
+                preparationFailure = Component.literal(
+                        "RSI Integration machine state read failed: "
+                                + failure.getClass().getSimpleName());
+                return false;
+            }
+            if (!state.loaded() || !state.valid()) {
+                preparationRetryable = true;
+                preparationFailure = Component.literal(
+                        "RSI Integration machine is unloaded or invalid");
+                return false;
+            }
+            if (state.failure() != null) {
+                preparationRetryable = true;
+                preparationFailure = Component.literal(
+                        "RSI Integration machine reported "
+                                + state.failure().code());
+                return false;
+            }
+            if (state.busy()) {
+                preparationRetryable = true;
+                preparationFailure = Component.literal(
+                        "RSI Integration machine is busy with recipe "
+                                + state.activeRecipeId()
+                                + " and process "
+                                + state.activeProcessId());
+                return false;
+            }
+        }
         RecipeExecutionIntegration custom = null;
         if (customRecipe) {
             ExecutionClaim executionClaim = api.executions().claim(
@@ -410,7 +445,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         this.recipeView = projection.view();
         this.machineIntegration = machine;
         this.descriptor = machineDescriptor;
-        this.stateProvider = machine.stateProvider().orElse(null);
+        this.stateProvider = provider;
         this.executionKind = executionKind;
         this.executionIntegration = custom;
         this.executionPlan = null;
