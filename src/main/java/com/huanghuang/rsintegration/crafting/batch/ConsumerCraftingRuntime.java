@@ -2124,7 +2124,7 @@ public final class ConsumerCraftingRuntime {
             }
         }
         GenericCraftPacket.BindingAwareGraph bindingGraph =
-                GenericCraftPacket.bindingAwareGraph(
+                GenericCraftPacket.consumerBindingAwareGraph(
                         player,
                         ImmutableRecipeGraphProjector.capture(
                                 player.serverLevel())

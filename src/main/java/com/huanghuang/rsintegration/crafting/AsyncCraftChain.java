@@ -517,7 +517,8 @@ public final class AsyncCraftChain {
         if (terminal.executions() != executions) {
             terminal = new CraftingResolver.ResolutionStep(terminal.recipeId(), terminal.modType(),
                     terminal.recipeTypeId(), terminal.alternativeIds(), terminal.alternativeModTypes(),
-                    terminal.inferMode(), executions, terminal.syntheticInput(), terminal.syntheticOutput());
+                    terminal.inferMode(), executions, terminal.syntheticInput(), terminal.syntheticOutput(),
+                    terminal.productionTarget(), terminal.magicCosts());
         }
         result.add(terminal);
         return List.copyOf(result);

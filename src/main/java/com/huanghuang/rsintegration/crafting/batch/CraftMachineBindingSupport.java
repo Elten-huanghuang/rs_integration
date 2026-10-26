@@ -57,6 +57,25 @@ final class CraftMachineBindingSupport {
         return AltarBindingRegistry.hasBindingForRecipe(player, recipe, executionType);
     }
 
+    /** Consumer 预检必须排除所有候选机器均被活动订单租用的情况。 */
+    static boolean hasIdleBindingForExecutionType(
+            ServerPlayer player,
+            Recipe<?> recipe,
+            @Nullable ModType executionType
+    ) {
+        if (executionType == null) return true;
+        List<AltarBindingRegistry.BoundMachine> machines =
+                ModIds.ID_MD_COPPER_POT.equals(executionType.id())
+                        ? AltarBindingRegistry.getBoundMachinesForType(
+                        player, executionType)
+                        : AltarBindingRegistry.getBoundMachinesForRecipe(
+                        player, executionType, recipe.getId());
+        return !machines.isEmpty()
+                && !AsyncCraftManager.getInstance()
+                .areAllMachinesLeased(
+                        machines, executionType.id());
+    }
+
     static boolean isRecipeAvailableForPlanning(ServerPlayer player, Recipe<?> recipe) {
         ModRecipeHandler handler = ModRecipeHandlers.claimFor(recipe).winner();
         return handler == null || handler.isAvailableForPlanning(recipe, player);

@@ -871,6 +871,22 @@ public final class GenericCraftPacket {
 
     static BindingAwareGraph bindingAwareGraph(
             ServerPlayer player, ImmutableRecipeGraph graph) {
+        return bindingAwareGraph(player, graph, false);
+    }
+
+    /** Consumer 检查要求中间机器至少存在一台当前未租用的候选。 */
+    static BindingAwareGraph consumerBindingAwareGraph(
+            ServerPlayer player,
+            ImmutableRecipeGraph graph
+    ) {
+        return bindingAwareGraph(player, graph, true);
+    }
+
+    private static BindingAwareGraph bindingAwareGraph(
+            ServerPlayer player,
+            ImmutableRecipeGraph graph,
+            boolean requireIdleMachine
+    ) {
         Map<ResourceLocation, Optional<Recipe<?>>> recipes = new HashMap<>();
         Function<ResourceLocation, Recipe<?>> resolve = recipeId ->
                 recipes.computeIfAbsent(recipeId,
@@ -889,7 +905,11 @@ public final class GenericCraftPacket {
             // previews can show the complete upgrade chain. Execution still
             // requires a bound smithing table at the terminal entry point.
             if (CraftExecutionPolicy.isSmithingRecipe(recipe)) return true;
-            return CraftMachineBindingSupport.hasBindingForExecutionType(player, recipe, type);
+            return requireIdleMachine
+                    ? CraftMachineBindingSupport.hasIdleBindingForExecutionType(
+                    player, recipe, type)
+                    : CraftMachineBindingSupport.hasBindingForExecutionType(
+                    player, recipe, type);
         });
     }
 

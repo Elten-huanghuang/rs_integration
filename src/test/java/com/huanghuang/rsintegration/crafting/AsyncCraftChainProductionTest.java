@@ -119,6 +119,35 @@ class AsyncCraftChainProductionTest extends BootstrapTest {
     }
 
     @Test
+    void compatibilityStepKeepsProductionTargetWhenExecutionsAreRescaled() {
+        ProductionTarget target =
+                ProductionTarget.of(
+                        new ItemStack(Items.EGG), 2L);
+        CraftingResolver.ResolutionStep terminal =
+                new CraftingResolver.ResolutionStep(
+                        new ResourceLocation("test", "terminal"),
+                        ModType.GENERIC,
+                        new ResourceLocation("test", "machine"),
+                        List.of(),
+                        List.of(),
+                        false,
+                        1,
+                        null,
+                        null,
+                        target,
+                        List.of()
+                );
+
+        List<CraftingResolver.ResolutionStep> combined =
+                AsyncCraftChain.compatibilitySteps(
+                        List.of(), terminal, 2);
+
+        assertEquals(2, combined.get(0).executions());
+        assertEquals(target,
+                combined.get(0).productionTarget());
+    }
+
+    @Test
     void graphReservationScalesConsumablesButNotReusableWorkerMaterials() {
         List<IngredientSpec> scaled = AsyncCraftChain.scaleGraphSpecsForExecutions(
                 List.of(new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 2),
