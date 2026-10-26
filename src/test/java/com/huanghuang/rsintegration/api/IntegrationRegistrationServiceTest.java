@@ -54,6 +54,34 @@ class IntegrationRegistrationServiceTest {
     }
 
     @Test
+    void lifecycleRejectionPrecedesIntegrationValidation() {
+        DefaultRSIIntegrationApi api = new DefaultRSIIntegrationApi();
+
+        assertEquals(
+                RegistrationStatus.PHASE_INVALID,
+                api.registerRecipe(null).status()
+        );
+
+        api.beginRegistration();
+        assertEquals(
+                RegistrationStatus.REJECTED,
+                api.registerRecipe(null).status()
+        );
+
+        api.freezeRegistration();
+        assertEquals(
+                RegistrationStatus.FROZEN,
+                api.registerRecipe(null).status()
+        );
+
+        api.stop();
+        assertEquals(
+                RegistrationStatus.PHASE_INVALID,
+                api.registerRecipe(null).status()
+        );
+    }
+
+    @Test
     void recipeClaimUsesHighestPriorityAndRejectsTies() {
         DefaultRSIIntegrationApi api = new DefaultRSIIntegrationApi();
         StubRecipeIntegration low = new StubRecipeIntegration("low", 10);

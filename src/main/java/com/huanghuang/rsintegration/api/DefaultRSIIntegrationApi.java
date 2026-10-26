@@ -133,6 +133,16 @@ public final class DefaultRSIIntegrationApi implements RSIIntegrationApi {
             @Nullable RegistrationOptions options
     ) {
         RegistrationPhase currentPhase = phase;
+        if (currentPhase == RegistrationPhase.FROZEN) {
+            return rejected(RegistrationStatus.FROZEN, currentPhase, null,
+                    IntegrationDiagnosticCode.REGISTRATION_FROZEN, kind,
+                    "registration_frozen");
+        }
+        if (currentPhase != RegistrationPhase.REGISTRATION) {
+            return rejected(RegistrationStatus.PHASE_INVALID, currentPhase, null,
+                    IntegrationDiagnosticCode.REGISTRATION_PHASE_INVALID, kind,
+                    "registration_phase");
+        }
         if (integration == null) {
             return rejected(RegistrationStatus.REJECTED, currentPhase, null,
                     IntegrationDiagnosticCode.REGISTRATION_INVALID_DECLARATION, kind,
@@ -150,16 +160,6 @@ public final class DefaultRSIIntegrationApi implements RSIIntegrationApi {
             return rejected(RegistrationStatus.REJECTED, currentPhase, null,
                     IntegrationDiagnosticCode.REGISTRATION_INVALID_DECLARATION, kind,
                     "invalid_id");
-        }
-        if (currentPhase == RegistrationPhase.FROZEN) {
-            return rejected(RegistrationStatus.FROZEN, currentPhase, id,
-                    IntegrationDiagnosticCode.REGISTRATION_FROZEN, kind,
-                    "registration_frozen");
-        }
-        if (currentPhase != RegistrationPhase.REGISTRATION) {
-            return rejected(RegistrationStatus.PHASE_INVALID, currentPhase, id,
-                    IntegrationDiagnosticCode.REGISTRATION_PHASE_INVALID, kind,
-                    "registration_phase");
         }
         RegistrationOptions safeOptions = options == null
                 ? RegistrationOptions.defaults() : options;

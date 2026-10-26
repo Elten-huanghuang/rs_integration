@@ -4,4 +4,7 @@
  * <p>Consumer 只能通过本包查询目录、创建检查会话、提交订单和读取状态，
  * 不得依赖 RSI 内部的配方图、委托器、能力或网络包类型。</p>
  */
+@ApiStatus.AvailableSince("1.0.0")
 package com.huanghuang.rsintegration.api.consumer;
+
+import org.jetbrains.annotations.ApiStatus;

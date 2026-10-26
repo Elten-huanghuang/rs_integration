@@ -3,7 +3,6 @@ package com.example.rsiintegration;
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.api.RSIIntegrationApi;
 import com.huanghuang.rsintegration.api.RSIIntegrationRegistrationEvent;
-import com.huanghuang.rsintegration.api.RSIIntegrationServices;
 import com.huanghuang.rsintegration.api.RegistrationResult;
 import com.huanghuang.rsintegration.api.ResourceMatchMode;
 import com.huanghuang.rsintegration.api.diagnostic.IntegrationDiagnostic;
@@ -39,37 +38,43 @@ import com.huanghuang.rsintegration.api.recipe.RecipeFlags;
 import com.huanghuang.rsintegration.api.recipe.RecipeInspectionResult;
 import com.huanghuang.rsintegration.api.recipe.RecipeIntegration;
 import com.huanghuang.rsintegration.api.recipe.RecipeView;
-import com.huanghuang.rsintegration.testutil.BootstrapTest;
-import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraftforge.eventbus.api.BusBuilder;
-import net.minecraftforge.eventbus.api.IEventBus;
-import org.junit.jupiter.api.Test;
-
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.mock;
+import static java.util.Objects.requireNonNull;
 
-class PublicIntegrationExampleTest extends BootstrapTest {
-    private static final ResourceLocation PROCESS =
+public final class PublicIntegrationExample {
+    public static final ResourceLocation PROCESS =
             new ResourceLocation("examplemod", "example_process");
 
-    @Test
-    void thirdPartyExampleOnlyUsesThePublicIntegrationApi() {
+    private PublicIntegrationExample() {}
+
+    public record RegisteredComponents(
+            RecipeIntegration<?> recipe,
+            MachineIntegration machine,
+            RecipeExecutionIntegration execution,
+            RegistrationResult recipeResult
+    ) {
+        public RegisteredComponents {
+            requireNonNull(recipe, "recipe");
+            requireNonNull(machine, "machine");
+            requireNonNull(execution, "execution");
+            requireNonNull(recipeResult, "recipeResult");
+        }
+    }
+
+    public static RegisteredComponents register(
+            RSIIntegrationRegistrationEvent event
+    ) {
+        requireNonNull(event, "event");
         ExampleRecipeIntegration recipeIntegration =
                 new ExampleRecipeIntegration();
         ExampleMachineIntegration machineIntegration =
@@ -77,61 +82,17 @@ class PublicIntegrationExampleTest extends BootstrapTest {
         ExampleExecutionIntegration executionIntegration =
                 new ExampleExecutionIntegration();
 
-        RSIIntegrationServices.initialize();
-        RSIIntegrationServices.beginRegistration();
-        IEventBus bus = BusBuilder.builder().build();
-        AtomicBoolean delivered = new AtomicBoolean();
-        AtomicReference<RegistrationResult>
-                recipeResult = new AtomicReference<>();
-        bus.addListener(
-                (RSIIntegrationRegistrationEvent event) -> {
-                    delivered.set(true);
-                    recipeResult.set(
-                            event.api().registerRecipe(recipeIntegration));
-                    event.api().registerMachine(machineIntegration);
-                    event.api().registerExecution(executionIntegration);
-                });
-        try {
-            RSIIntegrationApi api = RSIIntegrationApi.get()
-                    .orElseThrow();
-            bus.post(
-                    new RSIIntegrationRegistrationEvent(api));
-            assertTrue(delivered.get());
-            assertTrue(recipeResult.get().accepted(),
-                    () -> recipeResult.get().diagnostics().toString());
-            assertClaims(api, recipeIntegration, machineIntegration,
-                    executionIntegration);
-        } finally {
-            RSIIntegrationServices.freezeRegistration();
-        }
-    }
-
-    private static void assertClaims(
-            RSIIntegrationApi api,
-            ExampleRecipeIntegration recipeIntegration,
-            ExampleMachineIntegration machineIntegration,
-            ExampleExecutionIntegration executionIntegration
-    ) {
-
-        Recipe<?> recipe = mock(Recipe.class);
-        BlockEntity blockEntity = mock(BlockEntity.class);
-        assertSame(recipeIntegration,
-                api.recipes().claim(recipe).winner());
-        assertSame(machineIntegration,
-                api.machines().claim(blockEntity).winner());
-
-        MachineContext machine = new MachineContext(
-                machineIntegration.id(),
-                mock(ServerLevel.class),
-                BlockPos.ZERO,
-                null
+        RSIIntegrationApi api = event.api();
+        RegistrationResult recipeResult =
+                api.registerRecipe(recipeIntegration);
+        api.registerMachine(machineIntegration);
+        api.registerExecution(executionIntegration);
+        return new RegisteredComponents(
+                recipeIntegration,
+                machineIntegration,
+                executionIntegration,
+                recipeResult
         );
-        assertSame(executionIntegration,
-                api.executions().claim(
-                        recipeIntegration.view(), machine).winner());
-        assertEquals(PROCESS,
-                machineIntegration.describe(machine, blockEntity)
-                        .descriptor().acceptedProcesses().iterator().next());
     }
 
     private static final class ExampleRecipeIntegration
@@ -161,7 +122,7 @@ class PublicIntegrationExampleTest extends BootstrapTest {
             return RecipeExecutionKind.STANDARD_IO;
         }
 
-        private RecipeView view() {
+        public RecipeView view() {
             return view;
         }
     }
@@ -255,7 +216,7 @@ class PublicIntegrationExampleTest extends BootstrapTest {
         }
     }
 
-    private static RecipeView exampleView() {
+    public static RecipeView exampleView() {
         IntegrationResourceKey diamond = item(Items.DIAMOND);
         IntegrationResourceKey stick = item(Items.STICK);
         return new RecipeView(
