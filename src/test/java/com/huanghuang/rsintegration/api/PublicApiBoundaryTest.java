@@ -14,8 +14,14 @@ class PublicApiBoundaryTest {
             Path.of("src/examplemod/java/com/example/rsiintegration/"
                     + "examplemod/RSIIntegrationExampleMod.java"),
             Path.of("src/test/java/com/example/rsiintegration/"
-                    + "PublicIntegrationExample.java")
+                    + "PublicIntegrationExample.java"),
+            Path.of("src/test/java/com/example/rsiintegration/"
+                    + "PublicConsumerExample.java")
     );
+    private static final Path PUBLIC_API_ROOT =
+            Path.of("src/main/java/com/huanghuang/rsintegration/api");
+    private static final Path LEGACY_MAGIC_API =
+            PUBLIC_API_ROOT.resolve("magic");
 
     @Test
     void thirdPartyExampleOnlyImportsThePublicApiSurface() throws Exception {
@@ -45,6 +51,29 @@ class PublicApiBoundaryTest {
                     "com.huanghuang.rsintegration.network."));
             assertFalse(source.contains(
                     "com.huanghuang.rsintegration.recipe."));
+        }
+    }
+
+    @Test
+    void publicApiTypesDoNotImportInternalImplementationPackages() throws Exception {
+        try (var files = Files.walk(PUBLIC_API_ROOT)) {
+            for (Path sourceFile : files
+                    .filter(path -> path.toString().endsWith(".java"))
+                    .filter(path -> !path.startsWith(LEGACY_MAGIC_API))
+                    .toList()) {
+                String source = Files.readString(sourceFile);
+                if (source.contains("@ApiStatus.Internal")) continue;
+                source.lines()
+                        .filter(line -> line.startsWith(
+                                "import com.huanghuang.rsintegration."))
+                        .filter(line -> !line.startsWith(
+                                "import com.huanghuang.rsintegration.api."))
+                        .forEach(line -> {
+                            throw new AssertionError(
+                                    "internal import in public API "
+                                            + sourceFile + ": " + line);
+                        });
+            }
         }
     }
 }

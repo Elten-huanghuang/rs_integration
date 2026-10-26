@@ -1,19 +1,19 @@
 package com.huanghuang.rsintegration.api;
 
-import java.lang.reflect.Field;
-
-import com.huanghuang.rsintegration.RSIntegrationMod;
 import net.minecraftforge.fml.ModList;
 import org.apache.maven.artifact.versioning.ComparableVersion;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * Sniffs mod versions and answers threshold queries.
  *
  * <p>When a mod API changes between versions (e.g. Goety field renames,
- * FA ritual record additions), version-specific delegate classes can be
- * dispatched via {@link com.huanghuang.rsintegration.ModVersionDelegateRegistry}.</p>
+ * FA ritual record additions), version-specific implementations can dispatch
+ * against these stable threshold queries.</p>
  */
 public final class VersionRange {
+    private static final Logger LOGGER = LogManager.getLogger("RSI-Version");
 
     private VersionRange() {}
 
@@ -25,7 +25,7 @@ public final class VersionRange {
         try {
             return new ComparableVersion(actual).compareTo(new ComparableVersion(threshold)) >= 0;
         } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Version] Cannot parse version {} for mod {}", actual, modId, e);
+            LOGGER.warn("Cannot parse version {} for mod {}", actual, modId, e);
             return false;
         }
     }

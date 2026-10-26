@@ -165,3 +165,47 @@ src/examplemod/java/com/example/rsiintegration/examplemod/RSIIntegrationExampleM
 ```
 
 该源集只引用公共 API、Minecraft 和 Forge 类型，并通过 `check` 持续编译。
+
+## 9. Consumer API
+
+只查询或下单、不注册配方和机器时，使用：
+
+```text
+com.huanghuang.rsintegration.api.consumer.*
+```
+
+入口为 `RSICraftConsumerApi.get()`。主流程是：
+
+```text
+findRecipes
+  -> openInspection
+  -> nextInspectionPage
+  -> submit / submitBatch
+  -> status / cancel
+```
+
+完整接入代码见：
+
+```text
+docs/reports/RSI_CONSUMER_API_INTEGRATION_GUIDE.md
+```
+
+Consumer 不读取 `RecipeIndex`、计划图、材料表、网络包或 delegate。网络传输必须使用
+`ConsumerApiCodecs`，不能自行手写 DTO 字段顺序。
+
+## 10. 版本与发布检查
+
+公共 API 1.x 不允许向已发布 record 追加组件。需要新信息时新增独立可选类型或默认
+方法；破坏性变化进入下一个 major。
+
+API 收尾验证：
+
+```text
+gradlew test --tests "com.huanghuang.rsintegration.api.*"
+gradlew test --tests "com.huanghuang.rsintegration.crafting.external.*"
+gradlew compileExamplemodJava
+gradlew verifyReleaseJar
+```
+
+`PublicApiBoundaryTest` 会检查公共 API 类型没有引用内部实现包；`verifyReleaseJar`
+会检查 Integration 与 Consumer 的核心入口类已进入发布 jar。

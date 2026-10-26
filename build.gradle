@@ -423,6 +423,13 @@ tasks.register('verifyReleaseJar') {
                     'com/huanghuang/rsintegration/feature/ftbquests/FtbQuestSubmissionService.class',
                     'com/huanghuang/rsintegration/crafting/endpoint/CraftStorageEndpoint.class',
                     'com/huanghuang/rsintegration/crafting/progress/CraftProgressTracker.class',
+                    'com/huanghuang/rsintegration/api/RSIIntegrationApi.class',
+                    'com/huanghuang/rsintegration/api/RSIIntegrationRegistrationEvent.class',
+                    'com/huanghuang/rsintegration/api/recipe/RecipeIntegration.class',
+                    'com/huanghuang/rsintegration/api/machine/MachineIntegration.class',
+                    'com/huanghuang/rsintegration/api/execution/RecipeExecutionIntegration.class',
+                    'com/huanghuang/rsintegration/api/consumer/RSICraftConsumerApi.class',
+                    'com/huanghuang/rsintegration/api/consumer/ConsumerApiCodecs.class',
                     'rs_integration.mixins.json',
                     'rs_integration.craftflow_compat.mixins.json',
                     'rs_integration.refmap.json'

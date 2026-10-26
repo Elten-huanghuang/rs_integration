@@ -13,6 +13,8 @@ import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.HashSet;
+import java.util.ArrayList;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -74,6 +76,29 @@ class ExternalConsumerCatalogServiceTest extends BootstrapTest {
                 List.of(first, second),
                 matches
         );
+    }
+
+    @Test
+    void catalogSupportsStablePagingForSixHundredSeventyEightRecipes() {
+        List<ConsumerRecipeCandidate> input = new ArrayList<>();
+        for (int index = 0; index < 678; index++) {
+            input.add(candidate(String.format("recipes/food_%04d", index)));
+        }
+        List<ConsumerRecipeCandidate> ordered =
+                ExternalConsumerCatalogService.queryCandidates(
+                        input, new ConsumerRecipeQuery.All());
+
+        List<ConsumerRecipeCandidate> paged = new ArrayList<>();
+        int offset = 0;
+        while (offset < ordered.size()) {
+            int end = Math.min(ordered.size(), offset + 64);
+            paged.addAll(ordered.subList(offset, end));
+            offset = end;
+        }
+
+        assertEquals(678, paged.size());
+        assertEquals(ordered, paged);
+        assertEquals(678, new HashSet<>(paged).size());
     }
 
     private static ConsumerRecipeCandidate candidate(String recipePath) {
