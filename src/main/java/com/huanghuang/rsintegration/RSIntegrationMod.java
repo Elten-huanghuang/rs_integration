@@ -480,7 +480,7 @@ public final class RSIntegrationMod {
         event.enqueueWork(() -> {
             RSIIntegrationServices.beginRegistration();
             try {
-                MOD_BUS.post(new RSIIntegrationRegistrationEvent(
+                MinecraftForge.EVENT_BUS.post(new RSIIntegrationRegistrationEvent(
                         RSIIntegrationApi.get().orElseThrow()));
             } finally {
                 RSIIntegrationServices.freezeRegistration();
