@@ -41,6 +41,7 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import org.jetbrains.annotations.NotNull;
 
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
@@ -107,7 +108,20 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean startSingleOperation(ServerPlayer player) {
+    protected boolean startOperationImpl(@Nonnull OperationStartContext context) {
+        if (context.buffered()) return false;
+        if (context.materialOwnership()
+                == OperationStartContext.MaterialOwnership.DELEGATE_EXTRACTED) {
+            return context.materials().isEmpty()
+                    && startExtractedOperation(context.player());
+        }
+        List<ItemStack> materials = context.legacyMaterials();
+        return !materials.isEmpty()
+                && startPreparedOperationImpl(
+                context.player(), materials, context.ledger());
+    }
+
+    private boolean startExtractedOperation(ServerPlayer player) {
         if (!validateExecutionContext(player)) return false;
         this.player = player;
         this.ledger = new ExtractionLedger();
@@ -322,10 +336,9 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
         return policy.simulatedAssembly() ? policy : InstantRecipePolicy.none();
     }
 
-    @Override
-    public boolean startPreparedOperation(ServerPlayer player,
-                                         List<ItemStack> materials,
-                                         ExtractionLedger sharedLedger) {
+    private boolean startPreparedOperationImpl(ServerPlayer player,
+                                               List<ItemStack> materials,
+                                               ExtractionLedger sharedLedger) {
         if (!validateExecutionContext(player)) return false;
         this.player = player;
         this.ledger = sharedLedger;

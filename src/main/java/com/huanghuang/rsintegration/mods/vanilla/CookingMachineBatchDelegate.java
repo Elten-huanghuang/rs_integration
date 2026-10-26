@@ -196,7 +196,7 @@ public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public boolean startOperation(@Nonnull OperationStartContext context) {
+    protected boolean startOperationImpl(@Nonnull OperationStartContext context) {
         configureChild();
         return active().startOperation(context);
     }

@@ -221,9 +221,9 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     }
 
     @Override
-    public boolean startOperation(OperationStartContext context) {
+    protected boolean startOperationImpl(OperationStartContext context) {
         this.operationStartContext = context;
-        return super.startOperation(context);
+        return super.startOperationImpl(context);
     }
 
     @Override

@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.fluid;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.mods.historystages.HistoryStagesCompat;
 import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.storage.StorageBackendId;
 import com.huanghuang.rsintegration.storage.StorageItemKey;
@@ -81,7 +82,7 @@ class FluidContainerExecutionTest extends BootstrapTest {
         FluidContainerRecipe recipe = FluidContainerCatalogTest.waterFill();
         ServerPlayer player = player();
         GenericBatchDelegate delegate = delegate(recipe, 3);
-        assertTrue(delegate.startPreparedOperation(player,
+        assertTrue(startPrepared(delegate, player,
                 List.of(new ItemStack(Items.BUCKET, 3), FluidContainerCatalogTest.token(new FluidStack(Fluids.WATER, 3000))),
                 new ExtractionLedger()));
         var results = delegate.collectAllResults(player);
@@ -96,7 +97,8 @@ class FluidContainerExecutionTest extends BootstrapTest {
         FluidContainerRecipe recipe = FluidContainerCatalogTest.waterDrain();
         ServerPlayer player = player();
         GenericBatchDelegate delegate = delegate(recipe, 2);
-        assertTrue(delegate.startPreparedOperation(player, List.of(new ItemStack(Items.WATER_BUCKET, 2)), new ExtractionLedger()));
+        assertTrue(startPrepared(delegate, player,
+                List.of(new ItemStack(Items.WATER_BUCKET, 2)), new ExtractionLedger()));
         var results = delegate.collectAllResults(player);
         assertEquals(2, results.size());
         assertEquals(2000, InkFluidSupport.fluid(results.get(0)).getAmount());
@@ -115,7 +117,7 @@ class FluidContainerExecutionTest extends BootstrapTest {
         assertTrue(FluidContainerCatalog.isValid(drain));
         ServerPlayer player = player();
         GenericBatchDelegate fillDelegate = delegate(fill, 2);
-        assertTrue(fillDelegate.startPreparedOperation(player,
+        assertTrue(startPrepared(fillDelegate, player,
                 List.of(new ItemStack(buckets.empty(), 2),
                         FluidContainerCatalogTest.token(new FluidStack(Fluids.WATER, 2000))),
                 new ExtractionLedger()));
@@ -125,7 +127,8 @@ class FluidContainerExecutionTest extends BootstrapTest {
         assertEquals(2, filled.get(0).getCount());
 
         GenericBatchDelegate drainDelegate = delegate(drain, 2);
-        assertTrue(drainDelegate.startPreparedOperation(player, filled, new ExtractionLedger()));
+        assertTrue(startPrepared(
+                drainDelegate, player, filled, new ExtractionLedger()));
         var drained = drainDelegate.collectAllResults(player);
         assertEquals(2, drained.size());
         assertEquals(2000, InkFluidSupport.fluid(drained.get(0)).getAmount());
@@ -144,7 +147,7 @@ class FluidContainerExecutionTest extends BootstrapTest {
         assertTrue(FluidContainerCatalog.isValid(drain));
         ServerPlayer player = player();
         GenericBatchDelegate fillDelegate = delegate(fill, 2);
-        assertTrue(fillDelegate.startPreparedOperation(player,
+        assertTrue(startPrepared(fillDelegate, player,
                 List.of(new ItemStack(Items.BUCKET, 2), FluidContainerCatalogTest.token(
                         new FluidStack(((BucketItem) buckets.filled()).getFluid(), 2000))), new ExtractionLedger()));
         var filled = fillDelegate.collectAllResults(player);
@@ -153,7 +156,8 @@ class FluidContainerExecutionTest extends BootstrapTest {
         assertEquals(2, filled.get(0).getCount());
 
         GenericBatchDelegate drainDelegate = delegate(drain, 2);
-        assertTrue(drainDelegate.startPreparedOperation(player, filled, new ExtractionLedger()));
+        assertTrue(startPrepared(
+                drainDelegate, player, filled, new ExtractionLedger()));
         var drained = drainDelegate.collectAllResults(player);
         assertEquals(2, drained.size());
         assertEquals(2000, InkFluidSupport.fluid(drained.get(0)).getAmount());
@@ -179,7 +183,9 @@ class FluidContainerExecutionTest extends BootstrapTest {
                 StorageOperationResult.extracted(StorageOperationMode.PERFORM, 1, List.of(bucket)));
         GenericBatchDelegate delegate = delegate(recipe, 1);
         delegate.setStorageEndpoint(() -> session);
-        assertTrue(delegate.startSingleOperation(player));
+        assertTrue(delegate.startOperation(
+                OperationStartContext.delegateExtracted(
+                        player, new ExtractionLedger())));
         var results = delegate.collectAllResults(player);
         assertEquals(2, results.size());
         assertEquals(1000, InkFluidSupport.fluid(results.get(0)).getAmount());
@@ -200,7 +206,8 @@ class FluidContainerExecutionTest extends BootstrapTest {
                 List.of(new ItemStack(Items.BUCKET, 2), FluidContainerCatalogTest.token(new FluidStack(Fluids.WATER, 1000))))) {
             GenericBatchDelegate delegate = delegate(recipe, 1);
             ServerPlayer player = player();
-            assertFalse(delegate.startPreparedOperation(player, materials, new ExtractionLedger()));
+            assertFalse(startPrepared(
+                    delegate, player, materials, new ExtractionLedger()));
             assertTrue(delegate.collectAllResults(player).isEmpty());
         }
     }
@@ -210,8 +217,9 @@ class FluidContainerExecutionTest extends BootstrapTest {
         GenericBatchDelegate delegate = delegate(recipe, 1);
         try (MockedStatic<FluidContainerCatalog> catalog = mockStatic(FluidContainerCatalog.class, CALLS_REAL_METHODS)) {
             catalog.when(() -> FluidContainerCatalog.isValid(recipe)).thenReturn(false);
-            assertFalse(delegate.startPreparedOperation(player(), List.of(new ItemStack(Items.BUCKET),
-                    FluidContainerCatalogTest.token(new FluidStack(Fluids.WATER, 1000))), new ExtractionLedger()));
+            assertFalse(startPrepared(delegate, player(), List.of(new ItemStack(Items.BUCKET),
+                    FluidContainerCatalogTest.token(new FluidStack(Fluids.WATER, 1000))),
+                    new ExtractionLedger()));
         }
     }
 
@@ -250,7 +258,8 @@ class FluidContainerExecutionTest extends BootstrapTest {
         delegate.useSharedLedger(ledger);
         StorageSession session = mock(StorageSession.class);
         delegate.setStorageEndpoint(() -> session);
-        assertTrue(delegate.startPreparedOperation(player, List.of(new ItemStack(Items.WATER_BUCKET)), ledger));
+        assertTrue(startPrepared(
+                delegate, player, List.of(new ItemStack(Items.WATER_BUCKET)), ledger));
         delegate.onBatchFailed(player, "cancelled");
         // 逻辑转换没有物理产物；终止后由链退款，代理不能私自插入产物。
         verifyNoInteractions(session);
@@ -313,6 +322,17 @@ class FluidContainerExecutionTest extends BootstrapTest {
         delegate.setStorageEndpoint(() -> session);
         return delegate;
     }
+
+    private static boolean startPrepared(
+            GenericBatchDelegate delegate,
+            ServerPlayer player,
+            List<ItemStack> materials,
+            ExtractionLedger ledger
+    ) {
+        return delegate.startOperation(OperationStartContext.chainReserved(
+                player, ledger, delegate.materialPlan(), materials, null));
+    }
+
     private static void field(Object target, String name, Object value) throws Exception {
         Field field = target.getClass().getDeclaredField(name);
         field.setAccessible(true);

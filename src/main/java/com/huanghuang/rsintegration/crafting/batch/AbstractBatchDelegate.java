@@ -114,8 +114,19 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
     }
 
     @Override
-    public boolean startOperation(@Nonnull OperationStartContext context) {
+    public final boolean startOperation(@Nonnull OperationStartContext context) {
+        Objects.requireNonNull(context, "context");
         if (context.repeatedOperationPlan() != null) return false;
+        return startOperationImpl(context);
+    }
+
+    /**
+     * 子类唯一允许覆盖的启动实现入口。
+     *
+     * <p>公共入口负责校验操作上下文，子类不得绕过。旧材料入口会在迁移期
+     * 继续由此方法转发，全部 delegate 迁移完成后即可删除。</p>
+     */
+    protected boolean startOperationImpl(@Nonnull OperationStartContext context) {
         if (context.buffered()) {
             return startBufferedOperation(
                     context.player(), context.inputBufferPlan(), context.ledger());

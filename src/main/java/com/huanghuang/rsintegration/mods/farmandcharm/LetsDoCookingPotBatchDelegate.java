@@ -74,8 +74,7 @@ public abstract class LetsDoCookingPotBatchDelegate extends CookingPotBatchDeleg
     private static final int PER_OPERATION_INGREDIENT = 1;
 
     @Override
-    public boolean startOperation(OperationStartContext context) {
-        if (context.repeatedOperationPlan() != null) return false;
+    protected boolean startOperationImpl(OperationStartContext context) {
         if (context.buffered() && startBufferedOperation(
                 context.player(), context.inputBufferPlan(), context.ledger())) {
             return true;

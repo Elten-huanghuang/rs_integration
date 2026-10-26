@@ -8,11 +8,20 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Modifier;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DelegatePreparationContractTest {
+
+    @Test
+    void publicOperationEntryCannotBeBypassedBySubclasses() throws Exception {
+        assertTrue(Modifier.isFinal(AbstractBatchDelegate.class
+                .getMethod("startOperation", OperationStartContext.class)
+                .getModifiers()));
+    }
 
     @Test
     void legacyValidationSuccessMapsToReady() {
@@ -133,7 +142,7 @@ class DelegatePreparationContractTest {
             return true;
         }
 
-        @Override public boolean startOperation(OperationStartContext context) { return false; }
+        @Override protected boolean startOperationImpl(OperationStartContext context) { return false; }
         @Override public ItemStack collectResult(ServerPlayer player) { return ItemStack.EMPTY; }
         @Override public void onBatchFinished(ServerPlayer player) {}
         // Non-null so onBatchFailed does not short-circuit on the virtual-delegate path.
