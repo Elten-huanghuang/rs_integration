@@ -31,14 +31,22 @@ import com.huanghuang.rsintegration.api.recipe.RecipeIntegration;
 import com.huanghuang.rsintegration.api.recipe.RecipeExecutionKind;
 import com.huanghuang.rsintegration.api.recipe.RecipeView;
 import com.huanghuang.rsintegration.api.execution.ExecutionPlan;
+import com.huanghuang.rsintegration.api.execution.ExecutionResult;
 import com.huanghuang.rsintegration.api.execution.FluidRoute;
 import com.huanghuang.rsintegration.api.execution.InputRoute;
+import com.huanghuang.rsintegration.api.execution.LifecyclePhase;
 import com.huanghuang.rsintegration.api.execution.OutputPort;
+import com.huanghuang.rsintegration.api.execution.OperationContext;
+import com.huanghuang.rsintegration.api.execution.OperationSnapshot;
+import com.huanghuang.rsintegration.api.execution.RecipeExecutionIntegration;
 import com.huanghuang.rsintegration.api.execution.ReservedMaterial;
 import com.huanghuang.rsintegration.api.execution.ReservedMaterialView;
+import com.huanghuang.rsintegration.api.execution.RunningOperation;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.RegistryAccess;
@@ -60,6 +68,8 @@ import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.registries.ForgeRegistries;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -74,6 +84,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.withSettings;
 
@@ -307,6 +318,64 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
                 .contains("fluid route exceeds"));
     }
 
+    @Test
+    void transientObservationFailureResumesTheSameCustomOperation()
+            throws ReflectiveOperationException {
+        RecipeView view = recipeView(
+                resource("resume_recipe"), resource("resume_process"));
+        ExecutionPlan plan = customPlan(
+                view,
+                List.of(),
+                List.of(outputPort(view.outputs().get(0)))
+        );
+        OperationSnapshot snapshot = new OperationSnapshot(
+                LifecyclePhase.WORKING, 1L, new CompoundTag());
+        RunningOperation resumed = mock(RunningOperation.class);
+        when(resumed.snapshot()).thenReturn(snapshot);
+        RecipeExecutionIntegration execution =
+                mock(RecipeExecutionIntegration.class);
+        when(execution.resume(
+                any(OperationContext.class),
+                eq(plan),
+                eq(snapshot)
+        )).thenReturn(ExecutionResult.started(resumed));
+        MachineIntegration machine = mock(MachineIntegration.class);
+        when(machine.id()).thenReturn(resource("resume_machine"));
+        ServerLevel level = mock(ServerLevel.class);
+        when(level.getGameTime()).thenReturn(40L);
+        ServerPlayer player = mock(ServerPlayer.class);
+        OperationStartContext start = new OperationStartContext(
+                player,
+                new ExtractionLedger(),
+                OperationStartContext.MaterialOwnership.CHAIN_RESERVED,
+                MaterialPlan.none(),
+                List.of(),
+                null,
+                null,
+                UUID.randomUUID(),
+                plan.operationId(),
+                1
+        );
+        ExternalIntegrationBatchDelegate delegate =
+                new ExternalIntegrationBatchDelegate(
+                        new DefaultRSIIntegrationApi());
+        setField(delegate, "executionIntegration", execution);
+        setField(delegate, "executionPlan", plan);
+        setField(delegate, "operationStartContext", start);
+        setField(delegate, "customMaterials",
+                new StubReservedMaterials(List.of()));
+        setField(delegate, "machineIntegration", machine);
+        setField(delegate, "machinePos", BlockPos.ZERO);
+        setField(delegate, "customSnapshot", snapshot);
+
+        Method resume = ExternalIntegrationBatchDelegate.class
+                .getDeclaredMethod(
+                        "resumeCustomOperation", ServerLevel.class);
+        resume.setAccessible(true);
+        assertTrue((Boolean) resume.invoke(delegate, level));
+        assertEquals(resumed, getField(delegate, "runningOperation"));
+    }
+
     private static ExecutionPlan customPlan(
             RecipeView view,
             List<InputRoute> inputs,
@@ -365,6 +434,25 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
                     .filter(material -> material.entryId().equals(entryId))
                     .findFirst();
         }
+    }
+
+    private static void setField(
+            Object target,
+            String name,
+            Object value
+    ) throws ReflectiveOperationException {
+        Field field = target.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        field.set(target, value);
+    }
+
+    private static Object getField(
+            Object target,
+            String name
+    ) throws ReflectiveOperationException {
+        Field field = target.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        return field.get(target);
     }
 
     private static RecipeView recipeView(

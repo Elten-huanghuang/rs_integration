@@ -2,7 +2,6 @@ package com.huanghuang.rsintegration.crafting.external;
 
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.api.RSIIntegrationApi;
-import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.api.diagnostic.IntegrationDiagnostic;
 import com.huanghuang.rsintegration.api.diagnostic.IntegrationDiagnosticCode;
 import com.huanghuang.rsintegration.api.diagnostic.IntegrationSeverity;
@@ -22,6 +21,7 @@ import com.huanghuang.rsintegration.api.execution.OperationCleanupResult;
 import com.huanghuang.rsintegration.api.execution.OperationCollection;
 import com.huanghuang.rsintegration.api.execution.OperationContext;
 import com.huanghuang.rsintegration.api.execution.OutputPort;
+import com.huanghuang.rsintegration.api.execution.OperationSnapshot;
 import com.huanghuang.rsintegration.api.execution.RecipeExecutionIntegration;
 import com.huanghuang.rsintegration.api.execution.ReservedMaterial;
 import com.huanghuang.rsintegration.api.execution.ReservedMaterialView;
@@ -88,6 +88,8 @@ import net.minecraftforge.fluids.capability.IFluidHandler;
 import net.minecraftforge.fluids.capability.IFluidHandler.FluidAction;
 import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.registries.ForgeRegistries;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -111,6 +113,7 @@ import java.util.function.Supplier;
  * 真实产物收取。无法无损落入标准物品端口的声明在这里显式拒绝。</p>
  */
 public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegate {
+    private static final Logger LOGGER = LogManager.getLogger("RS Integration");
     private final Supplier<RSIIntegrationApi> apiProvider;
     private final boolean retainChunks;
     private ServerLevel level;
@@ -136,6 +139,9 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     private boolean customPendingRefundSafe;
     @Nullable
     private CancelReason customCancelReason;
+    @Nullable
+    private OperationSnapshot customSnapshot;
+    private long lastCustomSnapshotSequence = -1L;
     private long lastCustomStateRevision = -1L;
     private long lastCollectionSequence;
     private long recipeRevision;
@@ -370,6 +376,8 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         this.customStartPending = false;
         this.customPendingRefundSafe = false;
         this.customCancelReason = null;
+        this.customSnapshot = null;
+        this.lastCustomSnapshotSequence = -1L;
         this.lastCustomStateRevision = -1L;
         this.lastCollectionSequence = 0L;
         this.recipeRevision = projection.revision();
@@ -787,7 +795,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             try {
                 runningOperation.onSettled(player);
             } catch (RuntimeException | LinkageError failure) {
-                RSIntegrationMod.LOGGER.warn(
+                LOGGER.warn(
                         "[RSI-API] custom onSettled failed for {}",
                         recipe == null ? "unknown" : recipe.getId(),
                         failure
@@ -804,6 +812,8 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         }
         customOwnerId = null;
         customCancelReason = null;
+        customSnapshot = null;
+        lastCustomSnapshotSequence = -1L;
         uninsertedMaterials.clear();
         pendingInputRefunds.clear();
         releaseReusableMaterials(player);
@@ -837,6 +847,8 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         this.customOwnerId = player.getUUID();
         this.customReservedFluids.clear();
         this.customCancelReason = null;
+        this.customSnapshot = null;
+        this.lastCustomSnapshotSequence = -1L;
         List<ReservedMaterial> reserved = new ArrayList<>();
         for (int index = 0; index < recipeView.materials().size(); index++) {
             MaterialRequirement requirement = recipeView.materials().get(index);
@@ -954,7 +966,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         try {
             return runningOperation.observe(level);
         } catch (RuntimeException | LinkageError failure) {
-            RSIntegrationMod.LOGGER.warn(
+            LOGGER.warn(
                     "[RSI-API] custom observation failed for {}",
                     recipe == null ? "unknown" : recipe.getId(),
                     failure
@@ -1092,14 +1104,22 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             }
             runningOperation = started.operation();
             customStartPending = false;
+            captureCustomSnapshot();
         }
         if (runningOperation == null) {
             return failObservation("custom operation is missing");
         }
         var observation = observeRunningOperation(level);
         if (observation == null) {
-            return failObservation("custom observation callback failed");
+            if (!resumeCustomOperation(level)) {
+                return failObservation("custom observation callback failed");
+            }
+            observation = observeRunningOperation(level);
+            if (observation == null) {
+                return workingObservation();
+            }
         }
+        captureCustomSnapshot();
         if (lastCustomStateRevision >= 0L
                 && observation.stateRevision() < lastCustomStateRevision) {
             return failObservation("custom state revision moved backwards");
@@ -1118,13 +1138,93 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         };
     }
 
+    private boolean resumeCustomOperation(ServerLevel currentLevel) {
+        OperationSnapshot snapshot = customSnapshot;
+        if (snapshot == null
+                || executionPlan == null
+                || executionIntegration == null
+                || operationStartContext == null) {
+            return false;
+        }
+        ExecutionResult resumed;
+        try {
+            resumed = executionIntegration.resume(
+                    new OperationContext(
+                            operationStartContext.player(),
+                            operationStartContext.transactionId(),
+                            operationStartContext.operationId(),
+                            operationStartContext.attempt(),
+                            customMaterials,
+                            new MachineContext(
+                                    machineIntegration.id(),
+                                    currentLevel,
+                                    machinePos,
+                                    operationStartContext.player()
+                            ),
+                            currentLevel.getGameTime()
+                    ),
+                    executionPlan,
+                    snapshot
+            );
+        } catch (RuntimeException | LinkageError failure) {
+            LOGGER.warn(
+                    "[RSI-API] custom resume failed for {}",
+                    recipe == null ? "unknown" : recipe.getId(),
+                    failure
+            );
+            return false;
+        }
+        if (resumed.status() == ExecutionStartStatus.RETRY) {
+            return true;
+        }
+        if (resumed.status() != ExecutionStartStatus.STARTED
+                || resumed.operation() == null) {
+            return false;
+        }
+        runningOperation = resumed.operation();
+        customStartPending = false;
+        captureCustomSnapshot();
+        LOGGER.info(
+                "[RSI-API] resumed custom operation {} at sequence {}",
+                operationStartContext.operationId(),
+                snapshot.collectionSequence()
+        );
+        return true;
+    }
+
+    private void captureCustomSnapshot() {
+        if (runningOperation == null) return;
+        try {
+            OperationSnapshot snapshot = runningOperation.snapshot();
+            if (snapshot.collectionSequence()
+                    < lastCustomSnapshotSequence) {
+                LOGGER.warn(
+                        "[RSI-API] custom snapshot sequence moved backwards for {}",
+                        operationStartContext == null
+                                ? "unknown"
+                                : operationStartContext.operationId()
+                );
+                return;
+            }
+            customSnapshot = snapshot;
+            lastCustomSnapshotSequence =
+                    snapshot.collectionSequence();
+        } catch (RuntimeException | LinkageError failure) {
+            LOGGER.warn(
+                    "[RSI-API] custom snapshot failed for {}",
+                    recipe == null ? "unknown" : recipe.getId(),
+                    failure
+            );
+        }
+    }
+
     private List<ItemStack> collectCustomResults(ServerPlayer player) {
         if (runningOperation == null) return List.of();
         OperationCollection collection;
         try {
             collection = runningOperation.collect(player);
         } catch (RuntimeException | LinkageError failure) {
-            RSIntegrationMod.LOGGER.warn(
+            LOGGER.warn(
                     "[RSI-API] custom collect failed for {}",
                     recipe == null ? "unknown" : recipe.getId(),
                     failure
@@ -1148,7 +1248,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             if (declared == null
                     || declared.resource().kind() != output.resource().kind()
                     || !declared.resource().id().equals(output.resource().id())) {
-                RSIntegrationMod.LOGGER.warn(
+                LOGGER.warn(
                         "[RSI-API] custom collection returned undeclared output {}",
                         output.portId());
                 return List.of();
@@ -1172,7 +1272,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                     || declared.resource().kind()
                     != disposition.material().resource().kind()
                     || declared.amount() != disposition.material().amount()) {
-                RSIntegrationMod.LOGGER.warn(
+                LOGGER.warn(
                         "[RSI-API] custom collection returned an undeclared material disposition {}",
                         disposition.material().entryId());
                 return List.of();
@@ -1263,7 +1363,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                     }
                     failReportedResource(
                             "storage accepted only part of the fluid output");
-                    RSIntegrationMod.LOGGER.error(
+                    LOGGER.error(
                             "[RSI-API] failed to insert every collected fluid mB into storage: expected={}, accepted={}",
                             extracted.getAmount(), accepted);
                     return;
@@ -1286,7 +1386,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         FluidStack returned = remainder.copy();
         int accepted = handler.fill(returned, FluidAction.EXECUTE);
         if (accepted < remainder.getAmount()) {
-            RSIntegrationMod.LOGGER.error(
+            LOGGER.error(
                     "[RSI-API] failed to return {} mB of fluid output to the machine",
                     remainder.getAmount() - Math.max(0, accepted));
         }
@@ -1357,7 +1457,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             recordFailureRecoveredInputs(recovered);
             settleCustomFluidInputs(cleanup.materials(), player);
         } catch (RuntimeException | LinkageError exception) {
-            RSIntegrationMod.LOGGER.warn(
+            LOGGER.warn(
                     "[RSI-API] custom cleanup failed for {}",
                     recipe == null ? "unknown" : recipe.getId(),
                     exception
@@ -1442,7 +1542,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                 ? player.server
                 : level == null ? null : level.getServer();
         if (server == null || customOwnerId == null) {
-            RSIntegrationMod.LOGGER.error(
+            LOGGER.error(
                     "[RSI-API] custom fluid recovery is unavailable for {} entries",
                     fluids.size());
             return;
@@ -1708,7 +1808,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             if (refund.remainder() == null || refund.remainder().isEmpty()) {
                 continue;
             }
-            RSIntegrationMod.LOGGER.error(
+            LOGGER.error(
                     "[RSI-API] failed to return {} mB of {} to storage",
                     refund.remainder().getAmount(),
                     refund.remainder().getFluid()
@@ -1763,7 +1863,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             }
         }
         if (remaining > 0) {
-            RSIntegrationMod.LOGGER.warn(
+            LOGGER.warn(
                     "[RSI-API] unable to subtract {} inserted item(s) from pending recovery for {}",
                     remaining, entryId);
         }
