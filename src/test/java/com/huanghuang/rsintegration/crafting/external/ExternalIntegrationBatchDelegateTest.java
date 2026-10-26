@@ -53,6 +53,11 @@ import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.storage.StorageCapability;
+import com.huanghuang.rsintegration.storage.StorageFluidOperationResult;
+import com.huanghuang.rsintegration.storage.StorageOperationMode;
+import com.huanghuang.rsintegration.storage.StorageSession;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.RegistryAccess;
@@ -88,6 +93,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
@@ -366,6 +372,69 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
                 .validateCustomPlanAgainstRecipe(
                         view, materials, excessive)
                 .contains("fluid route exceeds"));
+    }
+
+    @Test
+    void customFluidOutputIsInsertedBeforeItIsReportedDelivered()
+            throws ReflectiveOperationException {
+        ServerPlayer player = mock(ServerPlayer.class);
+        CraftStorageEndpoint endpoint =
+                mock(CraftStorageEndpoint.class);
+        StorageSession session = mock(StorageSession.class);
+        when(endpoint.session()).thenReturn(session);
+        when(session.supports(StorageCapability.FLUID_STORAGE))
+                .thenReturn(true);
+        when(session.insertFluid(
+                eq(player), any(), anyBoolean())).thenAnswer(invocation -> {
+            FluidStack stack = invocation.getArgument(1);
+            boolean simulate = invocation.getArgument(2);
+            return StorageFluidOperationResult.inserted(
+                    simulate ? StorageOperationMode.SIMULATE
+                            : StorageOperationMode.PERFORM,
+                    stack,
+                    FluidStack.EMPTY
+            );
+        });
+        ExternalIntegrationBatchDelegate delegate =
+                new ExternalIntegrationBatchDelegate(
+                        new DefaultRSIIntegrationApi());
+        delegate.setStorageEndpoint(endpoint);
+        setField(delegate, "operationStartContext",
+                new OperationStartContext(
+                        player,
+                        new ExtractionLedger(),
+                        OperationStartContext.MaterialOwnership.CHAIN_RESERVED,
+                        MaterialPlan.none(),
+                        List.of(),
+                        null,
+                        null,
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        1
+                ));
+        CollectedOutput output = new CollectedOutput(
+                IntegrationResourceKey.fluid(
+                        new FluidStack(Fluids.WATER, 1)),
+                500L,
+                OutputKind.PRIMARY,
+                resource("fluid_output")
+        );
+
+        Method deliver = ExternalIntegrationBatchDelegate.class
+                .getDeclaredMethod(
+                        "deliverCustomFluidOutput",
+                        ServerPlayer.class,
+                        CollectedOutput.class
+                );
+        deliver.setAccessible(true);
+        assertNull(deliver.invoke(delegate, player, output));
+
+        List<CollectedOutput> reported =
+                delegate.drainReportedResources();
+        assertEquals(1, reported.size());
+        assertEquals(500L, reported.get(0).amount());
+        assertEquals(IntegrationResourceKey.ResourceKind.FLUID,
+                reported.get(0).resource().kind());
     }
 
     @Test

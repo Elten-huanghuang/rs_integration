@@ -1431,17 +1431,154 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             if (output.resource().kind()
                     == IntegrationResourceKey.ResourceKind.ITEM) {
                 appendItemOutput(output.resource(), output.amount());
-            } else {
-                reportedResources.add(output);
             }
         }
         if (collection.complete()) {
             customCollectionComplete = true;
+            List<CollectedOutput> fluidOutputs =
+                    customCollectedOutputs.stream()
+                            .filter(output -> output.resource().kind()
+                                    == IntegrationResourceKey.ResourceKind.FLUID)
+                            .toList();
+            if (!fluidOutputs.isEmpty()) {
+                persistCustomOperation(
+                        ExternalOperationJournal.State.DELIVERING,
+                        "delivering custom fluid outputs");
+            }
+            for (CollectedOutput output : fluidOutputs) {
+                String deliveryFailure = deliverCustomFluidOutput(
+                        operationStartContext.player(), output);
+                if (deliveryFailure != null) {
+                    return deliveryFailure;
+                }
+            }
+            if (!fluidOutputs.isEmpty()) {
+                customCollectedOutputs.removeIf(output ->
+                        output.resource().kind()
+                                == IntegrationResourceKey.ResourceKind.FLUID);
+                persistCustomOperation(
+                        ExternalOperationJournal.State.ACTIVE,
+                        "fluid outputs delivered");
+            }
             settleCustomFluidInputs(
                     customCollectedDispositions,
                     operationStartContext.player());
         }
         return null;
+    }
+
+    @Nullable
+    private String deliverCustomFluidOutput(
+            ServerPlayer player,
+            CollectedOutput output
+    ) {
+        if (!hasStorageAccess()
+                || !storageEndpoint().session().supports(
+                StorageCapability.FLUID_STORAGE)) {
+            retainCustomFluidOutput(output);
+            return "custom fluid output has no writable fluid storage";
+        }
+        long remaining = output.amount();
+        while (remaining > 0L) {
+            int chunk = (int) Math.min(
+                    Integer.MAX_VALUE, remaining);
+            FluidStack candidate = fluidStack(
+                    output.resource(), chunk);
+            if (candidate.isEmpty()) {
+                retainCustomFluidOutput(remaining(
+                        output, remaining));
+                return "custom fluid output is not registered";
+            }
+            StorageFluidOperationResult simulated;
+            try {
+                simulated = storageEndpoint().session().insertFluid(
+                        player, candidate, true);
+            } catch (RuntimeException | LinkageError failure) {
+                retainCustomFluidOutput(remaining(
+                        output, remaining));
+                return "custom fluid output simulation failed";
+            }
+            if (simulated.transferredAmountExact().orElse(-1L)
+                    != chunk) {
+                retainCustomFluidOutput(remaining(
+                        output, remaining));
+                return "storage rejected custom fluid output";
+            }
+            StorageFluidOperationResult inserted =
+                    storageEndpoint().session().insertFluid(
+                            player, candidate, false);
+            long accepted = inserted.transferredAmountExact()
+                    .orElse(-1L);
+            if (accepted > 0L) {
+                reportedResources.add(new CollectedOutput(
+                        output.resource(),
+                        accepted,
+                        output.outputKind(),
+                        output.portId()
+                ));
+            }
+            if (accepted != chunk) {
+                long uninserted = remaining - Math.max(0L, accepted);
+                if (uninserted > 0L) {
+                    retainCustomFluidOutput(remaining(
+                            output, uninserted));
+                }
+                return "storage accepted only part of custom fluid output";
+            }
+            remaining -= chunk;
+        }
+        return null;
+    }
+
+    private static FluidStack fluidStack(
+            IntegrationResourceKey resource,
+            int amount
+    ) {
+        var fluid = ForgeRegistries.FLUIDS.getValue(resource.id());
+        if (fluid == null) return FluidStack.EMPTY;
+        FluidStack stack = new FluidStack(fluid, amount);
+        if (!resource.identity().isEmpty()) {
+            stack.setTag(resource.identity());
+        }
+        return stack;
+    }
+
+    private static CollectedOutput remaining(
+            CollectedOutput output,
+            long amount
+    ) {
+        return new CollectedOutput(
+                output.resource(),
+                amount,
+                output.outputKind(),
+                output.portId()
+        );
+    }
+
+    private void retainCustomFluidOutput(
+            CollectedOutput output
+    ) {
+        long remaining = output.amount();
+        while (remaining > 0L) {
+            int chunk = (int) Math.min(
+                    Integer.MAX_VALUE, remaining);
+            CompoundTag fluidTag = new CompoundTag();
+            fluidTag.putString(
+                    "FluidName", output.resource().id().toString());
+            fluidTag.putInt("Amount", chunk);
+            CompoundTag identity = output.resource().identity();
+            if (!identity.isEmpty()) {
+                fluidTag.put("Tag", identity);
+            }
+            UnifiedGridFluidRecovery.get(
+                    operationStartContext.player().server)
+                    .retainRaw(
+                            operationStartContext.player().getUUID(),
+                            fluidTag,
+                            null
+                    );
+            remaining -= chunk;
+        }
     }
 
     private void appendItemOutput(
