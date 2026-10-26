@@ -366,15 +366,15 @@ class ConcurrentNodeExecutorTest extends BootstrapTest {
         InputPortId joinLeft = new InputPortId(joinId, 0);
         InputPortId joinRight = new InputPortId(joinId, 1);
         CraftNode left = node(leftId, "left", List.of(),
-                List.of(new OutputDeclaration(leftOutput, iron, 1, OutputKind.PRIMARY)));
+                List.of(OutputDeclaration.item(leftOutput, iron, 1, OutputKind.PRIMARY)));
         CraftNode right = node(rightId, "right", List.of(),
-                List.of(new OutputDeclaration(rightOutput, gold, 1, OutputKind.PRIMARY)));
+                List.of(OutputDeclaration.item(rightOutput, gold, 1, OutputKind.PRIMARY)));
         CraftNode join = node(joinId, "join", List.of(
                 new InputDemand(joinLeft, Ingredient.of(Items.IRON_INGOT), 1,
                         DemandRole.CONSUMED, new ItemStack(Items.IRON_INGOT)),
                 new InputDemand(joinRight, Ingredient.of(Items.GOLD_INGOT), 1,
                         DemandRole.CONSUMED, new ItemStack(Items.GOLD_INGOT))),
-                List.of(new OutputDeclaration(joinOutput, result, 1, OutputKind.PRIMARY)));
+                List.of(OutputDeclaration.item(joinOutput, result, 1, OutputKind.PRIMARY)));
         return new CraftPlanGraph(1, List.of(left, right, join), List.of(
                 new MaterialAllocation(new AllocationId(0), joinLeft,
                         new MaterialSource.ProducerOutput(leftOutput), iron, 1),
@@ -391,7 +391,7 @@ class ConcurrentNodeExecutorTest extends BootstrapTest {
         MaterialKey iron = MaterialKey.of(new ItemStack(Items.IRON_INGOT));
         OutputPortId output = new OutputPortId(nodeId, 0);
         CraftNode only = node(nodeId, "only", List.of(),
-                List.of(new OutputDeclaration(output, iron, 1, OutputKind.PRIMARY)));
+                List.of(OutputDeclaration.item(output, iron, 1, OutputKind.PRIMARY)));
         return new CraftPlanGraph(1, List.of(only), List.of(),
                 List.of(new RootDemand(Ingredient.of(Items.IRON_INGOT), 1, 0,
                         new ItemStack(Items.IRON_INGOT),
@@ -417,11 +417,11 @@ class ConcurrentNodeExecutorTest extends BootstrapTest {
         InputPortId joinExclusive = new InputPortId(joinId, 1);
         InputPortId joinLast = new InputPortId(joinId, 2);
         CraftNode first = node(firstId, "first", List.of(),
-                List.of(new OutputDeclaration(firstOutput, iron, 1, OutputKind.PRIMARY)));
+                List.of(OutputDeclaration.item(firstOutput, iron, 1, OutputKind.PRIMARY)));
         CraftNode exclusive = node(exclusiveId, "exclusive", List.of(),
-                List.of(new OutputDeclaration(exclusiveOutput, gold, 1, OutputKind.PRIMARY)));
+                List.of(OutputDeclaration.item(exclusiveOutput, gold, 1, OutputKind.PRIMARY)));
         CraftNode last = node(lastId, "last", List.of(),
-                List.of(new OutputDeclaration(lastOutput, copper, 1, OutputKind.PRIMARY)));
+                List.of(OutputDeclaration.item(lastOutput, copper, 1, OutputKind.PRIMARY)));
         CraftNode join = node(joinId, "join", List.of(
                 new InputDemand(joinFirst, Ingredient.of(Items.IRON_INGOT), 1,
                         DemandRole.CONSUMED, new ItemStack(Items.IRON_INGOT)),
@@ -429,7 +429,7 @@ class ConcurrentNodeExecutorTest extends BootstrapTest {
                         DemandRole.CONSUMED, new ItemStack(Items.GOLD_INGOT)),
                 new InputDemand(joinLast, Ingredient.of(Items.COPPER_INGOT), 1,
                         DemandRole.CONSUMED, new ItemStack(Items.COPPER_INGOT))),
-                List.of(new OutputDeclaration(joinOutput, result, 1, OutputKind.PRIMARY)));
+                List.of(OutputDeclaration.item(joinOutput, result, 1, OutputKind.PRIMARY)));
         return new CraftPlanGraph(1, List.of(first, exclusive, last, join), List.of(
                 new MaterialAllocation(new AllocationId(0), joinFirst,
                         new MaterialSource.ProducerOutput(firstOutput), iron, 1),

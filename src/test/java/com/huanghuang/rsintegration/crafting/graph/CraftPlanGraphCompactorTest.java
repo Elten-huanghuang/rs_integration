@@ -260,7 +260,7 @@ class CraftPlanGraphCompactorTest extends BootstrapTest {
                 false, null, null,
                 List.of(new InputDemand(input, Ingredient.of(Items.IRON_INGOT), executions,
                         DemandRole.CONSUMED, new ItemStack(Items.IRON_INGOT))),
-                List.of(new OutputDeclaration(output,
+                List.of(OutputDeclaration.item(output,
                         MaterialKey.of(result), executions,
                         OutputKind.PRIMARY)));
     }

@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.graph;
 
+import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import net.minecraft.world.item.ItemStack;
@@ -23,7 +24,8 @@ public final class TerminalGraphComposer {
             OutputKind kind,
             OutputProbability probability,
             boolean dynamicIdentity,
-            @Nullable Integer sourceInputIndex
+            @Nullable Integer sourceInputIndex,
+            IntegrationResourceKey resource
     ) {
         public TerminalOutput {
             if (material == null || maximumPerOperation <= 0) {
@@ -31,6 +33,7 @@ public final class TerminalGraphComposer {
             }
             Objects.requireNonNull(kind, "kind");
             Objects.requireNonNull(probability, "probability");
+            Objects.requireNonNull(resource, "resource");
             if (perOperation < 0
                     || minimumPerOperation < 0
                     || maximumPerOperation < minimumPerOperation
@@ -45,14 +48,14 @@ public final class TerminalGraphComposer {
             }
         }
 
-        public TerminalOutput(
+        public static TerminalOutput item(
                 MaterialKey material,
                 int perOperation,
                 OutputKind kind,
                 OutputProbability probability,
                 boolean dynamicIdentity
         ) {
-            this(
+            return new TerminalOutput(
                     material,
                     perOperation,
                     probability.isGuaranteed() ? perOperation : 0,
@@ -60,23 +63,49 @@ public final class TerminalGraphComposer {
                     kind,
                     probability,
                     dynamicIdentity,
-                    null
+                    null,
+                    itemResource(material)
             );
         }
 
-        public TerminalOutput(MaterialKey material, int perOperation, OutputKind kind) {
-            this(material, perOperation, kind, OutputProbability.guaranteed(), false);
+        public static TerminalOutput item(
+                MaterialKey material,
+                int perOperation,
+                OutputKind kind
+        ) {
+            return item(material, perOperation, kind,
+                    OutputProbability.guaranteed(), false);
         }
-    }
 
-    public static CraftPlanGraph compose(CraftPlanGraph base,
-                                         CraftingResolver.ResolutionStep terminalStep,
-                                         ItemStack terminalOutput) {
-        if (terminalOutput == null || terminalOutput.isEmpty()) {
-            throw new IllegalArgumentException("terminal output must be known");
+        public static TerminalOutput item(
+                MaterialKey material,
+                int perOperation,
+                int minimumPerOperation,
+                int maximumPerOperation,
+                OutputKind kind,
+                OutputProbability probability,
+                boolean dynamicIdentity,
+                @Nullable Integer sourceInputIndex
+        ) {
+            return new TerminalOutput(
+                    material,
+                    perOperation,
+                    minimumPerOperation,
+                    maximumPerOperation,
+                    kind,
+                    probability,
+                    dynamicIdentity,
+                    sourceInputIndex,
+                    itemResource(material)
+            );
         }
-        return compose(base, terminalStep, List.of(new TerminalOutput(
-                MaterialKey.of(terminalOutput), terminalOutput.getCount(), OutputKind.PRIMARY)));
+
+        private static IntegrationResourceKey itemResource(
+                MaterialKey material
+        ) {
+            return IntegrationResourceKey.item(
+                    material.toStack(1));
+        }
     }
 
     public static CraftPlanGraph compose(CraftPlanGraph base,
@@ -151,7 +180,8 @@ public final class TerminalGraphComposer {
                     maximumTotal,
                     output.probability(),
                     output.dynamicIdentity(),
-                    sourceInput
+                    sourceInput,
+                    output.resource()
             );
             outputs.add(declaration);
             if (primary == null && output.kind() == OutputKind.PRIMARY) primary = declaration;

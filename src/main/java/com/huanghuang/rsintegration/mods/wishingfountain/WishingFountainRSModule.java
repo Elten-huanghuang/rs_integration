@@ -34,7 +34,7 @@ public final class WishingFountainRSModule implements IModIntegration {
                 new String[]{TYPE_ID}, new String[]{TYPE_ID},
                 ModType.delegateSupplier(
                         "com.huanghuang.rsintegration.mods.wishingfountain.WishingFountainBatchDelegate"))
-                .confirmGraphExecution(
+                .confirmPureProjection(
                         "formed fountain inputs and synchronous output capture are transactionally owned");
         ModType.configureJei(TYPE_ID,
                 new String[][]{{"wishing_fountain:wishing_fountain", TYPE_ID}},

@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.huanghuang.rsintegration.api.execution.CollectedOutput;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.util.PerformanceMonitor;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
@@ -134,7 +135,14 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
             terminalOutputsDrained = true;
             actual.addAll(confirmedOutputs);
         }
-        return outputs.add(actual);
+        List<CollectedOutput> resources = new ArrayList<>(
+                delegate.drainReportedResources());
+        resources.addAll(delegate.drainObservedProduction());
+        if (!resources.isEmpty()) {
+            waitTicks = 0;
+            progressObserved = true;
+        }
+        return outputs.add(actual, resources);
     }
 
     boolean consumeProgressSignal() {

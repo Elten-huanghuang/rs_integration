@@ -327,13 +327,13 @@ class GraphLedgerRecoveryContractTest extends BootstrapTest {
             InputPortId goldInput = new InputPortId(CONSUMER, 1);
             CraftNode producer = new CraftNode(PRODUCER, new ResourceLocation("test", "producer"),
                     ModType.GENERIC.id(), null, 1, List.of(), List.of(), false, null, null, List.of(),
-                    List.of(new OutputDeclaration(firstPort, first, 3, OutputKind.PRIMARY),
-                            new OutputDeclaration(secondPort, second, 3, OutputKind.SECONDARY)));
+                    List.of(OutputDeclaration.item(firstPort, first, 3, OutputKind.PRIMARY),
+                            OutputDeclaration.item(secondPort, second, 3, OutputKind.SECONDARY)));
             CraftNode consumer = new CraftNode(CONSUMER, RECIPE, ModType.CUSTOM_GUI.id(),
                     null, 1, List.of(), List.of(), false, null, null,
                     List.of(new InputDemand(ironInput, IRON, 5, DemandRole.CONSUMED, tagged("first", 1)),
                             new InputDemand(goldInput, GOLD, 2, DemandRole.CONSUMED, gold(1))),
-                    List.of(new OutputDeclaration(resultPort, diamond, 1, OutputKind.PRIMARY)));
+                    List.of(OutputDeclaration.item(resultPort, diamond, 1, OutputKind.PRIMARY)));
             return new CraftPlanGraph(1, List.of(producer, consumer), List.of(
                     new MaterialAllocation(new AllocationId(0), ironInput,
                             new MaterialSource.ProducerOutput(firstPort), first, 2),

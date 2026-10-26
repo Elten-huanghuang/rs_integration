@@ -64,7 +64,7 @@ class FleshAltarIntegrationTest extends BootstrapTest {
     void moduleConnectsJeiBindingAndGraphExecution() {
         CthulhuCreaturesRSModule.INSTANCE.registerModType();
         ModType type = ModType.byId(ModIds.ID_CTHULHU_FLESH_ALTAR);
-        assertEquals(ModType.GraphExecutionAudit.GRAPH_SAFE, type.graphExecutionAudit());
+        assertEquals(ModType.PureProjectionAudit.SUPPORTED, type.pureProjectionAudit());
         assertSame(type, ModType.fromBlockKey("block.cthulhu_creatures.flesh_altar"));
         assertSame(type, ModType.fromBlockKey(ModIds.ID_CTHULHU_FLESH_ALTAR
                 + "||block.cthulhu_creatures.flesh_altar"));

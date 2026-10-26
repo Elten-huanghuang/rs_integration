@@ -79,24 +79,6 @@ class GenericCraftPacketTest extends BootstrapTest {
         assertFalse(GenericCraftPacket.hasSelectedCraftingPlanner(false, false, false));
     }
 
-    @Test
-    void selfAmplifyingPlannedStepDoesNotReceiveASecondFullTerminalStep() {
-        ResourceLocation recipeId = new ResourceLocation(
-                "minecraft", "netherite_upgrade_smithing_template");
-        ResolutionStep planned = new ResolutionStep(
-                recipeId, ModType.GENERIC, recipeId, List.of(), List.of(),
-                false, 6, null, null);
-        ResolutionStep terminal = new ResolutionStep(
-                recipeId, ModType.GENERIC, recipeId, List.of(), List.of(),
-                false, 65, null, null);
-        List<ResolutionStep> steps = new ArrayList<>(List.of(planned));
-
-        GenericCraftPacket.ensureTerminalRecipeStep(steps, terminal);
-
-        assertEquals(1, steps.size());
-        assertEquals(6, steps.get(0).executions());
-    }
-
 
     @BeforeAll
     static void loadServerConfig() {
@@ -113,7 +95,7 @@ class GenericCraftPacketTest extends BootstrapTest {
         MaterialKey planks = MaterialKey.of(new ItemStack(Items.OAK_PLANKS));
         CraftNode safeNode = new CraftNode(nodeId, new ResourceLocation("test", "planks"),
                 ModType.GENERIC.id(), null, 1, List.of(), List.of(), false, null, null,
-                List.of(), List.of(new OutputDeclaration(outputId, planks, 4,
+                List.of(), List.of(OutputDeclaration.item(outputId, planks, 4,
                         OutputKind.PRIMARY)));
         RootDemand missingTerminal = new RootDemand(Ingredient.of(Items.DIAMOND), 1, 1,
                 new ItemStack(Items.DIAMOND), List.of());
@@ -126,7 +108,7 @@ class GenericCraftPacketTest extends BootstrapTest {
                 ModType.GENERIC.id(), null, 1, List.of(), List.of(), false, null, null,
                 List.of(new InputDemand(inputId, Ingredient.of(Items.STICK), 1,
                         DemandRole.CONSUMED, new ItemStack(Items.STICK))),
-                List.of(new OutputDeclaration(outputId, planks, 4, OutputKind.PRIMARY)));
+                List.of(OutputDeclaration.item(outputId, planks, 4, OutputKind.PRIMARY)));
         CraftPlanGraph blocked = new CraftPlanGraph(1, List.of(blockedNode), List.of(),
                 List.of(new RootDemand(Ingredient.of(Items.OAK_PLANKS), 4, 0,
                         new ItemStack(Items.OAK_PLANKS), List.of(new RootAllocation(
@@ -152,12 +134,12 @@ class GenericCraftPacketTest extends BootstrapTest {
         MaterialKey diamond = MaterialKey.of(new ItemStack(Items.DIAMOND));
 
         CraftNode rawNode = graphNode(rawNodeId, "raw", List.of(),
-                new OutputDeclaration(rawOutputId, planks, 2, OutputKind.PRIMARY));
+                OutputDeclaration.item(rawOutputId, planks, 2, OutputKind.PRIMARY));
         InputPortId safeInputId = new InputPortId(safeNodeId, 0);
         CraftNode safeNode = graphNode(safeNodeId, "safe",
                 List.of(new InputDemand(safeInputId, Ingredient.of(Items.OAK_PLANKS), 2,
                         DemandRole.CONSUMED, new ItemStack(Items.OAK_PLANKS))),
-                new OutputDeclaration(safeOutputId, sticks, 4, OutputKind.PRIMARY));
+                OutputDeclaration.item(safeOutputId, sticks, 4, OutputKind.PRIMARY));
         InputPortId blockedInputId = new InputPortId(blockedNodeId, 0);
         InputPortId blockedPreparedInputId = new InputPortId(blockedNodeId, 1);
         CraftNode blockedNode = graphNode(blockedNodeId, "blocked",
@@ -166,12 +148,12 @@ class GenericCraftPacketTest extends BootstrapTest {
                                 DemandRole.CONSUMED, new ItemStack(Items.IRON_INGOT)),
                         new InputDemand(blockedPreparedInputId, Ingredient.of(Items.STICK), 4,
                                 DemandRole.CONSUMED, new ItemStack(Items.STICK))),
-                new OutputDeclaration(blockedOutputId, gold, 1, OutputKind.PRIMARY));
+                OutputDeclaration.item(blockedOutputId, gold, 1, OutputKind.PRIMARY));
         InputPortId downstreamInputId = new InputPortId(downstreamNodeId, 0);
         CraftNode downstreamNode = graphNode(downstreamNodeId, "downstream",
                 List.of(new InputDemand(downstreamInputId, Ingredient.of(Items.GOLD_INGOT), 1,
                         DemandRole.CONSUMED, new ItemStack(Items.GOLD_INGOT))),
-                new OutputDeclaration(downstreamOutputId, diamond, 1, OutputKind.PRIMARY));
+                OutputDeclaration.item(downstreamOutputId, diamond, 1, OutputKind.PRIMARY));
 
         CraftPlanGraph graph = new CraftPlanGraph(1,
                 List.of(rawNode, safeNode, blockedNode, downstreamNode),
@@ -216,7 +198,7 @@ class GenericCraftPacketTest extends BootstrapTest {
         CraftNode node = graphNode(nodeId, "blocked_only",
                 List.of(new InputDemand(inputId, Ingredient.of(Items.STICK), 1,
                         DemandRole.CONSUMED, new ItemStack(Items.STICK))),
-                new OutputDeclaration(outputId, planks, 1, OutputKind.PRIMARY));
+                OutputDeclaration.item(outputId, planks, 1, OutputKind.PRIMARY));
         CraftPlanGraph graph = new CraftPlanGraph(1, List.of(node), List.of(),
                 List.of(new RootDemand(Ingredient.of(Items.OAK_PLANKS), 1, 0,
                         new ItemStack(Items.OAK_PLANKS), List.of(new RootAllocation(
@@ -462,16 +444,6 @@ class GenericCraftPacketTest extends BootstrapTest {
     }
 
     @Test
-    void purePreviewPlanCanPrecedeAPhysicalMachineTerminal() {
-        PureRecipePlanner.Result complete = new PureRecipePlanner.Result(true,
-                List.of(), List.of(), Map.of());
-
-        assertTrue(GenericCraftPacket.canUsePureExecutionPlan(complete, ModType.GENERIC));
-        assertTrue(GenericCraftPacket.canUsePureExecutionPlan(
-                complete, ModType.FARMINGFORBLOCKHEADS_MARKET));
-    }
-
-    @Test
     void boundedPureSearchStillOpensKnownMissingMaterialTree() {
         var diamondPickaxe = new ImmutableRecipeGraph.MaterialRef(
                 new ResourceLocation("minecraft", "diamond_pickaxe"), "");
@@ -551,9 +523,9 @@ class GenericCraftPacketTest extends BootstrapTest {
     }
 
     @Test
-    void compatibilityResolverUsesPlanningLifetimeNotPerTickExecutionSlice() {
-        assertEquals(2_000, GenericCraftPacket.compatibilityResolverBudgetMs(2_000));
-        assertEquals(1, GenericCraftPacket.compatibilityResolverBudgetMs(0));
+    void typedResolverUsesPlanningLifetimeNotPerTickExecutionSlice() {
+        assertEquals(2_000, GenericCraftPacket.typedResolverBudgetMs(2_000));
+        assertEquals(1, GenericCraftPacket.typedResolverBudgetMs(0));
     }
 
     @Test
@@ -750,21 +722,6 @@ class GenericCraftPacketTest extends BootstrapTest {
     }
 
     @Test
-    void genericExecutionStepsAcceptImmutableProjectedSteps() {
-        var intermediate = genericStep("taint_earth_heart", 1);
-        List<CraftingResolver.ResolutionStep> projectedSteps = List.of(intermediate);
-        ResourceLocation target = new ResourceLocation("crafttweaker", "avarice_scroll");
-
-        List<CraftingResolver.ResolutionStep> executionSteps =
-                CraftTerminalSteps.genericExecutionSteps(projectedSteps, target, 4);
-
-        assertEquals(List.of(intermediate), projectedSteps);
-        assertEquals(2, executionSteps.size());
-        assertEquals(target, executionSteps.get(1).recipeId());
-        assertEquals(4, executionSteps.get(1).executions());
-    }
-
-    @Test
     void pureCraftingOperationCountSaturates() {
         List<CraftingResolver.ResolutionStep> steps = List.of(
                 genericStep("first", Integer.MAX_VALUE), genericStep("second", 1));
@@ -914,16 +871,6 @@ class GenericCraftPacketTest extends BootstrapTest {
         assertTrue(CraftIngredientPlanMath.useDirectTerminalPlan(
                 new DirectMaterialAllocator.Result(true, List.of(), -1, 0),
                 ordinarySpecs, planks));
-    }
-
-    @Test
-    void feasiblePureDependenciesCanPrecedeANonGenericTerminalStep() {
-        PureRecipePlanner.Result plan = new PureRecipePlanner.Result(
-                true, List.of(), List.of(), Map.of());
-
-        assertTrue(GenericCraftPacket.canUsePureExecutionPlan(
-                plan, ModType.byId(ModIds.ID_EMBERS_ALCHEMY)));
-        assertFalse(GenericCraftPacket.canUsePureExecutionPlan(plan, null));
     }
 
     @Test

@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.ExecutionEquivalence;
@@ -12,6 +13,7 @@ import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.crafting.graph.OutputKind;
 import com.huanghuang.rsintegration.crafting.graph.OutputProbability;
 import com.huanghuang.rsintegration.crafting.graph.TerminalGraphComposer;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.recipe.RecipeOutputSpec;
@@ -25,7 +27,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /** 终端步骤构造、等价格组合和点击输出选择。 */
-final class CraftTerminalSteps {
+public final class CraftTerminalSteps {
     private CraftTerminalSteps() {}
 
     static int totalExecutions(List<ResolutionStep> steps) {
@@ -43,13 +45,6 @@ final class CraftTerminalSteps {
                 Math.max(1, repeatCount));
     }
 
-    static List<ResolutionStep> genericExecutionSteps(
-            List<ResolutionStep> intermediateSteps, ResourceLocation recipeId, int repeatCount) {
-        List<ResolutionStep> executionSteps = new ArrayList<>(intermediateSteps);
-        executionSteps.add(genericTerminalStep(recipeId, repeatCount));
-        return List.copyOf(executionSteps);
-    }
-
     static ResolutionStep smithingTerminalStep(ResourceLocation recipeId, int repeatCount) {
         return new ResolutionStep(recipeId, ModType.GENERIC,
                 new ResourceLocation("minecraft:smithing"), List.of(), List.of(), false,
@@ -65,16 +60,14 @@ final class CraftTerminalSteps {
                         List.of(), List.of(), inferMode, Math.max(1, repeatCount));
     }
 
-    static CraftPlanGraph composeEquivalentTerminalGraph(
+    public static CraftPlanGraph composeEquivalentTerminalGraph(
             CraftPlanGraph inputGraph, ResolutionStep terminalStep, ItemStack output,
             Level level) {
-        ResolutionStep graphTerminal =
-                CraftExecutionPolicy.graphTerminalStep(inputGraph, terminalStep);
         CraftPlanGraph completeGraph = TerminalGraphComposer.compose(
-                inputGraph, graphTerminal, terminalOutputs(graphTerminal, output, level));
+                inputGraph, terminalStep, terminalOutputs(terminalStep, output, level));
         List<ResolutionStep> expectedFlat = new ArrayList<>(
                 ExecutionEquivalence.projectFlatSteps(inputGraph));
-        expectedFlat.add(graphTerminal);
+        expectedFlat.add(terminalStep);
         ExecutionEquivalence.Report equivalence =
                 ExecutionEquivalence.compare(completeGraph, expectedFlat);
         if (!equivalence.equivalent()) {
@@ -107,6 +100,13 @@ final class CraftTerminalSteps {
             boolean primaryHandled = false;
             for (RecipeOutputSpec output : declared) {
                 MaterialKey material = output.material();
+                IntegrationResourceKey resource = output.resource();
+                if (material == null
+                        && resource.kind()
+                        == IntegrationResourceKey.ResourceKind.FLUID) {
+                    material = MaterialKey.of(
+                            InkFluidSupport.tokenFor(resource, 1));
+                }
                 int expected = output.expectedPerOperation();
                 int minimum = output.minimumPerOperation();
                 int maximum = output.maximumPerOperation();
@@ -131,6 +131,7 @@ final class CraftTerminalSteps {
                     expected = target.getCount();
                     minimum = expected;
                     maximum = expected;
+                    resource = terminalStep.productionTarget().resource();
                     primaryHandled = true;
                 }
                 if (output.kind() == OutputKind.PRIMARY
@@ -156,8 +157,8 @@ final class CraftTerminalSteps {
                         output.kind(),
                         probability,
                         dynamicIdentity,
-                        output.sourceInputIndex()
-                ));
+                        output.sourceInputIndex(),
+                        resource));
             }
             if (declaredOutputs.stream().anyMatch(output ->
                     output.kind() == OutputKind.PRIMARY)) {
@@ -176,16 +177,35 @@ final class CraftTerminalSteps {
                 "terminal:" + terminalStep.recipeId());
         boolean dynamicIdentity = handler != null
                 && recipe != null && handler.hasRuntimeDependentPrimaryNbt(recipe);
-        outputs.add(new TerminalGraphComposer.TerminalOutput(
-                MaterialKey.of(primaryDeclaration), primaryDeclaration.getCount(),
-                OutputKind.PRIMARY, probability, dynamicIdentity));
+        IntegrationResourceKey targetResource =
+                terminalStep.productionTarget() == null
+                        ? null
+                        : terminalStep.productionTarget().resource();
+        outputs.add(targetResource == null
+                ? TerminalGraphComposer.TerminalOutput.item(
+                MaterialKey.of(primaryDeclaration),
+                primaryDeclaration.getCount(),
+                OutputKind.PRIMARY,
+                probability,
+                dynamicIdentity)
+                : new TerminalGraphComposer.TerminalOutput(
+                MaterialKey.of(primaryDeclaration),
+                primaryDeclaration.getCount(),
+                probability.isGuaranteed()
+                        ? primaryDeclaration.getCount() : 0,
+                primaryDeclaration.getCount(),
+                OutputKind.PRIMARY,
+                probability,
+                dynamicIdentity,
+                null,
+                targetResource));
         if (recipe == null) return List.copyOf(outputs);
         List<ItemStack> secondaries = handler == null
                 ? ModRecipeHandlers.tryGetSecondaryOutputs(recipe, level.registryAccess())
                 : handler.getSecondaryOutputs(recipe, level.registryAccess());
         for (ItemStack secondary : secondaries) {
             if (secondary == null || secondary.isEmpty()) continue;
-            outputs.add(new TerminalGraphComposer.TerminalOutput(
+            outputs.add(TerminalGraphComposer.TerminalOutput.item(
                     MaterialKey.of(secondary), secondary.getCount(), OutputKind.SECONDARY));
         }
         return List.copyOf(outputs);

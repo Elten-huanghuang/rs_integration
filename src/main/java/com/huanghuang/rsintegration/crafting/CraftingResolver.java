@@ -837,7 +837,7 @@ public final class CraftingResolver {
                             step.alternativeModTypes(), step.inferMode(), step.syntheticInput(),
                             step.syntheticOutput(), List.of(new InputDemand(inputPort, plainHeart,
                             executions, DemandRole.TRANSFORMED, plainTemplate)),
-                            List.of(new OutputDeclaration(outputPort, MaterialKey.of(tainted),
+                            List.of(OutputDeclaration.item(outputPort, MaterialKey.of(tainted),
                                     executions, OutputKind.SYNTHETIC)), step.magicCosts()));
                     taintedRemaining -= executions;
                 }

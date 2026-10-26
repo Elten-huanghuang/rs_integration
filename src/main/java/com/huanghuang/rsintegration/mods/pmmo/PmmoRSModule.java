@@ -25,7 +25,7 @@ public final class PmmoRSModule implements IModIntegration {
                 new String[]{PmmoSalvageRecipeWrapper.class.getName()},
                 new String[]{TYPE_ID}, new String[]{TYPE_ID},
                 PmmoSalvageBatchDelegate::new)
-                .requireFlatExecution("salvage output is probabilistic and each selected count is one attempt");
+                .rejectPureProjection("salvage output is probabilistic and each selected count is one attempt");
         ModType.configureJei(TYPE_ID,
                 new String[][]{{"rs_integration:pmmo_salvage", TYPE_ID}},
                 new String[][]{{"com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageRecipe", TYPE_ID}},

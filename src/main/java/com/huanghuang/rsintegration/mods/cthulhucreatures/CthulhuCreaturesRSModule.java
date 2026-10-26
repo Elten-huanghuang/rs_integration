@@ -34,7 +34,7 @@ public final class CthulhuCreaturesRSModule implements IModIntegration {
                 new String[]{"block.cthulhu_creatures.flesh_altar"},
                 new String[]{ModIds.ID_CTHULHU_FLESH_ALTAR},
                 FleshAltarBatchDelegate::new)
-                .confirmGraphExecution("血肉祭坛按槽位消耗确定数量材料，产物由机器租约隔离并回收");
+                .confirmPureProjection("血肉祭坛按槽位消耗确定数量材料，产物由机器租约隔离并回收");
         ModType.configureJei(ModIds.ID_CTHULHU_FLESH_ALTAR,
                 new String[][]{{BLOCK_ID}},
                 new String[][]{{FleshAltarRecipeHandler.RECIPE_CLASS}},

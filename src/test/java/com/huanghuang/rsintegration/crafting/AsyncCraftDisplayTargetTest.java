@@ -124,38 +124,6 @@ class AsyncCraftDisplayTargetTest extends BootstrapTest {
     }
 
     @Test
-    void legacyMaterialOnlyProductionTargetStillConfiguresTheDelegate()
-            throws Exception {
-        MaterialKey egg = MaterialKey.of(
-                new ItemStack(Items.EGG));
-        CraftingResolver.ResolutionStep step = step(
-                ModType.GENERIC,
-                null,
-                new ProductionTarget(egg, 12L)
-        );
-        AsyncCraftChain chain = chain(server(), List.of(step));
-        AbstractBatchDelegate delegate =
-                mock(AbstractBatchDelegate.class);
-        var apply = AsyncCraftChain.class.getDeclaredMethod(
-                "applyTargetOutput",
-                AbstractBatchDelegate.class
-        );
-        apply.setAccessible(true);
-
-        apply.invoke(chain, delegate);
-
-        verify(delegate).setTargetOutput(argThat(stack ->
-                stack.is(Items.EGG)
-                        && stack.getCount() == 1));
-        verify(delegate).setTargetResource(argThat(resource ->
-                resource != null
-                        && resource.kind()
-                        == IntegrationResourceKey.ResourceKind.ITEM
-                        && resource.id().equals(
-                        new ResourceLocation("minecraft", "egg"))));
-    }
-
-    @Test
     void explicitTargetWinsAndReturnedStackCannotMutateIt() {
         AsyncCraftChain chain = chain(server(), List.of(step(ModType.GENERIC,
                 new ItemStack(Items.IRON_INGOT), null)));
@@ -200,13 +168,6 @@ class AsyncCraftDisplayTargetTest extends BootstrapTest {
     }
 
     @Test
-    void materialsOnlyGraphDoesNotReplaceTerminalTarget() {
-        AsyncCraftChain chain = new AsyncCraftChain(UUID.randomUUID(), server(), null, graph(),
-                step(ModType.GENERIC, new ItemStack(Items.DIAMOND), null), 1);
-        assertTrue(chain.displayTarget().is(Items.DIAMOND));
-    }
-
-    @Test
     void emptyChainHasNoInventedDisplayTarget() {
         assertTrue(chain(server(), List.of()).displayTarget().isEmpty());
     }
@@ -242,8 +203,8 @@ class AsyncCraftDisplayTargetTest extends BootstrapTest {
         CraftNode node = new CraftNode(id, new ResourceLocation("test", "producer"),
                 ModType.GENERIC.id(), new ResourceLocation("minecraft", "crafting"), 1,
                 List.of(), List.of(), false, null, null, List.of(), List.of(
-                new OutputDeclaration(primary, MaterialKey.of(new ItemStack(Items.IRON_INGOT)), 1, OutputKind.PRIMARY),
-                new OutputDeclaration(secondary, gold, 1, OutputKind.SECONDARY)));
+                OutputDeclaration.item(primary, MaterialKey.of(new ItemStack(Items.IRON_INGOT)), 1, OutputKind.PRIMARY),
+                OutputDeclaration.item(secondary, gold, 1, OutputKind.SECONDARY)));
         RootDemand root = new RootDemand(Ingredient.of(Items.GOLD_INGOT), 1, 0,
                 new ItemStack(Items.GOLD_INGOT),
                 List.of(new RootAllocation(new MaterialSource.ProducerOutput(secondary), gold, 1)));

@@ -1,12 +1,17 @@
 package com.huanghuang.rsintegration.crafting.graph;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidTestFixtures;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.level.material.Fluids;
+import net.minecraftforge.fluids.FluidStack;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -24,7 +29,7 @@ class TerminalGraphComposerTest extends BootstrapTest {
         MaterialKey stick = MaterialKey.of(new ItemStack(Items.STICK));
         OutputPortId producerOutput = new OutputPortId(producerId, 0);
         CraftNode producer = node(producerId, "producer", List.of(), List.of(
-                new OutputDeclaration(producerOutput, iron, 2, OutputKind.PRIMARY)));
+                OutputDeclaration.item(producerOutput, iron, 2, OutputKind.PRIMARY)));
         CraftPlanGraph base = new CraftPlanGraph(1, List.of(producer), List.of(), List.of(
                 new RootDemand(Ingredient.of(Items.IRON_INGOT), 2, 0,
                         new ItemStack(Items.IRON_INGOT), List.of(new RootAllocation(
@@ -35,7 +40,7 @@ class TerminalGraphComposerTest extends BootstrapTest {
                 List.of(), List.of(producerId));
 
         CraftPlanGraph result = TerminalGraphComposer.compose(base,
-                step("terminal", 1), new ItemStack(Items.IRON_SWORD));
+                step("terminal", 1), terminalOutput(new ItemStack(Items.IRON_SWORD)));
 
         NodeId terminalId = new NodeId(5);
         assertEquals(List.of(producerId, terminalId), result.topologicalOrder());
@@ -56,7 +61,7 @@ class TerminalGraphComposerTest extends BootstrapTest {
                         DemandRole.CATALYST)), List.of(), List.of());
 
         CraftPlanGraph result = TerminalGraphComposer.compose(base,
-                step("catalyst_terminal", 1), new ItemStack(Items.CAKE));
+                step("catalyst_terminal", 1), terminalOutput(new ItemStack(Items.CAKE)));
 
         CraftNode terminal = result.nodes().get(0);
         assertEquals(DemandRole.CATALYST, terminal.inputs().get(0).role());
@@ -78,7 +83,7 @@ class TerminalGraphComposerTest extends BootstrapTest {
                         new MaterialSource.InitialPool(iron), iron, 3)))), List.of(), List.of(existingId));
 
         CraftPlanGraph result = TerminalGraphComposer.compose(base,
-                step("terminal", 3), new ItemStack(Items.DIAMOND, 2));
+                step("terminal", 3), terminalOutput(new ItemStack(Items.DIAMOND, 2)));
 
         CraftNode terminal = result.nodesById().get(new NodeId(3));
         assertEquals(3, terminal.executions());
@@ -98,7 +103,8 @@ class TerminalGraphComposerTest extends BootstrapTest {
         tag.putString("variant", "requested");
         target.setTag(tag);
 
-        CraftPlanGraph result = TerminalGraphComposer.compose(base, step("terminal", 1), target);
+        CraftPlanGraph result = TerminalGraphComposer.compose(
+                base, step("terminal", 1), terminalOutput(target));
 
         OutputDeclaration output = result.nodes().get(0).outputs().get(0);
         assertEquals("requested", output.material().toStack(1).getTag().getString("variant"));
@@ -114,7 +120,7 @@ class TerminalGraphComposerTest extends BootstrapTest {
                         new MaterialSource.InitialPool(geode), geode, 1)))), List.of(), List.of());
 
         CraftPlanGraph result = TerminalGraphComposer.compose(base, step("known", 1),
-                new ItemStack(Items.SNIFFER_EGG));
+                terminalOutput(new ItemStack(Items.SNIFFER_EGG)));
 
         assertEquals(OutputKind.PRIMARY, result.nodes().get(0).outputs().get(0).kind());
         CraftPlanValidator.validate(result);
@@ -130,9 +136,9 @@ class TerminalGraphComposerTest extends BootstrapTest {
 
         CraftPlanGraph result = TerminalGraphComposer.compose(base, step("known", 2),
                 List.of(
-                        new TerminalGraphComposer.TerminalOutput(
+                        TerminalGraphComposer.TerminalOutput.item(
                                 MaterialKey.of(new ItemStack(Items.DIAMOND)), 2, OutputKind.PRIMARY),
-                        new TerminalGraphComposer.TerminalOutput(
+                        TerminalGraphComposer.TerminalOutput.item(
                                 MaterialKey.of(new ItemStack(Items.EXPERIENCE_BOTTLE)),
                                 1, OutputKind.SECONDARY)));
 
@@ -148,6 +154,58 @@ class TerminalGraphComposerTest extends BootstrapTest {
     }
 
     @Test
+    void preservesFluidResourceIdentityOnTerminalOutput() {
+        MaterialKey input = MaterialKey.of(
+                new ItemStack(Items.PRISMARINE));
+        CraftPlanGraph base = new CraftPlanGraph(
+                1,
+                List.of(),
+                List.of(),
+                List.of(new RootDemand(
+                        Ingredient.of(Items.PRISMARINE),
+                        1,
+                        0,
+                        new ItemStack(Items.PRISMARINE),
+                        List.of(new RootAllocation(
+                                new MaterialSource.InitialPool(input),
+                                input,
+                                1))
+                )),
+                List.of(),
+                List.of()
+        );
+        IntegrationResourceKey water =
+                IntegrationResourceKey.fluid(
+                        new FluidStack(Fluids.WATER, 1));
+        MaterialKey token = MaterialKey.of(
+                InkFluidSupport.token(
+                        InkFluidTestFixtures.tokenItem(),
+                        new FluidStack(Fluids.WATER, 1)
+                )
+        );
+
+        CraftPlanGraph result = TerminalGraphComposer.compose(
+                base,
+                step("fluid_terminal", 1),
+                List.of(new TerminalGraphComposer.TerminalOutput(
+                        token,
+                        750,
+                        750,
+                        750,
+                        OutputKind.PRIMARY,
+                        OutputProbability.guaranteed(),
+                        false,
+                        null,
+                        water
+                ))
+        );
+
+        assertEquals(water,
+                result.nodes().get(0).outputs().get(0).resource());
+        CraftPlanValidator.validate(result);
+    }
+
+    @Test
     void probabilisticTerminalOutputKeepsZeroLowerBoundAndRetryBudget() {
         MaterialKey geode = MaterialKey.of(new ItemStack(Items.PRISMARINE));
         CraftPlanGraph base = new CraftPlanGraph(1, List.of(), List.of(), List.of(
@@ -157,7 +215,7 @@ class TerminalGraphComposerTest extends BootstrapTest {
         OutputProbability probability = OutputProbability.dynamic(null, 12, "terminal:test");
 
         CraftPlanGraph result = TerminalGraphComposer.compose(base, step("probability", 1),
-                List.of(new TerminalGraphComposer.TerminalOutput(
+                List.of(TerminalGraphComposer.TerminalOutput.item(
                         MaterialKey.of(new ItemStack(Items.DIAMOND)), 1,
                         OutputKind.PRIMARY, probability, false)));
 
@@ -180,7 +238,7 @@ class TerminalGraphComposerTest extends BootstrapTest {
         CraftPlanGraph result = TerminalGraphComposer.compose(
                 base,
                 step("range", 2),
-                List.of(new TerminalGraphComposer.TerminalOutput(
+                List.of(TerminalGraphComposer.TerminalOutput.item(
                         MaterialKey.of(new ItemStack(Items.DIAMOND)),
                         2,
                         1,
@@ -208,14 +266,22 @@ class TerminalGraphComposerTest extends BootstrapTest {
                 new RootDemand(Ingredient.of(Items.IRON_INGOT), 1, 1,
                         new ItemStack(Items.IRON_INGOT), List.of())), List.of(), List.of());
         assertThrows(IllegalArgumentException.class, () -> TerminalGraphComposer.compose(
-                unresolved, step("terminal", 1), new ItemStack(Items.IRON_SWORD)));
+                unresolved, step("terminal", 1),
+                terminalOutput(new ItemStack(Items.IRON_SWORD))));
 
         CraftPlanGraph resolved = new CraftPlanGraph(1, List.of(), List.of(), List.of(
                 new RootDemand(Ingredient.of(Items.IRON_INGOT), 1, 0,
                         new ItemStack(Items.IRON_INGOT), List.of(new RootAllocation(
                         new MaterialSource.InitialPool(iron), iron, 1)))), List.of(), List.of());
         assertThrows(IllegalArgumentException.class, () -> TerminalGraphComposer.compose(
-                resolved, step("terminal", 1), ItemStack.EMPTY));
+                resolved, step("terminal", 1), List.of()));
+    }
+
+    private static List<TerminalGraphComposer.TerminalOutput> terminalOutput(
+            ItemStack stack
+    ) {
+        return List.of(TerminalGraphComposer.TerminalOutput.item(
+                MaterialKey.of(stack), stack.getCount(), OutputKind.PRIMARY));
     }
 
     private static CraftingResolver.ResolutionStep step(String path, int executions) {

@@ -65,7 +65,7 @@ public final class FarmersDelightRSModule implements IModIntegration {
                     new String[]{"fiery_cooking_pot", "fiery_pot"},
                     new String[]{ModIds.ID_TD_FIERY_POT},
                     TwilightDelightFieryPotBatchDelegate::new)
-                    .confirmGraphExecution("炽铁锅食材与容器由共享账本预留，成品在独占机器槽内结算");
+                    .confirmPureProjection("炽铁锅食材与容器由共享账本预留，成品在独占机器槽内结算");
             ModType.configureJei(ModIds.ID_TD_FIERY_POT,
                     new String[][]{{"farmersdelight:cooking", ModIds.ID_TD_FIERY_POT}},
                     null,
@@ -97,7 +97,7 @@ public final class FarmersDelightRSModule implements IModIntegration {
                 new String[]{"cutting_board", "cuttingboard"},
                 new String[]{ModIds.ID_FD_CUTTING_BOARD},
                 CuttingBoardBatchDelegate::new);
-        cuttingBoard.requireFlatExecution(
+        cuttingBoard.rejectPureProjection(
                 "cutting board has probabilistic outputs and a durability-bearing tool");
         ModType.configureJei(ModIds.ID_FD_CUTTING_BOARD,
                 new String[][]{{"farmersdelight:cutting", ModIds.ID_FD_CUTTING_BOARD}},

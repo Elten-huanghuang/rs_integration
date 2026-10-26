@@ -170,7 +170,7 @@ import org.apache.logging.log4j.core.config.Configurator;
 
 @Mod(RSIntegrationMod.MOD_ID)
 public final class RSIntegrationMod {
-    private static final Set<String> REVIEWED_GRAPH_EXECUTION_TYPES = Set.of(
+    private static final Set<String> REVIEWED_PURE_PROJECTION_TYPES = Set.of(
             "aether", "aether_altar", "aether_freezer", "aether_incubator",
             "aetherworks_anvil", "aetherworks_tool_station",
             "apotheosis_fletching", "apotheosis_gem_cutting", "apotheosis_library",
@@ -1003,7 +1003,7 @@ public final class RSIntegrationMod {
                     PassiveEffectEngine.class);
         }
 
-        ModType.confirmReviewedGraphExecution(REVIEWED_GRAPH_EXECUTION_TYPES,
+        ModType.confirmReviewedPureProjection(REVIEWED_PURE_PROJECTION_TYPES,
                 "startup registry audit: standard machine lease, material transaction and output capture apply");
         ContractValidation.validateAll();
 

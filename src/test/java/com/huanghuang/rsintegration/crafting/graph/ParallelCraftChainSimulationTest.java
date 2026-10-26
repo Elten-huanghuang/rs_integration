@@ -169,7 +169,7 @@ class ParallelCraftChainSimulationTest extends BootstrapTest {
                     List.of(), List.of(), false, null, null,
                     List.of(new InputDemand(inputId, Ingredient.of(input.toStack(1)), 1,
                             DemandRole.CONSUMED, input.toStack(1))),
-                    List.of(new OutputDeclaration(outputId, output, 1, OutputKind.PRIMARY))));
+                    List.of(OutputDeclaration.item(outputId, output, 1, OutputKind.PRIMARY))));
             allocations.add(new MaterialAllocation(new AllocationId(index), inputId,
                     new MaterialSource.InitialPool(input), input, 1));
             roots.add(new RootDemand(Ingredient.of(output.toStack(1)), 1, 0, output.toStack(1),
@@ -200,7 +200,7 @@ class ParallelCraftChainSimulationTest extends BootstrapTest {
                         List.of(), List.of(), false, null, null,
                         List.of(new InputDemand(inputId, Ingredient.of(input.toStack(1)), 1,
                                 DemandRole.CONSUMED, input.toStack(1))),
-                        List.of(new OutputDeclaration(outputId, output, 1, OutputKind.PRIMARY))));
+                        List.of(OutputDeclaration.item(outputId, output, 1, OutputKind.PRIMARY))));
                 allocations.add(new MaterialAllocation(new AllocationId(value), inputId,
                         source, input, 1));
                 if (layer == layers - 1) {

@@ -5,7 +5,6 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.crafting.AsyncCraftChain;
 import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
-import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.OutputDestination;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
@@ -15,76 +14,52 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 
 import javax.annotation.Nullable;
-import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
 
-/** 统一提交扁平步骤和图步骤，并在当前 tick 内尽可能立即推进。 */
+/** 提交完整执行图，并在当前 tick 内尽可能立即推进。 */
 public final class CraftExecutionService {
     private CraftExecutionService() {}
 
-    public static AsyncCraftChain launch(
-            ServerPlayer player, @Nullable CraftStorageEndpoint storageEndpoint,
-            List<CraftingResolver.ResolutionStep> steps,
-            LegacyExecutionMetrics.Reason reason, ResourceLocation recipeId,
-            @Nullable ItemStack targetOutput, OutputDestination outputDestination,
-            Consumer<AsyncCraftChain> completionWiring) {
-        return launch(
-                player, storageEndpoint, steps, reason, recipeId,
-                null, targetOutput, outputDestination, completionWiring);
-    }
-
-    public static AsyncCraftChain launch(
-            ServerPlayer player, @Nullable CraftStorageEndpoint storageEndpoint,
-            List<CraftingResolver.ResolutionStep> steps,
-            LegacyExecutionMetrics.Reason reason, ResourceLocation recipeId,
+    public static AsyncCraftChain launchGraph(
+            ServerPlayer player,
+            @Nullable CraftStorageEndpoint storageEndpoint,
+            CraftPlanGraph graph,
+            ResourceLocation recipeId,
             @Nullable IntegrationResourceKey targetResource,
             @Nullable ItemStack targetOutput,
             OutputDestination outputDestination,
-            Consumer<AsyncCraftChain> completionWiring) {
+            Consumer<AsyncCraftChain> completionWiring
+    ) {
         Objects.requireNonNull(player, "player");
-        Objects.requireNonNull(steps, "steps");
-        Objects.requireNonNull(reason, "reason");
+        Objects.requireNonNull(graph, "graph");
         Objects.requireNonNull(recipeId, "recipeId");
         Objects.requireNonNull(outputDestination, "outputDestination");
         Objects.requireNonNull(completionWiring, "completionWiring");
 
-        List<CraftingResolver.ResolutionStep> chainSteps = List.copyOf(steps);
-        ModType legacyType = chainSteps.stream()
-                .map(CraftingResolver.ResolutionStep::modType)
+        ModType executionType = graph.nodes().stream()
+                .map(node -> ModType.findById(node.modTypeId()))
+                .filter(Objects::nonNull)
                 .filter(type -> type != ModType.GENERIC)
-                .findFirst().orElse(ModType.GENERIC);
-        LegacyExecutionMetrics.record(reason, recipeId, legacyType);
+                .findFirst()
+                .orElse(ModType.GENERIC);
+        ExecutionMetrics.record(
+                ExecutionMetrics.Reason.GRAPH_PLAN,
+                recipeId,
+                executionType
+        );
         RSIntegrationMod.LOGGER.info(
-                "[RSI-Craft] execution chain submit recipe={} reason={} modType={} steps={}",
-                recipeId, reason, legacyType.id(), chainSteps.size());
+                "[RSI-Craft] execution graph submit recipe={} modType={} graphNodes={}",
+                recipeId, executionType.id(), graph.nodes().size()
+        );
 
         AsyncCraftChain chain = new AsyncCraftChain(
-                player.getUUID(), player.getServer(), storageEndpoint, chainSteps);
+                player.getUUID(), player.getServer(), storageEndpoint, graph);
         return submit(
-                player, chain, chainSteps.size(), recipeId,
+                player, chain, graph.nodes().size(), recipeId,
                 targetResource, targetOutput,
-                outputDestination, completionWiring);
-    }
-
-    public static AsyncCraftChain launchIncompleteGraph(
-            ServerPlayer player, @Nullable CraftStorageEndpoint storageEndpoint,
-            CraftPlanGraph inputGraph,
-            CraftingResolver.ResolutionStep terminalStep, int repeatCount,
-            LegacyExecutionMetrics.Reason reason, ResourceLocation recipeId,
-            @Nullable ItemStack targetOutput, OutputDestination outputDestination,
-            Consumer<AsyncCraftChain> completionWiring) {
-        Objects.requireNonNull(inputGraph, "inputGraph");
-        Objects.requireNonNull(terminalStep, "terminalStep");
-        LegacyExecutionMetrics.record(reason, recipeId, terminalStep.modType());
-        RSIntegrationMod.LOGGER.info(
-                "[RSI-Craft] execution graph submit recipe={} reason={} modType={} graphNodes={}",
-                recipeId, reason, terminalStep.modType().id(), inputGraph.nodes().size());
-        AsyncCraftChain chain = new AsyncCraftChain(player.getUUID(), player.getServer(),
-                storageEndpoint, inputGraph, terminalStep, repeatCount);
-        return submit(
-                player, chain, chain.stepsCount(), recipeId,
-                null, targetOutput, outputDestination, completionWiring);
+                outputDestination, completionWiring
+        );
     }
 
     private static AsyncCraftChain submit(

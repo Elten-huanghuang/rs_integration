@@ -416,7 +416,7 @@ class AsyncCraftFailureSimulationTest extends BootstrapTest {
                     List.of(), List.of(), false, null, null,
                     List.of(new InputDemand(inputPort, Ingredient.of(input.toStack(1)), 1,
                             DemandRole.CONSUMED, input.toStack(1))),
-                    List.of(new OutputDeclaration(outputPort, output, 1, OutputKind.PRIMARY)));
+                    List.of(OutputDeclaration.item(outputPort, output, 1, OutputKind.PRIMARY)));
             return new CraftPlanGraph(1, List.of(node),
                     List.of(new MaterialAllocation(new AllocationId(0), inputPort,
                             inputSource, input, 1)),

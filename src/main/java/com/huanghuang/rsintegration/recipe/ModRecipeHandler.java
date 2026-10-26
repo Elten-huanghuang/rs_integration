@@ -144,7 +144,7 @@ public interface ModRecipeHandler {
         List<RecipeOutputSpec> outputs = new ArrayList<>();
         ItemStack primary = getResultItem(recipe, access);
         if (!primary.isEmpty()) {
-            outputs.add(new RecipeOutputSpec(
+            outputs.add(RecipeOutputSpec.item(
                     MaterialKey.of(primary),
                     primary.getCount(),
                     OutputKind.PRIMARY
@@ -152,7 +152,7 @@ public interface ModRecipeHandler {
         }
         for (ItemStack secondary : getSecondaryOutputs(recipe, access)) {
             if (secondary == null || secondary.isEmpty()) continue;
-            outputs.add(new RecipeOutputSpec(
+            outputs.add(RecipeOutputSpec.item(
                     MaterialKey.of(secondary),
                     secondary.getCount(),
                     OutputKind.SECONDARY
@@ -269,7 +269,7 @@ public interface ModRecipeHandler {
 
     /**
      * Allows a value-only recipe into the recursive dependency graph even when
-     * its mod type still requires the legacy flat executor at runtime.
+     * its mod type is excluded from full pure projection.
      */
     default boolean supportsIntermediateProjection(@Nonnull Recipe<?> recipe) {
         return false;

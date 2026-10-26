@@ -75,26 +75,6 @@ final class BatchDispatchPlanner {
         return new AsyncCraftChain.VanillaBatchSlice(List.copyOf(sliceSteps), i, 0);
     }
 
-    static boolean requiresFlatExecutionForOversizedNode(
-            List<CraftingResolver.ResolutionStep> steps, int vanillaOperationLimit,
-            int dispatchOperationLimit) {
-        int vanillaLimit = Math.max(1, vanillaOperationLimit);
-        int machineLimit = Math.max(1, dispatchOperationLimit);
-        return steps.stream().anyMatch(step -> step.executions()
-                > (step.modType() == ModType.GENERIC ? vanillaLimit : machineLimit));
-    }
-
-    static int configuredAtomicVanillaGraphLimit() {
-        try {
-            return Math.max(1, Math.min(
-                    RSIntegrationConfig.CRAFTING_VANILLA_OPERATIONS_PER_TICK.get(),
-                    RSIntegrationConfig.CRAFTING_GLOBAL_VANILLA_OPERATIONS_PER_TICK.get()));
-        } catch (Exception ignored) {
-            return Math.min(RSIntegrationConfig.DEFAULT_CRAFTING_VANILLA_OPERATIONS_PER_TICK,
-                    RSIntegrationConfig.DEFAULT_CRAFTING_GLOBAL_VANILLA_OPERATIONS_PER_TICK);
-        }
-    }
-
     static int configuredOperationsPerDispatch() {
         try {
             return Math.max(1, RSIntegrationConfig.CRAFTING_OPERATIONS_PER_DISPATCH.get());

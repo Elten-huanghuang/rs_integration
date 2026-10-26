@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.recipe;
 
+import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.crafting.graph.OutputKind;
 import com.huanghuang.rsintegration.crafting.graph.OutputProbability;
@@ -9,7 +10,8 @@ import java.util.Objects;
 
 /** 单次物理操作的声明输出，供终端图无损投影。 */
 public record RecipeOutputSpec(
-        MaterialKey material,
+        @Nullable MaterialKey material,
+        IntegrationResourceKey resource,
         int expectedPerOperation,
         int minimumPerOperation,
         int maximumPerOperation,
@@ -19,7 +21,7 @@ public record RecipeOutputSpec(
         @Nullable Integer sourceInputIndex
 ) {
     public RecipeOutputSpec {
-        Objects.requireNonNull(material, "material");
+        Objects.requireNonNull(resource, "resource");
         Objects.requireNonNull(kind, "kind");
         Objects.requireNonNull(probability, "probability");
         if (expectedPerOperation < 0
@@ -38,14 +40,71 @@ public record RecipeOutputSpec(
             throw new IllegalArgumentException(
                     "source input index must be non-negative");
         }
+        if (resource.kind() == IntegrationResourceKey.ResourceKind.ITEM
+                && material == null) {
+            throw new IllegalArgumentException(
+                    "item output requires material projection");
+        }
     }
 
-    public RecipeOutputSpec(
+    public static RecipeOutputSpec item(
             MaterialKey material,
             int perOperation,
             OutputKind kind
     ) {
-        this(material, perOperation, perOperation, perOperation, kind,
+        return item(material, perOperation, perOperation, perOperation, kind,
                 OutputProbability.guaranteed(), false, null);
+    }
+
+    public static RecipeOutputSpec item(
+            MaterialKey material,
+            int expectedPerOperation,
+            int minimumPerOperation,
+            int maximumPerOperation,
+            OutputKind kind,
+            OutputProbability probability,
+            boolean dynamicIdentity,
+            @Nullable Integer sourceInputIndex
+    ) {
+        Objects.requireNonNull(material, "material");
+        return new RecipeOutputSpec(
+                material,
+                IntegrationResourceKey.item(material.toStack(1)),
+                expectedPerOperation,
+                minimumPerOperation,
+                maximumPerOperation,
+                kind,
+                probability,
+                dynamicIdentity,
+                sourceInputIndex
+        );
+    }
+
+    public static RecipeOutputSpec fluid(
+            IntegrationResourceKey resource,
+            int expectedPerOperation,
+            int minimumPerOperation,
+            int maximumPerOperation,
+            OutputKind kind,
+            OutputProbability probability,
+            boolean dynamicIdentity,
+            @Nullable Integer sourceInputIndex
+    ) {
+        if (resource.kind()
+                != IntegrationResourceKey.ResourceKind.FLUID) {
+            throw new IllegalArgumentException(
+                    "fluid output requires a fluid resource");
+        }
+        return new RecipeOutputSpec(
+                null,
+                resource,
+                expectedPerOperation,
+                minimumPerOperation,
+                maximumPerOperation,
+                kind,
+                probability,
+                dynamicIdentity,
+                sourceInputIndex
+        );
     }
 }

@@ -26,12 +26,15 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.level.material.Fluids;
+import net.minecraftforge.registries.ForgeRegistries;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -120,6 +123,50 @@ class ExternalRecipeHandlerTest extends BootstrapTest {
         assertEquals(3, outputs.get(1).maximumPerOperation());
         assertEquals(0, outputs.get(1).expectedPerOperation());
         assertEquals(0.25D, outputs.get(1).probability().chance());
+    }
+
+    @Test
+    void declaredFluidOutputsUseTheSameResourceContract() {
+        IntegrationResourceKey water = new IntegrationResourceKey(
+                IntegrationResourceKey.ResourceKind.FLUID,
+                ForgeRegistries.FLUIDS.getKey(Fluids.WATER),
+                new CompoundTag()
+        );
+        OutputDeclaration fluid = new OutputDeclaration(
+                id("fluid"),
+                "fluid",
+                water,
+                OutputAmount.exactly(750L),
+                OutputKind.PRIMARY,
+                OutputProbability.guaranteed(),
+                false,
+                false,
+                null
+        );
+        RecipeView view = new RecipeView(
+                id("fluid_recipe"),
+                id("process"),
+                List.of(),
+                List.of(),
+                List.of(fluid),
+                new RecipeFlags(
+                        true, false, true, false,
+                        false, true, true)
+        );
+        ExternalRecipeHandler handler = new ExternalRecipeHandler(
+                new StubIntegration(view, new AtomicInteger()),
+                ModType.EXTERNAL_INTEGRATION,
+                1,
+                recipe -> true
+        );
+
+        var outputs = handler.getDeclaredOutputs(
+                mock(Recipe.class), RegistryAccess.EMPTY);
+
+        assertEquals(1, outputs.size());
+        assertNull(outputs.get(0).material());
+        assertEquals(water, outputs.get(0).resource());
+        assertEquals(750, outputs.get(0).maximumPerOperation());
     }
 
     private static RecipeView view() {

@@ -27,17 +27,6 @@ class VirtualExchangeAsyncBatchTest {
         assertEquals(1024, prepared);
     }
 
-    @Test
-    void largeVirtualExchangeNodeUsesFlatBatchExecutionInsteadOfGraphDispatch() {
-        CraftingResolver.ResolutionStep step = new CraftingResolver.ResolutionStep(
-                new ResourceLocation("test", "void_exchange"), ModType.FLUID_CONTAINER,
-                new ResourceLocation("test", "void_exchange"), List.of(), List.of(),
-                false, 1024);
-
-        assertTrue(AsyncCraftChain.requiresFlatExecutionForOversizedNode(
-                List.of(step), 8, 32));
-    }
-
     private static final class TestVirtualExchangeDelegate
             extends VirtualExchangeBatchDelegate {
         @Override

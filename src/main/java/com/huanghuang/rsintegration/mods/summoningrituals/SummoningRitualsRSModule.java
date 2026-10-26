@@ -37,7 +37,7 @@ public final class SummoningRitualsRSModule implements IModIntegration {
                 new String[]{"summoningrituals"},
                 new String[]{ModIds.ID_SUMMONING_RITUALS},
                 SummoningRitualAltarBatchDelegate::new);
-        type.requireFlatExecution("manual altar preparation does not publish a craft output");
+        type.rejectPureProjection("manual altar preparation does not publish a craft output");
         ModType.configureJei(ModIds.ID_SUMMONING_RITUALS,
                 new String[][]{{"summoningrituals:altar", ModIds.ID_SUMMONING_RITUALS}},
                 new String[][]{{SummoningRitualRecipeHandler.RECIPE_CLASS,

@@ -10,12 +10,13 @@ import net.minecraft.world.item.ItemStack;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
-/** Compares the observable operation sequence of DAG and legacy flat execution. */
+/** Compares a DAG with its flat projection without changing execution semantics. */
 public final class ExecutionEquivalence {
     private ExecutionEquivalence() {}
 
-    /** Projects the authoritative graph order into the legacy executor shape. */
+    /** Projects the authoritative graph order into a diagnostic flat shape. */
     public static List<CraftingResolver.ResolutionStep> projectFlatSteps(CraftPlanGraph graph) {
         Map<NodeId, CraftNode> nodes = graph.nodesById();
         List<CraftingResolver.ResolutionStep> projected = new ArrayList<>(
@@ -38,7 +39,8 @@ public final class ExecutionEquivalence {
                 node.recipeTypeId(), node.alternativeIds(), node.alternativeModTypeIds(),
                 node.inferMode(), node.executions(), node.syntheticInput(), node.syntheticOutput(),
                 node.outputs().stream().filter(output -> output.kind() == OutputKind.PRIMARY)
-                        .findFirst().map(output -> new ProductionTarget(output.material(), output.quantity()))
+                        .findFirst().map(output -> ProductionTarget.of(
+                                output.resource(), output.quantity()))
                         .orElse(null), node.magicCosts());
     }
 
@@ -84,6 +86,26 @@ public final class ExecutionEquivalence {
             }
             if (!sameStack(node.syntheticOutput(), step.syntheticOutput())) {
                 mismatches.add(new Mismatch(i, "synthetic output differs"));
+            }
+            ProductionTarget graphTarget = node.outputs().stream()
+                    .filter(output -> output.kind() == OutputKind.PRIMARY)
+                    .findFirst()
+                    .map(output -> ProductionTarget.of(
+                            output.resource(), output.quantity()))
+                    .orElse(null);
+            if (!Objects.equals(graphTarget, step.productionTarget())) {
+                mismatches.add(new Mismatch(
+                        i,
+                        "production target " + graphTarget
+                                + " != " + step.productionTarget()
+                ));
+            }
+            if (!node.magicCosts().equals(step.magicCosts())) {
+                mismatches.add(new Mismatch(
+                        i,
+                        "magic costs " + node.magicCosts()
+                                + " != " + step.magicCosts()
+                ));
             }
         }
         return new Report(mismatches.isEmpty(), List.copyOf(mismatches));

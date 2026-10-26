@@ -33,10 +33,10 @@ import java.util.function.Supplier;
  */
 public final class ModType {
 
-    public enum GraphExecutionAudit {
+    public enum PureProjectionAudit {
         UNAUDITED,
-        GRAPH_SAFE,
-        FLAT_REQUIRED
+        SUPPORTED,
+        UNSUPPORTED
     }
 
     private static final Map<String, ModType> BY_ID = new LinkedHashMap<>();
@@ -48,9 +48,9 @@ public final class ModType {
     private final Supplier<IBatchDelegate> delegateFactory;
     private final Supplier<IBatchDelegate> inferDelegateFactory;
     private final boolean virtual;
-    private volatile String flatExecutionReason;
-    private volatile GraphExecutionAudit graphExecutionAudit = GraphExecutionAudit.UNAUDITED;
-    private volatile String graphExecutionAuditReason = "not audited for graph execution";
+    private volatile String pureProjectionReason;
+    private volatile PureProjectionAudit pureProjectionAudit = PureProjectionAudit.UNAUDITED;
+    private volatile String pureProjectionAuditReason = "not audited for pure projection";
 
     // JEI integration — set via configureJei() after register()
     // uidToFilter: [[jeiUid, filterString], ...] — filterString is what getBindingFilter returns
@@ -70,12 +70,12 @@ public final class ModType {
         GENERIC = register("generic",
                 new String[0], new String[0], new String[0],
                 GenericBatchDelegate::new);
-        GENERIC.confirmGraphExecution("logical crafting has no external machine state");
+        GENERIC.confirmPureProjection("logical crafting has no external machine state");
 
         FLUID_CONTAINER = registerVirtual("fluid_container",
                 new String[]{"com.huanghuang.rsintegration.crafting.fluid.FluidContainerRecipe"},
                 HandlerVirtualExchangeBatchDelegate::new);
-        FLUID_CONTAINER.confirmGraphExecution("液体容器转换仅消耗账本材料并返回确定产物");
+        FLUID_CONTAINER.confirmPureProjection("液体容器转换仅消耗账本材料并返回确定产物");
         configureJei("fluid_container", new String[][]{{"rs_integration:fluid_container"}},
                 new String[][]{{"com.huanghuang.rsintegration.crafting.fluid.FluidContainerRecipe"}},
                 "gui.rs_integration.jei.fluid_container_craft");
@@ -85,14 +85,14 @@ public final class ModType {
                 new String[0],
                 new String[0],
                 GenericBatchDelegate::new);
-        CUSTOM_GUI.requireFlatExecution("custom GUI machine state is not represented in the DAG");
+        CUSTOM_GUI.rejectPureProjection("custom GUI machine state is not represented in the DAG");
 
         FARMINGFORBLOCKHEADS_MARKET = register("farmingforblockheads",
                 new String[]{"com.huanghuang.rsintegration.mods.farmingforblockheads.MarketRecipeWrapper"},
                 new String[]{"market", "farmingforblockheads"},
                 new String[]{"market"},
                 delegateSupplier("com.huanghuang.rsintegration.mods.farmingforblockheads.MarketBatchDelegate"));
-        FARMINGFORBLOCKHEADS_MARKET.confirmGraphExecution(
+        FARMINGFORBLOCKHEADS_MARKET.confirmPureProjection(
                 "market execution uses the standard material transaction and output capture");
         configureJei("farmingforblockheads",
                 new String[][]{{"farmingforblockheads:market", "market"}},
@@ -106,7 +106,7 @@ public final class ModType {
                 new String[]{"integration_api"},
                 ExternalIntegrationBatchDelegate::new
         );
-        EXTERNAL_INTEGRATION.confirmGraphExecution(
+        EXTERNAL_INTEGRATION.confirmPureProjection(
                 "公共 API 机器由图节点内的标准 I/O 或自定义执行器完成");
     }
 
@@ -129,41 +129,41 @@ public final class ModType {
     public boolean isVirtual() { return virtual; }
 
     @Nullable
-    public String flatExecutionReason() { return flatExecutionReason; }
+    public String pureProjectionReason() { return pureProjectionReason; }
 
-    public GraphExecutionAudit graphExecutionAudit() { return graphExecutionAudit; }
+    public PureProjectionAudit pureProjectionAudit() { return pureProjectionAudit; }
 
-    public String graphExecutionAuditReason() { return graphExecutionAuditReason; }
+    public String pureProjectionAuditReason() { return pureProjectionAuditReason; }
 
-    public ModType confirmGraphExecution(String reason) {
+    public ModType confirmPureProjection(String reason) {
         if (reason == null || reason.isBlank()) throw new IllegalArgumentException("reason");
-        if (graphExecutionAudit == GraphExecutionAudit.FLAT_REQUIRED) {
-            throw new IllegalStateException(id + " already requires flat execution");
+        if (pureProjectionAudit == PureProjectionAudit.UNSUPPORTED) {
+            throw new IllegalStateException(id + " already rejects pure projection");
         }
-        graphExecutionAuditReason = reason;
-        graphExecutionAudit = GraphExecutionAudit.GRAPH_SAFE;
+        pureProjectionAuditReason = reason;
+        pureProjectionAudit = PureProjectionAudit.SUPPORTED;
         return this;
     }
 
-    public ModType requireFlatExecution(String reason) {
+    public ModType rejectPureProjection(String reason) {
         if (reason == null || reason.isBlank()) throw new IllegalArgumentException("reason");
-        flatExecutionReason = reason;
-        graphExecutionAuditReason = reason;
-        graphExecutionAudit = GraphExecutionAudit.FLAT_REQUIRED;
+        pureProjectionReason = reason;
+        pureProjectionAuditReason = reason;
+        pureProjectionAudit = PureProjectionAudit.UNSUPPORTED;
         return this;
     }
 
     /**
-     * Freezes the current registry after startup auditing. Types registered later remain
-     * UNAUDITED and are therefore rejected by the graph execution policy.
+     * Freezes the current registry after startup auditing. Types registered later
+     * remain UNAUDITED and are excluded from pure planning until reviewed.
      */
-    public static void confirmReviewedGraphExecution(Collection<String> reviewedTypeIds,
+    public static void confirmReviewedPureProjection(Collection<String> reviewedTypeIds,
                                                      String reason) {
         Objects.requireNonNull(reviewedTypeIds, "reviewedTypeIds");
         for (ModType type : BY_ID.values()) {
-            if (type.graphExecutionAudit == GraphExecutionAudit.UNAUDITED
+            if (type.pureProjectionAudit == PureProjectionAudit.UNAUDITED
                     && reviewedTypeIds.contains(type.id)) {
-                type.confirmGraphExecution(reason);
+                type.confirmPureProjection(reason);
             }
         }
     }

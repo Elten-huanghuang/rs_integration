@@ -26,7 +26,7 @@ class NodeOutputAccumulatorTest extends BootstrapTest {
         MaterialKey diamond = MaterialKey.of(template);
         OutputPortId port = new OutputPortId(node, 0);
         NodeOutputAccumulator accumulator = new NodeOutputAccumulator(
-                List.of(new OutputDeclaration(port, diamond, 3, OutputKind.PRIMARY)));
+                List.of(OutputDeclaration.item(port, diamond, 3, OutputKind.PRIMARY)));
 
         List<NodeOutputAccumulator.Publication> first = accumulator.add(
                 List.of(new ItemStack(Items.DIAMOND, 2)));
@@ -47,7 +47,7 @@ class NodeOutputAccumulatorTest extends BootstrapTest {
         MaterialKey redKey = MaterialKey.of(red);
         OutputPortId port = new OutputPortId(new NodeId(0), 0);
         NodeOutputAccumulator accumulator = new NodeOutputAccumulator(
-                List.of(new OutputDeclaration(port, redKey, 1, OutputKind.PRIMARY)));
+                List.of(OutputDeclaration.item(port, redKey, 1, OutputKind.PRIMARY)));
 
         assertTrue(accumulator.add(List.of(blue)).isEmpty());
         assertFalse(accumulator.isComplete());
@@ -63,7 +63,7 @@ class NodeOutputAccumulatorTest extends BootstrapTest {
         MaterialKey declared = MaterialKey.of(new ItemStack(Items.POTION));
         OutputPortId port = new OutputPortId(new NodeId(1), 0);
         NodeOutputAccumulator accumulator = new NodeOutputAccumulator(
-                List.of(new OutputDeclaration(port, declared, 4, OutputKind.PRIMARY)));
+                List.of(OutputDeclaration.item(port, declared, 4, OutputKind.PRIMARY)));
         ItemStack actual = new ItemStack(Items.POTION, 4);
         CompoundTag tag = new CompoundTag();
         tag.putInt("Purity", 3);
@@ -79,9 +79,9 @@ class NodeOutputAccumulatorTest extends BootstrapTest {
     @Test
     void reportsEveryUnmetDeclarationWithoutDrainingSurplus() {
         NodeId node = new NodeId(2);
-        OutputDeclaration primary = new OutputDeclaration(new OutputPortId(node, 0),
+        OutputDeclaration primary = OutputDeclaration.item(new OutputPortId(node, 0),
                 MaterialKey.of(new ItemStack(Items.DIAMOND)), 3, OutputKind.PRIMARY);
-        OutputDeclaration remainder = new OutputDeclaration(new OutputPortId(node, 1),
+        OutputDeclaration remainder = OutputDeclaration.item(new OutputPortId(node, 1),
                 MaterialKey.of(new ItemStack(Items.BUCKET)), 1, OutputKind.REMAINDER);
         NodeOutputAccumulator accumulator = new NodeOutputAccumulator(List.of(primary, remainder));
 
@@ -99,7 +99,7 @@ class NodeOutputAccumulatorTest extends BootstrapTest {
 
     @Test
     void completedDeclarationsHaveNoShortages() {
-        OutputDeclaration declaration = new OutputDeclaration(
+        OutputDeclaration declaration = OutputDeclaration.item(
                 new OutputPortId(new NodeId(3), 0),
                 MaterialKey.of(new ItemStack(Items.DIAMOND)), 1, OutputKind.PRIMARY);
         NodeOutputAccumulator accumulator = new NodeOutputAccumulator(List.of(declaration));
@@ -112,7 +112,7 @@ class NodeOutputAccumulatorTest extends BootstrapTest {
 
     @Test
     void dynamicDeclarationAcceptsAndPreservesAnyRuntimeResult() {
-        OutputDeclaration declaration = new OutputDeclaration(
+        OutputDeclaration declaration = OutputDeclaration.item(
                 new OutputPortId(new NodeId(4), 0),
                 MaterialKey.of(new ItemStack(Items.SNIFFER_EGG)), 2, OutputKind.DYNAMIC);
         NodeOutputAccumulator accumulator = new NodeOutputAccumulator(List.of(declaration));
@@ -126,7 +126,7 @@ class NodeOutputAccumulatorTest extends BootstrapTest {
 
     @Test
     void prospectiveCaptureWaitsForTheEntireDeclaredBatchWithoutMutatingState() {
-        OutputDeclaration declaration = new OutputDeclaration(
+        OutputDeclaration declaration = OutputDeclaration.item(
                 new OutputPortId(new NodeId(5), 0),
                 MaterialKey.of(new ItemStack(Items.DIAMOND)), 2, OutputKind.PRIMARY);
         NodeOutputAccumulator accumulator = new NodeOutputAccumulator(List.of(declaration));
@@ -140,7 +140,7 @@ class NodeOutputAccumulatorTest extends BootstrapTest {
     @Test
     void reportsLongExpectedQuantitiesWithoutOverflow() {
         long expected = (long) Integer.MAX_VALUE + 10L;
-        OutputDeclaration declaration = new OutputDeclaration(
+        OutputDeclaration declaration = OutputDeclaration.item(
                 new OutputPortId(new NodeId(6), 0),
                 MaterialKey.of(new ItemStack(Items.DIAMOND)), expected, OutputKind.PRIMARY);
         NodeOutputAccumulator accumulator = new NodeOutputAccumulator(List.of(declaration));
@@ -156,7 +156,7 @@ class NodeOutputAccumulatorTest extends BootstrapTest {
                 new FluidStack(Fluids.WATER, 1000));
         ItemStack actual = declared.copy();
         actual.getOrCreateTag().putInt("Amount", 1000);
-        OutputDeclaration declaration = new OutputDeclaration(
+        OutputDeclaration declaration = OutputDeclaration.item(
                 new OutputPortId(new NodeId(7), 0),
                 MaterialKey.of(declared), declared.getCount(), OutputKind.PRIMARY);
         NodeOutputAccumulator accumulator = new NodeOutputAccumulator(List.of(declaration));
@@ -170,7 +170,7 @@ class NodeOutputAccumulatorTest extends BootstrapTest {
 
     @Test
     void probabilisticOutputIsObservedWithoutBeingRequired() {
-        OutputDeclaration declaration = new OutputDeclaration(
+        OutputDeclaration declaration = OutputDeclaration.item(
                 new OutputPortId(new NodeId(8), 0),
                 MaterialKey.of(new ItemStack(Items.DIAMOND)),
                 0, OutputKind.SECONDARY, 0, 2,
@@ -191,7 +191,7 @@ class NodeOutputAccumulatorTest extends BootstrapTest {
 
     @Test
     void probabilisticOutputPublishesNoMoreThanItsMaximumQuantity() {
-        OutputDeclaration declaration = new OutputDeclaration(
+        OutputDeclaration declaration = OutputDeclaration.item(
                 new OutputPortId(new NodeId(9), 0),
                 MaterialKey.of(new ItemStack(Items.DIAMOND)),
                 0, OutputKind.SECONDARY, 0, 2,

@@ -58,15 +58,15 @@ class CraftPlanValidatorTest extends BootstrapTest {
         OutputPortId rightOutput = new OutputPortId(rightId, 0);
 
         CraftNode producer = node(producerId, "producer", List.of(),
-                List.of(new OutputDeclaration(producerOutput, iron, 3, OutputKind.PRIMARY)));
+                List.of(OutputDeclaration.item(producerOutput, iron, 3, OutputKind.PRIMARY)));
         CraftNode left = node(leftId, "left",
                 List.of(new InputDemand(leftInput, Ingredient.of(Items.IRON_INGOT), 1,
                         DemandRole.CONSUMED, new ItemStack(Items.IRON_INGOT))),
-                List.of(new OutputDeclaration(leftOutput, leftOut, 1, OutputKind.PRIMARY)));
+                List.of(OutputDeclaration.item(leftOutput, leftOut, 1, OutputKind.PRIMARY)));
         CraftNode right = node(rightId, "right",
                 List.of(new InputDemand(rightInput, Ingredient.of(Items.IRON_INGOT), 2,
                         DemandRole.CONSUMED, new ItemStack(Items.IRON_INGOT))),
-                List.of(new OutputDeclaration(rightOutput, rightOut, 1, OutputKind.PRIMARY)));
+                List.of(OutputDeclaration.item(rightOutput, rightOut, 1, OutputKind.PRIMARY)));
 
         CraftPlanGraph graph = new CraftPlanGraph(CraftPlanGraph.CURRENT_VERSION,
                 List.of(producer, left, right),
@@ -95,7 +95,7 @@ class CraftPlanValidatorTest extends BootstrapTest {
         CraftPlanGraph graph = new CraftPlanGraph(1,
                 List.of(
                         node(producerId, "producer", List.of(),
-                                List.of(new OutputDeclaration(producerOutput, iron, 1, OutputKind.PRIMARY))),
+                                List.of(OutputDeclaration.item(producerOutput, iron, 1, OutputKind.PRIMARY))),
                         node(consumerId, "consumer",
                                 List.of(new InputDemand(consumerInput, Ingredient.of(Items.IRON_INGOT), 2,
                                         DemandRole.CONSUMED, new ItemStack(Items.IRON_INGOT))),
@@ -120,7 +120,7 @@ class CraftPlanValidatorTest extends BootstrapTest {
         CraftPlanGraph graph = new CraftPlanGraph(1,
                 List.of(
                         node(producerId, "producer", List.of(),
-                                List.of(new OutputDeclaration(producerOutput, iron, 1, OutputKind.PRIMARY))),
+                                List.of(OutputDeclaration.item(producerOutput, iron, 1, OutputKind.PRIMARY))),
                         node(consumerId, "consumer",
                                 List.of(new InputDemand(consumerInput, Ingredient.of(Items.IRON_INGOT), 1,
                                         DemandRole.CONSUMED, new ItemStack(Items.IRON_INGOT))), List.of())),
@@ -167,11 +167,11 @@ class CraftPlanValidatorTest extends BootstrapTest {
                         node(a, "a",
                                 List.of(new InputDemand(aIn, Ingredient.of(Items.IRON_INGOT), 1,
                                         DemandRole.CONSUMED, new ItemStack(Items.IRON_INGOT))),
-                                List.of(new OutputDeclaration(aOut, iron, 1, OutputKind.PRIMARY))),
+                                List.of(OutputDeclaration.item(aOut, iron, 1, OutputKind.PRIMARY))),
                         node(b, "b",
                                 List.of(new InputDemand(bIn, Ingredient.of(Items.IRON_INGOT), 1,
                                         DemandRole.CONSUMED, new ItemStack(Items.IRON_INGOT))),
-                                List.of(new OutputDeclaration(bOut, iron, 1, OutputKind.PRIMARY)))),
+                                List.of(OutputDeclaration.item(bOut, iron, 1, OutputKind.PRIMARY)))),
                 List.of(
                         new MaterialAllocation(new AllocationId(0), aIn,
                                 new MaterialSource.ProducerOutput(bOut), iron, 1),
@@ -266,8 +266,8 @@ class CraftPlanValidatorTest extends BootstrapTest {
         InputPortId ironInput = new InputPortId(consumerId, 0);
         InputPortId bucketInput = new InputPortId(consumerId, 1);
         CraftNode producer = node(producerId, "same_recipe", List.of(), List.of(
-                new OutputDeclaration(secondary, iron, 2, OutputKind.SECONDARY),
-                new OutputDeclaration(remainder, bucket, 1, OutputKind.REMAINDER)));
+                OutputDeclaration.item(secondary, iron, 2, OutputKind.SECONDARY),
+                OutputDeclaration.item(remainder, bucket, 1, OutputKind.REMAINDER)));
         CraftNode consumer = node(consumerId, "same_recipe", List.of(
                 new InputDemand(ironInput, Ingredient.of(Items.IRON_INGOT), 3,
                         DemandRole.CONSUMED, new ItemStack(Items.IRON_INGOT)),
@@ -320,7 +320,7 @@ class CraftPlanValidatorTest extends BootstrapTest {
         InputPortId input = new InputPortId(consumerId, 0);
         CraftPlanGraph graph = new CraftPlanGraph(1, List.of(
                 node(producerId, "producer", List.of(), List.of(
-                        new OutputDeclaration(output, iron, 2, OutputKind.PRIMARY))),
+                        OutputDeclaration.item(output, iron, 2, OutputKind.PRIMARY))),
                 node(consumerId, "consumer", List.of(new InputDemand(input,
                         Ingredient.of(Items.IRON_INGOT), 1, DemandRole.CONSUMED,
                         new ItemStack(Items.IRON_INGOT))), List.of())),

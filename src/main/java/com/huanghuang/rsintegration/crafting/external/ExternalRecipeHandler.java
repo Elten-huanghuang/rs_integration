@@ -291,10 +291,6 @@ final class ExternalRecipeHandler implements ModRecipeHandler {
         }
         List<RecipeOutputSpec> outputs = new ArrayList<>();
         for (OutputDeclaration output : projection.view().outputs()) {
-            if (output.resource().kind()
-                    != IntegrationResourceKey.ResourceKind.ITEM) {
-                continue;
-            }
             int minimum = (int) Math.min(
                     Integer.MAX_VALUE, output.amount().min());
             int maximum = (int) Math.min(
@@ -306,17 +302,33 @@ final class ExternalRecipeHandler implements ModRecipeHandler {
             Integer sourceInput = output.sourceInputEntryId() == null
                     ? null
                     : inputIndexes.get(output.sourceInputEntryId());
-            outputs.add(new RecipeOutputSpec(
-                    MaterialKey.of(ExternalRecipeProjection.toStack(
-                            output.resource(), Math.max(1, maximum))),
-                    expected,
-                    probabilistic ? 0 : minimum,
-                    maximum,
-                    ExternalRecipeProjection.kind(output),
-                    ExternalRecipeProjection.probability(output),
-                    output.dynamicIdentity(),
-                    sourceInput
-            ));
+            RecipeOutputSpec spec;
+            if (output.resource().kind()
+                    == IntegrationResourceKey.ResourceKind.ITEM) {
+                spec = RecipeOutputSpec.item(
+                        MaterialKey.of(ExternalRecipeProjection.toStack(
+                                output.resource(), Math.max(1, maximum))),
+                        expected,
+                        probabilistic ? 0 : minimum,
+                        maximum,
+                        ExternalRecipeProjection.kind(output),
+                        ExternalRecipeProjection.probability(output),
+                        output.dynamicIdentity(),
+                        sourceInput
+                );
+            } else {
+                spec = RecipeOutputSpec.fluid(
+                        output.resource(),
+                        expected,
+                        probabilistic ? 0 : minimum,
+                        maximum,
+                        ExternalRecipeProjection.kind(output),
+                        ExternalRecipeProjection.probability(output),
+                        output.dynamicIdentity(),
+                        sourceInput
+                );
+            }
+            outputs.add(spec);
         }
         return List.copyOf(outputs);
     }

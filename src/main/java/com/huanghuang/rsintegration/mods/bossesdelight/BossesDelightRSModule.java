@@ -40,7 +40,7 @@ public final class BossesDelightRSModule implements IModIntegration {
                 new String[]{"soul_cooking_pot"},
                 new String[]{ModIds.ID_BD_SOUL_COOKING_POT},
                 SoulCookingPotBatchDelegate::new)
-                .confirmGraphExecution("灵魂锅食材与装盛容器由共享账本预留，成品在机器输出槽结算");
+                .confirmPureProjection("灵魂锅食材与装盛容器由共享账本预留，成品在机器输出槽结算");
         ModType.configureJei(ModIds.ID_BD_SOUL_COOKING_POT,
                 new String[][]{{"bosses_delight:soul_cooking", ModIds.ID_BD_SOUL_COOKING_POT}},
                 new String[][]{{BossesDelightRecipeHandler.RECIPE_CLASS,

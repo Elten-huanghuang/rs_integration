@@ -47,7 +47,7 @@ class ProbabilityPlanningTest extends BootstrapTest {
         CraftNode node = new CraftNode(nodeId, new ResourceLocation("test", "recycle"),
                 ModType.GENERIC.id(), new ResourceLocation("test", "type"), 3,
                 List.of(), List.of(), false, null, null, List.of(),
-                List.of(new OutputDeclaration(new OutputPortId(nodeId, 0), material, 750, OutputKind.PRIMARY)));
+                List.of(OutputDeclaration.item(new OutputPortId(nodeId, 0), material, 750, OutputKind.PRIMARY)));
         ProductionTarget target = ExecutionEquivalence.projectStep(node).productionTarget();
         assertNotNull(target);
         assertEquals(750, target.quantity());

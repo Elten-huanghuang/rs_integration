@@ -172,7 +172,7 @@ class CraftProgressRuntimeTest extends BootstrapTest {
         NodeId node = new NodeId(6);
         CraftNodeRuntime runtime = new CraftNodeRuntime(node, "test:shortage", delegate, null, null);
         runtime.setChainContext(new ArrayList<>(), player);
-        runtime.attachOutputs(new NodeOutputAccumulator(List.of(new OutputDeclaration(
+        runtime.attachOutputs(new NodeOutputAccumulator(List.of(OutputDeclaration.item(
                 new OutputPortId(node, 0), MaterialKey.of(new ItemStack(net.minecraft.world.item.Items.DIAMOND)),
                 1, OutputKind.PRIMARY))));
 
@@ -197,7 +197,7 @@ class CraftProgressRuntimeTest extends BootstrapTest {
         CraftNodeRuntime runtime = new CraftNodeRuntime(
                 node, "test:world-state-mutation", delegate, null, null);
         runtime.setChainContext(new ArrayList<>(), player);
-        runtime.attachOutputs(new NodeOutputAccumulator(List.of(new OutputDeclaration(
+        runtime.attachOutputs(new NodeOutputAccumulator(List.of(OutputDeclaration.item(
                 new OutputPortId(node, 0), MaterialKey.of(new ItemStack(Items.DIAMOND)),
                 1, OutputKind.PRIMARY))));
 
@@ -276,7 +276,7 @@ class CraftProgressRuntimeTest extends BootstrapTest {
         CompoundTag tag = new CompoundTag();
         tag.putString("variant", "required");
         declared.setTag(tag);
-        runtime.attachOutputs(new NodeOutputAccumulator(List.of(new OutputDeclaration(
+        runtime.attachOutputs(new NodeOutputAccumulator(List.of(OutputDeclaration.item(
                 new OutputPortId(node, 0), MaterialKey.of(declared), 2, OutputKind.PRIMARY))));
 
         captured.add(new ItemStack(Items.DIAMOND));
@@ -308,7 +308,7 @@ class CraftProgressRuntimeTest extends BootstrapTest {
         runtime.setChainContext(new ArrayList<>(), player);
         runtime.attachCapture(capture);
         if (declaredOutputs) {
-            runtime.attachOutputs(new NodeOutputAccumulator(List.of(new OutputDeclaration(
+            runtime.attachOutputs(new NodeOutputAccumulator(List.of(OutputDeclaration.item(
                     new OutputPortId(node, 0), MaterialKey.of(new ItemStack(Items.DIAMOND)),
                     operations, OutputKind.PRIMARY))));
         }

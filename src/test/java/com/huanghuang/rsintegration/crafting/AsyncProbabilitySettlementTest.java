@@ -218,7 +218,7 @@ class AsyncProbabilitySettlementTest extends BootstrapTest {
         CraftNode producer = new CraftNode(nodeId, new ResourceLocation("test", "paper"),
                 ModType.GENERIC.id(), new ResourceLocation("minecraft", "crafting"), 1,
                 List.of(), List.of(), false, null, null, List.of(),
-                List.of(new OutputDeclaration(port, paper, 1, PRIMARY)));
+                List.of(OutputDeclaration.item(port, paper, 1, PRIMARY)));
         CraftPlanGraph graph = new CraftPlanGraph(1, List.of(producer), List.of(),
                 List.of(new RootDemand(Ingredient.of(Items.PAPER), 1, 0, new ItemStack(Items.PAPER),
                         List.of(new RootAllocation(new MaterialSource.ProducerOutput(port), paper, 1)))),

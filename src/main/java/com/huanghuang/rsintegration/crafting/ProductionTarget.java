@@ -13,19 +13,12 @@ import java.util.Objects;
 /** 递归步骤必须实际生产的材料；数量不是尝试次数。 */
 public record ProductionTarget(
         @Nullable MaterialKey material,
-        @Nullable IntegrationResourceKey resource,
+        IntegrationResourceKey resource,
         long quantity
 ) {
     public ProductionTarget {
-        if (material == null && resource == null) {
-            throw new IllegalArgumentException(
-                    "material or resource target is required");
-        }
+        Objects.requireNonNull(resource, "resource");
         if (quantity <= 0) throw new IllegalArgumentException("production quantity must be positive");
-    }
-
-    public ProductionTarget(MaterialKey material, long quantity) {
-        this(Objects.requireNonNull(material, "material"), null, quantity);
     }
 
     public static ProductionTarget of(ItemStack stack, long quantity) {
@@ -59,8 +52,7 @@ public record ProductionTarget(
     }
 
     boolean matchesFluid(CollectedOutput output) {
-        return resource != null
-                && resource.kind()
+        return resource.kind()
                 == IntegrationResourceKey.ResourceKind.FLUID
                 && output.resource().kind()
                 == IntegrationResourceKey.ResourceKind.FLUID
@@ -73,9 +65,7 @@ public record ProductionTarget(
     /** 仅用于进度、失败提示和内部循环身份，不代表真实物品产物。 */
     public ItemStack displayStack() {
         if (material != null) return material.toStack(1);
-        return resource == null
-                ? ItemStack.EMPTY
-                : InkFluidSupport.tokenFor(resource, 1);
+        return InkFluidSupport.tokenFor(resource, 1);
     }
 
     private static MaterialKey itemMaterial(

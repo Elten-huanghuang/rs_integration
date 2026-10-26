@@ -628,7 +628,7 @@ public final class RecipeIndex {
     static boolean isTypedPureProjectionCandidate(ModRecipeHandler handler, ModType type,
                                                    Recipe<?> recipe) {
         return handler != null && type != null && recipe != null
-                && (type.graphExecutionAudit() != ModType.GraphExecutionAudit.FLAT_REQUIRED
+                && (type.pureProjectionAudit() != ModType.PureProjectionAudit.UNSUPPORTED
                     || handler.supportsIntermediateProjection(recipe))
                 && handler.supportsBackgroundPlanning(recipe);
     }
@@ -640,7 +640,7 @@ public final class RecipeIndex {
         ModType type = ModType.classifyRecipe(recipe);
         if (type == null && handler != null) type = handler.modType();
         return handler != null && type != null
-                && (type.graphExecutionAudit() != ModType.GraphExecutionAudit.FLAT_REQUIRED
+                && (type.pureProjectionAudit() != ModType.PureProjectionAudit.UNSUPPORTED
                     || handler.supportsIntermediateProjection(recipe))
                 && handler.supportsBackgroundPlanning(recipe)
                 && handler.hasDeterministicPrimaryOutput(recipe);

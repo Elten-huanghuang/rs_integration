@@ -51,7 +51,7 @@ public final class AetherworksRSModule implements IModIntegration {
                 new String[]{"forge_metal_former"},
                 new String[]{ModIds.ID_AETHERWORKS_METAL_FORMER},
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.aetherworks.AetherworksMetalFormerBatchDelegate"))
-                .requireFlatExecution("金属成型台与锻造炉共享能量和流体，输入与产物共用槽位");
+                .rejectPureProjection("金属成型台与锻造炉共享能量和流体，输入与产物共用槽位");
         ModType.configureJei(ModIds.ID_AETHERWORKS_METAL_FORMER,
                 new String[][]{{"aetherworks:metal_forming", ModIds.ID_AETHERWORKS_METAL_FORMER}},
                 new String[][]{{"net.sirplop.aetherworks.recipe.MetalFormerRecipe", ModIds.ID_AETHERWORKS_METAL_FORMER}},

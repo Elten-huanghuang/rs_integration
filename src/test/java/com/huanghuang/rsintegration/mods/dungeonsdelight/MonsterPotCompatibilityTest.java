@@ -89,7 +89,7 @@ class MonsterPotCompatibilityTest extends BootstrapTest {
     @Test
     void nativeRecipeAndJeiCategoryResolveToGraphEnabledMonsterPot() {
         ModType type = ModType.byId(ModIds.ID_DD_MONSTER_POT);
-        assertEquals(ModType.GraphExecutionAudit.GRAPH_SAFE, type.graphExecutionAudit());
+        assertEquals(ModType.PureProjectionAudit.SUPPORTED, type.pureProjectionAudit());
         assertInstanceOf(MonsterPotBatchDelegate.class, type.createDelegate());
         assertEquals(ModIds.ID_DD_MONSTER_POT,
                 ModType.filterForJeiUid("dungeonsdelight:monster_cooking"));

@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.api.IntegrationResourceKey;
+import com.huanghuang.rsintegration.api.execution.CollectedOutput;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
@@ -12,17 +14,26 @@ import com.huanghuang.rsintegration.crafting.graph.CraftNode;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.crafting.graph.MaterialSource;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
+import com.huanghuang.rsintegration.crafting.graph.NodeOutputAccumulator;
+import com.huanghuang.rsintegration.crafting.graph.NodeOutputAccumulator.Publication;
 import com.huanghuang.rsintegration.crafting.graph.OutputDeclaration;
 import com.huanghuang.rsintegration.crafting.graph.OutputKind;
 import com.huanghuang.rsintegration.crafting.graph.OutputPortId;
+import com.huanghuang.rsintegration.crafting.graph.OutputProbability;
 import com.huanghuang.rsintegration.crafting.graph.RootAllocation;
 import com.huanghuang.rsintegration.crafting.graph.RootDemand;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidTestFixtures;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.TagParser;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.level.material.Fluids;
+import net.minecraftforge.fluids.FluidStack;
 import net.minecraft.world.item.EnchantedBookItem;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraft.world.item.enchantment.EnchantmentInstance;
@@ -73,6 +84,57 @@ class AsyncCraftChainProductionTest extends BootstrapTest {
     }
 
     @Test
+    void graphOutputAccumulatorCompletesFromFluidResources() {
+        IntegrationResourceKey water =
+                IntegrationResourceKey.fluid(
+                        new FluidStack(Fluids.WATER, 1));
+        MaterialKey token = MaterialKey.of(
+                InkFluidSupport.token(
+                        InkFluidTestFixtures.tokenItem(),
+                        new FluidStack(Fluids.WATER, 1)
+                )
+        );
+        OutputPortId port = new OutputPortId(
+                new NodeId(0), 0);
+        OutputDeclaration declaration =
+                new OutputDeclaration(
+                        port,
+                        token,
+                        750L,
+                        OutputKind.PRIMARY,
+                        750L,
+                        750L,
+                        OutputProbability.guaranteed(),
+                        false,
+                        null,
+                        water
+                );
+        NodeOutputAccumulator accumulator =
+                new NodeOutputAccumulator(
+                        List.of(declaration));
+        ResourceLocation portId =
+                new ResourceLocation("test", "fluid");
+
+        accumulator.add(
+                List.of(),
+                List.of(CollectedOutput.primary(
+                        water, 500L, portId))
+        );
+        assertEquals(500L,
+                accumulator.publishedQuantity(port));
+        assertFalse(accumulator.isComplete());
+
+        accumulator.add(
+                List.of(),
+                List.of(CollectedOutput.primary(
+                        water, 250L, portId))
+        );
+        assertEquals(750L,
+                accumulator.publishedQuantity(port));
+        assertTrue(accumulator.isComplete());
+    }
+
+    @Test
     void ambiguousCapturedWorldOutputIsNotAssignedToEitherPort() {
         OutputContract contract = new OutputContract(List.of(
                 new OutputContract.Port("world:first", null, new ItemStack(Items.IRON_INGOT), 1,
@@ -85,66 +147,6 @@ class AsyncCraftChainProductionTest extends BootstrapTest {
 
         assertEquals("unmatched:world:0", outputs.get(0).portId());
         assertFalse(OutputAccounting.assess(contract, 1, outputs).complete());
-    }
-
-    @Test
-    void appendedTerminalKeepsResolverScaledExecutions() {
-        var intermediate = new CraftingResolver.ResolutionStep(
-                new ResourceLocation("test", "intermediate"), ModType.GENERIC,
-                new ResourceLocation("minecraft", "crafting"), List.of(), List.of(), false, 2);
-        var terminal = new CraftingResolver.ResolutionStep(
-                new ResourceLocation("test", "terminal"), ModType.GENERIC,
-                new ResourceLocation("test", "ritual"), List.of(), List.of(), false, 1);
-
-        List<CraftingResolver.ResolutionStep> combined =
-                AsyncCraftChain.compatibilitySteps(List.of(intermediate), terminal, 2);
-
-        assertEquals(2, combined.get(0).executions());
-        assertEquals(2, combined.get(1).executions());
-    }
-
-    @Test
-    void resolverScaledModIntermediateIsNotMultipliedAgain() {
-        var intermediate = new CraftingResolver.ResolutionStep(
-                new ResourceLocation("malum", "runewood_plank"), ModType.byId("malum"),
-                new ResourceLocation("malum", "recipe"), List.of(), List.of(), false, 3);
-        List<CraftingResolver.ResolutionStep> combined =
-                AsyncCraftChain.compatibilitySteps(List.of(intermediate),
-                        new CraftingResolver.ResolutionStep(
-                                new ResourceLocation("test", "terminal"), ModType.GENERIC,
-                                new ResourceLocation("minecraft", "crafting"),
-                                List.of(), List.of(), false, 1), 4);
-        assertEquals(3, combined.get(0).executions());
-        assertEquals(4, combined.get(1).executions());
-    }
-
-    @Test
-    void compatibilityStepKeepsProductionTargetWhenExecutionsAreRescaled() {
-        ProductionTarget target =
-                ProductionTarget.of(
-                        new ItemStack(Items.EGG), 2L);
-        CraftingResolver.ResolutionStep terminal =
-                new CraftingResolver.ResolutionStep(
-                        new ResourceLocation("test", "terminal"),
-                        ModType.GENERIC,
-                        new ResourceLocation("test", "machine"),
-                        List.of(),
-                        List.of(),
-                        false,
-                        1,
-                        null,
-                        null,
-                        target,
-                        List.of()
-                );
-
-        List<CraftingResolver.ResolutionStep> combined =
-                AsyncCraftChain.compatibilitySteps(
-                        List.of(), terminal, 2);
-
-        assertEquals(2, combined.get(0).executions());
-        assertEquals(target,
-                combined.get(0).productionTarget());
     }
 
     @Test
@@ -193,28 +195,6 @@ class AsyncCraftChainProductionTest extends BootstrapTest {
     }
 
     @Test
-    void oversizedMachineGraphNodeUsesTickSlicedFlatExecution() {
-        var machine = new CraftingResolver.ResolutionStep(
-                new ResourceLocation("test", "machine"), ModType.CUSTOM_GUI,
-                new ResourceLocation("test", "machine"), List.of(), List.of(), false, 33);
-
-        assertTrue(AsyncCraftChain.requiresFlatExecutionForOversizedNode(
-                List.of(machine), 8, 32));
-        assertFalse(AsyncCraftChain.requiresFlatExecutionForOversizedNode(
-                List.of(machine), 8, 33));
-    }
-
-    @Test
-    void oversizedVanillaGraphNodeUsesItsStricterTickLimit() {
-        var vanilla = new CraftingResolver.ResolutionStep(
-                new ResourceLocation("minecraft", "stick"), ModType.GENERIC,
-                new ResourceLocation("minecraft", "crafting"), List.of(), List.of(), false, 9);
-
-        assertTrue(AsyncCraftChain.requiresFlatExecutionForOversizedNode(
-                List.of(vanilla), 8, 32));
-    }
-
-    @Test
     void graphNodeTargetKeepsIntermediateEnchantLevel() {
         ItemStack efficiencyFour = EnchantedBookItem.createForEnchantment(
                 new EnchantmentInstance(Enchantments.BLOCK_EFFICIENCY, 4));
@@ -222,7 +202,7 @@ class AsyncCraftChainProductionTest extends BootstrapTest {
         CraftNode node = new CraftNode(nodeId,
                 new ResourceLocation("goety", "enchant/efficiency"), "goety", null,
                 2, List.of(), List.of(), false, null, null, List.of(),
-                List.of(new OutputDeclaration(new OutputPortId(nodeId, 0),
+                List.of(OutputDeclaration.item(new OutputPortId(nodeId, 0),
                         MaterialKey.of(efficiencyFour), 2, OutputKind.PRIMARY)));
 
         ItemStack target = AsyncCraftChain.graphNodeTargetOutput(node);
@@ -252,20 +232,22 @@ class AsyncCraftChainProductionTest extends BootstrapTest {
     @Test
     void onlyPrimaryGraphPublicationsAdvanceCraftedItemProgress() {
         NodeId nodeId = new NodeId(7);
-        OutputDeclaration primary = new OutputDeclaration(new OutputPortId(nodeId, 0),
+        OutputDeclaration primary = OutputDeclaration.item(new OutputPortId(nodeId, 0),
                 MaterialKey.of(new ItemStack(Items.IRON_INGOT)), 2, OutputKind.PRIMARY);
-        OutputDeclaration remainder = new OutputDeclaration(new OutputPortId(nodeId, 1),
+        OutputDeclaration remainder = OutputDeclaration.item(new OutputPortId(nodeId, 1),
                 MaterialKey.of(new ItemStack(Items.BUCKET)), 1, OutputKind.REMAINDER);
         CraftNode node = new CraftNode(nodeId, new ResourceLocation("test", "smelting"),
                 "generic", null, 1, List.of(), List.of(), false, null, null,
                 List.of(), List.of(primary, remainder));
 
         assertTrue(AsyncCraftChain.isPrimaryGraphPublication(node,
-                new com.huanghuang.rsintegration.crafting.graph.NodeOutputAccumulator.Publication(
-                        primary.id(), primary.material(), new ItemStack(Items.IRON_INGOT, 2))));
+                new Publication(
+                        primary.id(), primary.material(),
+                        new ItemStack(Items.IRON_INGOT, 2), primary.resource())));
         assertFalse(AsyncCraftChain.isPrimaryGraphPublication(node,
-                new com.huanghuang.rsintegration.crafting.graph.NodeOutputAccumulator.Publication(
-                        remainder.id(), remainder.material(), new ItemStack(Items.BUCKET))));
+                new Publication(
+                        remainder.id(), remainder.material(),
+                        new ItemStack(Items.BUCKET), remainder.resource())));
     }
 
     @Test
@@ -303,7 +285,7 @@ class AsyncCraftChainProductionTest extends BootstrapTest {
     }
 
     @Test
-    void completeGraphRootStillRoutesRuntimeNbtOutputForFlatFallback() {
+    void completeGraphRootRemainsAuthoritativeForRuntimeNbtOutput() {
         MaterialKey declared = new MaterialKey(Items.DIAMOND_SWORD, null);
         MaterialSource source = new MaterialSource.ProducerOutput(
                 new OutputPortId(new NodeId(0), 0));
@@ -320,22 +302,22 @@ class AsyncCraftChainProductionTest extends BootstrapTest {
         clickedOutput.getOrCreateTag().putString("preview_state", "different");
 
         assertTrue(AsyncCraftChain.matchesFinalTarget(
-                runtimeOutput, graph, true, clickedOutput));
+                runtimeOutput, graph, clickedOutput));
         assertFalse(AsyncCraftChain.matchesFinalTarget(
-                runtimeOutput, graph, false, clickedOutput));
+                runtimeOutput, null, clickedOutput));
     }
 
     @Test
-    void flatFallbackRoutesPristineUnbreakableRuntimeOutputToPlayerInventory() throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+    void standaloneChainRoutesPristineUnbreakableRuntimeOutputToPlayerInventory() throws CommandSyntaxException {
         ItemStack clickedOutput = new ItemStack(Items.DIAMOND_SWORD);
-        clickedOutput.setTag(net.minecraft.nbt.TagParser.parseTag("{Unbreakable:1}"));
+        clickedOutput.setTag(TagParser.parseTag("{Unbreakable:1}"));
         ItemStack runtimeOutput = clickedOutput.copy();
         runtimeOutput.getOrCreateTag().putInt("Damage", 0);
         runtimeOutput.getOrCreateTag().putInt("RepairCost", 8);
         runtimeOutput.getOrCreateTag().putString("itemModifier", "celestial_forge:vicious");
 
-        assertTrue(AsyncCraftChain.matchesFinalTarget(runtimeOutput, null, false, clickedOutput));
+        assertTrue(AsyncCraftChain.matchesFinalTarget(runtimeOutput, null, clickedOutput));
         runtimeOutput.setDamageValue(1);
-        assertFalse(AsyncCraftChain.matchesFinalTarget(runtimeOutput, null, false, clickedOutput));
+        assertFalse(AsyncCraftChain.matchesFinalTarget(runtimeOutput, null, clickedOutput));
     }
 }

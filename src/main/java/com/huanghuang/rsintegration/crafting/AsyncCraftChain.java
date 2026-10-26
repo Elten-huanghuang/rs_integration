@@ -240,11 +240,9 @@ public final class AsyncCraftChain {
 
     @Nullable
     private final CraftPlanGraph graph;
-    /** True when {@link #graph} includes the requested terminal recipe and its root output. */
-    private boolean graphDeclaresFinalOutput;
     @Nullable
     private final DagScheduler graphScheduler;
-    private boolean useGraphExecution;
+    private final boolean useGraphExecution;
     @Nullable
     private NodeId currentGraphNode;
     @Nullable
@@ -328,29 +326,6 @@ public final class AsyncCraftChain {
                 ExecutionEquivalence.projectFlatSteps(graph), graph);
     }
 
-    public AsyncCraftChain(UUID playerId, MinecraftServer server,
-                           @Nullable CraftStorageEndpoint storageEndpoint,
-                           CraftPlanGraph graph, CraftingResolver.ResolutionStep terminalStep,
-                           int repeatCount) {
-        this(UUID.randomUUID(), playerId, server, storageEndpoint,
-                compatibilitySteps(ExecutionEquivalence.projectFlatSteps(graph),
-                        terminalStep, repeatCount), graph);
-        // The resolver graph describes the materials needed by terminalStep; it
-        // does not contain terminalStep itself. Running that graph scheduler would
-        // therefore finish after the intermediates and silently skip the requested
-        // physical craft. Keep the authoritative projected allocations for plan/UI,
-        // but execute this compatibility shape through the flat chain until the
-        // terminal operation is represented as a real graph node.
-        GraphExecutionPolicy.Decision executionDecision = GraphExecutionPolicy.decide(true,
-                terminalStep == null ? null : terminalStep.modType());
-        this.graphDeclaresFinalOutput = false;
-        this.useGraphExecution = executionDecision.useGraphExecutor();
-        RSIntegrationMod.LOGGER.debug(ctx.format(
-                "Using {} execution for graph plan: reason={} detail={} terminalStep={}"),
-                executionDecision.useGraphExecutor() ? "graph" : "flat",
-                executionDecision.reason(), executionDecision.detail(), terminalStep.recipeId());
-    }
-
     AsyncCraftChain(UUID craftId, UUID playerId, MinecraftServer server,
                     @Nullable CraftStorageEndpoint storageEndpoint,
                     List<CraftingResolver.ResolutionStep> steps) {
@@ -417,42 +392,17 @@ public final class AsyncCraftChain {
                 Math.max(1, globalTimeoutSeconds) * 20);
         if (graph != null) {
             this.graph = graph;
-            this.graphDeclaresFinalOutput = true;
             this.graphScheduler = new DagScheduler(graph);
             this.graphMaterials = new MaterialBroker();
             this.graphAdmissions = new NodeAdmissionCoordinator(graphScheduler, graphMaterials);
             initialiseGraphMaterialFlow(graph);
             logGraphNodeMappings(graph);
-            GraphExecutionPolicy.Decision executionDecision = GraphExecutionPolicy.decide(false,
-                    steps.stream().map(CraftingResolver.ResolutionStep::modType).distinct().toList(),
-                    graph);
-            int atomicVanillaLimit = configuredAtomicVanillaGraphLimit();
-            int dispatchOperationLimit = configuredOperationsPerDispatch();
-            boolean oversizedNode = requiresFlatExecutionForOversizedNode(
-                    steps, atomicVanillaLimit, dispatchOperationLimit);
-            boolean fluidProductionTarget = steps.stream().anyMatch(step ->
-                    step.productionTarget() != null
-                            && step.productionTarget().resource() != null
-                            && step.productionTarget().resource().kind()
-                            == IntegrationResourceKey.ResourceKind.FLUID);
-            this.useGraphExecution = executionDecision.useGraphExecutor()
-                    && !oversizedNode
-                    && !fluidProductionTarget;
+            this.useGraphExecution = true;
             RSIntegrationMod.LOGGER.debug(ctx.format(
-                    "Using {} execution for self-contained graph: reason={} detail={}"),
-                    useGraphExecution ? "graph" : "flat",
-                    fluidProductionTarget ? "FLUID_TARGET_REQUIRES_FLAT"
-                            : oversizedNode ? "NODE_REQUIRES_TICK_SLICING"
-                            : executionDecision.reason(),
-                    fluidProductionTarget
-                            ? "fluid production targets are observed on the flat executor"
-                            : oversizedNode
-                            ? "node exceeds its atomic dispatch limit (vanilla="
-                                    + atomicVanillaLimit + ", machine=" + dispatchOperationLimit + ")"
-                            : executionDecision.detail());
+                    "Using graph execution: nodes={} terminalEmbedded=true"),
+                    graph.topologicalOrder().size());
         } else {
             this.graph = null;
-            this.graphDeclaresFinalOutput = false;
             this.graphScheduler = null;
             this.graphMaterials = null;
             this.graphAdmissions = null;
@@ -503,26 +453,6 @@ public final class AsyncCraftChain {
     }
 
     private record InitialLotKey(MaterialSource.InitialPool source, MaterialKey material) {}
-
-    static List<CraftingResolver.ResolutionStep> compatibilitySteps(
-            List<CraftingResolver.ResolutionStep> projected,
-            CraftingResolver.ResolutionStep terminalStep,
-            int repeatCount) {
-        List<CraftingResolver.ResolutionStep> result = new ArrayList<>(projected.size() + 1);
-        // A resolver graph built from repeat-expanded root specs already contains
-        // scaled intermediate executions. Only the terminal recipe is absent.
-        result.addAll(projected);
-        CraftingResolver.ResolutionStep terminal = Objects.requireNonNull(terminalStep, "terminalStep");
-        int executions = Math.max(1, repeatCount);
-        if (terminal.executions() != executions) {
-            terminal = new CraftingResolver.ResolutionStep(terminal.recipeId(), terminal.modType(),
-                    terminal.recipeTypeId(), terminal.alternativeIds(), terminal.alternativeModTypes(),
-                    terminal.inferMode(), executions, terminal.syntheticInput(), terminal.syntheticOutput(),
-                    terminal.productionTarget(), terminal.magicCosts());
-        }
-        result.add(terminal);
-        return List.copyOf(result);
-    }
 
     /**
      * Set the concrete output the player asked for (from the JEI ghost slot).
@@ -598,8 +528,7 @@ public final class AsyncCraftChain {
 
     public ItemStack displayTarget() {
         if (targetOutput != null && !targetOutput.isEmpty()) return targetOutput.copy();
-        // 只有包含最终工序的图，其根需求才是合成目标；原料图不能用于此兜底。
-        if (graphDeclaresFinalOutput && graph != null) {
+        if (graph != null) {
             ItemStack declared = graph.rootDemands().stream()
                     .flatMap(root -> root.allocations().stream()
                             .filter(allocation -> allocation.source() instanceof MaterialSource.ProducerOutput)
@@ -635,11 +564,7 @@ public final class AsyncCraftChain {
             ItemStack display = productionTarget.displayStack();
             IntegrationResourceKey resource =
                     productionTarget.resource();
-            if (resource == null && !display.isEmpty()) {
-                resource = IntegrationResourceKey.item(display);
-            }
             if (!display.isEmpty()
-                    && resource != null
                     && resource.kind()
                     == IntegrationResourceKey.ResourceKind.ITEM) {
                 abd.setTargetOutput(display);
@@ -1990,8 +1915,18 @@ public final class AsyncCraftChain {
                 .filter(output -> output.kind() == OutputKind.PRIMARY
                         || output.kind() == OutputKind.DYNAMIC)
                 .findFirst()
-                .map(output -> output.material().toStack(SaturatingLongMath.clampToInt(
-                        Math.max(1L, output.quantity() / Math.max(1, node.executions())))))
+                .map(output -> ProductionTarget.of(
+                                output.resource(),
+                                Math.max(
+                                        1L,
+                                        output.quantity()
+                                                / Math.max(
+                                                1,
+                                                node.executions()
+                                        )
+                                )
+                        )
+                        .displayStack())
                 .orElse(ItemStack.EMPTY);
     }
 
@@ -2445,7 +2380,10 @@ public final class AsyncCraftChain {
         for (NodeOutputAccumulator.Publication publication : publications) {
             graphMaterials.publishActual(new MaterialSource.ProducerOutput(publication.port()),
                     publication.material(), publication.stack());
-            if (isPrimaryGraphPublication(graphNodes.get(nodeId), publication)) {
+            if (publication.resource().kind()
+                    == IntegrationResourceKey.ResourceKind.ITEM
+                    && isPrimaryGraphPublication(
+                    graphNodes.get(nodeId), publication)) {
                 ExternalItemProgressBridge.enqueueCrafted(resolvePlayer(), publication.stack());
             }
         }
@@ -3453,10 +3391,6 @@ public final class AsyncCraftChain {
         return waitingForVanillaBudget;
     }
 
-    private static int configuredAtomicVanillaGraphLimit() {
-        return BatchDispatchPlanner.configuredAtomicVanillaGraphLimit();
-    }
-
     private static int configuredOperationsPerDispatch() {
         return BatchDispatchPlanner.configuredOperationsPerDispatch();
     }
@@ -3468,13 +3402,6 @@ public final class AsyncCraftChain {
         } catch (Exception ignored) {
             return RSIntegrationConfig.DEFAULT_CRAFTING_STABLE_BATCH_RETRY_SECONDS * 20;
         }
-    }
-
-    static boolean requiresFlatExecutionForOversizedNode(
-            List<CraftingResolver.ResolutionStep> steps, int vanillaOperationLimit,
-            int dispatchOperationLimit) {
-        return BatchDispatchPlanner.requiresFlatExecutionForOversizedNode(
-                steps, vanillaOperationLimit, dispatchOperationLimit);
     }
 
     /**
@@ -5154,10 +5081,6 @@ public final class AsyncCraftChain {
                 if (storageEndpoint != null) {
                     boolean playerOutput = outputDestination == OutputDestination.PLAYER_INVENTORY
                             && (matchesFinalTarget(vi)
-                            // Recursive graphs may mark the terminal root as a
-                            // compatibility/intermediate node and therefore do
-                            // not expose graphDeclaresFinalOutput. The explicit
-                            // target item is still authoritative for delivery.
                             || (targetOutput != null && !targetOutput.isEmpty()
                             && vi.is(targetOutput.getItem())));
                     ItemStack leftover = playerOutput ? insertIntoPlayerInventory(online, vi) : vi.copy();
@@ -5219,19 +5142,13 @@ public final class AsyncCraftChain {
     }
 
     private boolean matchesFinalTarget(ItemStack stack) {
-        return matchesFinalTarget(stack, graph, graphDeclaresFinalOutput, targetOutput);
+        return matchesFinalTarget(stack, graph, targetOutput);
     }
 
     static boolean matchesFinalTarget(ItemStack stack, @Nullable CraftPlanGraph graph,
-                                      boolean graphDeclaresFinalOutput,
                                       @Nullable ItemStack targetOutput) {
         if (stack.isEmpty()) return false;
-        // A complete graph remains the authoritative output declaration even
-        // when its adapters require legacy flat execution. Restrict this to
-        // self-contained graphs: compatibility graphs describe only terminal
-        // inputs, so their roots are intermediate materials rather than the
-        // requested product.
-        if (graphDeclaresFinalOutput && graph != null) {
+        if (graph != null) {
             return matchesGraphFinalOutput(graph, stack);
         }
         if (targetOutput == null || targetOutput.isEmpty()) return false;

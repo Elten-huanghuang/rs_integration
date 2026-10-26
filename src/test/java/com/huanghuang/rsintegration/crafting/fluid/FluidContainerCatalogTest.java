@@ -293,7 +293,7 @@ class FluidContainerCatalogTest extends BootstrapTest {
         assertEquals(0L, result.remaining().getOrDefault(
                 material(token(new FluidStack(Fluids.WATER, 1))), 0L));
         assertTrue(ModType.FLUID_CONTAINER.isVirtual());
-        assertEquals(ModType.GraphExecutionAudit.GRAPH_SAFE, ModType.FLUID_CONTAINER.graphExecutionAudit());
+        assertEquals(ModType.PureProjectionAudit.SUPPORTED, ModType.FLUID_CONTAINER.pureProjectionAudit());
     }
 
     @Test void recursivelyProducesFluidAndMissingBucketBeforeFilling() {

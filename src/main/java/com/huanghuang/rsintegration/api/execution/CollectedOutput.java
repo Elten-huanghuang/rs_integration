@@ -16,4 +16,22 @@ public record CollectedOutput(
             throw new IllegalArgumentException("collected output is incomplete");
         }
     }
+
+    public static CollectedOutput primary(
+            IntegrationResourceKey resource,
+            long amount,
+            ResourceLocation portId
+    ) {
+        return new CollectedOutput(
+                resource, amount, OutputKind.PRIMARY, portId);
+    }
+
+    public static CollectedOutput secondary(
+            IntegrationResourceKey resource,
+            long amount,
+            ResourceLocation portId
+    ) {
+        return new CollectedOutput(
+                resource, amount, OutputKind.SECONDARY, portId);
+    }
 }

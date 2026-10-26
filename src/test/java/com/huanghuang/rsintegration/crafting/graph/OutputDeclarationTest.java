@@ -14,8 +14,8 @@ class OutputDeclarationTest extends BootstrapTest {
     private static final NodeId NODE = new NodeId(1);
 
     @Test
-    void legacyConstructorIsAnExactGuaranteedDeclaration() {
-        OutputDeclaration output = new OutputDeclaration(
+    void itemFactoryCreatesAnExactGuaranteedDeclaration() {
+        OutputDeclaration output = OutputDeclaration.item(
                 new OutputPortId(NODE, 0), MaterialKey.of(new ItemStack(Items.DIAMOND)),
                 4, OutputKind.PRIMARY);
 
@@ -28,7 +28,7 @@ class OutputDeclarationTest extends BootstrapTest {
     void probabilisticRangeDoesNotPromisePlannedQuantity() {
         OutputProbability probability =
                 OutputProbability.probabilistic(0.25D, 3, "diamond_bonus");
-        OutputDeclaration output = new OutputDeclaration(
+        OutputDeclaration output = OutputDeclaration.item(
                 new OutputPortId(NODE, 0), MaterialKey.of(new ItemStack(Items.DIAMOND)),
                 0, OutputKind.SECONDARY, 0, 2, probability, false, null);
 
@@ -42,10 +42,10 @@ class OutputDeclarationTest extends BootstrapTest {
         InputPortId source = new InputPortId(NODE, 0);
         MaterialKey bucket = MaterialKey.of(new ItemStack(Items.BUCKET));
 
-        assertThrows(IllegalArgumentException.class, () -> new OutputDeclaration(
+        assertThrows(IllegalArgumentException.class, () -> OutputDeclaration.item(
                 new OutputPortId(NODE, 1), bucket, 1, OutputKind.CONTAINER,
                 1, 1, OutputProbability.guaranteed(), false, null));
-        new OutputDeclaration(new OutputPortId(NODE, 1), bucket, 1, OutputKind.CONTAINER,
+        OutputDeclaration.item(new OutputPortId(NODE, 1), bucket, 1, OutputKind.CONTAINER,
                 1, 1, OutputProbability.guaranteed(), false, source);
     }
 

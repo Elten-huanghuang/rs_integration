@@ -261,11 +261,7 @@ public final class ExternalConsumerCatalogService {
         }
         List<IntegrationResourceKey> outputs = new ArrayList<>();
         for (RecipeOutputSpec spec : specs) {
-            ItemStack stack = spec.material().toStack(
-                    Math.max(1, spec.maximumPerOperation()));
-            if (!stack.isEmpty()) {
-                outputs.add(IntegrationResourceKey.item(stack));
-            }
+            outputs.add(spec.resource());
         }
         RecipeExecutionKind executionKind = outputs.isEmpty()
                 ? RecipeExecutionKind.NONE

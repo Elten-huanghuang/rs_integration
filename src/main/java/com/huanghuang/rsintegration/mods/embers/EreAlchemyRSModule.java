@@ -36,7 +36,7 @@ public final class EreAlchemyRSModule implements IModIntegration {
                 new String[0],
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.embers.EreAlchemyBatchDelegate"),
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.embers.EreAlchemyInferDelegate"))
-                .requireFlatExecution(
+                .rejectPureProjection(
                         "alchemy inference and tablet locking require serial per-operation preparation");
         ModType.configureJei(ModIds.ID_EMBERS_ALCHEMY,
                 new String[][]{{"embers:alchemy", "embers"}},

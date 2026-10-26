@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.graph;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.magic.MagicResourceCost;
 import com.mojang.logging.LogUtils;
@@ -214,7 +215,7 @@ public final class CraftPlanGraphCompactor {
             }
             outputs.add(new OutputDeclaration(output.id(), output.material(), quantity, output.kind(),
                     minimum, maximum, output.probability(), output.dynamicIdentity(),
-                    output.sourceInput()));
+                    output.sourceInput(), output.resource()));
         }
         return new CraftNode(first.id(), first.recipeId(), first.modTypeId(),
                 first.recipeTypeId(), executions, first.alternativeIds(),
@@ -311,14 +312,15 @@ public final class CraftPlanGraphCompactor {
     private record OutputSignature(int port, MaterialKey material, long perExecution,
                                    long minimumPerExecution, long maximumPerExecution,
                                    OutputKind kind, OutputProbability probability,
-                                   boolean dynamicIdentity, @Nullable InputPortId sourceInput) {
+                                   boolean dynamicIdentity, @Nullable InputPortId sourceInput,
+                                   IntegrationResourceKey resource) {
         private static OutputSignature from(OutputDeclaration output, int executions) {
             return new OutputSignature(output.id().index(), output.material(),
                     output.quantity() / Math.max(1, executions),
                     output.minimumQuantity() / Math.max(1, executions),
                     output.maximumQuantity() / Math.max(1, executions),
                     output.kind(), output.probability(), output.dynamicIdentity(),
-                    output.sourceInput());
+                    output.sourceInput(), output.resource());
         }
     }
 

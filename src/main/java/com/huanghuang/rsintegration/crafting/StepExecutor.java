@@ -514,7 +514,8 @@ final class StepExecutor {
         if (stack == null || stack.isEmpty() || stack.getCount() <= 0) return;
         ItemStack produced = stack.copyWithCount(mulCount(stack.getCount(), batches));
         OutputPortId port = new OutputPortId(nodeId, outputs.size());
-        outputs.add(new OutputDeclaration(port, MaterialKey.of(produced), produced.getCount(), kind));
+        outputs.add(OutputDeclaration.item(
+                port, MaterialKey.of(produced), produced.getCount(), kind));
         ctx.addProduced(produced, new MaterialSource.ProducerOutput(port));
     }
 

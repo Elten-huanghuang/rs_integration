@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.util;
 
 import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
-import com.huanghuang.rsintegration.crafting.batch.LegacyExecutionMetrics;
+import com.huanghuang.rsintegration.crafting.batch.ExecutionMetrics;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
 import com.huanghuang.rsintegration.crafting.planning.SynchronousFallbackReason;
 import com.huanghuang.rsintegration.util.Diagnostics;
@@ -429,7 +429,7 @@ public final class PerformanceMonitor {
              .map(e -> e.getKey() + ":" + e.getValue().totalNanos().get() / e.getValue().calls().get() / 1000
                      + "/" + e.getValue().maxNanos().get() / 1000 + "us")
              .collect(Collectors.joining(","))
-             + " legacy=" + LegacyExecutionMetrics.summary()
+             + " execution=" + ExecutionMetrics.summary()
              + " chains=" + getActiveChainCount();
     }
 }

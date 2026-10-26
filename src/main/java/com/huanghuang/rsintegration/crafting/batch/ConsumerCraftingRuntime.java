@@ -631,22 +631,6 @@ public final class ConsumerCraftingRuntime {
             return stale;
         }
 
-        List<CraftingResolver.ResolutionStep> steps;
-        try {
-            steps = plan.executionSteps;
-        } catch (RuntimeException failure) {
-            ConsumerResult<ConsumerOrderReceipt> invalid = reject(
-                    ConsumerDiagnosticCode.ORDER_SUBMISSION_REJECTED,
-                    "stored consumer plan cannot be projected into execution",
-                    false
-            );
-            SubmissionRecord record =
-                    new SubmissionRecord(request.planId(), invalid);
-            submissions.put(key, record);
-            journal.putSubmission(key, record);
-            return invalid;
-        }
-
         ConsumerOrderId orderId = new ConsumerOrderId(UUID.randomUUID());
         OrderRecord order = new OrderRecord(
                 orderId,
@@ -660,11 +644,10 @@ public final class ConsumerCraftingRuntime {
         orders.put(orderId, order);
         journal.putOrder(order);
         try {
-            AsyncCraftChain chain = CraftExecutionService.launch(
+            AsyncCraftChain chain = CraftExecutionService.launchGraph(
                     player,
                     endpoint,
-                    steps,
-                    LegacyExecutionMetrics.Reason.PLANNED_CHAIN,
+                    plan.executionGraph,
                     plan.recipeId,
                     plan.targetResource,
                     plan.targetOutput,
@@ -1099,190 +1082,7 @@ public final class ConsumerCraftingRuntime {
             ConsumerRecipeKey key,
             ConsumerCapabilities capabilities
     ) {
-        RecipeNode indexed = session.capture.graph.recipesById().get(
-                key.recipeId());
-        if (indexed == null
-                || !session.capture.projectableRecipeIds.contains(
-                key.recipeId())) {
-            return InspectionEntry.typed(key);
-        }
-        if (key.amount() instanceof ConsumerRequestAmount.Executions executions
-                && executions.count() > capabilities.maxRepeatCount()) {
-            return InspectionEntry.result(unavailable(
-                    key,
-                    ConsumerCraftabilityStatus.PLAN_LIMIT_REACHED,
-                    ConsumerDiagnosticCode.BATCH_LIMIT_EXCEEDED,
-                    "requested execution count exceeds the server limit"
-            ));
-        }
-        MaterialResolution material;
-        try {
-            material = material(key, indexed);
-        } catch (RuntimeException failure) {
-            return InspectionEntry.result(unavailable(
-                    key,
-                    ConsumerCraftabilityStatus.RECIPE_UNSUPPORTED,
-                    ConsumerDiagnosticCode.RECIPE_UNSUPPORTED,
-                    "target output cannot be represented by the recursive planner"
-            ));
-        }
-        if (material.material.isItem()
-                && session.capture.blockedOutputIds.contains(
-                material.material.itemId())) {
-            return InspectionEntry.result(unavailable(
-                    key,
-                    ConsumerCraftabilityStatus.MACHINE_UNAVAILABLE,
-                    ConsumerDiagnosticCode.MACHINE_UNAVAILABLE,
-                    "no usable bound machine can execute the target recipe"
-            ));
-        }
-
-        Map<ResourceLocation, ResourceLocation> forced = forcedRecipes(
-                key.preferences());
-        forced.put(material.material.itemId(), key.recipeId());
-        PlanningPreferences preferences = planningPreferences(
-                key.preferences());
-        ImmutableRecipeGraph scoped = ImmutableRecipeGraphProjector
-                .restrictToDependencies(
-                        session.capture.graph, key.recipeId());
-        ImmutableRecipeGraph projected = ForcedRecipeGraphProjector.apply(
-                scoped, forced);
-        if (projected == null
-                || !projected.recipesById().containsKey(key.recipeId())) {
-            return InspectionEntry.result(unavailable(
-                    key,
-                    ConsumerCraftabilityStatus.RECIPE_UNSUPPORTED,
-                    ConsumerDiagnosticCode.RECIPE_UNSUPPORTED,
-                    "target recipe cannot be forced into the planning graph"
-            ));
-        }
-        if (projected.recipesById().size() > capabilities.maxPlanNodes()) {
-            return InspectionEntry.result(unavailable(
-                    key,
-                    ConsumerCraftabilityStatus.PLAN_LIMIT_REACHED,
-                    ConsumerDiagnosticCode.PLAN_LIMIT_REACHED,
-                    "recursive plan exceeds the node limit"
-            ));
-        }
-
-        long requested = material.requestedCount;
-        long deadline = deadlineAfterMillis(
-                30_000L);
-        PureRecipePlanner.Result result;
-        try {
-            long proposedStates = SaturatingLongMath.multiply(
-                    requested, 32L);
-            result = PureRecipePlanner.resolveConfigured(
-                    projected,
-                    ImmutableRecipeGraphProjector.copyAvailability(
-                            session.capture.availableResources),
-                    List.of(new IngredientRef(
-                            List.of(material.material),
-                            requested,
-                            material.material.runtimeNbt()
-                                    ? NbtMatchMode.ANY
-                                    : NbtMatchMode.EXACT
-                    )),
-                    Math.max(1, SaturatingLongMath.clampToInt(
-                            Math.max(32L, proposedStates))),
-                    capabilities.maxSearchStates(),
-                    8192,
-                    deadline,
-                    forced,
-                    preferences
-            );
-        } catch (RuntimeException failure) {
-            return InspectionEntry.result(unavailable(
-                    key,
-                    ConsumerCraftabilityStatus.INTERNAL_ERROR,
-                    ConsumerDiagnosticCode.INTERNAL_ERROR,
-                    "recursive planning failed"
-            ));
-        }
-
-        if (!result.feasible()) {
-            if (!result.missing().isEmpty()) {
-                return InspectionEntry.result(
-                        missing(key, requested, result));
-            }
-            return InspectionEntry.result(unavailable(
-                    key,
-                    ConsumerCraftabilityStatus.RECIPE_UNSUPPORTED,
-                    ConsumerDiagnosticCode.RECIPE_UNSUPPORTED,
-                    "recursive planner could not construct an executable plan"
-            ));
-        }
-        if (session.closed) {
-            return InspectionEntry.result(unavailable(
-                    key,
-                    ConsumerCraftabilityStatus.INTERNAL_ERROR,
-                    ConsumerDiagnosticCode.SESSION_EXPIRED,
-                    "inspection session closed during planning"
-            ));
-        }
-        if (plans.size() >= MAX_PLAN_ENTRIES) {
-            return InspectionEntry.result(unavailable(
-                    key,
-                    ConsumerCraftabilityStatus.PLAN_LIMIT_REACHED,
-                    ConsumerDiagnosticCode.PLAN_LIMIT_REACHED,
-                    "consumer plan registry is full"
-            ));
-        }
-
-        ConsumerPlanId planId = new ConsumerPlanId(UUID.randomUUID());
-        PlanningSnapshot snapshot = PlanningSnapshotFactory.capture(
-                session.ticket.playerId(),
-                0L,
-                key.recipeId(),
-                session.capture.available,
-                forced,
-                session.capture.graph,
-                session.capture.networkFingerprint,
-                session.capture.bindingFingerprint,
-                session.capture.blockedOutputIds,
-                false,
-                preferences
-        );
-        PlanLease lease = new PlanLease(
-                planId,
-                session.ticket.playerId(),
-                session.ticket.consumerId(),
-                session.ticket.ticketId(),
-                session.capture.revision,
-                session.createdGameTime,
-                snapshot,
-                projected,
-                PurePlanAdapter.toResolutionSteps(result, projected),
-                key.recipeId(),
-                material.targetResource,
-                material.targetOutput,
-                material.requestedCount,
-                plannedOutputQuantity(result, projected, material.material),
-                indexed.modTypeId(),
-                graphHasFluidOutputs(projected)
-                        || session.capture.fluidOutputRecipeIds.contains(
-                        key.recipeId()),
-                session.capture.dimension,
-                session.capture.position,
-                machineSelectionMode(session.request.machineSelector()),
-                session.request.outputDestination(),
-                session.capture.storageReference
-        );
-        plans.put(planId, lease);
-        long plannedOutputs = plannedOutputQuantity(
-                result, projected, material.material);
-        long executable = key.amount()
-                instanceof ConsumerRequestAmount.OutputUnits
-                ? plannedOutputs : 0L;
-        return InspectionEntry.result(new ConsumerCraftability(
-                key,
-                ConsumerCraftabilityStatus.READY,
-                requestedQuantity(key),
-                executable,
-                List.of(),
-                planId,
-                List.of()
-        ));
+        return InspectionEntry.typed(key);
     }
 
     private ConsumerCraftability resolveTyped(
@@ -1589,7 +1389,35 @@ public final class ConsumerCraftingRuntime {
                     ))
             );
         }
-        if ((long) graph.nodes().size() + 1L
+        CraftingResolver.ResolutionStep terminalStep =
+                typedTerminalStep(
+                        key.recipeId(),
+                        recipe,
+                        type,
+                        executions,
+                        targetResource,
+                        target,
+                        requestedUnits,
+                        targetedProduction
+                );
+        CraftPlanGraph completeGraph;
+        try {
+            completeGraph = CraftTerminalSteps
+                    .composeEquivalentTerminalGraph(
+                            graph,
+                            terminalStep,
+                            target,
+                            player.serverLevel()
+                    );
+        } catch (IllegalArgumentException | ArithmeticException failure) {
+            return unavailable(
+                    key,
+                    ConsumerCraftabilityStatus.RECIPE_UNSUPPORTED,
+                    ConsumerDiagnosticCode.RECIPE_UNSUPPORTED,
+                    "typed recipe cannot be represented as a complete graph"
+            );
+        }
+        if ((long) completeGraph.nodes().size()
                 > capabilities.maxPlanNodes()) {
             return unavailable(
                     key,
@@ -1598,18 +1426,6 @@ public final class ConsumerCraftingRuntime {
                     "typed plan exceeds the node limit"
             );
         }
-        List<CraftingResolver.ResolutionStep> steps = new ArrayList<>(
-                ExecutionEquivalence.projectFlatSteps(graph));
-        steps.add(typedTerminalStep(
-                key.recipeId(),
-                recipe,
-                type,
-                executions,
-                targetResource,
-                target,
-                requestedUnits,
-                targetedProduction
-        ));
         if (session.closed) {
             return unavailable(
                     key,
@@ -1650,7 +1466,7 @@ public final class ConsumerCraftingRuntime {
                 session.createdGameTime,
                 snapshot,
                 session.capture.graph,
-                steps,
+                completeGraph,
                 key.recipeId(),
                 targetResource,
                 targetResource.kind()
@@ -2645,7 +2461,7 @@ public final class ConsumerCraftingRuntime {
         private final long createdGameTime;
         private final PlanningSnapshot snapshot;
         private final ImmutableRecipeGraph planningGraph;
-        private final List<CraftingResolver.ResolutionStep> executionSteps;
+        private final CraftPlanGraph executionGraph;
         private final ResourceLocation recipeId;
         private final IntegrationResourceKey targetResource;
         @Nullable
@@ -2670,7 +2486,7 @@ public final class ConsumerCraftingRuntime {
                 long createdGameTime,
                 PlanningSnapshot snapshot,
                 ImmutableRecipeGraph planningGraph,
-                List<CraftingResolver.ResolutionStep> executionSteps,
+                CraftPlanGraph executionGraph,
                 ResourceLocation recipeId,
                 IntegrationResourceKey targetResource,
                 @Nullable ItemStack targetOutput,
@@ -2693,7 +2509,8 @@ public final class ConsumerCraftingRuntime {
             this.createdGameTime = createdGameTime;
             this.snapshot = snapshot;
             this.planningGraph = planningGraph;
-            this.executionSteps = List.copyOf(executionSteps);
+            this.executionGraph = Objects.requireNonNull(
+                    executionGraph, "executionGraph");
             this.recipeId = recipeId;
             this.targetResource = targetResource;
             this.targetOutput = targetOutput == null

@@ -140,15 +140,15 @@ class DagSchedulerTest extends BootstrapTest {
         InputPortId joinRight = new InputPortId(joinId, 1);
 
         CraftNode left = node(leftId, "left", List.of(),
-                List.of(new OutputDeclaration(leftOutput, iron, 1, OutputKind.PRIMARY)));
+                List.of(OutputDeclaration.item(leftOutput, iron, 1, OutputKind.PRIMARY)));
         CraftNode right = node(rightId, "right", List.of(),
-                List.of(new OutputDeclaration(rightOutput, gold, 1, OutputKind.PRIMARY)));
+                List.of(OutputDeclaration.item(rightOutput, gold, 1, OutputKind.PRIMARY)));
         CraftNode join = node(joinId, "join", List.of(
                         new InputDemand(joinLeft, Ingredient.of(Items.IRON_INGOT), 1,
                                 DemandRole.CONSUMED, new ItemStack(Items.IRON_INGOT)),
                         new InputDemand(joinRight, Ingredient.of(Items.GOLD_INGOT), 1,
                                 DemandRole.CONSUMED, new ItemStack(Items.GOLD_INGOT))),
-                List.of(new OutputDeclaration(joinOutput, result, 1, OutputKind.PRIMARY)));
+                List.of(OutputDeclaration.item(joinOutput, result, 1, OutputKind.PRIMARY)));
 
         return new CraftPlanGraph(1, List.of(left, right, join), List.of(
                 new MaterialAllocation(new AllocationId(0), joinLeft,

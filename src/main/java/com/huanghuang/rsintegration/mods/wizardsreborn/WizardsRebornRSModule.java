@@ -47,7 +47,7 @@ public final class WizardsRebornRSModule implements IModIntegration {
                 new String[]{WRAlchemyRecipeHandler.RECIPE_CLASS},
                 new String[]{"alchemy_machine"}, new String[]{"alchemy_machine"},
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.wizardsreborn.WRAlchemyBatchDelegate"))
-                .confirmGraphExecution("炼金材料通过账本投入，产物从炼金机和上方锅炉回收");
+                .confirmPureProjection("炼金材料通过账本投入，产物从炼金机和上方锅炉回收");
         ModType.configureJei(WRAlchemyRecipeHandler.TYPE,
                 new String[][]{{"wizards_reborn:alchemy_machine", "alchemy_machine"}},
                 new String[][]{{WRAlchemyRecipeHandler.RECIPE_CLASS, "alchemy_machine"}}, null);

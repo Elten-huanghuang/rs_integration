@@ -109,7 +109,7 @@ class LongCraftChainSimulationTest extends BootstrapTest {
                     List.of(new InputDemand(inputId, Ingredient.of(input.toStack(1)), 1,
                             index % 7 == 0 ? DemandRole.CATALYST : DemandRole.CONSUMED,
                             input.toStack(1))),
-                    List.of(new OutputDeclaration(outputId, output, 1, OutputKind.PRIMARY))));
+                    List.of(OutputDeclaration.item(outputId, output, 1, OutputKind.PRIMARY))));
             allocations.add(new MaterialAllocation(new AllocationId(index), inputId, source, input, 1));
         }
         NodeId finalNode = new NodeId(count - 1);
