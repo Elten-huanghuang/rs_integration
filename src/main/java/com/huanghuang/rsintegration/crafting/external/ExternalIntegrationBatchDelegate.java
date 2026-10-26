@@ -1507,33 +1507,49 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             long gameTime = level == null
                     ? server.overworld().getGameTime()
                     : level.getGameTime();
-            ExternalOperationJournal.get(server).put(
-                    new ExternalOperationJournal.Entry(
-                            ownerId,
-                            operationStartContext.transactionId(),
-                            operationStartContext.operationId(),
-                            operationStartContext.attempt(),
-                            recipe.getId(),
-                            dimension,
-                            machinePos,
-                            recipeIntegration.id(),
-                            machineIntegration.id(),
-                            executionIntegration.id(),
-                            recipeRevision,
-                            descriptor.descriptorRevision(),
-                            recipeView.definitionFingerprint(),
-                            descriptor.descriptorFingerprint(),
-                            executionPlan,
-                            customMaterials.materials(),
-                            state,
-                            gameTime,
-                            detail,
-                            customSnapshot,
-                            customCollectedOutputs,
-                            customCollectedDispositions,
-                            customCollectionComplete
-                    )
-            );
+            ExternalOperationJournal journal =
+                    ExternalOperationJournal.get(server);
+            ExternalOperationJournal.Entry existing = journal.find(
+                    operationStartContext.operationId());
+            if (existing != null
+                    && existing.state() == state
+                    && existing.detail().equals(
+                    detail == null ? "" : detail)
+                    && Objects.equals(
+                    existing.snapshot(), customSnapshot)
+                    && existing.collectionComplete()
+                    == customCollectionComplete
+                    && existing.collectedOutputs().equals(
+                    customCollectedOutputs)
+                    && existing.collectedDispositions().equals(
+                    customCollectedDispositions)) {
+                return;
+            }
+            journal.put(new ExternalOperationJournal.Entry(
+                    ownerId,
+                    operationStartContext.transactionId(),
+                    operationStartContext.operationId(),
+                    operationStartContext.attempt(),
+                    recipe.getId(),
+                    dimension,
+                    machinePos,
+                    recipeIntegration.id(),
+                    machineIntegration.id(),
+                    executionIntegration.id(),
+                    recipeRevision,
+                    descriptor.descriptorRevision(),
+                    recipeView.definitionFingerprint(),
+                    descriptor.descriptorFingerprint(),
+                    executionPlan,
+                    customMaterials.materials(),
+                    state,
+                    gameTime,
+                    detail,
+                    customSnapshot,
+                    customCollectedOutputs,
+                    customCollectedDispositions,
+                    customCollectionComplete
+            ));
         } catch (RuntimeException | LinkageError failure) {
             LOGGER.warn(
                     "[RSI-API] failed to persist custom operation {}",
