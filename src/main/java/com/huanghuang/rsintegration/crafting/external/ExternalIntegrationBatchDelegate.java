@@ -140,6 +140,8 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     private final Map<String, Long> customCollectedMaterialTotals =
             new LinkedHashMap<>();
     private final List<ItemStack> customCollectedItems = new ArrayList<>();
+    private final List<CollectedOutput> customCollectedOutputs =
+            new ArrayList<>();
     private final List<MaterialDisposition> customCollectedDispositions =
             new ArrayList<>();
     private MachineContext customMachineContext;
@@ -803,6 +805,11 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     @Override
     public void onBatchFinished(@Nullable ServerPlayer player) {
         if (!markTerminalCleanup()) return;
+        if (executionKind == RecipeExecutionKind.CUSTOM) {
+            persistCustomOperation(
+                    ExternalOperationJournal.State.COMPLETED,
+                    "settled");
+        }
         if (runningOperation != null) {
             try {
                 runningOperation.onSettled(player);
@@ -925,6 +932,9 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             return false;
         }
         this.executionPlan = planned.plan();
+        persistCustomOperation(
+                ExternalOperationJournal.State.PRE_START,
+                "starting");
         ExecutionResult started = startCustomIntegration(player);
         if (started.status() == ExecutionStartStatus.RETRY) {
             this.customStartPending = true;
@@ -932,6 +942,9 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             markCraftStarted();
             this.operationStarted = true;
             retainMachineChunk();
+            persistCustomOperation(
+                    ExternalOperationJournal.State.PRE_START,
+                    "start retry");
             return true;
         }
         if (started.status() != ExecutionStartStatus.STARTED
@@ -939,6 +952,9 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             preparationFailure = firstDiagnostic(
                     started.diagnostics(),
                     "RSI custom execution rejected start");
+            persistCustomOperation(
+                    ExternalOperationJournal.State.FAILED,
+                    "start rejected");
             return false;
         }
         this.runningOperation = started.operation();
@@ -947,6 +963,10 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         markCraftStarted();
         this.operationStarted = true;
         retainMachineChunk();
+        captureCustomSnapshot();
+        persistCustomOperation(
+                ExternalOperationJournal.State.ACTIVE,
+                "started");
         return true;
     }
 
@@ -1297,6 +1317,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         customCollectedMaterialTotals.clear();
         customCollectedMaterialTotals.putAll(nextMaterialTotals);
         customCollectedDispositions.addAll(acceptedDispositions);
+        customCollectedOutputs.addAll(acceptedOutputs);
         for (CollectedOutput output : acceptedOutputs) {
             if (output.resource().kind()
                     == IntegrationResourceKey.ResourceKind.ITEM) {
@@ -1332,8 +1353,85 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         customCollectedOutputTotals.clear();
         customCollectedMaterialTotals.clear();
         customCollectedItems.clear();
+        customCollectedOutputs.clear();
         customCollectedDispositions.clear();
         customCollectionComplete = false;
+    }
+
+    private void persistCustomOperation(
+            ExternalOperationJournal.State state,
+            String detail
+    ) {
+        if (executionKind != RecipeExecutionKind.CUSTOM
+                || executionPlan == null
+                || customMaterials == null
+                || operationStartContext == null
+                || recipe == null
+                || recipe.getId() == null
+                || recipeIntegration == null
+                || machineIntegration == null
+                || executionIntegration == null
+                || descriptor == null
+                || recipeView == null
+                || machinePos == null) {
+            return;
+        }
+        MinecraftServer server = level == null
+                ? null : level.getServer();
+        if (server == null) {
+            server = operationStartContext.player().getServer();
+        }
+        if (server == null) return;
+        ResourceLocation dimension = getMachineDim();
+        if (dimension == null && level != null) {
+            try {
+                dimension = level.dimension().location();
+            } catch (RuntimeException ignored) {
+                return;
+            }
+        }
+        if (dimension == null) return;
+        try {
+            UUID ownerId = customOwnerId != null
+                    ? customOwnerId
+                    : operationStartContext.player().getUUID();
+            long gameTime = level == null
+                    ? server.overworld().getGameTime()
+                    : level.getGameTime();
+            ExternalOperationJournal.get(server).put(
+                    new ExternalOperationJournal.Entry(
+                            ownerId,
+                            operationStartContext.transactionId(),
+                            operationStartContext.operationId(),
+                            operationStartContext.attempt(),
+                            recipe.getId(),
+                            dimension,
+                            machinePos,
+                            recipeIntegration.id(),
+                            machineIntegration.id(),
+                            executionIntegration.id(),
+                            recipeRevision,
+                            descriptor.descriptorRevision(),
+                            recipeView.definitionFingerprint(),
+                            descriptor.descriptorFingerprint(),
+                            executionPlan,
+                            customMaterials.materials(),
+                            state,
+                            gameTime,
+                            detail,
+                            customSnapshot,
+                            customCollectedOutputs,
+                            customCollectedDispositions,
+                            customCollectionComplete
+                    )
+            );
+        } catch (RuntimeException | LinkageError failure) {
+            LOGGER.warn(
+                    "[RSI-API] failed to persist custom operation {}",
+                    operationStartContext.operationId(),
+                    failure
+            );
+        }
     }
 
     private boolean resumeCustomOperation(ServerLevel currentLevel) {
@@ -1407,6 +1505,9 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             customSnapshot = snapshot;
             lastCustomSnapshotSequence =
                     snapshot.collectionSequence();
+            persistCustomOperation(
+                    ExternalOperationJournal.State.ACTIVE,
+                    "");
         } catch (RuntimeException | LinkageError failure) {
             LOGGER.warn(
                     "[RSI-API] custom snapshot failed for {}",
@@ -1684,6 +1785,9 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                 customPendingRefundSafe = true;
                 customStartPending = false;
             }
+            persistCustomOperation(
+                    ExternalOperationJournal.State.FAILED,
+                    "operation was not started");
             return;
         }
         try {
@@ -1692,7 +1796,8 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                     FailureReason.EXECUTION_EXCEPTION, player)
                     : operation.onCancel(customCancelReason, player);
             customCancelReason = null;
-            String cleanupFailure = validateCustomCleanup(cleanup);
+            String cleanupFailure = validateCustomCleanup(
+                    cleanup, customMaterials);
             if (cleanupFailure != null) {
                 LOGGER.warn(
                         "[RSI-API] custom cleanup is not safe for {}: {}",
@@ -1700,6 +1805,9 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                         cleanupFailure
                 );
                 retainAllCustomFluids(player);
+                persistCustomOperation(
+                        ExternalOperationJournal.State.UNCERTAIN,
+                        cleanupFailure);
                 return;
             }
             List<ItemStack> recovered = new ArrayList<>();
@@ -1716,6 +1824,11 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             }
             recordFailureRecoveredInputs(recovered);
             settleCustomFluidInputs(cleanup.materials(), player);
+            persistCustomOperation(
+                    ExternalOperationJournal.State.FAILED,
+                    customCancelReason == null
+                            ? "cleanup complete"
+                            : "cancel cleanup complete");
         } catch (RuntimeException | LinkageError exception) {
             LOGGER.warn(
                     "[RSI-API] custom cleanup failed for {}",
@@ -1723,19 +1836,24 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                     exception
             );
             retainAllCustomFluids(player);
+            persistCustomOperation(
+                    ExternalOperationJournal.State.UNCERTAIN,
+                    "cleanup exception: "
+                            + exception.getClass().getName());
         }
     }
 
     @Nullable
-    private String validateCustomCleanup(
-            OperationCleanupResult cleanup
+    static String validateCustomCleanup(
+            OperationCleanupResult cleanup,
+            ReservedMaterialView materials
     ) {
         if (!cleanup.cleanupComplete()) {
             return "cleanupComplete=false";
         }
         Map<String, Long> totals = new LinkedHashMap<>();
         for (MaterialDisposition disposition : cleanup.materials()) {
-            ReservedMaterial reserved = customMaterials.find(
+            ReservedMaterial reserved = materials.find(
                     disposition.material().entryId()).orElse(null);
             if (reserved == null) {
                 return "undeclared material "
@@ -1756,7 +1874,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             }
             totals.put(reserved.entryId(), total);
         }
-        for (ReservedMaterial material : customMaterials.materials()) {
+        for (ReservedMaterial material : materials.materials()) {
             if (totals.getOrDefault(material.entryId(), 0L)
                     != material.amount()) {
                 return "cleanup did not account for reserved material "

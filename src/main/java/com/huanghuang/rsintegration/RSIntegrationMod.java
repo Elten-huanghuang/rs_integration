@@ -82,6 +82,7 @@ import com.huanghuang.rsintegration.crafting.CraftOutputInterceptor;
 import com.huanghuang.rsintegration.crafting.CraftPlanningRevision;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.external.ExternalIntegrationRuntime;
+import com.huanghuang.rsintegration.crafting.external.ExternalOperationRecoveryService;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
 import com.huanghuang.rsintegration.network.craftingstation.CraftingStationModePacket;
@@ -397,7 +398,11 @@ public final class RSIntegrationMod {
 
         FMLJavaModLoadingContext.get().getModEventBus().addListener(this::onCommonSetup);
         MinecraftForge.EVENT_BUS.addListener(
-                (ServerStoppingEvent event) -> RSIIntegrationServices.stop());
+                (ServerStoppingEvent event) -> {
+                    ExternalOperationRecoveryService.serverStopping(
+                            event.getServer());
+                    RSIIntegrationServices.stop();
+                });
         MinecraftForge.EVENT_BUS.register(
                 ExternalItemProgressBridge.class);
         if (ModList.get().isLoaded(ModIds.FTB_QUESTS)) {
@@ -922,6 +927,8 @@ public final class RSIntegrationMod {
         // 启动分片采集会话；完整配方扫描由后续 tick 逐步推进。
         MinecraftForge.EVENT_BUS.addListener((ServerStartedEvent e) -> {
             RSIIntegrationServices.resumeAfterStop();
+            ExternalOperationRecoveryService.serverStarted(
+                    e.getServer());
             RecipeIndex.warmUp(e.getServer().overworld());
         });
         // /reload fires this event after the new recipes have been applied and
@@ -938,6 +945,8 @@ public final class RSIntegrationMod {
                 RecipeIndex.tickWarmUp(e.getServer().overworld());
                 RSIIntegrationServices.tick(
                         e.getServer().overworld());
+                ExternalOperationRecoveryService.tick(
+                        e.getServer());
                 if ((e.getServer().getTickCount() & 3) == 0) {
                     MagicResourceTaskLedger.get(e.getServer()).tick(e.getServer());
                 }

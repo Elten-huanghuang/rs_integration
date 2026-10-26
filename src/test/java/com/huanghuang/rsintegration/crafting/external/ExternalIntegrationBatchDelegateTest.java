@@ -69,6 +69,7 @@ import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.material.Fluids;
+import net.minecraft.world.level.storage.DimensionDataStorage;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.registries.ForgeRegistries;
 import org.junit.jupiter.api.Test;
@@ -87,6 +88,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
@@ -655,6 +657,123 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
         assertEquals(1, results.size());
         assertEquals(Items.STICK, results.get(0).getItem());
         assertEquals(1, results.get(0).getCount());
+    }
+
+    @Test
+    void successfulCustomSnapshotIsWrittenToTheOperationJournal()
+            throws ReflectiveOperationException {
+        RecipeView view = recipeView(
+                resource("persist_recipe"), resource("persist_process"));
+        MaterialRequirement input = view.materials().get(0);
+        OutputDeclaration output = view.outputs().get(0);
+        ReservedMaterial reserved = new ReservedMaterial(
+                input.entryId().toString(),
+                IntegrationResourceKey.item(new ItemStack(Items.DIAMOND, 2)),
+                2L,
+                input.consumption()
+        );
+        ExecutionPlan plan = customPlan(
+                view,
+                List.of(),
+                List.of(outputPort(output))
+        );
+        OperationSnapshot snapshot = new OperationSnapshot(
+                LifecyclePhase.WORKING,
+                4L,
+                new CompoundTag()
+        );
+        RunningOperation operation = mock(RunningOperation.class);
+        when(operation.snapshot()).thenReturn(snapshot);
+        ServerPlayer player = mock(ServerPlayer.class);
+        UUID ownerId = UUID.randomUUID();
+        when(player.getUUID()).thenReturn(ownerId);
+        MinecraftServer server = mock(MinecraftServer.class);
+        ServerLevel level = mock(ServerLevel.class);
+        DimensionDataStorage storage =
+                mock(DimensionDataStorage.class);
+        ExternalOperationJournal journal =
+                new ExternalOperationJournal();
+        when(level.getServer()).thenReturn(server);
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        when(level.getGameTime()).thenReturn(40L);
+        when(server.overworld()).thenReturn(level);
+        when(storage.computeIfAbsent(
+                any(), any(), anyString())).thenReturn(journal);
+        when(level.getDataStorage()).thenReturn(storage);
+
+        Recipe<?> liveRecipe = mock(Recipe.class);
+        when(liveRecipe.getId()).thenReturn(view.recipeId());
+        RecipeIntegration<?> recipeIntegration =
+                mock(RecipeIntegration.class);
+        when(recipeIntegration.id()).thenReturn(
+                plan.recipeIntegrationId());
+        MachineIntegration machineIntegration =
+                mock(MachineIntegration.class);
+        when(machineIntegration.id()).thenReturn(
+                plan.machineIntegrationId());
+        RecipeExecutionIntegration executionIntegration =
+                mock(RecipeExecutionIntegration.class);
+        when(executionIntegration.id()).thenReturn(
+                plan.executionIntegrationId());
+        MachineDescriptor descriptor = new MachineDescriptor(
+                plan.machineId(),
+                plan.descriptorRevision(),
+                Set.of(view.processId()),
+                List.of(),
+                List.of(),
+                List.of(),
+                MachineExecutionMode.CUSTOM,
+                false,
+                ConcurrencyCapabilities.unknown(),
+                new SupportScope(List.of(), List.of(), false),
+                false
+        );
+        ExternalIntegrationBatchDelegate delegate =
+                new ExternalIntegrationBatchDelegate(
+                        new DefaultRSIIntegrationApi());
+        setField(delegate, "level", level);
+        setField(delegate, "machinePos", BlockPos.ZERO);
+        setField(delegate, "recipe", liveRecipe);
+        setField(delegate, "recipeIntegration", recipeIntegration);
+        setField(delegate, "machineIntegration", machineIntegration);
+        setField(delegate, "executionIntegration", executionIntegration);
+        setField(delegate, "executionKind", RecipeExecutionKind.CUSTOM);
+        setField(delegate, "executionPlan", plan);
+        setField(delegate, "runningOperation", operation);
+        setField(delegate, "recipeView", view);
+        setField(delegate, "descriptor", descriptor);
+        setField(delegate, "customMaterials",
+                new StubReservedMaterials(List.of(reserved)));
+        setField(delegate, "customOwnerId", ownerId);
+        delegate.setMachineDim(Level.OVERWORLD.location());
+        setField(delegate, "recipeRevision",
+                plan.recipeRevision());
+        setField(delegate, "operationStartContext",
+                new OperationStartContext(
+                        player,
+                        new ExtractionLedger(),
+                        OperationStartContext.MaterialOwnership.CHAIN_RESERVED,
+                        MaterialPlan.none(),
+                        List.of(),
+                        null,
+                        null,
+                        plan.operationId(),
+                        plan.operationId(),
+                        1
+                ));
+
+        Method capture = ExternalIntegrationBatchDelegate.class
+                .getDeclaredMethod("captureCustomSnapshot");
+        capture.setAccessible(true);
+        capture.invoke(delegate);
+
+        ExternalOperationJournal.Entry stored =
+                journal.find(plan.operationId());
+        assertTrue(stored != null);
+        assertEquals(snapshot, stored.snapshot());
+        assertEquals(
+                ExternalOperationJournal.State.ACTIVE,
+                stored.state());
     }
 
     private static ExecutionPlan customPlan(
