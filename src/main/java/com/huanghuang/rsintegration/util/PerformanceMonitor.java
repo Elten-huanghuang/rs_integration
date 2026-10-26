@@ -3,7 +3,6 @@ package com.huanghuang.rsintegration.util;
 import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
 import com.huanghuang.rsintegration.crafting.batch.ExecutionMetrics;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
-import com.huanghuang.rsintegration.crafting.planning.SynchronousFallbackReason;
 import com.huanghuang.rsintegration.util.Diagnostics;
 import net.minecraft.resources.ResourceLocation;
 import java.util.Locale;
@@ -104,8 +103,6 @@ public final class PerformanceMonitor {
     private static final AtomicLong vanillaTickOperations = new AtomicLong();
     private static final AtomicLong vanillaTickBudget = new AtomicLong();
     private static final AtomicLong vanillaDeferredChains = new AtomicLong();
-    private static final AtomicLongArray synchronousPlanningFallbacks =
-            new AtomicLongArray(SynchronousFallbackReason.values().length);
     private static final AtomicLong delegateObserveCalls = new AtomicLong();
     private static final AtomicLong delegateObserveNanos = new AtomicLong();
     private static final AtomicLong delegateObserveMaxNanos = new AtomicLong();
@@ -295,26 +292,6 @@ public final class PerformanceMonitor {
         typedPreviewAdmitted.addAndGet(Math.max(0, admitted));
         typedPreviewQueueDepth.set(Math.max(0, queueDepth));
     }
-    public static void recordSynchronousPlanningFallback(
-            SynchronousFallbackReason reason, ResourceLocation recipeId) {
-        synchronousPlanningFallbacks.incrementAndGet(reason.ordinal());
-        Diagnostics.record(Diagnostics.Category.PLANNING_FALLBACK,
-                "reason=" + reason, recipeId, null);
-    }
-    public static long getSynchronousPlanningFallbackCount(SynchronousFallbackReason reason) {
-        return synchronousPlanningFallbacks.get(reason.ordinal());
-    }
-    static void resetSynchronousPlanningFallbacksForTest() {
-        for (SynchronousFallbackReason reason : SynchronousFallbackReason.values()) {
-            synchronousPlanningFallbacks.set(reason.ordinal(), 0L);
-        }
-    }
-    private static String synchronousPlanningFallbackSummary() {
-        return Arrays.stream(SynchronousFallbackReason.values())
-                .map(reason -> reason.name().toLowerCase(Locale.ROOT) + ":"
-                        + getSynchronousPlanningFallbackCount(reason))
-                .collect(Collectors.joining(",", "[", "]"));
-    }
     public static void recordDelegateObserve(long nanosElapsed) {
         delegateObserveCalls.incrementAndGet();
         delegateObserveNanos.addAndGet(nanosElapsed);
@@ -421,7 +398,6 @@ public final class PerformanceMonitor {
              + "/" + typedPreviewAdmitted.get() + " depth=" + typedPreviewQueueDepth.get()
              + " vanillaTick=" + vanillaTickOperations.get() + "/"
              + vanillaTickBudget.get() + " deferred=" + vanillaDeferredChains.get()
-             + " syncFallback=" + synchronousPlanningFallbackSummary()
              + " delegateObserve=" + delegateObserveCalls.get() + "/"
              + (delegateObserveCalls.get() == 0 ? 0 : delegateObserveNanos.get() / delegateObserveCalls.get() / 1000)
              + "/" + delegateObserveMaxNanos.get() / 1000 + "us"

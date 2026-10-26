@@ -133,7 +133,6 @@ import com.huanghuang.rsintegration.crafting.planning.PureDemandTreeInspector;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
 import com.huanghuang.rsintegration.crafting.planning.AsyncPurePlanningService;
 import com.huanghuang.rsintegration.crafting.planning.AsyncPlanningCoordinator;
-import com.huanghuang.rsintegration.crafting.planning.SynchronousFallbackReason;
 import com.huanghuang.rsintegration.crafting.planning.PlanCache;
 import com.huanghuang.rsintegration.crafting.MaterialLocks;
 import com.huanghuang.rsintegration.crafting.planning.PlanRequestService;
@@ -2088,7 +2087,7 @@ public final class GenericCraftPacket {
                                       @Nullable ItemStack clickedOutput, long requestId,
                                       long previewGeneration) {
         tryBuildPlan(player, recipeId, forcedRecipes, dim, pos, repeatCount, baseItem,
-                clickedOutput, requestId, previewGeneration, null, null, false, null,
+                clickedOutput, requestId, previewGeneration, null, null, false,
                 false, CraftPlanResultDispatcher.networkSink(player, requestId, previewGeneration), null, Map.of());
     }
 
@@ -2102,7 +2101,7 @@ public final class GenericCraftPacket {
                                       long previewGeneration,
                                       @Nullable StorageReference storageReference) {
         tryBuildPlan(player, recipeId, forcedRecipes, dim, pos, repeatCount, baseItem,
-                clickedOutput, requestId, previewGeneration, null, null, false, null,
+                clickedOutput, requestId, previewGeneration, null, null, false,
                 false, CraftPlanResultDispatcher.networkSink(player, requestId, previewGeneration), storageReference, Map.of());
     }
 
@@ -2116,7 +2115,7 @@ public final class GenericCraftPacket {
                                       @Nullable StorageReference storageReference,
                                       Map<String, ItemStack> materialLocks) {
         tryBuildPlan(player, recipeId, forcedRecipes, dim, pos, repeatCount, baseItem,
-                clickedOutput, requestId, previewGeneration, null, null, false, null,
+                clickedOutput, requestId, previewGeneration, null, null, false,
                 false, CraftPlanResultDispatcher.networkSink(player, requestId, previewGeneration), storageReference, materialLocks);
     }
 
@@ -2131,7 +2130,7 @@ public final class GenericCraftPacket {
                                       Map<String, ItemStack> materialLocks,
                                       PlanningPreferences preferences) {
         tryBuildPlan(player, recipeId, forcedRecipes, dim, pos, repeatCount, baseItem,
-                clickedOutput, requestId, previewGeneration, null, null, false, null,
+                clickedOutput, requestId, previewGeneration, null, null, false,
                 false, CraftPlanResultDispatcher.networkSink(player, requestId, previewGeneration), storageReference,
                 materialLocks, null, preferences);
     }
@@ -2147,12 +2146,11 @@ public final class GenericCraftPacket {
                                       @Nullable PureRecipePlanner.Result precomputedPlan,
                                       @Nullable PlanningSnapshot precomputedSnapshot,
                                       boolean asyncAttempted,
-                                      @Nullable SynchronousFallbackReason pendingFallbackReason,
                                       boolean reuseValidatedSnapshot,
                                       CraftPlanResultDispatcher.Sink sink) {
         tryBuildPlan(player, recipeId, forcedRecipes, dim, pos, repeatCount, baseItem,
                 clickedOutput, requestId, previewGeneration, precomputedPlan,
-                precomputedSnapshot, asyncAttempted, pendingFallbackReason,
+                precomputedSnapshot, asyncAttempted,
                 reuseValidatedSnapshot, sink, null, Map.of());
     }
 
@@ -2167,14 +2165,13 @@ public final class GenericCraftPacket {
                              @Nullable PureRecipePlanner.Result precomputedPlan,
                              @Nullable PlanningSnapshot precomputedSnapshot,
                              boolean asyncAttempted,
-                             @Nullable SynchronousFallbackReason pendingFallbackReason,
                              boolean reuseValidatedSnapshot,
                              CraftPlanResultDispatcher.Sink sink,
                              @Nullable StorageReference storageReference,
                              Map<String, ItemStack> materialLocks) {
         tryBuildPlan(player, recipeId, forcedRecipes, dim, pos, repeatCount, baseItem,
                 clickedOutput, requestId, previewGeneration, precomputedPlan, precomputedSnapshot,
-                asyncAttempted, pendingFallbackReason, reuseValidatedSnapshot, sink,
+                asyncAttempted, reuseValidatedSnapshot, sink,
                 storageReference, materialLocks, null, PlanningPreferences.empty());
     }
 
@@ -2189,7 +2186,6 @@ public final class GenericCraftPacket {
                                       @Nullable PureRecipePlanner.Result precomputedPlan,
                                       @Nullable PlanningSnapshot precomputedSnapshot,
                                       boolean asyncAttempted,
-                                      @Nullable SynchronousFallbackReason pendingFallbackReason,
                                       boolean reuseValidatedSnapshot,
                                       CraftPlanResultDispatcher.Sink sink,
                                       @Nullable StorageReference storageReference,
@@ -2197,7 +2193,7 @@ public final class GenericCraftPacket {
                                       PlanningPreferences preferences) {
         tryBuildPlan(player, recipeId, forcedRecipes, dim, pos, repeatCount, baseItem,
                 clickedOutput, requestId, previewGeneration, precomputedPlan, precomputedSnapshot,
-                asyncAttempted, pendingFallbackReason, reuseValidatedSnapshot, sink,
+                asyncAttempted, reuseValidatedSnapshot, sink,
                 storageReference, materialLocks, null, preferences);
     }
 
@@ -2210,7 +2206,6 @@ public final class GenericCraftPacket {
                              @Nullable PureRecipePlanner.Result precomputedPlan,
                              @Nullable PlanningSnapshot precomputedSnapshot,
                              boolean asyncAttempted,
-                             @Nullable SynchronousFallbackReason pendingFallbackReason,
                              boolean reuseValidatedSnapshot, CraftPlanResultDispatcher.Sink sink,
                              @Nullable StorageReference storageReference,
                              Map<String, ItemStack> materialLocks,
@@ -2699,7 +2694,7 @@ public final class GenericCraftPacket {
         Set<ResourceLocation> pureIncompatibleOutputIds = directTerminalPlan ? Set.of()
                 : RecipeIndex.pureIncompatibleOutputIds(player.serverLevel());
         int demandMaxNodes = RSIntegrationConfig.CRAFTING_PURE_DEMAND_MAX_NODES.get();
-        if (!asyncAttempted && CraftPlanDecisionRules.shouldSubmitRoutedPreview(directTerminalPlan,
+        if (!asyncAttempted && CraftPlanDecisionRules.shouldUseAsyncPreviewRoute(directTerminalPlan,
                 planningSnapshot.mainThreadOnly(),
                 effectiveOverrides.isEmpty() || ForcedRecipeGraphProjector.apply(
                         planningSnapshot.recipeGraph(), effectiveOverrides) != null,
@@ -2711,7 +2706,7 @@ public final class GenericCraftPacket {
                     RSIntegrationConfig.CRAFTING_MAX_STEPS.get(), completed ->
                             tryBuildPlan(player, recipeId, forcedRecipes, dim, pos, repeatCount,
                                     baseItem, clickedOutput, requestId, previewGeneration,
-                                    completed.plan(), completed.snapshot(), true, null,
+                                    completed.plan(), completed.snapshot(), true,
                                     reuseValidatedSnapshot, sink, planStorageReference, materialLocks,
                                     completed, safePreferences),
                     failure -> {
@@ -2721,13 +2716,17 @@ public final class GenericCraftPacket {
                                             IntegrationDiagnosticCode.PLANNER_BUSY));
                             return;
                         }
-                        var fallbackReason = SynchronousFallbackReason.fromAsyncFailure(failure);
-                        if (fallbackReason.isEmpty()) return;
-                        tryBuildPlan(player, recipeId, forcedRecipes, dim, pos, repeatCount,
-                                baseItem, clickedOutput, requestId, previewGeneration,
-                                null, null, true, fallbackReason.orElseThrow(),
-                                reuseValidatedSnapshot, sink, planStorageReference, materialLocks,
-                                safePreferences);
+                        if (failure instanceof CancellationException
+                                || failure instanceof AsyncPlanningCoordinator
+                                .StalePlanningResultException) {
+                            return;
+                        }
+                        RSIntegrationMod.LOGGER.warn(
+                                "[RSI-plan] Background preview planning failed recipe={}",
+                                recipeId, failure);
+                        sink.error(PlanOutcome.RUNTIME_UNAVAILABLE,
+                                IntegrationDiagnostic.error(
+                                        IntegrationDiagnosticCode.INTERNAL_ERROR));
                     });
             return;
         }
@@ -2751,7 +2750,7 @@ public final class GenericCraftPacket {
             if (routedPlan != null) {
                 tryBuildPlan(player, recipeId, forcedRecipes, dim, pos, repeatCount,
                         baseItem, clickedOutput, requestId, previewGeneration,
-                        null, null, false, null, false, sink, planStorageReference, materialLocks,
+                        null, null, false, false, sink, planStorageReference, materialLocks,
                         safePreferences);
                 return;
             }
@@ -2774,8 +2773,8 @@ public final class GenericCraftPacket {
                     demandTree.visitedNodes(), demandTree.unresolved());
         }
         // NODE_LIMIT is only a conservative routing-probe cutoff. Keep those
-        // requests on the immutable background planner instead of falling back
-        // to the 500ms typed resolver on the server thread.
+        // requests on the immutable background planner without switching this
+        // attempt to the typed server-thread resolver.
         boolean projectedOverrides = effectiveOverrides.isEmpty()
                 || routedPlan != null
                 && routedPlan.snapshot().equals(planningSnapshot)
@@ -2792,18 +2791,8 @@ public final class GenericCraftPacket {
                 recipeId, pureRoute, demandTree.status(), demandTree.visitedNodes(),
                 demandTree.unresolved(), !effectiveOverrides.isEmpty(), planningSnapshot.mainThreadOnly(),
                 demandTree.catalystRouteAvailable(), targetUsesReusableCatalyst);
-        var synchronousFallbackReason = pendingFallbackReason != null
-                ? Optional.of(pendingFallbackReason)
-                : asyncAttempted && (routedPlan == null || routedPlan.plan() != null)
-                        ? Optional.<SynchronousFallbackReason>empty()
-                        : SynchronousFallbackReason.whenPureRouteUnavailable(
-                                planningSnapshot.mainThreadOnly(), !effectiveOverrides.isEmpty(),
-                                demandTree.backgroundCompatible(), demandTree.catalystRouteAvailable());
-        synchronousFallbackReason.ifPresent(reason ->
-                PerformanceMonitor.recordSynchronousPlanningFallback(reason, recipeId));
-
         boolean terminalPureResult = directTerminalPlan
-                || precomputedPlan != null && pendingFallbackReason == null;
+                || precomputedPlan != null;
         boolean timedOutMissingRoute = terminalPureResult
                 && CraftPlanDecisionRules.canOpenBoundedMissingPlan(precomputedPlan, demandTree);
         if (!directTerminalPlan && terminalPureResult
@@ -2854,7 +2843,7 @@ public final class GenericCraftPacket {
                             () -> tryBuildPlan(player, recipeId, forcedRecipes, dim, pos,
                                     repeatCount, baseItem, clickedOutput, requestId,
                                     previewGeneration, precomputedPlan, queuedSnapshot, true,
-                                    pendingFallbackReason, true, sink, planStorageReference,
+                                    true, sink, planStorageReference,
                                     materialLocks, routedPlan, safePreferences),
                             () -> {
                                 PerformanceMonitor.recordTypedPreviewRejected(queue.size());
@@ -2983,7 +2972,7 @@ public final class GenericCraftPacket {
                 // transient 500 ms resolver deadline. This path never authorizes
                 // execution: the response remains infeasible and retains its
                 // shortage/machine warnings below.
-                if (CraftPlanDecisionRules.canFallbackToBoundedPlanAfterTypedTimeout(
+                if (CraftPlanDecisionRules.canUseBoundedTraceAfterTypedTimeout(
                         precomputedPlan, demandTree, directTerminalPlan)) {
                     if (missing.isEmpty()) {
                         for (var unresolved : precomputedPlan.missing()) {
@@ -3709,7 +3698,7 @@ public final class GenericCraftPacket {
         if (RSIntegrationMod.LOGGER.isDebugEnabled()) {
             long shortageCount = materials.values().stream().filter(a -> a.missingCount() > 0).count();
             RSIntegrationMod.debug("[RSI-Generic] Plan for {}: {} steps, feasible={}, resolver={}, missing={}, shortages={}",
-                    recipeId, steps.size(), feasible, usedTypedResolver ? "typed" : "fallback",
+                    recipeId, steps.size(), feasible, usedTypedResolver ? "typed" : "pure",
                     missing.size(), shortageCount);
         }
         // Dedup missing items — the resolver may add the same ingredient

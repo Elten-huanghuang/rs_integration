@@ -52,7 +52,7 @@ public final class AsyncPurePlanningService {
             PlanningProgressServer.running(snapshot.playerId(), snapshot.requestGeneration(),
                     PlanningProgressSnapshot.Phase.SPECIAL_RECIPE);
             serverExecutor.execute(() -> rollback.accept(
-                    new PlanningThreadContext.MainThreadPlanningFallbackException("special recipe planning")));
+                    new PlanningThreadContext.MainThreadPlanningRequiredException("special recipe planning")));
             return;
         }
         PlanningKey key = new PlanningKey(snapshot.playerId(), snapshot.recipeRevision(),

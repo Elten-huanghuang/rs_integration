@@ -17,7 +17,7 @@ import java.util.UUID;
  * 将玩家在计划树中选择的配方投影成纯规划图。
  *
  * <p>强制配方仍然必须经过同一套递归搜索和循环检测。若配方无法在不可变图中
- * 完整投影，则返回 {@code null}，由调用方回退到 typed 解析器。</p>
+ * 完整投影，则返回 {@code null}，由调用方显式路由到 typed 规划器。</p>
  */
 public final class ForcedRecipeGraphProjector {
     private ForcedRecipeGraphProjector() {}

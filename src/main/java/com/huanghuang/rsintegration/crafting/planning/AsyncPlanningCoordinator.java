@@ -64,7 +64,8 @@ public final class AsyncPlanningCoordinator implements AutoCloseable {
                            Predicate<PlanningSnapshot> revalidator,
                            Consumer<T> commit,
                            Consumer<Throwable> rollback) {
-        submit(snapshot, computation, serverExecutor, revalidator, commit, rollback, null);
+        submitInternal(null, snapshot, computation, serverExecutor, revalidator,
+                (ignored, result) -> commit.accept(result), rollback);
     }
 
     /**
@@ -78,7 +79,7 @@ public final class AsyncPlanningCoordinator implements AutoCloseable {
                                  Predicate<PlanningSnapshot> revalidator,
                                  Consumer<T> commit, Consumer<Throwable> rollback) {
         submitInternal(key, snapshot, computation, serverExecutor, revalidator,
-                (ignored, result) -> commit.accept(result), rollback, null);
+                (ignored, result) -> commit.accept(result), rollback);
     }
 
     public <T> void submitShared(Object key, PlanningSnapshot snapshot,
@@ -87,41 +88,24 @@ public final class AsyncPlanningCoordinator implements AutoCloseable {
                                  Predicate<PlanningSnapshot> revalidator,
                                  BiConsumer<PlanningSnapshot, T> commit,
                                  Consumer<Throwable> rollback) {
-        submitInternal(key, snapshot, computation, serverExecutor, revalidator, commit, rollback, null);
-    }
-
-    /**
-     * Variant with an explicit server-thread fallback. This is used while migrating
-     * recipes whose handlers still require live third-party objects.
-     */
-    public <T> void submit(PlanningSnapshot snapshot,
-                           Function<PlanningSnapshot, T> computation,
-                           Executor serverExecutor,
-                           Predicate<PlanningSnapshot> revalidator,
-                           Consumer<T> commit,
-                           Consumer<Throwable> rollback,
-                           Function<PlanningSnapshot, T> synchronousFallback) {
-        submitInternal(null, snapshot, computation, serverExecutor, revalidator,
-                (ignored, result) -> commit.accept(result), rollback,
-                synchronousFallback);
+        submitInternal(key, snapshot, computation, serverExecutor, revalidator, commit, rollback);
     }
 
     private <T> void submitInternal(Object sharedKey, PlanningSnapshot snapshot,
                            Function<PlanningSnapshot, T> computation,
                            Executor serverExecutor,
                            Predicate<PlanningSnapshot> revalidator,
-                           BiConsumer<PlanningSnapshot, T> commit, Consumer<Throwable> rollback,
-                           Function<PlanningSnapshot, T> synchronousFallback) {
+                           BiConsumer<PlanningSnapshot, T> commit, Consumer<Throwable> rollback) {
         if (sharedKey != null) {
             Request<?> existing = active.get(snapshot.playerId());
             if (existing != null && sharedKey.equals(existing.sharedKey())) {
                 @SuppressWarnings("unchecked") Request<T> same = (Request<T>) existing;
-                same.replaceHandlers(snapshot, revalidator, commit, rollback, synchronousFallback);
+                same.replaceHandlers(snapshot, revalidator, commit, rollback);
                 return;
             }
         }
         Request<T> request = new Request<>(sharedKey, snapshot, serverExecutor, rollback, workers,
-                revalidator, commit, synchronousFallback);
+                revalidator, commit);
         Request<?> previous = active.put(snapshot.playerId(), request);
         if (previous != null) previous.cancel();
 
@@ -167,20 +151,7 @@ public final class AsyncPlanningCoordinator implements AutoCloseable {
             Throwable cause = unwrap(completedFailure);
             Predicate<PlanningSnapshot> revalidator = request.revalidator;
             BiConsumer<PlanningSnapshot, T> commit = request.commit;
-            Function<PlanningSnapshot, T> synchronousFallback = request.synchronousFallback;
             if (cause != null) {
-                if (synchronousFallback != null
-                        && cause instanceof PlanningThreadContext.MainThreadPlanningFallbackException
-                        && !request.isCancelled() && revalidator.test(snapshot)) {
-                    try {
-                        PerformanceMonitor.recordSynchronousPlanningFallback(
-                                SynchronousFallbackReason.MAIN_THREAD_ONLY, snapshot.recipeId());
-                        commit.accept(snapshot, synchronousFallback.apply(request.snapshot));
-                    } catch (Throwable fallbackFailure) {
-                        request.rollback.accept(fallbackFailure);
-                    }
-                    return;
-                }
                 request.rollback.accept(cause);
                 return;
             }
@@ -244,14 +215,13 @@ public final class AsyncPlanningCoordinator implements AutoCloseable {
         private final ThreadPoolExecutor workers;
         private volatile Predicate<PlanningSnapshot> revalidator;
         private volatile BiConsumer<PlanningSnapshot, T> commit;
-        private volatile Function<PlanningSnapshot, T> synchronousFallback;
         private final AtomicReference<State> state = new AtomicReference<>(State.ACTIVE);
         private volatile Future<?> task;
 
         private Request(Object sharedKey, PlanningSnapshot snapshot, Executor serverExecutor,
                         Consumer<Throwable> rollback, ThreadPoolExecutor workers,
-                        Predicate<PlanningSnapshot> revalidator, BiConsumer<PlanningSnapshot, T> commit,
-                        Function<PlanningSnapshot, T> synchronousFallback) {
+                        Predicate<PlanningSnapshot> revalidator,
+                        BiConsumer<PlanningSnapshot, T> commit) {
             this.sharedKey = sharedKey;
             this.snapshot = snapshot;
             this.callbackSnapshot = snapshot;
@@ -260,21 +230,19 @@ public final class AsyncPlanningCoordinator implements AutoCloseable {
             this.workers = workers;
             this.revalidator = revalidator;
             this.commit = commit;
-            this.synchronousFallback = synchronousFallback;
         }
 
         private Object sharedKey() { return sharedKey; }
 
         private void replaceHandlers(PlanningSnapshot latestSnapshot, Predicate<PlanningSnapshot> validator,
-                                     BiConsumer<PlanningSnapshot, T> nextCommit, Consumer<Throwable> nextRollback,
-                                     Function<PlanningSnapshot, T> fallback) {
+                                     BiConsumer<PlanningSnapshot, T> nextCommit,
+                                     Consumer<Throwable> nextRollback) {
             // The server executor is stable for a player, but retain the original executor used
             // to schedule the worker handoff. Only callback state is replaced for deduplication.
             this.callbackSnapshot = latestSnapshot;
             this.revalidator = validator;
             this.commit = nextCommit;
             this.rollback = nextRollback;
-            this.synchronousFallback = fallback;
         }
 
         private void attach(Future<?> submittedTask) {

@@ -28,7 +28,6 @@ import com.huanghuang.rsintegration.crafting.graph.RootDemand;
 import com.huanghuang.rsintegration.crafting.graph.UnresolvedDemand;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
 import com.huanghuang.rsintegration.crafting.planning.PureDemandTreeInspector;
-import com.huanghuang.rsintegration.crafting.planning.AsyncPlanningCoordinator;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.planning.PlanningSnapshot;
 import com.huanghuang.rsintegration.crafting.planning.PlanningPreferences;
@@ -58,8 +57,6 @@ import java.util.HashMap;
 import java.util.ArrayList;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.CancellationException;
-import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -391,7 +388,7 @@ class GenericCraftPacketTest extends BootstrapTest {
     }
 
     @Test
-    void typedMachineFallbackRequiresEveryMissingDemandToBeBlocked() {
+    void typedMachineRouteRequiresEveryMissingDemandToBeBlocked() {
         var blockedOutput = new ImmutableRecipeGraph.MaterialRef(
                 new ResourceLocation("test", "bound_machine_output"), "");
         var rawMaterial = new ImmutableRecipeGraph.MaterialRef(
@@ -514,11 +511,11 @@ class GenericCraftPacketTest extends BootstrapTest {
                 PureDemandTreeInspector.Status.MISSING_MATERIALS, 4,
                 missingMaterial, false);
 
-        assertTrue(CraftPlanDecisionRules.canFallbackToBoundedPlanAfterTypedTimeout(
+        assertTrue(CraftPlanDecisionRules.canUseBoundedTraceAfterTypedTimeout(
                 incomplete, missing, false));
-        assertFalse(CraftPlanDecisionRules.canFallbackToBoundedPlanAfterTypedTimeout(
+        assertFalse(CraftPlanDecisionRules.canUseBoundedTraceAfterTypedTimeout(
                 incomplete, missing, true));
-        assertFalse(CraftPlanDecisionRules.canFallbackToBoundedPlanAfterTypedTimeout(
+        assertFalse(CraftPlanDecisionRules.canUseBoundedTraceAfterTypedTimeout(
                 null, missing, false));
     }
 
@@ -572,7 +569,7 @@ class GenericCraftPacketTest extends BootstrapTest {
     }
 
     @Test
-    void typedCatalystFallbackIsRetainedWhenItCanResolveEveryShortage() {
+    void typedCatalystRouteIsUsedWhenItCanResolveEveryShortage() {
         var catalyst = new ImmutableRecipeGraph.MaterialRef(
                 new ResourceLocation("test", "catalyst_output"), "");
         PureRecipePlanner.Result missingCatalyst = new PureRecipePlanner.Result(false,
@@ -699,21 +696,6 @@ class GenericCraftPacketTest extends BootstrapTest {
     }
 
     @Test
-    void cancelledAndStaleAsyncPlansNeverTriggerSynchronousFallback() {
-        assertFalse(CraftPlanDecisionRules.shouldFallbackAfterAsyncFailure(
-                new CancellationException("superseded")));
-        PlanningSnapshot snapshot = new PlanningSnapshot(UUID.randomUUID(), 1, 1,
-                new ResourceLocation("test", "recipe"), Map.of(), Map.of(),
-                new ImmutableRecipeGraph(Map.of()), "network", "binding", false);
-        assertFalse(CraftPlanDecisionRules.shouldFallbackAfterAsyncFailure(
-                new AsyncPlanningCoordinator.StalePlanningResultException(snapshot)));
-        assertFalse(CraftPlanDecisionRules.shouldFallbackAfterAsyncFailure(
-                new RejectedExecutionException("planner queue full")));
-        assertTrue(CraftPlanDecisionRules.shouldFallbackAfterAsyncFailure(
-                new IllegalStateException("planner failed")));
-    }
-
-    @Test
     void synchronousTerminalStepUsesRequestedExecutionCount() {
         var step = CraftTerminalSteps.genericTerminalStep(
                 new ResourceLocation("minecraft", "iron_ingot"), 6);
@@ -738,11 +720,11 @@ class GenericCraftPacketTest extends BootstrapTest {
 
     @Test
     void missingDirectInputsKeepPureCraftingPreviewOffTheServerThread() {
-        assertTrue(CraftPlanDecisionRules.shouldSubmitRoutedPreview(false, false, true, false));
-        assertFalse(CraftPlanDecisionRules.shouldSubmitRoutedPreview(true, false, true, false));
-        assertFalse(CraftPlanDecisionRules.shouldSubmitRoutedPreview(false, true, true, false));
-        assertFalse(CraftPlanDecisionRules.shouldSubmitRoutedPreview(false, false, false, false));
-        assertFalse(CraftPlanDecisionRules.shouldSubmitRoutedPreview(false, false, true, true));
+        assertTrue(CraftPlanDecisionRules.shouldUseAsyncPreviewRoute(false, false, true, false));
+        assertFalse(CraftPlanDecisionRules.shouldUseAsyncPreviewRoute(true, false, true, false));
+        assertFalse(CraftPlanDecisionRules.shouldUseAsyncPreviewRoute(false, true, true, false));
+        assertFalse(CraftPlanDecisionRules.shouldUseAsyncPreviewRoute(false, false, false, false));
+        assertFalse(CraftPlanDecisionRules.shouldUseAsyncPreviewRoute(false, false, true, true));
         assertTrue(CraftPlanDecisionRules.shouldUseAsyncPurePreview(true, false));
         assertFalse(CraftPlanDecisionRules.shouldUseAsyncPurePreview(true, true));
         assertFalse(CraftPlanDecisionRules.shouldUseAsyncPurePreview(false, false));

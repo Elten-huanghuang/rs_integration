@@ -7,7 +7,6 @@ import com.huanghuang.rsintegration.crafting.planning.PureDemandTreeInspector;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
 import com.huanghuang.rsintegration.crafting.planning.PlanningPreferences;
 import com.huanghuang.rsintegration.crafting.planning.PlanningSnapshot;
-import com.huanghuang.rsintegration.crafting.planning.SynchronousFallbackReason;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
@@ -32,8 +31,12 @@ public final class CraftPlanDecisionRules {
         return pureRoute && !directTerminalPlan;
     }
 
-    static boolean shouldSubmitRoutedPreview(boolean directTerminalPlan, boolean mainThreadOnly,
-                                             boolean overridesProjectable, boolean hasMaterialLocks) {
+    static boolean shouldUseAsyncPreviewRoute(
+            boolean directTerminalPlan,
+            boolean mainThreadOnly,
+            boolean overridesProjectable,
+            boolean hasMaterialLocks
+    ) {
         return shouldUseAsyncPurePreview(
                 !mainThreadOnly && overridesProjectable && !hasMaterialLocks,
                 directTerminalPlan);
@@ -203,7 +206,7 @@ public final class CraftPlanDecisionRules {
                         && !plan.missing().isEmpty()));
     }
 
-    static boolean canFallbackToBoundedPlanAfterTypedTimeout(
+    static boolean canUseBoundedTraceAfterTypedTimeout(
             @Nullable PureRecipePlanner.Result plan,
             PureDemandTreeInspector.Result demandTree,
             boolean directTerminalPlan) {
@@ -230,10 +233,6 @@ public final class CraftPlanDecisionRules {
                 && snapshot.requestGeneration() == requestGeneration
                 && snapshot.forcedRecipes().equals(forcedRecipes)
                 && snapshot.preferences().equals(preferences);
-    }
-
-    static boolean shouldFallbackAfterAsyncFailure(Throwable failure) {
-        return SynchronousFallbackReason.fromAsyncFailure(failure).isPresent();
     }
 
     private static long itemCount(Map<Item, ? extends Number> counts, Item item) {

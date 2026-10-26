@@ -34,7 +34,7 @@ public final class PlanningThreadContext {
 
     public static void requireMainThread(String operation) {
         if (isBackgroundPlanningThread()) {
-            throw new MainThreadPlanningFallbackException(operation);
+            throw new MainThreadPlanningRequiredException(operation);
         }
     }
 
@@ -43,13 +43,13 @@ public final class PlanningThreadContext {
         requireMainThread(operation);
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server == null || !server.isSameThread()) {
-            throw new MainThreadPlanningFallbackException(operation);
+            throw new MainThreadPlanningRequiredException(operation);
         }
         return server;
     }
 
-    public static final class MainThreadPlanningFallbackException extends RuntimeException {
-        public MainThreadPlanningFallbackException(String operation) {
+    public static final class MainThreadPlanningRequiredException extends RuntimeException {
+        public MainThreadPlanningRequiredException(String operation) {
             super(operation + " requires the server thread");
         }
     }

@@ -143,18 +143,22 @@ class AsyncPlanningCoordinatorTest extends BootstrapTest {
     }
 
     @Test
-    void thirdPartyBoundaryUsesServerFallback() throws Exception {
+    void thirdPartyBoundaryFailsWithoutStartingASecondPlan() throws Exception {
         try (AsyncPlanningCoordinator coordinator = new AsyncPlanningCoordinator(1)) {
             CountDownLatch completed = new CountDownLatch(1);
             AtomicInteger commits = new AtomicInteger();
+            AtomicInteger rollbacks = new AtomicInteger();
             coordinator.submit(snapshot(), ignored -> {
-                        throw new PlanningThreadContext.MainThreadPlanningFallbackException("mod recipe");
+                        throw new PlanningThreadContext.MainThreadPlanningRequiredException("mod recipe");
                     }, Runnable::run, ignored -> true, result -> {
-                        assertEquals("sync", result);
                         commits.incrementAndGet(); completed.countDown();
-                    }, failure -> completed.countDown(), ignored -> "sync");
+                    }, failure -> {
+                        rollbacks.incrementAndGet();
+                        completed.countDown();
+                    });
             assertTrue(completed.await(2, TimeUnit.SECONDS));
-            assertEquals(1, commits.get());
+            assertEquals(0, commits.get());
+            assertEquals(1, rollbacks.get());
         }
     }
 

@@ -8,7 +8,6 @@ import com.huanghuang.rsintegration.crafting.plan.PlanOutcome;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import com.huanghuang.rsintegration.crafting.planning.PlanningSnapshot;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
-import com.huanghuang.rsintegration.crafting.planning.SynchronousFallbackReason;
 import com.huanghuang.rsintegration.storage.StorageReference;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
@@ -38,7 +37,7 @@ final class CraftMaxCraftableSearchService {
                 player, request.recipeId(), request.forcedRecipes(),
                 request.dimension(), request.position(), 1,
                 request.baseItem(), request.targetOutput(), request.requestId(),
-                previewGeneration, null, null, false, null, false,
+                previewGeneration, null, null, false, false,
                 new CraftPlanResultDispatcher.Sink() {
                     @Override
                     public void success(PlanResponse prepared, PlanningSnapshot snapshot) {
@@ -75,10 +74,12 @@ final class CraftMaxCraftableSearchService {
                                                 IntegrationDiagnostic.error(
                                                         IntegrationDiagnosticCode.MAX_CRAFTABLE_UNKNOWN));
                                     } else if (result.maximum() <= 0) {
-                                        MaxCraftableSearch fallback = new MaxCraftableSearch(
-                                                RSIntegrationConfig.REPEAT_COUNT_MAX.get());
+                                        MaxCraftableSearch continuation =
+                                                new MaxCraftableSearch(
+                                                        RSIntegrationConfig
+                                                                .REPEAT_COUNT_MAX.get());
                                         continueSearch(player, request, previewGeneration,
-                                                fallback, result.snapshot());
+                                                continuation, result.snapshot());
                                     } else {
                                         finishSearch(player, request, previewGeneration,
                                                 result.maximum(), result.plan(),
@@ -110,7 +111,6 @@ final class CraftMaxCraftableSearchService {
                 request.dimension(), request.position(), displayCount,
                 request.baseItem(), request.targetOutput(), request.requestId(),
                 previewGeneration, maximum > 0 ? plan : null, snapshot, true,
-                maximum > 0 ? null : SynchronousFallbackReason.PURE_UNRESOLVABLE,
                 true, networkSink(player, request, previewGeneration),
                 request.storageReference(), request.materialLocks());
     }
@@ -130,7 +130,7 @@ final class CraftMaxCraftableSearchService {
                         player, request.recipeId(), request.forcedRecipes(),
                         request.dimension(), request.position(), 1,
                         request.baseItem(), request.targetOutput(), request.requestId(),
-                        previewGeneration, null, snapshot, false, null,
+                        previewGeneration, null, snapshot, false,
                         true, networkSink(player, request, previewGeneration),
                         request.storageReference(), request.materialLocks());
                 return;
@@ -139,7 +139,7 @@ final class CraftMaxCraftableSearchService {
                     player, request.recipeId(), request.forcedRecipes(),
                     request.dimension(), request.position(), maximum,
                     request.baseItem(), request.targetOutput(), request.requestId(),
-                    previewGeneration, null, snapshot, false, null,
+                    previewGeneration, null, snapshot, false,
                     true, networkSink(player, request, previewGeneration),
                     request.storageReference(), request.materialLocks());
             return;
@@ -164,7 +164,7 @@ final class CraftMaxCraftableSearchService {
                 player, request.recipeId(), request.forcedRecipes(),
                 request.dimension(), request.position(), candidate,
                 request.baseItem(), request.targetOutput(), request.requestId(),
-                previewGeneration, null, snapshot, false, null,
+                previewGeneration, null, snapshot, false,
                 true, probeSink, request.storageReference(), request.materialLocks());
     }
 

@@ -57,10 +57,10 @@ class RecipeIndexBuildSessionTest extends BootstrapTest {
         try (var lifecycle = mockStatic(ServerLifecycleHooks.class)) {
             lifecycle.when(ServerLifecycleHooks::getCurrentServer).thenReturn(server);
             when(server.isSameThread()).thenReturn(false);
-            assertThrows(PlanningThreadContext.MainThreadPlanningFallbackException.class,
+            assertThrows(PlanningThreadContext.MainThreadPlanningRequiredException.class,
                     () -> RecipeIndex.warmUpBlocking(level));
             verifyNoInteractions(level);
-            assertThrows(PlanningThreadContext.MainThreadPlanningFallbackException.class,
+            assertThrows(PlanningThreadContext.MainThreadPlanningRequiredException.class,
                     () -> PlanningThreadContext.runInBackground(() -> {
                         RecipeIndex.warmUpBlocking(level);
                         return null;
