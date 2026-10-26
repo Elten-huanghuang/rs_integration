@@ -8,6 +8,8 @@ import com.huanghuang.rsintegration.mods.tacz.TaczWorkbenchCompatibility;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
+import com.huanghuang.rsintegration.crafting.external.ExternalIntegrationRuntime;
+import com.huanghuang.rsintegration.crafting.external.ExternalMachineBindingIndex;
 import com.huanghuang.rsintegration.feature.craftingstation.MachineTypeCompatibility;
 import com.huanghuang.rsintegration.storage.StorageBackendId;
 import com.huanghuang.rsintegration.storage.StorageReference;
@@ -397,6 +399,11 @@ public final class AltarBindingRegistry {
             if (mapped != null && ModType.byId(mapped) != null) type = ModType.byId(mapped);
         }
 
+        if (type == ModType.EXTERNAL_INTEGRATION) {
+            return !getBoundMachinesForRecipe(
+                    player, type, recipe.getId()).isEmpty();
+        }
+
         if (ModIds.TACZ.equals(type.id())) {
             return !getBoundMachinesForRecipe(player, type, recipe.getId()).isEmpty();
         }
@@ -742,15 +749,32 @@ public final class AltarBindingRegistry {
         // recipeMachineSubType(). Public callers without a recipe still pass a
         // raw recipe-folder hint and need the legacy one-time normalization.
         String normalized = bindingSubTypeFilter(subTypeHint, type, recipe != null);
+        ResourceLocation externalProcessId =
+                type == ModType.EXTERNAL_INTEGRATION && recipe != null
+                        ? ExternalIntegrationRuntime.recipeProcessId(
+                        recipe,
+                        player.serverLevel().registryAccess())
+                        : null;
 
         for (ItemStack stack : stacks) {
             if (stack.isEmpty()) continue;
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
                 if (isAutomationBlocked(blocked, entry)) continue;
                 ModType entryType = ModType.fromBlockKey(entry.blockKey());
-                if (!isCompatibleMachineType(type, entryType)
+                boolean externalRecipeBinding =
+                        isExternalRecipeBinding(
+                                type,
+                                recipe,
+                                entry,
+                                externalProcessId
+                        );
+                if (externalRecipeBinding) {
+                    // 已通过方块注册 ID 与 process 校验。
+                } else if (!isCompatibleMachineType(type, entryType)
                         && !(PmmoRSModule.TYPE_ID
-                        .equals(type.id()) && isPmmoSalvageBinding(entry))) continue;
+                        .equals(type.id()) && isPmmoSalvageBinding(entry))) {
+                    continue;
+                }
                 if (!isExecutableBinding(type, entry.blockKey())) continue;
                 if (recipeId != null && ModIds.TACZ.equals(type.id())
                         && !TaczWorkbenchCompatibility.accepts(entry.displayStack(), recipeId)) {
@@ -779,6 +803,19 @@ public final class AltarBindingRegistry {
                 out.add(new BoundMachine(entry.dim(), entry.pos(), executionType, entry.blockKey()));
             }
         }
+    }
+
+    static boolean isExternalRecipeBinding(
+            ModType type,
+            @Nullable Recipe<?> recipe,
+            BindingStorage.BindingEntry entry,
+            @Nullable ResourceLocation processId
+    ) {
+        return type == ModType.EXTERNAL_INTEGRATION
+                && recipe != null
+                && entry != null
+                && ExternalMachineBindingIndex.supportsProcess(
+                        entry.blockRegKey(), processId);
     }
 
     static boolean isAutomationBlocked(Set<MachineFavoriteKey> blocked,

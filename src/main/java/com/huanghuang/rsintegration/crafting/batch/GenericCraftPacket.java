@@ -1100,7 +1100,19 @@ public final class GenericCraftPacket {
     }
 
     private static ModType modTypeForCachedExecution(Recipe<?> recipe) {
-        ModType type = ModType.classifyRecipe(recipe);
+        ModRecipeHandler claimed =
+                ModRecipeHandlers.claimFor(recipe).winner();
+        return modTypeForCachedExecution(
+                claimed, ModType.classifyRecipe(recipe));
+    }
+
+    static ModType modTypeForCachedExecution(
+            @Nullable ModRecipeHandler claimed,
+            @Nullable ModType type
+    ) {
+        if (claimed != null && claimed.modType() != ModType.GENERIC) {
+            return claimed.modType();
+        }
         return type == null ? ModType.GENERIC : type;
     }
 

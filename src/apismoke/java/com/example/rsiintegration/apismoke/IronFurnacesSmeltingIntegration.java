@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.api.diagnostic.IntegrationSeverity;
 import com.huanghuang.rsintegration.api.machine.ConcurrencyCapabilities;
 import com.huanghuang.rsintegration.api.machine.InputOutputAccess;
 import com.huanghuang.rsintegration.api.machine.ItemPortAccess;
+import com.huanghuang.rsintegration.api.machine.MachineBinding;
 import com.huanghuang.rsintegration.api.machine.MachineContext;
 import com.huanghuang.rsintegration.api.machine.MachineDescriptor;
 import com.huanghuang.rsintegration.api.machine.MachineDescriptorResult;
@@ -15,6 +16,7 @@ import com.huanghuang.rsintegration.api.machine.MachineIntegration;
 import com.huanghuang.rsintegration.api.machine.MachineItemPort;
 import com.huanghuang.rsintegration.api.machine.MachineState;
 import com.huanghuang.rsintegration.api.machine.MachineStateProvider;
+import com.huanghuang.rsintegration.api.machine.PlannedConcurrency;
 import com.huanghuang.rsintegration.api.machine.SupportScope;
 import com.huanghuang.rsintegration.api.recipe.InputConsumption;
 import com.huanghuang.rsintegration.api.recipe.ItemIngredientView;
@@ -33,6 +35,7 @@ import ironfurnaces.tileentity.furnaces.BlockIronFurnaceTileBase;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.AbstractCookingRecipe;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeType;
@@ -81,9 +84,7 @@ final class IronFurnacesSmeltingIntegration {
         @Override
         public boolean supports(Recipe<?> recipe) {
             return recipe instanceof AbstractCookingRecipe
-                    && recipe.getId() != null
-                    && RsiApiSmokeMod.MOD_ID.equals(
-                    recipe.getId().getNamespace());
+                    && recipe.getId() != null;
         }
 
         @Override
@@ -116,6 +117,18 @@ final class IronFurnacesSmeltingIntegration {
                     INPUT_SLOT,
                     true
             );
+            MaterialRequirement fuel = new MaterialRequirement(
+                    smokeId("ironfurnaces/fuel"),
+                    ItemIngredientView.anyOf(
+                            new ItemStack(Items.COAL),
+                            new ItemStack(Items.CHARCOAL)
+                    ),
+                    1L,
+                    InputConsumption.fuel(200L),
+                    FUEL_GROUP,
+                    FUEL_SLOT,
+                    true
+            );
             OutputDeclaration result = new OutputDeclaration(
                     smokeId("ironfurnaces/output"),
                     OUTPUT_GROUP,
@@ -130,7 +143,7 @@ final class IronFurnacesSmeltingIntegration {
             return new RecipeInspectionResult(new RecipeView(
                     recipe.getId(),
                     processFor(recipe.getType()),
-                    List.of(input),
+                    List.of(input, fuel),
                     List.of(),
                     List.of(result),
                     new RecipeFlags(
@@ -138,7 +151,7 @@ final class IronFurnacesSmeltingIntegration {
                             false,
                             true,
                             false,
-                            false,
+                            true,
                             false,
                             true
                     )
@@ -154,6 +167,31 @@ final class IronFurnacesSmeltingIntegration {
         @Override
         public ResourceLocation id() {
             return machineIntegrationId;
+        }
+
+        @Override
+        public List<MachineBinding> bindings() {
+            return List.of(MachineBinding.blocks(
+                    Set.of(
+                            smeltingProcess,
+                            blastingProcess,
+                            smokingProcess
+                    ),
+                    true,
+                    new ResourceLocation("ironfurnaces", "iron_furnace")
+            ));
+        }
+
+        @Override
+        public Map<ResourceLocation, PlannedConcurrency>
+        planningConcurrency() {
+            PlannedConcurrency profile =
+                    PlannedConcurrency.machineSlot();
+            return Map.of(
+                    smeltingProcess, profile,
+                    blastingProcess, profile,
+                    smokingProcess, profile
+            );
         }
 
         @Override
@@ -184,7 +222,7 @@ final class IronFurnacesSmeltingIntegration {
                                     INPUT_SLOT,
                                     null,
                                     InputOutputAccess.INPUT,
-                                    ItemPortAccess.ITEM_HANDLER,
+                                    ItemPortAccess.CONTAINER,
                                     INPUT_GROUP,
                                     null,
                                     64
@@ -194,7 +232,7 @@ final class IronFurnacesSmeltingIntegration {
                                     FUEL_SLOT,
                                     null,
                                     InputOutputAccess.INPUT,
-                                    ItemPortAccess.ITEM_HANDLER,
+                                    ItemPortAccess.CONTAINER,
                                     FUEL_GROUP,
                                     null,
                                     64
@@ -204,7 +242,7 @@ final class IronFurnacesSmeltingIntegration {
                                     OUTPUT_SLOT,
                                     null,
                                     InputOutputAccess.OUTPUT,
-                                    ItemPortAccess.ITEM_HANDLER,
+                                    ItemPortAccess.CONTAINER,
                                     null,
                                     OUTPUT_GROUP,
                                     64

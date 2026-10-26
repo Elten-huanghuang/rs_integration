@@ -128,7 +128,6 @@ import com.huanghuang.rsintegration.feature.villager.client.VillagerRestockClien
 import com.huanghuang.rsintegration.feature.villager.tradelock.VillagerTradeLockService;
 import com.huanghuang.rsintegration.feature.villager.tradelock.VillagerTradeLockSnapshotPacket;
 import com.huanghuang.rsintegration.api.RSIIntegrationApi;
-import com.huanghuang.rsintegration.api.RSIIntegrationRegistrationEvent;
 import com.huanghuang.rsintegration.api.RSIIntegrationServices;
             // Stonecutter
 import java.util.List;
@@ -159,6 +158,7 @@ import net.minecraftforge.fml.event.config.ModConfigEvent;
 import net.minecraftforge.fml.config.ModConfig;
 import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
+import net.minecraftforge.fml.event.lifecycle.FMLLoadCompleteEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraftforge.network.NetworkDirection;
 import net.minecraftforge.network.PacketDistributor;
@@ -395,6 +395,7 @@ public final class RSIntegrationMod {
                     () -> StorageClientBootstrap::register);
         }
         MOD_BUS.addListener(this::onClientSetup);
+        MOD_BUS.addListener(this::onLoadComplete);
 
         FMLJavaModLoadingContext.get().getModEventBus().addListener(this::onCommonSetup);
         MinecraftForge.EVENT_BUS.addListener(
@@ -482,16 +483,6 @@ public final class RSIntegrationMod {
     }
 
     private void onCommonSetup(final FMLCommonSetupEvent event) {
-        event.enqueueWork(() -> {
-            RSIIntegrationServices.beginRegistration();
-            try {
-                MinecraftForge.EVENT_BUS.post(new RSIIntegrationRegistrationEvent(
-                        RSIIntegrationApi.get().orElseThrow()));
-            } finally {
-                RSIIntegrationServices.freezeRegistration();
-            }
-            ExternalIntegrationRuntime.initialize();
-        });
         event.enqueueWork(() -> CraftingHelper.register(new UnifiedDiskEnabledCondition.Serializer()));
         StorageBackendLoadResult rsBackend = STORAGE_BACKENDS.load(
                 StorageBackendDescriptors.REFINED_STORAGE);
@@ -1008,6 +999,16 @@ public final class RSIntegrationMod {
         ContractValidation.validateAll();
 
         LOGGER.info("{} initialized.", MOD_NAME);
+    }
+
+    private void onLoadComplete(final FMLLoadCompleteEvent event) {
+        LOGGER.info("[RSI-API] freezing direct registrations");
+        RSIIntegrationServices.freezeRegistration();
+        LOGGER.info(
+                "[RSI-API] registration accepted recipes={} machines={}",
+                RSIIntegrationServices.recipeRegistrations().size(),
+                RSIIntegrationServices.machineRegistrations().size());
+        ExternalIntegrationRuntime.initialize();
     }
 
     private void onClientSetup(final FMLClientSetupEvent event) {

@@ -161,6 +161,12 @@ public final class DefaultRSIIntegrationApi implements RSIIntegrationApi {
                     IntegrationDiagnosticCode.REGISTRATION_INVALID_DECLARATION, kind,
                     "invalid_id");
         }
+        if (kind == RegistrationKind.MACHINE
+                && !hasMachineBindings((MachineIntegration) integration)) {
+            return rejected(RegistrationStatus.REJECTED, currentPhase, id,
+                    IntegrationDiagnosticCode.REGISTRATION_INVALID_DECLARATION,
+                    kind, "invalid_machine_binding");
+        }
         RegistrationOptions safeOptions = options == null
                 ? RegistrationOptions.defaults() : options;
         synchronized (this) {
@@ -201,6 +207,19 @@ public final class DefaultRSIIntegrationApi implements RSIIntegrationApi {
             case MACHINE -> ((MachineIntegration) integration).id();
             case EXECUTION -> ((RecipeExecutionIntegration) integration).id();
         };
+    }
+
+    private static boolean hasMachineBindings(
+            MachineIntegration integration
+    ) {
+        try {
+            var bindings = integration.bindings();
+            return bindings != null
+                    && !bindings.isEmpty()
+                    && bindings.stream().allMatch(Objects::nonNull);
+        } catch (RuntimeException | LinkageError failure) {
+            return false;
+        }
     }
 
     private static RegistrationResult rejected(

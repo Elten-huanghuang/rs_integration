@@ -8,12 +8,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraftforge.eventbus.api.BusBuilder;
-import net.minecraftforge.eventbus.api.IEventBus;
 import org.junit.jupiter.api.Test;
-
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -23,22 +18,11 @@ import static org.mockito.Mockito.mock;
 class PublicIntegrationExampleRuntimeTest extends BootstrapTest {
 
     @Test
-    void publicExampleRegistersThroughTheForgeEvent() {
+    void publicExampleRegistersThroughApiEntryPoint() {
         DefaultRSIIntegrationApi api = new DefaultRSIIntegrationApi();
         api.beginRegistration();
-        IEventBus bus = BusBuilder.builder().build();
-        AtomicReference<RegisteredComponents> registered =
-                new AtomicReference<>();
-        AtomicBoolean delivered = new AtomicBoolean();
-        bus.addListener((RSIIntegrationRegistrationEvent event) -> {
-            delivered.set(true);
-            registered.set(PublicIntegrationExample.register(event));
-        });
-
-        bus.post(new RSIIntegrationRegistrationEvent(api));
-
-        RegisteredComponents components = registered.get();
-        assertTrue(delivered.get());
+        RegisteredComponents components =
+                PublicIntegrationExample.register(api);
         assertTrue(components.recipeResult().accepted(),
                 () -> components.recipeResult().diagnostics().toString());
         assertClaims(api, components);

@@ -472,13 +472,16 @@ final class ExternalRecipeProjection {
         ResourceLocation linked = consumption.linkedOutputPortId();
         Kind kind = switch (consumption.kind()) {
             case CONSUMED -> Kind.CONSUMED;
-            case FUEL -> Kind.FUEL;
+            // 标准 I/O 按配方声明逐次投料，无法把炉内剩余燃烧时间
+            // 当成可再次插入的物品；因此外部 API 燃料按操作次数实体化，
+            // 避免规划只预留 2 份煤而执行需要 11 次插入的双重语义。
+            case FUEL -> Kind.CONSUMED;
             case CATALYST -> Kind.CATALYST;
             case TRANSFORMED -> Kind.TRANSFORMED;
             case CONTAINER_RETURNED -> Kind.CONTAINER_RETURNED;
             case DURABILITY -> Kind.DURABILITY;
         };
-        long units = switch (consumption.kind()) {
+        long units = switch (kind) {
             case DURABILITY -> consumption.damagePerUse();
             case FUEL -> consumption.fuelBurnTicksPerOperation();
             default -> 0L;

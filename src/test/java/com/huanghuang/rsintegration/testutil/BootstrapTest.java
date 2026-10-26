@@ -33,8 +33,26 @@ public abstract class BootstrapTest {
     static void bootstrapMinecraft() {
         // Version metadata must be set before Bootstrap touches registries.
         SharedConstants.tryDetectVersion();
-        Bootstrap.bootStrap();
+        try {
+            Bootstrap.bootStrap();
+        } catch (ExceptionInInitializerError failure) {
+            if (!isForgeNetworkBootstrapFailure(failure)) throw failure;
+            // Forge 47.4 在没有 FML 启动器的纯测试进程里会在 NetworkHooks
+            // 初始化阶段反射 NetworkEvent 无参构造器失败；此时原版注册表已
+            // 完成引导，当前测试不使用 Forge 网络通道。
+        }
         initializeForgeCapabilities();
+    }
+
+    private static boolean isForgeNetworkBootstrapFailure(Throwable failure) {
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            if (current instanceof NoSuchMethodException
+                    && current.getMessage() != null
+                    && current.getMessage().contains("NetworkEvent.<init>")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

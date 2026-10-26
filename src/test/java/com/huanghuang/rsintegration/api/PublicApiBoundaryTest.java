@@ -11,8 +11,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PublicApiBoundaryTest {
     private static final List<Path> EXAMPLES = List.of(
-            Path.of("src/examplemod/java/com/example/rsiintegration/"
-                    + "examplemod/RSIIntegrationExampleMod.java"),
             Path.of("src/test/java/com/example/rsiintegration/"
                     + "PublicIntegrationExample.java"),
             Path.of("src/test/java/com/example/rsiintegration/"

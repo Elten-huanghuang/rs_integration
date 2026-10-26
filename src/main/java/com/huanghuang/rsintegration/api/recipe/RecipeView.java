@@ -9,6 +9,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+/**
+ * 一个 live recipe 的不可变公共投影。
+ *
+ * <p>所有列表都防御性复制。构造时会校验 entry ID、output port、材料与输出关联、
+ * flags 以及有序槽位是否一致。配方成功执行后，机器只能结算本视图声明且执行器实际
+ * 观察到的输出。</p>
+ */
 public record RecipeView(
         ResourceLocation recipeId,
         ResourceLocation processId,
@@ -27,6 +34,9 @@ public record RecipeView(
         validateSemantics(materials, fluids, outputs, flags);
     }
 
+    /**
+     * 返回根据当前视图内容重新计算的稳定 fingerprint。
+     */
     public String definitionFingerprint() {
         return IntegrationFingerprints.recipeDefinition(this);
     }

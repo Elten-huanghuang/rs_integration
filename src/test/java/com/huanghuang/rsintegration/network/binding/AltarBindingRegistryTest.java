@@ -1,6 +1,11 @@
 package com.huanghuang.rsintegration.network.binding;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.api.RSIIntegrationServices;
+import com.huanghuang.rsintegration.api.RegistrationOptions;
+import com.huanghuang.rsintegration.api.machine.MachineBinding;
+import com.huanghuang.rsintegration.api.machine.MachineIntegration;
+import com.huanghuang.rsintegration.crafting.external.ExternalMachineBindingIndex;
 import com.huanghuang.rsintegration.mods.dungeonsdelight.DungeonsDelightRSModule;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.network.binding.MachineFavoriteKey;
@@ -14,6 +19,7 @@ import net.minecraft.world.item.crafting.RecipeSerializer;
 import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.level.Level;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -23,8 +29,15 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class AltarBindingRegistryTest {
+
+    @AfterEach
+    void clearExternalMachineBindings() {
+        ExternalMachineBindingIndex.clear();
+    }
 
     @BeforeAll
     static void registerGoetyType() {
@@ -84,6 +97,41 @@ class AltarBindingRegistryTest {
                 goety, "goety_component||block.goety.cursed_cage"));
         assertFalse(AltarBindingRegistry.isExecutableBinding(
                 goety, "goety_component||block.goety.soul_candlestick"));
+    }
+
+    @Test
+    void legacyArsBindingCanServeExternalRecipeByBlockAndProcess() {
+        ResourceLocation process =
+                new ResourceLocation(
+                        "rsi_api_smoke", "ars_nouveau/imbuement");
+        MachineIntegration machine = mock(MachineIntegration.class);
+        when(machine.bindings()).thenReturn(List.of(
+                MachineBinding.blocks(
+                        Set.of(process),
+                        false,
+                        new ResourceLocation(
+                                "ars_nouveau", "imbuement_chamber")
+                )
+        ));
+        ExternalMachineBindingIndex.install(List.of(
+                new RSIIntegrationServices.MachineRegistration(
+                        machine, RegistrationOptions.defaults())
+        ));
+        BindingStorage.BindingEntry legacy =
+                new BindingStorage.BindingEntry(
+                        new ResourceLocation("minecraft", "overworld"),
+                        BlockPos.ZERO,
+                        "ars_nouveau_imbuement||block.ars_nouveau.imbuement_chamber",
+                        "ars_nouveau:imbuement_chamber",
+                        null
+                );
+
+        assertTrue(AltarBindingRegistry.isExternalRecipeBinding(
+                ModType.EXTERNAL_INTEGRATION,
+                mock(Recipe.class),
+                legacy,
+                process
+        ));
     }
 
     @Test

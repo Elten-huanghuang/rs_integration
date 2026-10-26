@@ -1,34 +1,37 @@
 package com.example.rsiintegration.apismoke;
 
-import com.huanghuang.rsintegration.api.RSIIntegrationRegistrationEvent;
-import com.huanghuang.rsintegration.api.RegistrationOptions;
-import net.minecraftforge.common.MinecraftForge;
-import net.minecraftforge.event.RegisterCommandsEvent;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.crafting.RecipeSerializer;
 import net.minecraftforge.fml.common.Mod;
-
-import java.util.Map;
+import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
+import net.minecraftforge.registries.DeferredRegister;
+import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraftforge.registries.RegistryObject;
 
 @Mod(RsiApiSmokeMod.MOD_ID)
 public final class RsiApiSmokeMod {
     public static final String MOD_ID = "rsi_api_smoke";
+    private static final DeferredRegister<Item> ITEMS =
+            DeferredRegister.create(ForgeRegistries.ITEMS, MOD_ID);
+    private static final DeferredRegister<RecipeSerializer<?>>
+            RECIPE_SERIALIZERS = DeferredRegister.create(
+                    ForgeRegistries.RECIPE_SERIALIZERS,
+                    MOD_ID
+            );
+    public static final RegistryObject<Item> API_SMOKE_RESULT =
+            ITEMS.register("api_smoke_result",
+                    () -> new Item(new Item.Properties()));
+    public static final RegistryObject<
+            RecipeSerializer<IronAlchemistChanceRecipe>>
+            IRON_ALCHEMIST_CHANCE_SERIALIZER =
+            RECIPE_SERIALIZERS.register(
+                    "iron_alchemist_chance",
+                    IronAlchemistChanceRecipe.Serializer::new
+            );
 
     public RsiApiSmokeMod() {
-        MinecraftForge.EVENT_BUS.addListener(this::registerIntegrations);
-        MinecraftForge.EVENT_BUS.addListener(
-                (RegisterCommandsEvent event) ->
-                        ConsumerSmokeCommand.register(event.getDispatcher()));
-    }
-
-    private void registerIntegrations(RSIIntegrationRegistrationEvent event) {
-        FarmersDelightCookingPotIntegration cookingPot =
-                new FarmersDelightCookingPotIntegration();
-        IronFurnacesSmeltingIntegration ironFurnaces =
-                new IronFurnacesSmeltingIntegration();
-        RegistrationOptions smokePriority =
-                new RegistrationOptions(1000, Map.of("source", MOD_ID));
-        event.api().registerRecipe(cookingPot.recipe(), smokePriority);
-        event.api().registerMachine(cookingPot.machine(), smokePriority);
-        event.api().registerRecipe(ironFurnaces.recipe(), smokePriority);
-        event.api().registerMachine(ironFurnaces.machine(), smokePriority);
+        ITEMS.register(FMLJavaModLoadingContext.get().getModEventBus());
+        RECIPE_SERIALIZERS.register(
+                FMLJavaModLoadingContext.get().getModEventBus());
     }
 }

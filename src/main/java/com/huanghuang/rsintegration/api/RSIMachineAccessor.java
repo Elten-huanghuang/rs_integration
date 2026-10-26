@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.api;
 
+import org.jetbrains.annotations.ApiStatus;
+
 /**
  * Mixin-injected interface for machine block entities to expose their
  * operational state without reflection.
@@ -12,6 +14,7 @@ package com.huanghuang.rsintegration.api;
  * Until then, the {@code instanceof} check returns {@code false} and
  * callers fall back to structural checks (chunk loaded, BE present).</p>
  */
+@ApiStatus.Internal
 public interface RSIMachineAccessor {
 
     /** True if the machine is currently processing a recipe and should not

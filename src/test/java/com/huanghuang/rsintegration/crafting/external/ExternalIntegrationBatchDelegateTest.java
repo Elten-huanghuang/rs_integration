@@ -11,6 +11,7 @@ import com.huanghuang.rsintegration.api.machine.MachineContext;
 import com.huanghuang.rsintegration.api.machine.MachineDescriptor;
 import com.huanghuang.rsintegration.api.machine.MachineDescriptorResult;
 import com.huanghuang.rsintegration.api.machine.MachineExecutionMode;
+import com.huanghuang.rsintegration.api.machine.MachineBinding;
 import com.huanghuang.rsintegration.api.machine.MachineIntegration;
 import com.huanghuang.rsintegration.api.machine.MachineItemPort;
 import com.huanghuang.rsintegration.api.machine.MachineState;
@@ -62,6 +63,7 @@ import com.huanghuang.rsintegration.storage.StorageOperationMode;
 import com.huanghuang.rsintegration.storage.StorageSession;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
@@ -79,6 +81,10 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraft.world.level.storage.DimensionDataStorage;
 import net.minecraftforge.fluids.FluidStack;
+import net.minecraftforge.common.capabilities.ForgeCapabilities;
+import net.minecraftforge.common.util.LazyOptional;
+import net.minecraftforge.items.IItemHandler;
+import net.minecraftforge.items.ItemStackHandler;
 import net.minecraftforge.registries.ForgeRegistries;
 import org.junit.jupiter.api.Test;
 
@@ -144,12 +150,13 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
     }
 
     @Test
-    void publicItemMachineMovesReservedInputsAndCollectsRealOutputs() {
+    void publicItemMachineMovesRepeatedReservedInputsAndCollectsRealOutputs() {
         ResourceLocation recipeId = resource("recipe");
         ResourceLocation processId = resource("process");
         BlockPos position = new BlockPos(4, 64, 8);
         DefaultRSIIntegrationApi api = new DefaultRSIIntegrationApi();
-        RecipeView view = recipeView(recipeId, processId);
+        RecipeView view = recipeViewWithRepeatedInputs(
+                recipeId, processId);
         api.beginRegistration();
         api.registerRecipe(
                 new StubRecipeIntegration(view),
@@ -245,7 +252,10 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
         );
         assertTrue(delegate.startPreparedOperation(
                 player,
-                List.of(new ItemStack(Items.DIAMOND, 2)),
+                List.of(
+                        new ItemStack(Items.DIAMOND),
+                        new ItemStack(Items.DIAMOND)
+                ),
                 new ExtractionLedger()
         ));
         assertEquals(Items.DIAMOND, inputSlot.get().getItem());
@@ -267,6 +277,159 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
                 outputs.get(0).portId());
         assertEquals(Items.STICK, outputs.get(0).stack().getItem());
         assertTrue(outputSlot.get().isEmpty());
+        delegate.onBatchFinished(player);
+    }
+
+    @Test
+    void outputOnlyItemHandlerCountsAsCapacityWithoutInsertSupport() {
+        ResourceLocation recipeId = resource("output_only_recipe");
+        ResourceLocation processId = resource("output_only_process");
+        BlockPos position = new BlockPos(6, 64, 9);
+        DefaultRSIIntegrationApi api = new DefaultRSIIntegrationApi();
+        RecipeView view = recipeView(recipeId, processId);
+        api.beginRegistration();
+        api.registerRecipe(
+                new StubRecipeIntegration(view),
+                new RegistrationOptions(10, Map.of())
+        );
+        StubMachineIntegration machineIntegration =
+                new StubMachineIntegration(processId, true);
+        api.registerMachine(
+                machineIntegration,
+                new RegistrationOptions(10, Map.of())
+        );
+        api.freezeRegistration();
+
+        ServerLevel level = mock(ServerLevel.class);
+        MinecraftServer server = mock(MinecraftServer.class);
+        ServerPlayer player = mock(ServerPlayer.class);
+        AtomicReference<ItemStack> inputSlot =
+                new AtomicReference<>(ItemStack.EMPTY);
+        AtomicReference<ItemStack> outputSlot =
+                new AtomicReference<>(ItemStack.EMPTY);
+        BlockEntity blockEntity = mock(
+                BlockEntity.class,
+                withSettings().extraInterfaces(Container.class)
+        );
+        Container container = (Container) blockEntity;
+        when(container.getItem(anyInt())).thenAnswer(invocation ->
+                invocation.<Integer>getArgument(0) == 0
+                        ? inputSlot.get().copy()
+                        : outputSlot.get().copy());
+        doAnswer(invocation -> {
+            int slot = invocation.getArgument(0);
+            ItemStack stack = invocation.getArgument(1);
+            if (slot == 0) inputSlot.set(stack.copy());
+            else outputSlot.set(stack.copy());
+            return null;
+        }).when(container).setItem(anyInt(), any());
+        when(container.getMaxStackSize()).thenReturn(64);
+        when(container.getContainerSize()).thenReturn(3);
+
+        IItemHandler outputHandler = mock(IItemHandler.class);
+        when(outputHandler.getSlots()).thenReturn(9);
+        when(outputHandler.getStackInSlot(1)).thenAnswer(
+                ignored -> outputSlot.get().copy());
+        when(outputHandler.getSlotLimit(1)).thenReturn(64);
+        when(outputHandler.insertItem(anyInt(), any(), anyBoolean()))
+                .thenThrow(new AssertionError(
+                        "只读输出 capability 不应通过 insertItem 探测容量"));
+        doReturn(LazyOptional.of(() -> outputHandler))
+                .when(blockEntity)
+                .getCapability(
+                        ForgeCapabilities.ITEM_HANDLER,
+                        Direction.DOWN
+                );
+
+        when(level.hasChunkAt(position)).thenReturn(true);
+        when(level.getBlockEntity(position)).thenReturn(blockEntity);
+        when(level.registryAccess()).thenReturn(RegistryAccess.EMPTY);
+        when(level.getGameTime()).thenReturn(10L);
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        when(player.level()).thenReturn(level);
+        setServer(player, server);
+
+        Recipe<?> recipe = mock(Recipe.class);
+        when(recipe.getId()).thenReturn(recipeId);
+        RecipeManager recipeManager = mock(RecipeManager.class);
+        doReturn(Optional.of(recipe)).when(recipeManager).byKey(recipeId);
+        when(level.getRecipeManager()).thenReturn(recipeManager);
+
+        ExternalIntegrationBatchDelegate delegate =
+                new ExternalIntegrationBatchDelegate(api);
+        var preparation = delegate.prepare(
+                player, recipeId, null, position);
+        assertEquals(
+                IBatchDelegate.PreparationState.READY,
+                preparation.state(),
+                () -> preparation.detail() + " / "
+                        + preparation.userMessage()
+        );
+        assertTrue(delegate.startPreparedOperation(
+                player,
+                List.of(new ItemStack(Items.DIAMOND, 2)),
+                new ExtractionLedger()
+        ));
+        delegate.onBatchFinished(player);
+    }
+
+    @Test
+    void machineInventoryPortsUseTheIntegrationInternalHandler() {
+        ResourceLocation recipeId = resource("internal_inventory_recipe");
+        ResourceLocation processId = resource("internal_inventory_process");
+        BlockPos position = new BlockPos(7, 64, 10);
+        DefaultRSIIntegrationApi api = new DefaultRSIIntegrationApi();
+        RecipeView view = recipeView(recipeId, processId);
+        api.beginRegistration();
+        api.registerRecipe(
+                new StubRecipeIntegration(view),
+                new RegistrationOptions(10, Map.of())
+        );
+        ItemStackHandler inventory = new ItemStackHandler(3);
+        StubMachineIntegration machineIntegration =
+                new StubMachineIntegration(processId)
+                        .withInternalItemHandler(inventory);
+        api.registerMachine(
+                machineIntegration,
+                new RegistrationOptions(10, Map.of())
+        );
+        api.freezeRegistration();
+
+        ServerLevel level = mock(ServerLevel.class);
+        MinecraftServer server = mock(MinecraftServer.class);
+        ServerPlayer player = mock(ServerPlayer.class);
+        BlockEntity blockEntity = mock(BlockEntity.class);
+        when(level.hasChunkAt(position)).thenReturn(true);
+        when(level.getBlockEntity(position)).thenReturn(blockEntity);
+        when(level.registryAccess()).thenReturn(RegistryAccess.EMPTY);
+        when(level.getGameTime()).thenReturn(10L);
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        when(player.level()).thenReturn(level);
+        setServer(player, server);
+
+        Recipe<?> recipe = mock(Recipe.class);
+        when(recipe.getId()).thenReturn(recipeId);
+        RecipeManager recipeManager = mock(RecipeManager.class);
+        doReturn(Optional.of(recipe)).when(recipeManager).byKey(recipeId);
+        when(level.getRecipeManager()).thenReturn(recipeManager);
+
+        ExternalIntegrationBatchDelegate delegate =
+                new ExternalIntegrationBatchDelegate(api);
+        var preparation = delegate.prepare(
+                player, recipeId, null, position);
+        assertEquals(
+                IBatchDelegate.PreparationState.READY,
+                preparation.state(),
+                () -> preparation.detail() + " / "
+                        + preparation.userMessage()
+        );
+        assertTrue(delegate.startPreparedOperation(
+                player,
+                List.of(new ItemStack(Items.DIAMOND, 2)),
+                new ExtractionLedger()
+        ));
+        assertEquals(Items.DIAMOND, inventory.getStackInSlot(0).getItem());
+        assertEquals(2, inventory.getStackInSlot(0).getCount());
         delegate.onBatchFinished(player);
     }
 
@@ -1031,6 +1194,40 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
         );
     }
 
+    private static RecipeView recipeViewWithRepeatedInputs(
+            ResourceLocation recipeId,
+            ResourceLocation processId
+    ) {
+        RecipeView base = recipeView(recipeId, processId);
+        MaterialRequirement template = base.materials().get(0);
+        MaterialRequirement first = new MaterialRequirement(
+                resource("input/0"),
+                template.ingredient(),
+                1L,
+                template.consumption(),
+                template.inputGroup(),
+                0,
+                true
+        );
+        MaterialRequirement second = new MaterialRequirement(
+                resource("input/1"),
+                template.ingredient(),
+                1L,
+                template.consumption(),
+                template.inputGroup(),
+                1,
+                true
+        );
+        return new RecipeView(
+                recipeId,
+                processId,
+                List.of(first, second),
+                base.fluids(),
+                base.outputs(),
+                base.flags()
+        );
+    }
+
     private static void setServer(ServerPlayer player, MinecraftServer server) {
         try {
             var field = ServerPlayer.class.getField("server");
@@ -1074,16 +1271,42 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
     private static final class StubMachineIntegration
             implements MachineIntegration {
         private final ResourceLocation processId;
+        private final boolean directionalOutput;
         private long revision = 1L;
         private MachineStateProvider stateProvider;
+        private IItemHandler internalItemHandler;
 
         private StubMachineIntegration(ResourceLocation processId) {
+            this(processId, false);
+        }
+
+        private StubMachineIntegration(
+                ResourceLocation processId,
+                boolean directionalOutput
+        ) {
             this.processId = processId;
+            this.directionalOutput = directionalOutput;
+        }
+
+        private StubMachineIntegration withInternalItemHandler(
+                IItemHandler handler
+        ) {
+            this.internalItemHandler = handler;
+            return this;
         }
 
         @Override
         public ResourceLocation id() {
             return resource("machine_integration");
+        }
+
+        @Override
+        public List<MachineBinding> bindings() {
+            return List.of(MachineBinding.blocks(
+                    Set.of(processId),
+                    true,
+                    resource("machine")
+            ));
         }
 
         @Override
@@ -1106,7 +1329,9 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
                                     0,
                                     null,
                                     InputOutputAccess.INPUT,
-                                    ItemPortAccess.CONTAINER,
+                                    internalItemHandler != null
+                                            ? ItemPortAccess.MACHINE_INVENTORY
+                                            : ItemPortAccess.CONTAINER,
                                     "ingredients",
                                     null,
                                     64
@@ -1114,9 +1339,16 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
                             new MachineItemPort(
                                     "output",
                                     1,
-                                    null,
+                                    internalItemHandler != null
+                                            ? null
+                                            : directionalOutput
+                                            ? Direction.DOWN : null,
                                     InputOutputAccess.OUTPUT,
-                                    ItemPortAccess.CONTAINER,
+                                    internalItemHandler != null
+                                            ? ItemPortAccess.MACHINE_INVENTORY
+                                            : directionalOutput
+                                            ? ItemPortAccess.ITEM_HANDLER
+                                            : ItemPortAccess.CONTAINER,
                                     null,
                                     "output",
                                     64
@@ -1126,7 +1358,9 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
                                     2,
                                     null,
                                     InputOutputAccess.INPUT,
-                                    ItemPortAccess.CONTAINER,
+                                    internalItemHandler != null
+                                            ? ItemPortAccess.MACHINE_INVENTORY
+                                            : ItemPortAccess.CONTAINER,
                                     null,
                                     null,
                                     64
@@ -1144,6 +1378,14 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
                     ),
                     false
             ));
+        }
+
+        @Override
+        public Optional<IItemHandler> internalItemHandler(
+                MachineContext context,
+                BlockEntity blockEntity
+        ) {
+            return Optional.ofNullable(internalItemHandler);
         }
 
         @Override

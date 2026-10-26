@@ -52,6 +52,64 @@ class GraphConcurrencyPolicyTest extends BootstrapTest {
     }
 
     @Test
+    void plannedCapabilityAllowsProbeWithoutRuntimeDescriptor() {
+        GraphConcurrencyPolicy.Decision decision =
+                GraphConcurrencyPolicy.decide(
+                        "integration_api",
+                        new FakeDelegate(null),
+                        safe()
+                );
+
+        assertFalse(decision.exclusive());
+        assertEquals(
+                BatchConcurrencyCapabilities.OutputOwnership.MACHINE_SLOT,
+                decision.capabilities().outputOwnership()
+        );
+    }
+
+    @Test
+    void runtimeDescriptorMustAgreeWithPlannedCapability() {
+        GraphConcurrencyPolicy.Decision decision =
+                GraphConcurrencyPolicy.decide(
+                        "integration_api",
+                        new FakeDelegate(
+                                BatchConcurrencyCapabilities.delegateResult()),
+                        safe()
+                );
+
+        assertTrue(decision.exclusive());
+        assertEquals(
+                "output ownership is ambiguous or entity-owned",
+                decision.reason()
+        );
+    }
+
+    @Test
+    void runtimeSupportScopeReplacesPlanningWorstCaseOffsets() {
+        BatchConcurrencyCapabilities planned = new BatchConcurrencyCapabilities(
+                BatchConcurrencyCapabilities.MaterialOwnership.CHAIN_RESERVED,
+                BatchConcurrencyCapabilities.OutputOwnership.MACHINE_SLOT,
+                BatchConcurrencyCapabilities.CleanupContract.SEPARABLE_OFFLINE,
+                BatchConcurrencyCapabilities.SideEffects.ADJACENT_MACHINE,
+                BatchConcurrencyCapabilities.PreparationContract.RETRY_SAFE,
+                List.of(new BlockPos(1, 0, 0), new BlockPos(2, 0, 0))
+        );
+        BatchConcurrencyCapabilities runtime = new BatchConcurrencyCapabilities(
+                BatchConcurrencyCapabilities.MaterialOwnership.CHAIN_RESERVED,
+                BatchConcurrencyCapabilities.OutputOwnership.MACHINE_SLOT,
+                BatchConcurrencyCapabilities.CleanupContract.SEPARABLE_OFFLINE,
+                BatchConcurrencyCapabilities.SideEffects.ADJACENT_MACHINE,
+                BatchConcurrencyCapabilities.PreparationContract.RETRY_SAFE,
+                List.of(new BlockPos(0, 0, 1))
+        );
+
+        BatchConcurrencyCapabilities merged =
+                GraphConcurrencyPolicy.intersectCapabilities(planned, runtime);
+
+        assertEquals(List.of(new BlockPos(0, 0, 1)), merged.supportOffsets());
+    }
+
+    @Test
     void localWorldRemaindersRemainConcurrencySafe() {
         GraphConcurrencyPolicy.Decision decision = GraphConcurrencyPolicy.decide(
                 "test", new FakeDelegate(BatchConcurrencyCapabilities.machineSlotWithLocalWorldItems()),

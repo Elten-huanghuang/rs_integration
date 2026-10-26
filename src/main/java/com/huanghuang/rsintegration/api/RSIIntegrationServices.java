@@ -23,6 +23,7 @@ public final class RSIIntegrationServices {
 
     public static synchronized void initialize() {
         initialized = true;
+        API.beginRegistration();
         RSIConsumerServices.install(CONSUMER);
         CONSUMER.markIndexing();
     }

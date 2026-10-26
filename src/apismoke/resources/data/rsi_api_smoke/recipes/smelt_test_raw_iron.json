@@ -6,5 +6,5 @@
   "ingredient": {
     "item": "minecraft:raw_iron"
   },
-  "result": "minecraft:iron_ingot"
+  "result": "rsi_api_smoke:api_smoke_result"
 }

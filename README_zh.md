@@ -227,6 +227,11 @@ RS Integration（RSI）为 Refined Storage 和 Beyond Dimensions 增加递归合
 
 RS 与 BD 使用独立 API，不共享库存，也不会自动合并余额。
 
+第三方配方、机器、执行器和 Consumer 接入文档见
+[docs/api/README.md](docs/api/README.md)。公共 API 使用
+[LICENSE-API.md](LICENSE-API.md) 中的有限互操作许可；RSI 主体仍按
+[LICENSE](LICENSE) 作为专有软件发布。
+
 RS 魔法资源入口：[`RsiMagicApi`](src/main/java/com/huanghuang/rsintegration/api/magic/RsiMagicApi.java)
 
 ```java

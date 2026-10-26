@@ -38,6 +38,7 @@ import net.minecraft.core.registries.Registries;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
+import com.huanghuang.rsintegration.crafting.external.ExternalIntegrationRuntime;
 import com.huanghuang.rsintegration.crafting.batch.CraftProgressPacket;
 import com.huanghuang.rsintegration.crafting.batch.CraftProgressDeltaPacket;
 import com.huanghuang.rsintegration.crafting.batch.CraftProgressPublisher;
@@ -1653,9 +1654,15 @@ public final class AsyncCraftChain {
         Recipe<?> recipe = server.overworld().getRecipeManager()
                 .byKey(step.recipeId()).orElse(null);
         String recipeClass = recipe == null ? "" : recipe.getClass().getName();
-        var recipeCapability = GraphConcurrencyEligibility.capabilities(
+        var recipeCapability = ExternalIntegrationRuntime
+                .isExternalType(step.modType())
+                ? ExternalIntegrationRuntime.planningConcurrency(
+                recipe, server.overworld().registryAccess())
+                : GraphConcurrencyEligibility.capabilities(
                 new GraphConcurrencyEligibility.Context(
-                        step.modType().id(), recipeClass, step.inferMode()));
+                        step.modType().id(),
+                        recipeClass,
+                        step.inferMode()));
         return GraphConcurrencyPolicy.decide(
                 step.modType().id(), delegate, recipeCapability);
     }

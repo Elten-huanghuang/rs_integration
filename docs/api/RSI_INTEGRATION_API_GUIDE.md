@@ -1,132 +1,274 @@
 # RSI Integration API 接入指南
 
-本文面向准备接入 RSI 的第三方模组开发者。阅读完应能完成：
+| 项目 | 值 |
+|---|---|
+| Minecraft | 1.20.1 |
+| Java | 17 |
+| Forge | 47.x |
+| Integration API | 1.1.x |
+| Consumer API | 1.0.x |
 
-- 将已有 `Recipe` 投影为 RSI 可递归规划的材料和产物。
-- 描述机器显式输入输出端口与执行模式。
-- 实现标准 I/O 或自定义多 tick 执行器。
-- 通过 Consumer API 查询配方、批量检查、下单、查询状态和取消。
-- 使用公共合同测试和 `rsi_api_smoke` 验证真实模组场景。
+本文面向第三方模组作者。目标是让作者在不读取 RSI 实现代码的前提下，完成配方投影、
+机器绑定、特殊执行、JEI 接入和 Consumer 下单。
 
-公共 API 是 Java SPI，不是 RSI 专用 JSON 配方格式。第三方模组继续使用自己的
-`RecipeType`、`RecipeSerializer`、datapack、`BlockEntity` 和 capability。
+RSI 不要求第三方改写现有配方 JSON。第三方保留自己的 `RecipeType`、
+`RecipeSerializer`、datapack、`BlockEntity` 和 capability，通过本文定义的 Java
+接口把真实语义告诉 RSI。
 
-## 0. 先看边界
+公共 API 的有限互操作授权见仓库根目录的 `LICENSE-API.md`，发布 jar 中也包含
+`META-INF/LICENSE_RS_INTEGRATION_API`。该授权只覆盖本文列出的公共 API；RSI
+主体、实现代码和原创素材仍适用主项目的专有许可。
 
-RSI 负责：
+## 1. 选择正确的接入面
 
-- 递归配方图、材料数量、输入组和候选路由。
-- 库存快照、材料预留、DAG 调度、机器租约和事务回滚。
-- 标准 I/O 投料、输出基线、真实收集和终态结算。
-- Consumer inspection、plan、幂等订单、状态和取消。
+RSI 提供两套彼此独立的公共 API。
 
-第三方负责：
+| 需求 | 使用 |
+|---|---|
+| 查询 RSI 已识别的配方、检查递归材料、提交或取消订单 | Consumer API |
+| 让 RSI 识别你的普通配方和固定槽位机器 | Integration API |
+| 让 RSI 执行仪式、GUI 流程、多方块或机器私有资源 | Integration API + `RecipeExecutionIntegration` |
 
-- 声明真实配方内容，不伪造配方中不存在的材料或产物。
-- 声明机器端口、执行模式和可选状态提供器。
-- 对特殊机器实现真实 `start/observe/collect/cleanup`。
-- 保证公共 ID、revision 和 fingerprint 稳定。
+Integration API 负责把模组内容接入递归规划；Consumer API 负责从 RSI 外部发起业务
+请求。一个模组可以只使用其中一套，也可以同时使用。
 
-以下内容不能从第三方接入：
+稳定的 Java 类型只在以下公共包中声明：
 
-- 直接修改 RSI 内部计划图、材料账本或机器租约。
-- 从公共 API 暴露 live `ServerPlayer`、`Level`、`BlockEntity` 或 capability 实例。
-- 把气体、化学品、温度、应力等私有资源伪装成普通物品或流体。
-
-字段不可变性、防御性复制、版本规则和线程边界以本文及对应公共类型的 Javadoc
-为准。第三方接入不需要读取 RSI 内部实现或未公开设计稿。
-
-## 1. 接入方式
-
-第三方只需要在 Forge 总线上监听注册事件：
-
-```java
-MinecraftForge.EVENT_BUS.addListener(
-        (RSIIntegrationRegistrationEvent event) -> {
-            event.api().registerRecipe(
-                    new MyRecipeIntegration(),
-                    new RegistrationOptions(100, Map.of())
-            );
-            event.api().registerMachine(
-                    new MyMachineIntegration(),
-                    new RegistrationOptions(100, Map.of())
-            );
-            event.api().registerExecution(
-                    new MyExecutionIntegration(),
-                    new RegistrationOptions(100, Map.of())
-            );
-        }
-);
+```text
+com.huanghuang.rsintegration.api
+com.huanghuang.rsintegration.api.recipe
+com.huanghuang.rsintegration.api.machine
+com.huanghuang.rsintegration.api.execution
+com.huanghuang.rsintegration.api.consumer
+com.huanghuang.rsintegration.api.diagnostic
 ```
 
-注册只发生在服务端启动阶段。注册冻结后新增声明需要重启服务端。
+公共 API 之外的实现类、注册表、网络包和调试入口不属于兼容契约。
 
-### 1.1 依赖边界
+## 2. 添加依赖并注册
 
-第三方只需要把 RSI jar 作为 `compileOnly` 依赖，并声明 `mods.toml` 依赖。
-不要在 RSI 缺失时加载直接引用 API 的类。
+第三方需要以 `compileOnly` 方式编译 RSI，并在运行时声明 RSI 为必需依赖。不要在
+RSI 缺失时加载直接引用 API 的类；如果 RSI 是可选依赖，应把全部接入代码隔离到单独
+的 bootstrap 类，只在确认 `rs_integration` 已加载后初始化该类。
 
-推荐的延迟加载方式：
+`mods.toml` 示例：
+
+```toml
+[[dependencies.mymod]]
+modId = "rs_integration"
+mandatory = true
+versionRange = "[1.5.2,2.0.0)"
+ordering = "AFTER"
+side = "BOTH"
+```
+
+第三方应在 Mod 总线的 `FMLCommonSetupEvent` 中注册一次。RSI 在加载完成时冻结注册，
+不接受运行期动态注册。
 
 ```java
-if (ModList.get().isLoaded("rs_integration")) {
-    MyRsiIntegrationBootstrap.initialize();
+package com.example.mymod;
+
+import com.huanghuang.rsintegration.api.RSIIntegrationApi;
+import com.huanghuang.rsintegration.api.RegistrationResult;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+@Mod.EventBusSubscriber(
+        modid = MyMod.MOD_ID,
+        bus = Mod.EventBusSubscriber.Bus.MOD
+)
+public final class MyRsiRegistration {
+    private static final Logger LOGGER =
+            LoggerFactory.getLogger(MyRsiRegistration.class);
+
+    private MyRsiRegistration() {}
+
+    @SubscribeEvent
+    public static void commonSetup(FMLCommonSetupEvent event) {
+        event.enqueueWork(MyRsiRegistration::register);
+    }
+
+    private static void register() {
+        RSIIntegrationApi api =
+                RSIIntegrationApi.get().orElse(null);
+        if (api == null) {
+            LOGGER.error("RSI API is unavailable");
+            return;
+        }
+        if (!api.version().supports(1, 1, 0)) {
+            LOGGER.error(
+                    "RSI API 1.1 or newer is required, found {}",
+                    api.version()
+            );
+            return;
+        }
+
+        requireAccepted(api.registerRecipe(
+                new MySmeltingRecipeIntegration()));
+        requireAccepted(api.registerMachine(
+                new MySmeltingMachineIntegration()));
+        // 如果配方使用 RecipeExecutionKind.CUSTOM，再注册 execution。
+    }
+
+    private static void requireAccepted(
+            RegistrationResult result
+    ) {
+        if (result.accepted()) return;
+        throw new IllegalStateException(
+                "RSI registration failed: status="
+                        + result.status()
+                        + ", id=" + result.registeredId()
+                        + ", diagnostics=" + result.diagnostics()
+        );
+    }
 }
 ```
 
-`MyRsiIntegrationBootstrap` 才直接 import `com.huanghuang.rsintegration.api.*`。
+注册失败不会抛出异常，而是通过 `RegistrationResult` 返回。发布版本至少应记录
+`status`、`registeredId` 和 `diagnostics`，不要忽略注册结果。
 
-### 1.2 线程规则
+同类型集成发生 claim 冲突时，`RegistrationOptions.priority` 更高者胜出；最高优先级
+并列会被视为 ambiguous，不会静默选择一个。除非确实需要覆盖低优先级兼容实现，
+否则使用 `RegistrationOptions.defaults()`。`attributes` 当前不参与配方或机器路由，
+不能用来传递执行所必需的运行期状态。
 
-| 回调 | 线程 |
+## 3. 必须先理解的稳定语义
+
+### 3.1 五种 ID
+
+| ID | 含义 | 要求 |
+|---|---|---|
+| `recipeId` | datapack 中真实配方的 ID | 必须来自 live `Recipe#getId()` |
+| `processId` | 配方与机器之间的路由键 | 同一个处理过程必须始终使用同一 ID |
+| `entryId` | 配方内一个材料需求的身份 | 同一 `RecipeView` 内不可重复且跨 reload 保持稳定 |
+| `portId` | 一个真实输出端口的身份 | 同一 `RecipeView` 内不可重复 |
+| `integrationId` | 配方、机器或执行适配器的身份 | 使用自己的 namespace，发布后不要复用 |
+
+`processId` 不是机器方块 ID。一个机器族可以接受多个 process，一个 process 也可以由
+多个兼容机器承接。
+
+### 3.2 物品身份
+
+1.20.1 中物品身份由“注册 ID + NBT”组成。使用
+`IntegrationResourceKey.item(ItemStack)` 构造物品键，使用
+`IntegrationResourceKey.fluid(FluidStack)` 构造流体键。不要使用显示名称、hover
+文本、`toString()` 或自定义字符串拼接作为身份。
+
+`ResourceMatchMode` 的语义如下：
+
+| 模式 | 匹配规则 |
 |---|---|
-| `supports` 类型判断 | 配方索引或机器扫描，禁止访问世界 |
-| `inspect` | 默认服务端主线程 |
-| `RecipeAvailabilityProvider` | 服务端主线程 |
+| `ANY_IDENTITY` | 只要求相同物品或流体 ID，忽略 NBT |
+| `EXACT_IDENTITY` | 要求完整身份，包括 NBT |
+| `PARTIAL_IDENTITY` | 以声明的 NBT 为模板，实际资源必须包含模板内容 |
+
+只要你的配方声明的是运行时 NBT 变体，就必须明确选择 `EXACT_IDENTITY` 或
+`PARTIAL_IDENTITY`。空 NBT 不能作为部分匹配模板。
+
+### 3.3 revision 与 reload
+
+`RecipeContext.recipeRevision()` 标识本次配方视图对应的一代 recipe manager 数据。
+当配方定义改变时，旧计划必须失效，不能继续使用旧的材料表结算。
+
+以下变化必须反映到 revision 或 fingerprint：
+
+- datapack reload 后配方材料或产物改变；
+- 机器端口、槽位、容量、执行模式改变；
+- 概率、returned container、target output 规则改变；
+- 会改变输出身份或可执行性的模组配置改变。
+
+不要只递增 revision 名称而保持内容不变。RSI 会校验 recipe definition fingerprint
+和 machine descriptor fingerprint。
+
+### 3.4 线程
+
+| 回调或调用 | 执行线程 |
+|---|---|
+| `registerRecipe/registerMachine/registerExecution` | Mod 总线 common setup |
+| `RecipeIntegration.supports` | 配方扫描线程，禁止访问世界 |
+| `RecipeIntegration.inspect` | 默认服务端主线程 |
+| `projectionThread() == BACKGROUND_SAFE` 时的 `inspect` | 后台安全线程 |
+| `RecipeAvailabilityProvider.check` | 服务端主线程 |
+| `RecipeIntegration.resolveJeiRecipe` | 客户端主线程 |
+| `MachineIntegration.bindings`、`supports` | 机器发现与 claim，禁止读取世界状态 |
 | `MachineIntegration.describe` | 服务端主线程 |
+| `MachineIntegration.internalItemHandler` | 服务端主线程 |
 | `MachineStateProvider.readState` | 服务端主线程，只读 |
-| `createPlan/start/observe/collect/cleanup` | 服务端主线程 |
-| Consumer 业务调用 | 拥有玩家的服务端主线程 |
+| `createPlan/start/resume` | 服务端主线程 |
+| `RunningOperation` 的 observe/collect/cleanup | 服务端主线程 |
+| Consumer API 调用 | 拥有目标 `ServerPlayer` 的服务端主线程 |
 
-不要在异步线程直接读取库存、BlockEntity、capability、机器 GUI 或发送网络包。
+只有当你能够保证 `inspect` 不读取 `Level`、`BlockEntity`、capability、玩家库存或
+可变全局状态时，才返回 `RecipeProjectionThread.BACKGROUND_SAFE`。
 
-### 1.3 稳定身份
+不要在客户端发起材料扣减、订单结算或机器状态变更。客户端只负责展示、收集玩家输入和
+发送请求。
 
-- 所有 integration ID 使用自己的 mod namespace。
-- `recipeId` 必须是被检查的真实 live recipe ID。
-- `processId` 是配方与机器之间唯一路由键。
-- 同一 `inputGroup` 和 `outputGroup` 在一次操作内稳定。
-- 配方或机器语义变化时提升 revision，并保持 fingerprint 可重新计算。
-- 已发布 ID 不要复用给另一种语义。
+## 4. 投影配方：RecipeIntegration
 
-## 2. 从现有模组开始
+`RecipeIntegration<R>` 把一种 live recipe 转换成不可变的 `RecipeView`。一个集成只
+应 claim 自己能正确解释的配方类型。
 
-第三方已有内容通常分三类：
-
-| 现有内容 | 推荐方式 |
+| `RecipeExecutionKind` | 用途 |
 |---|---|
-| 普通工作台配方 | `RecipeExecutionKind.STANDARD_IO` 或内部纯配方路径 |
-| 固定槽位、固定 tank 的机器 | `MachineDescriptor + STANDARD_IO` |
-| GUI、仪式、多方块、私有资源 | `RecipeExecutionKind.CUSTOM` |
+| `NONE` | 只展示或只参与查询，不由 RSI 执行 |
+| `STANDARD_IO` | 由 RSI 标准输入输出执行器完成 |
+| `CUSTOM` | 由 `RecipeExecutionIntegration` 完成 |
 
-不要把特殊机器硬塞进标准 I/O。标准 I/O 无法证明输入输出隔离时，应改为 custom
-execution，而不是增加 fallback 字段。
-
-## 3. RecipeIntegration
-
-一个配方 integration 只负责把 live recipe 投影成不可变 `RecipeView`：
+下面示例把带燃料需求的熔炼配方投影为物品输入和物品输出：
 
 ```java
-public final class MyRecipeIntegration
-        implements RecipeIntegration<MyRecipe> {
+package com.example.mymod;
+
+import com.huanghuang.rsintegration.api.IntegrationResourceKey;
+import com.huanghuang.rsintegration.api.diagnostic.IntegrationDiagnostic;
+import com.huanghuang.rsintegration.api.diagnostic.IntegrationDiagnosticCode;
+import com.huanghuang.rsintegration.api.diagnostic.IntegrationSeverity;
+import com.huanghuang.rsintegration.api.recipe.InputConsumption;
+import com.huanghuang.rsintegration.api.recipe.ItemIngredientView;
+import com.huanghuang.rsintegration.api.recipe.MaterialRequirement;
+import com.huanghuang.rsintegration.api.recipe.OutputAmount;
+import com.huanghuang.rsintegration.api.recipe.OutputDeclaration;
+import com.huanghuang.rsintegration.api.recipe.OutputKind;
+import com.huanghuang.rsintegration.api.recipe.OutputProbability;
+import com.huanghuang.rsintegration.api.recipe.RecipeContext;
+import com.huanghuang.rsintegration.api.recipe.RecipeExecutionKind;
+import com.huanghuang.rsintegration.api.recipe.RecipeFlags;
+import com.huanghuang.rsintegration.api.recipe.RecipeInspectionResult;
+import com.huanghuang.rsintegration.api.recipe.RecipeIntegration;
+import com.huanghuang.rsintegration.api.recipe.RecipeView;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.item.crafting.SmeltingRecipe;
+
+import java.util.List;
+import java.util.Map;
+
+public final class MySmeltingRecipeIntegration
+        implements RecipeIntegration<SmeltingRecipe> {
+    public static final ResourceLocation PROCESS_ID =
+            new ResourceLocation("mymod", "smelting");
+    private static final ResourceLocation INTEGRATION_ID =
+            new ResourceLocation("mymod", "smelting_recipes");
+    private static final String INPUT_GROUP = "ingredient";
+    private static final String FUEL_GROUP = "fuel";
+    private static final String OUTPUT_GROUP = "result";
+
     @Override
     public ResourceLocation id() {
-        return new ResourceLocation("mymod", "recipe");
+        return INTEGRATION_ID;
     }
 
     @Override
     public boolean supports(Recipe<?> recipe) {
-        return recipe instanceof MyRecipe;
+        return recipe instanceof SmeltingRecipe
+                && recipe.getId() != null;
     }
 
     @Override
@@ -137,42 +279,263 @@ public final class MyRecipeIntegration
     @Override
     public RecipeInspectionResult inspect(
             RecipeContext context,
-            MyRecipe recipe
+            SmeltingRecipe recipe
     ) {
-        // 从 recipe 读取真实 Ingredient、数量、副产物、概率和 NBT。
-        // 返回 new RecipeView(...) 或带稳定诊断的 rejected(...).
+        if (recipe.getIngredients().isEmpty()
+                || recipe.getIngredients().get(0).isEmpty()) {
+            return RecipeInspectionResult.rejected(
+                    diagnostic("missing_input"));
+        }
+        ItemStack output =
+                recipe.getResultItem(context.registries()).copy();
+        ResourceLocation recipeId = recipe.getId();
+        if (recipeId == null) {
+            return RecipeInspectionResult.rejected(
+                    diagnostic("missing_recipe_id"));
+        }
+        if (output.isEmpty()) {
+            return RecipeInspectionResult.rejected(
+                    diagnostic("missing_output"));
+        }
+
+        Ingredient ingredient = recipe.getIngredients().get(0);
+        MaterialRequirement input = new MaterialRequirement(
+                entryId(recipeId, "input"),
+                ItemIngredientView.anyOf(ingredient.getItems()),
+                1L,
+                InputConsumption.consumed(),
+                INPUT_GROUP,
+                0,
+                true
+        );
+        MaterialRequirement fuel = new MaterialRequirement(
+                entryId(recipeId, "fuel"),
+                ItemIngredientView.anyOf(
+                        new ItemStack(Items.COAL),
+                        new ItemStack(Items.CHARCOAL)
+                ),
+                1L,
+                InputConsumption.fuel(200L),
+                FUEL_GROUP,
+                1,
+                true
+        );
+        OutputDeclaration result = new OutputDeclaration(
+                new ResourceLocation(
+                        recipeId.getNamespace(),
+                        recipeId.getPath() + "/result"
+                ),
+                OUTPUT_GROUP,
+                IntegrationResourceKey.item(output),
+                OutputAmount.exactly(output.getCount()),
+                OutputKind.PRIMARY,
+                OutputProbability.guaranteed(),
+                false,
+                false,
+                null
+        );
+        RecipeView view = new RecipeView(
+                recipeId,
+                PROCESS_ID,
+                List.of(input, fuel),
+                List.of(),
+                List.of(result),
+                new RecipeFlags(
+                        true,
+                        false,
+                        true,
+                        false,
+                        true,
+                        false,
+                        true
+                )
+        );
+        return new RecipeInspectionResult(view, List.of());
+    }
+
+    private static ResourceLocation entryId(
+            ResourceLocation recipeId,
+            String suffix
+    ) {
+        return new ResourceLocation(
+                recipeId.getNamespace(),
+                recipeId.getPath() + "/" + suffix
+        );
+    }
+
+    private static IntegrationDiagnostic diagnostic(
+            String reason
+    ) {
+        return new IntegrationDiagnostic(
+                IntegrationDiagnosticCode.RECIPE_INSPECTION_FAILED,
+                IntegrationSeverity.ERROR,
+                INTEGRATION_ID,
+                Map.of("reason", reason)
+        );
     }
 }
 ```
 
-必须明确：
+实现 `inspect` 时必须遵守以下规则：
 
-- `recipeId`
-- `processId`
-- item/fluid alternatives
-- identity matching mode
-- consumed/fuel/catalyst/transformed/container/durability 语义
-- `inputGroup` 和可选 `inputSlot`
-- 每个输出端口、范围、概率、动态身份和 target-producing 语义
+- `recipeId` 使用 live recipe 的真实 ID。
+- `processId` 必须与机器 binding 接受的 process 一致。
+- 材料的 `amount` 是单次配方的真实消耗量，必须大于 0。
+- 产物只声明配方真实产生的物品或流体。
+- 不得在 `RecipeView` 中保存 live `Recipe`、`Ingredient`、`ItemStack` 或机器对象。
+- 不可枚举的 predicate 不能伪装成有限的 `ItemIngredientView`。
+- 同一 `RecipeView` 中 `entryId` 和 `portId` 都必须唯一。
 
-如果 recipe 只能通过不可枚举 predicate 描述，不能注册为标准递归材料。应改用
-`RecipeExecutionKind.NONE` 仅展示，或把不可递归部分放在 custom execution 内管理。
+### 4.1 Ingredient 展开
 
-## 4. MachineIntegration
+`Ingredient#getItems()` 返回当前注册状态下可枚举的替代物品。标签型 Ingredient 必须
+在此处展开为可规划的真实物品集合。不要把标签名本身当作物品身份。
 
-标准 I/O 机器返回显式 `MachineDescriptor`：
+如果某个 Ingredient 运行时才能决定且无法枚举，应该拒绝投影并返回稳定诊断，而不是
+返回一个永远不会匹配成功的假物品。
+
+### 4.2 RecipeFlags
+
+`RecipeFlags` 不是描述性备注，构造 `RecipeView` 时会与材料、输出交叉校验。
+
+| 字段 | 正确值 |
+|---|---|
+| `recursivePlanning` | 该配方是否允许 RSI 递归补齐材料 |
+| `targetProduction` | 是否至少有一个输出声明为 `targetProducing` |
+| `deterministicOutput` | 存在概率输出时必须为 `false` |
+| `runtimeDependentIdentity` | 是否存在运行时决定身份的输出 |
+| `requiresFuel` | 是否存在 `InputConsumption.Kind.FUEL` |
+| `supportsBatching` | 该配方能否安全批量提交 |
+| `orderedInputs` | 槽位顺序是否属于配方语义 |
+
+## 5. RecipeView 语义
+
+### 5.1 材料消耗类型
+
+| `InputConsumption.Kind` | 用途 |
+|---|---|
+| `CONSUMED` | 普通消耗材料 |
+| `FUEL` | 燃料，必须声明燃烧 tick |
+| `CATALYST` | 参与操作但不应按普通产物返还的催化材料 |
+| `TRANSFORMED` | 输入变成关联输出，必须指定 `linkedOutputPortId` |
+| `CONTAINER_RETURNED` | 容器输入产生关联的空容器或残留物 |
+| `DURABILITY` | 按耐久消耗，声明每次操作的损伤值 |
+
+在 `STANDARD_IO` 中，`amount` 始终表示每次操作需要投料的物理数量。`FUEL` 的
+`fuelBurnTicksPerOperation` 描述机器完成该次操作需要的燃烧时间，但标准 I/O
+不会把炉内剩余燃烧时间当成可再次插入的物品；因此多操作订单会按操作次数预留和
+投料，避免预览按燃料热值换算、执行却逐次插入的两套语义。
+
+容器返回值必须使用 `containerReturned(portId)` 并链接到一个
+`OutputKind.CONTAINER` 或 `OutputKind.REMAINDER` 输出。不要同时声明一个普通消耗的
+桶和一个凭空生成的空桶。
+
+### 5.2 输出声明
+
+`OutputDeclaration` 描述机器真实会产生的输出，不是 RSI 可以代发的奖励表。
+
+| 字段 | 说明 |
+|---|---|
+| `portId` | 输出端口稳定身份 |
+| `outputGroup` | 与机器 output 端口匹配的分组 |
+| `resource` | 物品或流体身份模板 |
+| `amount` | 最小和最大数量 |
+| `outputKind` | 主产物、副产物、容器、剩余物、transform 等 |
+| `probability` | 固定、概率或运行时概率模型 |
+| `dynamicIdentity` | 最终 NBT/流体 NBT 在运行时才能确定 |
+| `targetProducing` | 输出由本次请求的目标资源决定 |
+| `sourceInputEntryId` | returned/transformed 输出对应的输入 |
+
+概率输出必须使用 `OutputProbability.probabilistic(...)` 或
+`OutputProbability.dynamic(...)`。机器执行失败或概率未命中时，不得根据配方模板补发
+产物；RSI 只接受执行器实际收集到的输出。
+
+### 5.3 可选可用性检查
+
+如果配方是否可规划取决于玩家权限、研究、维度或其他服务端状态，实现
+`RecipeAvailabilityProvider`：
 
 ```java
-public final class MyMachineIntegration
+@Override
+public Optional<RecipeAvailabilityProvider> availabilityProvider() {
+    return Optional.of(context -> {
+        if (isUnlockedFor(context.player())) {
+            return RecipeAvailability.available();
+        }
+        return new RecipeAvailability(
+                false,
+                false,
+                List.of(lockedDiagnostic())
+        );
+    });
+}
+```
+
+该检查在服务端主线程执行。不可用时至少返回一个诊断。
+
+## 6. 声明机器：MachineIntegration
+
+`MachineIntegration` 描述玩家可绑定的真实方块和选中方块后的端口。
+
+```java
+package com.example.mymod;
+
+import com.huanghuang.rsintegration.api.machine.ConcurrencyCapabilities;
+import com.huanghuang.rsintegration.api.machine.InputOutputAccess;
+import com.huanghuang.rsintegration.api.machine.ItemPortAccess;
+import com.huanghuang.rsintegration.api.machine.MachineBinding;
+import com.huanghuang.rsintegration.api.machine.MachineContext;
+import com.huanghuang.rsintegration.api.machine.MachineDescriptor;
+import com.huanghuang.rsintegration.api.machine.MachineDescriptorResult;
+import com.huanghuang.rsintegration.api.machine.MachineExecutionMode;
+import com.huanghuang.rsintegration.api.machine.MachineIntegration;
+import com.huanghuang.rsintegration.api.machine.MachineItemPort;
+import com.huanghuang.rsintegration.api.machine.PlannedConcurrency;
+import com.huanghuang.rsintegration.api.machine.SupportScope;
+import com.huanghuang.rsintegration.api.diagnostic.IntegrationDiagnostic;
+import com.huanghuang.rsintegration.api.diagnostic.IntegrationDiagnosticCode;
+import com.huanghuang.rsintegration.api.diagnostic.IntegrationSeverity;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
+import net.minecraft.world.level.block.entity.BlockEntity;
+
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+public final class MySmeltingMachineIntegration
         implements MachineIntegration {
+    private static final ResourceLocation INTEGRATION_ID =
+            new ResourceLocation("mymod", "smelting_machines");
+    private static final ResourceLocation MACHINE_ID =
+            new ResourceLocation("mymod", "furnace");
+
     @Override
     public ResourceLocation id() {
-        return new ResourceLocation("mymod", "machine");
+        return INTEGRATION_ID;
+    }
+
+    @Override
+    public List<MachineBinding> bindings() {
+        return List.of(MachineBinding.blocks(
+                Set.of(MySmeltingRecipeIntegration.PROCESS_ID),
+                true,
+                new ResourceLocation("mymod", "furnace")
+        ));
+    }
+
+    @Override
+    public Map<ResourceLocation, PlannedConcurrency>
+    planningConcurrency() {
+        return Map.of(
+                MySmeltingRecipeIntegration.PROCESS_ID,
+                PlannedConcurrency.machineSlot()
+        );
     }
 
     @Override
     public boolean supports(BlockEntity blockEntity) {
-        return blockEntity instanceof MyMachineBlockEntity;
+        return blockEntity instanceof AbstractFurnaceBlockEntity;
     }
 
     @Override
@@ -180,405 +543,629 @@ public final class MyMachineIntegration
             MachineContext context,
             BlockEntity blockEntity
     ) {
-        // 返回显式 item/fluid/energy ports。
-        // 正常不可用时返回 rejected(diagnostic)。
-    }
-}
-```
-
-`MachineDescriptor` 必须包含：
-
-- accepted `processId`
-- 每个 item/fluid port 的稳定 `portId`
-- slot/tank、方向、INPUT/OUTPUT、access
-- `inputGroup`/`outputGroup`
-- capacity
-- execution mode
-- batching、concurrency、cleanup、support scope
-- `descriptorRevision`
-
-机器结构、端口或执行语义改变时必须提升 revision。仅改 revision 名称而不改内容会因
-fingerprint 校验失败。
-
-`TICKED_AND_BUSY` 还必须提供 `MachineStateProvider`。状态提供器只能读状态，不能投料、
-抽取、清理或缓存世界对象。
-
-## 5. 标准 I/O
-
-优先使用 `RecipeExecutionKind.STANDARD_IO`。标准执行器会：
-
-1. 校验材料和机器 descriptor revision。
-2. 模拟输出容量。
-3. 从存储提取材料。
-4. 按 `inputGroup` 写入显式机器端口。
-5. 等待机器完成或输出增量。
-6. 只收集配方声明且实际出现的产物。
-7. 处理容器返还、失败回滚和订单结算。
-
-标准 I/O 不支持：
-
-- GUI 内拖拽或仪式步骤。
-- 无法显式映射的私有资源。
-- 同资源输入输出且无法通过槽位和输出基线隔离。
-- 实体产物和无法证明收取的世界掉落。
-
-这些情况必须使用 custom execution。
-
-## 6. Custom Execution
-
-Custom execution 必须实现完整生命周期：
-
-```text
-createPlan
-start
-observe
-collect
-onFailure / onCancel
-onSettled
-snapshot / resume
-```
-
-`createPlan` 只能使用真实预留和显式 routes：
-
-```java
-ResourceLocation machineId = descriptor.machineId();
-long recipeRevision = context.recipeContext().revision();
-long descriptorRevision = descriptor.descriptorRevision();
-String descriptorFingerprint = descriptor.descriptorFingerprint();
-
-ExecutionPlan plan = new ExecutionPlan(
-        context.operationId(),
-        context.recipe().recipeId(),
-        machineId,
-        context.recipeContext().integrationId(),
-        context.machine().integrationId(),
-        id(),
-        recipeRevision,
-        descriptorRevision,
-        context.recipe().definitionFingerprint(),
-        descriptorFingerprint,
-        itemRoutes,
-        fluidRoutes,
-        List.of(),
-        expectedTicks,
-        outputPorts,
-        supportScope,
-        concurrency
-);
-```
-
-实际实现应从当前 claim 的 `RecipeView` 和 `MachineDescriptor` 生成上述字段，不能
-复制本文占位值。重点是：
-
-- operationId 与请求一致
-- recipe/machine/integration ID 一致
-- route 不超过 `ReservedMaterial`
-- output port 集合与 `RecipeView` 完全一致
-- descriptor/recipe fingerprint 与当前上下文一致
-
-`collect` 可以多次调用：
-
-- `collectionSequence` 必须单调递增
-- 每次只报告上次之后的新真实产物
-- `complete=true` 后才能结束结算
-- item/fluid identity、数量上限和保证下限会重新校验
-- 所有 ReservedMaterial 必须按 entryId 完整处置
-
-`MaterialDisposition`：
-
-- `RECOVERED`：已真实回收到可退款位置
-- `CONSUMED`：已确认不能退款
-- `UNCERTAIN`：状态未知，不能乐观退款
-
-`cleanupComplete=false` 或存在 `UNCERTAIN` 时，RSI 不会自动退款。
-
-`OperationSnapshot` 只能保存 primitive、NBT 和稳定 metadata：
-
-- 不保存 `Level`
-- 不保存 `ServerPlayer`
-- 不保存 capability / handler
-- 不保存 Java callback
-- 不保存旧 `RunningOperation`
-
-服务端重启后，RSI 会重新解析 recipe/machine/execution claim，并用 `resume` 恢复活动
-阶段。无法复核的操作进入 uncertain 清理，不会伪造成功。
-
-## 7. Consumer API
-
-只查询或下单、不注册配方和机器时，使用 Consumer API：
-
-```text
-com.huanghuang.rsintegration.api.consumer.*
-```
-
-标准流程：
-
-```text
-findRecipes
-  -> openInspection
-  -> nextInspectionPage
-  -> submit / submitBatch
-  -> status / cancel
-```
-
-最小查询示例：
-
-```java
-RSICraftConsumerApi api = RSICraftConsumerApi.get().orElse(null);
-if (api == null || api.state() != ConsumerServiceState.READY) {
-    return;
-}
-
-ConsumerResult<ConsumerRecipeCatalogPage> found = api.findRecipes(
-        player,
-        new ConsumerRecipeCatalogRequest(
-                new ConsumerRecipeQuery.ByOutput(
-                        IntegrationResourceKey.item(result),
-                        ResourceMatchMode.ANY_IDENTITY
+        if (!(blockEntity instanceof AbstractFurnaceBlockEntity)) {
+            return MachineDescriptorResult.rejected(
+                    new IntegrationDiagnostic(
+                            IntegrationDiagnosticCode.MACHINE_UNSUPPORTED,
+                            IntegrationSeverity.ERROR,
+                            INTEGRATION_ID,
+                            Map.of("reason", "not_a_furnace")
+                    ));
+        }
+        return MachineDescriptorResult.ready(new MachineDescriptor(
+                MACHINE_ID,
+                1L,
+                Set.of(MySmeltingRecipeIntegration.PROCESS_ID),
+                List.of(
+                        new MachineItemPort(
+                                "input",
+                                0,
+                                null,
+                                InputOutputAccess.INPUT,
+                                ItemPortAccess.CONTAINER,
+                                "ingredient",
+                                null,
+                                64
+                        ),
+                        new MachineItemPort(
+                                "fuel",
+                                1,
+                                null,
+                                InputOutputAccess.INPUT,
+                                ItemPortAccess.CONTAINER,
+                                "fuel",
+                                null,
+                                64
+                        ),
+                        new MachineItemPort(
+                                "result",
+                                2,
+                                null,
+                                InputOutputAccess.OUTPUT,
+                                ItemPortAccess.CONTAINER,
+                                null,
+                                "result",
+                                64
+                        )
                 ),
-                64,
-                0L
-        )
-);
+                List.of(),
+                List.of(),
+                MachineExecutionMode.OUTPUT_DELTA_ONLY,
+                false,
+                ConcurrencyCapabilities.machineSlot(),
+                new SupportScope(List.of(), List.of(), false),
+                true
+        ));
+    }
+
+}
 ```
 
-Inspection 会冻结一次库存、配方图、机器绑定和 storage snapshot。分页期间不能换
-snapshot。只有 `READY` craftability 会携带 `ConsumerPlanId`。
+### 6.1 bindings
 
-下单幂等键是：
-
-```text
-playerId + consumerId + externalRequestId
-```
-
-网络超时重试必须复用同一 `ConsumerExternalRequestId`。已消费 plan 不能再次提交。
-
-完整 Consumer 调用示例：
+`bindings()` 只声明稳定身份，不得读取世界状态或扫描附近方块。
 
 ```java
-ConsumerInspectionRequest request = new ConsumerInspectionRequest(
-        new ResourceLocation("mymod", "consumer"),
-        new ConsumerInspectionRequestId(UUID.randomUUID()),
-        recipes,
-        new ConsumerMachineSelector.AutomaticBound(),
-        new ConsumerStorageSelector.Default(),
-        ConsumerOutputDestination.PLAYER_INVENTORY,
-        new ConsumerInspectionOptions(64, true)
+MachineBinding.blocks(
+        Set.of(processA, processB),
+        true,
+        new ResourceLocation("mymod", "basic_machine"),
+        new ResourceLocation("mymod", "advanced_machine")
 );
+```
 
-ConsumerResult<ConsumerInspectionTicket> opened =
-        api.openInspection(player, request);
-if (!opened.successful()) {
-    ConsumerDiagnostic diagnostic = opened.diagnostics().get(0);
-    // 根据稳定 code/detail 处理，不解析异常字符串。
-    return;
+对于无法由固定方块 ID 表达的兼容方块，可使用
+`MachineBinding.blockClasses(...)`。不要依赖 integration ID 的 namespace 推断方块。
+
+`supportsGui=true` 只表示该方块存在可远程打开的原生菜单，不代表必须支持 GUI。
+
+### 6.2 端口访问
+
+| `ItemPortAccess` | 使用场景 |
+|---|---|
+| `CONTAINER` | 方块实体本身实现 `Container` |
+| `ITEM_HANDLER` | 指定方向的 `IItemHandler` capability |
+| `MACHINE_INVENTORY` | 固定内部槽位，必须实现 `internalItemHandler` |
+| `CUSTOM` | 仅允许 `MachineExecutionMode.CUSTOM` |
+
+`MACHINE_INVENTORY` 端口的 `side` 必须为 `null`。`internalItemHandler` 返回的槽位号
+必须与 descriptor 中的端口槽位一致。
+
+流体端口使用 `FluidPortAccess.FLUID_HANDLER` 或 `CUSTOM`。机器私有气体、温度、应力、
+研究点等资源不能伪装成带特殊 NBT 的无意义物品。
+
+### 6.3 执行模式
+
+| 模式 | 适用机器 |
+|---|---|
+| `IMMEDIATE_ON_INSERT` | 插入完成后立即结算的机器 |
+| `TICKED_AND_BUSY` | 有明确 busy/progress 状态的多 tick 机器 |
+| `OUTPUT_DELTA_ONLY` | 没有可靠 busy 状态，但输出槽可观察增量的机器 |
+| `CUSTOM` | 需要完整自定义生命周期 |
+
+`TICKED_AND_BUSY` 必须提供 `MachineStateProvider`。busy 状态必须报告真实
+`activeRecipeId`，并且 `stateRevision` 随状态变化递增。
+
+```java
+@Override
+public Optional<MachineStateProvider> stateProvider() {
+    return Optional.of((context, blockEntity) -> {
+        if (!(blockEntity instanceof MyMachineBlockEntity machine)
+                || machine.isRemoved()) {
+            return MachineState.invalid();
+        }
+        return new MachineState(
+                true,
+                true,
+                machine.isBusy(),
+                machine.progress(),
+                machine.totalProgress(),
+                machine.activeRecipeId(),
+                machine.activeProcessId(),
+                machine.stateRevision(),
+                null
+        );
+    });
 }
+```
 
-ConsumerInspectionTicketId ticketId = opened.value().ticketId();
-ConsumerResult<ConsumerInspectionPage> pageResult =
-        api.nextInspectionPage(player, ticketId);
-if (!pageResult.successful()
-        || pageResult.value().state()
-        != ConsumerInspectionPageState.COMPLETE) {
-    // RUNNING/PENDING 时稍后使用同一 ticket 再次查询。
-    return;
-}
+`MachineStateProvider` 只读状态，不得投料、抽取、清理、缓存 `BlockEntity` 或修改世界。
 
-for (ConsumerCraftability craftability : pageResult.value().results()) {
-    if (!craftability.canSubmit()) continue;
-    ConsumerPlanId planId = craftability.planId();
-    ConsumerResult<ConsumerOrderReceipt> submitted = api.submit(
-            player,
-            new ConsumerOrderRequest(
-                    new ResourceLocation("mymod", "consumer"),
-                    new ConsumerExternalRequestId(requestId),
-                    planId
-            )
+### 6.4 descriptor revision
+
+端口、槽位、容量、执行模式、support scope 或输出语义改变时必须提升
+`descriptorRevision`。运行时选中的 descriptor 还会与计划中的 fingerprint 比较；
+不一致时旧计划会被拒绝。
+
+## 7. STANDARD_IO 执行合同
+
+满足以下条件时优先使用 `RecipeExecutionKind.STANDARD_IO`：
+
+- 配方材料可以完整枚举；
+- 机器输入槽和输出槽都有稳定端口；
+- 输入组和输出组能一一匹配；
+- 可以检测真实输出是否出现；
+- 机器不会把额外副产物写进无法隔离的共享槽；
+- 输入和输出资源即使相同，也能通过槽位和输出基线区分。
+
+标准执行会按以下顺序处理一次操作：
+
+1. 校验 recipe view、descriptor revision 和 fingerprint。
+2. 模拟目标槽位与输出容量。
+3. 从选中的存储快照中预留材料。
+4. 从玩家库存或连接存储中提取材料。
+5. 按 `inputGroup` 和端口写入机器。
+6. 等待机器完成或检测输出增量。
+7. 只收集输出声明允许且实际出现的产物。
+8. 处理容器返还、失败回滚和订单结算。
+
+需要完整生命周期、无法显式映射端口、需要 GUI 交互、多方块或私有资源时，改用
+`CUSTOM`，不要通过增加伪造端口来绕过标准合同。
+
+## 8. CUSTOM 执行
+
+自定义执行必须同时注册：
+
+- 一个 `RecipeIntegration`，返回 `RecipeExecutionKind.CUSTOM`；
+- 一个 `MachineIntegration`，返回 `MachineExecutionMode.CUSTOM` 和真实端口；
+- 一个 `RecipeExecutionIntegration`。
+
+### 8.1 回调顺序
+
+| 回调 | 责任 |
+|---|---|
+| `createPlan` | 从当前 `RecipeView`、`MachineContext` 和预留材料建立真实执行计划 |
+| `start` | 首次执行准备；返回 `STARTED`、`RETRY` 或 `REJECTED` |
+| `RunningOperation.observe` | 报告机器当前阶段、进度和活动 recipe |
+| `RunningOperation.collect` | 只报告上次之后真实产生的新输出，并处置材料 |
+| `RunningOperation.snapshot` | 保存可跨重启恢复的可序列化状态 |
+| `RunningOperation.onFailure` | 失败清理并报告每个材料的最终状态 |
+| `RunningOperation.onCancel` | 取消清理并报告每个材料的最终状态 |
+| `RunningOperation.onSettled` | 只在结算完成后做最后清理，不得生成新产物 |
+
+`start` 必须按 `operationId` 幂等。已经启动的操作不能因为网络重试、同一 tick 重入或
+计划重新加载而再次执行物理动作。
+
+如果机器尚未就绪，可返回：
+
+```java
+return ExecutionResult.retry(
+        20,
+        preparationDiagnostic("machine_not_ready")
+);
+```
+
+`retryAfterTicks` 只对 `ExecutionStartStatus.RETRY` 有效。
+
+### 8.2 ExecutionPlan
+
+`ExecutionPlan` 必须与当前上下文一致：
+
+- `operationId` 来自 `ExecutionRequestContext`；
+- recipe、machine、recipe integration 和 machine integration ID 与 claim 一致；
+- `recipeRevision`、`descriptorRevision` 和两个 fingerprint 来自当前对象；
+- item/fluid route 只能使用已预留的 `ReservedMaterial`；
+- output port 必须与 `RecipeView.outputs()` 一一对应；
+- support scope 和 concurrency 与 descriptor 一致。
+
+不要在计划中直接保存 `Level`、`ServerPlayer`、`BlockEntity` 或 capability。
+
+### 8.3 收集与处置
+
+`OperationCollection.collectionSequence` 从 1 开始并严格递增。每次 `collect` 只能报告
+上次收集之后实际出现的新产物。`complete=true` 前不能视为执行完成。
+
+每个预留材料最终必须有且只有一个处置：
+
+| `MaterialOutcome` | 含义 |
+|---|---|
+| `RECOVERED` | 已真实退还到可退款位置 |
+| `CONSUMED` | 已确认消耗且不能退款 |
+| `UNCERTAIN` | 状态未知，禁止乐观退款 |
+
+`cleanupComplete=false` 或存在 `UNCERTAIN` 时，RSI 不会把操作当作可安全回滚。
+
+### 8.4 快照与恢复
+
+`OperationSnapshot.state()` 只允许保存：
+
+- primitive；
+- `String` 和稳定 ID；
+- `CompoundTag` 中的可序列化状态。
+
+不得保存 Java callback、`Level`、`ServerPlayer`、capability、handler 或旧
+`RunningOperation`。服务端重启后会重新 claim recipe、machine 和 execution，再调用
+`resume`。无法复核的状态必须进入 uncertain cleanup，不能伪造成功。
+
+## 9. 规划期并发
+
+`MachineDescriptor.concurrency()` 只有在选中具体方块后才能读取。
+`MachineIntegration.planningConcurrency()` 用于在绑定具体方块前声明 process 级并发
+合同：
+
+```java
+@Override
+public Map<ResourceLocation, PlannedConcurrency>
+planningConcurrency() {
+    return Map.of(
+            MySmeltingRecipeIntegration.PROCESS_ID,
+            PlannedConcurrency.machineSlot()
     );
 }
 ```
 
-可直接编译的 Consumer 示例：
+一个 process 的声明覆盖该 `MachineIntegration` 下所有接受此 process 的 binding。
+如果任意一个支持该 process 的集成没有声明，规划会保守地保持 exclusive。
 
-```text
-src/test/java/com/example/rsiintegration/PublicConsumerExample.java
+`supportOffsets` 是绑定具体方块前的最坏位置集合，只用于规划期冲突检测。选中机器后，
+执行期以 `MachineDescriptor.supportScope()` 返回的真实 support/adjacent 位置为准。
+因此规划期可以声明一个较大的候选范围，但 `describe()` 必须返回当前方块实际占用的
+位置，不能把整个候选范围继续当成每台机器都独占的区域。
+
+多机器声明只有在材料所有权、输出所有权、清理合同和副作用可证明兼容时才能并行。
+声明与运行期 descriptor 冲突时仍会降级为 exclusive。
+
+不要为了提速而把 `UNKNOWN` 改成 `machineSlot()`。并发的收益不能覆盖重复扣料、输出
+归属不明或清理不可分离的风险。
+
+## 10. JEI
+
+JEI 专用展示对象不一定能直接交给服务端 `RecipeManager`。如果目标模组使用独立的 JEI
+recipe DTO，重写：
+
+```java
+@Override
+public Optional<Recipe<?>> resolveJeiRecipe(
+        Object jeiRecipe,
+        ItemStack displayed,
+        RegistryAccess registries
+) {
+    if (!(jeiRecipe instanceof MyJeiRecipe myRecipe)) {
+        return Optional.empty();
+    }
+    Recipe<?> liveRecipe = findLiveRecipe(
+            myRecipe.recipeId(),
+            displayed,
+            registries
+    );
+    return Optional.ofNullable(liveRecipe);
+}
 ```
 
-Consumer 不读取 `RecipeIndex`、计划图、材料表、网络包或 delegate。网络传输必须使用
-`ConsumerApiCodecs`，不能自行手写 DTO 字段顺序。
+该方法在客户端主线程调用，只负责把展示对象解析成可识别的真实 recipe。返回空表示
+该 API 集成不支持此展示对象，不会猜测一个不存在的 recipe ID。
 
-## 8. 注册冲突
+要让 JEI 加号出现，以下条件必须同时满足：
 
-同类型同 ID 注册会失败。多个 handler 同时匹配时：
+- 目标配方被你的 `RecipeIntegration` claim；
+- 返回的 `processId` 能匹配玩家已绑定的机器；
+- `resolveJeiRecipe` 能返回服务端可重新找到的真实 recipe；
+- 配方 inspection 没有被拒绝；
+- 玩家已绑定支持该 process 的真实机器。
 
-- priority 最高者胜出
-- 最高 priority 并列视为 ambiguous
-- ambiguous claim 不会静默选一个
+## 11. Consumer API
 
-建议第三方 ID 使用自己的 mod namespace，并在发布后保持稳定。
+Consumer API 用于只消费 RSI 业务能力的模组。入口是：
 
-## 9. 最小完整接入清单
-
-发布前逐项确认：
-
-- `mods.toml` 声明 RSI 依赖，缺失时延迟加载 API 类。
-- 注册事件只触发一次。
-- recipe/machine/execution ID 稳定且使用自己的 namespace。
-- `supports` 无世界访问和无异常副作用。
-- `inspect` 不返回 live Recipe、Ingredient 或 capability。
-- 所有数量和概率输出均来自真实 recipe 语义。
-- 标准 I/O 的 inputGroup 与 machine port 完全匹配。
-- `TICKED_AND_BUSY` 提供只读状态提供器。
-- custom operation 完整处理 start/observe/collect/failure/cancel/settled。
-- 所有 reserved material 在完成或清理时有且仅有一次处置。
-- 重复 operationId/requestId 不产生第二次物理操作。
-- 配方或机器 reload 后旧 plan 返回稳定 stale 诊断。
-- `PublicApiBoundaryTest` 不报内部 import。
-- `rsi_api_smoke` 或等价真实模组场景通过。
-
-## 10. 可运行示例与烟测
-
-编译期公共示例：
-
-```text
-src/examplemod/java/com/example/rsiintegration/examplemod/RSIIntegrationExampleMod.java
-src/test/java/com/example/rsiintegration/PublicIntegrationExample.java
-src/test/java/com/example/rsiintegration/PublicConsumerExample.java
+```java
+RSICraftConsumerApi api =
+        RSICraftConsumerApi.get().orElse(null);
+if (api == null
+        || api.state() != ConsumerServiceState.READY) {
+    return;
+}
 ```
 
-真实模组烟测：
+所有 Consumer 调用都必须在服务端主线程执行，并使用该玩家自己的 `ServerPlayer`。
+不要从客户端线程、异步 HTTP 线程或另一个玩家的上下文提交订单。
 
-```text
-src/apismoke
-docs/api/RSI_API_SMOKE_TEST_GUIDE.md
+### 11.1 能力限制
+
+`api.capabilities()` 返回当前服务端的限制。不要硬编码：
+
+- 最大分页大小；
+- 单次 inspection 的最大配方数；
+- 每玩家或全局最大活动 session；
+- 最大计划节点和搜索状态；
+- 单批最大订单数；
+- session、plan 和订单幂等记录过期 tick。
+
+调用方应先读取能力，再裁剪自己的请求。
+
+`api.storageOptions(player)` 返回当前玩家可见的存储 ID。只有调用方确实要限定某个
+存储后端时才使用 `ConsumerStorageSelector.Explicit`；普通场景使用
+`ConsumerStorageSelector.Default()`，只使用玩家背包时使用
+`ConsumerStorageSelector.PlayerInventoryOnly()`。
+
+### 11.2 查询配方目录
+
+```java
+public static ConsumerResult<ConsumerRecipeCatalogPage> findRecipes(
+        ServerPlayer player,
+        ItemStack output
+) {
+    RSICraftConsumerApi api =
+            RSICraftConsumerApi.get().orElse(null);
+    if (api == null) {
+        return ConsumerResult.rejected(
+                ConsumerDiagnostic.error(
+                        ConsumerDiagnosticCode.CATALOG_NOT_READY,
+                        "RSI consumer API is unavailable",
+                        true
+                )
+        );
+    }
+    ConsumerRecipeQuery query = new ConsumerRecipeQuery.ByOutput(
+            IntegrationResourceKey.item(output),
+            ResourceMatchMode.ANY_IDENTITY
+    );
+    return api.findRecipes(
+            player,
+            new ConsumerRecipeCatalogRequest(query, 32, 0L)
+    );
+}
 ```
 
-当前烟测覆盖：
+`nextCursor == null` 表示目录页结束。查询新页时继续使用响应中的 `cursor` 和同一个
+query。`recipeRevision` 改变时，旧目录 cursor 不再可信，应从头重新查询。
 
-- FarmersDelight 烹饪锅：真实 recipe 投影、容器输入、`OUTPUT_DELTA_ONLY`
-- IronFurnaces：真实 BlockEntity descriptor、`TICKED_AND_BUSY`、进度和 revision
+### 11.3 创建 inspection
 
-### 10.1 自动测试案例
-
-| 案例 | 验证内容 | 命令 |
-|---|---|---|
-| Public API 边界 | 公共类型和烟测模组不 import 内部实现 | `gradlew test --tests "com.huanghuang.rsintegration.api.PublicApiBoundaryTest"` |
-| Registration phase | CREATED/REGISTRATION/FROZEN/STOPPED 生命周期 | `gradlew test --tests "com.huanghuang.rsintegration.api.IntegrationRegistrationServiceTest"` |
-| Claim 冲突 | priority、重复 ID、最高优先级并列 ambiguous | `gradlew test --tests "com.huanghuang.rsintegration.api.IntegrationClaimRegistryTest"` |
-| RecipeView | 数量、概率、动态身份、NBT fingerprint、容器关联 | `gradlew test --tests "com.huanghuang.rsintegration.api.recipe.*"` |
-| Machine descriptor | 端口、revision、fingerprint、状态不变量 | `gradlew test --tests "com.huanghuang.rsintegration.api.machine.*"` |
-| Custom execution 合同 | route、collection sequence、cleanup、resume | `gradlew test --tests "com.huanghuang.rsintegration.api.execution.*"` |
-| 外部执行适配 | 标准 I/O、custom fluid、幂等清理、真实输出 | `gradlew test --tests "com.huanghuang.rsintegration.crafting.external.*"` |
-| Consumer DTO/Codec | 所有嵌套变体、未知 wire version、顺序保持 | `gradlew test --tests "com.huanghuang.rsintegration.api.consumer.*"` |
-| Consumer runtime | plan、输出、真实产物和订单 journal | `gradlew test --tests "com.huanghuang.rsintegration.crafting.batch.ConsumerCraftingRuntimeTest"` |
-| Consumer 678 配方 | 稳定排序、分页无重复遗漏 | `gradlew test --tests "com.huanghuang.rsintegration.crafting.external.ExternalConsumerCatalogServiceTest"` |
-| FarmersDelight 真实投影 | `CookingPotRecipe -> RecipeView` | `gradlew test --tests "com.example.rsiintegration.apismoke.FarmersDelightCookingPotIntegrationTest"` |
-| IronFurnaces 真实投影 | `TICKED_AND_BUSY` descriptor 和 recipe view | `gradlew test --tests "com.example.rsiintegration.apismoke.IronFurnacesSmeltingIntegrationTest"` |
-
-### 10.2 游戏内 Integration 案例
-
-启动：
-
-```text
-gradlew runClient
+```java
+ConsumerRecipeKey key = new ConsumerRecipeKey(
+        recipeId,
+        null,
+        new ConsumerRequestAmount.Executions(1),
+        ConsumerPlanningPreferences.empty()
+);
+ConsumerInspectionRequest request =
+        new ConsumerInspectionRequest(
+                consumerId,
+                new ConsumerInspectionRequestId(requestUuid),
+                List.of(key),
+                new ConsumerMachineSelector.AutomaticBound(),
+                new ConsumerStorageSelector.Default(),
+                ConsumerOutputDestination.PLAYER_INVENTORY,
+                new ConsumerInspectionOptions(64, true)
+        );
+ConsumerResult<ConsumerInspectionTicket> opened =
+        api.openInspection(player, request);
 ```
 
-FarmersDelight 烹饪锅：
+`consumerId` 代表你的模组业务身份。`requestId` 代表一次逻辑检查请求；网络重试必须
+复用同一 ID。
 
-1. 放置并绑定烹饪锅，下方准备热源。
-2. 使用 `farmersdelight:cooking/beef_stew`。
-3. RS 中准备配方材料和空碗。
-4. 预期计划包含食材与容器，完成后只在真实输出槽出现料理时结算。
-5. 失败后输入槽和容器槽不能出现重复返还。
+inspection 会冻结材料、计划、机器绑定和存储快照。分页期间不要混用其他请求的快照。
 
-IronFurnaces：
+### 11.4 拉取 inspection 页
 
-1. 放置普通 Iron Furnace，不使用 generator/factory augment。
-2. 燃料槽放入足够燃料。
-3. 使用 `rsi_api_smoke:smelt_test_raw_iron`。
-4. 预期机器在 `TICKED_AND_BUSY` 下报告进度，铁锭真实出现前不完成订单。
-
-### 10.3 游戏内 Consumer 案例
-
-```text
-/rsi_api_smoke catalog minecraft:iron_ingot
-/rsi_api_smoke inspect rsi_api_smoke:smelt_test_raw_iron
-/rsi_api_smoke page <ticket-uuid>
-/rsi_api_smoke submit <ticket-uuid>
-/rsi_api_smoke status
-/rsi_api_smoke cancel
+```java
+ConsumerResult<ConsumerInspectionPage> pageResult =
+        api.nextInspectionPage(player, ticket.ticketId());
+if (!pageResult.successful()) {
+    return;
+}
+ConsumerInspectionPage page = pageResult.value();
+if (page.state() == ConsumerInspectionPageState.PENDING
+        || page.state() == ConsumerInspectionPageState.RUNNING) {
+    // 稍后使用同一 ticketId 再拉取，不要重新 openInspection。
+    return;
+}
+for (ConsumerCraftability result : page.results()) {
+    if (result.canSubmit()) {
+        ConsumerPlanId planId = result.planId();
+        // 保存 planId，下一阶段提交订单。
+    }
+}
 ```
 
-预期：
+`PENDING` 和 `RUNNING` 页不会携带半成品结果。`nextPageIndex != null` 时继续使用同一
+ticket。READY 结果一定有 `planId`，非 READY 结果不会暴露计划。
 
-- catalog 返回稳定 recipe revision 和分页 cursor。
-- inspection 只创建一次 snapshot ticket。
-- RUNNING 页面不返回半页结果。
-- READY craftability 必须携带 plan。
-- 同一 plan 第二次 submit 返回已消费诊断。
-- status/cancel 只操作当前 player 和 consumer 的订单。
+不再需要某个 inspection 时调用 `closeInspection(player, ticketId)`。如果已经生成
+READY plan 但决定不下单，可调用：
 
-## 11. 版本与发布检查
-
-公共 API 1.x 不允许向已发布 record 追加组件。需要新信息时新增独立可选类型或默认
-方法；破坏性变化进入下一个 major。
-
-API 收尾验证：
-
-```text
-gradlew test --tests "com.huanghuang.rsintegration.api.*"
-gradlew test --tests "com.huanghuang.rsintegration.crafting.external.*"
-gradlew test --tests "com.example.rsiintegration.apismoke.*"
-gradlew compileExamplemodJava
-gradlew apismokeClasses
-gradlew verifyReleaseJar
+```java
+api.discardPlan(player, consumerId, planId);
 ```
 
-`PublicApiBoundaryTest` 会检查公共 API 类型和烟测模组没有引用内部实现包；
-`verifyReleaseJar` 会检查 Integration 与 Consumer 的核心入口类已进入发布 jar。
+`closeInspection` 和 `discardPlan` 的成功结果使用 `ConsumerAck.accepted()` 判断。
 
-## 12. 常见错误
+### 11.5 提交订单
 
-### 把机器私有资源伪装成物品
+```java
+ConsumerExternalRequestId externalRequestId =
+        new ConsumerExternalRequestId(logicalOrderUuid);
+ConsumerOrderRequest request = new ConsumerOrderRequest(
+        consumerId,
+        externalRequestId,
+        planId
+);
+ConsumerResult<ConsumerOrderReceipt> submitted =
+        api.submit(player, request);
+```
 
-错误：用带特殊 NBT 的无意义物品代表气体、温度或应力。
+幂等范围是：
 
-正确：由 custom execution 读取并校验机器私有资源。RSI 只规划真实物品和流体。
+```text
+player + consumerId + externalRequestId
+```
 
-### 在 supports 中读取机器
+网络超时、连接重置或 UI 重试必须复用同一个 `externalRequestId`。新订单必须生成新
+ID。已消费的 plan 不能再次提交。
 
-错误：`supports(BlockEntity)` 中检查机器进度或扫描附近方块。
+批量提交：
 
-正确：`supports` 只判断类型；状态和结构放到 `describe`/`stateProvider`。
+```java
+List<ConsumerOrderRequest> orders = planIds.stream()
+        .map(planId -> new ConsumerOrderRequest(
+                consumerId,
+                new ConsumerExternalRequestId(planId.value()),
+                planId
+        ))
+        .toList();
+ConsumerBatchOrderRequest batch =
+        new ConsumerBatchOrderRequest(
+                consumerId,
+                new ConsumerBatchRequestId(batchUuid),
+                orders
+        );
+ConsumerResult<ConsumerBatchOrderReceipt> receipt =
+        api.submitBatch(player, batch);
+```
 
-### 每次调用生成新 ID
+批次中的每个订单仍保留自己的幂等结果。不要因为整批响应失败就给全部订单生成新 ID。
 
-错误：每次 preview/retry 都生成新 `requestId` 或 `operationId`。
+### 11.6 查询与取消
 
-正确：同一逻辑请求和同一物理操作复用稳定 ID。
+```java
+ConsumerResult<ConsumerOrderStatus> status =
+        api.status(player, consumerId, orderId);
 
-### 把显示名当身份
+ConsumerResult<ConsumerCancelResult> cancelled =
+        api.cancel(
+                player,
+                consumerId,
+                orderId,
+                new ConsumerExternalRequestId(cancelRequestUuid)
+        );
+```
 
-错误：使用本地化名称、hover name 或异常字符串做路由。
+取消请求也必须使用稳定幂等 ID。`cancel` 成功返回只表示请求已被接受，最终状态仍以
+`status` 为准。终态包括 `SUCCEEDED`、`FAILED` 和 `CANCELLED`。
 
-正确：使用 `ResourceLocation`、`IntegrationResourceKey`、规范化 NBT 和
-稳定 diagnostic code。
+### 11.7 结果与诊断
 
-### 在失败时直接补发模板产物
+`ConsumerResult.successful()` 判断业务是否成功。失败时读取
+`ConsumerDiagnostic.code()`、`severity()`、`detail()` 和 `retryable()`，不要解析异常
+字符串。
 
-错误：机器没有实际输出，但使用 recipe 模板生成产物。
+`idempotentReplay=true` 表示本次响应来自同一幂等请求的历史结果，不是第二次物理执行。
+调用方可以把它当作成功处理，但不应再触发一次扣料或产出。
 
-正确：只结算 `collect` 观察到的真实产物。不足时保持未完成或失败。
+如果要自行封装网络包，使用 `ConsumerApiCodecs` 读写 DTO。未知 wire version 会明确
+拒绝，不能静默按旧格式继续解析。
 
-## 13. 排错顺序
+## 12. 错误处理
 
-1. 先检查 `state()` 和 registration phase。
-2. 检查 integration ID、processId、priority 和 ambiguous claim。
-3. 检查 `RecipeInspectionResult` 是否 rejected。
-4. 检查 machine descriptor 的 accepted process、port group、slot/tank 和 revision。
-5. 检查 `TICKED_AND_BUSY` 状态是否满足 busy/progress/activeRecipeId 约束。
-6. 检查 custom `ExecutionPlan` 是否与 recipe view、reserved material 和 descriptor 一致。
-7. 检查 collect sequence、output minimum、material disposition 和 cleanupComplete。
-8. 检查 Consumer plan 是否过期、已消费或属于其他 player/consumer。
+### 12.1 注册阶段
 
-失败报告和日志中优先使用稳定 diagnostic code，不要解析异常文本。
+| 状态 | 处理 |
+|---|---|
+| `ACCEPTED` | 注册成功 |
+| `REJECTED` | 声明无效或 ID 重复，开发阶段应阻止发布 |
+| `FROZEN` | 注册窗口已关闭，改为在 common setup 注册 |
+| `PHASE_INVALID` | API 尚未进入注册阶段或服务已停止 |
+
+不要把注册失败降级为“运行时再试一次”。RSI 不支持运行期动态注册。
+
+### 12.2 配方不可用
+
+| 诊断方向 | 常见原因 |
+|---|---|
+| `RECIPE_CLAIM_AMBIGUOUS` | 多个集成同优先级 claim 同一配方 |
+| `RECIPE_INSPECTION_FAILED` | recipe view 构造失败或返回 rejected |
+| `MATERIAL_DECLARATION_INVALID` | 材料数量、分组或消耗类型不合法 |
+| `OUTPUT_DECLARATION_INVALID` | 输出数量、端口或概率模型不合法 |
+| `TARGET_OUTPUT_INVALID` | target producing 输出与请求目标不一致 |
+
+### 12.3 机器不可用
+
+| 诊断方向 | 常见原因 |
+|---|---|
+| `MACHINE_UNSUPPORTED` | 方块没有绑定到机器集成 |
+| `MACHINE_CLAIM_AMBIGUOUS` | 多个机器集成同时匹配 |
+| `MACHINE_DESCRIPTOR_INVALID` | 端口重复、分组不匹配或模式冲突 |
+| `MACHINE_DESCRIPTOR_CHANGED` | 计划生成后机器结构或 revision 改变 |
+| `MACHINE_STATE_INVALID` | busy/progress/activeRecipe 矛盾 |
+| `PORT_BINDING_UNAVAILABLE` | descriptor 声明的端口在运行时不存在 |
+
+### 12.4 执行不可用
+
+| 诊断方向 | 常见原因 |
+|---|---|
+| `EXECUTION_PREPARATION_FAILED` | start 无法准备机器 |
+| `EXECUTION_CONTRACT_VIOLATION` | route、plan 或 collection 违反合同 |
+| `COLLECTION_SEQUENCE_INVALID` | collect sequence 重复或倒退 |
+| `OUTPUT_MISSING` | 机器没有产生声明中的保证输出 |
+| `MATERIAL_DISPOSITION_INVALID` | 预留材料没有完整处置 |
+| `EXECUTION_CLEANUP_UNCERTAIN` | 无法证明材料已回收 |
+
+## 13. 版本规则
+
+`RSIIntegrationApi.version()` 和 `RSICraftConsumerApi.version()` 返回公共 API 版本。
+运行前可用 `supports(major, minor, patch)` 检查最低要求。
+
+同一 major 内：
+
+- 可以新增默认方法；
+- 可以新增独立可选接口；
+- 可以新增诊断 code；
+- 不应向已发布 record 追加构造参数；
+- 不应改变已有字段的单位、空值或概率含义；
+- 不应复用已发布的 ID 表示不同语义。
+
+破坏性变化进入下一个 major。第三方不应依赖 method descriptor、类名、reflection 或
+内部网络 discriminator 绕过公共 API。
+
+## 14. 发布前检查清单
+
+### 注册与线程
+
+- 只在 common setup 注册一次；
+- RSI 缺失时不会加载直接引用 API 的类；
+- recipe、machine、execution ID 使用自己的 namespace；
+- 所有回调遵守本文线程表；
+- `supports` 和 `bindings` 不读取可变世界状态。
+
+### 配方
+
+- 声明的材料、燃料、容器和输出都来自真实 recipe；
+- Ingredient 已展开为可枚举物品；
+- NBT 使用正确的 match mode；
+- `entryId`、`portId` 和输出分组稳定且唯一；
+- `RecipeFlags` 与材料、输出一致；
+- 概率或动态输出没有在失败时补发。
+
+### 机器
+
+- binding 能匹配玩家实际绑定的方块；
+- descriptor 端口和 `internalItemHandler` 槽位一致；
+- output group 与配方 output group 一致；
+- 执行模式与真实机器状态一致；
+- revision 和 fingerprint 会随结构变化更新。
+
+### 执行
+
+- `start` 按 `operationId` 幂等；
+- 等待使用 `RETRY`，不是伪造失败；
+- `observe` 报告真实 busy/progress；
+- `collect` 只报告真实新增产物；
+- 每个预留材料最终唯一处置；
+- cleanup 不确定时不会乐观退款；
+- snapshot 不包含世界对象或 callback。
+
+### Consumer
+
+- 调用发生在服务端主线程；
+- 分页使用同一 ticket；
+- 网络重试复用 `ConsumerExternalRequestId`；
+- 新订单不复用旧幂等 ID；
+- 提交前只接受 `READY` craftability；
+- 批次使用 `submitBatch`，不伪造多个独立 session；
+- 取消和状态查询始终带当前 player 与 consumer ID。
+
+## 15. 最小验收场景
+
+发布前至少完成以下真实环境验证：
+
+1. 在 JEI 中找到你的配方，并确认加号能在已绑定机器上出现。
+2. 用单次配方完成一次递归计划，确认缺料提示与真实材料一致。
+3. 准备刚好足够的材料，确认成功后没有重复返还。
+4. 准备一组缺少材料，确认失败前不会扣减完整输入。
+5. 在机器运行中破坏机器、卸载区块或 reload datapack，确认旧计划失效。
+6. 对概率配方运行多次，确认只有真实出现的输出被结算。
+7. 对容器输入运行配方，确认空容器和剩余物位置正确。
+8. 使用 Consumer catalog、inspection、submit、status、cancel 跑通一次完整订单。
+9. 对同一 order 请求重复提交，确认返回幂等结果而不是再次执行。
+10. 同时绑定两台机器，确认 process 路由不会把配方送到错误机器。

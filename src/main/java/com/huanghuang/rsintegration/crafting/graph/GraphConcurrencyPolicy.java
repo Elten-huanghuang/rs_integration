@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.graph;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import net.minecraft.core.BlockPos;
 
 import java.util.HashSet;
 import java.util.List;
@@ -62,8 +63,14 @@ public final class GraphConcurrencyPolicy {
             return Decision.deny("delegate policy is OFF", delegate.concurrencyCapabilities());
         }
 
+        BatchConcurrencyCapabilities runtimeCapabilities =
+                delegate.concurrencyCapabilities();
         BatchConcurrencyCapabilities capabilities = recipeCapabilities != null
-                ? recipeCapabilities : delegate.concurrencyCapabilities();
+                ? runtimeCapabilities == null
+                ? recipeCapabilities
+                : intersectCapabilities(
+                recipeCapabilities, runtimeCapabilities)
+                : runtimeCapabilities;
         if (capabilities == null) {
             return Decision.deny("delegate has no concurrency capability", null);
         }
@@ -94,6 +101,74 @@ public final class GraphConcurrencyPolicy {
                     + capabilities.sideEffects().name().toLowerCase(Locale.ROOT), capabilities);
         }
         return Decision.allow(capabilities);
+    }
+
+    static BatchConcurrencyCapabilities intersectCapabilities(
+            BatchConcurrencyCapabilities planned,
+            BatchConcurrencyCapabilities runtime
+    ) {
+        if (planned == null) return runtime;
+        if (runtime == null) return planned;
+        BatchConcurrencyCapabilities.MaterialOwnership materials =
+                planned.materials() == runtime.materials()
+                        ? planned.materials()
+                        : BatchConcurrencyCapabilities.MaterialOwnership.UNKNOWN;
+        BatchConcurrencyCapabilities.OutputOwnership outputOwnership =
+                planned.outputOwnership() == runtime.outputOwnership()
+                        ? planned.outputOwnership()
+                        : BatchConcurrencyCapabilities.OutputOwnership.AMBIGUOUS;
+        BatchConcurrencyCapabilities.CleanupContract cleanup =
+                planned.cleanup() == runtime.cleanup()
+                        ? planned.cleanup()
+                        : BatchConcurrencyCapabilities.CleanupContract.UNKNOWN;
+        BatchConcurrencyCapabilities.PreparationContract preparation =
+                stricterPreparation(
+                        planned.preparation(),
+                        runtime.preparation());
+        BatchConcurrencyCapabilities.SideEffects sideEffects =
+                sideEffectRisk(planned.sideEffects())
+                        >= sideEffectRisk(runtime.sideEffects())
+                        ? planned.sideEffects()
+                        : runtime.sideEffects();
+        // 运行时 descriptor 知道真实多方块/底座位置；规划期 offsets 只是
+        // 选机器前的最坏范围，不能在执行期继续扩大租约范围。
+        List<BlockPos> support = runtime.supportOffsets();
+        return new BatchConcurrencyCapabilities(
+                materials,
+                outputOwnership,
+                cleanup,
+                sideEffects,
+                preparation,
+                List.copyOf(support)
+        );
+    }
+
+    private static BatchConcurrencyCapabilities.PreparationContract
+    stricterPreparation(
+            BatchConcurrencyCapabilities.PreparationContract left,
+            BatchConcurrencyCapabilities.PreparationContract right
+    ) {
+        if (left == BatchConcurrencyCapabilities.PreparationContract.UNKNOWN
+                || right
+                == BatchConcurrencyCapabilities.PreparationContract.UNKNOWN) {
+            return BatchConcurrencyCapabilities.PreparationContract.UNKNOWN;
+        }
+        return BatchConcurrencyCapabilities.PreparationContract.RETRY_SAFE;
+    }
+
+    private static int sideEffectRisk(
+            BatchConcurrencyCapabilities.SideEffects sideEffects
+    ) {
+        return switch (sideEffects) {
+            case NONE -> 0;
+            case MACHINE_LOCAL -> 1;
+            case LOCAL_WORLD_ITEMS -> 2;
+            case INFER -> 3;
+            case ADJACENT_MACHINE -> 4;
+            case PLAYER_TRANSFORM -> 5;
+            case WORLD_GLOBAL -> 6;
+            case UNKNOWN -> 7;
+        };
     }
 
     static boolean isModDisabled(String modTypeId, List<? extends String> disabled) {

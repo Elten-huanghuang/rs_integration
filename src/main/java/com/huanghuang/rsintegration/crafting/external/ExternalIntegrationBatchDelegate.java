@@ -126,6 +126,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     private RecipeIntegration<?> recipeIntegration;
     private RecipeView recipeView;
     private MachineIntegration machineIntegration;
+    private MachineContext machineContext;
     private MachineDescriptor descriptor;
     private MachineStateProvider stateProvider;
     private RecipeExecutionKind executionKind;
@@ -311,6 +312,8 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         MachineIntegration machine = machineClaim.winner();
         MachineContext machineContext = new MachineContext(
                 machine.id(), level, pos.immutable(), player);
+        this.machineIntegration = machine;
+        this.machineContext = machineContext;
         MachineDescriptorResult described;
         try {
             described = machine.describe(machineContext, blockEntity);
@@ -443,7 +446,6 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         this.recipe = found;
         this.recipeIntegration = recipeClaim.winner();
         this.recipeView = projection.view();
-        this.machineIntegration = machine;
         this.descriptor = machineDescriptor;
         this.stateProvider = provider;
         this.executionKind = executionKind;
@@ -508,7 +510,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     ) {
         if (!validateExecutionContext(player)
                 || recipeView == null || descriptor == null) {
-            return false;
+            return failPreparedStart("execution context is invalid");
         }
         if (executionKind == RecipeExecutionKind.CUSTOM) {
             return startCustomOperation(player, materials, sharedLedger);
@@ -526,9 +528,8 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             if (!stack.isEmpty()) uninsertedMaterials.add(stack.copy());
         }
         if (materials.size() < recipeView.materials().size()) {
-            preparationFailure = Component.literal(
-                    "RSI Integration prepared material list is incomplete");
-            return false;
+            return failPreparedStart(
+                    "prepared material list is incomplete");
         }
         snapshotSlots(inputBaseline,
                 descriptor.itemPorts().stream()
@@ -552,21 +553,25 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                                 port.direction() == InputOutputAccess.OUTPUT)
                         .toList()
         );
+        Map<SlotKey, Integer> consumedBaselineInputs =
+                new LinkedHashMap<>();
         if (!hasOutputCapacity(player)) {
-            preparationFailure = Component.literal(
-                    "RSI Integration machine output ports have insufficient capacity");
-            return false;
+            return failPreparedStart(
+                    "machine output ports have insufficient capacity");
         }
         for (int index = 0; index < recipeView.materials().size(); index++) {
             MaterialRequirement requirement = recipeView.materials().get(index);
             ItemStack stack = materials.get(index).copy();
             if (stack.isEmpty()) {
-                preparationFailure = Component.literal(
-                        "RSI Integration prepared material is empty: "
+                return failPreparedStart(
+                        "prepared material is empty: "
                                 + requirement.entryId());
-                return false;
             }
-            int existing = matchingInputCount(requirement, stack);
+            int existing = takeMatchingInputCount(
+                    requirement,
+                    stack,
+                    consumedBaselineInputs
+            );
             if (existing > 0) {
                 int used = Math.min(existing, stack.getCount());
                 pendingInputRefunds.add(stack.copyWithCount(used));
@@ -576,19 +581,38 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             ItemStack remainder = insertMaterial(
                     player, requirement, stack);
             if (!remainder.isEmpty()) {
-                preparationFailure = Component.literal(
-                        "RSI Integration input port rejected "
+                return failPreparedStart(
+                        "input port rejected "
                                 + requirement.entryId());
-                return false;
             }
             int inserted = stack.getCount() - remainder.getCount();
             removeUninserted(requirement.entryId(), stack, inserted);
         }
-        if (!insertFluidInputs(player)) return false;
+        if (!insertFluidInputs(player)) {
+            return logPreparedStartFailure();
+        }
         markCraftStarted();
         this.operationStarted = true;
         retainMachineChunk();
         return true;
+    }
+
+    private boolean failPreparedStart(String detail) {
+        preparationFailure = Component.literal(
+                "RSI Integration " + detail);
+        return logPreparedStartFailure();
+    }
+
+    private boolean logPreparedStartFailure() {
+        LOGGER.warn(
+                "[RSI-API] start rejected for {} at {}: {}",
+                recipe == null ? "unknown" : recipe.getId(),
+                machinePos,
+                preparationFailure == null
+                        ? "unknown preparation failure"
+                        : preparationFailure.getString()
+        );
+        return false;
     }
 
     @Override
@@ -2533,27 +2557,35 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         }
     }
 
-    private int matchingInputCount(
+    private int takeMatchingInputCount(
             MaterialRequirement requirement,
-            ItemStack material
+            ItemStack material,
+            Map<SlotKey, Integer> consumedBaselineInputs
     ) {
         if (descriptor == null || material.isEmpty()) return 0;
         var ingredient = ExternalRecipeProjection.ingredient(
                 requirement.ingredient());
-        int available = 0;
+        int remaining = material.getCount();
         for (MachineItemPort port : descriptor.itemPorts()) {
+            if (remaining <= 0) break;
             if (port.direction() != InputOutputAccess.INPUT
                     || !matchesGroup(
                     port.inputGroup(), requirement.inputGroup())) {
                 continue;
             }
-            ItemStack current = get(port, null);
-            if (!current.isEmpty()
-                    && ingredient.test(current)) {
-                available += current.getCount();
-            }
+            SlotKey slot = new SlotKey(port);
+            ItemStack baseline = inputBaseline.get(slot);
+            if (baseline == null
+                    || baseline.isEmpty()
+                    || !ingredient.test(baseline)) continue;
+            int consumed = consumedBaselineInputs.getOrDefault(slot, 0);
+            int available = Math.max(0, baseline.getCount() - consumed);
+            int taken = Math.min(remaining, available);
+            if (taken <= 0) continue;
+            consumedBaselineInputs.put(slot, consumed + taken);
+            remaining -= taken;
         }
-        return available;
+        return material.getCount() - remaining;
     }
 
     private void removeUninserted(
@@ -2635,7 +2667,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                     output.resource(), maximum);
             long capacity = 0L;
             for (MachineItemPort port : outputPorts(output.outputGroup())) {
-                capacity += capacityFor(port, expected);
+                capacity += outputCapacityFor(port, expected);
                 if (capacity >= maximum) break;
             }
             if (capacity < maximum) return false;
@@ -2770,8 +2802,9 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             return container == null ? ItemStack.EMPTY
                     : container.getItem(port.slot()).copy();
         }
-        if (port.access() == ItemPortAccess.ITEM_HANDLER) {
-            IItemHandler handler = itemHandler(port.side());
+        if (port.access() == ItemPortAccess.ITEM_HANDLER
+                || port.access() == ItemPortAccess.MACHINE_INVENTORY) {
+            IItemHandler handler = itemHandler(port);
             return handler == null ? ItemStack.EMPTY
                     : handler.getStackInSlot(port.slot()).copy();
         }
@@ -2790,7 +2823,10 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         return insert(port, stack, false, player);
     }
 
-    private long capacityFor(MachineItemPort port, ItemStack expected) {
+    private long outputCapacityFor(
+            MachineItemPort port,
+            ItemStack expected
+    ) {
         if (port.access() == ItemPortAccess.CONTAINER) {
             Container container = container();
             if (container == null) return 0L;
@@ -2803,8 +2839,9 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                     Math.min(container.getMaxStackSize(), port.capacity()));
             return Math.max(0, limit - existing.getCount());
         }
-        if (port.access() == ItemPortAccess.ITEM_HANDLER) {
-            IItemHandler handler = itemHandler(port.side());
+        if (port.access() == ItemPortAccess.ITEM_HANDLER
+                || port.access() == ItemPortAccess.MACHINE_INVENTORY) {
+            IItemHandler handler = itemHandler(port);
             if (handler == null) return 0L;
             ItemStack current = handler.getStackInSlot(port.slot());
             if (!current.isEmpty()
@@ -2813,12 +2850,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             }
             int limit = Math.min(expected.getMaxStackSize(),
                     Math.min(handler.getSlotLimit(port.slot()), port.capacity()));
-            int free = Math.max(0, limit - current.getCount());
-            if (free == 0) return 0L;
-            ItemStack probe = expected.copyWithCount(free);
-            ItemStack remainder = handler.insertItem(
-                    port.slot(), probe, true);
-            return free - remainder.getCount();
+            return Math.max(0, limit - current.getCount());
         }
         return 0L;
     }
@@ -2877,8 +2909,9 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             remainder.shrink(accepted);
             return remainder;
         }
-        if (port.access() == ItemPortAccess.ITEM_HANDLER) {
-            IItemHandler handler = itemHandler(port.side());
+        if (port.access() == ItemPortAccess.ITEM_HANDLER
+                || port.access() == ItemPortAccess.MACHINE_INVENTORY) {
+            IItemHandler handler = itemHandler(port);
             if (handler == null) return stack;
             return handler.insertItem(port.slot(), stack.copy(), simulate);
         }
@@ -2903,8 +2936,9 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             container.setChanged();
             return result;
         }
-        if (port.access() == ItemPortAccess.ITEM_HANDLER) {
-            IItemHandler handler = itemHandler(port.side());
+        if (port.access() == ItemPortAccess.ITEM_HANDLER
+                || port.access() == ItemPortAccess.MACHINE_INVENTORY) {
+            IItemHandler handler = itemHandler(port);
             return handler == null ? ItemStack.EMPTY
                     : handler.extractItem(port.slot(), amount, false);
         }
@@ -2923,6 +2957,29 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         if (blockEntity == null) return null;
         return blockEntity.getCapability(
                 ForgeCapabilities.ITEM_HANDLER, side).orElse(null);
+    }
+
+    @Nullable
+    private IItemHandler itemHandler(MachineItemPort port) {
+        if (port.access() != ItemPortAccess.MACHINE_INVENTORY) {
+            return itemHandler(port.side());
+        }
+        if (machineIntegration == null || machineContext == null) {
+            return null;
+        }
+        BlockEntity blockEntity = blockEntity();
+        if (blockEntity == null) return null;
+        try {
+            return machineIntegration.internalItemHandler(
+                    machineContext, blockEntity).orElse(null);
+        } catch (RuntimeException | LinkageError failure) {
+            LOGGER.warn(
+                    "[RSI-API] internal item handler failed for {}",
+                    port.portId(),
+                    failure
+            );
+            return null;
+        }
     }
 
     @Nullable
@@ -3106,7 +3163,11 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                     ? null
                     : "item container port unavailable: " + port.portId();
         }
-        IItemHandler handler = itemHandler(port.side());
+        if (port.access() != ItemPortAccess.ITEM_HANDLER
+                && port.access() != ItemPortAccess.MACHINE_INVENTORY) {
+            return "unsupported item port access: " + port.portId();
+        }
+        IItemHandler handler = itemHandler(port);
         return handler != null && port.slot() < handler.getSlots()
                 ? null
                 : "item handler port unavailable: " + port.portId();

@@ -28,6 +28,10 @@ public record MachineItemPort(
         if (direction == InputOutputAccess.OUTPUT && inputGroup != null) {
             throw new IllegalArgumentException("output item port cannot define inputGroup");
         }
+        if (access == ItemPortAccess.MACHINE_INVENTORY && side != null) {
+            throw new IllegalArgumentException(
+                    "machine inventory port cannot define side");
+        }
         if (inputGroup != null) {
             inputGroup = IntegrationNames.requireGroup(inputGroup, "inputGroup");
         }

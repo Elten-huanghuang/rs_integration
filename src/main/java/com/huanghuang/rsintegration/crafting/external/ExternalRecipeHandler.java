@@ -356,6 +356,16 @@ final class ExternalRecipeHandler implements ModRecipeHandler {
         return projection.available() ? projection.view() : null;
     }
 
+    @Nullable
+    RecipeView recipeView(
+            Recipe<?> recipe,
+            RegistryAccess registries
+    ) {
+        ExternalRecipeProjection.Result projection =
+                project(recipe, registries);
+        return projection.available() ? projection.view() : null;
+    }
+
     List<RecipeNode> pureRecipeNodes(Recipe<?> recipe) {
         ExternalRecipeProjection.Result projection = project(recipe);
         return projection.available()

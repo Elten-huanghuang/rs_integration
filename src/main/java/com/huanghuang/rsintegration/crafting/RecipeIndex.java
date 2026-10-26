@@ -10,6 +10,7 @@ import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketRecipeWrappe
 import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisGemCuttingCatalog;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCatalog;
 import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
+import com.huanghuang.rsintegration.crafting.external.ExternalIntegrationRuntime;
 import com.huanghuang.rsintegration.crafting.fluid.FluidContainerCatalog;
 import com.huanghuang.rsintegration.crafting.fluid.FluidContainerRecipe;
 import com.huanghuang.rsintegration.mods.forbidden.FaRitualWrapper;
@@ -512,8 +513,7 @@ public final class RecipeIndex {
         ModType type;
         ItemStack result;
         if (handler != null) {
-            type = ModType.classifyRecipe(recipe);
-            if (type == null) type = handler.modType();
+            type = resolveIndexedModType(recipe, handler);
             if (!handler.indexPrimaryOutput(recipe)) return IndexOutcome.EMPTY_RESULT;
             result = ModRecipeHandlers.tryGetResultItem(recipe, level.registryAccess());
         } else if (recipe instanceof CraftingRecipe
@@ -625,6 +625,24 @@ public final class RecipeIndex {
         return IndexOutcome.INDEXED;
     }
 
+    /**
+     * 公共 API 已经 claim 的配方必须保持 API 执行归属。
+     *
+     * <p>内部模组处理器仍按配方类细分 machine type；只有公共 API
+     * 使用统一的 integration_api 类型，具体机器由 process 决定。</p>
+     */
+    static ModType resolveIndexedModType(
+            Recipe<?> recipe,
+            ModRecipeHandler handler
+    ) {
+        ModType claimedType = handler.modType();
+        if (ExternalIntegrationRuntime.isExternalType(claimedType)) {
+            return claimedType;
+        }
+        ModType classified = ModType.classifyRecipe(recipe);
+        return classified == null ? claimedType : classified;
+    }
+
     static boolean isTypedPureProjectionCandidate(ModRecipeHandler handler, ModType type,
                                                    Recipe<?> recipe) {
         return handler != null && type != null && recipe != null
@@ -637,8 +655,9 @@ public final class RecipeIndex {
     public static boolean isBackgroundProjectable(Recipe<?> recipe) {
         if (recipe == null) return false;
         ModRecipeHandler handler = ModRecipeHandlers.claimFor(recipe).winner();
-        ModType type = ModType.classifyRecipe(recipe);
-        if (type == null && handler != null) type = handler.modType();
+        ModType type = handler == null
+                ? ModType.classifyRecipe(recipe)
+                : resolveIndexedModType(recipe, handler);
         return handler != null && type != null
                 && (type.pureProjectionAudit() != ModType.PureProjectionAudit.UNSUPPORTED
                     || handler.supportsIntermediateProjection(recipe))

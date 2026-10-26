@@ -41,6 +41,11 @@ final class CraftMachineBindingSupport {
     static ModType resolveExecutionModType(ServerPlayer player, Recipe<?> recipe,
                                            @Nullable ResourceLocation dimension,
                                            @Nullable BlockPos position) {
+        ModRecipeHandler claimed = ModRecipeHandlers.claimFor(recipe).winner();
+        if (claimed != null
+                && claimed.modType() != ModType.GENERIC) {
+            return claimed.modType();
+        }
         if (MinersDelightCopperPotSupport.isRequestedCopperPot(
                 player, recipe, dimension, position)) {
             ModType copperPot = ModType.findById(ModIds.ID_MD_COPPER_POT);

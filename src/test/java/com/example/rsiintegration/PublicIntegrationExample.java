@@ -2,7 +2,6 @@ package com.example.rsiintegration;
 
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.api.RSIIntegrationApi;
-import com.huanghuang.rsintegration.api.RSIIntegrationRegistrationEvent;
 import com.huanghuang.rsintegration.api.RegistrationResult;
 import com.huanghuang.rsintegration.api.ResourceMatchMode;
 import com.huanghuang.rsintegration.api.diagnostic.IntegrationDiagnostic;
@@ -21,6 +20,7 @@ import com.huanghuang.rsintegration.api.machine.MachineContext;
 import com.huanghuang.rsintegration.api.machine.MachineDescriptor;
 import com.huanghuang.rsintegration.api.machine.MachineDescriptorResult;
 import com.huanghuang.rsintegration.api.machine.MachineExecutionMode;
+import com.huanghuang.rsintegration.api.machine.MachineBinding;
 import com.huanghuang.rsintegration.api.machine.MachineIntegration;
 import com.huanghuang.rsintegration.api.machine.MachineItemPort;
 import com.huanghuang.rsintegration.api.machine.SupportScope;
@@ -72,9 +72,9 @@ public final class PublicIntegrationExample {
     }
 
     public static RegisteredComponents register(
-            RSIIntegrationRegistrationEvent event
+            RSIIntegrationApi api
     ) {
-        requireNonNull(event, "event");
+        requireNonNull(api, "api");
         ExampleRecipeIntegration recipeIntegration =
                 new ExampleRecipeIntegration();
         ExampleMachineIntegration machineIntegration =
@@ -82,7 +82,6 @@ public final class PublicIntegrationExample {
         ExampleExecutionIntegration executionIntegration =
                 new ExampleExecutionIntegration();
 
-        RSIIntegrationApi api = event.api();
         RegistrationResult recipeResult =
                 api.registerRecipe(recipeIntegration);
         api.registerMachine(machineIntegration);
@@ -132,6 +131,15 @@ public final class PublicIntegrationExample {
         @Override
         public ResourceLocation id() {
             return new ResourceLocation("examplemod", "machine_integration");
+        }
+
+        @Override
+        public List<MachineBinding> bindings() {
+            return List.of(MachineBinding.blocks(
+                    Set.of(PROCESS),
+                    true,
+                    new ResourceLocation("examplemod", "machine")
+            ));
         }
 
         @Override

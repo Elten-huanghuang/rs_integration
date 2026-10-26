@@ -31,6 +31,7 @@ import com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule;
 import com.huanghuang.rsintegration.mods.vanilla.brewing.VanillaBrewingCatalog;
 import com.huanghuang.rsintegration.mods.malum.MalumVoidFavorVirtualRecipeHandler;
 import com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageAccess;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.util.CuriosAccess;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.HashMap;
@@ -53,6 +54,8 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
+import com.huanghuang.rsintegration.crafting.external.ExternalIntegrationRuntime;
+import com.huanghuang.rsintegration.crafting.external.ExternalMachineBindingIndex;
 import com.huanghuang.rsintegration.crafting.plan.ClientPlanningPreferences;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.mods.ModCraftNetworkHandlers;
@@ -191,6 +194,16 @@ public class RecipeGuiLayoutsMixin {
         int faNoFilter = 0;
         int faNoRecipeId = 0;
         int faNoBinding = 0;
+        String categoryUid = "unknown";
+        if (!recipeLayoutsWithButtons.isEmpty()) {
+            try {
+                categoryUid = rsi$safeCategoryUid(
+                        rsi$getRecipeLayout(
+                                recipeLayoutsWithButtons.get(0)));
+            } catch (RuntimeException ignored) {
+                categoryUid = "unknown";
+            }
+        }
 
         for (int i = 0; i < recipeLayoutsWithButtons.size(); i++) {
             Object layout = recipeLayoutsWithButtons.get(i);
@@ -230,10 +243,23 @@ public class RecipeGuiLayoutsMixin {
                 continue;
             }
 
-            if (IronAlchemistJeiBridge.isNativeRecipe(recipe)) {
-                ItemStack displayed = recipeLayout.getRecipeSlotsView()
-                        .findSlotByName("itemIn").flatMap(IRecipeSlotView::getDisplayedItemStack).orElse(null);
-                recipe = IronAlchemistJeiBridge.resolve(recipe, displayed, player.level());
+            ItemStack resolverDisplayed =
+                    extractResolverDisplayedInput(recipeLayout);
+            Recipe<?> apiRecipe =
+                    ExternalIntegrationRuntime.resolveJeiRecipe(
+                            recipe,
+                            resolverDisplayed,
+                            player.level().registryAccess()
+                    );
+            if (apiRecipe != null) {
+                recipe = apiRecipe;
+            } else if (IronAlchemistJeiBridge.isNativeRecipe(recipe)) {
+                ItemStack ironDisplayed = recipeLayout.getRecipeSlotsView()
+                        .findSlotByName("itemIn")
+                        .flatMap(IRecipeSlotView::getDisplayedItemStack)
+                        .orElse(resolverDisplayed);
+                recipe = IronAlchemistJeiBridge.resolve(
+                        recipe, ironDisplayed, player.level());
                 if (recipe == null) {
                     skippedNoRecipe++;
                     continue;
@@ -326,6 +352,13 @@ public class RecipeGuiLayoutsMixin {
             boolean longTravailCrown = LongTravailCrownRecipeIdResolver.isDisplay(recipe, recipeId);
             ModType recipeModType = computeModType(recipe);
             boolean isVirtual = recipeModType != null && recipeModType.isVirtual();
+            ResourceLocation externalProcessId =
+                    recipe instanceof Recipe<?> nativeRecipe
+                            && player.level() != null
+                            ? ExternalIntegrationRuntime.recipeProcessId(
+                            nativeRecipe,
+                            player.level().registryAccess())
+                            : null;
 
             // Keep manual-confirmation rituals visible in JEI. Their handler
             // prepares the altar and returns the activation item to the player.
@@ -355,8 +388,13 @@ public class RecipeGuiLayoutsMixin {
                 if (bindingType == null || bindingType == ModType.GENERIC) {
                     bindingType = recipeModType;
                 }
+                ModType recipeMachineType =
+                        recipeModType != null
+                                && recipeModType != ModType.GENERIC
+                                ? recipeModType : bindingType;
                 BindingStorage.BindingEntry binding = findBinding(
-                        filter, recipe, bindingType);
+                        filter, recipe, recipeMachineType,
+                        externalProcessId);
                 if (binding == null) {
                     if (isFa) faNoBinding++;
                 if (isFaOrTlm) {
@@ -438,7 +476,10 @@ public class RecipeGuiLayoutsMixin {
             if (handler == null) continue;
 
             ModType filteredType = ModType.findById(filter);
-            ModType modType = filteredType != null ? filteredType : recipeModType;
+            ModType modType = recipeModType != null
+                    && recipeModType != ModType.GENERIC
+                    ? recipeModType
+                    : filteredType;
 
             String tooltipKey;
             if (recipe instanceof PmmoSalvageRecipe) {
@@ -518,8 +559,10 @@ public class RecipeGuiLayoutsMixin {
 
         }
 
-        RSIntegrationMod.debug("[RSI-JEI-DIAG] Layouts processed: layouts={} totalRecipes={} buttonsAdded={} positions={} "
+        rsi$refreshButtonPositions();
+        RSIntegrationMod.debug("[RSI-JEI-DIAG] Layouts processed: category={} layouts={} totalRecipes={} buttonsAdded={} positions={} "
                         + "skipped(filter={} recipeId={} binding={} noRecipe={})",
+                categoryUid,
                 recipeLayoutsWithButtons.size(),
                 totalRecipes, buttonsAdded, rsi$positions.size(),
                 skippedNoFilter, skippedNoRecipeId, skippedNoBinding, skippedNoRecipe);
@@ -856,6 +899,19 @@ public class RecipeGuiLayoutsMixin {
 
     @Unique
     private static String getBindingFilter(Object recipe, IRecipeLayoutDrawable<?> recipeLayout) {
+        if (recipe instanceof Recipe<?> nativeRecipe
+                && Minecraft.getInstance().player != null
+                && Minecraft.getInstance().player.level() != null) {
+            ResourceLocation process =
+                    ExternalIntegrationRuntime.recipeProcessId(
+                            nativeRecipe,
+                            Minecraft.getInstance().player.level()
+                                    .registryAccess()
+                    );
+            if (process != null) {
+                return process.toString();
+            }
+        }
         if (recipe instanceof IronSpellBooksRecipe ironRecipe
                 && ironRecipe.machine() == IronSpellBooksRecipe.Machine.ALCHEMIST_CAULDRON) {
             return IronSpellBooksRSModule.ALCHEMIST_CAULDRON_TYPE;
@@ -1708,6 +1764,59 @@ public class RecipeGuiLayoutsMixin {
     }
 
     @Unique
+    @Nullable
+    private static ItemStack extractFirstDisplayedInput(
+            IRecipeLayoutDrawable<?> recipeLayout
+    ) {
+        try {
+            IRecipeSlotsView slotsView =
+                    recipeLayout.getRecipeSlotsView();
+            for (IRecipeSlotView slot : slotsView.getSlotViews(
+                    RecipeIngredientRole.INPUT)) {
+                ItemStack displayed = slot.getDisplayedItemStack()
+                        .orElse(null);
+                if (displayed != null && !displayed.isEmpty()) {
+                    return displayed.copy();
+                }
+            }
+            return null;
+        } catch (RuntimeException failure) {
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI-JEI] Failed to extract displayed input",
+                    failure
+            );
+            return null;
+        }
+    }
+
+    @Unique
+    @Nullable
+    private static ItemStack extractResolverDisplayedInput(
+            IRecipeLayoutDrawable<?> recipeLayout
+    ) {
+        try {
+            IRecipeSlotsView slotsView =
+                    recipeLayout.getRecipeSlotsView();
+            for (String slotName : List.of(
+                    "itemIn", "input", "base", "reagent"
+            )) {
+                ItemStack displayed = slotsView.findSlotByName(slotName)
+                        .flatMap(IRecipeSlotView::getDisplayedItemStack)
+                        .orElse(null);
+                if (displayed != null && !displayed.isEmpty()) {
+                    return displayed.copy();
+                }
+            }
+        } catch (RuntimeException failure) {
+            RSIntegrationMod.LOGGER.debug(
+                    "[RSI-JEI] Failed to extract named resolver input",
+                    failure
+            );
+        }
+        return extractFirstDisplayedInput(recipeLayout);
+    }
+
+    @Unique
     private static ItemStack extractFaSmithingBaseItem(IRecipeLayoutDrawable<?> recipeLayout) {
         try {
             IRecipeSlotsView slotsView = recipeLayout.getRecipeSlotsView();
@@ -1739,21 +1848,31 @@ public class RecipeGuiLayoutsMixin {
 
     @Unique
     private static BindingStorage.BindingEntry findBinding(
-            String filter, @Nullable Object recipe, @Nullable ModType recipeType) {
+            String filter,
+            @Nullable Object recipe,
+            @Nullable ModType recipeType,
+            @Nullable ResourceLocation externalProcessId
+    ) {
         var player = Minecraft.getInstance().player;
         if (player == null) return null;
 
 		boolean debugFaTlm = filter.equals("hephaestus_forge") || filter.equals("touhou_little_maid");
 		boolean debugVanilla = filter != null && filter.startsWith("block.minecraft.");
 		boolean debugYhk = filter != null && filter.startsWith("youkaishomecoming");
-		boolean debug = debugFaTlm || debugVanilla || debugYhk;
+        boolean debugFarmersDelight =
+                "farmersdelight_cooking_pot".equals(filter);
+        boolean debugExternal =
+                recipeType == ModType.EXTERNAL_INTEGRATION;
+        boolean debug = debugFaTlm || debugVanilla || debugYhk
+                || debugFarmersDelight || debugExternal;
         List<String> allBlockKeys = debug ? new ArrayList<>() : null;
 
         var inv = player.getInventory();
         for (ItemStack stack : inv.items) {
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
                 if (debug) allBlockKeys.add(entry.blockKey());
-                if (rsi$bindingMatchesFilter(entry, filter)
+                if (rsi$bindingMatchesFilter(
+                        entry, filter, recipeType, externalProcessId)
                         && rsi$bindingMatchesRecipe(entry, filter, recipe)
                         && rsi$bindingMatchesMachine(entry, recipe, recipeType)) return entry;
             }
@@ -1761,7 +1880,8 @@ public class RecipeGuiLayoutsMixin {
         for (ItemStack stack : inv.offhand) {
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
                 if (debug) allBlockKeys.add(entry.blockKey());
-                if (rsi$bindingMatchesFilter(entry, filter)
+                if (rsi$bindingMatchesFilter(
+                        entry, filter, recipeType, externalProcessId)
                         && rsi$bindingMatchesRecipe(entry, filter, recipe)
                         && rsi$bindingMatchesMachine(entry, recipe, recipeType)) return entry;
             }
@@ -1770,15 +1890,20 @@ public class RecipeGuiLayoutsMixin {
         for (ItemStack stack : CuriosAccess.stacks(player)) {
             for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
                 if (debug) allBlockKeys.add(entry.blockKey());
-                if (rsi$bindingMatchesFilter(entry, filter)
+                if (rsi$bindingMatchesFilter(
+                        entry, filter, recipeType, externalProcessId)
                         && rsi$bindingMatchesRecipe(entry, filter, recipe)
                         && rsi$bindingMatchesMachine(entry, recipe, recipeType)) return entry;
             }
         }
 
         if (debug) {
-            RSIntegrationMod.LOGGER.trace("[RSI-JEI-Mixin] findBinding(filter={}) found no match. All blockKeys in inv: {}",
-                    filter, allBlockKeys.isEmpty() ? "<none>" : String.join(", ", allBlockKeys));
+            RSIntegrationMod.debug(
+                    "[RSI-JEI] findBinding(filter={}) found no match. "
+                            + "All blockKeys in inventory: {}",
+                    filter,
+                    allBlockKeys.isEmpty()
+                            ? "<none>" : String.join(", ", allBlockKeys));
         }
 
         return null;
@@ -1820,9 +1945,38 @@ public class RecipeGuiLayoutsMixin {
     }
 
     @Unique
-    private static boolean rsi$bindingMatchesFilter(BindingStorage.BindingEntry entry, String filter) {
+    private static boolean rsi$bindingMatchesFilter(
+            BindingStorage.BindingEntry entry,
+            String filter,
+            @Nullable ModType recipeType,
+            @Nullable ResourceLocation externalProcessId
+    ) {
         String blockKey = entry.blockKey();
         if (blockKey == null || filter == null) return false;
+        int sep = blockKey.indexOf("||");
+        String prefix = sep >= 0 ? blockKey.substring(0, sep) : "";
+        if (recipeType == ModType.EXTERNAL_INTEGRATION) {
+            boolean supported = externalProcessId == null
+                    ? ExternalMachineBindingIndex.supportsBlock(
+                    entry.blockRegKey())
+                    : ExternalMachineBindingIndex.supportsProcess(
+                    entry.blockRegKey(), externalProcessId);
+            RSIntegrationMod.debug(
+                    "[RSI-JEI] external binding candidate: filter={} process={} blockReg={} blockKey={} supported={}",
+                    filter,
+                    externalProcessId,
+                    entry.blockRegKey(),
+                    blockKey,
+                    supported
+            );
+            if (!supported) {
+                return false;
+            }
+            RSIntegrationMod.debug(
+                    "[RSI-JEI] external binding accepted: filter={} process={} blockKey={}",
+                    filter, externalProcessId, blockKey);
+            return true;
+        }
         if (GoetyBindingRules.isGoetyMachineFilter(filter)) {
             return GoetyBindingRules.matches(
                     blockKey, entry.blockRegKey(), filter);
@@ -1833,9 +1987,7 @@ public class RecipeGuiLayoutsMixin {
             ResourceLocation configured = PmmoSalvageAccess.salvageBlockId();
             return configured != null && configured.toString().equals(entry.blockRegKey());
         }
-        int sep = blockKey.indexOf("||");
         if (sep < 0) return false;
-        String prefix = blockKey.substring(0, sep);
         if ("vanilla_furnace".equals(filter)) {
             return "ironfurnaces_furnace".equals(prefix);
         }
@@ -1963,6 +2115,11 @@ public class RecipeGuiLayoutsMixin {
             return ModType.byId("farmingforblockheads");
         }
         if (recipe instanceof Recipe<?> r) {
+            var claimed = ModRecipeHandlers.claimFor(r).winner();
+            if (claimed != null
+                    && claimed.modType() != ModType.GENERIC) {
+                return claimed.modType();
+            }
             ModType mt = ModType.classifyRecipe(r);
             if (mt != null) return mt;
         }

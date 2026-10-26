@@ -98,6 +98,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     private boolean[] reusableReservationsSettled = new boolean[0];
     private List<IngredientSpec> baseSpecs;
     private List<IngredientSpec> graphSpecs = List.of();
+    private List<IngredientSpec> graphReservationSpecs = List.of();
     private List<IngredientSpec> supplementalSpecs = List.of();
     @Nullable
     private List<IngredientSpec> requiredSpecsView;
@@ -254,13 +255,13 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     }
 
     /**
-     * Graph reservations use the child's graph contract, which is already
-     * expressed once per operation. Do not route this through the legacy full
-     * material list above.
+     * Graph reservations need every consumed item per operation and one
+     * reusable item per physical worker. The legacy required-material view uses
+     * a different operation-major layout and must not be used here.
      */
     @Override
     public List<IngredientSpec> getGraphSpecs() {
-        return graphSpecs;
+        return graphReservationSpecs;
     }
 
     @Nullable
@@ -291,9 +292,23 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         if (supplementalMaterials.isEmpty()) return graphMaterials;
         if (workers.isEmpty()) return List.of();
         IBatchDelegate child = workers.get(0).delegate;
+        int graphPerOperation = graphSpecs.size();
         return mergeOperationSlices(graphMaterials, supplementalMaterials,
-                operations.totalOperations(), graphSpecs.size(), supplementalSpecs.size(),
+                operations.totalOperations(), graphPerOperation, supplementalSpecs.size(),
                 child::mergeSupplementalMaterials);
+    }
+
+    static List<IngredientSpec> graphReservationSpecs(
+            List<IngredientSpec> perOperationSpecs,
+            int operationCount,
+            int workerCount
+    ) {
+        if (perOperationSpecs == null || perOperationSpecs.isEmpty()
+                || operationCount <= 0 || workerCount <= 0) {
+            return List.of();
+        }
+        return new GraphReservationSpecView(
+                perOperationSpecs, operationCount, workerCount);
     }
 
     static List<IngredientSpec> repeatSpecs(List<IngredientSpec> specs, int operationCount) {
@@ -320,6 +335,56 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         public IngredientSpec get(int index) {
             if (index < 0 || index >= size) throw new IndexOutOfBoundsException("index: " + index);
             return base.get(index % base.size());
+        }
+
+        @Override
+        public int size() {
+            return size;
+        }
+    }
+
+    private static final class GraphReservationSpecView
+            extends AbstractList<IngredientSpec>
+            implements RandomAccess {
+        private final List<IngredientSpec> base;
+        private final int[] cumulativeSizes;
+        private final int size;
+
+        private GraphReservationSpecView(
+                List<IngredientSpec> specs,
+                int operationCount,
+                int workerCount
+        ) {
+            this.base = List.copyOf(specs);
+            this.cumulativeSizes = new int[base.size()];
+            int total = 0;
+            for (int index = 0; index < base.size(); index++) {
+                int copies = base.get(index)
+                        .consumption()
+                        .reusableWithinWorkerBatch()
+                        ? workerCount : operationCount;
+                total = Math.addExact(total, copies);
+                cumulativeSizes[index] = total;
+            }
+            this.size = total;
+        }
+
+        @Override
+        public IngredientSpec get(int index) {
+            if (index < 0 || index >= size) {
+                throw new IndexOutOfBoundsException("index: " + index);
+            }
+            int low = 0;
+            int high = cumulativeSizes.length - 1;
+            while (low < high) {
+                int middle = (low + high) >>> 1;
+                if (index < cumulativeSizes[middle]) {
+                    high = middle;
+                } else {
+                    low = middle + 1;
+                }
+            }
+            return base.get(low);
         }
 
         @Override
@@ -1135,6 +1200,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         if (workers.isEmpty()) {
             baseSpecs = null;
             graphSpecs = List.of();
+            graphReservationSpecs = List.of();
             supplementalSpecs = List.of();
             requiredSpecsView = null;
             supplementalSpecsView = List.of();
@@ -1144,6 +1210,11 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         List<IngredientSpec> required = child.getRequiredMaterials();
         baseSpecs = required == null ? null : List.copyOf(required);
         graphSpecs = List.copyOf(child.getGraphSpecs());
+        graphReservationSpecs = graphReservationSpecs(
+                graphSpecs,
+                operations.totalOperations(),
+                workers.size()
+        );
         supplementalSpecs = List.copyOf(child.getSupplementalSpecs());
         requiredSpecsView = baseSpecs == null || baseSpecs.isEmpty()
                 ? null : repeatedSpecView(baseSpecs, operations.totalOperations());

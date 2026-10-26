@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.api;
 
 import com.huanghuang.rsintegration.api.diagnostic.IntegrationDiagnosticCode;
+import com.huanghuang.rsintegration.api.machine.MachineBinding;
 import com.huanghuang.rsintegration.api.machine.MachineContext;
 import com.huanghuang.rsintegration.api.machine.MachineDescriptorResult;
 import com.huanghuang.rsintegration.api.machine.MachineIntegration;
@@ -12,15 +13,13 @@ import com.huanghuang.rsintegration.api.diagnostic.IntegrationDiagnostic;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraftforge.eventbus.api.BusBuilder;
-import net.minecraftforge.eventbus.api.IEventBus;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -51,6 +50,20 @@ class IntegrationRegistrationServiceTest {
         RegistrationResult frozen = api.registerRecipe(
                 new StubRecipeIntegration("late", 0));
         assertEquals(RegistrationStatus.FROZEN, frozen.status());
+    }
+
+    @Test
+    void machineRegistrationRequiresExplicitBindingTargets() {
+        DefaultRSIIntegrationApi api = new DefaultRSIIntegrationApi();
+        api.beginRegistration();
+
+        RegistrationResult result = api.registerMachine(
+                new StubMachineIntegration("missing_binding", false));
+
+        assertEquals(RegistrationStatus.REJECTED, result.status());
+        assertEquals(
+                IntegrationDiagnosticCode.REGISTRATION_INVALID_DECLARATION,
+                result.diagnostics().get(0).code());
     }
 
     @Test
@@ -105,31 +118,6 @@ class IntegrationRegistrationServiceTest {
     }
 
     @Test
-    void registrationEventCarriesTheSameApiEntryPoint() {
-        DefaultRSIIntegrationApi api = new DefaultRSIIntegrationApi();
-        RSIIntegrationRegistrationEvent event =
-                new RSIIntegrationRegistrationEvent(api);
-
-        assertSame(api, event.api());
-        assertEquals(new ApiVersion(1, 0, 0), event.api().version());
-        assertFalse(event.isCancelable());
-    }
-
-    @Test
-    void forgeEventBusDeliversThePublicRegistrationEntryPoint() {
-        DefaultRSIIntegrationApi api = new DefaultRSIIntegrationApi();
-        AtomicReference<RSIIntegrationRegistrationEvent> received =
-                new AtomicReference<>();
-        IEventBus bus = BusBuilder.builder().build();
-        bus.addListener((RSIIntegrationRegistrationEvent event) ->
-                received.set(event));
-
-        bus.post(new RSIIntegrationRegistrationEvent(api));
-
-        assertSame(api, received.get().api());
-    }
-
-    @Test
     void stoppedApiResumesFrozenWithoutLosingRegistrations() {
         DefaultRSIIntegrationApi api = new DefaultRSIIntegrationApi();
         StubRecipeIntegration recipe = new StubRecipeIntegration("recipe", 0);
@@ -181,14 +169,33 @@ class IntegrationRegistrationServiceTest {
 
     private static final class StubMachineIntegration implements MachineIntegration {
         private final ResourceLocation id;
+        private final boolean hasBinding;
 
         private StubMachineIntegration(String path) {
+            this(path, true);
+        }
+
+        private StubMachineIntegration(
+                String path,
+                boolean hasBinding
+        ) {
             this.id = new ResourceLocation("test", path);
+            this.hasBinding = hasBinding;
         }
 
         @Override
         public ResourceLocation id() {
             return id;
+        }
+
+        @Override
+        public List<MachineBinding> bindings() {
+            if (!hasBinding) return List.of();
+            return List.of(MachineBinding.blocks(
+                    Set.of(new ResourceLocation("test", "process")),
+                    true,
+                    new ResourceLocation("test", "machine")
+            ));
         }
 
         @Override

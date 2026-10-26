@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Proxy;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -96,6 +97,35 @@ class ParallelCraftGroupSchedulingTest extends BootstrapTest {
         assertEquals(1, aggregated.get(0).getCount());
         assertEquals(6, aggregated.get(1).getCount());
         assertEquals(1, repeated.materialAt(2, 0).getCount());
+    }
+
+    @Test
+    void graphReservationKeepsCatalystPerWorkerAndConsumablesPerOperation() {
+        IngredientSpec catalyst = new IngredientSpec(
+                Ingredient.of(Items.DIAMOND),
+                1,
+                DemandRole.CATALYST
+        );
+        IngredientSpec input = new IngredientSpec(
+                Ingredient.of(Items.CLAY_BALL),
+                1
+        );
+        IngredientSpec fuel = new IngredientSpec(
+                Ingredient.of(Items.COAL),
+                1,
+                DemandRole.FUEL
+        );
+
+        List<IngredientSpec> reservation = ParallelCraftGroup.graphReservationSpecs(
+                List.of(catalyst, input, fuel),
+                6,
+                3
+        );
+
+        assertEquals(15, reservation.size());
+        assertEquals(3, Collections.frequency(reservation, catalyst));
+        assertEquals(6, Collections.frequency(reservation, input));
+        assertEquals(6, Collections.frequency(reservation, fuel));
     }
 
     @Test

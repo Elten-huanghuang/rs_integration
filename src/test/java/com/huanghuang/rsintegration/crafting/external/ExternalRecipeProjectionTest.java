@@ -20,6 +20,7 @@ import com.huanghuang.rsintegration.api.recipe.RecipeFlags;
 import com.huanghuang.rsintegration.api.recipe.RecipeInspectionResult;
 import com.huanghuang.rsintegration.api.recipe.RecipeIntegration;
 import com.huanghuang.rsintegration.api.recipe.RecipeView;
+import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
@@ -45,6 +46,27 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class ExternalRecipeProjectionTest extends BootstrapTest {
+    @Test
+    void externalFuelIsReservedOncePerOperationForStandardIo() {
+        RecipeView view = view(
+                List.of(material(
+                        "fuel",
+                        ingredient(ResourceMatchMode.ANY_IDENTITY,
+                                item(Items.COAL, new CompoundTag())),
+                        1L,
+                        InputConsumption.fuel(200L),
+                        true
+                )),
+                List.of(output("result", Items.EMERALD, 1L))
+        );
+
+        IngredientSpec fuel = ExternalRecipeProjection
+                .ingredients(view).get(0);
+
+        assertEquals("CONSUMED", fuel.consumption().kind().name());
+        assertEquals(11, CraftPacketUtils.requiredCount(fuel, 11));
+    }
+
     @Test
     void mapsInputsCountsConsumptionAndExactNbt() {
         CompoundTag identity = new CompoundTag();

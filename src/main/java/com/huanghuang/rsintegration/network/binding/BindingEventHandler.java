@@ -78,7 +78,10 @@ public final class BindingEventHandler {
     public static void registerTarget(MachineBindingTarget target) {
         TARGETS.add(target);
         for (String className : target.blockClassNames) {
-            CLASS_TARGET_MAP.put(className, target);
+            CLASS_TARGET_MAP.merge(className, target,
+                    (existing, candidate) ->
+                            candidate.priority > existing.priority
+                                    ? candidate : existing);
         }
         String prefix = target.blockKeyPrefix != null ? target.blockKeyPrefix : "";
         PREFIX_GUI_MAP.merge(prefix, target.supportsGui, (old, cur) -> old || cur);
@@ -473,12 +476,16 @@ public final class BindingEventHandler {
 
     private static MachineBindingTarget findEnabledTarget(Block block) {
         String className = block.getClass().getName();
+        MachineBindingTarget best = null;
         for (MachineBindingTarget target : TARGETS) {
             if (!target.configFlag.get()) continue;
             if (!isTargetModLoaded(target.modId)) continue;
-            if (target.matches(block, className)) return target;
+            if (!target.matches(block, className)) continue;
+            if (best == null || target.priority > best.priority) {
+                best = target;
+            }
         }
-        return null;
+        return best;
     }
 
     /**
@@ -538,21 +545,35 @@ public final class BindingEventHandler {
         @Nullable
         private final String blockKeyPrefix;
         public final boolean supportsGui;
+        private final int priority;
 
         public MachineBindingTarget(String modId, ModType modType, ForgeConfigSpec.BooleanValue configFlag,
                                      List<String> blockClassNames, @Nullable String blockKeyPrefix) {
-            this(modId, modType, configFlag, blockClassNames, null, blockKeyPrefix, true);
+            this(modId, modType, configFlag, blockClassNames, null,
+                    blockKeyPrefix, true, 0);
         }
 
         public MachineBindingTarget(String modId, ModType modType, ForgeConfigSpec.BooleanValue configFlag,
                                      List<String> blockClassNames, @Nullable String blockKeyPrefix,
                                      boolean supportsGui) {
-            this(modId, modType, configFlag, blockClassNames, null, blockKeyPrefix, supportsGui);
+            this(modId, modType, configFlag, blockClassNames, null,
+                    blockKeyPrefix, supportsGui, 0);
         }
 
         public MachineBindingTarget(String modId, ModType modType, ForgeConfigSpec.BooleanValue configFlag,
                                      List<String> blockClassNames, @Nullable List<String> blockRegistryKeys,
                                      @Nullable String blockKeyPrefix, boolean supportsGui) {
+            this(modId, modType, configFlag, blockClassNames,
+                    blockRegistryKeys, blockKeyPrefix, supportsGui, 0);
+        }
+
+        public MachineBindingTarget(String modId, ModType modType,
+                                     ForgeConfigSpec.BooleanValue configFlag,
+                                     List<String> blockClassNames,
+                                     @Nullable List<String> blockRegistryKeys,
+                                     @Nullable String blockKeyPrefix,
+                                     boolean supportsGui,
+                                     int priority) {
             this.modId = modId;
             this.modType = modType;
             this.configFlag = configFlag;
@@ -560,6 +581,7 @@ public final class BindingEventHandler {
             this.blockRegistryKeys = blockRegistryKeys;
             this.blockKeyPrefix = blockKeyPrefix;
             this.supportsGui = supportsGui;
+            this.priority = priority;
         }
 
         public ModType modType() { return modType; }
@@ -718,19 +740,22 @@ public final class BindingEventHandler {
 
     @Nullable
     public static MachineBindingTarget findTargetByClass(String className) {
-        MachineBindingTarget exact = CLASS_TARGET_MAP.get(className);
-        if (exact != null) return exact;
+        MachineBindingTarget best = CLASS_TARGET_MAP.get(className);
         try {
             Class<?> blockClass = Class.forName(className, false, BindingEventHandler.class.getClassLoader());
             for (MachineBindingTarget target : TARGETS) {
                 for (String targetName : target.blockClassNames) {
                     Class<?> targetClass = Class.forName(targetName, false,
                             BindingEventHandler.class.getClassLoader());
-                    if (targetClass.isAssignableFrom(blockClass)) return target;
+                    if (targetClass.isAssignableFrom(blockClass)
+                            && (best == null
+                            || target.priority > best.priority)) {
+                        best = target;
+                    }
                 }
             }
         } catch (ClassNotFoundException | LinkageError ignored) {}
-        return null;
+        return best;
     }
 
     private static final Map<String, Boolean> PREFIX_GUI_MAP = new LinkedHashMap<>();
@@ -807,12 +832,14 @@ public final class BindingEventHandler {
     @Nullable
     private static MachineBindingTarget findTarget(Block block) {
         String className = block.getClass().getName();
-        MachineBindingTarget exact = CLASS_TARGET_MAP.get(className);
-        if (exact != null) return exact;
+        MachineBindingTarget best = CLASS_TARGET_MAP.get(className);
         for (MachineBindingTarget target : TARGETS) {
-            if (target.matches(block, className)) return target;
+            if (!target.matches(block, className)) continue;
+            if (best == null || target.priority > best.priority) {
+                best = target;
+            }
         }
-        return null;
+        return best;
     }
 
     private static String extractBlockId(CompoundTag tag) {

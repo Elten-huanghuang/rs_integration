@@ -6,6 +6,8 @@ import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
@@ -21,6 +23,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
@@ -28,6 +31,30 @@ import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.when;
 
 class CraftMachineBindingSupportTest extends BootstrapTest {
+    @Test
+    void executionTypeUsesTheWinningApiRecipeClaim() {
+        ServerPlayer player = mock(ServerPlayer.class);
+        Recipe<?> recipe = mock(Recipe.class);
+        ModRecipeHandler handler = mock(ModRecipeHandler.class);
+        when(handler.modType())
+                .thenReturn(ModType.EXTERNAL_INTEGRATION);
+
+        try (MockedStatic<ModRecipeHandlers> claims =
+                     mockStatic(ModRecipeHandlers.class)) {
+            claims.when(() -> ModRecipeHandlers.claimFor(recipe))
+                    .thenReturn(new ModRecipeHandlers.Claim(
+                            handler,
+                            List.of(handler)
+                    ));
+
+            assertEquals(
+                    ModType.EXTERNAL_INTEGRATION,
+                    CraftMachineBindingSupport.resolveExecutionModType(
+                            player, recipe, null, null)
+            );
+        }
+    }
+
     @Test
     void consumerAvailabilityRequiresAnUnleasedMachine() {
         ServerPlayer player = mock(ServerPlayer.class);

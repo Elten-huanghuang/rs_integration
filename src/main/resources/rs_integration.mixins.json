@@ -149,6 +149,7 @@
     "jei.IngredientListOverlayAccessor",
     "jei.IngredientListOverlayTetraSortMixin",
     "jei.RecipeGuiLayoutsMixin",
+    "jei.AlchemistCauldronRecipeCategoryMixin",
     "jei.RecipesGuiMixin",
     "jei.RecipeBookmarkMixin",
     "jei.RecipeBookmarkButtonMixin",

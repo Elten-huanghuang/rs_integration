@@ -98,6 +98,18 @@ class GenericCraftPacketTest extends BootstrapTest {
     }
 
     @Test
+    void claimedHandlerTypeOverridesLegacyRecipeClassification() {
+        ModRecipeHandler claimed = mock(ModRecipeHandler.class);
+        when(claimed.modType()).thenReturn(ModType.EXTERNAL_INTEGRATION);
+
+        assertEquals(
+                ModType.EXTERNAL_INTEGRATION,
+                GenericCraftPacket.modTypeForCachedExecution(
+                        claimed, ModType.byId("vanilla_furnace"))
+        );
+    }
+
+    @Test
     void missingTypeRefreshReturnsANewImmutableAvailabilityMap() {
         ServerPlayer player = mock(ServerPlayer.class);
         when(player.getInventory()).thenReturn(new Inventory(mock(Player.class)));

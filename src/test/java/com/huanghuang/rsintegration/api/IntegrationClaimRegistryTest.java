@@ -10,6 +10,7 @@ import com.huanghuang.rsintegration.api.execution.RecipeExecutionIntegration;
 import com.huanghuang.rsintegration.api.execution.ExecutionRequestContext;
 import com.huanghuang.rsintegration.api.execution.ExecutionPlan;
 import com.huanghuang.rsintegration.api.machine.MachineClaim;
+import com.huanghuang.rsintegration.api.machine.MachineBinding;
 import com.huanghuang.rsintegration.api.machine.MachineContext;
 import com.huanghuang.rsintegration.api.machine.MachineDescriptorResult;
 import com.huanghuang.rsintegration.api.machine.MachineIntegration;
@@ -18,18 +19,17 @@ import com.huanghuang.rsintegration.api.recipe.RecipeContext;
 import com.huanghuang.rsintegration.api.recipe.RecipeInspectionResult;
 import com.huanghuang.rsintegration.api.recipe.RecipeIntegration;
 import com.huanghuang.rsintegration.api.recipe.RecipeView;
+import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.BlockPos;
-import net.minecraft.SharedConstants;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.server.Bootstrap;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -37,13 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
-class IntegrationClaimRegistryTest {
-    @BeforeAll
-    static void bootstrapMinecraft() {
-        SharedConstants.tryDetectVersion();
-        Bootstrap.bootStrap();
-    }
-
+class IntegrationClaimRegistryTest extends BootstrapTest {
     @Test
     void machineClaimUsesHighestPriorityAndRejectsTies() {
         DefaultRSIIntegrationApi api = new DefaultRSIIntegrationApi();
@@ -186,6 +180,16 @@ class IntegrationClaimRegistryTest {
         @Override
         public ResourceLocation id() {
             return id;
+        }
+
+        @Override
+        public List<MachineBinding> bindings() {
+            return List.of(MachineBinding.blocks(
+                    Set.of(new ResourceLocation(
+                            "test", "process")),
+                    true,
+                    new ResourceLocation("test", "machine")
+            ));
         }
 
         @Override

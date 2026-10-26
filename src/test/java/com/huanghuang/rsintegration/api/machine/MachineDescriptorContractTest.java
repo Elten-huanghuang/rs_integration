@@ -63,6 +63,21 @@ class MachineDescriptorContractTest {
     }
 
     @Test
+    void machineInventoryPortsCannotDefineDirectionalCapability() {
+        assertThrows(IllegalArgumentException.class, () ->
+                new MachineItemPort(
+                        "internal",
+                        0,
+                        Direction.UP,
+                        InputOutputAccess.INPUT,
+                        ItemPortAccess.MACHINE_INVENTORY,
+                        "ingredients",
+                        null,
+                        64
+                ));
+    }
+
+    @Test
     void descriptorFingerprintIgnoresSetAndListOrdering() {
         MachineItemPort first = itemPort(
                 "input", 0, InputOutputAccess.INPUT, "ingredients");

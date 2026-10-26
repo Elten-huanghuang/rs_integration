@@ -1,0 +1,6 @@
+{
+  "type": "rsi_api_smoke:iron_alchemist_chance",
+  "input_item": "irons_spellbooks:scroll",
+  "output_fluid": "irons_spellbooks:common_ink",
+  "output_amount": 250
+}

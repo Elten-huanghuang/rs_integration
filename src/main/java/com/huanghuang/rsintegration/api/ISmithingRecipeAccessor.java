@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.api;
 
 import javax.annotation.Nonnull;
 import net.minecraft.world.item.crafting.Ingredient;
+import org.jetbrains.annotations.ApiStatus;
 
 /**
  * Accessor interface for SmithingTransformRecipe / SmithingTrimRecipe that exposes
@@ -10,6 +11,7 @@ import net.minecraft.world.item.crafting.Ingredient;
  * Lives OUTSIDE the mixin package so non-mixin code can safely {@code instanceof}-check
  * against it without triggering Mixin's illegal-reference guard.
  */
+@ApiStatus.Internal
 public interface ISmithingRecipeAccessor {
     @Nonnull
     Ingredient rsi$getTemplate();

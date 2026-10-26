@@ -3,13 +3,16 @@ package com.huanghuang.rsintegration.api;
 import com.huanghuang.rsintegration.api.diagnostic.IntegrationDiagnostic;
 import com.huanghuang.rsintegration.api.diagnostic.IntegrationDiagnosticCode;
 import com.huanghuang.rsintegration.api.diagnostic.IntegrationSeverity;
+import com.huanghuang.rsintegration.api.machine.MachineBinding;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -102,5 +105,33 @@ class PublicIntegrationContractTest {
                 () -> new ResourceAmount(key, 0L));
         assertThrows(IllegalArgumentException.class,
                 () -> new ResourceAmount(null, 1L));
+    }
+
+    @Test
+    void machineBindingRequiresRealBlockIdentityAndCopiesCollections() {
+        List<ResourceLocation> blockIds = new ArrayList<>();
+        blockIds.add(new ResourceLocation("examplemod", "machine"));
+        Set<ResourceLocation> processes = Set.of(
+                new ResourceLocation("examplemod", "process"));
+
+        MachineBinding binding = new MachineBinding(
+                blockIds, List.of(), processes, true);
+        blockIds.clear();
+
+        assertEquals(1, binding.blockIds().size());
+        assertEquals(Set.of(new ResourceLocation(
+                "examplemod", "process")),
+                binding.acceptedProcesses());
+        assertTrue(binding.supportsGui());
+        assertThrows(IllegalArgumentException.class,
+                () -> new MachineBinding(
+                        List.of(), List.of(), processes, true));
+        assertThrows(IllegalArgumentException.class,
+                () -> new MachineBinding(
+                        List.of(new ResourceLocation(
+                                "examplemod", "machine")),
+                        List.of(), Set.of(), true));
+        assertThrows(UnsupportedOperationException.class,
+                () -> binding.blockIds().clear());
     }
 }

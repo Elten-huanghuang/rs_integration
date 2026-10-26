@@ -7,12 +7,14 @@ import com.huanghuang.rsintegration.api.diagnostic.IntegrationSeverity;
 import com.huanghuang.rsintegration.api.machine.ConcurrencyCapabilities;
 import com.huanghuang.rsintegration.api.machine.InputOutputAccess;
 import com.huanghuang.rsintegration.api.machine.ItemPortAccess;
+import com.huanghuang.rsintegration.api.machine.MachineBinding;
 import com.huanghuang.rsintegration.api.machine.MachineDescriptor;
 import com.huanghuang.rsintegration.api.machine.MachineDescriptorResult;
 import com.huanghuang.rsintegration.api.machine.MachineExecutionMode;
 import com.huanghuang.rsintegration.api.machine.MachineIntegration;
 import com.huanghuang.rsintegration.api.machine.MachineItemPort;
 import com.huanghuang.rsintegration.api.machine.MachineContext;
+import com.huanghuang.rsintegration.api.machine.PlannedConcurrency;
 import com.huanghuang.rsintegration.api.machine.SupportScope;
 import com.huanghuang.rsintegration.api.recipe.InputConsumption;
 import com.huanghuang.rsintegration.api.recipe.ItemIngredientView;
@@ -32,12 +34,14 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraftforge.items.IItemHandler;
 import vectorwing.farmersdelight.common.block.entity.CookingPotBlockEntity;
 import vectorwing.farmersdelight.common.crafting.CookingPotRecipe;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 final class FarmersDelightCookingPotIntegration {
@@ -164,6 +168,25 @@ final class FarmersDelightCookingPotIntegration {
         }
 
         @Override
+        public List<MachineBinding> bindings() {
+            return List.of(MachineBinding.blocks(
+                    Set.of(processId),
+                    true,
+                    new ResourceLocation(
+                            "farmersdelight", "cooking_pot")
+            ));
+        }
+
+        @Override
+        public Map<ResourceLocation, PlannedConcurrency>
+        planningConcurrency() {
+            return Map.of(
+                    processId,
+                    PlannedConcurrency.machineSlot()
+            );
+        }
+
+        @Override
         public boolean supports(BlockEntity blockEntity) {
             return blockEntity instanceof CookingPotBlockEntity;
         }
@@ -184,7 +207,7 @@ final class FarmersDelightCookingPotIntegration {
                         slot,
                         null,
                         InputOutputAccess.INPUT,
-                        ItemPortAccess.ITEM_HANDLER,
+                        ItemPortAccess.MACHINE_INVENTORY,
                         INGREDIENTS,
                         null,
                         64
@@ -195,7 +218,7 @@ final class FarmersDelightCookingPotIntegration {
                     CONTAINER_SLOT,
                     null,
                     InputOutputAccess.INPUT,
-                    ItemPortAccess.ITEM_HANDLER,
+                    ItemPortAccess.MACHINE_INVENTORY,
                     CONTAINER,
                     null,
                     64
@@ -205,7 +228,7 @@ final class FarmersDelightCookingPotIntegration {
                     OUTPUT_SLOT,
                     null,
                     InputOutputAccess.OUTPUT,
-                    ItemPortAccess.ITEM_HANDLER,
+                    ItemPortAccess.MACHINE_INVENTORY,
                     null,
                     MEAL,
                     64
@@ -223,6 +246,17 @@ final class FarmersDelightCookingPotIntegration {
                     new SupportScope(List.of(), List.of(), false),
                     true
             ));
+        }
+
+        @Override
+        public Optional<IItemHandler> internalItemHandler(
+                MachineContext context,
+                BlockEntity blockEntity
+        ) {
+            if (!(blockEntity instanceof CookingPotBlockEntity pot)) {
+                return Optional.empty();
+            }
+            return Optional.of(pot.getInventory());
         }
     }
 
