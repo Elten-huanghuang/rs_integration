@@ -51,6 +51,7 @@ import net.minecraftforge.items.ItemHandlerHelper;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public final class ExtractionLedger implements AutoCloseable {
@@ -69,6 +70,7 @@ public final class ExtractionLedger implements AutoCloseable {
     private final Map<CraftingResolver.StackKey, Long> pendingInv = new HashMap<>();
     private final Map<ResonanceReservationKey, Long> pendingResonance = new HashMap<>();
     private final List<Ingredient> preferredResonanceIngredients = new ArrayList<>();
+    private final Set<Class<?>> unreadableBackpackTypes = ConcurrentHashMap.newKeySet();
     private State state = State.IDLE;
     @Nullable private UUID refundOwner;
     @Nullable private MinecraftServer refundServer;
@@ -1447,7 +1449,7 @@ public final class ExtractionLedger implements AutoCloseable {
         int available = countExact(player.getInventory().items, template);
         for (IItemHandler backpack : findAllBackpackInventories(player)) {
             for (int slot = 0; slot < backpack.getSlots(); slot++) {
-                ItemStack stored = backpack.getStackInSlot(slot);
+                ItemStack stored = readBackpackSlot(backpack, slot);
                 if (MaterialMatcher.sameRuntimeFragment(template, stored)) available += stored.getCount();
             }
         }
@@ -1470,7 +1472,7 @@ public final class ExtractionLedger implements AutoCloseable {
         }
         for (IItemHandler backpack : findAllBackpackInventories(player)) {
             for (int slot = 0; slot < backpack.getSlots(); slot++) {
-                ItemStack stored = backpack.getStackInSlot(slot);
+                ItemStack stored = readBackpackSlot(backpack, slot);
                 if (MaterialMatcher.sameRuntimeFragment(template, stored)) {
                     available = saturatedAdd(available, stored.getCount());
                 }
@@ -1635,7 +1637,7 @@ public final class ExtractionLedger implements AutoCloseable {
             }
             for (IItemHandler backpack : findAllBackpackInventories(player)) {
                 for (int slot = 0; slot < backpack.getSlots(); slot++) {
-                    ItemStack stack = backpack.getStackInSlot(slot);
+                    ItemStack stack = readBackpackSlot(backpack, slot);
                     if (!IngredientMatcher.test(ingredient, stack)
                             || !InventoryProtectionPolicy.mayUseFromBackpack(stack, ingredient)) continue;
                     long available = stack.getCount()
@@ -1670,7 +1672,7 @@ public final class ExtractionLedger implements AutoCloseable {
         // Fast path for backpack contents
         for (IItemHandler bp : findAllBackpackInventories(player)) {
             for (int s = 0; s < bp.getSlots(); s++) {
-                ItemStack stack = bp.getStackInSlot(s);
+                ItemStack stack = readBackpackSlot(bp, s);
                 if (stack.isEmpty() || !IngredientMatcher.test(ingredient, stack)) continue;
                 if (!InventoryProtectionPolicy.mayUseFromBackpack(stack, ingredient)) continue;
                 long available = stack.getCount()
@@ -1714,7 +1716,7 @@ public final class ExtractionLedger implements AutoCloseable {
         // Aggregate backpack contents into availability
         for (IItemHandler bp : findAllBackpackInventories(player)) {
             for (int s = 0; s < bp.getSlots(); s++) {
-                ItemStack stack = bp.getStackInSlot(s);
+                ItemStack stack = readBackpackSlot(bp, s);
                 if (stack.isEmpty() || !IngredientMatcher.test(ingredient, stack)) continue;
                 if (!InventoryProtectionPolicy.mayUseFromBackpack(stack, ingredient)) continue;
                 long available = stack.getCount()
@@ -1764,7 +1766,7 @@ public final class ExtractionLedger implements AutoCloseable {
             if (remaining <= 0) break;
             for (int s = 0; s < bp.getSlots(); s++) {
                 if (remaining <= 0) break;
-                ItemStack stack = bp.getStackInSlot(s);
+                ItemStack stack = readBackpackSlot(bp, s);
                 if (stack.isEmpty() || !IngredientMatcher.test(ingredient, stack)) continue;
                 if (!InventoryProtectionPolicy.mayUseFromBackpack(stack, ingredient)) continue;
                 long available = stack.getCount()
@@ -1851,12 +1853,12 @@ public final class ExtractionLedger implements AutoCloseable {
     }
 
     /** Extract up to {@code limit} items from backpack internals for the given entry. */
-    private static ItemStack extractFromBackpackSlots(Entry entry, ServerPlayer player, int limit) {
+    private ItemStack extractFromBackpackSlots(Entry entry, ServerPlayer player, int limit) {
         ItemStack collected = ItemStack.EMPTY;
         int remaining = Math.min(limit, entry.count);
         for (IItemHandler bp : findAllBackpackInventories(player)) {
             for (int s = 0; s < bp.getSlots() && remaining > 0; s++) {
-                ItemStack inSlot = bp.getStackInSlot(s);
+                ItemStack inSlot = readBackpackSlot(bp, s);
                 if (inSlot.isEmpty() || !IngredientMatcher.test(entry.originalIngredient, inSlot)
                         || !InventoryProtectionPolicy.mayUseFromBackpack(inSlot, entry.originalIngredient)
                         || !MaterialMatcher.sameRuntimeFragment(entry.template, inSlot)) continue;
@@ -1871,6 +1873,25 @@ public final class ExtractionLedger implements AutoCloseable {
             if (remaining <= 0) break;
         }
         return collected;
+    }
+
+    /**
+     * 第三方背包处理器可能违反 IItemHandler 约定并直接抛出运行时异常。
+     * 同一库存类型只记录一次失败，后续按空库存处理，避免中断整个合成。
+     */
+    ItemStack readBackpackSlot(IItemHandler backpack, int slot) {
+        Class<?> backpackType = backpack.getClass();
+        if (unreadableBackpackTypes.contains(backpackType)) return ItemStack.EMPTY;
+        try {
+            ItemStack stack = backpack.getStackInSlot(slot);
+            return stack == null ? ItemStack.EMPTY : stack;
+        } catch (RuntimeException exception) {
+            if (unreadableBackpackTypes.add(backpackType)) {
+                LOGGER.debug("[RSI-Ledger] 跳过读取失败的背包库存类型 {}，slot={}",
+                        backpackType.getName(), slot, exception);
+            }
+            return ItemStack.EMPTY;
+        }
     }
 
     /** Returns a read-only snapshot of ledger entries for debug commands. */

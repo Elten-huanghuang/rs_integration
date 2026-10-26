@@ -16,6 +16,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraftforge.fluids.FluidStack;
+import net.minecraftforge.items.IItemHandler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -137,6 +138,18 @@ class ExtractionLedgerEndpointTest extends BootstrapTest {
         verify(session).extractExact(
                 eq(player), any(StorageItemKey.class), eq((long) requested), eq(false));
         verify(session, never()).extractMatching(any(), any(), anyLong(), eq(false));
+    }
+
+    @Test
+    void unreadableBackpackTypeIsSkippedAfterFirstFailure() {
+        IItemHandler broken = mock(IItemHandler.class);
+        when(broken.getStackInSlot(anyInt()))
+                .thenThrow(new ClassCastException("Long cannot be cast to Integer"));
+
+        assertTrue(ledger.readBackpackSlot(broken, 0).isEmpty());
+        assertTrue(ledger.readBackpackSlot(broken, 1).isEmpty());
+
+        verify(broken, times(1)).getStackInSlot(anyInt());
     }
 
     @Test

@@ -27,6 +27,8 @@ import java.util.List;
 public final class SummoningRitualRecipeHandler extends AbstractRecipeHandler {
     public static final String RECIPE_CLASS =
             "com.almostreliable.summoningrituals.recipe.AltarRecipe";
+    private static final String RECIPE_OUTPUT_BASE_CLASS =
+            "com.almostreliable.summoningrituals.recipe.component.RecipeOutputs$RecipeOutput";
 
     static {
         registerRecipePrefixes(SummoningRitualRecipeHandler.class, RECIPE_CLASS);
@@ -66,11 +68,16 @@ public final class SummoningRitualRecipeHandler extends AbstractRecipeHandler {
             Object outputs = recipe.getClass().getMethod("getOutputs").invoke(recipe);
             if (outputs == null) return ItemStack.EMPTY;
             List<ItemStack> items = new ArrayList<>();
+            // ItemOutput 是包级私有实现类。必须通过公开父类访问器调用，
+            // 否则安全检查会拒绝跨模组反射。
+            Class<?> outputBaseClass = Class.forName(RECIPE_OUTPUT_BASE_CLASS);
+            Method getOutput = outputBaseClass.getMethod("getOutput");
+            Method getCount = outputBaseClass.getMethod("getCount");
             TriConsumer<Object, Object, Integer> consumer = (type, output, index) -> {
                 if (output == null || !"ITEM".equals(String.valueOf(type))) return;
                 try {
-                    Object value = output.getClass().getMethod("getOutput").invoke(output);
-                    Object count = output.getClass().getMethod("getCount").invoke(output);
+                    Object value = getOutput.invoke(output);
+                    Object count = getCount.invoke(output);
                     if (value instanceof ItemStack stack && !stack.isEmpty()
                             && count instanceof Number number && number.intValue() > 0) {
                         items.add(stack.copyWithCount(number.intValue()));
