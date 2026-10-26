@@ -1,16 +1,20 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.level.material.Fluids;
+import net.minecraftforge.registries.ForgeRegistries;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 class PurePlanAdapterTest extends com.huanghuang.rsintegration.testutil.BootstrapTest {
     @Test
@@ -84,6 +88,43 @@ class PurePlanAdapterTest extends com.huanghuang.rsintegration.testutil.Bootstra
         assertEquals(2, steps.size());
         assertEquals(Integer.MAX_VALUE, steps.get(0).executions());
         assertEquals(5, steps.get(1).executions());
+    }
+
+    @Test
+    void fluidOutputKeepsItsResourceTargetInsteadOfAnEmptyItem() {
+        MaterialRef water = MaterialRef.fluid(
+                new ResourceLocation("minecraft", "water"));
+        ResourceLocation recipeId = id("fluid_recipe");
+        RecipeNode recipe = new RecipeNode(
+                recipeId, water, 250L, List.of());
+        PureRecipePlanner.Result plan =
+                new PureRecipePlanner.Result(
+                        true,
+                        List.of(new PureRecipePlanner.PlannedStep(
+                                recipeId, 3L)),
+                        List.of(),
+                        Map.of()
+                );
+
+        var steps = PurePlanAdapter.toResolutionSteps(
+                plan,
+                new ImmutableRecipeGraph(
+                        Map.of(water, List.of(recipe)))
+        );
+
+        assertEquals(1, steps.size());
+        assertNull(steps.get(0).syntheticOutput());
+        assertEquals(
+                IntegrationResourceKey.ResourceKind.FLUID,
+                steps.get(0).productionTarget()
+                        .resource().kind());
+        assertEquals(
+                Fluids.WATER,
+                ForgeRegistries.FLUIDS
+                        .getValue(steps.get(0).productionTarget()
+                                .resource().id()));
+        assertEquals(750L, steps.get(0).productionTarget()
+                .quantity());
     }
 
     private static MaterialRef material(String path) {

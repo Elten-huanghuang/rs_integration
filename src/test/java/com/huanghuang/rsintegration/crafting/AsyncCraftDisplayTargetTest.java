@@ -4,6 +4,7 @@ import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.graph.CraftNode;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
@@ -120,6 +121,38 @@ class AsyncCraftDisplayTargetTest extends BootstrapTest {
         AsyncCraftChain chain = chain(server(), List.of(step));
         assertTrue(chain.displayTarget().is(Items.EGG));
         assertEquals(1, chain.displayTarget().getCount());
+    }
+
+    @Test
+    void legacyMaterialOnlyProductionTargetStillConfiguresTheDelegate()
+            throws Exception {
+        MaterialKey egg = MaterialKey.of(
+                new ItemStack(Items.EGG));
+        CraftingResolver.ResolutionStep step = step(
+                ModType.GENERIC,
+                null,
+                new ProductionTarget(egg, 12L)
+        );
+        AsyncCraftChain chain = chain(server(), List.of(step));
+        AbstractBatchDelegate delegate =
+                mock(AbstractBatchDelegate.class);
+        var apply = AsyncCraftChain.class.getDeclaredMethod(
+                "applyTargetOutput",
+                AbstractBatchDelegate.class
+        );
+        apply.setAccessible(true);
+
+        apply.invoke(chain, delegate);
+
+        verify(delegate).setTargetOutput(argThat(stack ->
+                stack.is(Items.EGG)
+                        && stack.getCount() == 1));
+        verify(delegate).setTargetResource(argThat(resource ->
+                resource != null
+                        && resource.kind()
+                        == IntegrationResourceKey.ResourceKind.ITEM
+                        && resource.id().equals(
+                        new ResourceLocation("minecraft", "egg"))));
     }
 
     @Test

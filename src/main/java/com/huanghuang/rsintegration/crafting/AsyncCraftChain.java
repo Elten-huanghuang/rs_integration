@@ -626,7 +626,27 @@ public final class AsyncCraftChain {
      * {@linkplain #isPrimaryStep primary step}.
      */
     private void applyTargetOutput(AbstractBatchDelegate abd) {
-        ItemStack planned = steps.get(currentStepIdx).syntheticOutput();
+        CraftingResolver.ResolutionStep step =
+                steps.get(currentStepIdx);
+        ProductionTarget productionTarget =
+                step.productionTarget();
+        if (productionTarget != null) {
+            ItemStack display = productionTarget.displayStack();
+            IntegrationResourceKey resource =
+                    productionTarget.resource();
+            if (resource == null && !display.isEmpty()) {
+                resource = IntegrationResourceKey.item(display);
+            }
+            if (!display.isEmpty()
+                    && resource != null
+                    && resource.kind()
+                    == IntegrationResourceKey.ResourceKind.ITEM) {
+                abd.setTargetOutput(display);
+            }
+            abd.setTargetResource(resource);
+            return;
+        }
+        ItemStack planned = step.syntheticOutput();
         if (planned != null && !planned.isEmpty()) {
             abd.setTargetOutput(planned);
             abd.setTargetResource(IntegrationResourceKey.item(planned));
@@ -4263,7 +4283,22 @@ public final class AsyncCraftChain {
 
         this.machineCount = operationCount;
         group.setMachineServer(server);
-        if (step.syntheticOutput() != null && !step.syntheticOutput().isEmpty()) {
+        if (step.productionTarget() != null) {
+            ItemStack display = step.productionTarget().displayStack();
+            IntegrationResourceKey resource =
+                    step.productionTarget().resource();
+            if (resource == null && !display.isEmpty()) {
+                resource = IntegrationResourceKey.item(display);
+            }
+            if (!display.isEmpty()
+                    && resource != null
+                    && resource.kind()
+                    == IntegrationResourceKey.ResourceKind.ITEM) {
+                group.setTargetOutput(display);
+            }
+            group.setTargetResource(resource);
+        } else if (step.syntheticOutput() != null
+                && !step.syntheticOutput().isEmpty()) {
             group.setTargetOutput(step.syntheticOutput());
             group.setTargetResource(
                     IntegrationResourceKey.item(step.syntheticOutput()));
