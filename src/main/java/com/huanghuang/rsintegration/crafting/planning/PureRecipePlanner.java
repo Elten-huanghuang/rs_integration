@@ -1722,7 +1722,6 @@ public final class PureRecipePlanner {
         private static final int UNREACHABLE_DEPTH = Integer.MAX_VALUE;
 
         private final ImmutableRecipeGraph graph;
-        private final Set<MaterialRef> seeds;
         private final Map<MaterialRef, Integer> materialDepth;
         private final Map<RecipeNode, Integer> recipeDepth;
 
@@ -1730,12 +1729,7 @@ public final class PureRecipePlanner {
                                    Map<MaterialRef, Long> available,
                                    Runnable budgetCheck) {
             this.graph = graph;
-            Set<MaterialRef> present = new HashSet<>();
-            for (Map.Entry<MaterialRef, Long> entry : available.entrySet()) {
-                if (entry.getValue() == null || entry.getValue() <= 0L) continue;
-                present.add(entry.getKey());
-            }
-            this.seeds = Set.copyOf(present);
+            long reachabilityStarted = System.nanoTime();
             Map<MaterialRef, Integer> materialResult = new HashMap<>();
             Map<RecipeNode, Integer> recipeResult = new IdentityHashMap<>();
             Map<ResourceLocation, List<InputRef>> dependents = new HashMap<>();
@@ -1743,72 +1737,100 @@ public final class PureRecipePlanner {
             Map<RecipeNode, int[]> inputSatisfied = new IdentityHashMap<>();
             Map<RecipeNode, int[]> inputDepths = new IdentityHashMap<>();
             ArrayDeque<MaterialRef> queue = new ArrayDeque<>();
-            for (MaterialRef seed : seeds) {
-                materialResult.put(seed, 0);
-                queue.add(seed);
-            }
-            for (List<RecipeNode> candidates : graph.recipesByOutput().values()) {
-                for (RecipeNode recipe : candidates) {
-                    budgetCheck.run();
-                    if ("smithing".equals(recipe.modTypeId()) && recipe.inputs().size() == 3) {
-                        inheritedOutputs.add(recipe.output().itemId());
-                    }
-                    int inputCount = recipe.inputs().size();
-                    inputSatisfied.put(recipe, new int[inputCount]);
-                    inputDepths.put(recipe, new int[inputCount]);
-                    for (int inputIndex = 0; inputIndex < inputCount; inputIndex++) {
-                        Set<ResourceLocation> indexedItems = new HashSet<>();
-                        for (MaterialRef alternative : recipe.inputs().get(inputIndex).alternatives()) {
-                            budgetCheck.run();
-                            if (!indexedItems.add(alternative.itemId())) continue;
-                            dependents.computeIfAbsent(alternative.itemId(), ignored -> new ArrayList<>())
-                                    .add(new InputRef(recipe, inputIndex));
+            List<RecipeNode> inputFreeRecipes = new ArrayList<>();
+            long seedCandidates = 0L;
+            long seeds = 0L;
+            long indexedEdges = 0L;
+            long matchedEdges = 0L;
+            long stateAllocations = 0L;
+            try {
+                for (List<RecipeNode> candidates : graph.recipesByOutput().values()) {
+                    for (RecipeNode recipe : candidates) {
+                        budgetCheck.run();
+                        if ("smithing".equals(recipe.modTypeId()) && recipe.inputs().size() == 3) {
+                            inheritedOutputs.add(recipe.output().itemId());
+                        }
+                        int inputCount = recipe.inputs().size();
+                        if (inputCount == 0) inputFreeRecipes.add(recipe);
+                        for (int inputIndex = 0; inputIndex < inputCount; inputIndex++) {
+                            Set<ResourceLocation> indexedItems = new HashSet<>();
+                            for (MaterialRef alternative : recipe.inputs().get(inputIndex).alternatives()) {
+                                budgetCheck.run();
+                                if (!indexedItems.add(alternative.itemId())) continue;
+                                dependents.computeIfAbsent(alternative.itemId(), ignored -> new ArrayList<>())
+                                        .add(new InputRef(recipe, inputIndex));
+                                indexedEdges++;
+                            }
                         }
                     }
-                    if (inputCount == 0) {
-                        recipeResult.put(recipe, 1);
-                        materialResult.merge(recipe.output(), 1, Math::min);
-                        queue.add(recipe.output());
-                    }
                 }
-            }
-            while (!queue.isEmpty()) {
-                // Reachability is part of this request's planning work. It must obey the same
-                // deadline as recursive search, otherwise a broad NBT graph can overrun the
-                // configured timeout before the first search state is expanded.
-                budgetCheck.run();
-                MaterialRef material = queue.removeFirst();
-                int depth = materialResult.getOrDefault(material, 0);
-                for (InputRef ref : dependents.getOrDefault(material.itemId(), List.of())) {
+                for (Map.Entry<MaterialRef, Long> entry : available.entrySet()) {
+                    if (entry.getValue() == null || entry.getValue() <= 0L) continue;
+                    seedCandidates++;
                     budgetCheck.run();
-                    if (!ImmutableRecipeGraphProjector.matchesIngredient(material,
-                            ref.recipe().inputs().get(ref.inputIndex()))
-                            && !(material.nbt().isEmpty()
-                            && inheritedOutputs.contains(material.itemId()))) continue;
-                    int[] satisfied = inputSatisfied.get(ref.recipe());
-                    int[] depths = inputDepths.get(ref.recipe());
-                    if (depths[ref.inputIndex()] == 0 || depth < depths[ref.inputIndex()]) {
-                        depths[ref.inputIndex()] = depth;
-                    }
-                    if (satisfied[ref.inputIndex()] != 1) satisfied[ref.inputIndex()] = 1;
-                    boolean complete = true;
-                    int deepest = 0;
-                    for (int index = 0; index < satisfied.length; index++) {
-                        if (satisfied[index] == 0) {
-                            complete = false;
-                            break;
-                        }
-                        deepest = Math.max(deepest, depths[index]);
-                    }
-                    if (!complete || recipeResult.containsKey(ref.recipe())) continue;
-                    int recipeDepthValue = deepest + 1;
-                    recipeResult.put(ref.recipe(), recipeDepthValue);
-                    Integer previous = materialResult.putIfAbsent(ref.recipe().output(), recipeDepthValue);
-                    if (previous == null || recipeDepthValue < previous) queue.add(ref.recipe().output());
+                    MaterialRef seed = entry.getKey();
+                    if (!dependents.containsKey(seed.itemId())) continue;
+                    materialResult.putIfAbsent(seed, 0);
+                    queue.add(seed);
+                    seeds++;
                 }
+                for (RecipeNode recipe : inputFreeRecipes) {
+                    recipeResult.put(recipe, 1);
+                    materialResult.merge(recipe.output(), 1, Math::min);
+                    queue.add(recipe.output());
+                }
+                while (!queue.isEmpty()) {
+                    // 可达性属于本次规划工作，必须和递归搜索共享截止时间。
+                    budgetCheck.run();
+                    MaterialRef material = queue.removeFirst();
+                    int depth = materialResult.getOrDefault(material, 0);
+                    for (InputRef ref : dependents.getOrDefault(material.itemId(), List.of())) {
+                        budgetCheck.run();
+                        if (recipeResult.containsKey(ref.recipe())) continue;
+                        matchedEdges++;
+                        if (!ImmutableRecipeGraphProjector.matchesIngredient(material,
+                                ref.recipe().inputs().get(ref.inputIndex()))
+                                && !(material.nbt().isEmpty()
+                                && inheritedOutputs.contains(material.itemId()))) continue;
+                        int[] satisfied = inputSatisfied.get(ref.recipe());
+                        int[] depths = inputDepths.get(ref.recipe());
+                        if (satisfied == null) {
+                            int inputCount = ref.recipe().inputs().size();
+                            satisfied = new int[inputCount];
+                            depths = new int[inputCount];
+                            inputSatisfied.put(ref.recipe(), satisfied);
+                            inputDepths.put(ref.recipe(), depths);
+                            stateAllocations++;
+                        }
+                        if (depths[ref.inputIndex()] == 0 || depth < depths[ref.inputIndex()]) {
+                            depths[ref.inputIndex()] = depth;
+                        }
+                        if (satisfied[ref.inputIndex()] != 1) satisfied[ref.inputIndex()] = 1;
+                        boolean complete = true;
+                        int deepest = 0;
+                        for (int index = 0; index < satisfied.length; index++) {
+                            if (satisfied[index] == 0) {
+                                complete = false;
+                                break;
+                            }
+                            deepest = Math.max(deepest, depths[index]);
+                        }
+                        if (!complete) continue;
+                        int recipeDepthValue = deepest + 1;
+                        recipeResult.put(ref.recipe(), recipeDepthValue);
+                        Integer previous = materialResult.putIfAbsent(ref.recipe().output(), recipeDepthValue);
+                        if (previous == null || recipeDepthValue < previous) {
+                            queue.add(ref.recipe().output());
+                        }
+                    }
+                }
+                this.materialDepth = Map.copyOf(materialResult);
+                this.recipeDepth = new IdentityHashMap<>(recipeResult);
+            } finally {
+                PlanningLookupCache.recordReachability(seedCandidates, seeds, indexedEdges,
+                        matchedEdges, recipeResult.size(), stateAllocations,
+                        System.nanoTime() - reachabilityStarted);
             }
-            this.materialDepth = Map.copyOf(materialResult);
-            this.recipeDepth = new IdentityHashMap<>(recipeResult);
         }
 
         private boolean canReach(RecipeNode recipe) {

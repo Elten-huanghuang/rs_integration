@@ -488,6 +488,41 @@ class PlanningLookupCacheTest extends BootstrapTest {
     }
 
     @Test
+    void reachabilityIndexesOnlyRelevantSeedsAndAllocatesReachedRecipeState() {
+        MaterialRef target = new MaterialRef(id("reachable_target"), "");
+        MaterialRef seed = new MaterialRef(id("reachable_seed"), "");
+        List<RecipeNode> producers = new ArrayList<>();
+        for (int index = 0; index < 5; index++) {
+            producers.add(new RecipeNode(
+                    id("reachable_recipe_" + index), target, 1,
+                    List.of(new IngredientRef(List.of(seed), 1, NbtMatchMode.EXACT))));
+        }
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(target, producers));
+        Map<MaterialRef, Integer> stock = new LinkedHashMap<>();
+        stock.put(seed, 1);
+        for (int index = 0; index < 100; index++) {
+            stock.put(new MaterialRef(id("unrelated_stock_" + index), ""), 1);
+        }
+
+        PlanningLookupCache.Stats stats = PlanningLookupCache.run(() -> {
+            PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                    graph, stock,
+                    List.of(new IngredientRef(List.of(target), 1, NbtMatchMode.EXACT)), 64);
+            assertTrue(result.feasible());
+            return PlanningLookupCache.currentStats();
+        });
+
+        assertEquals(1, stats.reachabilityBuilds());
+        assertEquals(101, stats.reachabilitySeedCandidates());
+        assertEquals(1, stats.reachabilitySeeds());
+        assertEquals(5, stats.reachabilityIndexedEdges());
+        assertEquals(5, stats.reachabilityMatchedEdges());
+        assertEquals(5, stats.reachabilityReachedRecipes());
+        assertEquals(5, stats.reachabilityStateAllocations());
+        assertEquals(stats.reachabilityNanos(), stats.reachabilityMaxNanos());
+    }
+
+    @Test
     void changingInventoryInsideOneScopeDoesNotReuseOldFeasibility() {
         MaterialRef raw = new MaterialRef(id("raw"), "{quality:1}");
         MaterialRef output = new MaterialRef(id("output"), "{quality:2}");

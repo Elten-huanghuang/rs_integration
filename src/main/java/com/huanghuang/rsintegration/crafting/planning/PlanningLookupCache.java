@@ -53,6 +53,15 @@ final class PlanningLookupCache {
     private long outputIndexBuilds;
     private long outputScans;
     private long candidateVariants;
+    private long reachabilityBuilds;
+    private long reachabilitySeedCandidates;
+    private long reachabilitySeeds;
+    private long reachabilityIndexedEdges;
+    private long reachabilityMatchedEdges;
+    private long reachabilityReachedRecipes;
+    private long reachabilityStateAllocations;
+    private long reachabilityNanos;
+    private long reachabilityMaxNanos;
 
     private PlanningLookupCache(Limits limits) {
         this.limits = Objects.requireNonNull(limits);
@@ -88,7 +97,28 @@ final class PlanningLookupCache {
                 cache.outputScans, cache.candidateVariants, cache.parsedTags.size(),
                 cache.cachedNbtCharacters,
                 cache.outputIndexes.size() + cache.compactOutputIndexes.size(), cache.indexedVariants,
-                cache.compactIndexBytes);
+                cache.compactIndexBytes, cache.reachabilityBuilds,
+                cache.reachabilitySeedCandidates, cache.reachabilitySeeds,
+                cache.reachabilityIndexedEdges, cache.reachabilityMatchedEdges,
+                cache.reachabilityReachedRecipes, cache.reachabilityStateAllocations,
+                cache.reachabilityNanos, cache.reachabilityMaxNanos);
+    }
+
+    static void recordReachability(long seedCandidates, long seeds, long indexedEdges,
+                                   long matchedEdges, long reachedRecipes,
+                                   long stateAllocations, long elapsedNanos) {
+        PlanningLookupCache cache = CURRENT.get();
+        if (cache == null) return;
+        long elapsed = Math.max(0L, elapsedNanos);
+        cache.reachabilityBuilds++;
+        cache.reachabilitySeedCandidates += Math.max(0L, seedCandidates);
+        cache.reachabilitySeeds += Math.max(0L, seeds);
+        cache.reachabilityIndexedEdges += Math.max(0L, indexedEdges);
+        cache.reachabilityMatchedEdges += Math.max(0L, matchedEdges);
+        cache.reachabilityReachedRecipes += Math.max(0L, reachedRecipes);
+        cache.reachabilityStateAllocations += Math.max(0L, stateAllocations);
+        cache.reachabilityNanos += elapsed;
+        cache.reachabilityMaxNanos = Math.max(cache.reachabilityMaxNanos, elapsed);
     }
 
     static PreparationStats preparationStats(PreparationStage stage) {
@@ -387,7 +417,11 @@ final class PlanningLookupCache {
     record Stats(long nbtParses, long nbtCacheHits, long outputIndexBuilds,
                  long outputScans, long candidateVariants, int cachedTags,
                  int cachedNbtCharacters, int indexedGraphs, int indexedVariants,
-                 long compactIndexBytes) {}
+                 long compactIndexBytes, long reachabilityBuilds,
+                 long reachabilitySeedCandidates, long reachabilitySeeds,
+                 long reachabilityIndexedEdges, long reachabilityMatchedEdges,
+                 long reachabilityReachedRecipes, long reachabilityStateAllocations,
+                 long reachabilityNanos, long reachabilityMaxNanos) {}
 
     private record ParsedNbt(CompoundTag tag, boolean valid) {}
 
