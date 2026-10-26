@@ -3,6 +3,7 @@ package com.example.rsiintegration.apismoke;
 import com.huanghuang.rsintegration.api.RSIIntegrationRegistrationEvent;
 import com.huanghuang.rsintegration.api.RegistrationOptions;
 import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.fml.common.Mod;
 
 import java.util.Map;
@@ -13,6 +14,9 @@ public final class RsiApiSmokeMod {
 
     public RsiApiSmokeMod() {
         MinecraftForge.EVENT_BUS.addListener(this::registerIntegrations);
+        MinecraftForge.EVENT_BUS.addListener(
+                (RegisterCommandsEvent event) ->
+                        ConsumerSmokeCommand.register(event.getDispatcher()));
     }
 
     private void registerIntegrations(RSIIntegrationRegistrationEvent event) {

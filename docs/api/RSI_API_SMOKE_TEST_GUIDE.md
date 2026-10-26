@@ -96,6 +96,23 @@ rsi_api_smoke:smelt_test_raw_iron
 
 ## 4. 自动合同测试
 
+游戏内 Consumer 命令：
+
+```text
+/rsi_api_smoke catalog minecraft:iron_ingot
+/rsi_api_smoke inspect rsi_api_smoke:smelt_test_raw_iron
+/rsi_api_smoke page <ticket-uuid>
+/rsi_api_smoke submit <ticket-uuid>
+/rsi_api_smoke status
+/rsi_api_smoke cancel
+```
+
+`page` 返回 `RUNNING` 时再次执行同一命令；返回 `COMPLETE` 且带 READY plan 后，
+可用相同 ticket 执行 `submit`。该命令只引用 `api.consumer.*`，用于验证真实服务端
+目录、snapshot、plan、订单状态和幂等链路。
+
+自动合同测试：
+
 ```text
 gradlew test --tests "com.example.rsiintegration.apismoke.*"
 gradlew test --tests "com.huanghuang.rsintegration.api.PublicApiBoundaryTest"
