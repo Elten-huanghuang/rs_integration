@@ -276,6 +276,7 @@ public final class AsyncCraftChain {
     private int progressTickCounter;
     private boolean waitingForVanillaBudget;
     private int vanillaBatchDeferredTicks;
+    private final Map<NodeId, GraphVanillaJob> graphVanillaJobs = new LinkedHashMap<>();
     private final CraftProgressPublisher progressPublisher;
     private int progressSequence;
     @Nullable
@@ -310,6 +311,43 @@ public final class AsyncCraftChain {
 
         boolean complete() {
             return outputs.publishedQuantity(targetPort) >= targetQuantity;
+        }
+    }
+
+    /**
+     * 一个已准入 GENERIC 图节点的跨 tick 执行租约。
+     *
+     * <p>节点材料仍按整节点一次性预留，避免其他节点看到半完成的材料状态；
+     * 配方执行则严格按 tick 预算切片，全部分片成功后才发布节点产物。</p>
+     */
+    private static final class GraphVanillaJob {
+        private final NodeId nodeId;
+        private final CraftingResolver.ResolutionStep step;
+        private final NodeAdmissionCoordinator.Admission admission;
+        private final ExtractionLedger nodeLedger;
+        private final ExtractionLedger executionLedger;
+        private final OperationExecutionKernel.Session operation;
+        private final List<ItemStack> inventory;
+        private int remainingExecutions;
+
+        private GraphVanillaJob(
+                NodeId nodeId,
+                CraftingResolver.ResolutionStep step,
+                NodeAdmissionCoordinator.Admission admission,
+                ExtractionLedger nodeLedger,
+                ExtractionLedger executionLedger,
+                OperationExecutionKernel.Session operation,
+                List<ItemStack> inventory,
+                int remainingExecutions
+        ) {
+            this.nodeId = nodeId;
+            this.step = step;
+            this.admission = admission;
+            this.nodeLedger = nodeLedger;
+            this.executionLedger = executionLedger;
+            this.operation = operation;
+            this.inventory = inventory;
+            this.remainingExecutions = remainingExecutions;
         }
     }
 
@@ -1103,10 +1141,15 @@ public final class AsyncCraftChain {
         return false;
     }
 
-    /** Execute ready GENERIC nodes synchronously, one graph node at a time. */
+    /** Resume bounded GENERIC slices, then admit ready graph nodes in order. */
     private void settleReadyVanillaNodes(
             ServerPlayer online, VanillaCraftingTickBudget.ChainAllowance vanillaAllowance) {
+        if (!resumeGraphVanillaJobs(online, vanillaAllowance)) return;
         while (true) {
+            if (vanillaAllowance.remaining() <= 0) {
+                waitingForVanillaBudget = !graphVanillaJobs.isEmpty();
+                break;
+            }
             NodeId vanillaNode = findReadyVanillaNode();
             if (vanillaNode == null) break;
             if (graphAdmissions == null) {
@@ -1124,98 +1167,187 @@ public final class AsyncCraftChain {
             int idx = stepIndex(vanillaNode);
             CraftingResolver.ResolutionStep step = graphStep(vanillaNode);
             int executions = Math.max(1, step.executions());
-            if (!claimVanillaBudgetOrReleaseAdmission(
-                    vanillaAllowance, graphAdmissions, admission, executions)) {
+            ServerLevel overworld = server.overworld();
+            boolean stableBatchEligible = overworld != null
+                    && StableRecipeBatch.isEligible(
+                    overworld, step, targetOutput, supplementalMaterialLocks);
+            int grantedExecutions = claimGraphVanillaExecutions(
+                    vanillaAllowance, executions, stableBatchEligible);
+            if (grantedExecutions <= 0) {
+                graphAdmissions.releaseBeforeDispatch(admission);
                 waitingForVanillaBudget = true;
                 break;
             }
             currentStepIdx = idx;
-            ExtractionLedger nodeLedger = new ExtractionLedger();
-            nodeLedger.setLogContext(ctx);
-            if (storageEndpoint != null) nodeLedger.setStorageEndpoint(storageEndpoint);
-            ExtractionLedger executionLedger = new ExtractionLedger();
-            executionLedger.setLogContext(ctx);
-            if (storageEndpoint != null) executionLedger.setStorageEndpoint(storageEndpoint);
-            OperationExecutionKernel.Session operation = operationKernel.prepareLogical();
-            MaterialBroker.Checkout checkout = graphMaterials.checkout(admission.materialToken());
-            List<ItemStack> operationInventory = new ArrayList<>(checkout.producerStacks());
-            boolean initialReserved = true;
-            for (ItemStack initial : checkout.initialStacks()) {
-                ItemStack reserved = reserveExact(nodeLedger, initial, initial.getCount(), online);
-                if (reserved.isEmpty()) {
-                    initialReserved = false;
-                    break;
-                }
-                operationInventory.add(reserved);
-            }
-            if (!initialReserved || !operation.commit(() -> commitLedger(nodeLedger, online))) {
-                graphAdmissions.releaseMaterial(admission);
-                if (nodeLedger.isCommitted()) refundCommitted(nodeLedger, online);
-                else nodeLedger.rollback(online);
-                operation.close();
-                executionLedger.close();
-                graphScheduler.releaseClaim(vanillaNode);
-                break;
-            }
-            graphAdmissions.commit(admission);
-            boolean executed;
-            try {
-                executed = operation.tryStart(() ->
-                        executeVanillaStepsInline(List.of(step), online, operationInventory,
-                                executionLedger, false)
-                                && commitLedger(executionLedger, online));
-            } catch (RuntimeException exception) {
-                RSIntegrationMod.LOGGER.error(ctx.format("Graph vanilla operation threw for {}"),
-                        vanillaNode, exception);
-                graphFailureDetails.put(vanillaNode,
-                        "synchronous vanilla execution threw: " + exception.getMessage());
-                graphFailureCodes.put(vanillaNode, CraftFailureCode.INTERNAL_ERROR);
-                executed = false;
-            }
-            if (!executed || state == State.ABORTED) {
-                // Vanilla execution is synchronous and has no external machine side
-                // effect. A failed logical start can therefore refund exact inputs.
-                graphAdmissions.refundCommittedMaterial(admission);
-                if (nodeLedger.isCommitted()) refundCommitted(nodeLedger, online);
-                executionLedger.rollback(online);
-                graphFailureDetails.putIfAbsent(vanillaNode,
-                        "synchronous vanilla execution failed before producing outputs");
-                graphFailureCodes.putIfAbsent(vanillaNode,
-                        CraftFailureCode.MATERIAL_EXTRACTION_FAILED);
-                operation.close();
-                nodeLedger.close();
-                executionLedger.close();
-                if (graphScheduler.state(vanillaNode) == DagScheduler.NodeState.RUNNING) {
-                    graphScheduler.fail(vanillaNode);
-                }
-                return;
-            }
-            boolean outputsComplete = publishDeclaredNodeOutputs(vanillaNode, operationInventory);
-            OperationExecutionKernel.CompletionResult completion = operation.complete(
-                    () -> outputsComplete, () -> {
-                        graphAdmissions.settleMaterial(admission);
-                        nodeLedger.settleAllCommitted();
-                        if (executionLedger.isCommitted()) {
-                            executionLedger.settleAllCommitted();
-                        }
-                    });
-            operation.close();
-            nodeLedger.close();
-            executionLedger.close();
-            if (completion == OperationExecutionKernel.CompletionResult.OUTPUT_SHORTAGE) {
-                String detail = "output shortage after synchronous crafting";
-                graphFailureDetails.put(vanillaNode, detail);
-                graphFailureCodes.put(vanillaNode, CraftFailureCode.OUTPUT_MISSING);
-                RSIntegrationMod.LOGGER.warn(ctx.format("Graph node {} completion failed: {}"),
-                        vanillaNode, detail);
-                graphScheduler.fail(vanillaNode);
-                return;
-            }
-            snapshotCommittedVirtual();
-            graphScheduler.succeed(vanillaNode);
-            graphProgressWatchdog.markProgress();
-            currentStepIdx = idx + 1;
+            GraphVanillaJob job = beginGraphVanillaJob(
+                    vanillaNode, step, admission, executions, online);
+            if (job == null) break;
+            graphVanillaJobs.put(vanillaNode, job);
+            if (!runGraphVanillaSlice(job, grantedExecutions, online)) return;
         }
+    }
+
+    private boolean resumeGraphVanillaJobs(
+            ServerPlayer online,
+            VanillaCraftingTickBudget.ChainAllowance vanillaAllowance
+    ) {
+        for (GraphVanillaJob job : List.copyOf(graphVanillaJobs.values())) {
+            int granted = claimGraphVanillaExecutions(
+                    vanillaAllowance, job.remainingExecutions, false);
+            if (granted <= 0) {
+                waitingForVanillaBudget = true;
+                return false;
+            }
+            currentStepIdx = stepIndex(job.nodeId);
+            if (!runGraphVanillaSlice(job, granted, online)) return false;
+        }
+        return true;
+    }
+
+    @Nullable
+    private GraphVanillaJob beginGraphVanillaJob(
+            NodeId nodeId,
+            CraftingResolver.ResolutionStep step,
+            NodeAdmissionCoordinator.Admission admission,
+            int executions,
+            ServerPlayer online
+    ) {
+        if (graphMaterials == null || graphAdmissions == null) {
+            graphScheduler.releaseClaim(nodeId);
+            return null;
+        }
+        ExtractionLedger nodeLedger = new ExtractionLedger();
+        nodeLedger.setLogContext(ctx);
+        if (storageEndpoint != null) nodeLedger.setStorageEndpoint(storageEndpoint);
+        ExtractionLedger executionLedger = new ExtractionLedger();
+        executionLedger.setLogContext(ctx);
+        if (storageEndpoint != null) executionLedger.setStorageEndpoint(storageEndpoint);
+        OperationExecutionKernel.Session operation = operationKernel.prepareLogical();
+        MaterialBroker.Checkout checkout = graphMaterials.checkout(admission.materialToken());
+        List<ItemStack> operationInventory = new ArrayList<>(checkout.producerStacks());
+        for (ItemStack initial : checkout.initialStacks()) {
+            ItemStack reserved = reserveExact(nodeLedger, initial, initial.getCount(), online);
+            if (reserved.isEmpty()) {
+                graphAdmissions.releaseMaterial(admission);
+                nodeLedger.rollback(online);
+                operation.close();
+                executionLedger.close();
+                graphScheduler.releaseClaim(nodeId);
+                return null;
+            }
+            operationInventory.add(reserved);
+        }
+        if (!operation.commit(() -> commitLedger(nodeLedger, online))) {
+            graphAdmissions.releaseMaterial(admission);
+            if (nodeLedger.isCommitted()) refundCommitted(nodeLedger, online);
+            else nodeLedger.rollback(online);
+            operation.close();
+            executionLedger.close();
+            graphScheduler.releaseClaim(nodeId);
+            return null;
+        }
+        graphAdmissions.commit(admission);
+        return new GraphVanillaJob(nodeId, step, admission, nodeLedger,
+                executionLedger, operation, operationInventory, executions);
+    }
+
+    private boolean runGraphVanillaSlice(
+            GraphVanillaJob job, int executions, ServerPlayer online) {
+        boolean executed;
+        try {
+            executed = executeGraphVanillaSlice(job, executions, online);
+        } catch (RuntimeException exception) {
+            RSIntegrationMod.LOGGER.error(ctx.format("Graph vanilla operation threw for {}"),
+                    job.nodeId, exception);
+            graphFailureDetails.put(job.nodeId,
+                    "synchronous vanilla execution threw: " + exception.getMessage());
+            graphFailureCodes.put(job.nodeId, CraftFailureCode.INTERNAL_ERROR);
+            executed = false;
+        }
+        if (!executed || state == State.ABORTED) {
+            recoverGraphVanillaJob(job);
+            graphFailureDetails.putIfAbsent(job.nodeId,
+                    "synchronous vanilla execution failed before producing outputs");
+            graphFailureCodes.putIfAbsent(job.nodeId,
+                    CraftFailureCode.MATERIAL_EXTRACTION_FAILED);
+            if (graphScheduler.state(job.nodeId) == DagScheduler.NodeState.RUNNING) {
+                graphScheduler.fail(job.nodeId);
+            }
+            return false;
+        }
+
+        job.remainingExecutions -= executions;
+        if (job.remainingExecutions > 0) {
+            waitingForVanillaBudget = true;
+            graphProgressWatchdog.markProgress();
+            return true;
+        }
+        return completeGraphVanillaJob(job);
+    }
+
+    private boolean executeGraphVanillaSlice(
+            GraphVanillaJob job, int executions, ServerPlayer online) {
+        CraftingResolver.ResolutionStep slice = job.step.withExecutions(executions);
+        OperationExecutionKernel.StartAction run = () -> executeVanillaStepsInline(
+                List.of(slice), online, job.inventory, job.executionLedger, false)
+                && commitLedger(job.executionLedger, online);
+        return job.operation.startAttempted() ? run.start() : job.operation.tryStart(run);
+    }
+
+    private boolean completeGraphVanillaJob(GraphVanillaJob job) {
+        boolean outputsComplete = publishDeclaredNodeOutputs(job.nodeId, job.inventory);
+        OperationExecutionKernel.CompletionResult completion = job.operation.complete(
+                () -> outputsComplete,
+                () -> settleGraphVanillaJob(job));
+        closeGraphVanillaJob(job);
+        if (completion == OperationExecutionKernel.CompletionResult.OUTPUT_SHORTAGE) {
+            String detail = "output shortage after synchronous crafting";
+            graphFailureDetails.put(job.nodeId, detail);
+            graphFailureCodes.put(job.nodeId, CraftFailureCode.OUTPUT_MISSING);
+            RSIntegrationMod.LOGGER.warn(ctx.format("Graph node {} completion failed: {}"),
+                    job.nodeId, detail);
+            graphScheduler.fail(job.nodeId);
+            return false;
+        }
+        snapshotCommittedVirtual();
+        graphScheduler.succeed(job.nodeId);
+        graphProgressWatchdog.markProgress();
+        currentStepIdx = stepIndex(job.nodeId) + 1;
+        return true;
+    }
+
+    private void recoverGraphVanillaJob(GraphVanillaJob job) {
+        for (ItemStack stack : job.inventory) {
+            if (stack != null && !stack.isEmpty()) addToVirtualInventory(stack.copy());
+        }
+        job.inventory.clear();
+        try {
+            settleGraphVanillaJob(job);
+        } catch (RuntimeException exception) {
+            RSIntegrationMod.LOGGER.error(ctx.format(
+                    "Failed to settle recovered graph vanilla node {}"), job.nodeId, exception);
+        } finally {
+            closeGraphVanillaJob(job);
+            snapshotCommittedVirtual();
+        }
+    }
+
+    private void settleGraphVanillaJob(GraphVanillaJob job) {
+        if (graphAdmissions != null
+                && graphMaterials != null
+                && graphMaterials.state(job.admission.materialToken())
+                == MaterialBroker.ReservationState.COMMITTED) {
+            graphAdmissions.settleMaterial(job.admission);
+        }
+        if (job.nodeLedger.isCommitted()) job.nodeLedger.settleAllCommitted();
+        if (job.executionLedger.isCommitted()) job.executionLedger.settleAllCommitted();
+    }
+
+    private void closeGraphVanillaJob(GraphVanillaJob job) {
+        graphVanillaJobs.remove(job.nodeId);
+        job.operation.close();
+        job.nodeLedger.close();
+        job.executionLedger.close();
     }
 
     private void logGraphNodeMappings(CraftPlanGraph plan) {
@@ -1230,14 +1362,18 @@ public final class AsyncCraftChain {
         }
     }
 
-    static boolean claimVanillaBudgetOrReleaseAdmission(
+    static int claimGraphVanillaExecutions(
             VanillaCraftingTickBudget.ChainAllowance allowance,
-            NodeAdmissionCoordinator admissions,
-            NodeAdmissionCoordinator.Admission admission,
-            int executions) {
-        if (allowance.tryClaimExact(executions)) return true;
-        admissions.releaseBeforeDispatch(admission);
-        return false;
+            int remainingExecutions,
+            boolean stableBatchEligible
+    ) {
+        if (remainingExecutions <= 0) {
+            throw new IllegalArgumentException("remainingExecutions must be positive");
+        }
+        if (stableBatchEligible) {
+            return allowance.tryClaimExact(1) ? remainingExecutions : 0;
+        }
+        return allowance.claimUpTo(remainingExecutions);
     }
 
     @Nullable
@@ -5494,6 +5630,12 @@ public final class AsyncCraftChain {
     private void cleanupGraphNodes(@Nullable ServerPlayer player, String reason) {
         if (graphExecutor != null) {
             graphExecutor.stopScheduling();
+        }
+        for (GraphVanillaJob job : List.copyOf(graphVanillaJobs.values())) {
+            RSIntegrationMod.LOGGER.debug(ctx.format(
+                    "Recovering interrupted graph vanilla node {} after {}"),
+                    job.nodeId, reason);
+            recoverGraphVanillaJob(job);
         }
         for (CraftNodeRuntime runtime : List.copyOf(nodeRuntimes.values())) {
             if (runtime.failureReason() != null && !runtime.failureReason().isEmpty()) {

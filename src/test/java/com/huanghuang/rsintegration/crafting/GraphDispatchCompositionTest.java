@@ -143,8 +143,9 @@ class GraphDispatchCompositionTest extends BootstrapTest {
         assertNotNull(first);
         assertTrue(allowance.tryClaimExact(1));
 
-        assertFalse(AsyncCraftChain.claimVanillaBudgetOrReleaseAdmission(
-                allowance, harness.admissions, first, 1));
+        assertEquals(0, AsyncCraftChain.claimGraphVanillaExecutions(
+                allowance, 1, false));
+        harness.admissions.releaseBeforeDispatch(first);
         assertEquals(DagScheduler.NodeState.READY, harness.scheduler.state(harness.node));
         assertEquals(1, harness.broker.available(harness.source, harness.material));
         assertEquals(0, harness.broker.heldBy(harness.node));

@@ -56,9 +56,6 @@ final class StableRecipeBatch {
             ServerLevel level, CraftingResolver.ResolutionStep step,
             ServerPlayer player, List<ItemStack> workingInventory,
             ExtractionLedger ledger, FlatCraftExecutor.Context context) {
-        if (context.chainSteps().stream().anyMatch(value -> value.modType() != ModType.GENERIC)) {
-            return new Result(Outcome.NOT_APPLICABLE, "mixed execution chain");
-        }
         if (ledger.hasPreferredResonanceReservations()) {
             return new Result(Outcome.NOT_APPLICABLE, "resonance reservation preferred");
         }

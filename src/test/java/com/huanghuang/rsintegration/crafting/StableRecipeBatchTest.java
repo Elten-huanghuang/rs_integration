@@ -112,6 +112,27 @@ class StableRecipeBatchTest extends BootstrapTest {
     }
 
     @Test
+    void aggregatesBillionsOfStableWorkbenchExecutionsWithoutPerCraftLooping() {
+        ResourceLocation recipeId = new ResourceLocation("test", "billion_stone");
+        ShapelessRecipe recipe = new ShapelessRecipe(
+                recipeId, "", CraftingBookCategory.MISC, new ItemStack(Items.STONE),
+                NonNullList.withSize(1, Ingredient.of(Items.COBBLESTONE)));
+        Fixture fixture = fixture(Map.of(recipeId, recipe));
+        int executions = 2_100_000_000;
+        List<ItemStack> inventory = new ArrayList<>(
+                List.of(new ItemStack(Items.COBBLESTONE, executions)));
+
+        try (ExtractionLedger ledger = new ExtractionLedger()) {
+            assertEquals(StableRecipeBatch.Outcome.SUCCESS,
+                    execute(fixture, recipeId, executions, inventory, ledger));
+        }
+
+        assertEquals(1, inventory.size());
+        assertTrue(inventory.get(0).is(Items.STONE));
+        assertEquals(executions, inventory.get(0).getCount());
+    }
+
+    @Test
     void executesSelfAmplifyingSeedStagesWithoutCollapsingToPerCraftLoops() {
         ResourceLocation recipeId = new ResourceLocation("test", "amplifying_stage");
         ShapelessRecipe recipe = new ShapelessRecipe(
@@ -197,6 +218,37 @@ class StableRecipeBatchTest extends BootstrapTest {
         assertEquals(1, inventory.size());
         assertTrue(inventory.get(0).is(Items.DEEPSLATE));
         assertEquals(9, inventory.get(0).getCount());
+    }
+
+    @Test
+    void stableBatchRunsForGenericNodeInMixedExecutionGraph() {
+        ResourceLocation recipeId = new ResourceLocation("test", "mixed_graph_generic_node");
+        ShapedRecipe recipe = compressionRecipe(recipeId, Items.COBBLESTONE, Items.STONE);
+        Fixture fixture = fixture(Map.of(recipeId, recipe));
+        CraftingResolver.ResolutionStep genericStep = new CraftingResolver.ResolutionStep(
+                recipeId, ModType.GENERIC, new ResourceLocation("minecraft", "crafting"),
+                List.of(), List.of(), false, 27);
+        CraftingResolver.ResolutionStep machineStep = new CraftingResolver.ResolutionStep(
+                new ResourceLocation("test", "machine_terminal"),
+                ModType.FLUID_CONTAINER,
+                new ResourceLocation("test", "machine"),
+                List.of(), List.of(), false, 1);
+        FlatCraftExecutor.Context context = new FlatCraftExecutor.Context(
+                fixture.level(), CraftLogContext.create(UUID.randomUUID(), recipeId),
+                List.of(genericStep, machineStep), null,
+                mock(FlatCraftExecutor.Host.class), Map.of());
+        List<ItemStack> inventory = new ArrayList<>(
+                List.of(new ItemStack(Items.COBBLESTONE, 243)));
+
+        try (ExtractionLedger ledger = new ExtractionLedger()) {
+            assertEquals(StableRecipeBatch.Outcome.SUCCESS,
+                    StableRecipeBatch.tryExecute(fixture.level(), genericStep,
+                            fixture.player(), inventory, ledger, context));
+        }
+
+        assertEquals(1, inventory.size());
+        assertTrue(inventory.get(0).is(Items.STONE));
+        assertEquals(27, inventory.get(0).getCount());
     }
 
     @Test
