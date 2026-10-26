@@ -29,7 +29,7 @@ public final class ExecutionEquivalence {
     }
 
     /** Projects one authoritative graph node without relying on list position or node id. */
-    static CraftingResolver.ResolutionStep projectStep(CraftNode node) {
+    public static CraftingResolver.ResolutionStep projectStep(CraftNode node) {
         ModType modType = ModType.findById(node.modTypeId());
         if (modType == null) {
             throw new IllegalArgumentException("unknown graph mod type " + node.modTypeId());

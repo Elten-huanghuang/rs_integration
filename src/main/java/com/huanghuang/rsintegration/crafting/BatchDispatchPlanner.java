@@ -112,6 +112,7 @@ final class BatchDispatchPlanner {
         return new CraftingResolver.ResolutionStep(
                 step.recipeId(), step.modType(), step.recipeTypeId(),
                 step.alternativeIds(), step.alternativeModTypes(), step.inferMode(),
-                executions, step.syntheticInput(), step.syntheticOutput());
+                executions, step.syntheticInput(), step.syntheticOutput(),
+                step.productionTarget(), step.magicCosts());
     }
 }

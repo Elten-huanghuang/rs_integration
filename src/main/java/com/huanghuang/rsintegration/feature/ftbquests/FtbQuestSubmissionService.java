@@ -1,11 +1,11 @@
 package com.huanghuang.rsintegration.feature.ftbquests;
 
-import com.huanghuang.rsintegration.ModType;
 import java.util.Map;
 import java.util.Set;
 
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
+import com.huanghuang.rsintegration.crafting.ExecutionEquivalence;
 import com.huanghuang.rsintegration.crafting.CraftingPlanningTimeoutException;
 import com.huanghuang.rsintegration.crafting.AsyncCraftChain;
 import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
@@ -154,10 +154,7 @@ public final class FtbQuestSubmissionService {
         for (var nodeId : plan.graph().topologicalOrder()) {
             var node = nodes.get(nodeId);
             if (node == null) continue;
-            steps.add(new CraftingResolver.ResolutionStep(node.recipeId(),
-                    ModType.byId(node.modTypeId()), node.recipeTypeId(),
-                    node.alternativeIds(), node.alternativeModTypeIds(), node.inferMode(),
-                    node.executions(), node.syntheticInput(), node.syntheticOutput()));
+            steps.add(ExecutionEquivalence.projectStep(node));
         }
         return steps;
     }
