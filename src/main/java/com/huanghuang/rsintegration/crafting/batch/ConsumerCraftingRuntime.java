@@ -1329,16 +1329,17 @@ public final class ConsumerCraftingRuntime {
                     "typed execution cannot represent a fluid production target"
             );
         }
-        ItemStack target;
+        ItemStack declaredTarget;
         try {
-            target = key.targetOutput() == null
-                    ? handler.getResultItem(
-                            recipe,
-                            player.serverLevel().registryAccess())
-                    : itemStack(key.targetOutput());
+            declaredTarget = handler.getResultItem(
+                    recipe,
+                    player.serverLevel().registryAccess());
         } catch (RuntimeException failure) {
-            target = ItemStack.EMPTY;
+            declaredTarget = ItemStack.EMPTY;
         }
+        ItemStack target = key.targetOutput() == null
+                ? declaredTarget.copy()
+                : itemStack(key.targetOutput());
         ModType type = ModType.byId(handler.modType().id());
         target = CraftMachineBindingSupport.routeRecipeOutput(type, target);
         if (target.isEmpty()) {
@@ -1369,8 +1370,17 @@ public final class ConsumerCraftingRuntime {
                     "machine context rejected the typed recipe inputs"
             );
         }
+        ItemStack routedDeclaredTarget =
+                CraftMachineBindingSupport.routeRecipeOutput(
+                        type, declaredTarget);
+        long perOperationUnits = Math.max(
+                1,
+                routedDeclaredTarget.isEmpty()
+                        ? target.getCount()
+                        : routedDeclaredTarget.getCount()
+        );
         long requestedUnits = outputsRequestedCount(
-                key, target.getCount());
+                key, perOperationUnits);
         boolean targetedProduction =
                 handler.requiresTargetedProduction(recipe, target);
         int executions;
@@ -1660,9 +1670,9 @@ public final class ConsumerCraftingRuntime {
         );
     }
 
-    private static long outputsRequestedCount(
+    static long outputsRequestedCount(
             ConsumerRecipeKey key,
-            int perOperation
+            long perOperation
     ) {
         return key.amount() instanceof ConsumerRequestAmount.Executions count
                 ? SaturatingLongMath.multiply(

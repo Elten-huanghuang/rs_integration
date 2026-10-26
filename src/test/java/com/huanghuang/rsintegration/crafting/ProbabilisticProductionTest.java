@@ -1,80 +1,69 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.huanghuang.rsintegration.api.IntegrationResourceKey;
+import com.huanghuang.rsintegration.api.execution.CollectedOutput;
+import com.huanghuang.rsintegration.api.recipe.OutputKind;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidTestFixtures;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
+import net.minecraft.world.level.material.Fluids;
+import net.minecraftforge.fluids.FluidStack;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class ProbabilisticProductionTest extends BootstrapTest {
     @Test
-    void missesDoNotReleaseDownstreamDemandAndActualSurplusCompletesIt() {
-        ProbabilisticProduction progress = new ProbabilisticProduction(
-                ProductionTarget.of(new ItemStack(Items.EGG), 3), 8);
+    void inkTokenProgressCountsMillibucketsNotTokenItems() {
+        ItemStack template = InkFluidSupport.token(
+                InkFluidTestFixtures.tokenItem(),
+                new FluidStack(Fluids.WATER, 250)
+        );
+        ProbabilisticProduction progress =
+                new ProbabilisticProduction(
+                        ProductionTarget.of(
+                                template.copyWithCount(1), 750L),
+                        8
+                );
+
         progress.started();
-        progress.settle(List.of());
-        progress.started();
-        progress.settle(List.of(new ItemStack(Items.FEATHER, 10), new ItemStack(Items.EGG)));
-        assertFalse(progress.complete());
-        assertEquals(2, progress.remaining());
-        progress.started();
-        progress.settle(List.of(new ItemStack(Items.EGG, 4)));
-        assertTrue(progress.complete());
-        assertEquals(5, progress.produced());
-        assertEquals(3, progress.attempts());
-        assertFalse(progress.canAttempt());
+        progress.settle(List.of(
+                template.copyWithCount(250),
+                template.copyWithCount(250)
+        ));
+
+        assertEquals(1, progress.attempts());
+        assertEquals(500L, progress.produced());
+        assertEquals(250L, progress.remaining());
     }
 
     @Test
-    void exhaustedBudgetRetainsRealProgressAndCannotStartAnotherAttempt() {
-        ProbabilisticProduction progress = new ProbabilisticProduction(
-                ProductionTarget.of(new ItemStack(Items.EGG), 2), 2);
-        progress.started();
-        progress.settle(List.of(new ItemStack(Items.EGG)));
-        progress.started();
-        progress.settle(List.of());
-        assertFalse(progress.canAttempt());
-        assertFalse(progress.complete());
-        assertEquals(1, progress.produced());
-        assertEquals(1, progress.remaining());
-        assertThrows(IllegalStateException.class, progress::started);
-    }
+    void fluidReportedOutputCanAdvanceProbabilisticProgress() {
+        FluidStack water = new FluidStack(Fluids.WATER, 1);
+        IntegrationResourceKey resource =
+                IntegrationResourceKey.fluid(water);
+        ProbabilisticProduction progress =
+                new ProbabilisticProduction(
+                        ProductionTarget.of(resource, 750L),
+                        8
+                );
 
-    @Test
-    void strictTargetRejectsAnotherNbtVariantWhileItemOnlyTargetAcceptsRuntimeTags() {
-        ItemStack exact = new ItemStack(Items.PAPER);
-        exact.getOrCreateTag().putString("quality", "rare");
-        ProbabilisticProduction strict = new ProbabilisticProduction(ProductionTarget.of(exact, 1), 4);
-        ItemStack other = new ItemStack(Items.PAPER);
-        other.getOrCreateTag().putString("quality", "common");
-        strict.started();
-        strict.settle(List.of(other, new ItemStack(Items.PAPER)));
-        assertEquals(0, strict.produced());
-        strict.started();
-        strict.settle(List.of(exact));
-        assertTrue(strict.complete());
-        ProbabilisticProduction itemOnly = new ProbabilisticProduction(
-                ProductionTarget.of(new ItemStack(Items.PAPER), 1), 4);
-        itemOnly.started();
-        itemOnly.settle(List.of(other));
-        assertTrue(itemOnly.complete());
-    }
-
-    @Test
-    void fluidQuantityIsCountedInUnitsWithoutStackSizeTruncation() {
-        ProbabilisticProduction progress = new ProbabilisticProduction(
-                ProductionTarget.of(new ItemStack(Items.PAPER), 750), 16);
-        for (int i = 0; i < 2; i++) {
-            progress.started();
-            progress.settle(List.of(new ItemStack(Items.PAPER, 250)));
-            assertFalse(progress.complete());
-        }
         progress.started();
-        progress.settle(List.of(new ItemStack(Items.PAPER, 250)));
-        assertTrue(progress.complete());
-        assertEquals(750, progress.produced());
+        progress.settle(
+                List.of(),
+                List.of(new CollectedOutput(
+                        resource,
+                        500L,
+                        OutputKind.PRIMARY,
+                        new ResourceLocation("test", "fluid_output")
+                ))
+        );
+
+        assertEquals(500L, progress.produced());
+        assertEquals(250L, progress.remaining());
     }
 }

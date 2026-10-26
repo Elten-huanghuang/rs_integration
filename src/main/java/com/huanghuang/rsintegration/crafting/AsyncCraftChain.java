@@ -792,7 +792,8 @@ public final class AsyncCraftChain {
                     }
                     OutputCollection collectedOutputs = collectOutputsForSettlement(
                             currentDelegate, online, disarmOutputCapture());
-                    recordReportedResources(currentDelegate);
+                    List<CollectedOutput> reported =
+                            recordReportedResources(currentDelegate);
                     closeFlatOperationScope();
                     List<ItemStack> actualResults = collectedOutputs.stacks();
                     for (ItemStack result : actualResults) addToVirtualInventory(result);
@@ -810,7 +811,9 @@ public final class AsyncCraftChain {
                         return true;
                     }
                     ProbabilisticProduction probability = probabilityTargets.get(steps.get(currentStepIdx));
-                    if (probability != null) probability.settle(actualResults);
+                    if (probability != null) {
+                        probability.settle(actualResults, reported);
+                    }
 
                     IBatchDelegate.ExpectedProduction expected = currentDelegate.getExpectedProduction();
                     int actualCount = countMatchingProduction(actualResults, expected);
@@ -4723,12 +4726,17 @@ public final class AsyncCraftChain {
                 contract, Math.max(1, machineCount), structured));
     }
 
-    private void recordReportedResources(IBatchDelegate delegate) {
-        if (delegate == null) return;
+    private List<CollectedOutput> recordReportedResources(
+            IBatchDelegate delegate
+    ) {
+        if (delegate == null) return List.of();
+        List<CollectedOutput> recorded = new ArrayList<>();
         for (CollectedOutput output : delegate.drainReportedResources()) {
             if (output == null || output.amount() <= 0L) continue;
             reportedResources.add(output);
+            recorded.add(output);
         }
+        return List.copyOf(recorded);
     }
 
     public List<CollectedOutput> reportedResources() {

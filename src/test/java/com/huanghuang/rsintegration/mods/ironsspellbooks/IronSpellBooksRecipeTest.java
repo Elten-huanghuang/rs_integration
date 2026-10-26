@@ -4,6 +4,8 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.level.material.Fluids;
+import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.items.ItemStackHandler;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import org.junit.jupiter.api.Test;
@@ -66,6 +68,30 @@ class IronSpellBooksRecipeTest extends BootstrapTest {
                         new ResourceLocation("test", "legacy_spell"), 3),
                 IronSpellBooksRecipeCatalog.spellEntryKey(
                         new LegacySpellData(new TestSpell("test:legacy_spell"), 3)));
+    }
+
+    @Test
+    void scrollRecyclingRequiresTargetedInkProduction() {
+        ItemStack ink = InkFluidSupport.token(
+                InkFluidTestFixtures.tokenItem(),
+                new FluidStack(Fluids.WATER, 250)
+        );
+        IronSpellBooksRecipe recipe = new IronSpellBooksRecipe(
+                new ResourceLocation("test", "scroll_recycling"),
+                IronSpellBooksRecipe.Machine.ALCHEMIST_CAULDRON,
+                List.of(new ItemStack(Items.PAPER)),
+                List.of(Ingredient.of(Items.PAPER)),
+                ink,
+                "test:spell",
+                1
+        );
+        IronSpellBooksRecipeHandler handler =
+                new IronSpellBooksRecipeHandler();
+
+        assertTrue(recipe.isScrollRecycling());
+        assertFalse(handler.hasDeterministicPrimaryOutput(recipe));
+        assertTrue(handler.supportsTargetedProduction(recipe));
+        assertTrue(handler.requiresTargetedProduction(recipe, ink));
     }
 
     @Test

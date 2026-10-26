@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.huanghuang.rsintegration.api.execution.CollectedOutput;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import net.minecraft.world.item.ItemStack;
 
@@ -33,9 +34,22 @@ final class ProbabilisticProduction {
     }
 
     void settle(List<ItemStack> outputs) {
+        settle(outputs, List.of());
+    }
+
+    void settle(
+            List<ItemStack> outputs,
+            List<CollectedOutput> reportedResources
+    ) {
         for (ItemStack output : outputs) {
-            if (MaterialMatcher.matchesOutputDeclaration(target.material(), output)) {
+            if (target.matchesItem(output)) {
                 produced = SaturatingLongMath.add(produced, output.getCount());
+            }
+        }
+        for (CollectedOutput output : reportedResources) {
+            if (target.matchesFluid(output)) {
+                produced = SaturatingLongMath.add(
+                        produced, output.amount());
             }
         }
     }

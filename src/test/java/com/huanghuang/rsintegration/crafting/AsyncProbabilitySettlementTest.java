@@ -3,6 +3,9 @@ import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.api.IntegrationResourceKey;
+import com.huanghuang.rsintegration.api.execution.CollectedOutput;
+import com.huanghuang.rsintegration.api.recipe.OutputKind;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.graph.CraftNode;
@@ -11,7 +14,6 @@ import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.crafting.graph.MaterialSource;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.graph.OutputDeclaration;
-import com.huanghuang.rsintegration.crafting.graph.OutputKind;
 import com.huanghuang.rsintegration.crafting.graph.OutputPortId;
 import com.huanghuang.rsintegration.crafting.graph.RootAllocation;
 import com.huanghuang.rsintegration.crafting.graph.RootDemand;
@@ -28,6 +30,8 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeManager;
+import net.minecraft.world.level.material.Fluids;
+import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import org.junit.jupiter.api.BeforeAll;
@@ -43,6 +47,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
+import static com.huanghuang.rsintegration.crafting.graph.OutputKind.PRIMARY;
 
 class AsyncProbabilitySettlementTest extends BootstrapTest {
     @BeforeAll
@@ -88,6 +93,44 @@ class AsyncProbabilitySettlementTest extends BootstrapTest {
     }
 
     @Test
+    void flatChainAdvancesFluidProgressFromReportedResources()
+            throws Exception {
+        FluidStack water = new FluidStack(Fluids.WATER, 1);
+        IntegrationResourceKey resource =
+                IntegrationResourceKey.fluid(water);
+        Fixture fixture = fixture(
+                ProductionTarget.of(resource, 750L), 1);
+        ProbabilisticProduction progress =
+                new ProbabilisticProduction(
+                        fixture.step.productionTarget(), 16);
+        targets(fixture.chain).put(fixture.step, progress);
+
+        progress.started();
+        settle(fixture, List.of(), List.of(
+                new CollectedOutput(
+                        resource,
+                        500L,
+                        OutputKind.PRIMARY,
+                        new ResourceLocation("test", "water")
+                )
+        ));
+        assertEquals(0, field(fixture.chain, "currentStepIdx"));
+        assertEquals(500L, progress.produced());
+
+        progress.started();
+        settle(fixture, List.of(), List.of(
+                new CollectedOutput(
+                        resource,
+                        250L,
+                        OutputKind.PRIMARY,
+                        new ResourceLocation("test", "water")
+                )
+        ));
+        assertEquals(1, field(fixture.chain, "currentStepIdx"));
+        assertTrue(progress.complete());
+    }
+
+    @Test
     void supplementalPlanIsInsertedBeforeTheWaitingStepWithoutLosingProductionProgress() throws Exception {
         Fixture fixture = fixture(ProductionTarget.of(new ItemStack(Items.EGG), 3), 1);
         ProbabilisticProduction progress = new ProbabilisticProduction(fixture.step.productionTarget(), 16);
@@ -108,7 +151,7 @@ class AsyncProbabilitySettlementTest extends BootstrapTest {
         CraftNode producer = new CraftNode(nodeId, new ResourceLocation("test", "paper"),
                 ModType.GENERIC.id(), new ResourceLocation("minecraft", "crafting"), 1,
                 List.of(), List.of(), false, null, null, List.of(),
-                List.of(new OutputDeclaration(port, paper, 1, OutputKind.PRIMARY)));
+                List.of(new OutputDeclaration(port, paper, 1, PRIMARY)));
         CraftPlanGraph graph = new CraftPlanGraph(1, List.of(producer), List.of(),
                 List.of(new RootDemand(Ingredient.of(Items.PAPER), 1, 0, new ItemStack(Items.PAPER),
                         List.of(new RootAllocation(new MaterialSource.ProducerOutput(port), paper, 1)))),
@@ -158,10 +201,19 @@ class AsyncProbabilitySettlementTest extends BootstrapTest {
     }
 
     private void settle(Fixture fixture, List<ItemStack> outputs) throws Exception {
+        settle(fixture, outputs, List.of());
+    }
+
+    private void settle(
+            Fixture fixture,
+            List<ItemStack> outputs,
+            List<CollectedOutput> reported
+    ) throws Exception {
         IBatchDelegate delegate = mock(IBatchDelegate.class);
         when(delegate.observeCraft(any())).thenReturn(new IBatchDelegate.CraftObservation(IBatchDelegate.CraftPhase.DONE));
         when(delegate.validateExecutionContext(fixture.player)).thenReturn(true);
         when(delegate.collectAllResults(fixture.player)).thenReturn(outputs);
+        when(delegate.drainReportedResources()).thenReturn(reported);
         when(delegate.collectsPhysicalSecondaryOutputs()).thenReturn(true);
         set(fixture.chain, "currentDelegate", delegate);
         assertFalse(fixture.chain.tick());

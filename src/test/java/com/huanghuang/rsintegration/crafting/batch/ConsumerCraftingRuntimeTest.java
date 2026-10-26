@@ -3,6 +3,9 @@ package com.huanghuang.rsintegration.crafting.batch;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.api.consumer.ConsumerOutputDestination;
 import com.huanghuang.rsintegration.api.consumer.ConsumerOutputResult;
+import com.huanghuang.rsintegration.api.consumer.ConsumerPlanningPreferences;
+import com.huanghuang.rsintegration.api.consumer.ConsumerRecipeKey;
+import com.huanghuang.rsintegration.api.consumer.ConsumerRequestAmount;
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.api.execution.CollectedOutput;
 import com.huanghuang.rsintegration.api.recipe.OutputKind;
@@ -146,6 +149,29 @@ class ConsumerCraftingRuntimeTest extends BootstrapTest {
         assertEquals(1, step.executions());
         assertEquals(17L, step.productionTarget().quantity());
         assertEquals(Items.DIAMOND, step.syntheticOutput().getItem());
+    }
+
+    @Test
+    void executionsUseDeclaredOutputUnitsPerOperation() {
+        ConsumerRecipeKey executions = new ConsumerRecipeKey(
+                resource("ink_recycling"),
+                null,
+                new ConsumerRequestAmount.Executions(3),
+                ConsumerPlanningPreferences.empty()
+        );
+        ConsumerRecipeKey units = new ConsumerRecipeKey(
+                resource("ink_recycling"),
+                null,
+                new ConsumerRequestAmount.OutputUnits(750L),
+                ConsumerPlanningPreferences.empty()
+        );
+
+        assertEquals(750L,
+                ConsumerCraftingRuntime.outputsRequestedCount(
+                        executions, 250));
+        assertEquals(750L,
+                ConsumerCraftingRuntime.outputsRequestedCount(
+                        units, 250));
     }
 
     private static MaterialRef material(String path) {
