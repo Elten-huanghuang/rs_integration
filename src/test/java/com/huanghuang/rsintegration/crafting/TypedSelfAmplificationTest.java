@@ -165,4 +165,80 @@ class TypedSelfAmplificationTest extends BootstrapTest {
                     Ingredient.of(Items.EMERALD), 1, context, 0, new EdgeTracker()), missing.toString());
         }
     }
+
+    @Test
+    void oneBrickSeedCanCraftTheFourApparatusNeededByTacz() {
+        AlchemyRecipe brickRecipe = new AlchemyRecipe(
+                new ResourceLocation("embers", "alchemy/test_brick_for_tacz"),
+                Ingredient.of(Items.DIAMOND),
+                new ArrayList<>(List.of(Ingredient.of(Items.COAL))),
+                new ArrayList<>(List.of(
+                        Ingredient.of(Items.SOUL_SAND),
+                        Ingredient.of(Items.CLAY_BALL))),
+                new ItemStack(Items.DIAMOND, 5),
+                ItemStack.EMPTY);
+        CraftingRecipe circuitRecipe = mock(CraftingRecipe.class);
+        when(circuitRecipe.getId())
+                .thenReturn(new ResourceLocation("test", "circuit_for_tacz"));
+        when(circuitRecipe.getIngredients()).thenReturn(NonNullList.of(
+                Ingredient.EMPTY,
+                Ingredient.of(Items.DIAMOND),
+                Ingredient.of(Items.DIAMOND),
+                Ingredient.of(Items.DIAMOND),
+                Ingredient.of(Items.DIAMOND),
+                Ingredient.of(Items.COPPER_INGOT)));
+        when(circuitRecipe.getRemainingItems(any())).thenReturn(NonNullList.create());
+        when(circuitRecipe.getResultItem(any()))
+                .thenReturn(new ItemStack(Items.REDSTONE));
+        AlchemyRecipe apparatusRecipe = new AlchemyRecipe(
+                new ResourceLocation("embers", "alchemy/test_apparatus_for_tacz"),
+                Ingredient.of(Items.COPPER_INGOT),
+                new ArrayList<>(List.of(Ingredient.of(Items.COAL))),
+                new ArrayList<>(List.of(
+                        Ingredient.of(Items.COPPER_INGOT),
+                        Ingredient.of(Items.REDSTONE),
+                        Ingredient.of(Items.COPPER_INGOT),
+                        Ingredient.of(Items.REDSTONE))),
+                new ItemStack(Items.EMERALD, 4),
+                ItemStack.EMPTY);
+        RecipeIndex.Entry brickEntry = new RecipeIndex.Entry(
+                brickRecipe, ModType.byId(ModIds.ID_EMBERS_ALCHEMY),
+                new ResourceLocation("embers", "alchemy"), false);
+        RecipeIndex.Entry circuitEntry = new RecipeIndex.Entry(
+                circuitRecipe, ModType.GENERIC,
+                new ResourceLocation("minecraft", "crafting"), false);
+        RecipeIndex.Entry apparatusEntry = new RecipeIndex.Entry(
+                apparatusRecipe, ModType.byId(ModIds.ID_EMBERS_ALCHEMY),
+                new ResourceLocation("embers", "alchemy"), false);
+
+        Level level = mock(Level.class);
+        when(level.registryAccess()).thenReturn(RegistryAccess.EMPTY);
+        ServerPlayer player = mock(ServerPlayer.class);
+        ArrayList<String> missing = new ArrayList<>();
+        try (MockedStatic<AltarBindingRegistry> bindings =
+                     mockStatic(AltarBindingRegistry.class);
+             MockedStatic<RecipeIndex> recipeIndex =
+                     mockStatic(RecipeIndex.class)) {
+            recipeIndex.when(() -> RecipeIndex.reusableCatalystRoutes(any()))
+                    .thenReturn(Map.of());
+            bindings.when(() -> AltarBindingRegistry.hasBindingForRecipe(
+                    any(), any(), any())).thenReturn(true);
+            ResolutionContext context = new ResolutionContext(
+                    level, Map.of(
+                            Items.DIAMOND, List.of(brickEntry),
+                            Items.REDSTONE, List.of(circuitEntry),
+                            Items.EMERALD, List.of(apparatusEntry)),
+                    Map.of(new StackKey(Items.DIAMOND, null), 1L,
+                            new StackKey(Items.SOUL_SAND, null), 2L,
+                            new StackKey(Items.CLAY_BALL, null), 4L,
+                            new StackKey(Items.COPPER_INGOT, null), 5L),
+                    null, null, player, null, false, missing,
+                    Long.MAX_VALUE, false)
+                    .withPreferences(PlanningPreferences.empty());
+
+            assertTrue(CraftingResolver.ensureIngredient(
+                    Ingredient.of(Items.EMERALD), 4, context, 0,
+                    new EdgeTracker()), missing.toString());
+        }
+    }
 }

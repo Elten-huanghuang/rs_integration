@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.crafting.graph.CraftNode;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.graph.InputDemand;
@@ -323,9 +324,13 @@ final class StepExecutor {
         boolean bladeCrafting = SlashBladeRecipeHandler.isShapedBladeRecipe(recipe);
         for (int originalIndex : resolutionOrder) {
             IngredientSpec spec = physicalSpecs.get(originalIndex);
-            int quantity = handler != null
+            long quantityLong = spec.consumption().kind()
+                    == InputConsumption.Kind.DURABILITY
+                    ? ctx.requiredDurabilityItems(spec, batches)
+                    : handler != null
                     ? handler.requiredIngredientCount(recipe, spec, originalIndex, batches)
                     : CraftPacketUtils.requiredCount(spec, batches);
+            int quantity = SaturatingLongMath.clampToInt(quantityLong);
             InputPortId port = new InputPortId(nodeId, originalIndex);
             // 刀的展示栈只代表条件下限，不能把工作台原料锁成整份 NBT 相等。
             Ingredient plannedIngredient;

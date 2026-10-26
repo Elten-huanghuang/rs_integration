@@ -1098,6 +1098,13 @@ public final class CraftingResolver {
                         stageBatches = SaturatingLongMath.clampToInt(Math.min(batchesLeft,
                                 ctx.countMatching(exactOutput) / selfConsumed));
                         if (stageBatches <= 0) {
+                            if (ctx.diagnosticsEnabled()) {
+                                ctx.diag("ensureIngredient bootstrap missing recipe="
+                                        + a.entry.recipe().getId()
+                                        + " output=" + describeFirstItem(exactOutput)
+                                        + " available=" + ctx.countMatching(exactOutput)
+                                        + " requiredSeed=" + selfConsumed);
+                            }
                             allOk = false;
                             break;
                         }

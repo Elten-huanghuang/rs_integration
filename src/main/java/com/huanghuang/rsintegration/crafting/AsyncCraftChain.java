@@ -50,6 +50,7 @@ import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.graph.ConcurrentNodeExecutor;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanValidator;
 import com.huanghuang.rsintegration.crafting.graph.DagScheduler;
+import com.huanghuang.rsintegration.crafting.graph.InputDemand;
 import com.huanghuang.rsintegration.crafting.graph.MaterialAllocation;
 import com.huanghuang.rsintegration.crafting.graph.MaterialBroker;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
@@ -75,6 +76,7 @@ import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
+import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
@@ -2097,6 +2099,33 @@ public final class AsyncCraftChain {
     }
 
     /**
+     * 耐久输入的物理件数依赖运行时 Damage NBT，规划阶段已经算出精确数量。
+     * 返回 null 表示该节点没有耐久输入，继续使用 delegate 的普通缩放路径。
+     */
+    @Nullable
+    private List<IngredientSpec> plannedDurabilityGraphSpecs(NodeId nodeId) {
+        CraftNode node = graphNodes.get(nodeId);
+        return node == null ? null : plannedDurabilityGraphSpecs(node.inputs());
+    }
+
+    @Nullable
+    static List<IngredientSpec> plannedDurabilityGraphSpecs(List<InputDemand> inputs) {
+        if (inputs == null || inputs.isEmpty()
+                || inputs.stream().noneMatch(input ->
+                input.consumption().kind() == InputConsumption.Kind.DURABILITY)) {
+            return null;
+        }
+        List<IngredientSpec> specs = new ArrayList<>(inputs.size());
+        for (InputDemand input : inputs) {
+            specs.add(new IngredientSpec(
+                    input.ingredient(),
+                    SaturatingLongMath.clampToInt(input.quantity()),
+                    input.consumption()));
+        }
+        return List.copyOf(specs);
+    }
+
+    /**
      * Reusable materials are required once per physical worker.  The graph
      * planner intentionally records only one catalyst demand, so use the live
      * RS/player snapshot to avoid selecting more workers than can be equipped.
@@ -2190,8 +2219,17 @@ public final class AsyncCraftChain {
             }
             boolean parallelGroup = delegate instanceof ParallelCraftGroup;
             MaterialPlan materialPlan = parallelGroup ? MaterialPlan.none() : materialPlanFor(delegate);
+            List<IngredientSpec> plannedDurabilitySpecs =
+                    plannedDurabilityGraphSpecs(nodeId);
+            if (plannedDurabilitySpecs != null
+                    && plannedDurabilitySpecs.size() != materialPlan.entries().size()) {
+                plannedDurabilitySpecs = null;
+            }
             List<IngredientSpec> graphSpecs = parallelGroup
-                    ? delegate.getGraphSpecs() : materialPlan.legacyGraphSpecs();
+                    ? delegate.getGraphSpecs()
+                    : plannedDurabilitySpecs != null
+                    ? plannedDurabilitySpecs
+                    : materialPlan.legacyGraphSpecs();
             GraphNodeMaterials reserved;
             if (delegate instanceof CrockPotBatchDelegate crockPot
                     && crockPot.usesPlannedCategoryMaterials()) {
@@ -2208,7 +2246,9 @@ public final class AsyncCraftChain {
                     return GraphDispatchResult.fatal("delegate did not expose graph materials");
                 }
                 reserved = reserveGraphNodeMaterials(
-                        delegate, graphSpecs, prepared.step().executions(), online,
+                        delegate, graphSpecs,
+                        plannedDurabilitySpecs != null ? 1 : prepared.step().executions(),
+                        online,
                         nodeLedger, admission.materialToken());
             }
             if (reserved == null) return GraphDispatchResult.retry("exact graph materials are temporarily unavailable");

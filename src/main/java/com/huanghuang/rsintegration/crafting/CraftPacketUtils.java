@@ -1069,11 +1069,11 @@ public final class CraftPacketUtils {
 
     private static long requiredCountLong(IngredientSpec spec, long executions) {
         return spec.consumption().requiredPhysicalAmount(
-                executions, spec.count(), capacityPerItem(spec));
+                executions, spec.count(), capacityPerItemForPlanning(spec));
     }
 
     /** 规划阶段对未知具体变体采用保守的最小容量。 */
-    private static long capacityPerItem(IngredientSpec spec) {
+    static long capacityPerItemForPlanning(IngredientSpec spec) {
         InputConsumption.Kind kind = spec.consumption().kind();
         if (kind != InputConsumption.Kind.DURABILITY
                 && kind != InputConsumption.Kind.FUEL) {

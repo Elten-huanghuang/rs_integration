@@ -1,11 +1,21 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
+import com.huanghuang.rsintegration.crafting.graph.InputDemand;
+import com.huanghuang.rsintegration.crafting.graph.InputPortId;
+import com.huanghuang.rsintegration.crafting.graph.NodeId;
+import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.crafting.Ingredient;
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class GraphVanillaBatchBudgetTest {
+class GraphVanillaBatchBudgetTest extends BootstrapTest {
 
     @Test
     void stableGraphBatchCostsOneOperationRegardlessOfExpandedExecutions() {
@@ -32,5 +42,30 @@ class GraphVanillaBatchBudgetTest {
         assertEquals(114, totalGranted);
         assertEquals(0, remaining);
         assertEquals(15, ticks);
+    }
+
+    @Test
+    void durabilityGraphInputsKeepTheirPlannedPhysicalItemCount() {
+        List<InputDemand> inputs = List.of(
+                new InputDemand(
+                        new InputPortId(new NodeId(0), 0),
+                        Ingredient.of(Items.IRON_PICKAXE),
+                        2L,
+                        InputConsumption.durability(1L),
+                        new ItemStack(Items.IRON_PICKAXE)),
+                new InputDemand(
+                        new InputPortId(new NodeId(0), 1),
+                        Ingredient.of(Items.REDSTONE),
+                        3L,
+                        InputConsumption.consumed(),
+                        new ItemStack(Items.REDSTONE)));
+
+        List<IngredientSpec> specs =
+                AsyncCraftChain.plannedDurabilityGraphSpecs(inputs);
+
+        assertEquals(2, specs.get(0).count());
+        assertEquals(InputConsumption.Kind.DURABILITY,
+                specs.get(0).consumption().kind());
+        assertEquals(3, specs.get(1).count());
     }
 }

@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.graph.AllocationId;
 import com.huanghuang.rsintegration.crafting.graph.CraftNode;
+import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.crafting.graph.InputPortId;
 import com.huanghuang.rsintegration.crafting.graph.MaterialAllocation;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
@@ -623,6 +624,73 @@ final class ResolutionContext {
             }
         }
         return total;
+    }
+
+    /**
+     * 按候选物品的实际 Damage NBT 计算耐久输入需要的物理件数。
+     *
+     * <p>规划不能只查看 Ingredient 中未磨损的模板，否则一把快损坏的工具
+     * 会被错误地当成能完成整批操作。已有物品按剩余耐久优先使用，不足部分
+     * 再按新造模板的满耐久容量计算。</p>
+     */
+    long requiredDurabilityItems(IngredientSpec spec, long operations) {
+        if (spec == null || spec.isEmpty()
+                || spec.consumption().kind()
+                != InputConsumption.Kind.DURABILITY) {
+            return CraftPacketUtils.requiredCount(spec, operations);
+        }
+        long safeOperations = Math.max(1L, operations);
+        long damagePerUse = Math.max(1L, spec.consumption().unitsPerOperation());
+        long requiredUses = multiplySaturated(safeOperations, damagePerUse);
+        record DurabilityCandidate(long count, long usesPerItem) {}
+        List<DurabilityCandidate> candidates = new ArrayList<>();
+        for (Map.Entry<CraftingResolver.StackKey, Long> entry : counts.entrySet()) {
+            long count = entry.getValue() == null ? 0L : entry.getValue();
+            if (count <= 0L || !matches(spec.ingredient(), entry.getKey())) continue;
+            CachedStack cached = stacksByKey.get(entry.getKey());
+            ItemStack stack = cached == null ? entry.getKey().toStack() : cached.stack;
+            if (stack.isEmpty() || !stack.isDamageableItem()) continue;
+            long remaining = Math.max(0L,
+                    (long) stack.getMaxDamage() - stack.getDamageValue());
+            long usesPerItem = ceilDiv(remaining, damagePerUse);
+            if (usesPerItem > 0L) {
+                candidates.add(new DurabilityCandidate(count, usesPerItem));
+            }
+        }
+        candidates.sort((left, right) ->
+                Long.compare(right.usesPerItem(), left.usesPerItem()));
+
+        long remainingUses = requiredUses;
+        long itemCount = 0L;
+        for (DurabilityCandidate candidate : candidates) {
+            if (remainingUses <= 0L) break;
+            long neededItems = ceilDiv(remainingUses, candidate.usesPerItem());
+            long usedItems = Math.min(candidate.count(), neededItems);
+            long coveredUses = multiplySaturated(usedItems, candidate.usesPerItem());
+            remainingUses = Math.max(0L, remainingUses - coveredUses);
+            itemCount = saturatingAdd(itemCount, usedItems);
+        }
+        if (remainingUses > 0L) {
+            long freshUses = Math.max(1L,
+                    CraftPacketUtils.capacityPerItemForPlanning(spec));
+            itemCount = saturatingAdd(itemCount, ceilDiv(remainingUses, freshUses));
+        }
+        return Math.min(safeOperations, itemCount);
+    }
+
+    private static long saturatingAdd(long left, long right) {
+        return right > Long.MAX_VALUE - left ? Long.MAX_VALUE : left + right;
+    }
+
+    private static long multiplySaturated(long left, long right) {
+        if (left <= 0L || right <= 0L) return 0L;
+        return left > Long.MAX_VALUE / right ? Long.MAX_VALUE : left * right;
+    }
+
+    private static long ceilDiv(long value, long divisor) {
+        if (value <= 0L) return 0L;
+        long safeDivisor = Math.max(1L, divisor);
+        return value / safeDivisor + (value % safeDivisor == 0L ? 0L : 1L);
     }
 
     SupplyConsumption consumeMatchingDetailed(Ingredient ingredient, long needed) {

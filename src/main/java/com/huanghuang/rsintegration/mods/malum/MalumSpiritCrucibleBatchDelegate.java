@@ -93,6 +93,8 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     private boolean craftStarted;
     private boolean craftWasSeenActive;
     private int bufferedOperations = 1;
+    private ItemStack catalystStock = ItemStack.EMPTY;
+    private boolean catalystStockInitialized;
     @Nullable
     private CraftStorageEndpoint catalystReturnEndpoint;
     @Nullable
@@ -715,6 +717,10 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         ItemStack catalystToPlace = ItemStack.EMPTY;
 
         if (!materials.isEmpty()) {
+            if (!catalystStockInitialized) {
+                catalystStock = materials.get(0).copy();
+                catalystStockInitialized = true;
+            }
             ItemStack existing = invCatalyst.getStackInSlot(0);
             if (!existing.isEmpty()
                     && !keepsCatalystInSlot(getRequiredMaterials(), existing)) {
@@ -725,7 +731,8 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             if (!existing.isEmpty()) {
                 // A reusable catalyst can remain in place between operations.
             } else {
-                catalystToPlace = materials.get(0).copy();
+                catalystToPlace = takeCatalystFromStock();
+                if (catalystToPlace.isEmpty()) return false;
             }
         }
 
@@ -1074,11 +1081,23 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
                 allReturned = false;
             }
         }
+        if (!catalystStock.isEmpty()) {
+            if (tryReturnCrucibleItem(catalystStock.copy(), returnPlayer)) {
+                catalystStock = ItemStack.EMPTY;
+            } else {
+                allReturned = false;
+            }
+        }
         if (crucibleBE instanceof BlockEntity be) be.setChanged();
         if (allReturned) {
-            catalystReturnEndpoint = null;
+            catalystStockInitialized = false;
             catalystReturnEndpoint = null;
         }
+    }
+
+    private ItemStack takeCatalystFromStock() {
+        if (catalystStock.isEmpty()) return ItemStack.EMPTY;
+        return catalystStock.split(1);
     }
 
     private boolean hasReusableCatalystInput() {
@@ -1199,6 +1218,10 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
                 }
             }
         }
+        if (!catalystStock.isEmpty()) {
+            recovered.add(catalystStock.copy());
+            catalystStock = ItemStack.EMPTY;
+        }
         if (usingSharedLedger) {
             recordFailureRecoveredInputs(recovered);
         } else {
@@ -1225,6 +1248,8 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
                 setSlot(invSpirits, i, ItemStack.EMPTY);
             }
         }
+        catalystStock = ItemStack.EMPTY;
+        catalystStockInitialized = false;
         if (crucibleBE instanceof BlockEntity be) be.setChanged();
     }
 
