@@ -91,6 +91,29 @@ sourceSets {
         compileClasspath += sourceSets.test.runtimeClasspath
         runtimeClasspath += sourceSets.test.runtimeClasspath
     }
+    examplemod {
+        compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+        runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
+    }
+}
+
+minecraft {
+    runs {
+        client {
+            mods {
+                rsi_integration_example {
+                    source sourceSets.examplemod
+                }
+            }
+        }
+        server {
+            mods {
+                rsi_integration_example {
+                    source sourceSets.examplemod
+                }
+            }
+        }
+    }
 }
 
 dependencies {
@@ -284,6 +307,7 @@ tasks.register('verifyNoForcedChunkLoads') {
 }
 
 check.dependsOn tasks.named('verifyNoForcedChunkLoads')
+check.dependsOn tasks.named('compileExamplemodJava')
 
 test {
     useJUnitPlatform()
@@ -304,6 +328,10 @@ compileJava {
 }
 
 compileTestJava {
+    options.encoding = 'UTF-8'
+}
+
+compileExamplemodJava {
     options.encoding = 'UTF-8'
 }
 
