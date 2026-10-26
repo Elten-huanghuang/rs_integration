@@ -4,6 +4,7 @@ import com.hollingsworth.arsnouveau.api.source.AbstractSourceMachine;
 import com.hollingsworth.arsnouveau.api.source.ISourceTile;
 import com.hollingsworth.arsnouveau.common.block.tile.SourceJarTile;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import com.huanghuang.rsintegration.mixin.plugin.RSIntegrationMixinPlugin;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntityType;
@@ -60,12 +61,39 @@ class ArsResonantSourceNativeInteropTest extends BootstrapTest {
     }
 
     @Test
+    void nativeSourceInputStillWorksAfterInventoryExceedsIntMax() {
+        ArsResonantSourceTankBlockEntity tank = spy(tank());
+        doReturn(true).when(tank).isBound();
+        doReturn(true).when(tank).reachable();
+        doReturn(21_000_000_000L).when(tank).currentAmount();
+        doReturn(Long.MAX_VALUE).when(tank).resourceCapacity();
+        doReturn(0).when(tank).insert(anyInt());
+
+        assertTrue(tank.canAcceptSource(),
+                "实际库存仍低于 long 容量时不能因 int 饱和而伪装成已满");
+
+        tank.addSource(Integer.MAX_VALUE);
+
+        verify(tank).insert(Integer.MAX_VALUE);
+    }
+
+    @Test
     void nativeInheritanceReplacesFeatureSpecificArsMixins() throws IOException {
         String mixins = Files.readString(
                 Path.of("src/main/resources/rs_integration.mixins.json"));
         assertFalse(mixins.contains("arsnouveau.SourceUtilMixin"));
         assertFalse(mixins.contains("arsnouveau.RelaySourceInteropMixin"));
         assertFalse(mixins.contains("arsnouveau.RelaySplitterSourceInteropMixin"));
+    }
+
+    @Test
+    void nativeLongTransferMixinAppliesToCurrentArsContract() {
+        RSIntegrationMixinPlugin plugin = new RSIntegrationMixinPlugin();
+
+        assertTrue(plugin.shouldApplyMixin(
+                "com.hollingsworth.arsnouveau.api.source.AbstractSourceMachine",
+                "com.huanghuang.rsintegration.mixin.arsnouveau."
+                        + "AbstractSourceMachineLongTransferMixin"));
     }
 
     private static ArsResonantSourceTankBlockEntity tank() {

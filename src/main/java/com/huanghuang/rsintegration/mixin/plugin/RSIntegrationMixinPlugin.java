@@ -58,6 +58,18 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
         if (mixinClassName.contains(".aetherworks.")) {
             return isClassPresent(targetClassName);
         }
+        if (mixinClassName.endsWith(
+                ".arsnouveau.AbstractSourceMachineLongTransferMixin")) {
+            return isClassPresent(targetClassName)
+                    && isClassPresent(
+                    "com.hollingsworth.arsnouveau.api.source.ISourceTile")
+                    && hasMethod(targetClassName, "getTransferRate",
+                    "(Lcom/hollingsworth/arsnouveau/api/source/ISourceTile;"
+                            + "Lcom/hollingsworth/arsnouveau/api/source/ISourceTile;)I")
+                    && hasMethod(targetClassName, "getTransferRate",
+                    "(Lcom/hollingsworth/arsnouveau/api/source/ISourceTile;"
+                            + "Lcom/hollingsworth/arsnouveau/api/source/ISourceTile;I)I");
+        }
         if (mixinClassName.endsWith(".untileternity.ImFullInventoryHelperMixin")) {
             return isClassPresent(targetClassName) && hasMethod(targetClassName, "hasImFullItem")
                     && hasResonanceBackend();

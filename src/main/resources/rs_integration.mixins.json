@@ -11,6 +11,7 @@
     "tacz.AbstractGunItemAmmoMixin",
     "tacz.ModernKineticGunScriptAmmoMixin",
     "aetherworks.MetalFormerRecipeMixin",
+    "arsnouveau.AbstractSourceMachineLongTransferMixin",
     "refinedstorage.ConnectionStorageRefreshMixin",
     "refinedstorage.StorageRefreshDeduplicationMixin",
     "refinedstorage.StorageCacheBatchMixin",

@@ -37,7 +37,8 @@ public final class ArsResonantSourceTankBlockEntity extends SourceJarTile
     @Override public int getTransferRate() { return Integer.MAX_VALUE; }
     /** 只有绑定且可达的网络才有实际库存，避免 Ars 机器输出后发生能量丢失。 */
     @Override public boolean canAcceptSource() {
-        return isBound() && reachable() && getSource() < getMaxSource();
+        long current = currentAmount();
+        return isBound() && reachable() && current < resourceCapacity();
     }
     @Override public int getSource() {
         return SaturatingLongMath.clampToInt(currentAmount());
@@ -55,7 +56,11 @@ public final class ArsResonantSourceTankBlockEntity extends SourceJarTile
     }
     @Override public int addSource(int amount) {
         if (amount > 0) {
-            insert(Math.min(amount, Math.max(0, getMaxSource() - getSource())));
+            long current = currentAmount();
+            long capacity = resourceCapacity();
+            long space = capacity > current ? capacity - current : 0;
+            int request = (int) Math.min((long) amount, space);
+            if (request > 0) insert(request);
         } else if (amount < 0) {
             removeSource((int) Math.min(-(long) amount, Integer.MAX_VALUE));
         }
@@ -63,7 +68,9 @@ public final class ArsResonantSourceTankBlockEntity extends SourceJarTile
     }
     @Override public int removeSource(int amount) {
         if (amount > 0) {
-            extract(Math.min(amount, getSource()));
+            int request = (int) Math.min((long) amount,
+                    Math.max(0, currentAmount()));
+            if (request > 0) extract(request);
         } else if (amount < 0) {
             addSource((int) Math.min(-(long) amount, Integer.MAX_VALUE));
         }

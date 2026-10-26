@@ -4,13 +4,14 @@ package com.huanghuang.rsintegration.feature.resonance.magic;
 final class ManaPoolManaMath {
     private ManaPoolManaMath() {}
 
-    static int insertRequest(int mana, int current, int capacity) {
+    static int insertRequest(int mana, long current, long capacity) {
         if (mana <= 0) return 0;
-        int space = Math.max(0, capacity - Math.max(0, current));
-        return Math.min(mana, space);
+        long space = capacity > Math.max(0, current)
+                ? capacity - Math.max(0, current) : 0;
+        return (int) Math.min((long) mana, space);
     }
 
-    static int extractRequest(int mana, int current) {
+    static int extractRequest(int mana, long current) {
         if (mana >= 0) return 0;
         long requested = -(long) mana;
         return (int) Math.min(Math.min(requested, Integer.MAX_VALUE),

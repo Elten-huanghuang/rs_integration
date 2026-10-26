@@ -86,8 +86,9 @@ public final class BotaniaResonantManaPoolBlockEntity extends ManaPoolBlockEntit
     @Override public boolean isFull() { return currentAmount() >= resourceCapacity(); }
     @Override public void receiveMana(int mana) {
         if (mana > 0) insert(ManaPoolManaMath.insertRequest(
-                mana, getCurrentMana(), getMaxMana()));
-        if (mana < 0) extract(ManaPoolManaMath.extractRequest(mana, getCurrentMana()));
+                mana, currentAmount(), resourceCapacity()));
+        if (mana < 0) extract(ManaPoolManaMath.extractRequest(
+                mana, currentAmount()));
     }
 
     @Override public boolean canReceiveManaFromBursts() {
