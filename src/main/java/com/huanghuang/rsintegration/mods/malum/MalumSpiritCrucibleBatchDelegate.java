@@ -715,9 +715,9 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         ItemStack catalystToPlace = ItemStack.EMPTY;
 
         if (!materials.isEmpty()) {
-            boolean reusable = hasReusableCatalystInput();
             ItemStack existing = invCatalyst.getStackInSlot(0);
-            if (!existing.isEmpty() && !reusable) {
+            if (!existing.isEmpty()
+                    && !keepsCatalystInSlot(getRequiredMaterials(), existing)) {
                 returnCrucibleItem(existing.copy());
                 setSlot(invCatalyst, 0, ItemStack.EMPTY);
                 existing = ItemStack.EMPTY;
@@ -1082,9 +1082,29 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     }
 
     private boolean hasReusableCatalystInput() {
-        List<IngredientSpec> specs = getRequiredMaterials();
+        return hasReusableCatalystInput(getRequiredMaterials());
+    }
+
+    static boolean hasReusableCatalystInput(@Nullable List<IngredientSpec> specs) {
         return specs != null && !specs.isEmpty()
-                && specs.get(0).role() == DemandRole.CATALYST;
+                && specs.get(0).consumption().reusableWithinWorkerBatch();
+    }
+
+    private boolean matchesCatalystInput(ItemStack stack) {
+        return matchesCatalystInput(getRequiredMaterials(), stack);
+    }
+
+    static boolean matchesCatalystInput(@Nullable List<IngredientSpec> specs,
+                                        ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return false;
+        return specs != null && !specs.isEmpty()
+                && specs.get(0).ingredient().test(stack);
+    }
+
+    static boolean keepsCatalystInSlot(
+            @Nullable List<IngredientSpec> specs, ItemStack existing) {
+        return hasReusableCatalystInput(specs)
+                && matchesCatalystInput(specs, existing);
     }
 
     @Override
