@@ -95,12 +95,14 @@ public final class ExternalOperationRecoveryService {
     }
 
     private static final class Runtime {
+        private final MinecraftServer server;
         private final ExternalOperationJournal journal;
         private final Deque<UUID> pending = new ArrayDeque<>();
         private final Set<UUID> queued = new HashSet<>();
         private final Map<UUID, Driver> drivers = new LinkedHashMap<>();
 
         private Runtime(MinecraftServer server) {
+            this.server = server;
             journal = ExternalOperationJournal.get(server);
         }
 
@@ -117,19 +119,9 @@ public final class ExternalOperationRecoveryService {
         }
 
         private void tick() {
-            MinecraftServer server = null;
-            for (Map.Entry<MinecraftServer, Runtime> entry
-                    : RUNTIMES.entrySet()) {
-                if (entry.getValue() == this) {
-                    server = entry.getKey();
-                    break;
-                }
-            }
-            if (server == null) return;
-            MinecraftServer currentServer = server;
             List<Driver> snapshot = List.copyOf(drivers.values());
             for (Driver driver : snapshot) {
-                driver.tick(currentServer, this);
+                driver.tick(server, this);
             }
             if (drivers.size() >= MAX_DRIVERS) return;
             UUID operationId = pending.pollFirst();
@@ -143,7 +135,7 @@ public final class ExternalOperationRecoveryService {
                 enqueue(operationId);
                 return;
             }
-            recoverOne(currentServer, entry);
+            recoverOne(server, entry);
         }
 
         private void recoverOne(

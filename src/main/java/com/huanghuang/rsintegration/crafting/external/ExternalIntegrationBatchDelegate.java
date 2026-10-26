@@ -916,11 +916,6 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     @Override
     public void onBatchFinished(@Nullable ServerPlayer player) {
         if (!markTerminalCleanup()) return;
-        if (executionKind == RecipeExecutionKind.CUSTOM) {
-            persistCustomOperation(
-                    ExternalOperationJournal.State.COMPLETED,
-                    "settled");
-        }
         if (runningOperation != null) {
             try {
                 runningOperation.onSettled(player);
@@ -933,6 +928,11 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             } finally {
                 runningOperation = null;
             }
+        }
+        if (executionKind == RecipeExecutionKind.CUSTOM) {
+            persistCustomOperation(
+                    ExternalOperationJournal.State.COMPLETED,
+                    "settled");
         }
         flushPendingInputRefunds(player);
         if (!customReservedFluids.isEmpty()) {
