@@ -40,7 +40,8 @@ public final class ExecutionEquivalence {
                 node.inferMode(), node.executions(), node.syntheticInput(), node.syntheticOutput(),
                 node.outputs().stream().filter(output -> output.kind() == OutputKind.PRIMARY)
                         .findFirst().map(output -> ProductionTarget.of(
-                                output.resource(), output.quantity()))
+                                output.resource(),
+                                Math.max(1L, output.quantity())))
                         .orElse(null), node.magicCosts());
     }
 

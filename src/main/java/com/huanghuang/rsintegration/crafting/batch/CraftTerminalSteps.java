@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.ExecutionEquivalence;
+import com.huanghuang.rsintegration.crafting.ProductionTarget;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraphCompactor;
 import com.huanghuang.rsintegration.crafting.graph.CraftNodeMergePolicy;
@@ -63,11 +64,13 @@ public final class CraftTerminalSteps {
     public static CraftPlanGraph composeEquivalentTerminalGraph(
             CraftPlanGraph inputGraph, ResolutionStep terminalStep, ItemStack output,
             Level level) {
+        List<TerminalGraphComposer.TerminalOutput> terminalOutputs =
+                terminalOutputs(terminalStep, output, level);
         CraftPlanGraph completeGraph = TerminalGraphComposer.compose(
-                inputGraph, terminalStep, terminalOutputs(terminalStep, output, level));
+                inputGraph, terminalStep, terminalOutputs);
         List<ResolutionStep> expectedFlat = new ArrayList<>(
                 ExecutionEquivalence.projectFlatSteps(inputGraph));
-        expectedFlat.add(terminalStep);
+        expectedFlat.add(expectedTerminalStep(terminalStep, terminalOutputs));
         ExecutionEquivalence.Report equivalence =
                 ExecutionEquivalence.compare(completeGraph, expectedFlat);
         if (!equivalence.equivalent()) {
@@ -76,6 +79,37 @@ public final class CraftTerminalSteps {
         }
         return CraftPlanGraphCompactor.compact(completeGraph,
                 CraftNodeMergePolicy.forLevel(level));
+    }
+
+    static ResolutionStep expectedTerminalStep(
+            ResolutionStep terminalStep,
+            List<TerminalGraphComposer.TerminalOutput> outputs
+    ) {
+        TerminalGraphComposer.TerminalOutput primary = outputs.stream()
+                .filter(output -> output.kind() == OutputKind.PRIMARY)
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "terminal output must include a primary output"));
+        ProductionTarget target = terminalStep.productionTarget();
+        if (target == null) {
+            long perOperation = Math.max(1L, primary.perOperation());
+            long quantity = Math.multiplyExact(
+                    perOperation, Math.max(1, terminalStep.executions()));
+            target = ProductionTarget.of(primary.resource(), quantity);
+        }
+        return new ResolutionStep(
+                terminalStep.recipeId(),
+                terminalStep.modType(),
+                terminalStep.recipeTypeId(),
+                terminalStep.alternativeIds(),
+                terminalStep.alternativeModTypes(),
+                terminalStep.inferMode(),
+                terminalStep.executions(),
+                terminalStep.syntheticInput(),
+                terminalStep.syntheticOutput(),
+                target,
+                terminalStep.magicCosts()
+        );
     }
 
     static ItemStack selectTerminalGraphOutput(
