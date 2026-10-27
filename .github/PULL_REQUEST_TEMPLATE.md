@@ -8,7 +8,10 @@
 
 ## CLA
 
-- [ ] 我已阅读并同意 [CONTRIBUTING.md](../CONTRIBUTING.md) 中的 RSI Contributor License Agreement，并确认有权提交本次贡献。
+- 首次贡献代码、文档或素材：请新增一条评论，正文仅填写
+  `I have read and agree to the RSI Contributor License Agreement in CONTRIBUTING.md.`
+- 后续贡献：请链接此前接受 CLA 的 PR。
+- 完整条款见 [CONTRIBUTING.md](../CONTRIBUTING.md)。
 
 ## 第三方材料
 
