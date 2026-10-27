@@ -28,12 +28,16 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 校验超越维度流体容器混入对 BDBaseMenu#customClickHandler 的注入点。
+ * 校验超越维度流体容器混入的版本隔离与注入点。
  *
- * <p>第四个参数在 0.7.x 是 boolean shift，0.8.x 起改成 GLFW 修饰键掩码。混入给两个
- * 描述符各挂一个注入点并关掉 require，因此：注入点必须逐个带显式描述符（否则另一个
- * 重载会在描述符不符时抛 InvalidInjectionException），且在处理目标类的每个三参重载时
- * 都必须有对应注入点。</p>
+ * <p>第四个参数在 0.7.x 是 boolean shift，0.8 起改成 GLFW 修饰键掩码。两套逻辑分别写在
+ * {@link BDFluidContainerMixin}（旧版）与 {@link BDFluidContainerModifiersMixin}（新版）里，
+ * 由 {@code RSIntegrationMixinPlugin} 按版本启用其中一个，因此这里要同时确认：</p>
+ * <ul>
+ *   <li>两套混入各自只声明自己那一版的描述符；</li>
+ *   <li>插件在同一次运行里只放行其中一个；</li>
+ *   <li>目标类里每个 4 参 {@code customClickHandler} 都有对应的注入点。</li>
+ * </ul>
  */
 class BDFluidContainerMixinTest {
 
@@ -47,31 +51,42 @@ class BDFluidContainerMixinTest {
             "Lorg/spongepowered/asm/mixin/injection/callback/CallbackInfo;";
     private static final String SHIFT_SELECTOR = "customClickHandler(I" + KEY_AMOUNT + "IZ)V";
     private static final String MODIFIERS_SELECTOR = "customClickHandler(I" + KEY_AMOUNT + "II)V";
+    /** 0.8 新增的公共交互 API，插件用它区分新旧终端版本。 */
+    private static final String MODERN_MARKER =
+            "com/wintercogs/beyonddimensions/api/menu/interaction/SlotInteractions.class";
     /** 容器点击重载固定是 slot、KeyAmount、button 加第四个状态参数。 */
     private static final int CLICK_ARG_COUNT = 4;
 
     @Test
-    void mixinPinsOneInjectorPerKnownClickShape() throws Exception {
-        Set<String> selectors = new HashSet<>();
-        for (MethodNode method : mixinMethods()) {
-            String selector = injectSelector(method);
-            if (selector == null) continue;
-            assertTrue(injectRequire(method) == 0,
-                    method.name + " 必须 require = 0，否则未知版本会直接崩客户端");
-            assertHandlerMatchesSelector(method, selector);
-            selectors.add(selector);
-        }
-        assertEquals(Set.of(SHIFT_SELECTOR, MODIFIERS_SELECTOR), selectors,
-                "注入点应精确覆盖 0.7.x 的 boolean 与 0.8.x 的修饰键掩码两种形状");
+    void legacyMixinOnlyPinsTheBooleanClickShape() throws Exception {
+        assertEquals(Set.of(SHIFT_SELECTOR), selectorsOf(BDFluidContainerMixin.class),
+                "旧版混入只应接管 0.7.x 的 boolean shift 描述符");
     }
 
     @Test
-    void everyThreeArgumentClickOverloadHasASelector() throws Exception {
-        Set<String> selectors = new HashSet<>();
-        for (MethodNode method : mixinMethods()) {
-            String selector = injectSelector(method);
-            if (selector != null) selectors.add(selector);
+    void modernMixinOnlyPinsTheModifiersClickShape() throws Exception {
+        assertEquals(Set.of(MODIFIERS_SELECTOR), selectorsOf(BDFluidContainerModifiersMixin.class),
+                "新版混入只应接管 0.8 起的修饰键掩码描述符");
+    }
+
+    @Test
+    void bothMixinsUseOptionalInjections() throws Exception {
+        for (Class<?> mixinType : List.of(BDFluidContainerMixin.class,
+                BDFluidContainerModifiersMixin.class)) {
+            for (MethodNode method : mixinMethods(mixinType)) {
+                String selector = injectSelector(method);
+                if (selector == null) continue;
+                assertEquals(0, injectRequire(method),
+                        method.name + " 必须 require = 0，否则未知版本会直接崩客户端");
+                assertHandlerMatchesSelector(method, selector);
+            }
         }
+    }
+
+    @Test
+    void everyClickOverloadOnTheClasspathHasASelector() throws Exception {
+        Set<String> selectors = new HashSet<>(selectorsOf(BDFluidContainerMixin.class));
+        selectors.addAll(selectorsOf(BDFluidContainerModifiersMixin.class));
 
         int checked = 0;
         for (String shape : targetClickShapes()) {
@@ -95,27 +110,47 @@ class BDFluidContainerMixinTest {
     }
 
     @Test
-    void pluginGatesOnTheExactClickDescriptor() {
+    void pluginEnablesExactlyOneMixinPerVersion() {
         RSIntegrationMixinPlugin plugin = new RSIntegrationMixinPlugin();
+        boolean modern = testClassLoader().getResource(MODERN_MARKER) != null;
 
-        assertTrue(plugin.shouldApplyMixin(TARGET_CLASS, BDFluidContainerMixin.class.getName()),
-                "当前测试类路径上的超越维度版本应通过守卫");
+        assertEquals(modern, plugin.shouldApplyMixin(TARGET_CLASS,
+                        BDFluidContainerModifiersMixin.class.getName()),
+                "新版混入应只在 0.8 及以上启用");
+        assertEquals(!modern, plugin.shouldApplyMixin(TARGET_CLASS,
+                        BDFluidContainerMixin.class.getName()),
+                "旧版混入应只在 0.8 以下启用");
+
         assertFalse(plugin.shouldApplyMixin(
-                "com.wintercogs.beyonddimensions.common.menu.AbsentMenu",
-                BDFluidContainerMixin.class.getName()));
+                        "com.wintercogs.beyonddimensions.common.menu.AbsentMenu",
+                        BDFluidContainerModifiersMixin.class.getName()),
+                "目标类不存在时新版混入必须拒绝");
+        assertFalse(plugin.shouldApplyMixin(
+                        "com.wintercogs.beyonddimensions.common.menu.AbsentMenu",
+                        BDFluidContainerMixin.class.getName()),
+                "目标类不存在时旧版混入必须拒绝");
     }
 
-    private static List<MethodNode> mixinMethods() throws Exception {
+    private static Set<String> selectorsOf(Class<?> mixinType) throws Exception {
+        Set<String> selectors = new HashSet<>();
+        for (MethodNode method : mixinMethods(mixinType)) {
+            String selector = injectSelector(method);
+            if (selector != null) selectors.add(selector);
+        }
+        return selectors;
+    }
+
+    private static List<MethodNode> mixinMethods(Class<?> mixinType) throws Exception {
         ClassNode node = new ClassNode();
-        try (InputStream input = mixinClassResource()) {
+        try (InputStream input = mixinClassResource(mixinType)) {
             assertNotNull(input);
             new ClassReader(input).accept(node, 0);
         }
         return node.methods;
     }
 
-    private static InputStream mixinClassResource() {
-        String resource = BDFluidContainerMixin.class.getName().replace('.', '/') + ".class";
+    private static InputStream mixinClassResource(Class<?> mixinType) {
+        String resource = mixinType.getName().replace('.', '/') + ".class";
         return testClassLoader().getResourceAsStream(resource);
     }
 
@@ -207,7 +242,7 @@ class BDFluidContainerMixinTest {
             @Override
             public MethodVisitor visitMethod(int access, String name, String descriptor,
                                              String signature, String[] exceptions) {
-                // 三参重载是容器点击（slot、KeyAmount、button 加 shift 或修饰键掩码），
+                // 4 参重载是容器点击（slot、KeyAmount、button 加 shift 或修饰键掩码），
                 // 带 amount 的重载属于“取指定数量”通道，不需要注入点。
                 if ("customClickHandler".equals(name)
                         && Type.getArgumentTypes(descriptor).length == CLICK_ARG_COUNT) {

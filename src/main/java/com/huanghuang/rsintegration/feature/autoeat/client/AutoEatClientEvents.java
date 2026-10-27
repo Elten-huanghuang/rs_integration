@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.feature.autoeat.network.RequestBlacklistPack
 import com.huanghuang.rsintegration.config.ClientSyncedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
+import com.huanghuang.rsintegration.mods.bd.BeyondDimensionsVersion;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.Minecraft;
@@ -42,6 +43,9 @@ public final class AutoEatClientEvents {
             new ResourceLocation("beyonddimensions", "textures/gui/sprites/widget/slot_button.png");
     private static final ResourceLocation BD_SLOT_HOVER =
             new ResourceLocation("beyonddimensions", "textures/gui/sprites/widget/slot_button_hovered.png");
+    /** 0.8 起终端与工作台界面合并后的屏幕类名。 */
+    private static final String MODERN_BD_TERMINAL_SCREEN =
+            "com.wintercogs.beyonddimensions.client.ui.storage.StorageScreen";
 
     private static boolean blacklistRequested;
 
@@ -328,12 +332,12 @@ public final class AutoEatClientEvents {
 
     private static boolean isBeyondDimensionsScreen(Screen screen) {
         String name = screen.getClass().getName();
+        // 不按菜单类反推界面：配方树界面可能仍挂着 BD 的菜单，会被误判。
         if (name.endsWith("DimensionsCraftGUI") || name.endsWith("DimensionsTerminalCraftGUI")
                 || name.contains("beyonddimensions.client.gui.DimensionsCraftGUI")) return true;
-        // Do not infer a terminal from its menu: the recipe-tree screen can
-        // retain the BD menu while it is open, which would incorrectly place
-        // the auto-eat controls on the tree UI.
-        return false;
+        // 0.8 起终端与各工作台界面合并到了 client.ui.storage.StorageScreen。
+        return BeyondDimensionsVersion.isModernTerminalUi()
+                && name.equals(MODERN_BD_TERMINAL_SCREEN);
     }
 
     private static int resolveScreenInt(Screen screen, String methodName, String fieldName, int fallback) {

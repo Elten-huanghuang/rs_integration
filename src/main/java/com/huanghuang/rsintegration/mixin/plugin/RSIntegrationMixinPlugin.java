@@ -24,8 +24,20 @@ import java.util.Set;
  */
 public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
 
+    /** 0.8 新增的公共交互 API，用来把新旧终端界面区分开。 */
+    private static final String MODERN_API_MARKER =
+            "com.wintercogs.beyonddimensions.api.menu.interaction.SlotInteractions";
+    /** 0.8 起终端与工作台界面合并后的屏幕类。 */
+    private static final String MODERN_TERMINAL_SCREEN =
+            "com.wintercogs.beyonddimensions.client.ui.storage.StorageScreen";
+
     @Override
     public void onLoad(String mixinPackage) {}
+
+    /** 超越维度是否为 0.8 及以上的新版（Compose 终端界面）。 */
+    private static boolean isModernBeyondDimensions() {
+        return isClassPresent(MODERN_API_MARKER);
+    }
 
     @Override
     public String getRefMapperConfig() {
@@ -35,11 +47,17 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
     @Override
     public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
         if (mixinClassName.endsWith(".beyonddimensions.BDFluidContainerMixin")) {
-            // 0.7.x 用 boolean shift，0.8.x 起换成 GLFW 修饰键掩码，两个描述符必须分开校验。
-            return (hasMethod(targetClassName, "customClickHandler",
+            // 0.7.x 的旧版：第四个参数是 boolean shift。
+            return !isModernBeyondDimensions()
+                    && hasMethod(targetClassName, "customClickHandler",
                     "(ILcom/wintercogs/beyonddimensions/api/storage/key/KeyAmount;IZ)V")
-                    || hasMethod(targetClassName, "customClickHandler",
-                    "(ILcom/wintercogs/beyonddimensions/api/storage/key/KeyAmount;II)V"))
+                    && isClassPresent("com.wintercogs.beyonddimensions.common.menu.widget.slot.DisorderedStackTypedSlot");
+        }
+        if (mixinClassName.endsWith(".beyonddimensions.BDFluidContainerModifiersMixin")) {
+            // 0.8 起的新版：第四个参数换成 GLFW 修饰键掩码。
+            return isModernBeyondDimensions()
+                    && hasMethod(targetClassName, "customClickHandler",
+                    "(ILcom/wintercogs/beyonddimensions/api/storage/key/KeyAmount;II)V")
                     && isClassPresent("com.wintercogs.beyonddimensions.common.menu.widget.slot.DisorderedStackTypedSlot");
         }
         if (mixinClassName.endsWith(".tacz.GunHudOverlayAmmoMixin")) {
@@ -509,12 +527,15 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
                     && hasMethod(targetClassName, "workContent");
         }
         if (mixinClassName.contains("beyonddimensions.DimensionsNetGuiAutoEatMixin")) {
-                    return isClassPresent("com.wintercogs.beyonddimensions.client.gui.DimensionsNetGUI")
+            // 0.7.x 的终端屏幕（client.gui.DimensionsNetGUI），0.8 已被删除。
+            return !isModernBeyondDimensions()
+                    && isClassPresent("com.wintercogs.beyonddimensions.client.gui.DimensionsNetGUI")
                     && !hasField(targetClassName, "leftButtonSidebar")
                     && (hasMethod(targetClassName, "init") || hasMethod(targetClassName, "m_7856_"));
         }
         if (mixinClassName.contains("beyonddimensions.DimensionsNetGuiSidebarMixin")) {
-            return isClassPresent("com.wintercogs.beyonddimensions.client.gui.DimensionsNetGUI")
+            return !isModernBeyondDimensions()
+                    && isClassPresent("com.wintercogs.beyonddimensions.client.gui.DimensionsNetGUI")
                     && hasField(targetClassName, "leftButtonSidebar")
                     // The sidebar mixin shadows the vanilla screen widget
                     // registration method. Disable it when BD changes or
@@ -524,9 +545,21 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
                     && (hasMethod(targetClassName, "init") || hasMethod(targetClassName, "m_7856_"));
         }
         if (mixinClassName.contains("beyonddimensions.BDBaseGuiOverlayMixin")) {
-            return isClassPresent("com.wintercogs.beyonddimensions.client.gui.BDBaseGUI")
+            return !isModernBeyondDimensions()
+                    && isClassPresent("com.wintercogs.beyonddimensions.client.gui.BDBaseGUI")
                     && (hasMethod(targetClassName, "renderTooltip")
                     || hasMethod(targetClassName, "m_280072_"));
+        }
+        if (mixinClassName.contains("beyonddimensions.BDStorageScreenOverlayMixin")) {
+            // 0.8 起终端与工作台界面合并到 client.ui.storage.StorageScreen。
+            // 绘制入口 renderTooltip 继承自 AbstractContainerScreen，不在目标类里直接声明，
+            // 因此只校验类存在；注入点本身是 require = 0，方法缺失时静默跳过而不是崩溃。
+            return isModernBeyondDimensions() && isClassPresent(MODERN_TERMINAL_SCREEN);
+        }
+        if (mixinClassName.contains("beyonddimensions.BDStorageScreenAutoEatMixin")) {
+            return isModernBeyondDimensions()
+                    && isClassPresent(MODERN_TERMINAL_SCREEN)
+                    && (hasMethod(targetClassName, "init") || hasMethod(targetClassName, "m_7856_"));
         }
         if (mixinClassName.contains("refinedstorage.GridTransferMessageAccessor")) {
             return hasField(targetClassName, "recipe");

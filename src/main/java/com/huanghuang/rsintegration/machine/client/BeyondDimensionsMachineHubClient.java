@@ -20,6 +20,7 @@ import net.minecraftforge.fml.ModList;
 import org.lwjgl.glfw.GLFW;
 import com.huanghuang.rsintegration.machine.client.MachineFavoritesClient;
 import com.huanghuang.rsintegration.machine.client.MachineTabRenderer;
+import com.huanghuang.rsintegration.mods.bd.BeyondDimensionsVersion;
 import net.minecraft.world.item.Items;
 import net.minecraftforge.api.distmarker.OnlyIn;
 
@@ -35,6 +36,9 @@ public final class BeyondDimensionsMachineHubClient {
     // visible 4px gap to the right of the complete terminal surface instead
     // of placing them on top of the scrollbar.
     private static final int BD_TAB_X_OFFSET = 198;
+    /** 0.8 起终端与工作台界面合并后的屏幕类名。 */
+    private static final String MODERN_BD_TERMINAL_SCREEN =
+            "com.wintercogs.beyonddimensions.client.ui.storage.StorageScreen";
     private static final int BD_FAVORITE_WIDTH = 23;
     private static final int BD_FAVORITE_HEIGHT = 26;
     // BD's native RightTabButton positions are top+6, top+36, ...:
@@ -212,9 +216,10 @@ public final class BeyondDimensionsMachineHubClient {
         String name = screen.getClass().getName();
         if (name.endsWith("DimensionsCraftGUI") || name.endsWith("DimensionsTerminalCraftGUI")
                 || name.contains("beyonddimensions.client.gui.DimensionsCraftGUI")) return true;
-        // Deliberately do not use the menu class as a fallback: the recipe-tree
-        // screen can retain the BD menu while it is open.
-        return false;
+        // 0.8 起终端与各工作台界面合并到了 client.ui.storage.StorageScreen；
+        // 不按菜单类反推，避免配方树界面被误判。
+        return BeyondDimensionsVersion.isModernTerminalUi()
+                && name.equals(MODERN_BD_TERMINAL_SCREEN);
     }
 
     /** Draw BD-local machine favorites to the right of the terminal surface. */
