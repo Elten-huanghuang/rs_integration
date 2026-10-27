@@ -8,6 +8,7 @@ import com.huanghuang.rsintegration.config.ClientSyncedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.huanghuang.rsintegration.mods.bd.BeyondDimensionsVersion;
+import com.huanghuang.rsintegration.machine.client.BeyondDimensionsMachineHubClient;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.Minecraft;
@@ -24,6 +25,7 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 
@@ -43,11 +45,45 @@ public final class AutoEatClientEvents {
             new ResourceLocation("beyonddimensions", "textures/gui/sprites/widget/slot_button.png");
     private static final ResourceLocation BD_SLOT_HOVER =
             new ResourceLocation("beyonddimensions", "textures/gui/sprites/widget/slot_button_hovered.png");
+    /** 0.8 没有 BD 槽位贴图，改用纯色底绘制按钮。 */
+    private static final int MODERN_SLOT = 0xFF1B2130;
+    private static final int MODERN_SLOT_HOVER = 0xFF2C3547;
+    private static final int MODERN_SLOT_BORDER = 0xFF46E0C8;
     /** 0.8 起终端与工作台界面合并后的屏幕类名。 */
     private static final String MODERN_BD_TERMINAL_SCREEN =
             "com.wintercogs.beyonddimensions.client.ui.storage.StorageScreen";
 
     private static boolean blacklistRequested;
+    /**
+     * 0.8 里自动进食改由侧边栏页签开关，面板收起时这些按钮不绘制也不响应点击，
+     * 避免一直浮在存储界面左边挡视线。
+     */
+    private static boolean modernControlsOpen;
+
+    /** 侧边栏“自动进食”页签点击：开关 0.8 的自动进食面板。 */
+    public static void toggleModernControls() {
+        modernControlsOpen = !modernControlsOpen;
+        Screen screen = Minecraft.getInstance().screen;
+        if (screen != null) applyModernPanelVisibility(screen);
+    }
+
+    /** 终端关闭时收起面板，下次打开保持干净。 */
+    public static void resetModernControls() {
+        modernControlsOpen = false;
+    }
+
+    /**
+     * 只对 0.8 的 BD 终端生效：页签打开时三个按钮全部出现，关闭时全部隐藏
+     * （0.8 没有“展开/收起”子菜单按钮，展开状态沿用旧配置没有意义）。
+     */
+    private static void applyModernPanelVisibility(Screen screen) {
+        if (screen == null || !isBeyondDimensionsScreen(screen)) return;
+        if (!BeyondDimensionsVersion.isModernTerminalUi()) return;
+        for (Object listener : screen.children()) {
+            if (!(listener instanceof AutoEatButton button)) continue;
+            button.visible = modernControlsOpen;
+        }
+    }
 
     @SubscribeEvent
     public static void onClientLogin(ClientPlayerNetworkEvent.LoggingIn event) {
@@ -122,6 +158,8 @@ public final class AutoEatClientEvents {
         }
 
         boolean beyondDimensions = isBeyondDimensionsScreen(screen);
+        // 0.8 的自动进食由侧边栏页签开关，不再需要“展开/收起”那个菜单按钮。
+        boolean modern = beyondDimensions && BeyondDimensionsVersion.isModernTerminalUi();
         // RS Grid keeps its established left-side placement. BD's main panel
         // is a centered 176px surface; anchor the buttons beside that panel
         // instead of reusing the RS offset, which puts them roughly 150px
@@ -131,7 +169,17 @@ public final class AutoEatClientEvents {
         int menuSize;
         int secondaryX;
         int secondaryY;
-        if (beyondDimensions) {
+        if (modern) {
+            // 面板改由页签开关后，三个按钮直接贴终端窗口左外侧的下缘排一列，
+            // 与 0.7 的手感一致；不再往窗口内侧叠小图标。
+            Rect2i window = BeyondDimensionsMachineHubClient.modernWindowBounds(screen);
+            int stackHeight = BUTTON_HEIGHT * 3 + BUTTON_GAP * 2;
+            menuSize = 16;
+            menuX = Math.max(2, window.getX() - menuSize - 6);
+            menuY = Math.max(2, window.getY() + 4);
+            secondaryX = Math.max(2, window.getX() - BUTTON_WIDTH - 6);
+            secondaryY = Math.max(2, window.getY() + window.getHeight() - stackHeight - 4);
+        } else if (beyondDimensions) {
             // Keep the controls in the left gutter of BD's item grid. Resolve
             // the real container edge when available so GUI scaling does not
             // push them into the inventory slots.
@@ -179,6 +227,9 @@ public final class AutoEatClientEvents {
         }
 
         boolean expanded = isMenuExpanded(screen);
+        // 0.8 的整包已删掉 textures/gui/sprites/widget/，沿用 BD 贴图会画出一片空白，改用纯色底。
+        MenuStyle menuStyle = !beyondDimensions ? MenuStyle.RS
+                : BeyondDimensionsVersion.isModernTerminalUi() ? MenuStyle.MODERN : MenuStyle.BEYOND_DIMENSIONS;
 
         AutoEatButton menuBtn = new AutoEatButton(Role.MENU, menuX, menuY,
                 menuSize, menuSize, getMenuLabel(), getMenuTooltip(expanded),
@@ -188,16 +239,20 @@ public final class AutoEatClientEvents {
                     btn.setTooltip(getMenuTooltip(nextExpanded));
                     setSecondaryControlsVisible(screen, nextExpanded);
                 });
-        menuBtn.setMenuStyle(beyondDimensions);
-        if (existingMenu == null) adder.add(menuBtn);
-        else {
+        menuBtn.setMenuStyle(menuStyle);
+        if (modern) {
+            // 0.8 用页签开关面板，这个图标没有存在的意义，连同旧实例一起收起来。
+            if (existingMenu != null) existingMenu.visible = false;
+        } else if (existingMenu == null) {
+            adder.add(menuBtn);
+        } else {
             existingMenu.setX(menuX);
             existingMenu.setY(menuY);
             existingMenu.setWidth(menuSize);
             existingMenu.setHeight(menuSize);
             existingMenu.setMessage(getMenuLabel());
             existingMenu.setTooltip(getMenuTooltip(expanded));
-            existingMenu.setMenuStyle(beyondDimensions);
+            existingMenu.setMenuStyle(menuStyle);
         }
 
         // Keep the three established controls at their original screen anchors.
@@ -261,6 +316,9 @@ public final class AutoEatClientEvents {
             blacklistRequested = true;
             NetworkHandler.CHANNEL.sendToServer(new RequestBlacklistPacket());
         }
+
+        // 0.8 的自动进食由侧边栏页签控制显隐，放在最后统一套用，避免被上面的 setButtonVisible 覆盖。
+        applyModernPanelVisibility(screen);
     }
 
     private static boolean isAutoEatEnabled() {
@@ -272,20 +330,14 @@ public final class AutoEatClientEvents {
     /** Returns the bounds of the currently visible auto-eat controls for JEI avoidance. */
     public static List<Rect2i> getGuiExtraAreas(Screen screen) {
         if (screen == null || !isAutoEatEnabled() || !isStorageScreen(screen)) return List.of();
-        int minX = Integer.MAX_VALUE;
-        int minY = Integer.MAX_VALUE;
-        int maxX = Integer.MIN_VALUE;
-        int maxY = Integer.MIN_VALUE;
+        if (BeyondDimensionsVersion.isModernTerminalUi() && !modernControlsOpen) return List.of();
+        // 每个按钮单独声明，避免把按钮之间的空隙也让给配方浏览器。
+        List<Rect2i> areas = new ArrayList<>();
         for (Object listener : screen.children()) {
             if (!(listener instanceof AutoEatButton button) || !button.visible) continue;
-            minX = Math.min(minX, button.getX());
-            minY = Math.min(minY, button.getY());
-            maxX = Math.max(maxX, button.getX() + button.getWidth());
-            maxY = Math.max(maxY, button.getY() + button.getHeight());
+            areas.add(new Rect2i(button.getX(), button.getY(), button.getWidth(), button.getHeight()));
         }
-        return minX == Integer.MAX_VALUE
-                ? List.of()
-                : List.of(new Rect2i(minX, minY, maxX - minX, maxY - minY));
+        return List.copyOf(areas);
     }
 
     private static boolean isMenuExpanded(Screen screen) {
@@ -466,9 +518,19 @@ public final class AutoEatClientEvents {
      */
     private enum Role { MENU, EAT, SELECT, MODE }
 
+    /** 自动进食面板按钮的外观来源。 */
+    private enum MenuStyle {
+        /** RS 网格：沿用 RS 图标表的 hunger 按钮。 */
+        RS,
+        /** 超越维度 0.7：沿用 BD 的 18px 槽位贴图。 */
+        BEYOND_DIMENSIONS,
+        /** 超越维度 0.8：贴图已删除，改用纯色底。 */
+        MODERN
+    }
+
     private static class AutoEatButton extends Button {
         private final Role role;
-        private boolean beyondDimensionsStyle;
+        private MenuStyle menuStyle = MenuStyle.RS;
 
         AutoEatButton(Role role, int x, int y, int w, int h, Component text, Tooltip tooltip, OnPress onPress) {
             super(x, y, w, h, text, onPress, DEFAULT_NARRATION);
@@ -476,8 +538,8 @@ public final class AutoEatClientEvents {
             setTooltip(tooltip);
         }
 
-        void setMenuStyle(boolean beyondDimensions) {
-            this.beyondDimensionsStyle = beyondDimensions;
+        void setMenuStyle(MenuStyle style) {
+            this.menuStyle = style;
         }
 
         @Override
@@ -488,7 +550,11 @@ public final class AutoEatClientEvents {
             }
 
             boolean hovered = isHoveredOrFocused();
-            if (beyondDimensionsStyle) {
+            if (menuStyle == MenuStyle.MODERN) {
+                graphics.fill(getX(), getY(), getX() + width, getY() + height,
+                        hovered ? MODERN_SLOT_HOVER : MODERN_SLOT);
+                graphics.renderOutline(getX(), getY(), width, height, MODERN_SLOT_BORDER);
+            } else if (menuStyle == MenuStyle.BEYOND_DIMENSIONS) {
                 ResourceLocation texture = hovered ? BD_SLOT_HOVER : BD_SLOT;
                 graphics.blit(texture, getX(), getY(), 0, 0,
                         width, height, width, height);

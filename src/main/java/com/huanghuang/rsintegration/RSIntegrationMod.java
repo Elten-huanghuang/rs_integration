@@ -115,6 +115,7 @@ import com.huanghuang.rsintegration.feature.resonance.bd.BDResonanceDiskItem;
 import com.huanghuang.rsintegration.feature.resonance.passive.PassiveEffectEngine;
 import com.huanghuang.rsintegration.network.packet.JeiNetworkInventorySyncManager;
 import com.huanghuang.rsintegration.machine.client.MachineFavoritesClient;
+import com.huanghuang.rsintegration.machine.client.MachineHubPage;
 import com.huanghuang.rsintegration.client.input.WorldPickClient;
 import com.huanghuang.rsintegration.machine.client.data.MachineStatusCache;
 import com.huanghuang.rsintegration.storage.StorageBackendDescriptors;
@@ -1027,6 +1028,10 @@ public final class RSIntegrationMod {
             MenuScreens.register(
                     (MenuType) ModItems.RESONANCE_BACKPACK.get(),
                     ResonanceBackpackScreen::new);
+        }
+        // 超越维度 0.8 起终端改用页面系统，机器中心要注册成侧边栏页签。
+        if (ModList.get().isLoaded(ModIds.BEYOND_DIMENSIONS)) {
+            MachineHubPage.install();
         }
     }
 

@@ -138,6 +138,7 @@
     "beyonddimensions.DimensionsNetGuiSidebarMixin",
     "beyonddimensions.BDStorageScreenOverlayMixin",
     "beyonddimensions.BDStorageScreenAutoEatMixin",
+    "beyonddimensions.BdPageSelectionMixin",
     "apotheosis.EnchLibraryScreenMixin",
     "apotheosis.ReforgingMenuRestockMixin",
     "ftbquests.ClearRepeatCooldownMessageMixin",

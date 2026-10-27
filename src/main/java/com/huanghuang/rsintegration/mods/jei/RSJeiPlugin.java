@@ -367,7 +367,10 @@ public final class RSJeiPlugin implements IModPlugin {
                 };
         for (String className : List.of(
                 "com.wintercogs.beyonddimensions.client.gui.DimensionsCraftGUI",
-                "com.wintercogs.beyonddimensions.client.gui.DimensionsTerminalCraftGUI")) {
+                "com.wintercogs.beyonddimensions.client.gui.DimensionsTerminalCraftGUI",
+                // 0.8 起终端与工作台界面合并到 StorageScreen，旧类已删除；
+                // 不注册它的话，0.8 下 JEI 完全不知道收藏条占了哪块地方，配方会压在收藏图标上。
+                "com.wintercogs.beyonddimensions.client.ui.storage.StorageScreen")) {
             try {
                 Class<?> raw = Class.forName(className);
                 if (AbstractContainerScreen.class.isAssignableFrom(raw)) {

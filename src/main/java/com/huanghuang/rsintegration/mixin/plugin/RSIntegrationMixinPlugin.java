@@ -569,6 +569,12 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
                     && isClassPresent(MODERN_TERMINAL_SCREEN)
                     && (hasMethod(targetClassName, "init") || hasMethod(targetClassName, "m_7856_"));
         }
+        if (mixinClassName.contains("beyonddimensions.BdPageSelectionMixin")) {
+            // 侧边栏页签的选中状态容器，0.8 才有；注入点是 require = 0，open 缺失时静默跳过。
+            return isModernBeyondDimensions()
+                    && isClassPresent("com.wintercogs.beyonddimensions.client.ui.base.BdPageSelection")
+                    && hasMethod(targetClassName, "open", "(Ljava/lang/String;)V");
+        }
         if (mixinClassName.contains("refinedstorage.GridTransferMessageAccessor")) {
             return hasField(targetClassName, "recipe");
         }
