@@ -10,6 +10,8 @@ import com.wintercogs.beyonddimensions.api.storage.key.KeyAmount;
 import com.wintercogs.beyonddimensions.api.storage.key.StackKeyRegistry;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 import java.util.Map;
@@ -32,6 +34,7 @@ public final class BdMagicApi {
     private static final Map<ResourceLocation, ResourceLocation> ALIASES =
             new ConcurrentHashMap<>();
     private static volatile boolean handlersInstalled;
+    private static final Logger LOGGER = LoggerFactory.getLogger("RSI-BD");
 
     private BdMagicApi() {}
 
@@ -50,6 +53,14 @@ public final class BdMagicApi {
         if (handlersInstalled) return;
         synchronized (BdMagicApi.class) {
             if (handlersInstalled) return;
+            handlersInstalled = true;
+            if (!legacyHandlersPresent()) {
+                // 0.8 起 BD 删掉了这两个全局 BeforeInsert/BeforeExtract 回调，改用 UnifiedStorageRules 规则表。
+                // 直接链接旧类会 NoClassDefFoundError，这里先跳过：别名仍对 RSI 自己的存取生效，
+                // 只是不再参与 BD 全局的插入/提取规范化。
+                LOGGER.info("[RSI-BD] 当前 BD 版本没有旧的 Key 别名 handler API，跳过安装");
+                return;
+            }
             UnifiedStorageBeforeInsertHandler.addHandler(
                     (incoming, current, network) -> {
                         IStackKey<?> key = canonicalKey(incoming.key());
@@ -68,12 +79,23 @@ public final class BdMagicApi {
                                 .BeforeExtractHandlerReturnInfo(
                                 normalized, false);
                     });
-            handlersInstalled = true;
         }
     }
 
     public static Session network(ServerPlayer player, int networkId) {
         return new Session(player, networkId);
+    }
+
+    /** 0.7 才有的全局 handler 类是否还在（0.8 换成 UnifiedStorageRules 后已删除）。 */
+    private static boolean legacyHandlersPresent() {
+        try {
+            Class.forName(
+                    "com.wintercogs.beyonddimensions.api.dimensionnet.helper.UnifiedStorageBeforeInsertHandler",
+                    false, BdMagicApi.class.getClassLoader());
+            return true;
+        } catch (ClassNotFoundException | LinkageError missing) {
+            return false;
+        }
     }
 
     /** 把已注册别名解析为规范 Key；未登记的 Key 原样返回。 */

@@ -1,9 +1,9 @@
 package com.huanghuang.rsintegration.mods.goety.magic;
 
+import com.huanghuang.rsintegration.mods.bd.BeyondDimensionsAmountFormat;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.wintercogs.beyonddimensions.api.storage.key.IStackKey;
 import com.wintercogs.beyonddimensions.api.storage.key.IStackRender;
-import com.wintercogs.beyonddimensions.util.StringFormat;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
@@ -41,7 +41,8 @@ public final class GoetySoulStackKeyRender implements IStackRender {
         gui.pose().popPose();
     }
 
-    @Override public String getCountText(long count) { return count < 0 ? "" : StringFormat.formatCount(count); }
+    // 数量写法按 BD 版本自复刻，不直接链接 0.7 的 formatCount（0.8 改名为 formatCompact 会 NoSuchMethodError）。
+    @Override public String getCountText(long count) { return count < 0 ? "" : BeyondDimensionsAmountFormat.format(count); }
     @Override public Component getDisplayName(IStackKey<?> key) { return GoetySoulStackKey.INSTANCE.getRenderStack().getName(); }
 
     @Override public List<Component> getTooltipLines(IStackKey<?> key, long amount, @Nullable Player player, TooltipFlag tooltipFlag) {
