@@ -8,6 +8,11 @@
   <strong>English</strong> | <a href="README_zh.md">简体中文</a>
 </p>
 <p align="center"><strong>Minecraft 1.20.1 · Forge 47+ </strong></p>
+<p align="center">
+  <a href="https://modrinth.com/mod/rs-integration"><img src="https://img.shields.io/modrinth/dt/vtvveeqA?style=flat&amp;logo=modrinth&amp;label=Modrinth" alt="Modrinth downloads"></a>
+  <a href="https://www.curseforge.com/minecraft/mc-mods/rs-integration"><img src="https://img.shields.io/curseforge/dt/1630184?style=flat&amp;logo=curseforge&amp;label=CurseForge" alt="CurseForge downloads"></a>
+  <a href="https://www.mcmod.cn/class/29199.html"><img src="https://img.shields.io/badge/MC%E7%99%BE%E7%A7%91-29199-2f855a?style=flat" alt="MC百科"></a>
+</p>
 
 RS Integration (RSI) extends Refined Storage and Beyond Dimensions with recursive crafting, remote machine access, storage-aware interactions, and optional magic-resource integration. It is an add-on, not a replacement for either storage mod.
 
@@ -233,9 +238,9 @@ Custom GUI defaults include Crabber's Delight, Metal Barrels, PGP, EMX Arms, Apo
 RS and BD expose separate APIs. They do not share inventories or merge balances.
 
 Third-party recipe, machine, execution, and Consumer integrations are documented
-in [docs/api/README.md](docs/api/README.md). The public API has a limited
-interoperability license in [LICENSE-API.md](LICENSE-API.md); the rest of RSI
-remains proprietary under [LICENSE](LICENSE).
+in [docs/api/README.md](docs/api/README.md). The single project [LICENSE](LICENSE)
+contains the proprietary terms for RSI and the limited interoperability terms
+for the public API.
 
 RS magic resources are available through [`RsiMagicApi`](src/main/java/com/huanghuang/rsintegration/api/magic/RsiMagicApi.java):
 

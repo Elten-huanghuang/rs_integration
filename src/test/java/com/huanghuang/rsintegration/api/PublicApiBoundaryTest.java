@@ -14,7 +14,9 @@ class PublicApiBoundaryTest {
             Path.of("src/test/java/com/example/rsiintegration/"
                     + "PublicIntegrationExample.java"),
             Path.of("src/test/java/com/example/rsiintegration/"
-                    + "PublicConsumerExample.java")
+                    + "PublicConsumerExample.java"),
+            Path.of("src/test/java/com/example/rsiintegration/"
+                    + "PublicResonanceExample.java")
     );
     private static final Path PUBLIC_API_ROOT =
             Path.of("src/main/java/com/huanghuang/rsintegration/api");

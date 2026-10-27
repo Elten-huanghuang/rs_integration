@@ -8,6 +8,11 @@
   <a href="README.md">English</a> | <strong>简体中文</strong>
 </p>
 <p align="center"><strong>Minecraft 1.20.1 · Forge 47+ </strong></p>
+<p align="center">
+  <a href="https://modrinth.com/mod/rs-integration"><img src="https://img.shields.io/modrinth/dt/vtvveeqA?style=flat&amp;logo=modrinth&amp;label=Modrinth" alt="Modrinth 下载量"></a>
+  <a href="https://www.curseforge.com/minecraft/mc-mods/rs-integration"><img src="https://img.shields.io/curseforge/dt/1630184?style=flat&amp;logo=curseforge&amp;label=CurseForge" alt="CurseForge 下载量"></a>
+  <a href="https://www.mcmod.cn/class/29199.html"><img src="https://img.shields.io/badge/MC%E7%99%BE%E7%A7%91-29199-2f855a?style=flat" alt="MC百科"></a>
+</p>
 
 RS Integration（RSI）为 Refined Storage 和 Beyond Dimensions 增加递归合成、机器远程访问、存储联动及可选魔法资源集成。它是附属模组，不替代两种存储网络。
 
@@ -228,9 +233,8 @@ RS Integration（RSI）为 Refined Storage 和 Beyond Dimensions 增加递归合
 RS 与 BD 使用独立 API，不共享库存，也不会自动合并余额。
 
 第三方配方、机器、执行器和 Consumer 接入文档见
-[docs/api/README.md](docs/api/README.md)。公共 API 使用
-[LICENSE-API.md](LICENSE-API.md) 中的有限互操作许可；RSI 主体仍按
-[LICENSE](LICENSE) 作为专有软件发布。
+[docs/api/README.md](docs/api/README.md)。唯一项目许可证 [LICENSE](LICENSE)
+同时包含 RSI 主体专有条款和公共 API 的有限互操作许可。
 
 RS 魔法资源入口：[`RsiMagicApi`](src/main/java/com/huanghuang/rsintegration/api/magic/RsiMagicApi.java)
 

@@ -4,6 +4,8 @@ import com.huanghuang.rsintegration.api.consumer.DefaultRSICraftConsumerApi;
 import com.huanghuang.rsintegration.api.consumer.RSIConsumerServices;
 import com.huanghuang.rsintegration.api.machine.MachineIntegration;
 import com.huanghuang.rsintegration.api.recipe.RecipeIntegration;
+import com.huanghuang.rsintegration.api.resonance.RSIResonanceServices;
+import com.huanghuang.rsintegration.feature.resonance.api.DefaultRSIResonanceApi;
 import net.minecraft.server.level.ServerLevel;
 import org.jetbrains.annotations.ApiStatus;
 
@@ -24,6 +26,7 @@ public final class RSIIntegrationServices {
     public static synchronized void initialize() {
         initialized = true;
         API.beginRegistration();
+        RSIResonanceServices.install(new DefaultRSIResonanceApi());
         RSIConsumerServices.install(CONSUMER);
         CONSUMER.markIndexing();
     }
@@ -39,10 +42,12 @@ public final class RSIIntegrationServices {
     public static void stop() {
         API.stop();
         CONSUMER.stop();
+        RSIResonanceServices.clear();
     }
 
     public static void resumeAfterStop() {
         API.resumeAfterStop();
+        RSIResonanceServices.install(new DefaultRSIResonanceApi());
         CONSUMER.markIndexing();
     }
 

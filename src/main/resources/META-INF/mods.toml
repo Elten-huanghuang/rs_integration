@@ -1,6 +1,6 @@
 modLoader = "javafml"
 loaderVersion = "[47,)"
-license = "All Rights Reserved; public API interoperability terms are provided in META-INF/LICENSE_RS_INTEGRATION_API"
+license = "All Rights Reserved; public API interoperability terms are included in META-INF/LICENSE_RS_INTEGRATION"
 
 [[mods]]
 modId = "${mod_id}"

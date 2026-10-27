@@ -1,4 +1,4 @@
-# RSI Integration API 接入指南
+# RSI Public API 接入指南
 
 | 项目 | 值 |
 |---|---|
@@ -6,23 +6,25 @@
 | Java | 17 |
 | Forge | 47.x |
 | Integration API | 1.1.x |
+| Resonance Inventory API | 1.0.x |
 | Consumer API | 1.0.x |
 
 本文面向第三方模组作者。目标是让作者在不读取 RSI 实现代码的前提下，完成配方投影、
-机器绑定、特殊执行、JEI 接入和 Consumer 下单。
+机器绑定、特殊执行、JEI 接入、共振盘物品访问和 Consumer 下单。
 
 RSI 不要求第三方改写现有配方 JSON。第三方保留自己的 `RecipeType`、
 `RecipeSerializer`、datapack、`BlockEntity` 和 capability，通过本文定义的 Java
 接口把真实语义告诉 RSI。
 
-公共 API 的有限互操作授权见仓库根目录的 `LICENSE-API.md`，发布 jar 中也包含
-`META-INF/LICENSE_RS_INTEGRATION_API`。该授权只覆盖本文列出的公共 API；RSI
-主体、实现代码和原创素材仍适用主项目的专有许可。
+公共 API 的有限互操作授权已并入仓库根目录的唯一许可证 `LICENSE`，发布 jar 中
+对应 `META-INF/LICENSE_RS_INTEGRATION`。该授权只覆盖本文列出的公共 API；RSI
+主体、实现代码和原创素材仍适用同一文件中的专有条款。
 
 ## 实例索引
 
-仓库中的 `src/apismoke` 是独立编译的 API 烟测模组。它只引用公共 API，并用于验证
-第三方从外部模组接入时能否完成注册、规划、JEI 展示和执行。第一次接入时，先阅读
+仓库中的 `src/apismoke` 是独立编译的 API 烟测模组，`src/test/java/com/example` 还包含
+公共 API 边界示例。它们只引用公共 API，并用于验证第三方从外部模组接入时能否完成
+注册、规划、JEI 展示、共振盘访问和执行。第一次接入时，先阅读
 [ApiSmokeRegistrar.java](../../src/apismoke/java/com/example/rsiintegration/apismoke/ApiSmokeRegistrar.java)，
 再按机器类型选择一个完整案例。
 
@@ -33,6 +35,7 @@ RSI 不要求第三方改写现有配方 JSON。第三方保留自己的 `Recipe
 | 可选的 Ars Nouveau 兼容 | [ArsNouveauIntegration.java](../../src/apismoke/java/com/example/rsiintegration/apismoke/ArsNouveauIntegration.java) | 可选模组隔离、有序材料、apparatus 与 imbuement 配方 |
 | 概率流体和自定义执行 | [IronAlchemistCauldronIntegration.java](../../src/apismoke/java/com/example/rsiintegration/apismoke/IronAlchemistCauldronIntegration.java) | 自定义配方类型、`RecipeExecutionIntegration`、概率输出和流体结算 |
 | RSI 本体内置 API 兼容 | [ProfoundCurseApiIntegration.java](../../src/main/java/com/huanghuang/rsintegration/mods/profoundcurse/ProfoundCurseApiIntegration.java) | 邻接多方块结构、8 个展示架、持久操作、失败回收和成品回写 |
+| 共振盘作为额外物品来源 | [PublicResonanceExample.java](../../src/test/java/com/example/rsiintegration/PublicResonanceExample.java) | 快照、精确 NBT 匹配、模拟提取和实际提取 |
 | Consumer API 全流程 | [ConsumerSmokeCommand.java](../../src/apismoke/java/com/example/rsiintegration/apismoke/ConsumerSmokeCommand.java) | catalog、inspection、batch、submit、status 和 cancel |
 
 这些文件是验收示例，不是复制模板：
@@ -45,16 +48,18 @@ RSI 不要求第三方改写现有配方 JSON。第三方保留自己的 `Recipe
 
 ## 1. 选择正确的接入面
 
-RSI 提供两套彼此独立的公共 API。
+RSI 提供三套彼此独立的公共 API。
 
 | 需求 | 使用 |
 |---|---|
 | 查询 RSI 已识别的配方、检查递归材料、提交或取消订单 | Consumer API |
+| 把共振盘内容作为额外玩家物品来源 | Resonance Inventory API |
 | 让 RSI 识别你的普通配方和固定槽位机器 | Integration API |
 | 让 RSI 执行仪式、GUI 流程、多方块或机器私有资源 | Integration API + `RecipeExecutionIntegration` |
 
 Integration API 负责把模组内容接入递归规划；Consumer API 负责从 RSI 外部发起业务
-请求。一个模组可以只使用其中一套，也可以同时使用。
+请求；Resonance Inventory API 负责让第三方物品或工具读取共振盘中与玩家关联的存储。
+一个模组可以只使用其中一套，也可以同时使用。
 
 稳定的 Java 类型只在以下公共包中声明：
 
@@ -63,6 +68,7 @@ com.huanghuang.rsintegration.api
 com.huanghuang.rsintegration.api.recipe
 com.huanghuang.rsintegration.api.machine
 com.huanghuang.rsintegration.api.execution
+com.huanghuang.rsintegration.api.resonance
 com.huanghuang.rsintegration.api.consumer
 com.huanghuang.rsintegration.api.diagnostic
 ```
@@ -871,7 +877,105 @@ public Optional<Recipe<?>> resolveJeiRecipe(
 - 配方 inspection 没有被拒绝；
 - 玩家已绑定支持该 process 的真实机器。
 
-## 11. Consumer API
+## 11. Resonance Inventory API
+
+Resonance Inventory API 用于第三方物品、武器、饰品或工具把共振盘中的物品视为额外的
+玩家物品来源。它不把共振盘伪装成玩家主背包，也不会替换 Forge 的全局
+`ITEM_HANDLER` capability。
+
+入口是：
+
+```java
+Optional<RSIResonanceApi> api = RSIResonanceApi.get();
+```
+
+所有带 `ServerPlayer` 的调用必须在服务端主线程执行。共振盘只对当前玩家可见的已连接
+共振存储生效，不读取其它玩家或未连接网络的数据。
+
+### 11.1 打开短生命周期快照
+
+```java
+RSIResonanceApi api = RSIResonanceApi.get().orElse(null);
+if (api == null) return;
+
+ResonanceResult<ResonanceInventory> opened =
+        api.openInventory(player);
+if (!opened.successful()) {
+    LOGGER.debug("RSI resonance storage unavailable: {}",
+            opened.diagnostics());
+    return;
+}
+ResonanceInventory inventory = opened.value();
+```
+
+`ResonanceInventory` 只能在当前请求或当前 tick 内使用。不要跨 tick、跨玩家或跨线程
+缓存。需要再次访问时应重新调用 `openInventory`。
+
+### 11.2 查询与匹配
+
+```java
+List<ResonanceEntry> exact = inventory.find(
+        template,
+        ResourceMatchMode.EXACT_IDENTITY
+);
+boolean present = inventory.hasItem(
+        template,
+        ResourceMatchMode.PARTIAL_IDENTITY
+);
+long count = inventory.count(
+        template,
+        ResourceMatchMode.ANY_IDENTITY
+);
+```
+
+| 模式 | 语义 |
+|---|---|
+| `ANY_IDENTITY` | 只比较物品注册 ID，忽略 NBT |
+| `EXACT_IDENTITY` | 比较物品注册 ID 和完整 NBT |
+| `PARTIAL_IDENTITY` | 物品相同，且实际 NBT 包含模板中的字段 |
+
+`ResonanceEntry.stack()` 返回独立副本。`entryId` 只在生成它的快照及 revision 内有效，
+不能写入存档。
+
+### 11.3 模拟提取与实际提取
+
+需要消耗共振盘物品时，必须先模拟再执行：
+
+```java
+ResonanceEntry entry = exact.get(0);
+ResonanceResult<ResonanceExtraction> simulated =
+        inventory.extract(entry.entryId(), 1, true);
+if (!simulated.successful()) return;
+
+ResonanceResult<ResonanceExtraction> extracted =
+        inventory.extract(entry.entryId(), 1, false);
+if (!extracted.successful()) return;
+ItemStack actual = extracted.value().stack();
+```
+
+实际提取按逻辑槽位和完整 NBT 精确执行。若快照打开后盘内容发生变化，接口返回
+`STALE_SNAPSHOT`，调用方应重新打开快照，不能把旧 `entryId` 用在新的 revision 上。
+
+### 11.4 未分配插入
+
+```java
+ResonanceResult<ResonanceInsertion> insertion =
+        inventory.insert(stack, false);
+ItemStack remainder = insertion.value().remainder();
+```
+
+插入的物品不会自动占用背包逻辑槽位；它进入共振盘的未分配内部条目。是否接受以及
+保留多少由真实后端决定，`remainder` 表示未插入部分。
+
+### 11.5 使用边界
+
+- 不把共振盘物品写回玩家 `Inventory`。
+- 不注册覆盖玩家 item capability 的全局 handler。
+- 不长期保存 `ResonanceInventory`、`ResonanceEntry` 或可变 `ItemStack` 引用。
+- 不在客户端根据展示快照直接扣除物品；实际提取只能由服务端执行。
+- API 不可用时保持原模组行为，不要把“不可用”解释成背包里一定有或一定没有。
+
+## 12. Consumer API
 
 Consumer API 用于只消费 RSI 业务能力的模组。入口是：
 
@@ -887,7 +991,7 @@ if (api == null
 所有 Consumer 调用都必须在服务端主线程执行，并使用该玩家自己的 `ServerPlayer`。
 不要从客户端线程、异步 HTTP 线程或另一个玩家的上下文提交订单。
 
-### 11.1 能力限制
+### 12.1 能力限制
 
 `api.capabilities()` 返回当前服务端的限制。不要硬编码：
 
@@ -905,7 +1009,7 @@ if (api == null
 `ConsumerStorageSelector.Default()`，只使用玩家背包时使用
 `ConsumerStorageSelector.PlayerInventoryOnly()`。
 
-### 11.2 查询配方目录
+### 12.2 查询配方目录
 
 ```java
 public static ConsumerResult<ConsumerRecipeCatalogPage> findRecipes(
@@ -937,7 +1041,7 @@ public static ConsumerResult<ConsumerRecipeCatalogPage> findRecipes(
 `nextCursor == null` 表示目录页结束。查询新页时继续使用响应中的 `cursor` 和同一个
 query。`recipeRevision` 改变时，旧目录 cursor 不再可信，应从头重新查询。
 
-### 11.3 创建 inspection
+### 12.3 创建 inspection
 
 ```java
 ConsumerRecipeKey key = new ConsumerRecipeKey(
@@ -965,7 +1069,7 @@ ConsumerResult<ConsumerInspectionTicket> opened =
 
 inspection 会冻结材料、计划、机器绑定和存储快照。分页期间不要混用其他请求的快照。
 
-### 11.4 拉取 inspection 页
+### 12.4 拉取 inspection 页
 
 ```java
 ConsumerResult<ConsumerInspectionPage> pageResult =
@@ -999,7 +1103,7 @@ api.discardPlan(player, consumerId, planId);
 
 `closeInspection` 和 `discardPlan` 的成功结果使用 `ConsumerAck.accepted()` 判断。
 
-### 11.5 提交订单
+### 12.5 提交订单
 
 ```java
 ConsumerExternalRequestId externalRequestId =
@@ -1044,7 +1148,7 @@ ConsumerResult<ConsumerBatchOrderReceipt> receipt =
 
 批次中的每个订单仍保留自己的幂等结果。不要因为整批响应失败就给全部订单生成新 ID。
 
-### 11.6 查询与取消
+### 12.6 查询与取消
 
 ```java
 ConsumerResult<ConsumerOrderStatus> status =
@@ -1062,7 +1166,7 @@ ConsumerResult<ConsumerCancelResult> cancelled =
 取消请求也必须使用稳定幂等 ID。`cancel` 成功返回只表示请求已被接受，最终状态仍以
 `status` 为准。终态包括 `SUCCEEDED`、`FAILED` 和 `CANCELLED`。
 
-### 11.7 结果与诊断
+### 12.7 结果与诊断
 
 `ConsumerResult.successful()` 判断业务是否成功。失败时读取
 `ConsumerDiagnostic.code()`、`severity()`、`detail()` 和 `retryable()`，不要解析异常
@@ -1074,9 +1178,9 @@ ConsumerResult<ConsumerCancelResult> cancelled =
 如果要自行封装网络包，使用 `ConsumerApiCodecs` 读写 DTO。未知 wire version 会明确
 拒绝，不能静默按旧格式继续解析。
 
-## 12. 错误处理
+## 13. 错误处理
 
-### 12.1 注册阶段
+### 13.1 注册阶段
 
 | 状态 | 处理 |
 |---|---|
@@ -1087,7 +1191,7 @@ ConsumerResult<ConsumerCancelResult> cancelled =
 
 不要把注册失败降级为“运行时再试一次”。RSI 不支持运行期动态注册。
 
-### 12.2 配方不可用
+### 13.2 配方不可用
 
 | 诊断方向 | 常见原因 |
 |---|---|
@@ -1097,7 +1201,7 @@ ConsumerResult<ConsumerCancelResult> cancelled =
 | `OUTPUT_DECLARATION_INVALID` | 输出数量、端口或概率模型不合法 |
 | `TARGET_OUTPUT_INVALID` | target producing 输出与请求目标不一致 |
 
-### 12.3 机器不可用
+### 13.3 机器不可用
 
 | 诊断方向 | 常见原因 |
 |---|---|
@@ -1108,7 +1212,7 @@ ConsumerResult<ConsumerCancelResult> cancelled =
 | `MACHINE_STATE_INVALID` | busy/progress/activeRecipe 矛盾 |
 | `PORT_BINDING_UNAVAILABLE` | descriptor 声明的端口在运行时不存在 |
 
-### 12.4 执行不可用
+### 13.4 执行不可用
 
 | 诊断方向 | 常见原因 |
 |---|---|
@@ -1119,10 +1223,27 @@ ConsumerResult<ConsumerCancelResult> cancelled =
 | `MATERIAL_DISPOSITION_INVALID` | 预留材料没有完整处置 |
 | `EXECUTION_CLEANUP_UNCERTAIN` | 无法证明材料已回收 |
 
-## 13. 版本规则
+### 13.5 共振盘不可用
 
-`RSIIntegrationApi.version()` 和 `RSICraftConsumerApi.version()` 返回公共 API 版本。
-运行前可用 `supports(major, minor, patch)` 检查最低要求。
+| 诊断方向 | 常见原因 |
+|---|---|
+| `API_UNAVAILABLE` | RSI 未完成初始化，或调用发生在公共入口安装前 |
+| `PLAYER_UNAVAILABLE` | 玩家已退出、已移除或上下文不属于在线玩家 |
+| `MAIN_THREAD_REQUIRED` | 从异步线程或错误线程打开或修改快照 |
+| `STORAGE_UNAVAILABLE` | 功能关闭、没有已连接的共振盘或当前玩家看不到存储 |
+| `ENTRY_NOT_FOUND` | `entryId` 不属于当前快照 |
+| `STALE_SNAPSHOT` | 打开快照后共振盘内容或 revision 已变化 |
+| `EXTRACTION_FAILED` | 后端无法按完整 NBT 和逻辑条目精确提取 |
+| `INSERTION_FAILED` | 后端插入失败；调用方应保留未插入余额 |
+
+`INVALID_REQUEST` 表示参数本身错误，例如空物品、非正数量或超过条目数量。
+标记为 `retryable=true` 的诊断可以重新打开快照后重试；不可重试错误不应循环重试。
+
+## 14. 版本规则
+
+`RSIIntegrationApi.version()`、`RSIResonanceApi.version()` 和
+`RSICraftConsumerApi.version()` 返回各自公共 API 的版本。运行前可用
+`supports(major, minor, patch)` 检查最低要求。
 
 同一 major 内：
 
@@ -1136,7 +1257,7 @@ ConsumerResult<ConsumerCancelResult> cancelled =
 破坏性变化进入下一个 major。第三方不应依赖 method descriptor、类名、reflection 或
 内部网络 discriminator 绕过公共 API。
 
-## 14. 发布前检查清单
+## 15. 发布前检查清单
 
 ### 注册与线程
 
@@ -1183,7 +1304,17 @@ ConsumerResult<ConsumerCancelResult> cancelled =
 - 批次使用 `submitBatch`，不伪造多个独立 session；
 - 取消和状态查询始终带当前 player 与 consumer ID。
 
-## 15. 最小验收场景
+### Resonance
+
+- 只调用已安装的 `RSIResonanceApi.get()`；
+- 所有调用发生在服务端主线程；
+- 快照只在当前请求或当前 tick 内使用；
+- 需要消费时先模拟，再按同一 `entryId` 和 revision 实际提取；
+- 遇到 `STALE_SNAPSHOT` 时重新打开快照，不复用旧条目；
+- 插入后的 `remainder` 被完整保留并交给调用方处理；
+- 不把共振盘冒充玩家背包或全局 `ITEM_HANDLER`。
+
+## 16. 最小验收场景
 
 发布前至少完成以下真实环境验证：
 
@@ -1197,3 +1328,7 @@ ConsumerResult<ConsumerCancelResult> cancelled =
 8. 使用 Consumer catalog、inspection、submit、status、cancel 跑通一次完整订单。
 9. 对同一 order 请求重复提交，确认返回幂等结果而不是再次执行。
 10. 同时绑定两台机器，确认 process 路由不会把配方送到错误机器。
+11. 打开共振盘快照，分别验证 ANY、EXACT、PARTIAL 三种身份匹配。
+12. 先模拟提取再实际提取；确认模拟不改变数量，实际提取按完整 NBT 精确扣除。
+13. 在两个 API 调用之间修改共振盘内容，确认旧快照返回 `STALE_SNAPSHOT`。
+14. 插入超过剩余容量的物品，确认 `remainder` 数量准确且没有丢失。

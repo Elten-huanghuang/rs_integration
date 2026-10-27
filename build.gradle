@@ -390,11 +390,6 @@ processResources {
         rename { "LICENSE_RS_INTEGRATION" }
     }
 
-    from("LICENSE-API.md") {
-        into "META-INF"
-        rename { "LICENSE_RS_INTEGRATION_API" }
-    }
-
     // Mirror the English lang file into data/ so a DEDICATED SERVER can resolve
     // our keys. Forge's LanguageHook.loadLanguagesOnServer only reads
     // data/<ns>/lang/en_us.json; assets/ is client-only, so without this a
@@ -456,7 +451,6 @@ tasks.register('verifyReleaseJar') {
                     'META-INF/MANIFEST.MF',
                     'META-INF/mods.toml',
                     'META-INF/LICENSE_RS_INTEGRATION',
-                    'META-INF/LICENSE_RS_INTEGRATION_API',
                     'META-INF/licenses/MIT-MixinExtras.txt',
                     'META-INF/jarjar/metadata.json',
                     'META-INF/jarjar/mixinextras-forge-0.3.6.jar',
@@ -470,6 +464,8 @@ tasks.register('verifyReleaseJar') {
                     'com/huanghuang/rsintegration/api/recipe/RecipeIntegration.class',
                     'com/huanghuang/rsintegration/api/machine/MachineIntegration.class',
                     'com/huanghuang/rsintegration/api/execution/RecipeExecutionIntegration.class',
+                    'com/huanghuang/rsintegration/api/resonance/RSIResonanceApi.class',
+                    'com/huanghuang/rsintegration/api/resonance/ResonanceInventory.class',
                     'com/huanghuang/rsintegration/api/consumer/RSICraftConsumerApi.class',
                     'com/huanghuang/rsintegration/api/consumer/ConsumerApiCodecs.class',
                     'rs_integration.mixins.json',
@@ -488,6 +484,7 @@ tasks.register('verifyReleaseJar') {
                     'com/github/promeg/',
                     'dev/emi/emi/'
             ]
+            def rsiLicenses = []
             zip.entries().each { entry ->
                 def lowerName = entry.name.toLowerCase(java.util.Locale.ROOT)
                 forbiddenFragments.each { fragment ->
@@ -496,6 +493,13 @@ tasks.register('verifyReleaseJar') {
                                 "Release jar contains removed pinyin dependency ${entry.name}: ${archive}")
                     }
                 }
+                if (lowerName.startsWith('meta-inf/license_rs_integration')) {
+                    rsiLicenses.add(entry.name)
+                }
+            }
+            if (rsiLicenses != ['META-INF/LICENSE_RS_INTEGRATION']) {
+                throw new GradleException(
+                        "Release jar must contain exactly one RSI license, found ${rsiLicenses}: ${archive}")
             }
 
             ['rs_integration.mixins.json', 'rs_integration.craftflow_compat.mixins.json'].each { configName ->
@@ -515,7 +519,7 @@ tasks.register('verifyReleaseJar') {
             def modsToml = zip.getInputStream(modsEntry).getText('UTF-8')
             if (!modsToml.contains("modId = \"${mod_id}\"")
                     || !modsToml.contains("version = \"${project.version}\"")
-                    || !modsToml.contains("LICENSE_RS_INTEGRATION_API")) {
+                    || !modsToml.contains("LICENSE_RS_INTEGRATION")) {
                 throw new GradleException("Release mods.toml has unexpanded or incorrect identity: ${archive}")
             }
 
