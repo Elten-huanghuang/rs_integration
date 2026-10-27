@@ -982,6 +982,10 @@ class GenericCraftPacketTest extends BootstrapTest {
                 .sum());
         assertTrue(graph.nodes().isEmpty());
         assertTrue(graph.unresolvedDemands().isEmpty());
+        assertTrue(CraftTerminalSteps.canComposeEquivalentTerminalGraph(
+                graph, List.of(), List.of()));
+        assertFalse(CraftTerminalSteps.canComposeEquivalentTerminalGraph(
+                graph, List.of(), List.of("minecraft:diamond")));
     }
 
     @Test

@@ -1899,7 +1899,8 @@ public final class GenericCraftPacket {
                 throw timeout;
             }
             List<ResolutionStep> allSteps = ExecutionEquivalence.projectFlatSteps(inputGraph);
-            if (!allSteps.isEmpty() && graphMissing.isEmpty()) {
+            if (CraftTerminalSteps.canComposeEquivalentTerminalGraph(
+                    inputGraph, allSteps, graphMissing)) {
                 boolean physicalSteps = allSteps.stream().anyMatch(
                         step -> step.modType() != ModType.GENERIC);
                 if (physicalSteps && storageEndpoint == null) {
@@ -1975,7 +1976,8 @@ public final class GenericCraftPacket {
                 throw timeout;
             }
             List<ResolutionStep> planSteps = ExecutionEquivalence.projectFlatSteps(inputGraph);
-            if (planSteps != null && !planSteps.isEmpty() && missingCheck.isEmpty()) {
+            if (CraftTerminalSteps.canComposeEquivalentTerminalGraph(
+                    inputGraph, planSteps, missingCheck)) {
                 boolean physicalSteps = planSteps.stream().anyMatch(
                         step -> step.modType() != ModType.GENERIC);
                 ResolutionStep terminalStep = CraftTerminalSteps.genericTerminalStep(recipeId, repeatCount);

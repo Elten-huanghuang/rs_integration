@@ -220,6 +220,54 @@ public final class MaterialBroker {
     }
 
     /**
+     * 机器实时状态可能让规划时需要的材料在启动前不再需要，例如机器里
+     * 已装入正确催化剂。释放这些尚未提交的预留，避免整套节点被误判失败。
+     */
+    public void releaseUnusedReservedFragments(ReservationToken token,
+                                               List<ItemStack> initialFragments,
+                                               List<ItemStack> producerFragments) {
+        requireOwnerThread();
+        Reservation reservation = require(token, ReservationState.RESERVED);
+        releaseUnusedReservedFragments(reservation, initialFragments, true);
+        releaseUnusedReservedFragments(reservation, producerFragments, false);
+        reservation.claims.removeIf(claim -> claim.quantity <= 0L);
+    }
+
+    private void releaseUnusedReservedFragments(Reservation reservation,
+                                                List<ItemStack> fragments,
+                                                boolean initialPool) {
+        List<ItemStack> remaining = new ArrayList<>();
+        if (fragments != null) {
+            for (ItemStack stack : fragments) {
+                if (stack != null && !stack.isEmpty()) remaining.add(stack.copy());
+            }
+        }
+        for (Claim claim : reservation.claims) {
+            AssetLot lot = lots.get(claim.lotId);
+            if (initialPool != (lot.source instanceof MaterialSource.InitialPool)
+                    || claim.quantity <= 0L) continue;
+            long refundable = claim.quantity;
+            for (ItemStack stack : remaining) {
+                if (refundable <= 0L) break;
+                if (stack.isEmpty() || !MaterialMatcher.sameRuntimeFragment(lot.stack, stack)) {
+                    continue;
+                }
+                int giveBack = (int) Math.min(refundable, stack.getCount());
+                stack.shrink(giveBack);
+                lot.reserved -= giveBack;
+                lot.available += giveBack;
+                claim.quantity -= giveBack;
+                refundable -= giveBack;
+            }
+        }
+        remaining.removeIf(ItemStack::isEmpty);
+        if (!remaining.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "unused fragments exceed reserved broker claims");
+        }
+    }
+
+    /**
      * Return exact producer fragments for operations that never reached a machine.
      * Remaining committed claims stay owned by in-flight/consumed operations.
      */
@@ -497,7 +545,7 @@ public final class MaterialBroker {
 
         Reservation(NodeId owner, List<Claim> claims, ReservationState state) {
             this.owner = owner;
-            this.claims = claims;
+            this.claims = new ArrayList<>(claims);
             this.state = state;
         }
     }

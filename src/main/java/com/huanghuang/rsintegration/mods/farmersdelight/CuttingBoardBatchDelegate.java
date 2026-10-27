@@ -371,6 +371,12 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
+    protected boolean isFailureRefundSafe() {
+        // 产物和工具耐久都在内存中模拟，失败时砧板从未接收实际输入。
+        return true;
+    }
+
+    @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         // Execution is staged in memory. On failure the ledger refunds the
         // original inputs, so unpublished staged outputs must be discarded.

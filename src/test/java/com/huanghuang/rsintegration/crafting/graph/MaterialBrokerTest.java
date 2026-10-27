@@ -147,6 +147,32 @@ class MaterialBrokerTest extends BootstrapTest {
     }
 
     @Test
+    void unusedReservedFragmentsReturnToTheirOriginalSource() {
+        MaterialBroker broker = new MaterialBroker();
+        ItemStack diamonds = new ItemStack(Items.DIAMOND, 2);
+        MaterialKey diamond = MaterialKey.of(diamonds);
+        MaterialSource initial = new MaterialSource.InitialPool(diamond);
+        MaterialSource producer = new MaterialSource.ProducerOutput(
+                new OutputPortId(new NodeId(7), 0));
+        broker.publishActual(initial, diamond, diamonds.copy());
+        broker.publishActual(producer, diamond, diamonds.copy());
+        NodeId owner = new NodeId(8);
+        MaterialBroker.ReservationToken token = broker.reserve(owner, List.of(
+                new MaterialBroker.Request(initial, diamond, 2),
+                new MaterialBroker.Request(producer, diamond, 2)));
+
+        broker.releaseUnusedReservedFragments(token,
+                List.of(diamonds.copy()), List.of());
+
+        assertEquals(2, broker.available(initial, diamond));
+        assertEquals(0, broker.available(producer, diamond));
+        assertEquals(2, broker.heldBy(owner));
+        broker.commit(token);
+        broker.settle(token);
+        assertEquals(0, broker.heldBy(owner));
+    }
+
+    @Test
     void deliveredSurplusExcludesUnitsCommittedByDownstream() {
         MaterialBroker broker = brokerWithDiamonds(3);
         MaterialKey diamond = MaterialKey.of(new ItemStack(Items.DIAMOND));

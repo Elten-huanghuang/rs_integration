@@ -61,6 +61,20 @@ public final class CraftTerminalSteps {
                         List.of(), List.of(), inferMode, Math.max(1, repeatCount));
     }
 
+    /**
+     * 材料已全部在库存中时，输入图只有根需求而没有中间生产节点。
+     * 这种零步骤图同样可以追加终端节点并执行。
+     */
+    static boolean canComposeEquivalentTerminalGraph(
+            CraftPlanGraph inputGraph,
+            @Nullable List<ResolutionStep> flatSteps,
+            List<String> missing) {
+        return inputGraph != null
+                && missing != null && missing.isEmpty()
+                && ((flatSteps != null && !flatSteps.isEmpty())
+                || !inputGraph.rootDemands().isEmpty());
+    }
+
     public static CraftPlanGraph composeEquivalentTerminalGraph(
             CraftPlanGraph inputGraph, ResolutionStep terminalStep, ItemStack output,
             Level level) {

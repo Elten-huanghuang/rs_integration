@@ -2837,7 +2837,7 @@ public final class AsyncCraftChain {
                 virtualDebits.add(List.of());
                 producerDebits.add(consumedFragments(producerBefore, producerPool));
             }
-            requireGraphMaterialPoolsDrained(initialPool, producerPool);
+            releaseUnusedGraphMaterials(materialToken, initialPool, producerPool);
             List<ExtractionLedger.ReservationToken> reusableTokens = reusableEntryIds.stream()
                     .map(ExtractionLedger.ReservationToken::new)
                     .toList();
@@ -2874,16 +2874,28 @@ public final class AsyncCraftChain {
             if (reusableIndices.contains(i)) materials.add(reusableMaterials.get(reusableIndex++));
             else materials.add(consumedMaterials.get(consumedIndex++));
         }
-        requireGraphMaterialPoolsDrained(initialPool, producerPool);
+        releaseUnusedGraphMaterials(materialToken, initialPool, producerPool);
         return new GraphNodeMaterials(materials, List.of(), List.of(), List.of(), reusableTokens);
     }
 
-    private static void requireGraphMaterialPoolsDrained(
-            List<ItemStack> initialPool, List<ItemStack> producerPool) {
-        if (!graphMaterialPoolsDrained(initialPool, producerPool)) {
-            throw new IllegalStateException(
-                    "runtime material specs did not consume the complete graph checkout");
+    private void releaseUnusedGraphMaterials(
+            MaterialBroker.ReservationToken materialToken,
+            List<ItemStack> initialPool,
+            List<ItemStack> producerPool) {
+        if (graphMaterialPoolsDrained(initialPool, producerPool)) return;
+        if (graphMaterials == null) {
+            throw new IllegalStateException("graph materials unavailable for checkout reconciliation");
         }
+        List<ItemStack> unusedInitial = StackCopies.excludingEmpty(initialPool);
+        List<ItemStack> unusedProducer = StackCopies.excludingEmpty(producerPool);
+        graphMaterials.releaseUnusedReservedFragments(
+                materialToken, unusedInitial, unusedProducer);
+        RSIntegrationMod.LOGGER.warn(ctx.format(
+                "[RSI-Graph] Released unused planned materials node={} recipe={} "
+                        + "initial={} producer={}"),
+                currentStepIdx, currentRecipeForLogging(),
+                describeStacksForLogging(unusedInitial),
+                describeStacksForLogging(unusedProducer));
     }
 
     static boolean graphMaterialPoolsDrained(

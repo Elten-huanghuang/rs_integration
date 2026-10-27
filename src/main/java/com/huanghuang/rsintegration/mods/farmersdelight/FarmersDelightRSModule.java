@@ -185,6 +185,7 @@ public final class FarmersDelightRSModule implements IModIntegration {
     @Override
     public void registerRecipeHandler() {
         ModRecipeHandlers.register(new FarmersDelightRecipeHandler());
+        ModRecipeHandlers.register(new CuttingBoardRecipeHandler());
     }
 
     @Override

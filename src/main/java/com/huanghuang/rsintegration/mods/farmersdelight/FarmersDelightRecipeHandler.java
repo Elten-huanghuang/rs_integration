@@ -35,8 +35,11 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
     @Override
     public boolean canHandle(Recipe<?> recipe) {
         return recipe.getClass().getName().equals(COOKING_POT_CLASS)
-                || recipe.getClass().getName().equals(CUTTING_BOARD_CLASS)
                 || recipe instanceof CampfireCookingRecipe;
+    }
+
+    static boolean isCuttingBoardRecipe(@Nullable Recipe<?> recipe) {
+        return recipe != null && recipe.getClass().getName().equals(CUTTING_BOARD_CLASS);
     }
 
     @Override

@@ -1,11 +1,16 @@
 package com.huanghuang.rsintegration.mods.farmersdelight;
 
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import net.minecraft.core.NonNullList;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraftforge.items.wrapper.RecipeWrapper;
+import vectorwing.farmersdelight.common.crafting.CuttingBoardRecipe;
+import vectorwing.farmersdelight.common.crafting.ingredient.ChanceResult;
 import org.junit.jupiter.api.Test;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
@@ -34,6 +39,26 @@ class CuttingBoardCompatibilityTest extends BootstrapTest {
     void repeatedBatchRequiresTheNewRecipeWrapperContract() {
         assertFalse(CuttingBoardBatchDelegate.supportsRepeatedRolls(OldRollFixture.class));
         assertTrue(CuttingBoardBatchDelegate.supportsRepeatedRolls(NewRollFixture.class));
+    }
+
+    @Test
+    void cuttingBoardUsesItsDedicatedRecipeHandler() {
+        CuttingBoardRecipe recipe = new CuttingBoardRecipe(
+                new ResourceLocation("farmersdelight", "cutting/test_branch"),
+                "",
+                Ingredient.of(Items.OAK_LOG),
+                Ingredient.of(Items.IRON_SWORD),
+                NonNullList.of(ChanceResult.EMPTY,
+                        new ChanceResult(new ItemStack(Items.STICK), 1.0F)),
+                "");
+
+        assertTrue(new CuttingBoardRecipeHandler().canHandle(recipe));
+        assertFalse(new FarmersDelightRecipeHandler().canHandle(recipe));
+    }
+
+    @Test
+    void cuttingBoardFailureCanRefundStagedInputs() {
+        assertTrue(new CuttingBoardBatchDelegate().isFailureRefundSafe());
     }
 
     public static final class OldRollFixture {
