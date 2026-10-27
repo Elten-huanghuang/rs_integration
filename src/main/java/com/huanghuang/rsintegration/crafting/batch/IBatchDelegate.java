@@ -186,6 +186,15 @@ public interface IBatchDelegate {
 
     /** Unified operation start entry. */
     boolean startOperation(@Nonnull OperationStartContext context);
+
+    /**
+     * 最近一次启动失败的稳定详情，供并行组和故障报告展示。
+     */
+    @Nullable
+    default String lastStartFailureDetail() {
+        return null;
+    }
+
     boolean validateAndInit(@Nonnull ServerPlayer player, @Nonnull ResourceLocation recipeId,
                             @Nullable ResourceLocation dim, @Nonnull BlockPos pos);
 

@@ -229,6 +229,13 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     }
 
     @Override
+    @Nullable
+    public String lastStartFailureDetail() {
+        return preparationFailure == null
+                ? null : preparationFailure.getString();
+    }
+
+    @Override
     public int prepareFlatBatch(int remainingOperations) {
         int requested = Math.max(0, remainingOperations);
         if (requested <= 1) {
@@ -558,7 +565,10 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             return failPreparedStart("execution context is invalid");
         }
         if (executionKind == RecipeExecutionKind.CUSTOM) {
-            return startCustomOperation(player, materials, sharedLedger);
+            boolean started = startCustomOperation(
+                    player, materials, sharedLedger);
+            if (!started) logPreparedStartFailure();
+            return started;
         }
         this.ledger = sharedLedger;
         this.operationStarted = false;
@@ -1071,6 +1081,15 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             List<ItemStack> materials,
             ExtractionLedger sharedLedger
     ) {
+        if (LOGGER.isDebugEnabled()) {
+            LOGGER.debug(
+                    "[RSI-API] custom start recipe={} expectedEntries={} materialEntries={} counts={}",
+                    recipe == null ? "unknown" : recipe.getId(),
+                    recipeView.materials().size(),
+                    materials.size(),
+                    materials.stream().map(ItemStack::getCount).toList()
+            );
+        }
         if (operationStartContext == null
                 || operationStartContext.transactionId() == null
                 || operationStartContext.operationId() == null) {

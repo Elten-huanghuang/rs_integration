@@ -40,6 +40,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import org.jetbrains.annotations.NotNull;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
@@ -621,18 +622,27 @@ public final class ParallelCraftGroup implements IBatchDelegate {
                         : InputBufferPlan.none();
                 OperationStartContext startContext = OperationStartContext.chainReserved(
                         player, sharedLedger, materialPlan, batchMaterials, inputBuffer);
+                OperationStartContext identifiedContext = attachOperationIdentity(
+                        startContext, worker.operationSession);
                 accepted = worker.operationSession != null
-                        ? worker.operationSession.tryStart(() -> delegate.startOperation(startContext))
-                        : delegate.startOperation(startContext);
+                        ? worker.operationSession.tryStart(() -> delegate.startOperation(identifiedContext))
+                        : delegate.startOperation(identifiedContext);
             } else {
                 OperationStartContext startContext = OperationStartContext.delegateExtracted(
                         player, sharedLedger != null ? sharedLedger : delegateExtractedLedger);
+                OperationStartContext identifiedContext = attachOperationIdentity(
+                        startContext, worker.operationSession);
                 accepted = worker.operationSession != null
-                        ? worker.operationSession.tryStart(() -> delegate.startOperation(startContext))
-                        : delegate.startOperation(startContext);
+                        ? worker.operationSession.tryStart(() -> delegate.startOperation(identifiedContext))
+                        : delegate.startOperation(identifiedContext);
             }
             if (!accepted) {
-                handleFailedStart(worker, "worker start failed at " + worker.machine.pos());
+                String failureDetail = delegate.lastStartFailureDetail();
+                handleFailedStart(worker,
+                        "worker start failed at " + worker.machine.pos()
+                                + (failureDetail == null
+                                || failureDetail.isBlank()
+                                ? "" : ": " + failureDetail));
                 return false;
             }
             // Deferred-output machines only learn the concrete item while
@@ -647,6 +657,29 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             handleFailedStart(worker, "worker start threw at " + worker.machine.pos());
             return false;
         }
+    }
+
+    static OperationStartContext attachOperationIdentity(
+            OperationStartContext context,
+            @Nullable OperationExecutionKernel.Session session
+    ) {
+        if (session == null || session.operationId() == null) {
+            return context;
+        }
+        OperationId operationId = session.operationId();
+        return context.withOperationIdentity(
+                operationId.craftId(),
+                publicOperationId(operationId),
+                operationId.sequence() + 1
+        );
+    }
+
+    static UUID publicOperationId(OperationId operationId) {
+        String identity = operationId.craftId()
+                + "|" + operationId.nodeId().value()
+                + "|" + operationId.sequence();
+        return UUID.nameUUIDFromBytes(
+                identity.getBytes(StandardCharsets.UTF_8));
     }
 
     private int compatibleBatchSize(IBatchDelegate delegate, int firstOperation, int requested) {

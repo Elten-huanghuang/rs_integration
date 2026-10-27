@@ -6,6 +6,8 @@ import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.crafting.batch.RepeatedOperationPlan;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.crafting.graph.NodeId;
+import com.huanghuang.rsintegration.crafting.graph.OperationId;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
@@ -17,9 +19,11 @@ import net.minecraft.world.item.crafting.Ingredient;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Proxy;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -153,6 +157,22 @@ class ParallelCraftGroupSchedulingTest extends BootstrapTest {
     @Test
     void exclusiveDelegateCanDrainOperationsThroughOneSerialWorker() {
         assertTrue(ParallelCraftGroup.operationGroupAcceptsChild(true, 1));
+    }
+
+    @Test
+    void parallelWorkerUsesStableGraphOperationIdentity() {
+        OperationId operation = new OperationId(
+                UUID.fromString("00000000-0000-0000-0000-000000000123"),
+                new NodeId(7),
+                3
+        );
+
+        assertEquals(
+                UUID.nameUUIDFromBytes(
+                        (operation.craftId()
+                                + "|7|3").getBytes(StandardCharsets.UTF_8)),
+                ParallelCraftGroup.publicOperationId(operation)
+        );
     }
 
     @Test

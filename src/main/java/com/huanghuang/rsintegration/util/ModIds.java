@@ -35,6 +35,7 @@ public final class ModIds {
     public static final String LYCHEE = "lychee";
     public static final String BIOMANCY = "biomancy";
     public static final String CTHULHU_CREATURES = "cthulhu_creatures";
+    public static final String PROFOUND_CURSE = "profound_curse";
     /** Let's Do 系列：烛火晚宴。 */
     public static final String CANDLELIGHT = "candlelight";
     /** Let's Do 系列：田园乐事（烹饪锅 / 烘焙机）。 */

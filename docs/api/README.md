@@ -9,6 +9,10 @@ RS Integration 为第三方模组提供两套 Java API：
 
 完整接入说明见 [RSI_INTEGRATION_API_GUIDE.md](RSI_INTEGRATION_API_GUIDE.md)。
 
+第一次接入时，建议直接从
+[实例索引](RSI_INTEGRATION_API_GUIDE.md#实例索引) 开始，按普通机器、处理进度机器、
+自定义执行或 Consumer 下单选择对应参考实现，再阅读完整契约。
+
 公共 API 的有限互操作授权见
 [LICENSE-API.md](../../LICENSE-API.md)。RSI 主体仍是专有软件；该许可只允许
 第三方针对公共 API 编译、运行和发布兼容模组，不授权复制或修改 RSI 实现。

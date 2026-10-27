@@ -19,6 +19,30 @@ RSI 不要求第三方改写现有配方 JSON。第三方保留自己的 `Recipe
 `META-INF/LICENSE_RS_INTEGRATION_API`。该授权只覆盖本文列出的公共 API；RSI
 主体、实现代码和原创素材仍适用主项目的专有许可。
 
+## 实例索引
+
+仓库中的 `src/apismoke` 是独立编译的 API 烟测模组。它只引用公共 API，并用于验证
+第三方从外部模组接入时能否完成注册、规划、JEI 展示和执行。第一次接入时，先阅读
+[ApiSmokeRegistrar.java](../../src/apismoke/java/com/example/rsiintegration/apismoke/ApiSmokeRegistrar.java)，
+再按机器类型选择一个完整案例。
+
+| 场景 | 参考实现 | 重点 |
+|---|---|---|
+| 普通配方向与固定容器槽位 | [FarmersDelightCookingPotIntegration.java](../../src/apismoke/java/com/example/rsiintegration/apismoke/FarmersDelightCookingPotIntegration.java) | `RecipeIntegration`、`MachineIntegration`、容器端口和材料顺序 |
+| 带燃料、处理进度和一次批量投料的标准机器 | [IronFurnacesSmeltingIntegration.java](../../src/apismoke/java/com/example/rsiintegration/apismoke/IronFurnacesSmeltingIntegration.java) | `STANDARD_IO`、`TICKED_AND_BUSY`、状态 revision、`supportsBatching` |
+| 可选的 Ars Nouveau 兼容 | [ArsNouveauIntegration.java](../../src/apismoke/java/com/example/rsiintegration/apismoke/ArsNouveauIntegration.java) | 可选模组隔离、有序材料、apparatus 与 imbuement 配方 |
+| 概率流体和自定义执行 | [IronAlchemistCauldronIntegration.java](../../src/apismoke/java/com/example/rsiintegration/apismoke/IronAlchemistCauldronIntegration.java) | 自定义配方类型、`RecipeExecutionIntegration`、概率输出和流体结算 |
+| RSI 本体内置 API 兼容 | [ProfoundCurseApiIntegration.java](../../src/main/java/com/huanghuang/rsintegration/mods/profoundcurse/ProfoundCurseApiIntegration.java) | 邻接多方块结构、8 个展示架、持久操作、失败回收和成品回写 |
+| Consumer API 全流程 | [ConsumerSmokeCommand.java](../../src/apismoke/java/com/example/rsiintegration/apismoke/ConsumerSmokeCommand.java) | catalog、inspection、batch、submit、status 和 cancel |
+
+这些文件是验收示例，不是复制模板：
+
+- `rsi_api_smoke` 的 namespace、测试配方和 `priority=1000` 只用于覆盖测试，第三方应使用
+  自己的稳定 ID；普通兼容实现应优先使用 `RegistrationOptions.defaults()`。
+- 示例会针对不同模组做取舍，不能把一个案例中的槽位、燃料或输出规则直接套到另一台机器。
+- 示例源码属于独立 smoke mod，不在 RSI 主 jar 的公共 API 包中；可以依照其调用方式接入，
+  但稳定契约仍是本文列出的 `com.huanghuang.rsintegration.api` 公共类型。
+
 ## 1. 选择正确的接入面
 
 RSI 提供两套彼此独立的公共 API。

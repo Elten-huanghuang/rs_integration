@@ -513,6 +513,16 @@ public final class RSIntegrationMod {
                         unavailable.toString());
             }
         }
+        if (ModList.get().isLoaded(ModIds.PROFOUND_CURSE)) {
+            try {
+                Class<?> type = Class.forName(
+                        "com.huanghuang.rsintegration.mods.profoundcurse.ProfoundCurseApiIntegration");
+                type.getMethod("register").invoke(null);
+            } catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) {
+                LOGGER.error("[RSI-ProfoundCurse] 公共 API 兼容注册失败: {}",
+                        unavailable.toString());
+            }
+        }
         if (!ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
             LOGGER.info("[RSI-Storage] Refined Storage is absent; storage operations stay disabled, but cross-mod recipe and JEI metadata remain registered.");
         }
