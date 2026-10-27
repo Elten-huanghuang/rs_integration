@@ -24,6 +24,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
@@ -31,6 +32,57 @@ import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.when;
 
 class CraftMachineBindingSupportTest extends BootstrapTest {
+
+    // 便于复现“模组级兜底类型 vs 具体机器子类型”的纯类型选择
+    private static final ModType COARSE = ModType.register(
+            "testutil_coarse", new String[0], new String[0], new String[0],
+            GenericBatchDelegate::new);
+    private static final ModType SPECIFIC = ModType.register(
+            "testutil_coarse_pot", new String[0], new String[0], new String[0],
+            GenericBatchDelegate::new);
+    private static final ModType OTHER_MOD = ModType.register(
+            "testutil_other_pot", new String[0], new String[0], new String[0],
+            GenericBatchDelegate::new);
+
+    @Test
+    void unboundCoarseTypeFallsBackToTheSpecificSibling() {
+        assertSame(SPECIFIC, CraftMachineBindingSupport.preferSpecificExecutionType(
+                COARSE, SPECIFIC, false));
+    }
+
+    @Test
+    void boundCoarseTypeKeepsTheExistingBinding() {
+        assertSame(COARSE, CraftMachineBindingSupport.preferSpecificExecutionType(
+                COARSE, SPECIFIC, true));
+    }
+
+    @Test
+    void otherModTypeIsNotTreatedAsASibling() {
+        assertSame(COARSE, CraftMachineBindingSupport.preferSpecificExecutionType(
+                COARSE, OTHER_MOD, false));
+    }
+
+    @Test
+    void genericOrMissingClaimFallsBackToTheClassifiedType() {
+        assertSame(SPECIFIC, CraftMachineBindingSupport.preferSpecificExecutionType(
+                ModType.GENERIC, SPECIFIC, false));
+        assertSame(SPECIFIC, CraftMachineBindingSupport.preferSpecificExecutionType(
+                null, SPECIFIC, false));
+        assertSame(COARSE, CraftMachineBindingSupport.preferSpecificExecutionType(
+                COARSE, null, false));
+    }
+
+    @Test
+    void cachedExecutionTypeAlsoPrefersTheSpecificSibling() {
+        ModRecipeHandler claimed = mock(ModRecipeHandler.class);
+        when(claimed.modType()).thenReturn(COARSE);
+
+        assertSame(SPECIFIC, GenericCraftPacket.modTypeForCachedExecution(
+                claimed, SPECIFIC));
+        assertSame(ModType.GENERIC, GenericCraftPacket.modTypeForCachedExecution(
+                null, null));
+    }
+
     @Test
     void executionTypeUsesTheWinningApiRecipeClaim() {
         ServerPlayer player = mock(ServerPlayer.class);

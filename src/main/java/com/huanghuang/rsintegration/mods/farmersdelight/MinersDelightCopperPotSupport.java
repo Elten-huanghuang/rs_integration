@@ -72,8 +72,10 @@ public final class MinersDelightCopperPotSupport {
     public static boolean isRequestedCopperPot(ServerPlayer player, Recipe<?> recipe,
                                                 @Nullable ResourceLocation dim,
                                                 @Nullable BlockPos pos) {
-        if (!ModList.get().isLoaded(ModIds.MINERS_DELIGHT) || !isCookingRecipe(recipe)
-                || dim == null || pos == null) return false;
+        // 先判定配方与坐标，避免在没有接入 FML 的单元测试里访问 ModList；
+        // 铜锅只有四个食材槽，装不下的配方仍然交给普通烹饪锅
+        if (!isCompatibleRecipe(recipe) || dim == null || pos == null
+                || !ModList.get().isLoaded(ModIds.MINERS_DELIGHT)) return false;
 
         ModType copperType = ModType.findById(ModIds.ID_MD_COPPER_POT);
         if (copperType == null) return false;

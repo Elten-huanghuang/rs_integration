@@ -41,17 +41,69 @@ final class CraftMachineBindingSupport {
     static ModType resolveExecutionModType(ServerPlayer player, Recipe<?> recipe,
                                            @Nullable ResourceLocation dimension,
                                            @Nullable BlockPos position) {
-        ModRecipeHandler claimed = ModRecipeHandlers.claimFor(recipe).winner();
-        if (claimed != null
-                && claimed.modType() != ModType.GENERIC) {
-            return claimed.modType();
-        }
+        // 铜锅与烹饪锅共用同一个配方类，只能靠请求位置上的方块区分，因此要先判铜锅
         if (MinersDelightCopperPotSupport.isRequestedCopperPot(
                 player, recipe, dimension, position)) {
             ModType copperPot = ModType.findById(ModIds.ID_MD_COPPER_POT);
             if (copperPot != null) return copperPot;
         }
-        return ModType.classifyRecipe(recipe);
+        ModRecipeHandler claimed = ModRecipeHandlers.claimFor(recipe).winner();
+        ModType claimedType = claimed == null ? null : claimed.modType();
+        if (claimedType == null || claimedType == ModType.GENERIC) {
+            return ModType.classifyRecipe(recipe);
+        }
+        // 注册表里没有同模组子类型时直接沿用处理器声明的类型，常见路径不做全表前缀匹配
+        if (!hasMoreSpecificType(claimedType)) return claimedType;
+        ModType classified = classifyQuietly(recipe);
+        // 配方处理器常只声明模组级兜底类型（如 farmersdelight、youkaishomecoming），
+        // 这类类型没有可绑定的方块，绑定检查必定失败，此时以配方类能确定的子类型为准；
+        // 但若旧存档已经把兜底类型绑定到机器上，则保持原类型避免破坏既有绑定。
+        boolean claimedTypeBound = isSpecificSiblingOf(classified, claimedType)
+                && AltarBindingRegistry.hasBindingForRecipe(player, recipe, claimedType);
+        return preferSpecificExecutionType(claimedType, classified, claimedTypeBound);
+    }
+
+    /** 注册表中是否存在 {@code type} 的更具体子类型，例如 farmersdelight_cooking_pot。 */
+    private static boolean hasMoreSpecificType(ModType type) {
+        String prefix = type.id() + "_";
+        for (ModType candidate : ModType.values()) {
+            if (candidate.id().startsWith(prefix)) return true;
+        }
+        return false;
+    }
+
+    @Nullable
+    private static ModType classifyQuietly(Recipe<?> recipe) {
+        try {
+            return ModType.classifyRecipe(recipe);
+        } catch (RuntimeException failure) {
+            // 分类只是加速绑定匹配的辅助信息，失败时退回处理器声明的类型
+            RSIntegrationMod.LOGGER.debug("Unable to classify recipe {}", recipe.getId(), failure);
+            return null;
+        }
+    }
+
+    /**
+     * 在“处理器声明的类型”和“配方类分类出的类型”之间选出真正能绑定机器的类型。
+     *
+     * @param claimedTypeBound 处理器声明的类型当前已有绑定机器
+     */
+    @Nullable
+    static ModType preferSpecificExecutionType(@Nullable ModType claimedType,
+                                               @Nullable ModType classified,
+                                               boolean claimedTypeBound) {
+        if (claimedType == null || claimedType == ModType.GENERIC) return classified;
+        if (!isSpecificSiblingOf(classified, claimedType)) return claimedType;
+        return claimedTypeBound ? claimedType : classified;
+    }
+
+    /** 判断 {@code specific} 是否是 {@code coarser} 在同一模组下的更具体子类型。 */
+    private static boolean isSpecificSiblingOf(@Nullable ModType specific, @Nullable ModType coarser) {
+        return specific != null
+                && coarser != null
+                && specific != coarser
+                && specific != ModType.GENERIC
+                && specific.id().startsWith(coarser.id() + "_");
     }
 
     static boolean hasBindingForExecutionType(ServerPlayer player, Recipe<?> recipe,

@@ -1110,10 +1110,10 @@ public final class GenericCraftPacket {
             @Nullable ModRecipeHandler claimed,
             @Nullable ModType type
     ) {
-        if (claimed != null && claimed.modType() != ModType.GENERIC) {
-            return claimed.modType();
-        }
-        return type == null ? ModType.GENERIC : type;
+        // 与预览/执行入口共用同一条类型解析规则，避免缓存执行把模组级兜底类型写进终端步骤
+        ModType resolved = CraftMachineBindingSupport.preferSpecificExecutionType(
+                claimed == null ? null : claimed.modType(), type, false);
+        return resolved == null ? ModType.GENERIC : resolved;
     }
 
     private static void tickExecutionRequests(MinecraftServer server) {
