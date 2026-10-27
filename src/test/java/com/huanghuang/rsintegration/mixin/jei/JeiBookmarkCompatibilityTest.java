@@ -7,7 +7,9 @@ import org.objectweb.asm.FieldVisitor;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 
+import java.io.ByteArrayInputStream;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
@@ -35,6 +37,27 @@ class JeiBookmarkCompatibilityTest {
                                     + "Lorg/spongepowered/asm/mixin/injection/callback/CallbackInfo;)V"),
                     mixin.methodDescriptors().get(
                             "rsIntegration$extendBookmarkTooltip"));
+        }
+    }
+
+    @Test
+    void unbookmarkingClearsRecipeExclusionPreference() throws Exception {
+        String resource = BookmarkListChangeMixin.class.getName()
+                .replace('.', '/') + ".class";
+        try (InputStream input = BookmarkListChangeMixin.class
+                .getClassLoader().getResourceAsStream(resource)) {
+            byte[] bytes = input.readAllBytes();
+            ClassShape mixin = shape(new ByteArrayInputStream(bytes));
+            assertEquals(Set.of("(Lmezz/jei/gui/bookmarks/IBookmark;"
+                            + "Lorg/spongepowered/asm/mixin/injection/callback/"
+                            + "CallbackInfoReturnable;)V"),
+                    mixin.methodDescriptors().get("rsIntegration$bookmarkRemoved"));
+            // 回调体必须真的去清理递归禁用偏好，否则取消收藏后拉黑会残留
+            String constants = new String(bytes, StandardCharsets.ISO_8859_1);
+            assertTrue(constants.contains(
+                    "com/huanghuang/rsintegration/crafting/plan/ClientRecipeExclusions"));
+            assertTrue(constants.contains("mezz/jei/gui/bookmarks/RecipeBookmark"));
+            assertTrue(constants.contains("clear"));
         }
     }
 

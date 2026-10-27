@@ -430,6 +430,14 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
                     && hasMethod(targetClassName, "updateBounds")
                     && hasMethod(targetClassName, "createInputHandler");
         }
+        if (mixinClassName.endsWith("jei.BookmarkListChangeMixin")) {
+            // 回调依赖 add/remove 返回 boolean，版本不符时直接跳过而不是让混入失败
+            return isClassPresent("mezz.jei.gui.bookmarks.BookmarkList")
+                    && hasMethod(targetClassName, "add",
+                    "(Lmezz/jei/gui/bookmarks/IBookmark;)Z")
+                    && hasMethod(targetClassName, "remove",
+                    "(Lmezz/jei/gui/bookmarks/IBookmark;)Z");
+        }
         if (mixinClassName.contains("easyvillagers.EasyVillagersTradeLockMixin")) {
             return isClassPresent("de.maxhenkel.easyvillagers.events.GuiEvents")
                     && hasMethod(targetClassName, "onCycleTrades");

@@ -159,7 +159,7 @@
     "jei.BookmarkOverlayAccessor",
     "jei.BookmarkOverlayConfigButtonMixin",
     "jei.BookmarkOverlayConfigButtonV15Mixin",
-    "jei.BookmarkListTradeLockMixin",
+    "jei.BookmarkListChangeMixin",
     "jei.IngredientFilterSolCarrotMixin",
     "jei.IngredientFilterTetraMixin",
     "tetra.WorkbenchScreenJeiPreviewMixin",
