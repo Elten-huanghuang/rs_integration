@@ -328,6 +328,8 @@ public final class CraftingPlanScreen extends Screen {
     private List<Component> hoveredStepWarnings = List.of();
     private int hoveredTooltipX, hoveredTooltipY;
     private long hoveredTooltipAvail, hoveredTooltipNeeded;
+    /** 当前悬停的是否为引用节点（成本已在树中别处展开）。 */
+    private boolean hoveredTooltipReference;
 
     protected CraftingPlanScreen(PlanResponse plan, long requestId) {
         super(Component.translatable("rsi.plan.title",
@@ -1168,6 +1170,7 @@ public final class CraftingPlanScreen extends Screen {
                         hoveredTooltipY = my;
                         hoveredTooltipAvail = avail;
                         hoveredTooltipNeeded = need;
+                        hoveredTooltipReference = false;
                     }, this::registerBookmarkHit);
             if (materialScroll > materialMaxScroll) materialScroll = materialMaxScroll;
             // Draggable scrollbar — grid begins below the header row (top+4 + lineHeight+4).
@@ -1686,6 +1689,7 @@ public final class CraftingPlanScreen extends Screen {
             hoveredTooltipY = mouseY;
             hoveredTooltipAvail = avail;
             hoveredTooltipNeeded = needed;
+            hoveredTooltipReference = false;
         }
 
         if (displayCount > 1) {
@@ -2154,6 +2158,7 @@ public final class CraftingPlanScreen extends Screen {
                 hoveredTooltipY = mouseY;
                 hoveredTooltipAvail = hovered.available;
                 hoveredTooltipNeeded = hovered.needed > 0 ? hovered.needed : hovered.amount;
+                hoveredTooltipReference = hovered.referenceOnly;
             }
         }
 
@@ -2376,6 +2381,7 @@ public final class CraftingPlanScreen extends Screen {
                 PlanResponse.Availability a = plan.availability(e.key());
                 hoveredTooltipAvail = a != null ? a.available() : 0;
                 hoveredTooltipNeeded = e.count();
+                hoveredTooltipReference = false;
             }
             int hitLeft = Math.max(scrX, treeViewLeft);
             int hitTop = Math.max(scrY, treeViewTop);
@@ -3566,6 +3572,13 @@ public final class CraftingPlanScreen extends Screen {
         lines.add(Component.literal(
                 Component.translatable("rsi.plan.tooltip.available").getString()
                 + ": " + availStr).withStyle(style -> style.withColor(statusColor)));
+
+        // 引用节点：这里不是另一批生产，只是同一批产出在另一个消耗分支上的引用。
+        if (hoveredTooltipReference) {
+            lines.add(Component.translatable("rsi.plan.tooltip.reference_only")
+                    .withStyle(ChatFormatting.GRAY));
+            hoveredTooltipReference = false;
+        }
 
         PlanResponse.Availability availability = plan.availability(hoveredItemForTooltip);
         if (availability != null && !availability.isEnough() && availability.missingCount() == 0) {

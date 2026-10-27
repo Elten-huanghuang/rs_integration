@@ -52,6 +52,8 @@ public final class PlanTreeRenderer {
     private static final int C_LIMITED         = 0xFFF0A040;  // over-candidate-cap badge
     private static final int C_TRUNCATED       = 0xFFE0A040;  // hidden by display depth/node limits
     private static final int C_CAROUSEL        = 0xFF66CCEE;  // tag-input carousel indicator
+    private static final int C_REFERENCE       = 0xFF6FA8C8;  // 引用节点角标（成本已在别处展开）
+    private static final int C_REFERENCE_TINT  = 0x33101C24;  // 引用节点整体压暗
     private static final int C_PREREQ_WARNING  = 0xFFFFAA33;
     private static final int C_PREREQ_BLOCKED  = 0xFFFF4444;
     private static final int C_MACHINE_HINT    = 0xFF66CCEE;
@@ -191,6 +193,11 @@ public final class PlanTreeRenderer {
         UIRenderer.roundedGradient(gfx, x + 1, y + 1, w - 2, h - 2, NODE_RADIUS - 1,
                 fillTopColor(node), fillBotColor(node));
 
+        // 3b. 引用节点压暗：该批产出已在树中别处展开成本，这里只表示消耗关系。
+        if (node.referenceOnly) {
+            UIRenderer.rounded(gfx, x + 1, y + 1, w - 2, h - 2, NODE_RADIUS - 1, C_REFERENCE_TINT);
+        }
+
         int iconY = y + (h - PlanTreeLayout.ITEM_ICON_SIZE) / 2;
         int contentStartX = x + PlanTreeLayout.NODE_PADDING;
 
@@ -237,6 +244,10 @@ public final class PlanTreeRenderer {
         // 6b. Limited badge — node hides extra alternatives beyond the candidate cap.
         if (node.limited) {
             drawLimitedBadge(gfx, x + w - 6, y - 1);
+        }
+        // 6b-2. 引用角标：放在左上角，与右上"候选上限"、右下"截断"角标区分。
+        if (node.referenceOnly) {
+            drawReferenceBadge(gfx, x + 1, y + 1);
         }
         if (node.viewTruncated) {
             drawViewTruncatedBadge(gfx, x + w - 6, y + h - 1);
@@ -358,6 +369,19 @@ public final class PlanTreeRenderer {
         for (int i = 0; i < 5; i++) {
             gfx.fill(cornerX - i, bottomY - i, cornerX + 5 - i, bottomY - i + 1, C_TRUNCATED);
         }
+    }
+
+    /** 左上角小方标，标出"该批产出已在树中别处展开，此处仅为消耗引用"。 */
+    private static void drawReferenceBadge(GuiGraphics gfx, int x, int y) {
+        int size = 9;
+        UIRenderer.rounded(gfx, x, y, size, size, 2f, C_REFERENCE);
+        UIRenderer.rounded(gfx, x + 1, y + 1, size - 2, size - 2, 1.5f, 0xFF10242E);
+        // 右上斜箭头，暗示"指向已展开的那一处"。
+        for (int i = 0; i < 4; i++) {
+            gfx.fill(x + 2 + i, y + 6 - i, x + 3 + i, y + 7 - i, C_REFERENCE);
+        }
+        gfx.fill(x + 5, y + 2, x + 7, y + 3, C_REFERENCE);
+        gfx.fill(x + 6, y + 2, x + 7, y + 4, C_REFERENCE);
     }
 
     private void drawPrerequisiteBadge(GuiGraphics gfx, int x, int y, boolean blocked) {

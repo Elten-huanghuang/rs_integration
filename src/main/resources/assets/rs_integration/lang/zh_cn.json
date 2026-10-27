@@ -649,6 +649,7 @@
   "rsi.plan.status_ok": "合成计划可执行",
   "rsi.plan.status_fail": "合成计划暂不可执行",
   "rsi.plan.tooltip.planned": "由计划内生产或返还提供",
+  "rsi.plan.tooltip.reference_only": "该批产出已在树中展开，此处仅表示消耗关系",
   "rsi.plan.background.ready": "§a后台合成规划已完成：§f%s",
   "rsi.plan.background.open": "[打开计划]",
   "rsi.plan.background.open_hover": "点击打开这份合成计划",

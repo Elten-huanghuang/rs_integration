@@ -67,11 +67,50 @@ public final class PlanTreeModel {
 
     private static PlanTreeModel from(PlanResponse plan, TreeLimits limits) {
         BuildBudget budget = new BuildBudget(limits);
-        if (plan.graph() != null
-                && (!plan.graph().nodes().isEmpty() || !plan.graph().roots().isEmpty())) {
-            return fromGraph(plan, budget);
+        PlanTreeModel model = plan.graph() != null
+                && (!plan.graph().nodes().isEmpty() || !plan.graph().roots().isEmpty())
+                ? fromGraph(plan, budget)
+                : fromLegacySteps(plan, budget);
+        // 兄弟合并、根下补挂都会改变"哪一处展开过成本"的结果，只能在整棵树建完之后再统一标记。
+        markReferenceNodes(model.root);
+        return model;
+    }
+
+    /**
+     * 标记引用节点：同一批产出的成本只展开一次，其他出现位置只是消耗引用。
+     * <p>
+     * 这里按"生产者身份"分组（图模式下是 {@link PlanTreeNode#graphNodeId}，旧版清单模式下是
+     * {@link PlanStep} 本身）：组内存在带子节点的节点，则没有子节点的同组节点都是引用。
+     */
+    private static void markReferenceNodes(PlanTreeNode root) {
+        Set<Object> expanded = new HashSet<>();
+        collectExpandedProducers(root, expanded);
+        applyReferenceFlags(root, expanded);
+    }
+
+    private static void collectExpandedProducers(PlanTreeNode node, Set<Object> expanded) {
+        if (node.step != null && !node.children.isEmpty()) {
+            expanded.add(producerIdentity(node));
         }
-        return fromLegacySteps(plan, budget);
+        for (PlanTreeNode child : node.children) {
+            collectExpandedProducers(child, expanded);
+        }
+    }
+
+    private static void applyReferenceFlags(PlanTreeNode node, Set<Object> expanded) {
+        // 显示上限截断的节点同样没有子节点，但那不是"成本已在别处展开"，不应画引用角标。
+        if (node.step != null && node.children.isEmpty() && !node.viewTruncated
+                && expanded.contains(producerIdentity(node))) {
+            node.referenceOnly = true;
+        }
+        for (PlanTreeNode child : node.children) {
+            applyReferenceFlags(child, expanded);
+        }
+    }
+
+    /** 生产者身份：图模式用稳定的 DAG 节点 id，旧版清单模式用步骤对象。 */
+    private static Object producerIdentity(PlanTreeNode node) {
+        return node.graphNodeId != null ? "graph:" + node.graphNodeId : node.step;
     }
 
     private static int maxTreeCandidates() {

@@ -64,6 +64,12 @@ public final class PlanTreeNode {
     public boolean limited;
     /** True when child nodes are hidden by the client tree depth/node display limits. */
     public boolean viewTruncated;
+    /**
+     * 引用节点：同一批产出在树里只在首个位置展开成本，其余出现位置仅表示消耗关系。
+     * 这些节点带 step 但没有子节点，界面上与展开节点完全一样的图标/数量会让人误以为要生产两批，
+     * 因此单独标记出来画引用角标。
+     */
+    public boolean referenceOnly;
 
     /** Non-null for tag-input nodes — renders an Ingredient carousel. */
     @Nullable
