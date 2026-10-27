@@ -35,7 +35,11 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
     @Override
     public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
         if (mixinClassName.endsWith(".beyonddimensions.BDFluidContainerMixin")) {
-            return hasMethod(targetClassName, "customClickHandler")
+            // 0.7.x 用 boolean shift，0.8.x 起换成 GLFW 修饰键掩码，两个描述符必须分开校验。
+            return (hasMethod(targetClassName, "customClickHandler",
+                    "(ILcom/wintercogs/beyonddimensions/api/storage/key/KeyAmount;IZ)V")
+                    || hasMethod(targetClassName, "customClickHandler",
+                    "(ILcom/wintercogs/beyonddimensions/api/storage/key/KeyAmount;II)V"))
                     && isClassPresent("com.wintercogs.beyonddimensions.common.menu.widget.slot.DisorderedStackTypedSlot");
         }
         if (mixinClassName.endsWith(".tacz.GunHudOverlayAmmoMixin")) {
