@@ -1257,6 +1257,11 @@ ConsumerResult<ConsumerCancelResult> cancelled =
 破坏性变化进入下一个 major。第三方不应依赖 method descriptor、类名、reflection 或
 内部网络 discriminator 绕过公共 API。
 
+上述规则描述当前兼容策略，不构成永久维护、回移修复或支持所有历史 API 版本的承诺。
+RSI 可以在新的 major 中引入不兼容变更；升级 RSI 的第三方需要在运行时检查版本并根据
+最新接口完成适配。第三方继续使用已发布的官方版本时，不会因后续版本升级而失去该版本
+已经授予的 API 使用许可。
+
 ## 15. 发布前检查清单
 
 ### 注册与线程

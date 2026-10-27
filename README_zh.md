@@ -304,4 +304,9 @@ long souls = session.amount(BdMagicApi.SOUL_KEY);
 
 ## 许可
 
-All rights reserved.
+RS Integration 是专有软件。唯一许可证 [LICENSE](LICENSE) 允许使用官方未修改版本、
+将官方版本放入公开整合包、制作可变现的游戏视频或直播，以及使用文档列出的公共 API。
+
+代码贡献需要同意 [CONTRIBUTING.md](CONTRIBUTING.md) 中的贡献者许可协议。
+
+打包与仅编译使用的第三方边界见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

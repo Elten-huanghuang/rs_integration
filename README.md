@@ -310,4 +310,12 @@ Release JARs are written to `build/libs/` and checked by `verifyReleaseJar`.
 
 ## License
 
-All rights reserved.
+RS Integration is proprietary software. The single [LICENSE](LICENSE) allows
+use of official unmodified releases, inclusion in public modpacks, monetized
+gameplay videos and streams, and use of the documented public API.
+
+Code contributions require the Contributor License Agreement in
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
+Packaged and compile-only third-party boundaries are listed in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

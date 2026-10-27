@@ -7,8 +7,26 @@ Copyright (c) 2026 Huanghuang. All rights reserved.
 The source code, original assets, documentation, and other original portions
 of RS Integration are proprietary works owned by the copyright holder.
 
-Permission is granted to download and use official, unmodified binary releases
-of RS Integration for personal, non-commercial gameplay.
+Permission is granted to:
+
+1. download, install, run, and use official, unmodified binary releases of
+   RS Integration for gameplay on private or public Minecraft servers,
+   provided that server access is not sold specifically as access to
+   RS Integration;
+2. include official, unmodified binary releases of RS Integration in public
+   modpacks, including modpacks distributed through CurseForge, Modrinth, FTB,
+   or similar platforms, provided that recipients are not required to pay
+   specifically for access to RS Integration and the mod binary is not sold as
+   a separate product;
+3. record, stream, publish, and monetize gameplay content that features RS
+   Integration, including through platform advertising, subscriptions, and
+   donations, provided that the content is not primarily a redistribution of
+   the mod binary or a standalone mirror of its assets.
+
+Modpack authors and content creators may receive ordinary platform
+monetization or donations under this section. These permissions do not imply
+endorsement, do not permit modified builds, and do not permit removing
+copyright, license, or attribution notices from official RS Integration files.
 
 No permission is granted to copy, modify, publish, sublicense, sell, reverse
 engineer, or redistribute the source code, original assets, modified binaries,
@@ -85,13 +103,41 @@ notice. After termination, you must stop using and distributing the Licensed
 API. End users may continue using already obtained official RS Integration
 releases under Section 1.
 
+### 2.5 API Compatibility
+
+The version and compatibility rules published in the RSI API documentation
+describe the current compatibility policy. They are not a warranty of
+indefinite support, a promise to backport fixes, or an obligation to maintain
+every prior API version.
+
+RSI may introduce incompatible API changes in a new major version as described
+by that policy. Consumers of the Licensed API are responsible for checking the
+available API version at runtime and adapting their integrations when they
+choose to upgrade RS Integration. Nothing in this section revokes rights
+already granted for an official release that a consumer continues to use.
+
 ## 3. Third-Party Components
 
 This license does not apply to third-party components bundled with or referenced
 by RS Integration. Those components remain subject to their respective licenses,
 which are included in binary releases under META-INF/licenses/.
 
-## 4. Disclaimer
+This project license does not relicense any third-party component and does not
+guarantee that every optional dependency is compatible with every distribution
+model. Anyone distributing RS Integration, a modpack containing it, or an
+integration for it is responsible for complying with the applicable
+third-party licenses.
+
+## 4. Contributions
+
+Code, documentation, assets, and other material intentionally submitted for
+inclusion in RS Integration are accepted only under the contributor terms in
+`CONTRIBUTING.md`, including the Contributor License Agreement.
+
+Do not submit third-party code unless its origin and license are clearly
+identified and compatible with the project's distribution model.
+
+## 5. Disclaimer
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
