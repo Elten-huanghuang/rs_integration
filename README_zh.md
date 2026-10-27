@@ -20,8 +20,6 @@ RS Integration（RSI）为 Refined Storage 和 Beyond Dimensions 增加递归合
 
 [1.5.2 更新公告](docs/announcements/RELEASE_NOTES_1.5.2.md)
 
-[MC百科介绍](https://www.mcmod.cn/class/29199.html)
-
 ## 目录
 
 [运行要求](#运行要求) · [主要功能](#主要功能) · [快速开始](#快速开始) · [按键](#按键) · [模组兼容](#模组兼容) · [开发者 API](#开发者-api) · [配置](#配置) · [诊断](#诊断) · [构建](#构建)

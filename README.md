@@ -20,8 +20,6 @@ RS Integration (RSI) extends Refined Storage and Beyond Dimensions with recursiv
 
 [1.5.2 release notes (Chinese)](docs/announcements/RELEASE_NOTES_1.5.2.md)
 
-[MC百科介绍](https://www.mcmod.cn/class/29199.html)
-
 ## Contents
 
 [Requirements](#requirements) · [Features](#features) · [Quick Start](#quick-start) · [Controls](#controls) · [Compatibility](#compatibility) · [Developer API](#developer-api) · [Configuration](#configuration) · [Diagnostics](#diagnostics) · [Building](#building)
