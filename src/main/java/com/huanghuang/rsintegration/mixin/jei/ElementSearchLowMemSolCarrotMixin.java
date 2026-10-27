@@ -1,29 +1,21 @@
 package com.huanghuang.rsintegration.mixin.jei;
 
-import java.lang.reflect.Method;
-
 import com.huanghuang.rsintegration.mods.jei.SolCarrotJeiSearchResults;
 import mezz.jei.gui.ingredients.IListElement;
-import mezz.jei.gui.ingredients.IListElementInfo;
 import mezz.jei.gui.search.ElementPrefixParser;
 import mezz.jei.gui.search.ElementSearchLowMem;
-import org.spongepowered.asm.mixin.Final;
+import mezz.jei.gui.search.IElementSearch;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Set;
 
 @Mixin(value = ElementSearchLowMem.class, remap = false)
 public abstract class ElementSearchLowMemSolCarrotMixin {
-    @Shadow
-    @Final
-    private List<IListElementInfo<?>> elementInfoList;
-
+    // 与 ElementSearch 版本保持一致：只依赖 IElementSearch 接口，
+    // 不再 @Shadow elementInfoList 之类的内部字段，避免 JEI 改字段类型后硬崩。
     @Inject(method = "getSearchResults", at = @At("HEAD"), cancellable = true)
     private void rsi$searchCurrentSolCarrotStatus(
             ElementPrefixParser.TokenInfo tokenInfo,
@@ -31,14 +23,11 @@ public abstract class ElementSearchLowMemSolCarrotMixin {
         try {
             var query = SolCarrotJeiSearchResults.query(tokenInfo);
             if (query != null) {
-                List<IListElement<?>> elements = new ArrayList<>(elementInfoList.size());
-                for (IListElementInfo<?> info : elementInfoList) {
-                    elements.add(info.getElement());
-                }
-                cir.setReturnValue(SolCarrotJeiSearchResults.filter(this, elements, query));
+                cir.setReturnValue(SolCarrotJeiSearchResults.filter(
+                        this, ((IElementSearch) this).getAllIngredients(), query));
             }
-        } catch (LinkageError ignored) {
-            // SolCarrot search is optional; leave JEI's normal search active.
+        } catch (LinkageError | RuntimeException ignored) {
+            // SolCarrot 搜索属于可选功能；运行时接口不匹配时保持 JEI 原生搜索。
         }
     }
 }

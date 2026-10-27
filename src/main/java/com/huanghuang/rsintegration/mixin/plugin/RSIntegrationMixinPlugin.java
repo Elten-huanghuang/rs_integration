@@ -474,12 +474,14 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
             return isClassPresent("se.mickelus.tetra.blocks.workbench.gui.WorkbenchScreen")
                     && hasMethod(targetClassName, "m_88315_");
         }
-        if (mixinClassName.contains("jei.ElementSearchSolCarrotMixin")) {
-            return hasField(targetClassName, "allElements")
-                    && hasMethod(targetClassName, "getSearchResults");
-        }
-        if (mixinClassName.contains("jei.ElementSearchLowMemSolCarrotMixin")) {
-            return hasField(targetClassName, "elementInfoList")
+        if (mixinClassName.contains("jei.ElementSearchSolCarrotMixin")
+                || mixinClassName.contains("jei.ElementSearchLowMemSolCarrotMixin")) {
+            // 这两个 mixin 只依赖 IElementSearch 契约（getSearchResults +
+            // getAllIngredients）。JEI 的内部字段在各版本间反复变动：
+            // 15.20.0.106 没有 allElements，15.20.0.112 是 Set，15.20.0.129
+            // 才是 Map，按字段名做守卫会让 @Shadow 在中间版本上直接崩。
+            return isClassPresent("mezz.jei.gui.search.IElementSearch")
+                    && implementsInterface(targetClassName, "mezz/jei/gui/search/IElementSearch")
                     && hasMethod(targetClassName, "getSearchResults");
         }
         if (mixinClassName.contains("jei.IngredientListRendererGridMixin")) {
@@ -587,6 +589,11 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
         return readClass(className, node -> node.methods.stream()
                 .anyMatch(method -> methodName.equals(method.name)
                         && methodDescriptor.equals(method.desc)));
+    }
+
+    private static boolean implementsInterface(String className, String interfaceName) {
+        return readClass(className, node -> node.interfaces.stream()
+                .anyMatch(name -> interfaceName.equals(name)));
     }
 
     private interface ClassPredicate {
