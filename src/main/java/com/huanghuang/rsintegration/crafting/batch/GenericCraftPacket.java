@@ -1111,8 +1111,12 @@ public final class GenericCraftPacket {
             @Nullable ModType type
     ) {
         // 与预览/执行入口共用同一条类型解析规则，避免缓存执行把模组级兜底类型写进终端步骤
+        ModType claimedType = claimed == null ? null : claimed.modType();
+        // 原版烹饪与切石配方共用一个处理器，缓存执行同样要按配方类细分出具体机器类型
+        ModType vanillaFamily = CraftMachineBindingSupport.preferVanillaFamilyType(
+                claimedType, type, false);
         ModType resolved = CraftMachineBindingSupport.preferSpecificExecutionType(
-                claimed == null ? null : claimed.modType(), type, false);
+                vanillaFamily, type, false);
         return resolved == null ? ModType.GENERIC : resolved;
     }
 
@@ -3412,13 +3416,10 @@ public final class GenericCraftPacket {
                     }
                     // Machine gating must match the resolver's own candidate check
                     // (CandidateEngine.isMachineAvailable → hasBindingForRecipe).
-                    // hasBindingForRecipe re-classifies the recipe, so vanilla
-                    // furnace/blast/smoker/stonecutter recipes — which classifyRecipe
-                    // treats as null/GENERIC — are always available and need no bound
-                    // machine. The old hasAnyBindingForType(vanilla_furnace) check
-                    // wrongly hid those alternatives (e.g. the blast-furnace path for
-                    // refined_beeswax_bar), leaving only the stonecutter step with no
-                    // switch button even though the resolver could use either.
+                    // hasBindingForRecipe compares the bound machine types against the
+                    // type recorded on the step, so the type must already be the concrete
+                    // one (vanilla_blast_furnace / vanilla_stonecutter), not the family
+                    // fallback vanilla_furnace that the vanilla handler declares.
                     boolean hasMachine = AltarBindingRegistry.hasBindingForRecipe(
                             player, altRecipe, ModType.byId(altMod));
                     boolean runtimeAvailable = CraftMachineBindingSupport.isRecipeAvailableForPlanning(player, altRecipe);

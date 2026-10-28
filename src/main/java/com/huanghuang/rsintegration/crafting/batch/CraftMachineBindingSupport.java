@@ -30,6 +30,12 @@ import java.util.Set;
 
 /** 执行机器类型解析、绑定检查和机器专用输出路由。 */
 final class CraftMachineBindingSupport {
+    /** 原版机器家族的兜底类型：处理器把烹饪和切石配方都声明成它。 */
+    private static final String VANILLA_FURNACE_TYPE_ID = "vanilla_furnace";
+    /** 与兜底类型共用配方处理器、但各自有独立绑定类型和方块的原版机器。 */
+    private static final Set<String> VANILLA_MACHINE_FAMILY = Set.of(
+            "vanilla_blast_furnace", "vanilla_smoker", "vanilla_campfire", "vanilla_stonecutter");
+
     private CraftMachineBindingSupport() {}
 
     record PlanAvailability(
@@ -51,6 +57,19 @@ final class CraftMachineBindingSupport {
         ModType claimedType = claimed == null ? null : claimed.modType();
         if (claimedType == null || claimedType == ModType.GENERIC) {
             return ModType.classifyRecipe(recipe);
+        }
+        // 原版烹饪与切石配方共用同一个处理器，只能声明家族兜底类型 vanilla_furnace；
+        // 高炉、烟熏炉、营火、切石机的绑定类型各不相同，必须按配方类细分，
+        // 否则会拿 vanilla_furnace 去查绑定，永远匹配不到玩家已经绑定的高炉或切石机。
+        if (VANILLA_FURNACE_TYPE_ID.equals(claimedType.id())) {
+            ModType classified = classifyQuietly(recipe);
+            if (isVanillaMachineFamilyType(classified)) {
+                // 旧存档可能把兜底类型本身绑到了机器上，此时保持原类型避免破坏既有绑定
+                boolean claimedTypeBound = AltarBindingRegistry.hasBindingForRecipe(
+                        player, recipe, claimedType);
+                return preferVanillaFamilyType(claimedType, classified, claimedTypeBound);
+            }
+            return claimedType;
         }
         // 注册表里没有同模组子类型时直接沿用处理器声明的类型，常见路径不做全表前缀匹配
         if (!hasMoreSpecificType(claimedType)) return claimedType;
@@ -94,6 +113,27 @@ final class CraftMachineBindingSupport {
                                                boolean claimedTypeBound) {
         if (claimedType == null || claimedType == ModType.GENERIC) return classified;
         if (!isSpecificSiblingOf(classified, claimedType)) return claimedType;
+        return claimedTypeBound ? claimedType : classified;
+    }
+
+    /** 判断 {@code type} 是否是原版机器家族里除兜底类型外的具体机器类型。 */
+    static boolean isVanillaMachineFamilyType(@Nullable ModType type) {
+        return type != null && VANILLA_MACHINE_FAMILY.contains(type.id());
+    }
+
+    /**
+     * 在“原版家族兜底类型”和“配方类细分出的具体机器类型”之间选出能绑定机器的类型。
+     *
+     * @param claimedTypeBound 兜底类型当前已有绑定机器
+     */
+    @Nullable
+    static ModType preferVanillaFamilyType(@Nullable ModType claimedType,
+                                           @Nullable ModType classified,
+                                           boolean claimedTypeBound) {
+        if (claimedType == null || !VANILLA_FURNACE_TYPE_ID.equals(claimedType.id())) {
+            return claimedType;
+        }
+        if (!isVanillaMachineFamilyType(classified)) return claimedType;
         return claimedTypeBound ? claimedType : classified;
     }
 

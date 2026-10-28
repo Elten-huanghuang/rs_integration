@@ -212,6 +212,12 @@ public final class CraftPacketUtils {
     /** Upper bound on entries listed before collapsing into "+N more". */
     private static final int MISSING_SUMMARY_LIMIT = 24;
 
+    /**
+     * 「不可损坏的工具」在规划阶段的单件容量。运行时这类工具可以无限次使用，
+     * 因此折算数量时不能按每件 1 点耐久来算。
+     */
+    private static final long UNLIMITED_USES = Integer.MAX_VALUE;
+
     /** Heuristic: descriptionIds look like "item.mod.path"; free text does not. */
     private static boolean looksLikeTranslationKey(String value) {
         return value.indexOf('.') > 0 && value.indexOf(' ') < 0;
@@ -1094,7 +1100,13 @@ public final class CraftPacketUtils {
                 if (burnTime > 0) minimum = Math.min(minimum, burnTime);
             }
         }
-        return minimum == Long.MAX_VALUE ? 1L : minimum;
+        if (minimum != Long.MAX_VALUE) {
+            return minimum;
+        }
+        // 候选里没有任何可损坏的物品时，运行时只能把它当作「不可损坏的工具」，
+        // 即可以反复使用（砧板的剪切工具就是这种情况）。此时若按「每件顶 1 点耐久」
+        // 折算，批量 N 次会要求 N 件工具，和实际行为矛盾。
+        return kind == InputConsumption.Kind.DURABILITY ? UNLIMITED_USES : 1L;
     }
 
     public static int remainderExecutions(ItemStack remainder, List<IngredientSpec> specs,

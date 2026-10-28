@@ -723,6 +723,7 @@
   "rsi.plan.bookmark_all.unavailable": "收藏当前不可用",
   "rsi.async.chain_started": "§a合成任务已开始（%s 步），将在后续 tick 继续执行。完成后物品将送入选定存储网络。",
   "rsi.async.chain_started_player": "§a合成任务已开始（%s 步），将在后续 tick 继续执行。完成后最终产物将送入玩家背包。",
+  "rsi.async.wait.slow": "§e合成仍在等待：%s（若长时间没有进展，请检查已绑定机器是否可用、材料是否充足）",
   "rsi.async.cancel_button": "[取消合成]",
   "rsi.async.cancelled": "§c合成链已取消。",
   "rsi.async.no_chain": "§c没有正在进行的合成链。",

@@ -132,7 +132,40 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
     public List<ItemStack> getSecondaryOutputs(Recipe<?> recipe, RegistryAccess access) {
         if (!recipe.getClass().getName().equals(CUTTING_BOARD_CLASS)) return List.of();
         List<ItemStack> results = getCuttingBoardResults(recipe);
-        return results.size() <= 1 ? List.of() : List.copyOf(results.subList(1, results.size()));
+        if (results.size() <= 1) return List.of();
+        List<ItemStack> probabilistic = getProbabilisticCuttingBoardResults(recipe);
+        List<ItemStack> secondary = new ArrayList<>(results.size() - 1);
+        for (ItemStack result : results.subList(1, results.size())) {
+            // 概率产物（例如 CraftTweaker 添加的 % 概率输出）不是每次都会出现，
+            // 不能写进「必需次产物」的输出契约，否则没滚到就会被判 OUTPUT_MISSING。
+            if (probabilistic.stream().anyMatch(rolled -> ItemStack.isSameItemSameTags(rolled, result))) {
+                continue;
+            }
+            secondary.add(result);
+        }
+        return List.copyOf(secondary);
+    }
+
+    /** 概率小于 1 的切板产物，运行时由 rollResults 决定是否出现。 */
+    static List<ItemStack> getProbabilisticCuttingBoardResults(Recipe<?> recipe) {
+        try {
+            Object values = recipe.getClass().getMethod("getRollableResults").invoke(recipe);
+            if (!(values instanceof List<?> list) || list.isEmpty()) return List.of();
+            List<ItemStack> stacks = new ArrayList<>();
+            for (Object value : list) {
+                if (value == null) continue;
+                Object chance = value.getClass().getMethod("getChance").invoke(value);
+                if (!(chance instanceof Number number) || number.floatValue() >= 1.0F) continue;
+                Object stack = value.getClass().getMethod("getStack").invoke(value);
+                if (stack instanceof ItemStack itemStack && !itemStack.isEmpty()) {
+                    stacks.add(itemStack.copy());
+                }
+            }
+            return List.copyOf(stacks);
+        } catch (ReflectiveOperationException e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Recipe] cutting board rollable probe failed", e);
+            return List.of();
+        }
     }
 
     private static List<ItemStack> getCuttingBoardResults(Recipe<?> recipe) {
@@ -164,6 +197,12 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
         } catch (ReflectiveOperationException e) {
             return false;
         }
+    }
+
+    /** 切板配方是否带真正的小于 1 的概率结算结果。 */
+    static boolean hasProbabilisticCuttingBoardResults(Recipe<?> recipe) {
+        if (recipe == null || !recipe.getClass().getName().equals(CUTTING_BOARD_CLASS)) return false;
+        return !getProbabilisticCuttingBoardResults(recipe).isEmpty();
     }
 
     public static List<IngredientSpec> appendOutputContainerSpec(

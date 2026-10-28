@@ -720,6 +720,7 @@
   "rsi.plan.bookmark_all.unavailable": "Recipe browser favorites are unavailable",
   "rsi.async.chain_started": "§aCrafting started (%s steps) and will continue on later ticks. Items will be delivered to the selected storage network when complete.",
   "rsi.async.chain_started_player": "§aCrafting started (%s steps) and will continue on later ticks. The final result will be delivered to your inventory when complete.",
+  "rsi.async.wait.slow": "§eCrafting is still waiting: %s (check the bound machine and materials if it does not progress)",
   "rsi.async.cancel_button": "[Cancel]",
   "rsi.async.cancelled": "§cCrafting chain cancelled.",
   "rsi.async.no_chain": "§cNo active crafting chain.",

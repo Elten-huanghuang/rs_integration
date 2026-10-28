@@ -24,6 +24,17 @@ class FarmersDelightCuttingBoardConsumptionTest extends BootstrapTest {
     }
 
     @Test
+    void nonDamageableToolIsOnlyRequiredOncePerBatch() {
+        List<IngredientSpec> specs = FarmersDelightRecipeHandler.cuttingBoardIngredients(
+                Ingredient.of(Items.CARROT), Ingredient.of(Items.FLINT));
+
+        IngredientSpec tool = specs.get(1);
+        assertEquals(DemandRole.DURABILITY, tool.role());
+        // 不可损坏的工具运行时可无限次使用，批量时不该要求 N 个。
+        assertEquals(1, CraftPacketUtils.requiredCount(tool, 64));
+    }
+
+    @Test
     void durabilityToolCanBeProducedRecursively() {
         List<IngredientSpec> specs = FarmersDelightRecipeHandler.cuttingBoardIngredients(
                 Ingredient.of(Items.CARROT), Ingredient.of(Items.IRON_SWORD));

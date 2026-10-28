@@ -53,6 +53,12 @@ public final class CuttingBoardRecipeHandler extends AbstractRecipeHandler {
     }
 
     @Override
+    public boolean supportsTargetedProduction(Recipe<?> recipe) {
+        // 只有真正带概率结算的切板配方才按目标产物重试，确定性配方保持一次成型。
+        return FarmersDelightRecipeHandler.hasProbabilisticCuttingBoardResults(recipe);
+    }
+
+    @Override
     public List<ScaledIngredientSpec> getRecursiveScaledIngredients(
             Recipe<?> recipe, @Nullable List<ScaledIngredientSpec> ingredients) {
         return semantics.getRecursiveScaledIngredients(recipe, ingredients);

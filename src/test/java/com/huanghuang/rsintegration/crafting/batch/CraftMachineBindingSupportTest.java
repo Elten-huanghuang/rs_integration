@@ -13,8 +13,11 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.item.crafting.BlastingRecipe;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeManager;
+import net.minecraft.world.item.crafting.SmeltingRecipe;
+import net.minecraft.world.item.crafting.StonecutterRecipe;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 
@@ -42,6 +45,23 @@ class CraftMachineBindingSupportTest extends BootstrapTest {
             GenericBatchDelegate::new);
     private static final ModType OTHER_MOD = ModType.register(
             "testutil_other_pot", new String[0], new String[0], new String[0],
+            GenericBatchDelegate::new);
+
+    // 复现原版机器家族：处理器只能声明兜底类型 vanilla_furnace，其余类型靠配方类细分
+    private static final ModType VANILLA_FURNACE = ModType.register(
+            "vanilla_furnace",
+            new String[]{"net.minecraft.world.item.crafting.SmeltingRecipe"},
+            new String[]{"furnace"}, new String[]{"vanilla_furnace"},
+            GenericBatchDelegate::new);
+    private static final ModType VANILLA_BLAST_FURNACE = ModType.register(
+            "vanilla_blast_furnace",
+            new String[]{"net.minecraft.world.item.crafting.BlastingRecipe"},
+            new String[]{"blast_furnace"}, new String[]{"vanilla_blast_furnace"},
+            GenericBatchDelegate::new);
+    private static final ModType VANILLA_STONECUTTER = ModType.register(
+            "vanilla_stonecutter",
+            new String[]{"net.minecraft.world.item.crafting.StonecutterRecipe"},
+            new String[]{"stonecutter"}, new String[]{"vanilla_stonecutter"},
             GenericBatchDelegate::new);
 
     @Test
@@ -105,6 +125,118 @@ class CraftMachineBindingSupportTest extends BootstrapTest {
                             player, recipe, null, null)
             );
         }
+    }
+
+    @Test
+    void blastingRecipeUsesTheBlastFurnaceExecutionType() {
+        // 玩家绑定了高炉但没绑定熔炉时，不能再拿兜底类型 vanilla_furnace 去查绑定
+        ServerPlayer player = mock(ServerPlayer.class);
+        Recipe<?> recipe = mock(BlastingRecipe.class);
+
+        try (MockedStatic<ModRecipeHandlers> claims = claimForVanillaFurnace(recipe);
+             MockedStatic<AltarBindingRegistry> bindings =
+                     mockStatic(AltarBindingRegistry.class)) {
+            assertEquals(
+                    VANILLA_BLAST_FURNACE,
+                    CraftMachineBindingSupport.resolveExecutionModType(
+                            player, recipe, null, null)
+            );
+        }
+    }
+
+    @Test
+    void stonecuttingRecipeUsesTheStonecutterExecutionType() {
+        ServerPlayer player = mock(ServerPlayer.class);
+        Recipe<?> recipe = mock(StonecutterRecipe.class);
+
+        try (MockedStatic<ModRecipeHandlers> claims = claimForVanillaFurnace(recipe);
+             MockedStatic<AltarBindingRegistry> bindings =
+                     mockStatic(AltarBindingRegistry.class)) {
+            assertEquals(
+                    VANILLA_STONECUTTER,
+                    CraftMachineBindingSupport.resolveExecutionModType(
+                            player, recipe, null, null)
+            );
+        }
+    }
+
+    @Test
+    void existingFurnaceBindingKeepsTheFamilyExecutionType() {
+        // 旧存档已经把 vanilla_furnace 绑到机器上时保持原类型，避免破坏既有绑定
+        ServerPlayer player = mock(ServerPlayer.class);
+        Recipe<?> recipe = mock(BlastingRecipe.class);
+
+        try (MockedStatic<ModRecipeHandlers> claims = claimForVanillaFurnace(recipe);
+             MockedStatic<AltarBindingRegistry> bindings =
+                     mockStatic(AltarBindingRegistry.class)) {
+            bindings.when(() -> AltarBindingRegistry.hasBindingForRecipe(
+                            player, recipe, VANILLA_FURNACE))
+                    .thenReturn(true);
+
+            assertEquals(
+                    VANILLA_FURNACE,
+                    CraftMachineBindingSupport.resolveExecutionModType(
+                            player, recipe, null, null)
+            );
+        }
+    }
+
+    @Test
+    void smeltingRecipeKeepsTheFurnaceExecutionType() {
+        ServerPlayer player = mock(ServerPlayer.class);
+        Recipe<?> recipe = mock(SmeltingRecipe.class);
+
+        try (MockedStatic<ModRecipeHandlers> claims = claimForVanillaFurnace(recipe)) {
+            assertEquals(
+                    VANILLA_FURNACE,
+                    CraftMachineBindingSupport.resolveExecutionModType(
+                            player, recipe, null, null)
+            );
+        }
+    }
+
+    @Test
+    void vanillaFamilyHelperOnlyRefinesTheFamilyRoot() {
+        assertSame(VANILLA_BLAST_FURNACE,
+                CraftMachineBindingSupport.preferVanillaFamilyType(
+                        VANILLA_FURNACE, VANILLA_BLAST_FURNACE, false));
+        assertSame(VANILLA_FURNACE,
+                CraftMachineBindingSupport.preferVanillaFamilyType(
+                        VANILLA_FURNACE, VANILLA_STONECUTTER, true));
+        assertSame(VANILLA_FURNACE,
+                CraftMachineBindingSupport.preferVanillaFamilyType(
+                        VANILLA_FURNACE, COARSE, false));
+        assertSame(VANILLA_FURNACE,
+                CraftMachineBindingSupport.preferVanillaFamilyType(
+                        VANILLA_FURNACE, null, false));
+        assertSame(VANILLA_BLAST_FURNACE,
+                CraftMachineBindingSupport.preferVanillaFamilyType(
+                        VANILLA_BLAST_FURNACE, VANILLA_STONECUTTER, false));
+        assertTrue(CraftMachineBindingSupport.isVanillaMachineFamilyType(
+                VANILLA_STONECUTTER));
+        assertFalse(CraftMachineBindingSupport.isVanillaMachineFamilyType(
+                VANILLA_FURNACE));
+    }
+
+    @Test
+    void cachedExecutionTypeAlsoRefinesTheVanillaFamily() {
+        ModRecipeHandler claimed = mock(ModRecipeHandler.class);
+        when(claimed.modType()).thenReturn(VANILLA_FURNACE);
+
+        assertEquals(VANILLA_STONECUTTER,
+                GenericCraftPacket.modTypeForCachedExecution(
+                        claimed, VANILLA_STONECUTTER));
+    }
+
+    private static MockedStatic<ModRecipeHandlers> claimForVanillaFurnace(
+            Recipe<?> recipe) {
+        ModRecipeHandler handler = mock(ModRecipeHandler.class);
+        when(handler.modType()).thenReturn(VANILLA_FURNACE);
+        MockedStatic<ModRecipeHandlers> claims =
+                mockStatic(ModRecipeHandlers.class);
+        claims.when(() -> ModRecipeHandlers.claimFor(recipe))
+                .thenReturn(new ModRecipeHandlers.Claim(handler, List.of(handler)));
+        return claims;
     }
 
     @Test

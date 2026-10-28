@@ -138,6 +138,8 @@ import java.util.function.Predicate;
 public final class AsyncCraftChain {
     private static final LogSampler GRAPH_RETRY_LOGS = new LogSampler(2_000L);
     private static final int GRAPH_RETRY_MAX_DELAY_TICKS = 40;
+    /** 同一个节点连续等待到达这个次数后，向玩家提示一次具体原因，避免只看到“准备中”。 */
+    private static final int GRAPH_RETRY_NOTIFY_ATTEMPTS = 5;
 
     public enum State {
         PENDING,        // Created, not yet started
@@ -258,6 +260,8 @@ public final class AsyncCraftChain {
     private final Map<NodeId, Integer> graphRetryUntilTick = new HashMap<>();
     private final Map<NodeId, Integer> graphRetryAttempts = new HashMap<>();
     private final Map<String, Integer> graphRetryCounts = new HashMap<>();
+    /** 已经向玩家提示过“长时间等待”的节点，避免同一次等待反复刷屏。 */
+    private final Set<NodeId> graphRetryNotified = new HashSet<>();
     @Nullable
     private final MaterialBroker graphMaterials;
     @Nullable
@@ -1835,12 +1839,26 @@ public final class AsyncCraftChain {
         int delay = Math.min(GRAPH_RETRY_MAX_DELAY_TICKS, 1 << attempts);
         graphRetryUntilTick.put(nodeId, server.getTickCount() + delay);
         logGraphRetry(nodeId, detail, requests);
+        notifySlowRetry(nodeId, detail);
         return ConcurrentNodeExecutor.StartResult.retry();
     }
 
     private void clearGraphRetry(NodeId nodeId) {
         graphRetryUntilTick.remove(nodeId);
         graphRetryAttempts.remove(nodeId);
+        graphRetryNotified.remove(nodeId);
+    }
+
+    /**
+     * 同一步骤长时间停在同一个等待原因时，把原因告诉玩家。
+     * 只提示一次：真正的等待可能很久（机器正在跑别的配方），但玩家至少要能知道在等什么。
+     */
+    private void notifySlowRetry(NodeId nodeId, String detail) {
+        if (graphRetryAttempts.getOrDefault(nodeId, 0) < GRAPH_RETRY_NOTIFY_ATTEMPTS) return;
+        if (!graphRetryNotified.add(nodeId)) return;
+        ServerPlayer online = resolvePlayer();
+        if (online == null) return;
+        online.sendSystemMessage(Component.translatable("rsi.async.wait.slow", detail));
     }
 
     private void logGraphRetry(NodeId nodeId, String detail,
@@ -2394,13 +2412,15 @@ public final class AsyncCraftChain {
                             startDelegate.startOperation(operationStartContext))
                     : startDelegate.startOperation(operationStartContext);
             if (!accepted) {
+                String startDetail = delegate.lastStartFailureDetail();
                 RSIntegrationMod.LOGGER.warn(ctx.format(
-                        "Graph node delegate rejected start: node={} recipe={} delegate={} machine={}"),
+                        "Graph node delegate rejected start: node={} recipe={} delegate={} machine={} detail={}"),
                         nodeId, prepared.step().recipeId(), delegate.getClass().getSimpleName(),
-                        prepared.machine().pos());
+                        prepared.machine().pos(), startDetail == null ? "<none>" : startDetail);
                 runtime.markStartFailed("delegate rejected graph dispatch after start attempt: delegate="
                         + delegate.getClass().getSimpleName()
-                        + " recipe=" + prepared.step().recipeId());
+                        + " recipe=" + prepared.step().recipeId()
+                        + (startDetail == null || startDetail.isBlank() ? "" : " detail=" + startDetail));
             } else {
                 if (attempt != null) attempt.started();
                 attachDeferredGraphCapture(runtime, startDelegate, prepared.machine(), nodeId);
@@ -4064,8 +4084,14 @@ public final class AsyncCraftChain {
                         // combine an input refund with an already-produced result.
                         return delegate;
                     }
-                    RSIntegrationMod.LOGGER.warn(ctx.format("Delegate startPreparedOperation failed for {}"),
-                            step.recipeId());
+                    // 必须在 onBatchFailed 清理委托状态前取出失败详情，否则报告只剩兜底文案
+                    String startDetail = startedDelegate.lastStartFailureDetail();
+                    if (startDetail != null && !startDetail.isBlank()) {
+                        machineStartFailureDetail = startDetail;
+                    }
+                    RSIntegrationMod.LOGGER.warn(ctx.format(
+                            "Delegate startPreparedOperation failed for {} detail={}"),
+                            step.recipeId(), startDetail == null ? "<none>" : startDetail);
                     Component failureTarget = stepFailureTarget(step, online);
                     machineStartFailureMessage = Component.translatable(
                             "rsi.async.abort.machine_start_failed", failureTarget);
