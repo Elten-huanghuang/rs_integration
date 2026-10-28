@@ -472,6 +472,12 @@ public final class MySmeltingRecipeIntegration
 不会把炉内剩余燃烧时间当成可再次插入的物品；因此多操作订单会按操作次数预留和
 投料，避免预览按燃料热值换算、执行却逐次插入的两套语义。
 
+`CATALYST` 和 `DURABILITY` 按“每台并行 worker 预留一份”处理：规划器会让
+可并行机器数不超过库存可支撑的份数，执行期每台机器各拿一份，操作之间复用。
+因此催化剂/工具的并行上限就是 `min(库存数量, 可并行机器数)`。`FUEL` 不是
+复用材料，它按每个 worker 实际分到的操作数分别计算并补充燃烧时间，递归树中的
+燃料总数是各 worker 需求之和。
+
 容器返回值必须使用 `containerReturned(portId)` 并链接到一个
 `OutputKind.CONTAINER` 或 `OutputKind.REMAINDER` 输出。不要同时声明一个普通消耗的
 桶和一个凭空生成的空桶。
@@ -825,9 +831,13 @@ return ExecutionResult.retry(
 
 ## 9. 规划期并发
 
+普通机器默认按 `machineSlot()` 处理：材料链内预留、输出回到机器槽、清理可离线
+分离、副作用仅限机器本地。`IBatchDelegate.concurrencyCapabilities()` 的默认值
+和 `MachineDescriptor.concurrency()` 都是这个合同，不需要在每个集成里重复声明。
+
 `MachineDescriptor.concurrency()` 只有在选中具体方块后才能读取。
-`MachineIntegration.planningConcurrency()` 用于在绑定具体方块前声明 process 级并发
-合同：
+`MachineIntegration.planningConcurrency()` 用于在绑定具体方块前覆盖 process 级
+并发合同，只有确实需要比默认值更保守或更宽松时才需要实现：
 
 ```java
 @Override
@@ -840,8 +850,13 @@ planningConcurrency() {
 }
 ```
 
+如果机器确实不能并行（共享世界状态、清理边界不可拆分、准备阶段不可重试），
+返回 `ConcurrencyCapabilities.exclusive()` 或 `PlannedConcurrency.exclusive()`。
+没有声明时使用运行期 descriptor 的默认能力，不再要求主动声明才能并行。
+
 一个 process 的声明覆盖该 `MachineIntegration` 下所有接受此 process 的 binding。
-如果任意一个支持该 process 的集成没有声明，规划会保守地保持 exclusive。
+如果任意一个支持该 process 的集成没有声明，规划会使用该 binding 的运行期默认
+合同，而不是一律保持 exclusive。
 
 `supportOffsets` 是绑定具体方块前的最坏位置集合，只用于规划期冲突检测。选中机器后，
 执行期以 `MachineDescriptor.supportScope()` 返回的真实 support/adjacent 位置为准。
@@ -851,8 +866,8 @@ planningConcurrency() {
 多机器声明只有在材料所有权、输出所有权、清理合同和副作用可证明兼容时才能并行。
 声明与运行期 descriptor 冲突时仍会降级为 exclusive。
 
-不要为了提速而把 `UNKNOWN` 改成 `machineSlot()`。并发的收益不能覆盖重复扣料、输出
-归属不明或清理不可分离的风险。
+`exclusive()` 只用于真实存在的独占机器，不要为了保守而把普通机器标成
+`UNKNOWN`；普通机器使用默认 `machineSlot()` 即可。
 
 ## 10. JEI
 

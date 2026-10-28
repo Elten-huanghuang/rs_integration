@@ -61,6 +61,31 @@ public final class ArsNouveauRecipeHandler extends AbstractRecipeHandler {
         return ModType.byId(ModIds.ID_ARS_IMBUEMENT);  // Primary type
     }
 
+    /**
+     * 一个处理器覆盖三种机器，执行类型必须按配方判定：符文配方走抄写台，
+     * 注魔配方走注魔台，附魔装置、附魔和护甲升级配方都由附魔装置方块执行。
+     */
+    @Override
+    public ModType modType(Recipe<?> recipe) {
+        return ModType.byId(machineTypeId(ArsTileAccess.recipeTypeId(recipe)));
+    }
+
+    /**
+     * 配方类型 id 到执行机器类型 id 的映射，独立出来便于纯单元测试。
+     *
+     * <p>只有注魔配方用注魔台、符文配方用抄写台，其余可自动化的 Ars 配方
+     * （附魔装置、附魔、护甲升级）都由附魔装置方块执行。</p>
+     */
+    static String machineTypeId(@Nullable String recipeTypeId) {
+        if (ArsRecipeClassifier.isGlyph(recipeTypeId)) {
+            return ModIds.ID_ARS_SCRIBES_TABLE;
+        }
+        if (ArsRecipeClassifier.isImbuement(recipeTypeId)) {
+            return ModIds.ID_ARS_IMBUEMENT;
+        }
+        return ModIds.ID_ARS_APPARATUS;
+    }
+
     @Override
     public boolean canHandle(Recipe<?> recipe) {
         // First check class prefix

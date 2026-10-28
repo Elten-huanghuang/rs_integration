@@ -22,7 +22,7 @@ class RecipeIndexTest {
         Recipe<?> recipe = mock(Recipe.class);
         ModRecipeHandler handler = mock(ModRecipeHandler.class);
         ModType external = ModType.EXTERNAL_INTEGRATION;
-        when(handler.modType()).thenReturn(external);
+        when(handler.modType(recipe)).thenReturn(external);
 
         try (MockedStatic<ModType> classifications =
                      mockStatic(ModType.class)) {
@@ -43,7 +43,7 @@ class RecipeIndexTest {
         ModRecipeHandler handler = mock(ModRecipeHandler.class);
         ModType claimed = ModType.GENERIC;
         ModType classified = ModType.CUSTOM_GUI;
-        when(handler.modType()).thenReturn(claimed);
+        when(handler.modType(recipe)).thenReturn(claimed);
 
         try (MockedStatic<ModType> classifications =
                      mockStatic(ModType.class)) {
@@ -62,7 +62,7 @@ class RecipeIndexTest {
     void backgroundProjectionKeepsExternalClaimOwnership() {
         Recipe<?> recipe = mock(Recipe.class);
         ModRecipeHandler handler = mock(ModRecipeHandler.class);
-        when(handler.modType())
+        when(handler.modType(recipe))
                 .thenReturn(ModType.EXTERNAL_INTEGRATION);
         when(handler.supportsBackgroundPlanning(recipe)).thenReturn(true);
         when(handler.hasDeterministicPrimaryOutput(recipe)).thenReturn(true);

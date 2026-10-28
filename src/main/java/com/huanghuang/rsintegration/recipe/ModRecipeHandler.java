@@ -44,6 +44,18 @@ public interface ModRecipeHandler {
     @Nonnull
     ModType modType();
 
+    /**
+     * 该处理器为具体配方声明的执行机器类型。
+     *
+     * <p>一个处理器只服务一种机器时沿用 {@link #modType()}；当同一个处理器覆盖
+     * 多种彼此独立的机器（例如 Ars Nouveau 的注魔台、附魔装置和抄写台）时必须
+     * 按配方覆盖，否则绑定检查会拿错机器类型去找绑定，最终误报“没有可用的已绑定机器”。</p>
+     */
+    @Nonnull
+    default ModType modType(@Nonnull Recipe<?> recipe) {
+        return modType();
+    }
+
     /** Quick check: does this handler claim responsibility for the given recipe? */
     boolean canHandle(@Nonnull Recipe<?> recipe);
 

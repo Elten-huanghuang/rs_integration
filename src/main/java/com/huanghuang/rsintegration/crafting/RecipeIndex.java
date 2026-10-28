@@ -636,7 +636,7 @@ public final class RecipeIndex {
             Recipe<?> recipe,
             ModRecipeHandler handler
     ) {
-        ModType claimedType = handler.modType();
+        ModType claimedType = handler.modType(recipe);
         if (ExternalIntegrationRuntime.isExternalType(claimedType)) {
             return claimedType;
         }

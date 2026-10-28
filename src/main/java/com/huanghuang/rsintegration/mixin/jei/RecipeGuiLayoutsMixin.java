@@ -2111,9 +2111,9 @@ public class RecipeGuiLayoutsMixin {
         }
         if (recipe instanceof Recipe<?> r) {
             var claimed = ModRecipeHandlers.claimFor(r).winner();
-            if (claimed != null
-                    && claimed.modType() != ModType.GENERIC) {
-                return claimed.modType();
+            if (claimed != null) {
+                ModType claimedType = claimed.modType(r);
+                if (claimedType != ModType.GENERIC) return claimedType;
             }
             ModType mt = ModType.classifyRecipe(r);
             if (mt != null) return mt;
