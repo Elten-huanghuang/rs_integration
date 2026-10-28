@@ -4,7 +4,6 @@ import com.huanghuang.rsintegration.feature.craftingstation.CraftingStationAcces
 import com.huanghuang.rsintegration.feature.craftingstation.CraftingStationAvailability;
 import com.huanghuang.rsintegration.feature.craftingstation.CraftingStationMode;
 import com.huanghuang.rsintegration.network.craftingstation.CraftingStationModePacket;
-import com.huanghuang.rsintegration.feature.craftingstation.CraftingStationState;
 import com.huanghuang.rsintegration.feature.craftingstation.CraftingStationInputSlot;
 import com.huanghuang.rsintegration.feature.craftingstation.CraftingStationResultSlot;
 import com.huanghuang.rsintegration.feature.craftingstation.AnvilTerminalState;
@@ -20,6 +19,7 @@ import com.refinedmods.refinedstorage.screen.BaseScreen;
 import com.refinedmods.refinedstorage.screen.grid.GridScreen;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.inventory.CyclingSlotBackground;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -144,7 +144,14 @@ public abstract class GridScreenSmithingMixin implements StonecutterScreenAccess
     @Unique
     private int rsi$stonecutterStartIndex;
     @Unique
-    private boolean rsi$anvilNameFocused;
+    // 铁砧名称输入框：用原版 EditBox，才能复用输入法提交、剪贴板粘贴和光标编辑。
+    private EditBox rsi$anvilNameBox;
+    @Unique
+    // EditBox 记录的顶部偏移，工作区行数变化时据此重建输入框。
+    private int rsi$anvilNameBoxTop = Integer.MIN_VALUE;
+    @Unique
+    // 最近一次同步到服务端的名称，用于逐帧检测 EditBox 内容变化。
+    private String rsi$anvilNameSent = "";
 
     @Override
     public int rsi$getStonecutterStartIndex() {
@@ -194,6 +201,8 @@ public abstract class GridScreenSmithingMixin implements StonecutterScreenAccess
 
     @Inject(method = "tick", at = @At("TAIL"), remap = false)
     private void rsi$tickSmithingSlots(int guiLeft, int guiTop, CallbackInfo ci) {
+        // EditBox 不在 RS 的控件列表里，需要手动推进光标闪烁。
+        if (rsi$anvilNameBox != null) rsi$anvilNameBox.tick();
         GridContainerMenu menu = ((GridScreen) (Object) this).getMenu();
         if (menu.getGrid().getGridType() != GridType.CRAFTING) return;
         if (CraftingStationAccess.access(menu).rsi$getCraftingStationMode() != CraftingStationMode.SMITHING) return;
@@ -218,27 +227,18 @@ public abstract class GridScreenSmithingMixin implements StonecutterScreenAccess
         GridScreen screen = (GridScreen) (Object) this;
         if (screen.getGrid().getGridType() != GridType.CRAFTING) return;
         CraftingStationMode mode = CraftingStationAccess.access(screen.getMenu()).rsi$getCraftingStationMode();
+        if (mode != CraftingStationMode.ANVIL) rsi$blurAnvilName();
         if (mode == CraftingStationMode.ANVIL
                 && CraftingStationAccess.access(screen.getMenu()).rsi$getCraftingStationState()
                 instanceof AnvilTerminalState anvil) {
             int y = screen.getTopHeight() + screen.getVisibleRows() * 18;
-            String itemName = Minecraft.getInstance().font.plainSubstrByWidth(
-                    anvil.itemName(), RSI_ANVIL_NAME_WIDTH - 8);
-            graphics.drawString(Minecraft.getInstance().font, itemName,
-                    RSI_ANVIL_NAME_X + 4, y + RSI_ANVIL_NAME_Y + 3, 0xFFFFFFFF, false);
+            rsi$renderAnvilNameBox(anvil, graphics, y, mouseX, mouseY);
             if (!anvil.result().isEmpty()) {
                 int color = screen.getMenu().getPlayer().experienceLevel >= anvil.cost()
                         ? 0x80FF20 : 0xFF3030;
                 graphics.drawString(Minecraft.getInstance().font,
                         Component.translatable("container.repair.cost", anvil.cost()),
                         110, y + 64, color, false);
-            }
-            if (rsi$anvilNameFocused) {
-                int cursorX = Math.min(RSI_ANVIL_NAME_X + RSI_ANVIL_NAME_WIDTH - 4,
-                        RSI_ANVIL_NAME_X + 3 + Minecraft.getInstance().font.width(anvil.itemName()));
-                graphics.fill(cursorX, y + RSI_ANVIL_NAME_Y + 2,
-                        cursorX + 1, y + RSI_ANVIL_NAME_Y + RSI_ANVIL_NAME_HEIGHT - 2,
-                        0xFF404040);
             }
         }
         int top = screen.getTopHeight() + screen.getVisibleRows() * 18 + RSI_BUTTON_TOP_OFFSET;
@@ -297,12 +297,12 @@ public abstract class GridScreenSmithingMixin implements StonecutterScreenAccess
             double localY = mouseY - screen.getGuiTop();
             if (rsi$inside(localX, localY, RSI_ANVIL_NAME_X, stationY + RSI_ANVIL_NAME_Y,
                     RSI_ANVIL_NAME_WIDTH, RSI_ANVIL_NAME_HEIGHT)) {
-                rsi$anvilNameFocused = true;
+                rsi$focusAnvilName(access, stationY, localX, localY - stationY);
                 cir.setReturnValue(true);
                 return;
             }
         }
-        rsi$anvilNameFocused = false;
+        rsi$blurAnvilName();
         if (access.rsi$getCraftingStationMode() == CraftingStationMode.STONECUTTER
                 && access.rsi$getCraftingStationState() instanceof StonecutterTerminalState stonecutter) {
             int stationTop = screen.getTopHeight() + screen.getVisibleRows() * 18;
@@ -371,16 +371,11 @@ public abstract class GridScreenSmithingMixin implements StonecutterScreenAccess
                                         CallbackInfoReturnable<Boolean> cir) {
         GridScreen screen = (GridScreen) (Object) this;
         if (screen.getGrid().getGridType() != GridType.CRAFTING) return;
-        if (!rsi$anvilNameFocused
+        if (!rsi$isAnvilNameFocused()
                 || CraftingStationAccess.access(screen.getMenu()).rsi$getCraftingStationMode()
                 != CraftingStationMode.ANVIL) return;
-        if (keyCode == 259) {
-            CraftingStationState state = CraftingStationAccess.access(screen.getMenu())
-                    .rsi$getCraftingStationState();
-            if (state instanceof AnvilTerminalState anvil) {
-                String name = anvil.itemName();
-                if (!name.isEmpty()) rsi$setAnvilName(anvil, name.substring(0, name.length() - 1));
-            }
+        // 退格、Delete、方向键、Home/End 以及 Ctrl+A/C/V/X 全部交给 EditBox。
+        if (rsi$anvilNameBox.keyPressed(keyCode, scanCode, modifiers)) {
             cir.setReturnValue(true);
         }
     }
@@ -390,21 +385,88 @@ public abstract class GridScreenSmithingMixin implements StonecutterScreenAccess
                                               CallbackInfoReturnable<Boolean> cir) {
         GridScreen screen = (GridScreen) (Object) this;
         if (screen.getGrid().getGridType() != GridType.CRAFTING) return;
-        if (!rsi$anvilNameFocused
+        if (!rsi$isAnvilNameFocused()
                 || CraftingStationAccess.access(screen.getMenu()).rsi$getCraftingStationMode()
                 != CraftingStationMode.ANVIL || Character.isISOControl(character)) return;
-        CraftingStationState state = CraftingStationAccess.access(screen.getMenu())
-                .rsi$getCraftingStationState();
-        if (state instanceof AnvilTerminalState anvil && anvil.itemName().length() < 50) {
-            rsi$setAnvilName(anvil, anvil.itemName() + character);
+        // 中文等非 ASCII 字符同样经 EditBox 写入，长度按字符而不是字节截断。
+        if (rsi$anvilNameBox.charTyped(character, modifiers)) {
+            cir.setReturnValue(true);
         }
-        cir.setReturnValue(true);
     }
 
     @Unique
     private void rsi$setAnvilName(AnvilTerminalState state, String name) {
-        state.setItemName(name);
-        NetworkHandler.CHANNEL.sendToServer(new AnvilNamePacket(name));
+        String clamped = AnvilNamePacket.clampName(name);
+        state.setItemName(clamped);
+        NetworkHandler.CHANNEL.sendToServer(new AnvilNamePacket(clamped));
+    }
+
+    @Unique
+    private boolean rsi$isAnvilNameFocused() {
+        return rsi$anvilNameBox != null && rsi$anvilNameBox.isFocused();
+    }
+
+    @Unique
+    private void rsi$blurAnvilName() {
+        if (rsi$anvilNameBox != null) rsi$anvilNameBox.setFocused(false);
+    }
+
+    @Unique
+    private void rsi$focusAnvilName(CraftingStationAccess access, int stationY,
+                                    double localX, double localY) {
+        EditBox box = rsi$anvilNameBox(stationY);
+        if (!box.isFocused()) {
+            if (access.rsi$getCraftingStationState() instanceof AnvilTerminalState anvil) {
+                rsi$syncAnvilName(box, anvil.itemName());
+            }
+            rsi$anvilNameSent = box.getValue();
+            box.setFocused(true);
+        }
+        // 把点击位置换算成控件内坐标，用于把光标放到点中的位置。
+        box.mouseClicked(localX, localY, 0);
+    }
+
+    @Unique
+    private EditBox rsi$anvilNameBox(int stationY) {
+        if (rsi$anvilNameBox != null && rsi$anvilNameBoxTop == stationY) return rsi$anvilNameBox;
+        String previous = rsi$anvilNameBox == null ? "" : rsi$anvilNameBox.getValue();
+        boolean wasFocused = rsi$isAnvilNameFocused();
+        EditBox box = new EditBox(Minecraft.getInstance().font,
+                RSI_ANVIL_NAME_X + 4, stationY + RSI_ANVIL_NAME_Y + 3,
+                RSI_ANVIL_NAME_WIDTH - 8, 9, Component.empty());
+        box.setBordered(false);
+        box.setMaxLength(50);
+        box.setTextColor(0xFFFFFFFF);
+        box.setTextColorUneditable(0xFFFFFFFF);
+        if (!previous.isEmpty()) box.setValue(previous);
+        box.setFocused(wasFocused);
+        rsi$anvilNameBox = box;
+        rsi$anvilNameBoxTop = stationY;
+        return box;
+    }
+
+    @Unique
+    private void rsi$renderAnvilNameBox(AnvilTerminalState anvil, GuiGraphics graphics,
+                                        int stationY, int mouseX, int mouseY) {
+        EditBox box = rsi$anvilNameBox(stationY);
+        if (box.isFocused()) {
+            // 聚焦时以输入框内容为准，内容变化即同步给服务端（每帧检测，避免逐字符发包）。
+            if (!box.getValue().equals(rsi$anvilNameSent)) {
+                rsi$anvilNameSent = box.getValue();
+                rsi$setAnvilName(anvil, box.getValue());
+            }
+        } else {
+            // 未聚焦时跟随菜单状态，物品变化后能显示新的默认名称。
+            rsi$syncAnvilName(box, anvil.itemName());
+            rsi$anvilNameSent = box.getValue();
+        }
+        box.render(graphics, mouseX, mouseY, 0.0F);
+    }
+
+    @Unique
+    private static void rsi$syncAnvilName(EditBox box, String name) {
+        String clamped = AnvilNamePacket.clampName(name);
+        if (!box.getValue().equals(clamped)) box.setValue(clamped);
     }
 
     @Inject(method = "m_6050_", at = @At("HEAD"), cancellable = true)
@@ -481,16 +543,17 @@ public abstract class GridScreenSmithingMixin implements StonecutterScreenAccess
         // 名称框与 RS 清空按钮错开，输入状态使用更亮的边框提示。
         int nameX = guiLeft + RSI_ANVIL_NAME_X;
         int nameY = y + RSI_ANVIL_NAME_Y;
-        int nameBackground = rsi$anvilNameFocused ? 0xFFB0A184 : 0xFF4B4639;
+        boolean editing = rsi$isAnvilNameFocused();
+        int nameBackground = editing ? 0xFFB0A184 : 0xFF4B4639;
         graphics.fill(nameX - 1, nameY - 1,
                 nameX + RSI_ANVIL_NAME_WIDTH + 1, nameY + RSI_ANVIL_NAME_HEIGHT + 1, 0xFF37332B);
         graphics.fill(nameX, nameY, nameX + RSI_ANVIL_NAME_WIDTH,
                 nameY + RSI_ANVIL_NAME_HEIGHT, nameBackground);
         graphics.fill(nameX + 1, nameY + 1, nameX + RSI_ANVIL_NAME_WIDTH - 1,
-                nameY + 2, rsi$anvilNameFocused ? 0xFFC5B99D : 0xFF625B49);
+                nameY + 2, editing ? 0xFFC5B99D : 0xFF625B49);
         graphics.fill(nameX + RSI_ANVIL_NAME_WIDTH - 1, nameY + 1,
                 nameX + RSI_ANVIL_NAME_WIDTH, nameY + RSI_ANVIL_NAME_HEIGHT - 1,
-                rsi$anvilNameFocused ? 0xFFE7DEC9 : 0xFF777062);
+                editing ? 0xFFE7DEC9 : 0xFF777062);
         graphics.drawCenteredString(Minecraft.getInstance().font,
                 Component.translatable("container.repair"), guiLeft + 88, y + 6, 0x404040);
     }
