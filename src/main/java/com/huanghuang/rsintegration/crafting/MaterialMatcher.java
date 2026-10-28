@@ -86,6 +86,24 @@ public final class MaterialMatcher {
         return false;
     }
 
+    /**
+     * 机器运行时可能给产物补上额外 NBT（例如污染大地之心的 {isTainted:1b}）。
+     * 输出声明仍然是下游请求使用的稳定身份，因此发布前把运行时堆对齐到声明
+     * 的 NBT；只在物品类型一致且声明带 NBT 时对齐，避免放宽普通匹配。
+     */
+    public static ItemStack alignToDeclaration(MaterialKey declared, ItemStack stack) {
+        Objects.requireNonNull(declared, "declared");
+        if (stack == null || stack.isEmpty() || matchesOutputDeclaration(declared, stack)) {
+            return stack;
+        }
+        if (stack.getItem() != declared.item() || declared.tag() == null) return stack;
+        CompoundTag tag = parseTag(declared.tag());
+        if (tag == null) return stack;
+        ItemStack aligned = stack.copyWithCount(stack.getCount());
+        aligned.setTag(tag.copy());
+        return aligned;
+    }
+
     @Nullable
     private static CompoundTag parseTag(@Nullable String serialized) {
         if (serialized == null || serialized.isBlank()) return null;

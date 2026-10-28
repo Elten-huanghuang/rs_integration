@@ -423,7 +423,31 @@ public final class PlanRenderEngine {
     public static String formatMachineLabel(PlanStep step) {
         if (step == null || step.modType() == null) return "?";
         String bound = findBoundMachineLabel(step.modType().id(), step.recipeId());
-        return bound != null ? bound : formatModTypeLabel(step.modType().id());
+        String base = bound != null ? bound : formatModTypeLabel(step.modType().id());
+        ParallelPlan parallel = step.parallelPlan();
+        if (parallel == null || parallel.workers().isEmpty()) return base;
+        StringBuilder details = new StringBuilder();
+        if (parallel.workerCount() > 1) {
+            details.append(parallel.workerCount()).append("台 ")
+                    .append(parallel.shareSummary());
+        }
+        if (parallel.fuelItems() > 0L) {
+            if (details.length() > 0) details.append(" · ");
+            details.append("燃料×").append(parallel.fuelItems());
+        }
+        if (parallel.catalystItems() > 0L) {
+            if (details.length() > 0) details.append(" · ");
+            details.append("催化×").append(parallel.catalystItems());
+        }
+        if (parallel.durabilityItems() > 0L) {
+            if (details.length() > 0) details.append(" · ");
+            details.append("工具×").append(parallel.durabilityItems());
+        }
+        if (parallel.limitedBy() != null && !parallel.limitedBy().isBlank()) {
+            if (details.length() > 0) details.append(" · ");
+            details.append(parallel.limitedBy());
+        }
+        return details.length() == 0 ? base : details + " · " + base;
     }
 
     @Nullable

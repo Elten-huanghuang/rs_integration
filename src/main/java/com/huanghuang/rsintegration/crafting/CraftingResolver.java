@@ -1,4 +1,5 @@
 package com.huanghuang.rsintegration.crafting;
+import com.huanghuang.rsintegration.crafting.batch.VirtualExchangeRecipe;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 
 import java.lang.reflect.Field;
@@ -1654,9 +1655,24 @@ public final class CraftingResolver {
     // almost certainly the real output the mod author intended.
 
     public static ItemStack extractHiddenOutput(Recipe<?> recipe) {
+        return extractHiddenOutput(recipe, ItemStack.EMPTY);
+    }
+
+    /**
+     * @param visibleResult 该配方对外的可见产物；非空时只接受与它同物品的隐藏栈，
+     *                      避免把材料/支付物这类同样带 NBT 的字段误当成产物。
+     */
+    public static ItemStack extractHiddenOutput(Recipe<?> recipe, ItemStack visibleResult) {
         ResourceLocation id = recipe.getId();
+        boolean identityKnown = visibleResult != null && !visibleResult.isEmpty();
         ItemStack cached = HIDDEN_OUTPUT_CACHE.get(id);
-        if (cached != null) return cached.copy();
+        if (cached != null) {
+            // 缓存里的值只有在物品与可见产物一致时才是真产物。
+            if (cached.isEmpty() || !identityKnown
+                    || cached.getItem() == visibleResult.getItem()) {
+                return cached.copy();
+            }
+        }
 
         Class<?> clazz = recipe.getClass();
         while (clazz != null && clazz != Object.class) {
@@ -1665,7 +1681,8 @@ public final class CraftingResolver {
                 f.setAccessible(true);
                 try {
                     ItemStack stack = (ItemStack) f.get(recipe);
-                    if (stack != null && !stack.isEmpty() && stack.hasTag()) {
+                    if (stack != null && !stack.isEmpty() && stack.hasTag()
+                            && (!identityKnown || stack.getItem() == visibleResult.getItem())) {
                         ItemStack result = stack.copy();
                         HIDDEN_OUTPUT_CACHE.put(id, result.copy());
                         return result;
@@ -1694,8 +1711,12 @@ public final class CraftingResolver {
             dynamic.setTag(null);
             return dynamic;
         }
-        if (!staticResult.hasTag()) {
-            ItemStack hidden = extractHiddenOutput(recipe);
+        // 虚拟交换配方（市场交易等）的产物就是字段里写死的可见结果，支付物同样以
+        // ItemStack 字段保存；反射扫描会把支付物当成“隐藏产物”（例如把护手当成
+        // 探险家指南针），导致节点声明的产物与实际产出不符，执行时必然报
+        // OUTPUT_MISSING。这类配方的产物是权威的，直接使用可见结果。
+        if (!staticResult.hasTag() && !(recipe instanceof VirtualExchangeRecipe)) {
+            ItemStack hidden = extractHiddenOutput(recipe, staticResult);
             if (!hidden.isEmpty()) return hidden;
         }
         return staticResult.copy();

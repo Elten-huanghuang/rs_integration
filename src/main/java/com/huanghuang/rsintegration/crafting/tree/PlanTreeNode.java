@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.tree;
 
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.crafting.plan.ParallelPlan;
 import com.huanghuang.rsintegration.crafting.plan.PlanStep;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
@@ -29,6 +30,9 @@ public final class PlanTreeNode {
     public final int depth;
     @Nullable
     public final PlanStep step;    // null = leaf (raw material)
+    /** 计划阶段估算的并行分派；旧计划/无机器节点为 null。 */
+    @Nullable
+    public final ParallelPlan parallelPlan;
     /** Stable logical DAG identity. Repeated tree references share this id. */
     @Nullable
     public final Integer graphNodeId;
@@ -105,6 +109,7 @@ public final class PlanTreeNode {
         this.amount = amount;
         this.depth = depth;
         this.step = step;
+        this.parallelPlan = step == null ? null : step.parallelPlan();
         this.graphNodeId = graphNodeId;
         this.demandRole = demandRole == null ? DemandRole.CONSUMED : demandRole;
     }

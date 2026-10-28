@@ -241,7 +241,7 @@ public record PlanResponseDraft(
                 step.inputs().stream().map(ItemStack::copy).toList(),
                 step.alternatives(), step.modType(), step.depth(), step.hasOrSiblings(),
                 step.recipeWidth(), step.recipeHeight(), step.alternativeModTypes(),
-                step.inputRoles());
+                step.inputRoles(), step.inferMode(), step.parallelPlan());
     }
 
     private static PlanGraphView copyGraph(PlanGraphView source) {
@@ -254,7 +254,7 @@ public record PlanResponseDraft(
                                 input.roleOrdinal())).toList(),
                         node.outputs().stream().map(output -> new PlanGraphView.OutputView(
                                 output.portIndex(), output.display().copy(), output.quantity(),
-                                output.kindOrdinal())).toList()))
+                                output.kindOrdinal())).toList(), node.parallelPlan()))
                 .toList();
         List<PlanGraphView.EdgeView> edges = source.edges().stream()
                 .map(edge -> new PlanGraphView.EdgeView(edge.consumerNodeId(),

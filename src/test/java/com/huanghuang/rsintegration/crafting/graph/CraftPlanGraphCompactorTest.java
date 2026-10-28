@@ -7,13 +7,21 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.item.crafting.RecipeManager;
+import net.minecraft.world.level.Level;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class CraftPlanGraphCompactorTest extends BootstrapTest {
     private static final ResourceLocation RECIPE = ResourceLocation.parse("test:compressed");
@@ -229,6 +237,56 @@ class CraftPlanGraphCompactorTest extends BootstrapTest {
 
         assertEquals(2, compacted.nodes().size());
         CraftPlanValidator.validate(compacted);
+    }
+
+    /**
+     * 切石机没有方块实体状态，一次派发就算完整批：同配方的单件节点必须能并成一个节点，
+     * 否则每件都要单独排一次绑定的切石机，玩家看到的就是「几秒才切一刀」。
+     */
+    @Test
+    void mergesStonecutterNodesThroughMergePolicy() {
+        ResourceLocation stonecutting = ResourceLocation.parse(
+                "locusazzurro_icaruswings:linen_string_from_stonecutting");
+        MaterialKey material = MaterialKey.of(new ItemStack(Items.IRON_INGOT));
+        List<CraftNode> nodes = new ArrayList<>();
+        List<MaterialAllocation> allocations = new ArrayList<>();
+        List<RootDemand> roots = new ArrayList<>();
+        List<NodeId> order = new ArrayList<>();
+        for (int i = 0; i < 19; i++) {
+            NodeId nodeId = new NodeId(i);
+            InputPortId input = new InputPortId(nodeId, 0);
+            OutputPortId output = new OutputPortId(nodeId, 0);
+            nodes.add(node(nodeId, input, output, 1, null, "vanilla_stonecutter", stonecutting));
+            allocations.add(new MaterialAllocation(new AllocationId(i), input,
+                    new MaterialSource.InitialPool(material), material, 1));
+            roots.add(root(output, 1));
+            order.add(nodeId);
+        }
+        CraftPlanGraph graph = new CraftPlanGraph(1, nodes, allocations, roots, List.of(), order);
+        Level level = mock(Level.class);
+
+        CraftPlanGraph compacted = CraftPlanGraphCompactor.compact(
+                graph, CraftNodeMergePolicy.forLevel(level));
+
+        assertEquals(1, compacted.nodes().size());
+        assertEquals(19, compacted.nodes().get(0).executions());
+        assertEquals(19, compacted.allocations().get(0).quantity());
+        CraftPlanValidator.validate(compacted);
+    }
+
+    /** 有方块实体状态的机器（例如熔炉）仍然不能合并：每份进度都是独立的。 */
+    @Test
+    void keepsStatefulMachineNodesSeparate() {
+        Level level = mock(Level.class);
+        RecipeManager recipes = mock(RecipeManager.class);
+        doReturn(Optional.empty()).when(recipes).byKey(any());
+        when(level.getRecipeManager()).thenReturn(recipes);
+        NodeId nodeId = new NodeId(0);
+        CraftNode furnace = node(nodeId, new InputPortId(nodeId, 0),
+                new OutputPortId(nodeId, 0), 1, null, "vanilla_furnace",
+                ResourceLocation.parse("minecraft:smelting"));
+
+        assertFalse(CraftNodeMergePolicy.forLevel(level).test(furnace));
     }
 
     private static CraftNode node(NodeId nodeId, InputPortId input, OutputPortId output,

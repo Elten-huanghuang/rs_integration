@@ -3,12 +3,15 @@ package com.huanghuang.rsintegration.crafting.tree;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.MaterialLocks;
+import com.huanghuang.rsintegration.crafting.batch.CraftExecutionPolicy;
 import net.minecraft.client.Minecraft;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -71,6 +74,15 @@ public final class JeiSubtreeBuilder {
                                     || !ItemStack.isSameItemSameTags(locked, child.displayStack)
                                     || !ing.test(locked)
                                     ? null : locked.copyWithCount(1);
+                            if (CraftExecutionPolicy.requiresBoundMachine(recipe, node.step.modType())) {
+                                Component hint = Component.translatable(
+                                        "rsi.plan.machine_single_variant");
+                                if (!child.hints.contains(hint)) {
+                                    List<Component> hints = new ArrayList<>(child.hints);
+                                    hints.add(hint);
+                                    child.hints = List.copyOf(hints);
+                                }
+                            }
                             used[i] = true;
                             break;
                         }

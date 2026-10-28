@@ -19,6 +19,7 @@ import com.huanghuang.rsintegration.crafting.graph.RootAllocation;
 import com.huanghuang.rsintegration.crafting.graph.RootDemand;
 import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
 import com.huanghuang.rsintegration.crafting.plan.PlanMaterialBill;
+import com.huanghuang.rsintegration.crafting.plan.ParallelPlanEstimator;
 import com.huanghuang.rsintegration.crafting.plan.PlanOutcome;
 import com.huanghuang.rsintegration.crafting.plan.IntegrationDiagnostic;
 import com.huanghuang.rsintegration.crafting.plan.IntegrationDiagnosticCode;
@@ -1104,15 +1105,15 @@ public final class GenericCraftPacket {
         ModRecipeHandler claimed =
                 ModRecipeHandlers.claimFor(recipe).winner();
         return modTypeForCachedExecution(
-                claimed, ModType.classifyRecipe(recipe));
+                claimed == null ? null : claimed.modType(recipe),
+                ModType.classifyRecipe(recipe));
     }
 
     static ModType modTypeForCachedExecution(
-            @Nullable ModRecipeHandler claimed,
+            @Nullable ModType claimedType,
             @Nullable ModType type
     ) {
         // 与预览/执行入口共用同一条类型解析规则，避免缓存执行把模组级兜底类型写进终端步骤
-        ModType claimedType = claimed == null ? null : claimed.modType();
         // 原版烹饪与切石配方共用一个处理器，缓存执行同样要按配方类细分出具体机器类型
         ModType vanillaFamily = CraftMachineBindingSupport.preferVanillaFamilyType(
                 claimedType, type, false);
@@ -1529,7 +1530,7 @@ public final class GenericCraftPacket {
         }
         if (!partialPreparation && modType != null && modType.isVirtual()) {
             ModRecipeHandler virtualHandler = ModRecipeHandlers.claimFor(recipe).winner();
-            if (virtualHandler == null || virtualHandler.modType() != modType
+            if (virtualHandler == null || virtualHandler.modType(recipe) != modType
                     || !virtualHandler.isAvailableForPlanning(recipe, player)) {
                 player.sendSystemMessage(Component.translatable(
                         "rsi.generic.error.execution_context", recipeId));
@@ -1683,11 +1684,11 @@ public final class GenericCraftPacket {
             return;
         }
 
-        // Smithing is authorized by its bound table above, then assembled
-        // directly from the concrete extracted inputs below. Physical machines
-        // and logical virtual recipes both need their typed terminal delegate:
-        // the latter have no block, but may still depend on recursively crafted
-        // inputs (for example Malum void favor consuming a craftable relic).
+        // Smithing is authorized by its bound table above, then dispatched by its
+        // own terminal block below (it is deliberately excluded here). Physical
+        // machines and logical virtual recipes both need their typed terminal
+        // delegate: the latter have no block, but may still depend on recursively
+        // crafted inputs (for example Malum void favor consuming a craftable relic).
         // The auto-crafting flag controls intermediate resolution, not whether
         // the terminal must still be represented by a typed graph node.
         if (CraftExecutionPolicy.requiresTypedTerminalExecution(recipe, modType)
@@ -2023,12 +2024,12 @@ public final class GenericCraftPacket {
                 return;
             }
 
-            RSIntegrationMod.debug("[RSI-Generic] Unified resolver: nothing to resolve for {}, falling through to direct extraction", recipeId);
+            RSIntegrationMod.debug("[RSI-Generic] Unified resolver: nothing to resolve for {}", recipeId);
         }
 
-        // Guard: non-CraftingRecipe mod recipes REQUIRE a bound machine.
-        // Falling through to grouped extraction would consume items without
-        // actually running the machine crafting.
+        // Guard: physical machine recipes REQUIRE a bound machine before any
+        // terminal graph is built. Executing them without the machine would
+        // consume items without actually running the machine crafting.
         if (CraftExecutionPolicy.isPhysicalMachineRecipe(recipe, modType)
                 && (effectiveDim == null || effectivePos == null)) {
             CraftMachineBindingSupport.logBindingRejection("execute-context", player, recipe, modType,
@@ -2048,7 +2049,9 @@ public final class GenericCraftPacket {
         // Resolve intermediate crafting steps for smithing recipes.
         // Smithing skips the CraftingRecipe-only paths above, so intermediates
         // (e.g. diamond from diamond block) would not be crafted otherwise.
-        if (modType == ModType.byId("smithing") && storageEndpoint != null
+        // 没有存储端点时也必须继续：绑定锻造台后直接从背包锻造是合法路径，
+        // 只有递归出现实体机器步骤时才需要网络（下方按需报 network_unavailable）。
+        if (modType == ModType.byId("smithing")
                 && RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING.get()) {
             ItemStack smithingOutput = ModRecipeHandlers.tryGetResultItem(
                     recipe, player.serverLevel().registryAccess());
@@ -2059,10 +2062,30 @@ public final class GenericCraftPacket {
                 Map<StackKey, Long> avail = listAvailable(player, storageEndpoint);
                 DirectReservationCheck directSmithing = probeDirectTerminalReservation(
                         player, recipeId, smithingSpecs, avail, storageEndpoint);
-                if (!directSmithing.available()) {
-                    // Smithing inputs are immutable planner data as well. Do not spend the
-                    // server-thread compatibility slice before trying the background route.
-                    if (!typedGraphOnly && safePreferences.isEmpty()
+                // 锻造输入同样是不可变的规划数据：材料不齐时先让后台路线排依赖，
+                // 避免占用服务端线程的兼容解析预算。
+                // 材料已经齐全（directSmithing 可行）时不能在此跳出：终端图仍然必须构造，
+                // 否则锻造配方会掉到末尾的“不支持的机器类型”兜底上。
+                // 后台物理路线需要存储端点，无端点时直接走前台解析。
+                if (!directSmithing.available() && storageEndpoint != null
+                        && !typedGraphOnly && safePreferences.isEmpty()
+                        && CraftPureExecutionPlanner.queuePhysical(
+                        player, recipe, recipeId, forcedRecipes, dim, pos, repeatCount,
+                        inferMode, baseItem, targetOutput, outputDestination,
+                        machineSelectionMode, storageEndpoint,
+                        executionStorageReference, smithingSpecs, smithingOutput,
+                        materialLocks)) {
+                    return;
+                }
+                List<String> missing = new ArrayList<>();
+                CraftPlanGraph smithingInputGraph;
+                try {
+                    smithingInputGraph = CraftingResolver.resolveGraphForScaledSpecsWithTypes(
+                    smithingSpecs, avail, player.serverLevel(), player, storageEndpoint, missing,
+                            forcedOverrides, false, typedResolverBudgetMs(), null,
+                            materialLocks, safePreferences);
+                } catch (CraftingPlanningTimeoutException timeout) {
+                    if (storageEndpoint != null && !typedGraphOnly && safePreferences.isEmpty()
                             && CraftPureExecutionPlanner.queuePhysical(
                             player, recipe, recipeId, forcedRecipes, dim, pos, repeatCount,
                             inferMode, baseItem, targetOutput, outputDestination,
@@ -2071,54 +2094,54 @@ public final class GenericCraftPacket {
                             materialLocks)) {
                         return;
                     }
-                    List<String> missing = new ArrayList<>();
-                    CraftPlanGraph smithingInputGraph;
+                    throw timeout;
+                }
+                List<ResolutionStep> interSteps =
+                        ExecutionEquivalence.projectFlatSteps(smithingInputGraph);
+                // 材料全齐时输入图只有根需求、没有中间节点，零步骤图同样可以追加锻造终端节点。
+                if (CraftTerminalSteps.canComposeEquivalentTerminalGraph(
+                        smithingInputGraph, interSteps, missing)) {
+                    // 递归里出现实体机器步骤时必须有网络端点，普通合成步骤可以直接用背包。
+                    boolean physicalSteps = interSteps.stream().anyMatch(
+                            step -> step.modType() != ModType.GENERIC);
+                    if (physicalSteps && storageEndpoint == null) {
+                        player.sendSystemMessage(Component.translatable(
+                                "rsi.generic.error.network_unavailable"));
+                        return;
+                    }
+                    ResolutionStep terminalStep = CraftTerminalSteps.smithingTerminalStep(recipeId, repeatCount);
+                    ItemStack recipeOutput = ModRecipeHandlers.tryGetResultItem(
+                            recipe, player.serverLevel().registryAccess());
+                    recipeOutput = CraftTerminalSteps.selectTerminalGraphOutput(
+                            recipe, recipeOutput, targetOutput);
                     try {
-                        smithingInputGraph = CraftingResolver.resolveGraphForScaledSpecsWithTypes(
-                        smithingSpecs, avail, player.serverLevel(), player, storageEndpoint, missing,
-                                forcedOverrides, false, typedResolverBudgetMs(), null,
-                                materialLocks, safePreferences);
-                    } catch (CraftingPlanningTimeoutException timeout) {
-                        if (!typedGraphOnly && safePreferences.isEmpty()
-                                && CraftPureExecutionPlanner.queuePhysical(
-                                player, recipe, recipeId, forcedRecipes, dim, pos, repeatCount,
-                                inferMode, baseItem, targetOutput, outputDestination,
-                                machineSelectionMode, storageEndpoint,
-                                executionStorageReference, smithingSpecs, smithingOutput,
-                                materialLocks)) {
-                            return;
-                        }
-                        throw timeout;
+                        CraftPlanGraph completeGraph = CraftTerminalSteps.composeEquivalentTerminalGraph(
+                                smithingInputGraph, terminalStep, recipeOutput,
+                                player.serverLevel());
+                        launchGraphAsyncChain(player, completeGraph, storageEndpoint,
+                                recipeId, forcedRecipes, dim, pos,
+                                targetOutput, outputDestination,
+                                machineSelectionMode, materialLocks);
+                        return;
+                    } catch (IllegalArgumentException | ArithmeticException exception) {
+                        RSIntegrationMod.LOGGER.warn(
+                                "[RSI-Craft] smithing terminal graph composition failed recipe={} reason={}",
+                                recipeId, exception.getMessage());
+                        player.sendSystemMessage(Component.translatable(
+                                "rsi.generic.error.unsupported_machine",
+                                recipe.getClass().getSimpleName()));
+                        return;
                     }
-                    List<ResolutionStep> interSteps =
-                            ExecutionEquivalence.projectFlatSteps(smithingInputGraph);
-                    if (interSteps != null && !interSteps.isEmpty() && missing.isEmpty()) {
-                        ResolutionStep terminalStep = CraftTerminalSteps.smithingTerminalStep(recipeId, repeatCount);
-                        boolean physicalSteps = interSteps.stream().anyMatch(
-                                step -> step.modType() != ModType.GENERIC);
-                        ItemStack recipeOutput = ModRecipeHandlers.tryGetResultItem(
-                                recipe, player.serverLevel().registryAccess());
-                        recipeOutput = CraftTerminalSteps.selectTerminalGraphOutput(
-                                recipe, recipeOutput, targetOutput);
-                        try {
-                            CraftPlanGraph completeGraph = CraftTerminalSteps.composeEquivalentTerminalGraph(
-                                    smithingInputGraph, terminalStep, recipeOutput,
-                                    player.serverLevel());
-                            launchGraphAsyncChain(player, completeGraph, storageEndpoint,
-                                    recipeId, forcedRecipes, dim, pos,
-                                    targetOutput, outputDestination,
-                                    machineSelectionMode, materialLocks);
-                            return;
-                        } catch (IllegalArgumentException | ArithmeticException exception) {
-                            RSIntegrationMod.LOGGER.warn(
-                                    "[RSI-Craft] smithing terminal graph composition failed recipe={} reason={}",
-                                    recipeId, exception.getMessage());
-                            player.sendSystemMessage(Component.translatable(
-                                    "rsi.generic.error.unsupported_machine",
-                                    recipe.getClass().getSimpleName()));
-                            return;
-                        }
-                    }
+                }
+                if (!missing.isEmpty()) {
+                    // 锻造缺料也要报缺料，不能落到“不支持的机器类型”误导玩家。
+                    RSIntegrationMod.LOGGER.warn(
+                            "[RSI-Craft] smithing planning failed recipe={} missing={}",
+                            recipeId, missing);
+                    player.sendSystemMessage(Component.translatable(
+                            "rsi.generic.error.missing_materials",
+                            CraftPacketUtils.formatMissingSummary(missing)));
+                    return;
                 }
             }
         }
@@ -2859,7 +2882,10 @@ public final class GenericCraftPacket {
         DirectMaterialAllocator.Result directPreviewAllocation =
                 executionMachineAvailable && effectiveOverrides.isEmpty()
                 && hasFixedTerminalInputs
-                        ? DirectMaterialAllocator.allocateScaled(recipeSpecs, available)
+                        ? (CraftExecutionPolicy.requiresBoundMachine(recipe, recipeModType)
+                                ? DirectMaterialAllocator.allocateScaledSingleVariant(
+                                        recipeSpecs, available)
+                                : DirectMaterialAllocator.allocateScaled(recipeSpecs, available))
                 : new DirectMaterialAllocator.Result(false, List.of(), -1, 0);
         boolean directTerminalPlan = CraftIngredientPlanMath.useDirectTerminalPlan(
                 directPreviewAllocation, recipeSpecs, planTargetOutput);
@@ -3814,7 +3840,10 @@ public final class GenericCraftPacket {
                 recipeModType != null ? recipeModType.id() : null,
                 itemAvailable, itemSource, neededCounts, repeatCount);
 
-        PlanGraphView planGraphView = planGraph != null ? PlanGraphView.from(planGraph) : null;
+        PlanGraphView planGraphView = planGraph != null
+                ? PlanGraphView.from(planGraph,
+                        ParallelPlanEstimator.estimate(player, planGraph, itemAvailable))
+                : null;
         Map<ResourceLocation, PlanResponse.StepIssue> stepIssues = new LinkedHashMap<>();
         if (resolutionSteps != null) {
             for (ResolutionStep step : resolutionSteps) {
@@ -4025,11 +4054,18 @@ public final class GenericCraftPacket {
             }
         }
 
+        // 单层配方没有 CraftPlanGraph，但仍要让递归树显示会并行到几台机器、
+        // 每台分多少、需要多少燃料/催化剂/耐久工具。
+        List<PlanStep> displaySteps = steps.stream()
+                .map(step -> step.withParallelPlan(ParallelPlanEstimator.estimate(
+                        player, step, itemAvailable)))
+                .toList();
+
         PlanResponseDraft responseDraft = new PlanResponseDraft(
                 feasible,
                 targetName,
                 planTargetOutput,
-                steps,
+                displaySteps,
                 materials,
                 dedupedMissing,
                 recipeId.toString(),
@@ -4061,7 +4097,7 @@ public final class GenericCraftPacket {
                 diagnostics
         );
 
-        int responseStepCount = steps.size();
+        int responseStepCount = displaySteps.size();
         int responseGraphNodes = planGraphView != null ? planGraphView.nodes().size() : 0;
         boolean responseFeasible = feasible;
         CraftPlanGraph resolvedGraphForCache =

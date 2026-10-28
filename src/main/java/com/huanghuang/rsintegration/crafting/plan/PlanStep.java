@@ -30,7 +30,9 @@ public record PlanStep(
         int recipeWidth,
         int recipeHeight,
         List<String> alternativeModTypes,
-        List<DemandRole> inputRoles
+        List<DemandRole> inputRoles,
+        boolean inferMode,
+        @Nullable ParallelPlan parallelPlan
 ) {
     public PlanStep {
         inputs = List.copyOf(inputs);
@@ -42,6 +44,32 @@ public record PlanStep(
         if (inputRoles.size() != inputs.size()) {
             throw new IllegalArgumentException("inputRoles must align with inputs");
         }
+    }
+
+    /** 兼容旧调用：没有并行分派快照，也不是推断配方。 */
+    public PlanStep(ResourceLocation recipeId, ItemStack output, long batches,
+                    List<ItemStack> inputs, List<ResourceLocation> alternatives,
+                    @Nullable ModType modType, int depth, boolean hasOrSiblings,
+                    int recipeWidth, int recipeHeight, List<String> alternativeModTypes,
+                    List<DemandRole> inputRoles) {
+        this(recipeId, output, batches, inputs, alternatives, modType, depth, hasOrSiblings,
+                recipeWidth, recipeHeight, alternativeModTypes, inputRoles, false, null);
+    }
+
+    /** 兼容旧调用：有并行快照但没有推断标记。 */
+    public PlanStep(ResourceLocation recipeId, ItemStack output, long batches,
+                    List<ItemStack> inputs, List<ResourceLocation> alternatives,
+                    @Nullable ModType modType, int depth, boolean hasOrSiblings,
+                    int recipeWidth, int recipeHeight, List<String> alternativeModTypes,
+                    List<DemandRole> inputRoles, @Nullable ParallelPlan parallelPlan) {
+        this(recipeId, output, batches, inputs, alternatives, modType, depth, hasOrSiblings,
+                recipeWidth, recipeHeight, alternativeModTypes, inputRoles, false, parallelPlan);
+    }
+
+    public PlanStep withParallelPlan(@Nullable ParallelPlan plan) {
+        return new PlanStep(recipeId, output, batches, inputs, alternatives, modType, depth,
+                hasOrSiblings, recipeWidth, recipeHeight, alternativeModTypes, inputRoles,
+                inferMode, plan);
     }
 
     public PlanStep(ResourceLocation recipeId, ItemStack output, long batches,
@@ -103,6 +131,12 @@ public record PlanStep(
         if (index < 0 || index >= inputs.size()) return 0L;
         int count = Math.max(0, inputs.get(index).getCount());
         DemandRole role = inputRole(index);
+        if (parallelPlan != null && executions == batches) {
+            if (role == DemandRole.FUEL) return parallelPlan.fuelItems();
+            if (role == DemandRole.CATALYST || role == DemandRole.DURABILITY) {
+                return SaturatingLongMath.multiply(count, Math.max(1, parallelPlan.workerCount()));
+            }
+        }
         if (role == DemandRole.CATALYST
                 || role == DemandRole.FUEL
                 || role == DemandRole.DURABILITY) return count;

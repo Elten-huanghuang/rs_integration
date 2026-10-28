@@ -403,11 +403,13 @@ final class StepExecutor {
                     return id != null ? id.toString() : "";
                 }));
 
+        List<String> variantFailures = new ArrayList<>();
         for (ItemStack variant : variants) {
             // A tagged display candidate does not make a vanilla Ingredient strict.
             // Preserve the source predicate when locking one physical machine slot.
             Ingredient selected = CraftingResolver.ingredientOf(variant, strictNbt);
             List<ResolutionContext.SupplySlice> consumed = new ArrayList<>();
+            int variantMissingStart = ctx.missingCount();
             ctx.beginUndo();
             edges.beginUndo();
             boolean resolved = CraftingResolver.ensureIngredient(
@@ -418,9 +420,27 @@ final class StepExecutor {
                 if (consumedOut != null) consumedOut.addAll(consumed);
                 return selected;
             }
+            List<String> details = ctx.missingSince(variantMissingStart);
+            ctx.truncateMissing(variantMissingStart);
             ctx.rollback();
             edges.rollback();
+            String variantName = variant.getHoverName().getString();
+            long available = ctx.countMatching(selected);
+            variantFailures.add(variantName + "(" + available + "/" + quantity + ")");
+            for (int i = 0; i < details.size() && i < 6; i++) {
+                ctx.diag("machine variant " + variantName + " missing: " + details.get(i));
+            }
         }
+
+        // 机器槽位要求同一个 concrete variant 填满整槽。把每个变体的失败明细汇总成
+        // 一条 tag 级缺料，避免把多个变体的深层缺料并集误当成顶层配方材料。
+        String tagName = CraftPacketUtils.describeIngredient(ingredient).getString();
+        int shown = Math.min(8, variantFailures.size());
+        String candidates = String.join("、", variantFailures.subList(0, shown))
+                + (variantFailures.size() > shown ? "…" : "");
+        String summary = "需要同一种「" + tagName + "」× " + quantity
+                + "（候选：" + candidates + "）";
+        ctx.addMissing(summary);
         return null;
     }
 

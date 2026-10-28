@@ -80,6 +80,19 @@ class MaterialMatcherTest extends BootstrapTest {
     }
 
     @Test
+    void alignsRuntimeNbtToDeclaredVariant() {
+        ItemStack declared = tagged("heart");
+        ItemStack actual = tagged("heart");
+        actual.getOrCreateTag().putString("runtime-state", "tainted");
+
+        ItemStack aligned = MaterialMatcher.alignToDeclaration(MaterialKey.of(declared), actual);
+
+        assertTrue(MaterialMatcher.matchesOutputDeclaration(MaterialKey.of(declared), aligned));
+        assertEquals("heart", aligned.getTag().getString("variant"));
+        assertFalse(aligned.getTag().contains("runtime-state"));
+    }
+
+    @Test
     void pristineDamageTagDoesNotConstrainRuntimeOutputNbt() {
         ItemStack pristine = new ItemStack(Items.DIAMOND_SWORD);
         pristine.getOrCreateTag().putInt("Damage", 0);

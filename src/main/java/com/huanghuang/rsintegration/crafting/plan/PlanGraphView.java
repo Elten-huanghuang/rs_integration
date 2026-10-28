@@ -15,6 +15,7 @@ import net.minecraft.world.item.ItemStack;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Client-safe, server-authored material-flow DAG carried alongside the legacy
@@ -51,6 +52,14 @@ public record PlanGraphView(
     }
 
     public static PlanGraphView from(CraftPlanGraph graph) {
+        return from(graph, Map.of());
+    }
+
+    /**
+     * @param parallelPlans 计划阶段估算的节点并行分派快照；没有估算的节点为 null。
+     */
+    public static PlanGraphView from(CraftPlanGraph graph,
+                                     Map<Integer, ParallelPlan> parallelPlans) {
         List<NodeView> nodes = new ArrayList<>(graph.nodes().size());
         for (CraftNode node : graph.nodes()) {
             ItemStack primary = node.outputs().stream()
@@ -73,7 +82,7 @@ public record PlanGraphView(
                     .toList();
             nodes.add(new NodeView(node.id().value(), node.recipeId(), node.modTypeId(),
                     node.executions(), primary, node.alternativeIds(), node.alternativeModTypeIds(),
-                    inputs, outputs));
+                    inputs, outputs, parallelPlans.get(node.id().value())));
         }
 
         List<EdgeView> edges = graph.allocations().stream().map(allocation -> {
@@ -122,12 +131,22 @@ public record PlanGraphView(
                            int executions, ItemStack primaryOutput,
                            List<ResourceLocation> alternativeIds,
                            List<String> alternativeModTypeIds,
-                           List<InputView> inputs, List<OutputView> outputs) {
+                           List<InputView> inputs, List<OutputView> outputs,
+                           @Nullable ParallelPlan parallelPlan) {
+        public NodeView(int nodeId, ResourceLocation recipeId, String modTypeId,
+                        int executions, ItemStack primaryOutput,
+                        List<ResourceLocation> alternativeIds,
+                        List<String> alternativeModTypeIds,
+                        List<InputView> inputs, List<OutputView> outputs) {
+            this(nodeId, recipeId, modTypeId, executions, primaryOutput,
+                    alternativeIds, alternativeModTypeIds, inputs, outputs, null);
+        }
+
         public NodeView(int nodeId, ResourceLocation recipeId, String modTypeId,
                         int executions, ItemStack primaryOutput,
                         List<InputView> inputs, List<OutputView> outputs) {
             this(nodeId, recipeId, modTypeId, executions, primaryOutput,
-                    List.of(), List.of(), inputs, outputs);
+                    List.of(), List.of(), inputs, outputs, null);
         }
 
         public NodeView {
@@ -147,7 +166,8 @@ public record PlanGraphView(
             List<DemandRole> inputRoles = inputs.stream().map(InputView::role).toList();
             return new PlanStep(recipeId, primaryOutput.copy(), runCount,
                     displayInputs, alternativeIds, ModType.byId(modTypeId), 0,
-                    !alternativeIds.isEmpty(), 0, 0, alternativeModTypeIds, inputRoles);
+                    !alternativeIds.isEmpty(), 0, 0, alternativeModTypeIds, inputRoles,
+                    false, parallelPlan);
         }
     }
 

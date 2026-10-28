@@ -14,6 +14,7 @@ import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.storage.StorageReferenceCodec;
 import com.huanghuang.rsintegration.util.PerformanceMonitor;
 import io.netty.handler.codec.DecoderException;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -26,6 +27,7 @@ import com.huanghuang.rsintegration.magic.MagicResourceCost;
 import com.huanghuang.rsintegration.magic.MagicResourceKind;
 import com.huanghuang.rsintegration.storage.StorageBackendId;
 import io.netty.buffer.Unpooled;
+import javax.annotation.Nullable;
 
 import java.util.*;
 import java.util.function.Supplier;
@@ -154,6 +156,8 @@ public final class PlanResponsePacket {
             for (String mt : step.alternativeModTypes()) {
                 buf.writeUtf(mt, MAX_MOD_TYPE_LENGTH);
             }
+            buf.writeBoolean(step.inferMode());
+            writeParallelPlan(buf, step.parallelPlan());
         }
         // Materials
         buf.writeVarInt(plan.materials().size());
@@ -319,7 +323,7 @@ public final class PlanResponsePacket {
             }
             steps.add(new PlanStep(rid, output, batches, inputs, alternatives, modType,
                     depth, hasOrSiblings, recipeWidth, recipeHeight, alternativeModTypes,
-                    inputRoles));
+                    inputRoles, buf.readBoolean(), readParallelPlan(buf)));
         }
         // Materials
         int matCount = readBoundedCount(buf);
@@ -497,6 +501,50 @@ public final class PlanResponsePacket {
                 stepIssues, storageReference, storageNetworks, outcome, diagnostics), requestId);
     }
 
+    private static void writeParallelPlan(FriendlyByteBuf buf, @Nullable ParallelPlan plan) {
+        buf.writeBoolean(plan != null);
+        if (plan == null) return;
+        buf.writeVarInt(plan.workers().size());
+        for (ParallelPlan.WorkerShare worker : plan.workers()) {
+            buf.writeBlockPos(worker.machinePos());
+            buf.writeUtf(worker.machineType(), MAX_MOD_TYPE_LENGTH);
+            buf.writeVarInt(worker.operations());
+            buf.writeVarLong(worker.fuelItems());
+            buf.writeVarLong(worker.catalystItems());
+            buf.writeVarLong(worker.durabilityItems());
+        }
+        buf.writeVarInt(plan.totalOperations());
+        buf.writeVarLong(plan.fuelItems());
+        buf.writeVarLong(plan.catalystItems());
+        buf.writeVarLong(plan.durabilityItems());
+        buf.writeBoolean(plan.limitedBy() != null);
+        if (plan.limitedBy() != null) buf.writeUtf(plan.limitedBy(), 64);
+    }
+
+    @Nullable
+    private static ParallelPlan readParallelPlan(FriendlyByteBuf buf) {
+        if (!buf.readBoolean()) return null;
+        int workerCount = readBoundedCount(buf);
+        List<ParallelPlan.WorkerShare> workers = new ArrayList<>(workerCount);
+        for (int i = 0; i < workerCount; i++) {
+            BlockPos pos = buf.readBlockPos();
+            String machineType = buf.readUtf(MAX_MOD_TYPE_LENGTH);
+            int operations = readNonNegativeVarInt(buf, "parallel worker operations");
+            long fuel = readNonNegativeVarLong(buf, "parallel worker fuel");
+            long catalyst = readNonNegativeVarLong(buf, "parallel worker catalyst");
+            long durability = readNonNegativeVarLong(buf, "parallel worker durability");
+            workers.add(new ParallelPlan.WorkerShare(pos, machineType, operations, fuel, catalyst,
+                    durability));
+        }
+        int totalOperations = readNonNegativeVarInt(buf, "parallel total operations");
+        long fuelItems = readNonNegativeVarLong(buf, "parallel fuel total");
+        long catalystItems = readNonNegativeVarLong(buf, "parallel catalyst total");
+        long durabilityItems = readNonNegativeVarLong(buf, "parallel durability total");
+        String limitedBy = buf.readBoolean() ? buf.readUtf(64) : null;
+        return new ParallelPlan(workers, totalOperations, fuelItems, catalystItems, durabilityItems,
+                limitedBy);
+    }
+
     private static void writeGraph(FriendlyByteBuf buf, PlanGraphView graph) {
         buf.writeVarInt(graph.version());
         buf.writeVarInt(graph.nodes().size());
@@ -528,6 +576,7 @@ public final class PlanResponsePacket {
                 buf.writeVarLong(output.quantity());
                 buf.writeVarInt(output.kindOrdinal());
             }
+            writeParallelPlan(buf, node.parallelPlan());
         }
         buf.writeVarInt(graph.edges().size());
         for (PlanGraphView.EdgeView edge : graph.edges()) {
@@ -599,7 +648,8 @@ public final class PlanResponsePacket {
                         readNonNegativeVarInt(buf, "output kind ordinal")));
             }
             nodes.add(new PlanGraphView.NodeView(nodeId, recipe, modType, executions,
-                    primary, alternativeIds, alternativeModTypes, inputs, outputs));
+                    primary, alternativeIds, alternativeModTypes, inputs, outputs,
+                    readParallelPlan(buf)));
         }
         List<PlanGraphView.EdgeView> edges = new ArrayList<>();
         for (int i = 0, n = readBoundedCount(buf); i < n; i++) {

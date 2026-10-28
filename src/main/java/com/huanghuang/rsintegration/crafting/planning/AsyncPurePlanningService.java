@@ -4,7 +4,6 @@ import com.huanghuang.rsintegration.config.CraftingPlanningConfig;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.SelfAmplifyingRecipePolicy;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
-import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
 import net.minecraft.resources.ResourceLocation;
 import com.huanghuang.rsintegration.util.PerformanceMonitor;
@@ -176,15 +175,13 @@ public final class AsyncPurePlanningService {
         if (target == null) {
             return new PureRecipePlanner.Result(false, List.of(), List.of(), Map.of());
         }
-        List<IngredientRef> roots = SelfAmplifyingRecipePolicy.planningRoots(
-                target, repeatCount);
         setPhase(session, snapshot, PlanningSession.Phase.RECURSIVE_SEARCH);
         long searchStarted = System.nanoTime();
         long deadlineNanos = session.deadlineNanos();
-        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
-                planningGraph, stock, roots, maxSteps,
-                maxSearchStates, maxMemoizedFailures, deadlineNanos, System::nanoTime,
-                planningRootGuard(target), snapshot.forcedRecipes(), snapshot.preferences());
+        PureRecipePlanner.Result result = resolveInScope(
+                planningGraph, stock, target, repeatCount, maxSteps,
+                maxSearchStates, maxMemoizedFailures, deadlineNanos,
+                snapshot.forcedRecipes(), snapshot.preferences());
         long elapsedNanos = System.nanoTime() - searchStarted;
         PerformanceMonitor.recordPurePlanningSearch(
                 result, elapsedNanos);
@@ -204,6 +201,35 @@ public final class AsyncPurePlanningService {
                     lookupStats.reachabilityStateAllocations());
         }
         return result;
+    }
+
+    /**
+     * 按目标配方输入规划；若目标配方是“没有库存支撑的反向换算”（例如 Prefab 的
+     * 分解压缩萤石），按输入规划必然绕回自身产物，形成“9 个萤石压成 1 个压缩、
+     * 再分解回 9 个萤石”的闭环，此时改为按目标产物需求量规划，让正向配方
+     * （如 4 萤石粉 → 1 萤石）接手。
+     */
+    static PureRecipePlanner.Result resolveInScope(ImmutableRecipeGraph graph,
+                                                   Map<ImmutableRecipeGraph.MaterialRef, Long> stock,
+                                                   RecipeNode target, int repeatCount,
+                                                   int maxSteps, int maxSearchStates,
+                                                   int maxMemoizedFailures, long deadlineNanos,
+                                                   Map<ResourceLocation, ResourceLocation> forcedRecipes,
+                                                   PlanningPreferences preferences) {
+        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
+                graph, stock, SelfAmplifyingRecipePolicy.planningRoots(target, repeatCount),
+                maxSteps, maxSearchStates, maxMemoizedFailures, deadlineNanos,
+                System::nanoTime, planningRootGuard(target), forcedRecipes, preferences);
+        if (result.feasible()
+                || !SelfAmplifyingRecipePolicy.isUnseededReverseTarget(target, graph, stock)) {
+            return result;
+        }
+        PureRecipePlanner.Result direct = PureRecipePlanner.resolve(
+                graph, stock,
+                SelfAmplifyingRecipePolicy.directProductionRoots(target, repeatCount),
+                maxSteps, maxSearchStates, maxMemoizedFailures, deadlineNanos,
+                System::nanoTime, Set.of(), forcedRecipes, preferences);
+        return direct.feasible() || !direct.missing().isEmpty() ? direct : result;
     }
 
     static Set<ImmutableRecipeGraph.MaterialRef> planningRootGuard(

@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
+import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.ItemStack;
@@ -91,5 +92,29 @@ class DirectMaterialAllocatorTest extends BootstrapTest {
                 Map.of(new StackKey(Items.DIAMOND_SWORD, wrong.getTag().toString()), 1));
 
         assertFalse(result.feasible());
+    }
+
+    @Test
+    void singleVariantMachineDemandDoesNotMixTagMembers() {
+        ScaledIngredientSpec tag = new ScaledIngredientSpec(
+                Ingredient.of(Items.APPLE, Items.GOLDEN_APPLE), 3,
+                InputConsumption.consumed());
+        Map<StackKey, Long> supplied = Map.of(
+                new StackKey(Items.APPLE, null), 1L,
+                new StackKey(Items.GOLDEN_APPLE, null), 2L);
+
+        assertTrue(DirectMaterialAllocator.allocateScaled(List.of(tag), supplied).feasible());
+        assertFalse(DirectMaterialAllocator.allocateScaledSingleVariant(
+                List.of(tag), supplied).feasible());
+    }
+
+    @Test
+    void singleVariantMachineDemandAcceptsOneCompleteVariant() {
+        ScaledIngredientSpec tag = new ScaledIngredientSpec(
+                Ingredient.of(Items.APPLE, Items.GOLDEN_APPLE), 3,
+                InputConsumption.consumed());
+
+        assertTrue(DirectMaterialAllocator.allocateScaledSingleVariant(
+                List.of(tag), Map.of(new StackKey(Items.APPLE, null), 3L)).feasible());
     }
 }

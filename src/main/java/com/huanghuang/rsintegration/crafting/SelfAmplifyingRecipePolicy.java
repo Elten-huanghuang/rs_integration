@@ -10,6 +10,7 @@ import net.minecraft.world.item.crafting.Ingredient;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 
 /** Scales terminal inputs while preserving the seed of a self-amplifying recipe. */
@@ -52,6 +53,71 @@ public final class SelfAmplifyingRecipePolicy {
                 target.output().runtimeNbt()
                         ? ImmutableRecipeGraph.NbtMatchMode.ANY
                         : ImmutableRecipeGraph.NbtMatchMode.EXACT));
+    }
+
+    /**
+     * 目标配方本身是“没有库存支撑的反向换算”时（例如 Prefab 的分解压缩萤石：
+     * 1 压缩萤石 → 9 萤石，而压缩萤石又只能由 9 萤石压出来），按配方输入规划
+     * 一定会绕回自己的产物，形成“9 个合成 1 个压缩、再分解成 9 个”的闭环。
+     * 这种目标应改为按产物需求量规划，交给正向配方（如 4 萤石粉 → 1 萤石）。
+     */
+    public static boolean isUnseededReverseTarget(RecipeNode target,
+                                                  ImmutableRecipeGraph graph,
+                                                  Map<MaterialRef, Long> stock) {
+        if (target == null || graph == null || stock == null) return false;
+        // 自增配方已经有自己的 roots/守卫策略，不能走反向换算的退化逻辑。
+        if (isSelfAmplifying(target)) return false;
+        boolean hasForwardProducer = graph.recipesByOutput()
+                .getOrDefault(target.output(), List.of())
+                .stream()
+                .anyMatch(producer -> !producer.recipeId().equals(target.recipeId()));
+        if (!hasForwardProducer) return false;
+        for (IngredientRef input : target.inputs()) {
+            if (input.role() == DemandRole.CATALYST) continue;
+            if (input.alternatives().isEmpty() || input.count() <= 0L) continue;
+            if (stockCoverage(input, stock) >= input.count()) continue;
+            boolean sawProducer = false;
+            boolean reverseOnly = true;
+            for (MaterialRef alternative : input.alternatives()) {
+                List<RecipeNode> producers = graph.recipesByOutput()
+                        .getOrDefault(alternative, List.of());
+                if (producers.isEmpty()) {
+                    reverseOnly = false;
+                    break;
+                }
+                sawProducer = true;
+                if (producers.stream().anyMatch(producer ->
+                        producer.inputs().stream().noneMatch(ingredient ->
+                                ingredient.alternatives().contains(target.output())))) {
+                    reverseOnly = false;
+                    break;
+                }
+            }
+            if (sawProducer && reverseOnly) return true;
+        }
+        return false;
+    }
+
+    /** 反向换算目标退化后的规划根：直接按目标产物的需求量规划。 */
+    public static List<IngredientRef> directProductionRoots(RecipeNode target, int executions) {
+        long count = saturatingMultiply(Math.max(1L, target.outputCount()),
+                Math.max(1L, executions));
+        return List.of(new IngredientRef(List.of(target.output()), count,
+                target.output().runtimeNbt()
+                        ? ImmutableRecipeGraph.NbtMatchMode.ANY
+                        : ImmutableRecipeGraph.NbtMatchMode.EXACT));
+    }
+
+    private static long stockCoverage(IngredientRef ingredient, Map<MaterialRef, Long> stock) {
+        long total = 0L;
+        for (MaterialRef alternative : ingredient.alternatives()) {
+            for (Map.Entry<MaterialRef, Long> entry : stock.entrySet()) {
+                if (entry.getValue() == null || entry.getValue() <= 0L) continue;
+                if (!entry.getKey().itemId().equals(alternative.itemId())) continue;
+                total = saturatingAdd(total, entry.getValue());
+            }
+        }
+        return total;
     }
 
     public static List<IngredientSpec> scaleTargetInputs(List<IngredientSpec> specs,

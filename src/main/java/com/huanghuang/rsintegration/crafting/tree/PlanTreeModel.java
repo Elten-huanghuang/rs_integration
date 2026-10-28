@@ -1,6 +1,5 @@
 package com.huanghuang.rsintegration.crafting.tree;
 
-import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
@@ -114,21 +113,14 @@ public final class PlanTreeModel {
     }
 
     private static int maxTreeCandidates() {
-        try {
-            return RSIntegrationConfig.RECIPE_TREE_MAX_CANDIDATES.get();
-        } catch (IllegalStateException ignored) {
-            return 8;
-        }
+        // 备选配方展示不再由配置限制；保留一个客户端渲染安全上限。
+        return 8;
     }
 
     private static TreeLimits treeLimits() {
-        try {
-            return new TreeLimits(
-                    RSIntegrationConfig.RECIPE_TREE_MAX_DEPTH.get(),
-                    RSIntegrationConfig.RECIPE_TREE_MAX_NODES.get());
-        } catch (IllegalStateException ignored) {
-            return new TreeLimits(16, 512);
-        }
+        // 递归树默认完整展开；这里仅保留防止环/异常数据无限递归的
+        // 内部安全上限，不再暴露为用户配置。
+        return new TreeLimits(128, 20_000);
     }
 
     private record TreeLimits(int maxDepth, int maxNodes) {}

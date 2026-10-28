@@ -371,6 +371,12 @@ final class ResolutionContext {
         }
     }
 
+    /** 取某个检查点之后新增的缺料记录，供聚合诊断使用。 */
+    List<String> missingSince(int checkpoint) {
+        if (missingOut == null || checkpoint < 0 || checkpoint >= missingOut.size()) return List.of();
+        return List.copyOf(missingOut.subList(checkpoint, missingOut.size()));
+    }
+
     /** 回滚探测候选时产生的缺料记录，避免失败备选污染最终结果。 */
     void truncateMissing(int checkpoint) {
         if (missingOut == null || checkpoint < 0 || checkpoint >= missingOut.size()) return;

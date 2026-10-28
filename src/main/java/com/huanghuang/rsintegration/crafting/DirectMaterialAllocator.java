@@ -42,6 +42,65 @@ public final class DirectMaterialAllocator {
         return allocateDemands(demands, supplied);
     }
 
+    /**
+     * 机器槽位版本：同一个 tag 输入必须由单一变体填满，不能跨变体凑数。
+     * 预览若按普通流分配，会出现“预览可行、执行缺料”的假阳性。
+     */
+    public static Result allocateScaledSingleVariant(
+            List<ScaledIngredientSpec> specs, Map<StackKey, ? extends Number> supplied) {
+        List<IndexedDemand> demands = new ArrayList<>();
+        for (int i = 0; i < specs.size(); i++) {
+            ScaledIngredientSpec spec = specs.get(i);
+            if (spec == null || spec.isEmpty()) continue;
+            demands.add(new IndexedDemand(i, spec.ingredient(), spec.count()));
+        }
+
+        List<Integer> variantDemandIndices = new ArrayList<>();
+        List<List<Ingredient>> variantOptions = new ArrayList<>();
+        for (int i = 0; i < demands.size(); i++) {
+            IndexedDemand demand = demands.get(i);
+            ItemStack[] candidates = candidateItems(demand.ingredient());
+            if (candidates.length <= 1) continue;
+            LinkedHashMap<StackKey, Ingredient> variants = new LinkedHashMap<>();
+            boolean strictNbt = IngredientMatcher.requiresNbt(demand.ingredient());
+            for (ItemStack candidate : candidates) {
+                if (candidate == null || candidate.isEmpty()) continue;
+                variants.putIfAbsent(StackKey.of(candidate, candidate.hasTag()),
+                        CraftingResolver.ingredientOf(candidate, strictNbt));
+            }
+            if (variants.size() <= 1) continue;
+            variantDemandIndices.add(i);
+            variantOptions.add(new ArrayList<>(variants.values()));
+        }
+        if (variantDemandIndices.isEmpty()) return allocateDemands(demands, supplied);
+
+        return allocateSingleVariantAt(0, demands, variantDemandIndices,
+                variantOptions, supplied, new int[] {0});
+    }
+
+    private static Result allocateSingleVariantAt(
+            int depth, List<IndexedDemand> demands, List<Integer> variantDemandIndices,
+            List<List<Ingredient>> variantOptions,
+            Map<StackKey, ? extends Number> supplied, int[] attempts) {
+        if (depth >= variantDemandIndices.size()) return allocateDemands(demands, supplied);
+
+        int demandIndex = variantDemandIndices.get(depth);
+        IndexedDemand original = demands.get(demandIndex);
+        Result lastFailure = null;
+        for (Ingredient option : variantOptions.get(depth)) {
+            attempts[0]++;
+            if (attempts[0] > 512) break;
+            demands.set(demandIndex, new IndexedDemand(original.index(), option, original.count()));
+            Result result = allocateSingleVariantAt(depth + 1, demands, variantDemandIndices,
+                    variantOptions, supplied, attempts);
+            if (result.feasible()) return result;
+            lastFailure = result;
+        }
+        demands.set(demandIndex, original);
+        return lastFailure != null ? lastFailure
+                : new Result(false, List.of(), original.index(), original.count());
+    }
+
     private static Result allocateDemands(List<IndexedDemand> demands,
                                           Map<StackKey, ? extends Number> supplied) {
         Map<StackKey, Long> available = new LinkedHashMap<>();
