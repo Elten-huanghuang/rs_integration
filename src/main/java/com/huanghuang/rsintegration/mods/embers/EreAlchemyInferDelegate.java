@@ -10,6 +10,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.mods.embers.EreAlchemyBatchDelegate;
 import com.huanghuang.rsintegration.mods.embers.EreAlchemyLock;
 import com.huanghuang.rsintegration.mods.embers.KnownCodeSavedData;
@@ -102,6 +103,21 @@ extends AbstractBatchDelegate {
             EreAlchemyProgressSavedData.get(this.level).removeProgress(
                     this.player.getUUID(), rid.toString());
         }
+    }
+
+    /**
+     * 猜配方会读取并回写同一玩家/同一配方的候选集与尝试进度；两个 worker
+     * 同时猜会互相覆盖。这里显式声明为推断类副作用，由策略层拒绝并行。
+     */
+    @Override
+    public BatchConcurrencyCapabilities concurrencyCapabilities() {
+        return new BatchConcurrencyCapabilities(
+                BatchConcurrencyCapabilities.MaterialOwnership.CHAIN_RESERVED,
+                BatchConcurrencyCapabilities.OutputOwnership.DELEGATE_RESULT,
+                BatchConcurrencyCapabilities.CleanupContract.SEPARABLE_OFFLINE,
+                BatchConcurrencyCapabilities.SideEffects.INFER,
+                BatchConcurrencyCapabilities.PreparationContract.RETRY_SAFE,
+                List.of());
     }
 
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId, @Nullable ResourceLocation dim, BlockPos pos) {

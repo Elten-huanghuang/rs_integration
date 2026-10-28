@@ -196,6 +196,20 @@ public final class FurnaceMachineAccess {
         }
     }
 
+    /**
+     * 反射判定更多熔炉是否处于发电机模式（插入发电机增幅后进入该模式）。
+     * 发电机模式只把燃料转成能量，不再执行熔炼、烧炼和烟熏配方。
+     */
+    public static boolean isGeneratorMode(@Nullable BlockEntity entity) {
+        if (!isIronFurnace(entity)) return false;
+        try {
+            return (boolean) entity.getClass().getMethod("isGenerator")
+                    .invoke(entity);
+        } catch (ReflectiveOperationException exception) {
+            return false;
+        }
+    }
+
     @Nullable
     static RecipeType<?> ironRecipeType(BlockEntity entity) {
         try {

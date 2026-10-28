@@ -11,6 +11,7 @@ import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.external.ExternalIntegrationRuntime;
 import com.huanghuang.rsintegration.crafting.external.ExternalMachineBindingIndex;
 import com.huanghuang.rsintegration.feature.craftingstation.MachineTypeCompatibility;
+import com.huanghuang.rsintegration.machine.FurnaceMachineAccess;
 import com.huanghuang.rsintegration.storage.StorageBackendId;
 import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.network.binding.MachineFavoritesSavedData;
@@ -76,6 +77,9 @@ public final class AltarBindingRegistry {
     // resolution the same inventory is probed repeatedly for different ModTypes;
     // building the full set once per tick avoids redundant NBT scans of 41+ slots.
     private static final Map<UUID, TickCache> SCAN_CACHE = new ConcurrentHashMap<>();
+
+    /** 更多熔炉三族（熔炉/高炉/烟熏炉）绑定键的公共前缀。 */
+    private static final String IRON_FURNACE_KEY_PREFIX = "ironfurnaces_";
 
     private static class TickCache {
         final long tick;
@@ -431,7 +435,7 @@ public final class AltarBindingRegistry {
             Recipe<?> recipe,
             ModType type, @Nullable String blockKey) {
         ModRecipeHandler handler = ModRecipeHandlers.claimFor(recipe).winner();
-        if (handler == null || handler.modType() == ModType.GENERIC) {
+        if (handler == null || handler.modType(recipe) == ModType.GENERIC) {
             handler = ModRecipeHandlers.handlerFor(type);
         }
         return handler == null || handler.isCompatibleBinding(recipe, blockKey);
@@ -484,6 +488,7 @@ public final class AltarBindingRegistry {
                     lazyCleanupGhostBinding(player.server, altarDim, entry.pos());
                     continue;
                 }
+                if (!isCraftModeUsable(entryLevel, entry.pos(), entry.blockKey())) continue;
                 if (hasUsableStorageBinding(player, altarDim, entry.pos())) {
                     addCompatibleTypeIds(entryType, entry.blockKey(), modTypeIds, blockKeysByType);
                     if (isPmmoSalvageBinding(entry)) {
@@ -841,6 +846,7 @@ public final class AltarBindingRegistry {
                     lazyCleanupGhostBinding(player.server, altarDim, entry.pos());
                     continue;
                 }
+                if (!isCraftModeUsable(entryLevel, entry.pos(), entry.blockKey())) continue;
                 if (!hasUsableStorageBinding(player, altarDim, entry.pos())) continue;
                 // Keep the concrete binding type. A recipe can deliberately use a
                 // compatible alias (notably vanilla_furnace -> ironfurnaces_furnace),
@@ -862,8 +868,8 @@ public final class AltarBindingRegistry {
                                           @Nullable Recipe<?> recipe) {
         if (player == null || type == null || player.server == null) return "unavailable";
         // 0 总数 1 黑名单 2 类型不兼容 3 不可自动化 4 配方不兼容
-        // 5 方块实体失效 6 无存储端点 7 子类型过滤
-        int[] counts = new int[8];
+        // 5 方块实体失效 6 无存储端点 7 子类型过滤 8 机器模式不可用(发电机)
+        int[] counts = new int[9];
         List<String> matched = new ArrayList<>();
         Set<MachineFavoriteKey> blocked = blockedMachines(player);
         String normalized = recipe != null ? recipeMachineSubType(recipe, type) : null;
@@ -909,6 +915,10 @@ public final class AltarBindingRegistry {
                         counts[5]++;
                         continue;
                     }
+                    if (!isCraftModeUsable(level, entry.pos(), entry.blockKey())) {
+                        counts[8]++;
+                        continue;
+                    }
                     if (!hasUsableStorageBinding(player, dim, entry.pos())) {
                         counts[6]++;
                         continue;
@@ -920,7 +930,8 @@ public final class AltarBindingRegistry {
         return "matched=" + matched + " total=" + counts[0] + " blocked=" + counts[1]
                 + " incompatible=" + counts[2] + " notExecutable=" + counts[3]
                 + " recipeIncompatible=" + counts[4] + " stale=" + counts[5]
-                + " noStorage=" + counts[6] + " subtype=" + counts[7];
+                + " noStorage=" + counts[6] + " subtype=" + counts[7]
+                + " generatorMode=" + counts[8];
     }
 
     static boolean isExternalRecipeBinding(
@@ -1008,6 +1019,21 @@ public final class AltarBindingRegistry {
         return !key.startsWith("goety_component")
                 && !key.contains("cursed_cage")
                 && !key.contains("soul_candlestick");
+    }
+
+    /**
+     * 机器当前工作模式是否仍能执行该族配方。更多熔炉插上发电机增幅后会切到
+     * 发电机模式，只把燃料转成能量，不再执行熔炼、烧炼和烟熏。递归合成的
+     * 候选判定与最终机器枚举都必须排除这类绑定，否则规划会把它当成可用机器，
+     * 执行阶段才报“不支持机器模式”。
+     */
+    static boolean isCraftModeUsable(@Nullable ServerLevel level, BlockPos pos,
+                                     @Nullable String blockKey) {
+        if (level == null || pos == null || blockKey == null) return true;
+        if (!blockKey.startsWith(IRON_FURNACE_KEY_PREFIX)) return true;
+        // 区块未加载时读不到方块实体，和 isBindingFresh 一样保持乐观判定。
+        if (!level.isLoaded(pos)) return true;
+        return !FurnaceMachineAccess.isGeneratorMode(level.getBlockEntity(pos));
     }
 
     /**

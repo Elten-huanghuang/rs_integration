@@ -201,10 +201,10 @@ public abstract class GridScreenSmithingMixin implements StonecutterScreenAccess
 
     @Inject(method = "tick", at = @At("TAIL"), remap = false)
     private void rsi$tickSmithingSlots(int guiLeft, int guiTop, CallbackInfo ci) {
-        // EditBox 不在 RS 的控件列表里，需要手动推进光标闪烁。
-        if (rsi$anvilNameBox != null) rsi$anvilNameBox.tick();
         GridContainerMenu menu = ((GridScreen) (Object) this).getMenu();
         if (menu.getGrid().getGridType() != GridType.CRAFTING) return;
+        // EditBox 不在 RS 的控件列表里，需要手动推进光标闪烁。
+        if (rsi$anvilNameBox != null) rsi$anvilNameBox.tick();
         if (CraftingStationAccess.access(menu).rsi$getCraftingStationMode() != CraftingStationMode.SMITHING) return;
         rsi$ensureSlotBackgrounds(menu);
         if (rsi$slotBackgrounds == null) return;

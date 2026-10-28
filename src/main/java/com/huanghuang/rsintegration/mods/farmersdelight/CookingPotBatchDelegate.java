@@ -181,7 +181,13 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public void prepareGraphBatch(int executions) {
-        plannedOperations = Math.max(1, executions);
+        int requested = Math.max(1, executions);
+        // 图批次必须与实际输入缓冲上限一致；否则 startBufferedOperation 会因
+        // plan.operations() 与 inputBufferPlan() 重新计算的上限不一致而失败，
+        // 调度器却只看到 worker 未启动，表现为“一直执行但不制作”。
+        plannedOperations = supportsInputBuffer()
+                ? Math.max(1, inputBufferPlan(requested).operations())
+                : 1;
     }
 
     @Override

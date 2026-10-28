@@ -150,8 +150,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         try {
             boolean mainEmpty = (boolean) invMain.getClass().getMethod("isEmpty").invoke(invMain);
             if (!mainEmpty) {
-                player.sendSystemMessage(Component.translatable("rsi.malum.warn.not_empty"));
-                validationFailureDetail = "Malum altar main inventory is not empty";
+                validationFailureDetail = "祭坛主槽已有物品，请先清空";
                 RSIntegrationMod.LOGGER.info(
                         "[RSI-Batch-Malum] Preparation rejected: recipe={} pos={} reason={}",
                         recipeId, pos, validationFailureDetail);
@@ -159,8 +158,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
             }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-Malum] isEmpty() check failed — assuming busy", e);
-            player.sendSystemMessage(Component.translatable("rsi.malum.warn.not_empty"));
-            validationFailureDetail = "Malum altar main inventory could not be inspected";
+            validationFailureDetail = "无法读取祭坛主槽状态";
             return false;
         }
 
@@ -189,8 +187,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
             this.pedestals = capturePedestals();
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-Malum] Cannot capture pedestals — assuming busy", e);
-            player.sendSystemMessage(Component.translatable("rsi.malum.warn.not_empty"));
-            validationFailureDetail = "Malum altar pedestals could not be inspected";
+            validationFailureDetail = "无法读取祭坛周围底座状态";
             return false;
         }
         if (pedestals != null) {
@@ -198,9 +195,9 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
             List<?> extraItems = (List<?>) getField(recipe, "extraItems");
             int needed = requiredPedestalSlots(extraItems);
             if (emptyPedCount < needed) {
-                player.sendSystemMessage(Component.translatable("rsi.malum.warn.not_empty"));
-                validationFailureDetail = "Malum altar has insufficient empty pedestals ("
-                        + emptyPedCount + "/" + needed + ")";
+                validationFailureDetail = "祭坛空间过小：需要 " + needed
+                        + " 个空底座，实际只有 " + emptyPedCount
+                        + " 个；请清理周围的符文木物品台，或扩大祭坛位置";
                 RSIntegrationMod.LOGGER.info(
                         "[RSI-Batch-Malum] Preparation rejected: recipe={} pos={} reason={}",
                         recipeId, pos, validationFailureDetail);
@@ -1147,6 +1144,13 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
+    public boolean allowsOverlappingOutputCaptureOrigins() {
+        // 多台祭坛并排时捕获区域必然重叠；输出由拦截器按最近区域归属，
+        // 不同祭坛来源的重叠是安全的。
+        return true;
+    }
+
+    @Override
     public AABB getOutputCaptureRegion() {
         // Malum may spawn the result on one of the nearby pedestals rather than
         // at the altar block. Cover the complete altar/pedestal ring so magnets
@@ -1322,7 +1326,10 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
             f.setAccessible(true);
             spirits = (List<?>) f.get(recipe);
         } catch (Exception e) { /* recipe has no spirit requirements */ }
-        if (spirits == null) return warnings;
+        if (spirits == null) {
+            addPedestalWarning(player, recipe, dim, pos, warnings);
+            return warnings;
+        }
 
         List<String> spiritNames = new ArrayList<>();
         for (Object swc : spirits) {
@@ -1367,7 +1374,70 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
                     String.join(", ", spiritNames)));
         }
 
+        // 计划阶段就提示底座空间不足，避免执行时才在聊天栏刷“位置过小”。
+        addPedestalWarning(player, recipe, dim, pos, warnings);
+
         return warnings;
+    }
+
+    private static void addPedestalWarning(ServerPlayer player, Recipe<?> recipe,
+                                           @Nullable ResourceLocation dim,
+                                           @Nullable BlockPos pos,
+                                           List<Component> warnings) {
+        if (dim == null || pos == null) return;
+        try {
+            List<?> extraItems = (List<?>) getField(recipe, "extraItems");
+            int needed = requiredPedestalSlotsStatic(extraItems);
+            if (needed <= 0) return;
+            ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
+            if (level == null || !level.isLoaded(pos)) return;
+            List<?> pedestals = (List<?>) MalumReflection.altarCraftingHelperClass
+                    .getMethod("capturePedestals", Level.class, BlockPos.class)
+                    .invoke(null, level, pos);
+            int empty = countEmptyPedestalSlotsStatic(pedestals);
+            if (empty < needed) {
+                warnings.add(Component.translatable(
+                        "rsi.malum.warn.pedestals_insufficient", needed, empty));
+            }
+        } catch (Exception e) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Malum] Plan pedestal check failed", e);
+        }
+    }
+
+    private static int requiredPedestalSlotsStatic(@Nullable List<?> extraItems) {
+        if (extraItems == null || extraItems.isEmpty()) return 0;
+        int required = 0;
+        for (Object extra : extraItems) {
+            Object countObj = getField(extra, "count");
+            Object ingredientObj = getField(extra, "ingredient");
+            int count = countObj instanceof Number number ? Math.max(0, number.intValue()) : 1;
+            int maxStack = Integer.MAX_VALUE;
+            if (ingredientObj instanceof Ingredient ingredient) {
+                for (ItemStack option : ingredient.getItems()) {
+                    if (!option.isEmpty()) {
+                        maxStack = Math.min(maxStack, Math.max(1, option.getMaxStackSize()));
+                    }
+                }
+            }
+            if (maxStack == Integer.MAX_VALUE) maxStack = 1;
+            required += pedestalSlotsForCount(count, maxStack);
+        }
+        return required;
+    }
+
+    private static int countEmptyPedestalSlotsStatic(List<?> pedestals) {
+        int count = 0;
+        for (Object ap : pedestals) {
+            if (isSpiritCrucible(ap)) continue;
+            try {
+                Object inv = ap.getClass().getMethod("getSuppliedInventory").invoke(ap);
+                boolean empty = (boolean) inv.getClass().getMethod("isEmpty").invoke(inv);
+                if (empty) count++;
+            } catch (Exception ex) {
+                RSIntegrationMod.LOGGER.debug("[RSI-Batch-Malum] Pedestal probe failed", ex);
+            }
+        }
+        return count;
     }
 
     private static Object getFieldStatic(Object obj, String name) {

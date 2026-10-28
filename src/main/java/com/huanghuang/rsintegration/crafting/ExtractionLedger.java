@@ -1314,10 +1314,38 @@ public final class ExtractionLedger implements AutoCloseable {
         CraftStorageEndpoint sourceEndpoint = entry.sourceEndpoint != null
                 ? entry.sourceEndpoint : endpoint != null ? endpoint : storageEndpoint;
         if (entry.source == Source.NETWORK && sourceEndpoint != null) {
-            return entry.exactIdentity
+            StorageOperationResult result = entry.exactIdentity
                     ? sourceEndpoint.extractExact(player, entry.template, entry.count, false)
                     : sourceEndpoint.extractMatching(
                             player, entry.originalIngredient, entry.count, false);
+            if (entry.exactIdentity
+                    && result.status() == StorageOperationStatus.NOT_FOUND) {
+                // 机器输入只要求“能放进机器”，显示输入的 NBT 可能在规划后漂移。
+                // 精确身份失败时先按配方原料匹配，仍失败再按物品类型兜底；机器
+                // 启动后会自行校验配方，失败则原样回收，无需在账本层特判物品。
+                StorageOperationResult relaxed = sourceEndpoint.extractMatching(
+                        player, entry.originalIngredient, entry.count, false);
+                if (relaxed.status() == StorageOperationStatus.SUCCESS
+                        && relaxed.complete()) {
+                    LOGGER.warn(
+                            "[RSI-Ledger] Exact material {} missing; used recipe ingredient fallback",
+                            CraftPacketUtils.describeIngredient(entry.originalIngredient));
+                    return relaxed;
+                }
+                if (!entry.template.isEmpty()) {
+                    StorageOperationResult itemOnly = sourceEndpoint.extractMatching(
+                            player, Ingredient.of(entry.template.getItem()),
+                            entry.count, false);
+                    if (itemOnly.status() == StorageOperationStatus.SUCCESS
+                            && itemOnly.complete()) {
+                        LOGGER.warn(
+                                "[RSI-Ledger] Exact material {} missing; used item-type fallback",
+                                entry.template.getItem());
+                        return itemOnly;
+                    }
+                }
+            }
+            return result;
         }
         ItemStack stack = extractLegacyOne(entry, player);
         return StorageOperationResult.extracted(StorageOperationMode.PERFORM, entry.count,
