@@ -16,9 +16,9 @@
 
 RS Integration (RSI) extends Refined Storage and Beyond Dimensions with recursive crafting, remote machine access, storage-aware interactions, and optional magic-resource integration. It is an add-on, not a replacement for either storage mod.
 
-**Current version: 1.5.2.2 | Minecraft 1.20.1**
+**Current version: 1.5.2.3 | Minecraft 1.20.1**
 
-[1.5.2.2 release notes (Chinese)](docs/announcements/RELEASE_NOTES_1.5.2.2.md)
+[1.5.2.3 release notes (Chinese)](docs/announcements/RELEASE_NOTES_1.5.2.3.md)
 
 ## Contents
 
