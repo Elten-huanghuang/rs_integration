@@ -700,7 +700,7 @@
   "rsi.plan.failure.internal_error": "规划过程中发生内部错误，请查看服务端日志。",
   "rsi.plan.failure.prerequisite_unavailable": "配方要求的机器或世界前置条件当前不可用。",
   "rsi.plan.failure.stale": "规划结果已过期，请重新发起请求。",
-  "rsi.plan.failure.special_recipe": "失败原因：该配方是特殊配方（没有材料数据），无法自动合成",
+  "rsi.plan.failure.no_ingredient_data": "失败原因：该配方是特殊配方（没有材料数据），无法自动合成",
   "rsi.plan.failure.finalizing_timeout": "计划结果校验超时，已停止本次规划；请稍后重试。",
   "rsi.plan.failure.planning_cancelled": "规划请求已取消，未生成计划。",
   "rsi.plan.failure.dynamic_plan_unavailable": "此配方包含动态、变换或材料锁定输入，当前无法安全生成完整计划。",

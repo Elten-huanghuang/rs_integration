@@ -2568,7 +2568,7 @@ public final class GenericCraftPacket {
                 // 例如 Farmer's Delight 的 wheat_dough_from_water。这类配方既没有可推导
                 // 的材料，也绝不能按空材料放行（否则会变成免材料合成），只能如实说明原因。
                 sink.error(PlanOutcome.NO_RECIPE,
-                        IntegrationDiagnostic.error(IntegrationDiagnosticCode.SPECIAL_RECIPE,
+                        IntegrationDiagnostic.error(IntegrationDiagnosticCode.NO_INGREDIENT_DATA,
                                 recipeId.toString()));
                 return;
             }

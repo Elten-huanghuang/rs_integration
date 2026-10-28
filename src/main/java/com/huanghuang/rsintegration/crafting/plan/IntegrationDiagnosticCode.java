@@ -28,7 +28,7 @@ public enum IntegrationDiagnosticCode {
     INTERNAL_ERROR("rsi.plan.failure.internal_error"),
     PLAN_CANCELLED("rsi.plan.failure.planning_cancelled"),
     STALE_PLAN("rsi.plan.failure.stale"),
-    SPECIAL_RECIPE("rsi.plan.failure.special_recipe");
+    NO_INGREDIENT_DATA("rsi.plan.failure.no_ingredient_data");
 
     private final String translationKey;
 

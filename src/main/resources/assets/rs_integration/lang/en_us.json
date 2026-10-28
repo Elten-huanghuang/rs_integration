@@ -697,7 +697,7 @@
   "rsi.plan.failure.internal_error": "An internal error occurred while planning. Check the server log.",
   "rsi.plan.failure.prerequisite_unavailable": "A machine or world prerequisite required by the recipe is currently unavailable.",
   "rsi.plan.failure.stale": "The planning result is stale. Request a new plan.",
-  "rsi.plan.failure.special_recipe": "Failure reason: this is a special recipe without ingredient data and cannot be auto-crafted",
+  "rsi.plan.failure.no_ingredient_data": "Failure reason: this is a special recipe without ingredient data and cannot be auto-crafted",
   "rsi.plan.failure.finalizing_timeout": "Plan validation timed out and this request was stopped. Please try again.",
   "rsi.plan.failure.planning_cancelled": "The planning request was cancelled; no plan was generated.",
   "rsi.plan.failure.dynamic_plan_unavailable": "This recipe uses dynamic, transformed, or material-locked inputs and a complete plan cannot currently be generated safely.",
