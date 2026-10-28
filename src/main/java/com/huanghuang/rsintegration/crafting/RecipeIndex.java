@@ -21,6 +21,7 @@ import com.huanghuang.rsintegration.mods.pmmo.PmmoSalvageCatalog;
 import com.huanghuang.rsintegration.mods.vanilla.brewing.VanillaBrewingCatalog;
 import com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule;
 import com.huanghuang.rsintegration.mods.farmersdelight.MinersDelightCopperPotSupport;
+import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.util.PerformanceMonitor;
@@ -640,7 +641,12 @@ public final class RecipeIndex {
             return claimedType;
         }
         ModType classified = ModType.classifyRecipe(recipe);
-        return classified == null ? claimedType : classified;
+        ModType resolved = classified == null ? claimedType : classified;
+        // 与执行类型解析保持一致：只能落到无绑定方块的模组级兜底类型的网格合成配方，
+        // 索引时也按 generic 记录，避免纯计划把它当成需要机器的配方。
+        return BindingEventHandler.isBindlessGridRecipe(recipe, resolved)
+                ? ModType.GENERIC
+                : resolved;
     }
 
     static boolean isTypedPureProjectionCandidate(ModRecipeHandler handler, ModType type,

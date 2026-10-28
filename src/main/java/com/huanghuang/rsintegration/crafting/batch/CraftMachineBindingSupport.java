@@ -47,6 +47,15 @@ final class CraftMachineBindingSupport {
     static ModType resolveExecutionModType(ServerPlayer player, Recipe<?> recipe,
                                            @Nullable ResourceLocation dimension,
                                            @Nullable BlockPos position) {
+        ModType resolved = resolveClaimedExecutionType(player, recipe, dimension, position);
+        // 只能落到模组级兜底类型、且该类型没有任何可绑定方块的网格合成配方（如农夫乐事的面团），
+        // 没有机器可绑；退回 generic 按模拟装配执行，避免预览和规划误报“没有可用的已绑定机器”。
+        return BindingEventHandler.isBindlessGridRecipe(recipe, resolved) ? ModType.GENERIC : resolved;
+    }
+
+    private static ModType resolveClaimedExecutionType(ServerPlayer player, Recipe<?> recipe,
+                                                       @Nullable ResourceLocation dimension,
+                                                       @Nullable BlockPos position) {
         // 铜锅与烹饪锅共用同一个配方类，只能靠请求位置上的方块区分，因此要先判铜锅
         if (MinersDelightCopperPotSupport.isRequestedCopperPot(
                 player, recipe, dimension, position)) {

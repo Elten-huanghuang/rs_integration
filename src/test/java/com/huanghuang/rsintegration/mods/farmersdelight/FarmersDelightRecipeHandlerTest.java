@@ -3,14 +3,19 @@ package com.huanghuang.rsintegration.mods.farmersdelight;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.crafting.CraftingBookCategory;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.item.crafting.Recipe;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Constructor;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FarmersDelightRecipeHandlerTest extends BootstrapTest {
@@ -90,5 +95,42 @@ class FarmersDelightRecipeHandlerTest extends BootstrapTest {
         assertEquals(12, graphSpecs.get(0).count());
         assertEquals(DemandRole.DURABILITY, graphSpecs.get(1).role());
         assertTrue(graphSpecs.get(1).ingredient().test(new ItemStack(Items.IRON_SWORD)));
+    }
+
+    @Test
+    void doughRecipeIsClaimedAsWorkbenchCraft() throws Exception {
+        Recipe<?> dough = newDoughRecipe();
+
+        assertTrue(FarmersDelightRecipeHandler.isDoughRecipe(dough));
+        assertTrue(new FarmersDelightRecipeHandler().canHandle(dough));
+
+        List<IngredientSpec> specs = FarmersDelightRecipeHandler.doughMaterials();
+
+        assertEquals(2, specs.size());
+        assertEquals(1, specs.get(0).count());
+        assertTrue(specs.get(0).ingredient().test(new ItemStack(Items.WHEAT)));
+        assertEquals(1, specs.get(1).count());
+        assertFalse(specs.get(1).ingredient().test(new ItemStack(Items.WHEAT)));
+    }
+
+    @Test
+    void doughRecipeProvidesItsOwnIngredientsThroughHandlerContract() throws Exception {
+        Recipe<?> dough = newDoughRecipe();
+
+        List<IngredientSpec> specs = new FarmersDelightRecipeHandler()
+                .getIngredients(dough);
+
+        assertEquals(2, specs.size());
+        assertTrue(specs.get(0).ingredient().test(new ItemStack(Items.WHEAT)));
+    }
+
+    private static Recipe<?> newDoughRecipe() throws Exception {
+        Class<?> type = Class.forName(
+                "vectorwing.farmersdelight.common.crafting.DoughRecipe");
+        Constructor<?> constructor = type.getConstructor(
+                ResourceLocation.class, CraftingBookCategory.class);
+        return (Recipe<?>) constructor.newInstance(
+                new ResourceLocation("farmersdelight", "wheat_dough_from_water"),
+                CraftingBookCategory.MISC);
     }
 }

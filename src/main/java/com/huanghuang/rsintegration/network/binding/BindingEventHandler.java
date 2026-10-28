@@ -15,6 +15,8 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.item.crafting.CraftingRecipe;
+import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Blocks;
@@ -101,6 +103,21 @@ public final class BindingEventHandler {
             return true;
         }
         return false;
+    }
+
+    /**
+     * 网格合成配方是否只能落到“没有可绑定方块”的模组级兜底类型。
+     *
+     * <p>例如 Farmer's Delight 的 {@code wheat_dough_from_water} 归类到兜底类型
+     * {@code farmersdelight}；这类配方本质是网格合成，应退回通用模拟装配执行，
+     * 否则预览和规划都会误报“没有可用的已绑定机器”。</p>
+     */
+    public static boolean isBindlessGridRecipe(Recipe<?> recipe, @Nullable ModType modType) {
+        if (!(recipe instanceof CraftingRecipe) || modType == null) return false;
+        if (modType == ModType.GENERIC || modType == ModType.CUSTOM_GUI || modType.isVirtual()) {
+            return false;
+        }
+        return !hasBindableTarget(modType);
     }
 
     public static void registerTarget(MachineBindingTarget target) {

@@ -10,10 +10,13 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.ScaledIngredientSpec;
 import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
+import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.CampfireCookingRecipe;
+import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 
@@ -28,6 +31,14 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
             "vectorwing.farmersdelight.common.crafting.CookingPotRecipe";
     private static final String CUTTING_BOARD_CLASS =
             "vectorwing.farmersdelight.common.crafting.CuttingBoardRecipe";
+    /**
+     * 面团配方类，对应配方类型 {@code farmersdelight:dough}。
+     *
+     * <p>它继承 {@code CustomRecipe}，json 里没有原料列表，实际是在工作台用
+     * 1 小麦 + 1 水桶合成；按类型识别可以覆盖同类型的其它面团配方。</p>
+     */
+    private static final String DOUGH_CLASS =
+            "vectorwing.farmersdelight.common.crafting.DoughRecipe";
 
     @Override
     public ModType modType() { return ModType.byId("farmersdelight"); }
@@ -35,11 +46,35 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
     @Override
     public boolean canHandle(Recipe<?> recipe) {
         return recipe.getClass().getName().equals(COOKING_POT_CLASS)
+                || isDoughRecipe(recipe)
                 || recipe instanceof CampfireCookingRecipe;
     }
 
     static boolean isCuttingBoardRecipe(@Nullable Recipe<?> recipe) {
         return recipe != null && recipe.getClass().getName().equals(CUTTING_BOARD_CLASS);
+    }
+
+    /**
+     * 面团配方（{@code farmersdelight:dough}）继承 {@code CustomRecipe}，
+     * 配方 json 里没有原料列表，实际是在工作台用 1 小麦 + 1 水桶合成。
+     */
+    static boolean isDoughRecipe(@Nullable Recipe<?> recipe) {
+        return recipe instanceof CraftingRecipe
+                && recipe.getClass().getName().equals(DOUGH_CLASS);
+    }
+
+    /** 面团配方的材料，顺序即合成格槽位；水桶会作为剩余物原样返还。 */
+    static List<IngredientSpec> doughMaterials() {
+        // 主代码没有农夫乐事的编译依赖，这里按具体物品描述水桶；
+        // 该物品正好是配方匹配使用的 buckets/water 标签里唯一的实际物品。
+        return List.of(
+                new IngredientSpec(Ingredient.of(Items.WHEAT), 1),
+                new IngredientSpec(Ingredient.of(Items.WATER_BUCKET), 1));
+    }
+
+    /** 模拟装配面团时放进合成格的物品，下标与 {@link #doughMaterials()} 一致。 */
+    private static ItemStack[] doughGridStacks() {
+        return new ItemStack[]{new ItemStack(Items.WHEAT), new ItemStack(Items.WATER_BUCKET)};
     }
 
     @Override
@@ -49,6 +84,10 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
 
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
+        if (isDoughRecipe(recipe) && recipe instanceof CraftingRecipe craftingRecipe) {
+            // 面团配方没有 getResultItem() 数据，只能按配方自己的匹配条件模拟一次装配取产物。
+            return CraftPacketUtils.assembleCraftingOutput(craftingRecipe, doughGridStacks(), access);
+        }
         if (recipe instanceof CampfireCookingRecipe) {
             return CampfireRecipeSupport.resolveOutput(recipe, access);
         }
@@ -62,6 +101,10 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
     @Nullable
     @Override
     public List<IngredientSpec> getIngredients(Recipe<?> recipe) {
+        if (isDoughRecipe(recipe)) {
+            // 与农夫乐事源码一致：1 个小麦 + 1 个水桶类物品，产物为小麦面团，水桶按剩余物返还。
+            return doughMaterials();
+        }
         if (recipe instanceof CampfireCookingRecipe) {
             Ingredient ing = recipe.getIngredients().get(0);
             if (ing.isEmpty()) return null;
