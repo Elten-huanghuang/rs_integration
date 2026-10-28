@@ -947,12 +947,7 @@ public class RecipeGuiLayoutsMixin {
             }
 
             // 1. ModType UID → filter lookup (replaces per-mod if/else chain)
-            String uidStr = uid.toString();
-            String filter = ModType.filterForJeiUid(uidStr);
-            if (uidStr.startsWith("youkaishomecoming")) {
-                RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] getBindingFilter YHK: uid={} filter={} class={}",
-                        uidStr, filter, recipe.getClass().getName());
-            }
+            String filter = ModType.filterForJeiUid(uid.toString());
             // Miner's Delight and similar add-ons reuse CookingPotRecipe in a
             // different JEI machine category. A class-only fallback would make
             // their machines borrow the Farmer's Delight cooking-pot binding.

@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.plan;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.planning.PlanningProgressTracker;
+import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.network.chat.Component;
@@ -19,6 +20,11 @@ import java.util.Optional;
 
 @OnlyIn(Dist.CLIENT)
 final class PlanResponseClientPacketHandler {
+    /** 相同失败提示的最小间隔，避免预览连续重算时刷屏。 */
+    private static final long DUPLICATE_MESSAGE_WINDOW_MS = 3000L;
+    private static String lastErrorMessage;
+    private static long lastErrorMessageAt;
+
     private PlanResponseClientPacketHandler() {}
 
     static void handle(PlanResponse plan, long requestId) {
@@ -47,7 +53,9 @@ final class PlanResponseClientPacketHandler {
                         .orElseGet(() -> plan.modWarnings().isEmpty()
                                 ? Component.translatable("rsi.generic.error.craft_failed")
                                 : plan.modWarnings().get(0));
-                mc.player.displayClientMessage(message, false);
+                if (!isDuplicateMessage(message)) {
+                    mc.player.displayClientMessage(message, false);
+                }
             }
             return;
         }
@@ -74,6 +82,22 @@ final class PlanResponseClientPacketHandler {
                         == IntegrationDiagnostic.Severity.ERROR)
                 .map(IntegrationDiagnostic::clientMessage)
                 .findFirst();
+    }
+
+    /**
+     * 预览每次重算都会回包同一条失败原因（例如玩家滚动数量触发的重复请求），
+     * 相同文案在短窗口内只提示一次；页面状态回滚不依赖这条聊天消息。
+     */
+    private static boolean isDuplicateMessage(Component message) {
+        long now = Util.getMillis();
+        String text = message.getString();
+        boolean duplicate = text.equals(lastErrorMessage)
+                && now - lastErrorMessageAt < DUPLICATE_MESSAGE_WINDOW_MS;
+        if (!duplicate) {
+            lastErrorMessage = text;
+            lastErrorMessageAt = now;
+        }
+        return duplicate;
     }
 
     static List<String> localizeItemNames(List<String> names) {

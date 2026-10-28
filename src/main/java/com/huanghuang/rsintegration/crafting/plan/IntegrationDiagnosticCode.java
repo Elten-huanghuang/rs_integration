@@ -27,7 +27,8 @@ public enum IntegrationDiagnosticCode {
     RESPONSE_TOO_LARGE("rsi.plan.failure.response_too_large"),
     INTERNAL_ERROR("rsi.plan.failure.internal_error"),
     PLAN_CANCELLED("rsi.plan.failure.planning_cancelled"),
-    STALE_PLAN("rsi.plan.failure.stale");
+    STALE_PLAN("rsi.plan.failure.stale"),
+    SPECIAL_RECIPE("rsi.plan.failure.special_recipe");
 
     private final String translationKey;
 

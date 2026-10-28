@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.crafting.SelfAmplifyingRecipePolicy;
+import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.CraftingRecipe;
@@ -49,6 +50,12 @@ public final class CraftExecutionPolicy {
         // 只有真实机器配方需要使用绑定上下文。
         if (recipe instanceof CraftingRecipe && modType == ModType.CUSTOM_GUI) return false;
         if (recipe instanceof CraftingRecipe && !isPhysicalMachineRecipe(recipe, modType)) {
+            return false;
+        }
+        // 模组级兜底类型没有可绑定的方块（如 Farmer's Delight 的通用兜底），
+        // 这类配方按网格合成执行，不能因为查不到绑定目标就判定为不可规划。
+        if (recipe instanceof CraftingRecipe
+                && !BindingEventHandler.hasBindableTarget(modType)) {
             return false;
         }
         return isSmithingRecipe(recipe) || requiresBoundMachine(modType);

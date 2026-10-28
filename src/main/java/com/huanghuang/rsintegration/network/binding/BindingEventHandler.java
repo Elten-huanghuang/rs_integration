@@ -75,6 +75,34 @@ public final class BindingEventHandler {
 
     private BindingEventHandler() {}
 
+    /**
+     * 该执行类型是否存在可绑定的机器方块。
+     *
+     * <p>模组级兜底类型（例如 Farmer's Delight 的 {@code farmersdelight}）只用于配方
+     * 分类兜底，没有注册任何目标方块；这类配方本身是网格合成，不能因为查不到绑定
+     * 就判定为“缺少已绑定机器”。</p>
+     */
+    public static boolean hasBindableTarget(@Nullable ModType modType) {
+        if (modType == null) return false;
+        String typeId = modType.id();
+        for (MachineBindingTarget target : TARGETS) {
+            if (target.modType == null || !typeId.equals(target.modType.id())) continue;
+            if (target.configFlag != null) {
+                boolean enabled;
+                try {
+                    enabled = target.configFlag.get();
+                } catch (RuntimeException ignored) {
+                    // 配置尚未加载时按启用处理，宁可多要求一次绑定也不要放行无机器配方。
+                    enabled = true;
+                }
+                if (!enabled) continue;
+            }
+            if (!isTargetModLoaded(target.modId)) continue;
+            return true;
+        }
+        return false;
+    }
+
     public static void registerTarget(MachineBindingTarget target) {
         TARGETS.add(target);
         for (String className : target.blockClassNames) {

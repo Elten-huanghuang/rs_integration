@@ -176,6 +176,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.AbstractCookingRecipe;
 import net.minecraft.world.item.crafting.CraftingRecipe;
+import net.minecraft.world.item.crafting.CustomRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.SmithingTransformRecipe;
@@ -2561,6 +2562,16 @@ public final class GenericCraftPacket {
         } else if (recipe instanceof CraftingRecipe cr) {
             List<Ingredient> raw = cr.getIngredients();
             List<IngredientSpec> extractedSpecs = CraftIngredientPlanMath.extractPlanIngredientSpecs(cr);
+            if (cr instanceof CustomRecipe
+                    && extractedSpecs.stream().allMatch(IngredientSpec::isEmpty)) {
+                // 特殊配方（CustomRecipe 及其子类）不提供 getIngredients() 数据，
+                // 例如 Farmer's Delight 的 wheat_dough_from_water。这类配方既没有可推导
+                // 的材料，也绝不能按空材料放行（否则会变成免材料合成），只能如实说明原因。
+                sink.error(PlanOutcome.NO_RECIPE,
+                        IntegrationDiagnostic.error(IntegrationDiagnosticCode.SPECIAL_RECIPE,
+                                recipeId.toString()));
+                return;
+            }
             if (cr instanceof ShapedRecipe) {
                 // Preserve empty slots for the shaped-grid renderer.
                 displayIngredients = raw;
