@@ -32,6 +32,25 @@ class AnvilTerminalStateNameTest extends BootstrapTest {
     }
 
     @Test
+    void appliesChineseCustomNameToAnvilResult() {
+        Player player = mock(Player.class);
+        when(player.getInventory()).thenReturn(new Inventory(player));
+        GridContainerMenu menu = mock(GridContainerMenu.class);
+        when(menu.getPlayer()).thenReturn(player);
+        AnvilTerminalState state = new AnvilTerminalState(menu);
+
+        ItemStack input = new ItemStack(Items.DIAMOND_SWORD);
+        input.setDamageValue(100);
+        state.setInput(0, input);
+        state.setInput(1, new ItemStack(Items.DIAMOND_SWORD));
+
+        state.setItemName("龙纹铁剑");
+
+        assertEquals("龙纹铁剑", state.itemName());
+        assertEquals("龙纹铁剑", state.result().getHoverName().getString());
+    }
+
+    @Test
     void preservesExistingCustomNameInAnvilResult() {
         Player player = mock(Player.class);
         when(player.getInventory()).thenReturn(new Inventory(player));
