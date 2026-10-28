@@ -47,6 +47,9 @@ final class BiomancyBatchDelegate extends InstantBatchDelegate {
     private final List<ItemStack> injectedFuel = new ArrayList<>();
     private List<ItemStack> bioForgeRecoveredInputs = List.of();
     private boolean bioForgeStarted;
+    /** 最近一次启动失败的具体原因，供执行链写入故障报告。 */
+    @Nullable
+    private String startFailureDetail;
 
     @Override
     public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
@@ -67,6 +70,7 @@ final class BiomancyBatchDelegate extends InstantBatchDelegate {
         this.machineServer = player.server;
         this.bioForgeStarted = false;
         this.bioForgeRecoveredInputs = List.of();
+        this.startFailureDetail = null;
         resetInstantBatch();
         this.unplacedInputs.clear();
         this.placedInputs.clear();
@@ -89,6 +93,7 @@ final class BiomancyBatchDelegate extends InstantBatchDelegate {
 
     @Override
     public boolean startSingleOperation(ServerPlayer player) {
+        startFailureDetail = null;
         List<IngredientSpec> specs = getRequiredMaterials();
         if (specs == null || specs.isEmpty()) return false;
         if (storageEndpoint() == null) {
@@ -120,6 +125,7 @@ final class BiomancyBatchDelegate extends InstantBatchDelegate {
     @Override
     public boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
+        startFailureDetail = null;
         this.sharedMaterials = true;
         if (isBioForge()) {
             bioForgeRecoveredInputs = materials.stream().filter(stack -> stack != null && !stack.isEmpty())
@@ -134,15 +140,31 @@ final class BiomancyBatchDelegate extends InstantBatchDelegate {
         return placeInputs(player, materials);
     }
 
+    @Nullable
+    @Override
+    public String lastStartFailureDetail() {
+        return startFailureDetail;
+    }
+
+    /** 记录启动失败原因并返回 false，便于执行链把真实原因写进故障报告。 */
+    private boolean failStart(String detail) {
+        this.startFailureDetail = detail;
+        return false;
+    }
+
     private boolean isBioForge() {
         return ModIds.ID_BIOMANCY_BIO_FORGE.equals(typeForRecipe(recipe));
     }
 
     private boolean startBioForge(ServerPlayer player, List<ItemStack> materials) {
         if (level == null || recipe == null || materials == null || materials.isEmpty()
-                || !level.hasChunkAt(pos)) return false;
+                || !level.hasChunkAt(pos)) {
+            return failStart("bio forge: machine or reserved materials unavailable (chunk="
+                    + (level != null && level.hasChunkAt(pos))
+                    + ", materials=" + (materials == null ? "</null>" : materials.size()) + ")");
+        }
         BlockEntity forge = level.getBlockEntity(pos);
-        if (forge == null) return false;
+        if (forge == null) return failStart("bio forge: machine block entity missing");
 
         results.clear();
         bioForgeRecoveredInputs = materials.stream().filter(stack -> stack != null && !stack.isEmpty())
@@ -150,24 +172,26 @@ final class BiomancyBatchDelegate extends InstantBatchDelegate {
         try (BiomancyBioForgeInventory inventory = BiomancyBioForgeInventory.open(
                 player.getInventory().items, materials)) {
             if (inventory == null) {
-                return false;
+                return failStart("bio forge: cannot stage reserved materials into player inventory");
             }
             try {
                 for (int execution = 0; execution < preparedExecutions(); execution++) {
                     AbstractContainerMenu menu = createBioForgeMenu(forge, player);
                     if (menu == null) {
                         results.clear();
-                        return false;
+                        return failStart("bio forge: menu creation failed (biomancy menu API unavailable)");
                     }
                     try {
                         if (!selectBioForgeRecipe(menu, player)) {
                             results.clear();
-                            return false;
+                            return failStart("bio forge: recipe selection rejected by machine menu");
                         }
                         ItemStack taken = takeBioForgeResult(menu, player);
                         if (taken.isEmpty()) {
                             results.clear();
-                            return false;
+                            return failStart("bio forge: result slot empty at execution "
+                                    + (execution + 1) + "/" + preparedExecutions()
+                                    + " (ingredients or nutrients rejected by recipe)");
                         }
                         results.add(taken.copy());
                     } finally {
@@ -429,24 +453,38 @@ final class BiomancyBatchDelegate extends InstantBatchDelegate {
     }
 
     private boolean ensureNutrients(@Nullable ServerPlayer player) {
-        if (player == null || level == null || recipe == null || !level.hasChunkAt(pos)) return false;
+        if (player == null || level == null || recipe == null || !level.hasChunkAt(pos)) {
+            return failStart("biomancy: machine unavailable before nutrient refuel (chunk unloaded?)");
+        }
         BlockEntity machine = level.getBlockEntity(pos);
-        if (machine == null) return false;
+        if (machine == null) return failStart("biomancy: machine block entity missing");
         int required = nutrientCost(machine);
         Object handler = fuelHandler(machine);
         int capacity = number(invoke(handler, "getMaxFuelAmount"), -1);
-        if (required < 0 || capacity < required) return false;
+        if (required < 0) {
+            return failStart("biomancy: recipe nutrient cost unknown for " + recipe.getId());
+        }
+        if (capacity < required) {
+            return failStart("biomancy: recipe needs " + required + " nutrients but machine capacity is "
+                    + capacity);
+        }
         boolean triedAutoCraft = false;
         for (int attempt = 0; attempt < 64 && !hasEnoughFuel(machine); attempt++) {
             int previous = fuelAmount(machine);
             ItemStack current = stack(invoke(machine, "getStackInFuelSlot"));
             if (!current.isEmpty()) {
-                if (!invokeVoid(machine, "refuel") || fuelAmount(machine) <= previous) return false;
+                if (!invokeVoid(machine, "refuel") || fuelAmount(machine) <= previous) {
+                    return failStart("biomancy: fuel slot item " + current.getItem()
+                            + " did not raise machine nutrients (" + previous + " -> "
+                            + fuelAmount(machine) + ", required " + required + ")");
+                }
                 continue;
             }
             injectedFuel.clear();
             int deficit = required - previous;
-            if (deficit <= 0) return false;
+            if (deficit <= 0) {
+                return failStart("biomancy: nutrient check failed at " + previous + "/" + required);
+            }
             ItemStack fuel = reserveFuel(player, nutrientPasteIngredient(), deficit);
             if (fuel.isEmpty() && !triedAutoCraft) {
                 triedAutoCraft = true;
@@ -461,15 +499,23 @@ final class BiomancyBatchDelegate extends InstantBatchDelegate {
                 }
             }
             if (fuel.isEmpty()) fuel = reserveFallbackFuel(player, deficit);
-            if (fuel.isEmpty()) return false;
+            if (fuel.isEmpty()) {
+                return failStart("biomancy: machine has " + previous + "/" + required
+                        + " nutrients and storage holds no nutrient paste or valid fuel");
+            }
             if (!invokeVoid(machine, "setStackInFuelSlot", fuel.copy())) {
                 refundFuel(player, fuel);
-                return false;
+                return failStart("biomancy: cannot place reserved fuel into machine fuel slot");
             }
             injectedFuel.add(fuel.copy());
-            if (!invokeVoid(machine, "refuel") || fuelAmount(machine) <= previous) return false;
+            if (!invokeVoid(machine, "refuel") || fuelAmount(machine) <= previous) {
+                return failStart("biomancy: refuel rejected for " + fuel.getItem() + " (" + previous
+                        + " -> " + fuelAmount(machine) + ", required " + required + ")");
+            }
         }
-        return hasEnoughFuel(machine);
+        if (hasEnoughFuel(machine)) return true;
+        return failStart("biomancy: machine nutrients still short after refuel ("
+                + fuelAmount(machine) + "/" + required + ")");
     }
 
     private void recoverInjectedFuel(BlockEntity machine, @Nullable ServerPlayer player) {
