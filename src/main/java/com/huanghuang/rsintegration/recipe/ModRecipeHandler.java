@@ -193,6 +193,28 @@ public interface ModRecipeHandler {
         return true;
     }
 
+    /**
+     * 该配方是否存在随机（概率）产物。
+     *
+     * <p>纯图要求声明的每个产物都必然出现，因此只要存在概率产物（包括概率主产物），
+     * 配方就不能作为递归合成的中间步骤。默认认为配方产物全部确定；带概率结算的
+     * 处理器必须覆盖本方法，纯图审计才会把它排除在外。</p>
+     */
+    default boolean hasRandomizedOutputs(@Nonnull Recipe<?> recipe) {
+        return false;
+    }
+
+    /**
+     * 通用判定：配方是否具备「可以进纯图」的确定性语义。
+     *
+     * <p>要求主产物必然产出，且不存在任何随机产物。机器类型仍可通过
+     * {@code ModType.allowDeterministicProjection} 声明按配方逐个判断，
+     * 这样概率配方被排除、确定性配方照常参与递归规划。</p>
+     */
+    default boolean supportsDeterministicProjection(@Nonnull Recipe<?> recipe) {
+        return hasDeterministicPrimaryOutput(recipe) && !hasRandomizedOutputs(recipe);
+    }
+
     /** 主产物在递归与消费者语义中的真实资源身份。 */
     @Nullable
     default IntegrationResourceKey getPrimaryOutputResource(

@@ -238,6 +238,18 @@ final class ExternalRecipeHandler implements ModRecipeHandler {
                 && ExternalRecipeProjection.deterministicPrimary(projection.view());
     }
 
+    /**
+     * 公共 API 集成已在 {@code RecipeView.outputs()} 里声明了每个产物的概率，
+     * 因此随机产物完全由集成自己声明：只要存在非 GUARANTEED 的产物，就不能进纯图。
+     */
+    @Override
+    public boolean hasRandomizedOutputs(Recipe<?> recipe) {
+        ExternalRecipeProjection.Result projection = project(recipe);
+        return projection.available()
+                && projection.view().outputs().stream().anyMatch(output ->
+                output.probability().mode() != OutputProbabilityMode.GUARANTEED);
+    }
+
     @Override
     public boolean supportsTargetedProduction(Recipe<?> recipe) {
         ExternalRecipeProjection.Result projection = project(recipe);

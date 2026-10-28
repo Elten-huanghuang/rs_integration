@@ -89,7 +89,7 @@ public final class FarmersDelightRSModule implements IModIntegration {
                 new String[][]{{"net.minecraft.world.item.crafting.CampfireCookingRecipe", "farmersdelight_skillet"}},
                 "gui.rs_integration.jei.fd_skillet_craft");
 
-        // Specific: Cutting Board. Its outputs are independently randomized and
+        // Specific: Cutting Board. Its outputs may be independently randomized and
         // its knife/shears tool loses durability, so keep execution serial and
         // let the delegate return the exact rolled stacks to the network.
         ModType cuttingBoard = ModType.register(ModIds.ID_FD_CUTTING_BOARD,
@@ -97,7 +97,9 @@ public final class FarmersDelightRSModule implements IModIntegration {
                 new String[]{"cutting_board", "cuttingboard"},
                 new String[]{ModIds.ID_FD_CUTTING_BOARD},
                 CuttingBoardBatchDelegate::new);
-        cuttingBoard.rejectPureProjection(
+        // 概率配方不能进纯图；产物确定的配方由处理器
+        // hasRandomizedOutputs / supportsDeterministicProjection 逐条声明放行。
+        cuttingBoard.allowDeterministicProjection(
                 "cutting board has probabilistic outputs and a durability-bearing tool");
         ModType.configureJei(ModIds.ID_FD_CUTTING_BOARD,
                 new String[][]{{"farmersdelight:cutting", ModIds.ID_FD_CUTTING_BOARD}},

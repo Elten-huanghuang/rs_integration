@@ -71,4 +71,28 @@ class CuttingBoardProbabilisticOutputsTest extends BootstrapTest {
         // 主产物确定时不走按目标重试，避免无谓地反复消耗材料。
         assertFalse(handler.requiresTargetedProduction(recipe, new ItemStack(Items.BOWL)));
     }
+
+    @Test
+    void deterministicCuttingRecipeCanBeAnIntermediateStep() {
+        CuttingBoardRecipe recipe = recipe(
+                new ChanceResult(new ItemStack(Items.MELON_SLICE), 1.0F),
+                new ChanceResult(new ItemStack(Items.BOWL), 1.0F));
+
+        CuttingBoardRecipeHandler handler = new CuttingBoardRecipeHandler();
+
+        // 输入输出完全确定，才允许进入递归图当中间步骤。
+        assertTrue(handler.supportsDeterministicProjection(recipe));
+    }
+
+    @Test
+    void probabilisticCuttingRecipeStaysOutOfTheRecipeGraph() {
+        CuttingBoardRecipe recipe = recipe(
+                new ChanceResult(new ItemStack(Items.MELON_SLICE), 1.0F),
+                new ChanceResult(new ItemStack(Items.PUMPKIN_PIE), 0.35F));
+
+        CuttingBoardRecipeHandler handler = new CuttingBoardRecipeHandler();
+
+        // 只要存在概率结果，就不能被当成必然产出的中间步骤。
+        assertFalse(handler.supportsDeterministicProjection(recipe));
+    }
 }

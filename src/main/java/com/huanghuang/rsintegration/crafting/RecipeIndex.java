@@ -652,9 +652,23 @@ public final class RecipeIndex {
     static boolean isTypedPureProjectionCandidate(ModRecipeHandler handler, ModType type,
                                                    Recipe<?> recipe) {
         return handler != null && type != null && recipe != null
-                && (type.pureProjectionAudit() != ModType.PureProjectionAudit.UNSUPPORTED
-                    || handler.supportsIntermediateProjection(recipe))
+                && allowsPureProjection(handler, type, recipe)
                 && handler.supportsBackgroundPlanning(recipe);
+    }
+
+    /**
+     * 机器类型审计与配方级声明的统一放行判定。
+     *
+     * <p>{@code SUPPORTED}/{@code UNAUDITED} 直接放行；{@code CONDITIONAL} 要求处理器
+     * 声明该配方产物完全确定；{@code UNSUPPORTED} 只允许处理器显式点名放行。</p>
+     */
+    static boolean allowsPureProjection(ModRecipeHandler handler, ModType type,
+                                        Recipe<?> recipe) {
+        return switch (type.pureProjectionAudit()) {
+            case SUPPORTED, UNAUDITED -> true;
+            case CONDITIONAL -> handler.supportsDeterministicProjection(recipe);
+            case UNSUPPORTED -> handler.supportsIntermediateProjection(recipe);
+        };
     }
 
     /** Returns whether the immutable recipe graph can represent this recipe's inputs. */
@@ -665,8 +679,7 @@ public final class RecipeIndex {
                 ? ModType.classifyRecipe(recipe)
                 : resolveIndexedModType(recipe, handler);
         return handler != null && type != null
-                && (type.pureProjectionAudit() != ModType.PureProjectionAudit.UNSUPPORTED
-                    || handler.supportsIntermediateProjection(recipe))
+                && allowsPureProjection(handler, type, recipe)
                 && handler.supportsBackgroundPlanning(recipe)
                 && handler.hasDeterministicPrimaryOutput(recipe);
     }

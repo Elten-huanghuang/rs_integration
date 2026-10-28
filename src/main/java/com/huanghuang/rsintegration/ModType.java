@@ -33,9 +33,17 @@ import java.util.function.Supplier;
  */
 public final class ModType {
 
+    /**
+     * 纯图审计结论。
+     *
+     * <p>{@code CONDITIONAL} 用于「机器类型整体不适合直接投影，但产物确定的配方可以」
+     * 的情况：是否放行由 {@code ModRecipeHandler.supportsDeterministicProjection}
+     * 逐配方决定，而不是一刀切拒绝。</p>
+     */
     public enum PureProjectionAudit {
         UNAUDITED,
         SUPPORTED,
+        CONDITIONAL,
         UNSUPPORTED
     }
 
@@ -150,6 +158,24 @@ public final class ModType {
         pureProjectionReason = reason;
         pureProjectionAuditReason = reason;
         pureProjectionAudit = PureProjectionAudit.UNSUPPORTED;
+        return this;
+    }
+
+    /**
+     * 声明该机器类型默认不参与纯图，但产物完全确定的配方可以按配方逐条放行。
+     *
+     * <p>适用于「机器本身带共享状态/概率结算，不能整体投影」但「同类配方中仍存在
+     * 输入输出完全确定的条目」的类型。是否放行由处理器通过
+     * {@code hasRandomizedOutputs} / {@code supportsDeterministicProjection} 声明。</p>
+     */
+    public ModType allowDeterministicProjection(String reason) {
+        if (reason == null || reason.isBlank()) throw new IllegalArgumentException("reason");
+        if (pureProjectionAudit == PureProjectionAudit.SUPPORTED) {
+            throw new IllegalStateException(id + " already confirms pure projection");
+        }
+        pureProjectionReason = reason;
+        pureProjectionAuditReason = reason;
+        pureProjectionAudit = PureProjectionAudit.CONDITIONAL;
         return this;
     }
 

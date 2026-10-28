@@ -442,6 +442,18 @@ public final class MySmeltingRecipeIntegration
 一次机器投料，并等待所有保证输出累计出现后才完成这批操作。机器必须真的能处理聚合
 后的堆叠数量；如果只能逐次投一个材料，应保持 `false`。
 
+### 4.3 概率产物与递归图
+
+递归图要求每个声明的产物都必然出现，因此只要任一输出的
+`OutputProbability.mode()` 不是 `GUARANTEED`（此时 `deterministicOutput` 必须为
+`false`），该配方就不会作为递归合成的中间步骤使用，只能作为根节点按目标产物重试。
+
+这条判定由声明本身推导，集成不需要额外注册开关：把概率写进 `OutputDeclaration`
+即可。内建模组处理器走同一套语义，通过
+`ModRecipeHandler.hasRandomizedOutputs` 声明随机产物；机器类型如果整体不适合投影，
+可以用 `ModType.allowDeterministicProjection(reason)` 声明「按配方逐个判断」，
+产物确定的配方照常参与递归规划。
+
 ## 5. RecipeView 语义
 
 ### 5.1 材料消耗类型

@@ -58,6 +58,16 @@ public final class CuttingBoardRecipeHandler extends AbstractRecipeHandler {
         return FarmersDelightRecipeHandler.hasProbabilisticCuttingBoardResults(recipe);
     }
 
+    /**
+     * 切板配方可能带概率产物，纯图要求产物必然出现，所以有概率结算的配方不能
+     * 作为中间步骤；产物完全确定的配方由 {@link #supportsDeterministicProjection}
+     * 统一放行（机器类型通过 allowDeterministicProjection 声明按配方逐个判断）。
+     */
+    @Override
+    public boolean hasRandomizedOutputs(Recipe<?> recipe) {
+        return FarmersDelightRecipeHandler.hasProbabilisticCuttingBoardResults(recipe);
+    }
+
     @Override
     public List<ScaledIngredientSpec> getRecursiveScaledIngredients(
             Recipe<?> recipe, @Nullable List<ScaledIngredientSpec> ingredients) {

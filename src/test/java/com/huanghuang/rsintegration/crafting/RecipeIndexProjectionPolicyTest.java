@@ -75,6 +75,43 @@ class RecipeIndexProjectionPolicyTest extends BootstrapTest {
     }
 
     @Test
+    void conditionalTypeAdmitsOnlyDeterministicRecipes() {
+        Recipe<?> recipe = new ShapelessRecipe(
+                new ResourceLocation("test", "conditional_projection"), "",
+                CraftingBookCategory.MISC, new ItemStack(Items.DIAMOND),
+                NonNullList.of(Ingredient.EMPTY, Ingredient.of(Items.IRON_INGOT)));
+        ModType conditional = ModType.register("testutil_projection_conditional",
+                        new String[0], new String[0], new String[0],
+                        com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate::new)
+                .allowDeterministicProjection("默认排除，确定性配方逐条放行");
+
+        assertTrue(RecipeIndex.allowsPureProjection(
+                randomizedHandler(conditional, true, false, false), conditional, recipe));
+        assertFalse(RecipeIndex.allowsPureProjection(
+                randomizedHandler(conditional, true, true, false), conditional, recipe));
+        // 主产物本身不确定时，同样不能进纯图。
+        assertFalse(RecipeIndex.allowsPureProjection(
+                randomizedHandler(conditional, false, false, false), conditional, recipe));
+    }
+
+    @Test
+    void unsupportedTypeStillNeedsExplicitPerRecipeOptIn() {
+        Recipe<?> recipe = new ShapelessRecipe(
+                new ResourceLocation("test", "rejected_projection"), "",
+                CraftingBookCategory.MISC, new ItemStack(Items.DIAMOND),
+                NonNullList.of(Ingredient.EMPTY, Ingredient.of(Items.IRON_INGOT)));
+        ModType rejected = ModType.register("testutil_projection_rejected",
+                        new String[0], new String[0], new String[0],
+                        com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate::new)
+                .rejectPureProjection("整体不允许纯图投影");
+
+        assertFalse(RecipeIndex.allowsPureProjection(
+                randomizedHandler(rejected, true, false, false), rejected, recipe));
+        assertTrue(RecipeIndex.allowsPureProjection(
+                randomizedHandler(rejected, true, false, true), rejected, recipe));
+    }
+
+    @Test
     void flatExecutorCanOptIntoIntermediateProjection() {
         Recipe<?> recipe = new ShapelessRecipe(
                 new ResourceLocation("test", "flat_intermediate_projection"), "",
@@ -120,6 +157,30 @@ class RecipeIndexProjectionPolicyTest extends BootstrapTest {
         };
 
         assertFalse(handler.supportsBackgroundPlanning(recipe));
+    }
+
+    /** 测试处理器：同时声明主产物确定性、随机产物与显式放行，用来驱动统一放行判定。 */
+    private static ModRecipeHandler randomizedHandler(ModType type, boolean deterministicPrimary,
+                                                      boolean randomized, boolean explicitOptIn) {
+        return new ModRecipeHandler() {
+            @Override public ModType modType() { return type; }
+            @Override public boolean canHandle(Recipe<?> recipe) { return true; }
+            @Override public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
+                return new ItemStack(Items.DIAMOND);
+            }
+            @Override public List<IngredientSpec> getIngredients(Recipe<?> recipe) {
+                return List.of(new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 1));
+            }
+            @Override public boolean hasDeterministicPrimaryOutput(Recipe<?> recipe) {
+                return deterministicPrimary;
+            }
+            @Override public boolean hasRandomizedOutputs(Recipe<?> recipe) {
+                return randomized;
+            }
+            @Override public boolean supportsIntermediateProjection(Recipe<?> recipe) {
+                return explicitOptIn;
+            }
+        };
     }
 
     private static ModRecipeHandler handler(boolean deterministic) {

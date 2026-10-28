@@ -34,6 +34,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -123,6 +124,9 @@ class ExternalRecipeHandlerTest extends BootstrapTest {
         assertEquals(3, outputs.get(1).maximumPerOperation());
         assertEquals(0, outputs.get(1).expectedPerOperation());
         assertEquals(0.25D, outputs.get(1).probability().chance());
+        // 公共 API 自己声明了概率产物，随机性判定直接来自视图，不再由内建处理器硬编码。
+        assertTrue(handler.hasRandomizedOutputs(mock(Recipe.class)));
+        assertFalse(handler.supportsDeterministicProjection(mock(Recipe.class)));
     }
 
     @Test
