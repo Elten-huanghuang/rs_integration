@@ -91,6 +91,23 @@ final class BiomancyBatchDelegate extends InstantBatchDelegate {
         return isBioForge();
     }
 
+    /**
+     * 生物炼金台每次执行都会扣掉配方营养，因此一批执行的总需求不能超过燃料槽容量：
+     * 否则一批跑到中途营养耗尽，结果槽变空，整批启动会被判成失败。
+     */
+    @Override
+    protected int instantBatchCapacity() {
+        if (!isBioForge() || level == null || recipe == null || !level.hasChunkAt(pos)) {
+            return MAX_INSTANT_BATCH;
+        }
+        BlockEntity machine = level.getBlockEntity(pos);
+        if (machine == null) return MAX_INSTANT_BATCH;
+        int cost = nutrientCost(machine);
+        int capacity = number(invoke(fuelHandler(machine), "getMaxFuelAmount"), -1);
+        if (cost <= 0 || capacity <= 0) return MAX_INSTANT_BATCH;
+        return Math.max(1, Math.min(MAX_INSTANT_BATCH, capacity / cost));
+    }
+
     @Override
     public boolean startSingleOperation(ServerPlayer player) {
         startFailureDetail = null;
@@ -458,18 +475,20 @@ final class BiomancyBatchDelegate extends InstantBatchDelegate {
         }
         BlockEntity machine = level.getBlockEntity(pos);
         if (machine == null) return failStart("biomancy: machine block entity missing");
-        int required = nutrientCost(machine);
-        Object handler = fuelHandler(machine);
-        int capacity = number(invoke(handler, "getMaxFuelAmount"), -1);
-        if (required < 0) {
+        int cost = nutrientCost(machine);
+        if (cost < 0) {
             return failStart("biomancy: recipe nutrient cost unknown for " + recipe.getId());
         }
+        int executions = batchExecutions();
+        int required = nutrientDemand(cost, executions);
+        Object handler = fuelHandler(machine);
+        int capacity = number(invoke(handler, "getMaxFuelAmount"), -1);
         if (capacity < required) {
-            return failStart("biomancy: recipe needs " + required + " nutrients but machine capacity is "
-                    + capacity);
+            return failStart("biomancy: " + executions + " execution(s) need " + required
+                    + " nutrients but machine capacity is " + capacity);
         }
         boolean triedAutoCraft = false;
-        for (int attempt = 0; attempt < 64 && !hasEnoughFuel(machine); attempt++) {
+        for (int attempt = 0; attempt < 64 && !hasEnoughFuel(machine, required); attempt++) {
             int previous = fuelAmount(machine);
             ItemStack current = stack(invoke(machine, "getStackInFuelSlot"));
             if (!current.isEmpty()) {
@@ -513,9 +532,21 @@ final class BiomancyBatchDelegate extends InstantBatchDelegate {
                         + " -> " + fuelAmount(machine) + ", required " + required + ")");
             }
         }
-        if (hasEnoughFuel(machine)) return true;
+        if (hasEnoughFuel(machine, required)) return true;
         return failStart("biomancy: machine nutrients still short after refuel ("
                 + fuelAmount(machine) + "/" + required + ")");
+    }
+
+    /** 一次启动要跑的执行次数：生物炼金台每次执行都会扣营养，必须按整批备料。 */
+    private int batchExecutions() {
+        return isBioForge() ? preparedExecutions() : 1;
+    }
+
+    /** 整批所需的营养总量。 */
+    static int nutrientDemand(int cost, int executions) {
+        if (cost <= 0) return cost;
+        long demand = (long) cost * Math.max(1, executions);
+        return demand > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) demand;
     }
 
     private void recoverInjectedFuel(BlockEntity machine, @Nullable ServerPlayer player) {
@@ -546,6 +577,12 @@ final class BiomancyBatchDelegate extends InstantBatchDelegate {
         }
         Object enough = invokeCompatible(machine, "hasEnoughFuel", recipe);
         return Boolean.TRUE.equals(enough);
+    }
+
+    /** 生物炼金台要按整批营养总量判断，其他机器仍交给元素自身判定。 */
+    private boolean hasEnoughFuel(BlockEntity machine, int required) {
+        if (isBioForge()) return required >= 0 && fuelAmount(machine) >= required;
+        return hasEnoughFuel(machine);
     }
 
     private boolean invokeVoid(Object receiver, String name, Object... args) {
