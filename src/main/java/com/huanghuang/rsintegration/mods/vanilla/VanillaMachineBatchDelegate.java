@@ -80,6 +80,13 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     /** Immutable logical operation count for the currently running furnace lease. */
     private int activeFurnaceOperations = 1;
 
+    /** 切石机、锻造台这类没有处理时间的虚拟机器，一次派发最多完成的操作数。 */
+    private static final int VIRTUAL_INSTANT_BATCH = 64;
+    /** 当前虚拟批次已经预留并提交的逻辑操作数。 */
+    private int activeVirtualOperations = 1;
+    /** 当前虚拟批次的整批产物；每个栈不超过物品最大堆叠。 */
+    private final List<ItemStack> pendingVirtualResults = new ArrayList<>();
+
     private enum MachineKind {
         FURNACE,
         CAMPFIRE,
@@ -172,6 +179,8 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         this.furnaceBE = null;
         this.plannedFurnaceOperations = 1;
         this.activeFurnaceOperations = 1;
+        this.activeVirtualOperations = 1;
+        this.pendingVirtualResults.clear();
         resetFurnaceOwnership();
 
         ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
@@ -364,6 +373,13 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public int prepareFlatBatch(int remainingOperations) {
+        if (kind == MachineKind.VIRTUAL) {
+            // 切石机/锻造台没有处理时间，整批就是"一次操作"：按剩余量与瞬时上限取批，
+            // 否则派发一次只能完成 1 份，之后还要等下一 tick 才能再观察。
+            if (remainingOperations <= 0) return 0;
+            activeVirtualOperations = Math.min(VIRTUAL_INSTANT_BATCH, remainingOperations);
+            return activeVirtualOperations;
+        }
         if (!supportsInputBuffer()) {
             plannedFurnaceOperations = 1;
             return remainingOperations > 0 ? 1 : 0;
@@ -378,11 +394,20 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         // Planning may run again while the delegate is being admitted. Keep it
         // separate from activeFurnaceOperations, which becomes immutable only
         // when startOperation accepts the bound input buffer.
+        if (kind == MachineKind.VIRTUAL) {
+            activeVirtualOperations = Math.min(VIRTUAL_INSTANT_BATCH, Math.max(1, executions));
+            return;
+        }
         plannedFurnaceOperations = Math.max(1, executions);
     }
 
     @Override
     public int preferredParallelBatchSize(int totalOperations, int workerCount) {
+        if (kind == MachineKind.VIRTUAL) {
+            int workers = Math.max(1, workerCount);
+            int evenShare = Math.max(1, (totalOperations + workers - 1) / workers);
+            return Math.min(VIRTUAL_INSTANT_BATCH, evenShare);
+        }
         if (!supportsInputBuffer()) return 1;
         int workers = Math.max(1, workerCount);
         int evenShare = Math.max(1, (totalOperations + workers - 1) / workers);
@@ -391,6 +416,9 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public int flatBatchOperationLimit(int configuredLimit) {
+        if (kind == MachineKind.VIRTUAL) {
+            return Math.max(Math.max(1, configuredLimit), VIRTUAL_INSTANT_BATCH);
+        }
         return supportsInputBuffer()
                 ? Math.max(Math.max(1, configuredLimit), inputBufferOperationLimit())
                 : Math.max(1, configuredLimit);
@@ -398,7 +426,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public boolean expandsFlatBatchOperationLimit() {
-        return supportsInputBuffer();
+        return kind == MachineKind.VIRTUAL || supportsInputBuffer();
     }
 
     @Override
@@ -583,14 +611,38 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         } else if (kind == MachineKind.CAMPFIRE) {
             return tryStartCampfireWithMaterials(materials);
         } else {
-            // Virtual: materials already committed by chain, compute result directly
-            this.pendingResult = recipe instanceof SmithingTransformRecipe smithing
+            // 虚拟机器（切石机、锻造台）：材料已由执行链预留并提交，
+            // 直接按材料数量一次性算出整批产物，不再等后续 tick 逐份推进。
+            this.activeVirtualOperations = Math.max(1, injectedOperations);
+            ItemStack singleResult = recipe instanceof SmithingTransformRecipe smithing
                     ? SmithingRecipeHandler.assembleTransform(smithing, materials, myLevel.registryAccess())
                     : computeResult();
-            if (this.pendingResult.isEmpty()) return false;
+            if (singleResult.isEmpty()) return false;
+            this.pendingResult = singleResult.copy();
+            stageVirtualResults(singleResult, activeVirtualOperations);
             this.craftDone = true;
             return true;
         }
+    }
+
+    /** 把单次产物按批次数量摊成整批产物；每个栈不超过物品最大堆叠。 */
+    private void stageVirtualResults(ItemStack singleResult, int operations) {
+        pendingVirtualResults.clear();
+        pendingVirtualResults.addAll(splitBatchStacks(singleResult, operations));
+    }
+
+    /** 把整批产物按最大堆叠拆成若干栈，供虚拟机器一次交付。 */
+    static List<ItemStack> splitBatchStacks(ItemStack singleResult, int operations) {
+        List<ItemStack> stacks = new ArrayList<>();
+        if (singleResult == null || singleResult.isEmpty() || operations <= 0) return stacks;
+        long total = (long) singleResult.getCount() * operations;
+        int stackLimit = Math.max(1, singleResult.getMaxStackSize());
+        while (total > 0) {
+            int amount = (int) Math.min(stackLimit, total);
+            stacks.add(singleResult.copyWithCount(amount));
+            total -= amount;
+        }
+        return stacks;
     }
 
     // ── FURNACE path ──────────────────────────────────────────────
@@ -879,6 +931,8 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
 
         this.pendingResult = computeResult();
         if (this.pendingResult.isEmpty()) return false;
+        this.activeVirtualOperations = 1;
+        pendingVirtualResults.clear();
 
         ExtractionLedger activeLedger = usingSharedLedger ? sharedLedger : ledger;
 
@@ -913,6 +967,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
             }
         }
 
+        stageVirtualResults(pendingResult, 1);
         this.craftDone = true;
         return true;
     }
@@ -1174,10 +1229,14 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     @Override
     public ItemStack collectResult(ServerPlayer player) {
         if (kind == MachineKind.VIRTUAL) {
-            ItemStack r = pendingResult.copy();
-            pendingResult = ItemStack.EMPTY;
-            craftDone = false;
-            return r;
+            if (pendingVirtualResults.isEmpty()) {
+                pendingResult = ItemStack.EMPTY;
+                craftDone = false;
+                return ItemStack.EMPTY;
+            }
+            ItemStack result = pendingVirtualResults.remove(0);
+            if (pendingVirtualResults.isEmpty()) craftDone = false;
+            return result;
         }
         if (kind == MachineKind.CAMPFIRE) {
             return collectCampfireResult();
@@ -1196,6 +1255,24 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         furnaceBE.setItem(2, retained.isEmpty() ? ItemStack.EMPTY : retained);
         furnaceBE.setChanged();
         return result;
+    }
+
+    @Override
+    public List<ItemStack> collectAllResults(ServerPlayer player) {
+        if (kind != MachineKind.VIRTUAL) {
+            ItemStack result = collectResult(player);
+            return result.isEmpty() ? List.of() : List.of(result);
+        }
+        if (pendingVirtualResults.isEmpty()) {
+            pendingResult = ItemStack.EMPTY;
+            craftDone = false;
+            return List.of();
+        }
+        List<ItemStack> results = new ArrayList<>(pendingVirtualResults);
+        pendingVirtualResults.clear();
+        pendingResult = ItemStack.EMPTY;
+        craftDone = false;
+        return List.copyOf(results);
     }
 
     // ── lifecycle ─────────────────────────────────────────────────
@@ -1234,6 +1311,8 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         }
 
         pendingResult = ItemStack.EMPTY;
+        pendingVirtualResults.clear();
+        activeVirtualOperations = 1;
         craftDone = false;
         resetState();
     }
@@ -1258,6 +1337,8 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     protected void clearMissingMachineState(@Nullable ServerPlayer player) {
         resetFurnaceOwnership();
         pendingResult = ItemStack.EMPTY;
+        pendingVirtualResults.clear();
+        activeVirtualOperations = 1;
         craftDone = false;
         resetState();
     }
@@ -1271,6 +1352,8 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
             resetFurnaceOwnership();
         }
         pendingResult = ItemStack.EMPTY;
+        pendingVirtualResults.clear();
+        activeVirtualOperations = 1;
         craftDone = false;
         resetState();
     }
@@ -1283,6 +1366,14 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     @Nullable
     @Override
     public ExpectedProduction getExpectedProduction() {
+        if (kind == MachineKind.VIRTUAL) {
+            // 瞬时批次一次产出整批，完成契约必须按批次数量声明，
+            // 否则执行链看到 1 份产出就以为整批完成、少算剩余订单。
+            ItemStack single = computeResult();
+            if (single.isEmpty()) return null;
+            long expected = (long) single.getCount() * Math.max(1, activeVirtualOperations);
+            return new ExpectedProduction(single, (int) Math.min(Integer.MAX_VALUE, expected));
+        }
         if (kind != MachineKind.FURNACE) return null;
         ItemStack result = computeResult();
         if (result.isEmpty()) return null;
@@ -1305,9 +1396,19 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     public List<OutputAccounting.CollectedOutput> collectStructuredResults(ServerPlayer player) {
         OutputContract contract = outputContract();
         if (contract.ports().size() != 1) return List.of();
+        OutputContract.Port port = contract.ports().get(0);
+        if (kind == MachineKind.VIRTUAL) {
+            // 整批产物可能被拆成多个不超过最大堆叠的栈，全部交给结算，
+            // 让实际数量与 machineCount 份声明对齐。
+            List<OutputAccounting.CollectedOutput> outputs = new ArrayList<>();
+            for (ItemStack stack : collectAllResults(player)) {
+                if (stack == null || stack.isEmpty()) continue;
+                outputs.add(new OutputAccounting.CollectedOutput(port.portId(), port.source(), stack));
+            }
+            return List.copyOf(outputs);
+        }
         ItemStack result = collectResult(player);
         if (result.isEmpty()) return List.of();
-        OutputContract.Port port = contract.ports().get(0);
         return List.of(new OutputAccounting.CollectedOutput(port.portId(), port.source(), result));
     }
 

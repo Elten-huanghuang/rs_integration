@@ -50,9 +50,16 @@ public final class UnifiedMountCoordinator {
         return chunk == null ? null : chunk.getBlockEntities().get(node.getPos());
     }
 
-    private static boolean attached(ServerLevel level, NetworkNode node) {
-        BlockEntity block = loadedBlockEntity(level, node);
-        return block instanceof INetworkNodeProxy<?> proxy && proxy.getNode() == node;
+    private static ItemStack stackInSlot(NetworkNode node, int slot) {
+        if (node instanceof DiskDriveNetworkNode drive) return drive.getDisks().getStackInSlot(slot);
+        if (node instanceof DiskManipulatorNetworkNode manipulator) return manipulator.getDisks().getStackInSlot(slot);
+        return ItemStack.EMPTY;
+    }
+
+    /** 物理盘是否仍在该槽位；拔盘后不能继续为它保留挂载入口。 */
+    private static boolean diskStillInSlot(NetworkNode node, int slot) {
+        ItemStack current = stackInSlot(node, slot);
+        return current.getItem() instanceof UnifiedDiskItem && current.getCount() == 1;
     }
 
     public static final class Lease {
@@ -103,9 +110,7 @@ public final class UnifiedMountCoordinator {
             return !same;
         }
         private boolean hasPhysicalDisk() {
-            ItemStack current = node instanceof DiskDriveNetworkNode drive ? drive.getDisks().getStackInSlot(slot)
-                    : node instanceof DiskManipulatorNetworkNode manipulator ? manipulator.getDisks().getStackInSlot(slot) : ItemStack.EMPTY;
-            return sameDisk(current);
+            return sameDisk(stackInSlot(node, slot));
         }
         /** 区块/服务器重载会重建 ItemStack 对象，必须按持久化身份比较，不能比较对象引用。 */
         private boolean sameDisk(ItemStack current) {
@@ -121,10 +126,10 @@ public final class UnifiedMountCoordinator {
         final NetworkNode node;
         final int slot;
         final Runnable retry;
-        boolean observedBlockEntity;
+        /** 区块已加载但方块实体一直缺席的起点；-1 表示当前没有在计时。 */
+        long missingSince = -1;
         Candidate(UnifiedDiskRoot root, ServerLevel level, NetworkNode node, int slot, Runnable retry) {
             this.root = root; this.level = level; this.node = node; this.slot = slot; this.retry = retry;
-            observedBlockEntity = attached(level, node);
         }
     }
     private static final class Deferred {
@@ -133,16 +138,18 @@ public final class UnifiedMountCoordinator {
         final int slot;
         final Runnable retry;
         long nextAttempt;
-        boolean observedBlockEntity;
+        /** 区块已加载但方块实体一直缺席的起点；-1 表示当前没有在计时。 */
+        long missingSince = -1;
         Deferred(ServerLevel level, NetworkNode node, int slot, Runnable retry, long nextAttempt) {
             this.level = level; this.node = node; this.slot = slot; this.retry = retry; this.nextAttempt = nextAttempt;
-            observedBlockEntity = attached(level, node);
         }
     }
     private final Map<UUID, Lease> leases = new HashMap<>();
     private final List<Candidate> waiting = new ArrayList<>();
     private final List<Deferred> deferred = new ArrayList<>();
     private long ticks;
+    /** 区块一直加载却始终等不到方块实体时，最多再等 2 分钟；超时视为方块实体已被移除。 */
+    private static final long MISSING_GRACE_TICKS = 2400;
 
     /** RS 只调用一次 createStorages 时，延迟等待节点恢复后再触发一次。 */
     public void defer(NetworkNode node, int slot, Runnable retry) {
@@ -207,14 +214,15 @@ public final class UnifiedMountCoordinator {
 
     private void retire(Lease lease) {
         lease.revoke();
-        if (!lease.hasPhysicalDisk() || loadedChunk(lease.level, lease.node) != null) return;
-        // RS 在区块重载后复用原节点，不会重新读取槽位；旧视图撤销后必须保留重挂载入口。
-        LOGGER.info("[RSI] 统一盘 {} 所在区块卸载，等待区块恢复后重新挂载: dim={} pos={} slot={}",
+        if (!lease.hasPhysicalDisk()) return;
+        // 区块卸载和“区块已加载但方块实体尚未注册”都必须保留重挂入口：
+        // RS 在区块重载后不一定会再次读取槽位，丢了重挂入口就只能靠玩家拔插。
+        LOGGER.info("[RSI] 统一盘 {} 暂时不可用，等待节点恢复后重新挂载: dim={} pos={} slot={}",
                 lease.root.id(), lease.level.dimension(), lease.node.getPos(), lease.slot);
         defer(lease.level, lease.node, lease.slot, () -> {
             // 等待期间可能发生插拔；只恢复原盘，不能用捕获的旧 ItemStack 覆盖新槽位。
             if (!lease.hasPhysicalDisk()) return;
-            LOGGER.info("[RSI] 统一盘 {} 所在区块已恢复，尝试自动重建物品与流体视图: dim={} pos={} slot={}",
+            LOGGER.info("[RSI] 统一盘 {} 所在节点已恢复，尝试自动重建物品与流体视图: dim={} pos={} slot={}",
                     lease.root.id(), lease.level.dimension(), lease.node.getPos(), lease.slot);
             lease.retry.run();
         });
@@ -235,16 +243,22 @@ public final class UnifiedMountCoordinator {
             retire(lease); changed.put(lease.node, true); return true;
         });
         for (Candidate candidate : List.copyOf(waiting)) {
+            if (!diskStillInSlot(candidate.node, candidate.slot)) { waiting.remove(candidate); continue; }
             LevelChunk chunk = loadedChunk(candidate.level, candidate.node);
             BlockEntity block = chunk == null ? null : chunk.getBlockEntities().get(candidate.node.getPos());
+            // 区块尚未加载、方块实体尚未注册都只是暂时现象，不能据此丢弃待办。
+            // 但区块一直加载着却等不到方块实体（驱动器被拆掉），超过宽容期就放弃，避免长期持有旧节点。
             if (block == null) {
-                if (candidate.observedBlockEntity) waiting.remove(candidate);
+                if (chunk == null) candidate.missingSince = -1;
+                else if (candidate.missingSince < 0) candidate.missingSince = ticks;
+                else if (ticks - candidate.missingSince > MISSING_GRACE_TICKS) waiting.remove(candidate);
                 continue;
             }
+            candidate.missingSince = -1;
             if (!(block instanceof INetworkNodeProxy<?> proxy) || proxy.getNode() != candidate.node) {
+                // 方块实体已换成另一个节点实例：旧待办永远挂不上，交给新节点连网时的自动重建流程。
                 waiting.remove(candidate); continue;
             }
-            candidate.observedBlockEntity = true;
             if (!leases.containsKey(candidate.root.id())) {
                 waiting.remove(candidate);
                 candidate.retry.run();
@@ -252,17 +266,20 @@ public final class UnifiedMountCoordinator {
             }
         }
         for (Deferred candidate : List.copyOf(deferred)) {
+            if (!diskStillInSlot(candidate.node, candidate.slot)) { deferred.remove(candidate); continue; }
             LevelChunk chunk = loadedChunk(candidate.level, candidate.node);
             BlockEntity block = chunk == null ? null : chunk.getBlockEntities().get(candidate.node.getPos());
             if (block == null) {
-                if (candidate.observedBlockEntity) deferred.remove(candidate);
+                if (chunk == null) candidate.missingSince = -1;
+                else if (candidate.missingSince < 0) candidate.missingSince = ticks;
+                else if (ticks - candidate.missingSince > MISSING_GRACE_TICKS) deferred.remove(candidate);
                 continue;
             }
+            candidate.missingSince = -1;
             if (!(block instanceof INetworkNodeProxy<?> proxy) || proxy.getNode() != candidate.node) {
                 deferred.remove(candidate);
                 continue;
             }
-            candidate.observedBlockEntity = true;
             if (ticks < candidate.nextAttempt) continue;
             deferred.remove(candidate);
             candidate.retry.run();

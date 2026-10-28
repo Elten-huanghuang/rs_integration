@@ -258,18 +258,35 @@ class UnifiedDiskAdapterTest extends BootstrapTest {
         verify(level, never()).getBlockEntity(any());
     }
 
-    @ParameterizedTest
-    @ValueSource(booleans = {true, false})
-    void deferredMountIsCancelledWhenAttachedNodeUnloadsOrIsReplaced(boolean unloaded) throws Exception {
+    @Test void deferredMountSurvivesChunkUnloadAndRetriesWhenNodeReturns() throws Exception {
+        setup();
+        AtomicInteger retries = new AtomicInteger();
+        manager.mounts().defer(node, 0, retries::incrementAndGet);
+        when(chunks.getChunkNow(0, 0)).thenReturn(null);
+        manager.mounts().sweep();
+        when(chunks.getChunkNow(0, 0)).thenReturn(chunk);
+        for (int i = 0; i < 25; i++) manager.mounts().sweep();
+        // 区块卸载只是暂时不可见；节点回来后待办必须仍然有效，否则磁盘会永久空盘。
+        assertEquals(1, retries.get());
+        manager.mounts().sweep();
+        assertEquals(1, retries.get());
+        verify(level, never()).getBlockEntity(any());
+    }
+
+    @Test void deferredMountIsCancelledWhenNodeIsReplacedOrDiskIsRemoved() throws Exception {
         setup();
         AtomicInteger retries = new AtomicInteger();
         manager.mounts().defer(node, 0, retries::incrementAndGet);
         BlockEntity block = blocks.get(BlockPos.ZERO);
-        if (unloaded) when(chunks.getChunkNow(0, 0)).thenReturn(null);
-        else blocks.put(BlockPos.ZERO, mock(BlockEntity.class));
+        blocks.put(BlockPos.ZERO, mock(BlockEntity.class));
         manager.mounts().sweep();
-        when(chunks.getChunkNow(0, 0)).thenReturn(chunk);
         blocks.put(BlockPos.ZERO, block);
+        for (int i = 0; i < 25; i++) manager.mounts().sweep();
+        assertEquals(0, retries.get());
+
+        // 物理盘被拔走后同样不再保留挂载入口。
+        manager.mounts().defer(node, 0, retries::incrementAndGet);
+        current.set(ItemStack.EMPTY);
         for (int i = 0; i < 25; i++) manager.mounts().sweep();
         assertEquals(0, retries.get());
         verify(level, never()).getBlockEntity(any());
@@ -333,6 +350,62 @@ class UnifiedDiskAdapterTest extends BootstrapTest {
         assertFalse(lease.valid());
         assertNull(items[0]); assertNull(fluids[0]);
         assertFalse(manager.mounts().mounted(root.id()));
+        verify(level, never()).getBlockEntity(any());
+    }
+
+    @Test void missingBlockEntityAfterMountKeepsRemountEntryAndRecoversWhenNodeReturns() throws Exception {
+        setup();
+        var core = manager.entry(root.id()).core;
+        core.insertItem(new ItemStack(Items.DIAMOND), 17, true);
+        AtomicInteger retries = new AtomicInteger();
+        AtomicReference<UnifiedMountCoordinator.Lease> replacement = new AtomicReference<>();
+        Runnable retry = () -> {
+            retries.incrementAndGet();
+            var restored = manager.mounts().acquire(root, level, node, 0, items, fluids, current.get(), () -> {});
+            replacement.set(restored);
+            if (restored != null) {
+                items[0] = new UnifiedBoundDisk<ItemStack>(restored, core, FrozenKey.Kind.ITEM);
+                fluids[0] = new UnifiedBoundDisk<FluidStack>(restored, core, FrozenKey.Kind.FLUID);
+            }
+        };
+        var first = manager.mounts().acquire(root, node, 0, items, fluids, current.get(), retry);
+        items[0] = new UnifiedBoundDisk<ItemStack>(first, core, FrozenKey.Kind.ITEM);
+        fluids[0] = new UnifiedBoundDisk<FluidStack>(first, core, FrozenKey.Kind.FLUID);
+        assertTrue(first.valid());
+
+        // 区块仍可查询，但方块实体在注册过程中短暂缺失：旧逻辑直接撤视图且不排队，导致永久空盘。
+        BlockEntity block = blocks.remove(BlockPos.ZERO);
+        manager.mounts().sweep();
+        assertFalse(first.valid()); assertNull(items[0]); assertNull(fluids[0]);
+        for (int i = 0; i < 25; i++) manager.mounts().sweep();
+        assertEquals(0, retries.get());
+
+        blocks.put(BlockPos.ZERO, block);
+        for (int i = 0; i < 25; i++) manager.mounts().sweep();
+        assertEquals(1, retries.get()); assertNotNull(replacement.get());
+        assertTrue(replacement.get().valid());
+        assertEquals(17, items[0].getStored());
+        verify(level, never()).getBlockEntity(any());
+    }
+
+    @Test void deferredMountKeepsGraceForMissingBlockEntityButGivesUpOnRemovedDrive() throws Exception {
+        setup();
+        AtomicInteger retries = new AtomicInteger();
+        BlockEntity block = blocks.get(BlockPos.ZERO);
+        manager.mounts().defer(node, 0, retries::incrementAndGet);
+        blocks.clear();
+        for (int i = 0; i < 100; i++) manager.mounts().sweep();
+        blocks.put(BlockPos.ZERO, block);
+        for (int i = 0; i < 25; i++) manager.mounts().sweep();
+        assertEquals(1, retries.get());
+
+        // 驱动器被拆掉后区块仍然加载，方块实体永远不会回来：宽容期结束就不再持有旧节点。
+        manager.mounts().defer(node, 0, retries::incrementAndGet);
+        blocks.clear();
+        for (int i = 0; i < 2500; i++) manager.mounts().sweep();
+        blocks.put(BlockPos.ZERO, block);
+        for (int i = 0; i < 25; i++) manager.mounts().sweep();
+        assertEquals(1, retries.get());
         verify(level, never()).getBlockEntity(any());
     }
 
