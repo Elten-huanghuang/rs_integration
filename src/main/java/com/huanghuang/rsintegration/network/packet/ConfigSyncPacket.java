@@ -35,7 +35,6 @@ public class ConfigSyncPacket {
     public final boolean enableEmbersAlchemyCalc;
     public final boolean enableFtbQuestCheckmarkButton;
     public final boolean enableFtbQuestStorageScanButton;
-    public final int recipeTreeMaxCandidates;
     public final int repeatCountMax;
     public final boolean enableUnifiedDisk;
 
@@ -46,7 +45,7 @@ public class ConfigSyncPacket {
                             boolean enableJeiBookmarkMarquee, boolean enableGridSwipeExtract,
                             boolean enableApotheosis, boolean enableDistantWorlds,
                             boolean enableEmbersAlchemyCalc, boolean enableFtbQuestCheckmarkButton,
-                            boolean enableFtbQuestStorageScanButton, int recipeTreeMaxCandidates,
+                            boolean enableFtbQuestStorageScanButton,
                             int repeatCountMax, boolean enableUnifiedDisk) {
         this.enableMachineGuiTabs = enableMachineGuiTabs;
         this.machineTabThreshold = machineTabThreshold;
@@ -63,7 +62,6 @@ public class ConfigSyncPacket {
         this.enableEmbersAlchemyCalc = enableEmbersAlchemyCalc;
         this.enableFtbQuestCheckmarkButton = enableFtbQuestCheckmarkButton;
         this.enableFtbQuestStorageScanButton = enableFtbQuestStorageScanButton;
-        this.recipeTreeMaxCandidates = recipeTreeMaxCandidates;
         this.repeatCountMax = repeatCountMax;
         this.enableUnifiedDisk = enableUnifiedDisk;
     }
@@ -85,7 +83,6 @@ public class ConfigSyncPacket {
                 RSIntegrationConfig.ENABLE_EMBERS_ALCHEMY_CALC.get(),
                 RSIntegrationConfig.ENABLE_FTB_QUEST_CHECKMARK_BUTTON.get(),
                 RSIntegrationConfig.ENABLE_FTB_QUEST_STORAGE_SCAN_BUTTON.get(),
-                RSIntegrationConfig.RECIPE_TREE_MAX_CANDIDATES.get(),
                 RSIntegrationConfig.REPEAT_COUNT_MAX.get(),
                 RSStorageConfig.enabled(RSStorageConfig.UNIFIED_DISK));
     }
@@ -106,7 +103,6 @@ public class ConfigSyncPacket {
         buf.writeBoolean(packet.enableEmbersAlchemyCalc);
         buf.writeBoolean(packet.enableFtbQuestCheckmarkButton);
         buf.writeBoolean(packet.enableFtbQuestStorageScanButton);
-        buf.writeVarInt(packet.recipeTreeMaxCandidates);
         buf.writeVarInt(packet.repeatCountMax);
         buf.writeBoolean(packet.enableUnifiedDisk);
     }
@@ -118,8 +114,6 @@ public class ConfigSyncPacket {
                 buf.readBoolean(),
                 buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean(),
                 buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean(),
-                // Clamp to the config's own declared range (2-32).
-                Math.max(2, Math.min(buf.readVarInt(), 32)),
                 // Server-authoritative crafting request limit.
                 Math.max(1, Math.min(buf.readVarInt(),
                         RSIntegrationConfig.REPEAT_COUNT_ABSOLUTE_MAX)), buf.readBoolean());

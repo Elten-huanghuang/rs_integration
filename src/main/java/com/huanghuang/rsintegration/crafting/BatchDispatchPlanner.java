@@ -1,7 +1,6 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.ModType;
-import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -76,11 +75,9 @@ final class BatchDispatchPlanner {
     }
 
     static int configuredOperationsPerDispatch() {
-        try {
-            return Math.max(1, RSIntegrationConfig.CRAFTING_OPERATIONS_PER_DISPATCH.get());
-        } catch (Exception ignored) {
-            return RSIntegrationConfig.DEFAULT_CRAFTING_OPERATIONS_PER_DISPATCH;
-        }
+        // 单次派发不再受配置上限约束；实际批量由机器数量、单机容量和
+        // 材料/租约是否允许决定。
+        return Integer.MAX_VALUE;
     }
 
     private static int completedFlatOperations(int totalOperations, int remainingOperations) {

@@ -45,7 +45,7 @@ public final class CraftExecutionPolicy {
         return modType != null && modType != ModType.GENERIC && !modType.isVirtual();
     }
 
-    static boolean requiresBoundMachine(Recipe<?> recipe, @Nullable ModType modType) {
+    public static boolean requiresBoundMachine(Recipe<?> recipe, @Nullable ModType modType) {
         // 配置为 CUSTOM_GUI 的普通 CraftingRecipe 仍按逻辑配方执行；
         // 只有真实机器配方需要使用绑定上下文。
         if (recipe instanceof CraftingRecipe && modType == ModType.CUSTOM_GUI) return false;

@@ -69,4 +69,21 @@ public record ConcurrencyCapabilities(
                 PreparationContract.UNKNOWN
         );
     }
+
+    /**
+     * 明确声明该机器不能与其他机器并行。
+     *
+     * <p>普通机器应使用 {@link #machineSlot()}；只有确实存在共享世界状态、
+     * 清理边界不可拆分或准备阶段不可重试的机器才用该声明，规划器会把它
+     * 当作独占节点，不再做并行拆分。</p>
+     */
+    public static ConcurrencyCapabilities exclusive() {
+        return new ConcurrencyCapabilities(
+                MaterialOwnership.UNKNOWN,
+                OutputOwnership.AMBIGUOUS,
+                CleanupContract.UNKNOWN,
+                SideEffects.UNKNOWN,
+                PreparationContract.UNKNOWN
+        );
+    }
 }

@@ -45,8 +45,21 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class AsyncCraftChainProductionTest extends BootstrapTest {
+
+    @Test
+    void earthHeartTaintStepIsRecognizedBeforeGenericRejection() {
+        CraftingResolver.ResolutionStep taint = mock(CraftingResolver.ResolutionStep.class);
+        when(taint.recipeId()).thenReturn(CraftingResolver.TAINT_EARTH_HEART_STEP);
+        assertTrue(AsyncCraftChain.isEarthHeartTaintStep(taint));
+
+        CraftingResolver.ResolutionStep generic = mock(CraftingResolver.ResolutionStep.class);
+        when(generic.recipeId()).thenReturn(new ResourceLocation("minecraft", "stick"));
+        assertFalse(AsyncCraftChain.isEarthHeartTaintStep(generic));
+    }
 
     @Test
     void countsOnlyMatchingRealStacks() {

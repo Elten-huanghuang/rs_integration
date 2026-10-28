@@ -359,12 +359,22 @@ public interface IBatchDelegate {
     }
 
     /**
-     * Structured safety contract for cross-node execution. Unknown or incomplete
-     * contracts remain exclusive even when the legacy boolean returns true.
+     * 未显式声明的委托按产物形态推断并发契约；只有真正无法并行的形态
+     * （不发布声明产物、猜配方/世界状态推断）才保持独占。
      */
-    @Nullable
+    @Nonnull
     default BatchConcurrencyCapabilities concurrencyCapabilities() {
-        return null;
+        // 未显式声明的委托按真实产物形态推断：
+        // - 不发布声明产物（仪式只有世界状态变化）-> 独占；
+        // - 产物会掉到世界（祭坛/坩埚等）-> OWNED_WORLD_CAPTURE；
+        // - 其余普通机器 -> 机器槽位。
+        if (!publishesDeclaredGraphOutputs()) {
+            return BatchConcurrencyCapabilities.exclusive();
+        }
+        if (getExpectedOutput() != null) {
+            return BatchConcurrencyCapabilities.ownedWorldCapture();
+        }
+        return BatchConcurrencyCapabilities.machineSlot();
     }
 
     /**

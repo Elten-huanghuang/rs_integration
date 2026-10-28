@@ -90,6 +90,28 @@ public record BatchConcurrencyCapabilities(
                 List.of());
     }
 
+    /** 产物由委托从世界捕获（祭坛、坩埚等多方块结构）。 */
+    public static BatchConcurrencyCapabilities ownedWorldCapture() {
+        return new BatchConcurrencyCapabilities(
+                MaterialOwnership.CHAIN_RESERVED,
+                OutputOwnership.OWNED_WORLD_CAPTURE,
+                CleanupContract.SEPARABLE_OFFLINE,
+                SideEffects.LOCAL_WORLD_ITEMS,
+                PreparationContract.RETRY_SAFE,
+                List.of());
+    }
+
+    /** 显式声明机器只能独占运行；用于确实无法安全并行的世界交互。 */
+    public static BatchConcurrencyCapabilities exclusive() {
+        return new BatchConcurrencyCapabilities(
+                MaterialOwnership.UNKNOWN,
+                OutputOwnership.AMBIGUOUS,
+                CleanupContract.UNKNOWN,
+                SideEffects.UNKNOWN,
+                PreparationContract.UNKNOWN,
+                List.of());
+    }
+
     /** 无物理机器、无世界副作用的纯账本事务。 */
     public static BatchConcurrencyCapabilities virtualTransaction() {
         return new BatchConcurrencyCapabilities(

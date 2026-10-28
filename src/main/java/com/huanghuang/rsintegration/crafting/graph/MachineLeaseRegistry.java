@@ -36,6 +36,8 @@ public final class MachineLeaseRegistry {
 
     private final Map<MachineKey, Lease> leases = new HashMap<>();
     private long nextGeneration;
+    /** 累计释放次数：等待机器的执行链据此判断“机器可能已经空出来”。 */
+    private long releaseCount;
 
     public synchronized Lease tryAcquire(MachineKey machine, OperationId owner) {
         Objects.requireNonNull(machine, "machine");
@@ -76,11 +78,17 @@ public final class MachineLeaseRegistry {
         if (current == null || current.generation() != lease.generation()
                 || !current.owner().equals(lease.owner())) return false;
         leases.remove(lease.machine());
+        releaseCount++;
         return true;
     }
 
     public synchronized boolean isLeased(MachineKey machine) {
         return leases.containsKey(machine);
+    }
+
+    /** 累计释放次数，单调递增；等待机器的执行链用它触发立即重试。 */
+    public synchronized long releaseCount() {
+        return releaseCount;
     }
 
     public synchronized int size() {

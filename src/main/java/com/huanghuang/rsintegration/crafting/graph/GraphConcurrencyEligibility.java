@@ -39,6 +39,12 @@ public final class GraphConcurrencyEligibility {
             return capability(BatchConcurrencyCapabilities.OutputOwnership.OWNED_WORLD_CAPTURE,
                     BatchConcurrencyCapabilities.SideEffects.INFER, 3);
         }
+        // Embers 固定配方或已猜出代码的配方：每台炼金平板各自把产物收进自己的输出槽，
+        // 不会把产物散落到世界里，因此可按机器槽并行。
+        if ("embers_alchemy".equals(type)) {
+            return capability(BatchConcurrencyCapabilities.OutputOwnership.MACHINE_SLOT,
+                    BatchConcurrencyCapabilities.SideEffects.MACHINE_LOCAL, 0);
+        }
         if ("eidolon_worktable".equals(type)) {
             return capability(BatchConcurrencyCapabilities.OutputOwnership.DELEGATE_RESULT,
                     BatchConcurrencyCapabilities.SideEffects.MACHINE_LOCAL, 0);

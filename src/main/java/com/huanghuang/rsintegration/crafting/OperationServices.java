@@ -8,7 +8,8 @@ import com.huanghuang.rsintegration.crafting.graph.OperationBudget;
 final class OperationServices {
     private final MachineLeaseRegistry machines = new MachineLeaseRegistry();
     private final CaptureLeaseRegistry captures = new CaptureLeaseRegistry();
-    private final OperationBudget globalBudget = new OperationBudget(64, Integer.MAX_VALUE);
+    private final OperationBudget globalBudget = new OperationBudget(
+            Integer.MAX_VALUE, Integer.MAX_VALUE);
     private final OperationResourceCoordinator resources = new OperationResourceCoordinator(
             machines, captures, globalBudget);
     private final OperationExecutionKernel kernel = new OperationExecutionKernel(resources);

@@ -94,11 +94,8 @@ class CraftMachineBindingSupportTest extends BootstrapTest {
 
     @Test
     void cachedExecutionTypeAlsoPrefersTheSpecificSibling() {
-        ModRecipeHandler claimed = mock(ModRecipeHandler.class);
-        when(claimed.modType()).thenReturn(COARSE);
-
         assertSame(SPECIFIC, GenericCraftPacket.modTypeForCachedExecution(
-                claimed, SPECIFIC));
+                COARSE, SPECIFIC));
         assertSame(ModType.GENERIC, GenericCraftPacket.modTypeForCachedExecution(
                 null, null));
     }
@@ -108,7 +105,7 @@ class CraftMachineBindingSupportTest extends BootstrapTest {
         ServerPlayer player = mock(ServerPlayer.class);
         Recipe<?> recipe = mock(Recipe.class);
         ModRecipeHandler handler = mock(ModRecipeHandler.class);
-        when(handler.modType())
+        when(handler.modType(recipe))
                 .thenReturn(ModType.EXTERNAL_INTEGRATION);
 
         try (MockedStatic<ModRecipeHandlers> claims =
@@ -220,18 +217,15 @@ class CraftMachineBindingSupportTest extends BootstrapTest {
 
     @Test
     void cachedExecutionTypeAlsoRefinesTheVanillaFamily() {
-        ModRecipeHandler claimed = mock(ModRecipeHandler.class);
-        when(claimed.modType()).thenReturn(VANILLA_FURNACE);
-
         assertEquals(VANILLA_STONECUTTER,
                 GenericCraftPacket.modTypeForCachedExecution(
-                        claimed, VANILLA_STONECUTTER));
+                        VANILLA_FURNACE, VANILLA_STONECUTTER));
     }
 
     private static MockedStatic<ModRecipeHandlers> claimForVanillaFurnace(
             Recipe<?> recipe) {
         ModRecipeHandler handler = mock(ModRecipeHandler.class);
-        when(handler.modType()).thenReturn(VANILLA_FURNACE);
+        when(handler.modType(recipe)).thenReturn(VANILLA_FURNACE);
         MockedStatic<ModRecipeHandlers> claims =
                 mockStatic(ModRecipeHandlers.class);
         claims.when(() -> ModRecipeHandlers.claimFor(recipe))

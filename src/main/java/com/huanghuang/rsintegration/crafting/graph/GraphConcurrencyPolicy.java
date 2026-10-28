@@ -1,23 +1,14 @@
 package com.huanghuang.rsintegration.crafting.graph;
 
-import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import net.minecraft.core.BlockPos;
 
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
 
 /** Conservative policy gate for cross-node delegate concurrency. */
 public final class GraphConcurrencyPolicy {
-    public enum DelegatePolicy {
-        AUTO,
-        OFF,
-        FORCE_WITH_GUARDS
-    }
-
     public record Decision(boolean exclusive, String reason,
                            BatchConcurrencyCapabilities capabilities) {
         static Decision allow(BatchConcurrencyCapabilities capabilities) {
@@ -36,40 +27,21 @@ public final class GraphConcurrencyPolicy {
     }
 
     public static Decision decide(String modTypeId, IBatchDelegate delegate) {
-        return decide(modTypeId, delegate, null, disabledMods(), delegatePolicies());
+        return decide(modTypeId, delegate, null);
     }
 
     public static Decision decide(String modTypeId, IBatchDelegate delegate,
                                   BatchConcurrencyCapabilities recipeCapabilities) {
-        return decide(modTypeId, delegate, recipeCapabilities, disabledMods(), delegatePolicies());
-    }
-
-    static Decision decide(String modTypeId, IBatchDelegate delegate,
-                           List<? extends String> disabled,
-                           List<? extends String> policies) {
-        return decide(modTypeId, delegate, null, disabled, policies);
-    }
-
-    static Decision decide(String modTypeId, IBatchDelegate delegate,
-                           BatchConcurrencyCapabilities recipeCapabilities,
-                           List<? extends String> disabled,
-                           List<? extends String> policies) {
         if (delegate == null) return Decision.deny("delegate unavailable", null);
-        if (isModDisabled(modTypeId, disabled)) {
-            return Decision.deny("mod disabled by craftingParallelDisabledMods", null);
-        }
-        DelegatePolicy policy = policyFor(modTypeId, delegate, policies);
-        if (policy == DelegatePolicy.OFF) {
-            return Decision.deny("delegate policy is OFF", delegate.concurrencyCapabilities());
-        }
 
+        // 并行能力由委托自身的结构化契约推断，旧的全局禁用列表和
+        // AUTO/OFF 策略不再参与判定。
         BatchConcurrencyCapabilities runtimeCapabilities =
                 delegate.concurrencyCapabilities();
         BatchConcurrencyCapabilities capabilities = recipeCapabilities != null
                 ? runtimeCapabilities == null
                 ? recipeCapabilities
-                : intersectCapabilities(
-                recipeCapabilities, runtimeCapabilities)
+                : intersectCapabilities(recipeCapabilities, runtimeCapabilities)
                 : runtimeCapabilities;
         if (capabilities == null) {
             return Decision.deny("delegate has no concurrency capability", null);
@@ -100,6 +72,11 @@ public final class GraphConcurrencyPolicy {
             return Decision.deny("delegate has non-local side effects: "
                     + capabilities.sideEffects().name().toLowerCase(Locale.ROOT), capabilities);
         }
+        // 猜配方是“同一玩家/同一配方共享候选集”的有状态搜索；两个 worker
+        // 同时猜会互相覆盖进度，因此只允许顺序执行。
+        if (capabilities.sideEffects() == BatchConcurrencyCapabilities.SideEffects.INFER) {
+            return Decision.deny("inference recipes are stateful and must run sequentially", capabilities);
+        }
         return Decision.allow(capabilities);
     }
 
@@ -109,18 +86,22 @@ public final class GraphConcurrencyPolicy {
     ) {
         if (planned == null) return runtime;
         if (runtime == null) return planned;
+        // 运行时 delegate 最了解机器真实产物/清理方式；规划期资格表只是按
+        // 模组类型给出的保守上界。只要运行时契约明确安全，就采用运行时值，
+        // 不能因为“上界”与“实际”不完全相等而把普通机器误判为独占。
         BatchConcurrencyCapabilities.MaterialOwnership materials =
-                planned.materials() == runtime.materials()
-                        ? planned.materials()
-                        : BatchConcurrencyCapabilities.MaterialOwnership.UNKNOWN;
+                runtime.materials() == BatchConcurrencyCapabilities.MaterialOwnership.CHAIN_RESERVED
+                        ? runtime.materials()
+                        : planned.materials();
         BatchConcurrencyCapabilities.OutputOwnership outputOwnership =
-                planned.outputOwnership() == runtime.outputOwnership()
+                runtime.outputOwnership() == BatchConcurrencyCapabilities.OutputOwnership.AMBIGUOUS
+                        || runtime.outputOwnership() == BatchConcurrencyCapabilities.OutputOwnership.ENTITY
                         ? planned.outputOwnership()
-                        : BatchConcurrencyCapabilities.OutputOwnership.AMBIGUOUS;
+                        : runtime.outputOwnership();
         BatchConcurrencyCapabilities.CleanupContract cleanup =
-                planned.cleanup() == runtime.cleanup()
-                        ? planned.cleanup()
-                        : BatchConcurrencyCapabilities.CleanupContract.UNKNOWN;
+                runtime.cleanup() == BatchConcurrencyCapabilities.CleanupContract.SEPARABLE_OFFLINE
+                        ? runtime.cleanup()
+                        : planned.cleanup();
         BatchConcurrencyCapabilities.PreparationContract preparation =
                 stricterPreparation(
                         planned.preparation(),
@@ -131,8 +112,11 @@ public final class GraphConcurrencyPolicy {
                         ? planned.sideEffects()
                         : runtime.sideEffects();
         // 运行时 descriptor 知道真实多方块/底座位置；规划期 offsets 只是
-        // 选机器前的最坏范围，不能在执行期继续扩大租约范围。
-        List<BlockPos> support = runtime.supportOffsets();
+        // 选机器前的最坏范围，不能在执行期继续扩大租约范围。普通机器没有
+        // 运行时 support 时，采用配方资格表给出的保守范围（祭坛/仪式）。
+        List<BlockPos> support = runtime.supportOffsets().isEmpty()
+                ? planned.supportOffsets()
+                : runtime.supportOffsets();
         return new BatchConcurrencyCapabilities(
                 materials,
                 outputOwnership,
@@ -171,63 +155,4 @@ public final class GraphConcurrencyPolicy {
         };
     }
 
-    static boolean isModDisabled(String modTypeId, List<? extends String> disabled) {
-        if (modTypeId == null || disabled == null || disabled.isEmpty()) return false;
-        Set<String> normalized = new HashSet<>();
-        for (String entry : disabled) {
-            if (entry != null && !entry.isBlank()) normalized.add(entry.trim().toLowerCase(Locale.ROOT));
-        }
-        return normalized.contains(modTypeId.toLowerCase(Locale.ROOT));
-    }
-
-    static DelegatePolicy policyFor(String modTypeId, IBatchDelegate delegate,
-                                    List<? extends String> policies) {
-        if (policies == null || policies.isEmpty()) return DelegatePolicy.AUTO;
-        String mod = normalize(modTypeId);
-        String className = normalize(delegate.getClass().getName());
-        String simpleName = normalize(delegate.getClass().getSimpleName());
-        DelegatePolicy selected = DelegatePolicy.AUTO;
-        int selectedSpecificity = -1;
-        for (String entry : policies) {
-            if (entry == null) continue;
-            int separator = entry.lastIndexOf('=');
-            if (separator <= 0 || separator == entry.length() - 1) continue;
-            String key = normalize(entry.substring(0, separator));
-            DelegatePolicy value;
-            try {
-                value = DelegatePolicy.valueOf(entry.substring(separator + 1)
-                        .trim().toUpperCase(Locale.ROOT));
-            } catch (IllegalArgumentException ignored) {
-                continue;
-            }
-            int specificity = key.equals(className) ? 3
-                    : key.equals(simpleName) ? 2
-                    : key.equals(mod) ? 1 : -1;
-            if (specificity > selectedSpecificity) {
-                selected = value;
-                selectedSpecificity = specificity;
-            }
-        }
-        return selected;
-    }
-
-    private static String normalize(String value) {
-        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
-    }
-
-    private static List<? extends String> disabledMods() {
-        try {
-            return RSIntegrationConfig.CRAFTING_PARALLEL_DISABLED_MODS.get();
-        } catch (Exception ignored) {
-            return List.of();
-        }
-    }
-
-    private static List<? extends String> delegatePolicies() {
-        try {
-            return RSIntegrationConfig.CRAFTING_PARALLEL_DELEGATE_POLICIES.get();
-        } catch (Exception ignored) {
-            return List.of();
-        }
-    }
 }

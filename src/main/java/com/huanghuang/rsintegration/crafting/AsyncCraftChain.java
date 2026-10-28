@@ -138,6 +138,18 @@ import java.util.function.Predicate;
 public final class AsyncCraftChain {
     private static final LogSampler GRAPH_RETRY_LOGS = new LogSampler(2_000L);
     private static final int GRAPH_RETRY_MAX_DELAY_TICKS = 40;
+    /**
+     * 机器被占用时的重试上限。机器通常几个 tick 内就会释放，用 40 tick 的退避会让
+     * 一条需要同一台机器的链退化成“每 2 秒才推进一步”（例如切石机连环切割）。
+     */
+    private static final int GRAPH_RETRY_MACHINE_BUSY_MAX_DELAY_TICKS = 6;
+    /** 绑定机器全被占用/未加载时的等待原因。 */
+    private static final String MACHINE_BUSY_DETAIL =
+            "all bound machines are busy, unloaded, or unavailable";
+    /** 属于“机器暂时不可用”的等待原因；这些原因不需要长时间退避。 */
+    private static final List<String> MACHINE_WAIT_DETAILS = List.of(
+            MACHINE_BUSY_DETAIL,
+            "operation budget, machine, or capture is temporarily unavailable");
     /** 同一个节点连续等待到达这个次数后，向玩家提示一次具体原因，避免只看到“准备中”。 */
     private static final int GRAPH_RETRY_NOTIFY_ATTEMPTS = 5;
     /** 图节点连续重试超过这个时长仍未推进，就判定为卡死并中止，避免整条链永远停在“准备中”。 */
@@ -191,6 +203,10 @@ public final class AsyncCraftChain {
     private int taintSlot = -1;
     private int taintRemaining;
     private int taintWaitTicks;
+    @Nullable
+    private NodeId earthHeartTaintNodeId;
+    /** 图模式下从 MaterialBroker 预留里取出、等待逐个污染的大地之心。 */
+    private final List<ItemStack> taintHeartQueue = new ArrayList<>();
     private String abortReason = "";
     private CraftFailureCode failureCode = CraftFailureCode.NONE;
     private TerminationCoordinator.Cause terminalCause;
@@ -264,8 +280,12 @@ public final class AsyncCraftChain {
     private final Map<String, Integer> graphRetryCounts = new HashMap<>();
     /** 每个节点第一次进入等待的 tick，用于判定“卡死”。 */
     private final Map<NodeId, Integer> graphRetrySinceTick = new HashMap<>();
-    /** 已经向玩家提示过“长时间等待”的节点，避免同一次等待反复刷屏。 */
-    private final Set<NodeId> graphRetryNotified = new HashSet<>();
+    /** 已经提示过的等待原因（按原因去重）：同一条链上十几个节点等同一台机器时只提示一次。 */
+    private final Set<String> graphRetryNotified = new HashSet<>();
+    /** 正在等机器的节点，机器租约一释放就立刻给它们一次机会。 */
+    private final Set<NodeId> graphMachineWaits = new HashSet<>();
+    /** 等待机器时记录的租约释放计数，用于判断等待期间是否有机器空出来。 */
+    private final Map<NodeId, Long> graphMachineWaitMarks = new HashMap<>();
     @Nullable
     private final MaterialBroker graphMaterials;
     @Nullable
@@ -402,32 +422,13 @@ public final class AsyncCraftChain {
                 AsyncCraftManager.getInstance()::enqueueCompletion);
         this.ledger.setLogContext(ctx);
         if (this.storageEndpoint != null) this.ledger.setStorageEndpoint(this.storageEndpoint);
-        int cap;
-        try { cap = RSIntegrationConfig.CRAFTING_MAX_CONCURRENT_GRAPH_NODES.get(); }
-        catch (Exception e) { cap = 1; }
-        this.graphRunningNodeCap = Math.max(1, cap);
-        int dispatchPerTick;
-        int dispatchPerCraft;
-        try {
-            dispatchPerTick = RSIntegrationConfig.CRAFTING_GRAPH_DISPATCH_PER_TICK.get();
-            dispatchPerCraft = RSIntegrationConfig.CRAFTING_GRAPH_DISPATCH_PER_CRAFT.get();
-        } catch (Exception e) {
-            dispatchPerTick = 2;
-            dispatchPerCraft = 8192;
-        }
-        this.graphDispatchPerTick = Math.max(1, dispatchPerTick);
-        this.graphDispatchPerCraft = Math.max(1, dispatchPerCraft);
-        int operationCap;
-        int operationStarts;
-        try {
-            operationCap = RSIntegrationConfig.CRAFTING_MAX_CONCURRENT_OPERATIONS.get();
-            operationStarts = RSIntegrationConfig.CRAFTING_OPERATION_DISPATCH_PER_CRAFT.get();
-        } catch (Exception e) {
-            operationCap = 4;
-            operationStarts = 16384;
-        }
+        // 并行/派发上限不再由配置写死：图节点、每 tick 派发和机器操作都由
+        // DAG 依赖、机器租约与材料预留自然决定。
+        this.graphRunningNodeCap = Integer.MAX_VALUE;
+        this.graphDispatchPerTick = Integer.MAX_VALUE;
+        this.graphDispatchPerCraft = Integer.MAX_VALUE;
         this.craftOperationBudget = new OperationBudget(
-                Math.max(1, operationCap), Math.max(1, operationStarts));
+                Integer.MAX_VALUE, Integer.MAX_VALUE);
         AsyncCraftManager manager = AsyncCraftManager.getInstance();
         this.globalOperationBudget = manager.operationBudget();
         this.machineLeases = manager.machineLeases();
@@ -958,7 +959,7 @@ public final class AsyncCraftChain {
 
         // Execute next step(s)
         CraftingResolver.ResolutionStep step = steps.get(currentStepIdx);
-        if (step.recipeId().equals(CraftingResolver.TAINT_EARTH_HEART_STEP)) {
+        if (isEarthHeartTaintStep(step)) {
             if (!startEarthHeartTaint(online, step.executions())) return true;
             return false;
         }
@@ -1624,8 +1625,11 @@ public final class AsyncCraftChain {
 
     private boolean isConcurrentGraphNode(NodeId nodeId) {
         CraftingResolver.ResolutionStep step = graphStep(nodeId);
+        // 大地之心污染虽然不是 GENERIC 普通批处理，但也不能交给
+        // settleReadyVanillaNodes 的批处理路径；把它交给图执行器，
+        // 由 startAdmittedGraphNode 的同步污染分支处理。
         return step.modType() != ModType.GENERIC
-                && !step.recipeId().equals(CraftingResolver.TAINT_EARTH_HEART_STEP);
+                || isEarthHeartTaintStep(step);
     }
 
     /**
@@ -1670,7 +1674,8 @@ public final class AsyncCraftChain {
                 new GraphConcurrencyEligibility.Context(
                         step.modType().id(),
                         recipeClass,
-                        step.inferMode()));
+                        // 已猜出代码的 Embers 配方不再按“推断中”处理，可正常并行。
+                        step.inferMode() && !embersCodeKnown(step)));
         return GraphConcurrencyPolicy.decide(
                 step.modType().id(), delegate, recipeCapability);
     }
@@ -1745,7 +1750,7 @@ public final class AsyncCraftChain {
         if (graphAdmissions == null) return ConcurrentNodeExecutor.StartResult.failed();
         int currentTick = server.getTickCount();
         Integer retryUntil = graphRetryUntilTick.get(nodeId);
-        if (retryUntil != null && currentTick < retryUntil) {
+        if (retryUntil != null && currentTick < retryUntil && !wakeOnMachineRelease(nodeId)) {
             return ConcurrentNodeExecutor.StartResult.retry();
         }
         if (graph != null && !CraftPlanningRevision.isCurrent(graph.planningRevision())) {
@@ -1755,15 +1760,10 @@ public final class AsyncCraftChain {
         }
         CraftingResolver.ResolutionStep step = graphStep(nodeId);
 
-        if (step.modType() == ModType.GENERIC) {
-            graphFailureDetails.put(nodeId,
-                    "synchronous generic node reached concurrent graph dispatcher");
-            graphFailureCodes.put(nodeId, CraftFailureCode.INTERNAL_ERROR);
-            return ConcurrentNodeExecutor.StartResult.failed();
-        }
-
-        // Earth Heart is synchronous and owns no machine/capture resources.
-        if (step.recipeId().equals(CraftingResolver.TAINT_EARTH_HEART_STEP)) {
+        // Earth Heart 是同步步骤，但它的 modType 是 GENERIC；必须在通用节点
+        // 拒绝逻辑之前识别，否则图执行器会把它当成“同步 generic 节点”直接失败，
+        // 导致大地之心永远不会被放进玩家背包。
+        if (isEarthHeartTaintStep(step)) {
             NodeAdmissionCoordinator.Candidate candidate = new NodeAdmissionCoordinator.Candidate(
                     nodeId, graphRequests.getOrDefault(nodeId, List.of()));
             NodeAdmissionCoordinator.Admission admission = graphAdmissions.tryAdmitClaimed(candidate);
@@ -1771,24 +1771,42 @@ public final class AsyncCraftChain {
                 return graphRetry(nodeId, "material admission unavailable",
                         candidate.materialRequests());
             }
-            if (!startEarthHeartTaint(online, step.executions())) {
+            // 图模式下上游产物通常保存在 MaterialBroker 的 producer 资产里，
+            // 不会自动进入 virtualInventory；必须用本节点的预留取出大地之心。
+            taintHeartQueue.clear();
+            if (graphMaterials != null) {
+                MaterialBroker.Checkout checkout = graphMaterials.checkout(admission.materialToken());
+                List<ItemStack> reservedHearts = new ArrayList<>();
+                reservedHearts.addAll(checkout.initialStacks());
+                reservedHearts.addAll(checkout.producerStacks());
+                for (ItemStack stack : reservedHearts) {
+                    if (!isPlainEarthHeart(stack)) continue;
+                    int take = Math.min(stack.getCount(),
+                            Math.max(0, step.executions() - taintHeartQueue.size()));
+                    for (int i = 0; i < take; i++) {
+                        taintHeartQueue.add(stack.copyWithCount(1));
+                    }
+                }
+            }
+            if (!startEarthHeartTaint(online, step.executions(), nodeId)) {
                 graphAdmissions.releaseMaterial(admission);
                 return ConcurrentNodeExecutor.StartResult.failed();
             }
             clearGraphRetry(nodeId);
             graphAdmissions.commit(admission);
             graphAdmissions.settleMaterial(admission);
-            if (!publishDeclaredNodeOutputs(nodeId, virtualInventory)) {
-                return ConcurrentNodeExecutor.StartResult.failed();
-            }
-            return ConcurrentNodeExecutor.StartResult.completed();
+            // 污染是异步等待玩家背包里的物品被转化，不能立即标记完成；
+            // 由 worker 在状态机完成后返回 SUCCEEDED，再发布产物。
+            return ConcurrentNodeExecutor.StartResult.started(new EarthHeartTaintWorker());
         }
 
-        if (craftOperationBudget.availableCapacity() <= 0
-                || globalOperationBudget.availableCapacity() <= 0) {
-            return graphRetry(nodeId, "operation budget temporarily unavailable",
-                    graphRequests.getOrDefault(nodeId, List.of()));
+        if (step.modType() == ModType.GENERIC) {
+            graphFailureDetails.put(nodeId,
+                    "synchronous generic node reached concurrent graph dispatcher");
+            graphFailureCodes.put(nodeId, CraftFailureCode.INTERNAL_ERROR);
+            return ConcurrentNodeExecutor.StartResult.failed();
         }
+
         PreparationResult preparation = prepareGraphNode(nodeId, step, online);
         if (preparation.state() == PreparationState.RETRY) {
             machineWaitNotifier.notifyWait(online, preparation.userMessage());
@@ -1853,18 +1871,52 @@ public final class AsyncCraftChain {
             clearGraphRetry(nodeId);
             return ConcurrentNodeExecutor.StartResult.failed();
         }
-        int delay = Math.min(GRAPH_RETRY_MAX_DELAY_TICKS, 1 << attempts);
+        int delay = retryDelayTicks(detail, attempts);
         graphRetryUntilTick.put(nodeId, now + delay);
+        if (isMachineWait(detail)) {
+            graphMachineWaits.add(nodeId);
+            graphMachineWaitMarks.put(nodeId, machineLeases.releaseCount());
+        } else {
+            graphMachineWaits.remove(nodeId);
+            graphMachineWaitMarks.remove(nodeId);
+        }
         logGraphRetry(nodeId, detail, requests);
         notifySlowRetry(nodeId, detail);
         return ConcurrentNodeExecutor.StartResult.retry();
     }
 
+    /** 机器类等待用短退避，材料类等待保留长退避，避免把“等材料”变成忙轮询。 */
+    static int retryDelayTicks(String detail, int attempts) {
+        int cap = isMachineWait(detail)
+                ? GRAPH_RETRY_MACHINE_BUSY_MAX_DELAY_TICKS
+                : GRAPH_RETRY_MAX_DELAY_TICKS;
+        int bounded = Math.max(1, Math.min(attempts, 6));
+        return Math.min(cap, 1 << bounded);
+    }
+
+    static boolean isMachineWait(String detail) {
+        return detail != null && MACHINE_WAIT_DETAILS.contains(detail);
+    }
+
+    /**
+     * 等待机器时退避可能还剩几十 tick，但机器在这期间已经空出来了。
+     * 每发生一次租约释放就给等待中的节点补一次机会，避免“机器空闲却还在睡”。
+     */
+    private boolean wakeOnMachineRelease(NodeId nodeId) {
+        if (!graphMachineWaits.contains(nodeId)) return false;
+        long released = machineLeases.releaseCount();
+        Long mark = graphMachineWaitMarks.get(nodeId);
+        if (mark == null || mark == released) return false;
+        graphMachineWaitMarks.put(nodeId, released);
+        return true;
+    }
+
     private void clearGraphRetry(NodeId nodeId) {
         graphRetryUntilTick.remove(nodeId);
         graphRetryAttempts.remove(nodeId);
-        graphRetryNotified.remove(nodeId);
         graphRetrySinceTick.remove(nodeId);
+        graphMachineWaits.remove(nodeId);
+        graphMachineWaitMarks.remove(nodeId);
     }
 
     /**
@@ -1873,7 +1925,9 @@ public final class AsyncCraftChain {
      */
     private void notifySlowRetry(NodeId nodeId, String detail) {
         if (graphRetryAttempts.getOrDefault(nodeId, 0) < GRAPH_RETRY_NOTIFY_ATTEMPTS) return;
-        if (!graphRetryNotified.add(nodeId)) return;
+        // 按原因去重：同一条链上常有十几个节点在等同一台机器，
+        // 逐节点提示会让聊天栏出现十几行一模一样的话。
+        if (!graphRetryNotified.add(detail)) return;
         ServerPlayer online = resolvePlayer();
         if (online == null) return;
         online.sendSystemMessage(Component.translatable("rsi.async.wait.slow", detail));
@@ -1901,15 +1955,25 @@ public final class AsyncCraftChain {
     static boolean validatePreparedDelegate(
             IBatchDelegate delegate, ServerPlayer player, ResourceLocation recipeId,
             @Nullable ResourceLocation dimension, BlockPos position) {
-        boolean ready = false;
+        return prepareDelegate(delegate, player, recipeId, dimension, position)
+                .state() == IBatchDelegate.PreparationState.READY;
+    }
+
+    static IBatchDelegate.PreparationResult prepareDelegate(
+            IBatchDelegate delegate, ServerPlayer player, ResourceLocation recipeId,
+            @Nullable ResourceLocation dimension, BlockPos position) {
+        IBatchDelegate.PreparationResult result;
         try {
-            IBatchDelegate.PreparationResult result = PreparationMessageScope.prepare(
+            result = PreparationMessageScope.prepare(
                     delegate, player, recipeId, dimension, position);
-            ready = result.state() == IBatchDelegate.PreparationState.READY;
-            return ready;
-        } finally {
-            if (!ready) releasePreparationQuietly(delegate);
+        } catch (RuntimeException exception) {
+            releasePreparationQuietly(delegate);
+            throw exception;
         }
+        if (result.state() != IBatchDelegate.PreparationState.READY) {
+            releasePreparationQuietly(delegate);
+        }
+        return result;
     }
 
     private static void releasePreparationQuietly(IBatchDelegate delegate) {
@@ -1997,7 +2061,7 @@ public final class AsyncCraftChain {
         available = MachineDispatchPlanner.filterUnleased(
                 available, machineLeases, step.modType().id());
         if (available.isEmpty()) {
-            return PreparationResult.retry("all bound machines are busy, unloaded, or unavailable");
+            return PreparationResult.retry(MACHINE_BUSY_DETAIL);
         }
         List<BoundMachine> eligible = new ArrayList<>();
         releasePreparationQuietly(delegate);
@@ -2006,6 +2070,7 @@ public final class AsyncCraftChain {
         boolean retryableRejection = false;
         boolean protectionRejection = false;
         String fatalDetail = "";
+        String firstRetryDetail = "";
         Component fatalUserMessage = null;
         Component retryUserMessage = null;
         for (BoundMachine machine : available) {
@@ -2056,6 +2121,9 @@ public final class AsyncCraftChain {
                     eligible.add(machine);
                 } else if (result.state() == IBatchDelegate.PreparationState.RETRY) {
                     retryableRejection = true;
+                    if (firstRetryDetail.isEmpty() && result.detail() != null) {
+                        firstRetryDetail = result.detail();
+                    }
                     if (retryUserMessage == null) {
                         retryUserMessage = result.userMessage();
                     }
@@ -2081,22 +2149,26 @@ public final class AsyncCraftChain {
             }
             String retryDetail = validationThrew
                     ? "delegate validation temporarily failed on every available machine"
-                    : "no available machine currently accepts the recipe";
+                    : !firstRetryDetail.isEmpty()
+                            ? firstRetryDetail
+                            : "no available machine currently accepts the recipe";
             return retryUserMessage == null
                     ? PreparationResult.retry(retryDetail)
                     : PreparationResult.waiting(retryDetail, retryUserMessage);
         }
         int desiredOperations = Math.max(1, step.executions());
-        int availableOperations = Math.min(craftOperationBudget.availableCapacity(),
-                globalOperationBudget.availableCapacity());
-        boolean bufferedNode = canBufferEntireGraphNode(delegate, desiredOperations);
-        boolean operationGroup = shouldUseGraphOperationGroup(desiredOperations, availableOperations)
-                && !bufferedNode;
-        if (requiresGraphOperationSlot(desiredOperations, bufferedNode, operationGroup)) {
-            return PreparationResult.retry(
-                    "operation budget is temporarily unavailable for a repeated graph node");
-        }
+        // 配置里的并发上限已经移除，剩余操作数就是可用容量；真正的并行度
+        // 由可用机器数、材料复用上限和 delegate 契约共同决定。
+        int availableOperations = desiredOperations;
         boolean concurrencySafe = !concurrencyDecision(step, delegate).exclusive();
+        // 输入缓冲只能让“一台”机器整批吞下操作；只要存在多台可并行机器，
+        // 就应拆成并行组，让每台机器各自缓冲自己的份额，而不是把 11 个
+        // 操作全部塞进第一台熔炉。
+        boolean bufferedNode = canBufferEntireGraphNode(delegate, desiredOperations)
+                && (eligible.size() <= 1 || !concurrencySafe);
+        boolean operationGroup = shouldUseGraphOperationGroup(desiredOperations, availableOperations)
+                && !bufferedNode && concurrencySafe;
+        // 不能并行不是错误：退回单 worker 顺序执行，绝不能让节点无限重试。
         MaterialPlan delegateMaterials = materialPlanFor(delegate);
         boolean workerReusable = !delegateMaterials.reusableEntries().isEmpty();
         int operationCost = operationGroup
@@ -2108,6 +2180,10 @@ public final class AsyncCraftChain {
                     reusableWorkerCapacity(delegateMaterials.legacyGraphSpecs(),
                             online, storageEndpoint)));
         }
+        RSIntegrationMod.debug(
+                "[RSI-GraphConcurrency] node={} machines={} eligible={} operations={} buffered={} safe={} workers={} reusable={}",
+                step.recipeId(), machines.size(), eligible.size(), desiredOperations,
+                bufferedNode, concurrencySafe, operationCost, workerReusable);
         return PreparationResult.ready(
                 new PreparedGraphNode(step, delegate, eligible, operationCost, operationGroup));
     }
@@ -2256,14 +2332,18 @@ public final class AsyncCraftChain {
             if (prepared.parallelGroup()) {
                 List<BoundMachine> workers = new ArrayList<>(
                         prepared.machines().subList(0, prepared.operationCost()));
+                // 原 delegate 已经在 prepareGraphNode 里完成过 prepare；
+                // 若机器带独占锁（如 Embers 炼金台），必须先释放它，
+                // 否则新建的 worker 子 delegate 会拿不到同一把锁，永远 RETRY。
+                releasePreparationQuietly(delegate);
                 var groupCapability = concurrencyDecision(prepared.step(), delegate).capabilities();
                 ParallelCraftGroup group = new ParallelCraftGroup(workers,
                         prepared.step().modType(), prepared.step().recipeId(), online,
                         prepared.step().executions(), prepared.step().inferMode(), groupCapability,
                         storageEndpoint);
-                if (validatePreparedDelegate(
-                        group, online, prepared.step().recipeId(), null, BlockPos.ZERO)) {
-                    releasePreparationQuietly(delegate);
+                IBatchDelegate.PreparationResult groupPreparation = prepareDelegate(
+                        group, online, prepared.step().recipeId(), null, BlockPos.ZERO);
+                if (groupPreparation.state() == IBatchDelegate.PreparationState.READY) {
                     delegate = group;
                     group.setMachineServer(server);
                     ItemStack nodeTarget = graphNodeTargetOutput(graphNodes.get(nodeId));
@@ -2280,7 +2360,9 @@ public final class AsyncCraftChain {
                     }
                 } else {
                     return GraphDispatchResult.retry(
-                            "operation group could not prepare a worker for serial dispatch");
+                            "operation group could not prepare a worker for serial dispatch"
+                                    + (groupPreparation.detail().isBlank()
+                                    ? "" : ": " + groupPreparation.detail()));
                 }
             }
             boolean parallelGroup = delegate instanceof ParallelCraftGroup;
@@ -3202,6 +3284,26 @@ public final class AsyncCraftChain {
         throw new IllegalArgumentException("Unknown graph node " + nodeId);
     }
 
+    private final class EarthHeartTaintWorker implements ConcurrentNodeExecutor.Worker {
+        @Override
+        public ConcurrentNodeExecutor.Observation observe() {
+            if (state == State.ABORTED) return ConcurrentNodeExecutor.Observation.FAILED;
+            if (state == State.WAITING_PLAYER_TRANSFORMATION || taintRemaining > 0) {
+                return ConcurrentNodeExecutor.Observation.WORKING;
+            }
+            return ConcurrentNodeExecutor.Observation.SUCCEEDED;
+        }
+    }
+
+    /**
+     * 大地之心污染是同步步骤，但它的配方 id 被建模为 GENERIC；图执行器必须
+     * 在拒绝 GENERIC 节点之前先识别它，否则该步骤永远不会真正执行。
+     */
+    static boolean isEarthHeartTaintStep(CraftingResolver.ResolutionStep step) {
+        return step != null
+                && CraftingResolver.TAINT_EARTH_HEART_STEP.equals(step.recipeId());
+    }
+
     private CraftingResolver.ResolutionStep graphStep(NodeId nodeId) {
         CraftNode node = graphNodes.get(nodeId);
         if (node == null) throw new IllegalArgumentException("Unknown graph node " + nodeId);
@@ -3480,22 +3582,35 @@ public final class AsyncCraftChain {
     }
 
     private boolean startEarthHeartTaint(ServerPlayer player, int count) {
+        return startEarthHeartTaint(player, count, null);
+    }
+
+    private boolean startEarthHeartTaint(ServerPlayer player, int count, @Nullable NodeId nodeId) {
+        // 旧语义要求手动把大地之心放进玩家背包再污染；没有诅咒之戒也应
+        // 保留这条路径，只提示玩家，而不是直接中止整个合成。
         if (!hasEquippedCursedRing(player)) {
-            abort("Earth Heart tainting requires an equipped Cursed Ring", Component.translatable("rsi.async.earth_heart.error.cursed_ring_required"));
-            return false;
+            player.sendSystemMessage(Component.translatable(
+                    "rsi.async.earth_heart.warn.cursed_ring_missing"));
         }
         int slot = player.getInventory().getFreeSlot();
         if (slot < 0 || slot >= player.getInventory().items.size()) {
             abort("Earth Heart tainting requires an empty main-inventory slot", Component.translatable("rsi.async.earth_heart.error.empty_slot_required"));
             return false;
         }
-        ResourceLocation heartId = new ResourceLocation("enigmaticlegacy", "earth_heart");
         ItemStack heart = ItemStack.EMPTY;
-        for (ItemStack vi : virtualInventory) {
-            if (heartId.equals(ForgeRegistries.ITEMS.getKey(vi.getItem()))
-                    && (vi.getTag() == null || !vi.getTag().getBoolean("isTainted"))) {
-                heart = vi.split(1);
+        while (!taintHeartQueue.isEmpty()) {
+            ItemStack queued = taintHeartQueue.remove(0);
+            if (isPlainEarthHeart(queued)) {
+                heart = queued.copyWithCount(1);
                 break;
+            }
+        }
+        if (heart.isEmpty()) {
+            for (ItemStack vi : virtualInventory) {
+                if (isPlainEarthHeart(vi)) {
+                    heart = vi.split(1);
+                    break;
+                }
             }
         }
         if (heart.isEmpty()) {
@@ -3507,7 +3622,10 @@ public final class AsyncCraftChain {
         this.taintSlot = slot;
         this.taintRemaining = Math.max(1, count);
         this.taintWaitTicks = 0;
+        this.earthHeartTaintNodeId = nodeId;
         this.state = State.WAITING_PLAYER_TRANSFORMATION;
+        RSIntegrationMod.LOGGER.info(ctx.format(
+                "Earth Heart taint started: slot={} count={}"), slot, taintRemaining);
         // Heart is now physically in the player's slot, not virtualInventory -
         // snapshot so an abort mid-taint doesn't re-mint it into the network
         // while it also sits in the player's inventory.
@@ -3516,8 +3634,39 @@ public final class AsyncCraftChain {
         return true;
     }
 
+    /**
+     * 图执行器不会为纯 worker 节点做增量产物发布；污染完成的大地之心必须
+     * 主动写回该节点的 ProducerOutput，否则下游节点永远等不到材料。
+     */
+    private void publishTaintedEarthHeart(NodeId nodeId, ItemStack tainted, ServerPlayer player) {
+        CraftNode node = graphNodes.get(nodeId);
+        if (graphMaterials == null || node == null || node.outputs().isEmpty()) {
+            addToVirtualInventory(tainted);
+            return;
+        }
+        OutputDeclaration output = node.outputs().get(0);
+        ItemStack published = MaterialMatcher.alignToDeclaration(output.material(), tainted);
+        try {
+            graphMaterials.publishActual(
+                    new MaterialSource.ProducerOutput(output.id()), output.material(), published);
+        } catch (RuntimeException exception) {
+            RSIntegrationMod.LOGGER.warn(ctx.format(
+                    "Failed to publish tainted Earth Heart for node={}; falling back to virtual inventory"),
+                    nodeId, exception);
+            addToVirtualInventory(tainted);
+        }
+        MaterialSources.invalidateFor(player);
+    }
+
+    private static boolean isPlainEarthHeart(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return false;
+        if (!new ResourceLocation("enigmaticlegacy", "earth_heart")
+                .equals(ForgeRegistries.ITEMS.getKey(stack.getItem()))) return false;
+        return stack.getTag() == null || !stack.getTag().getBoolean("isTainted");
+    }
+
     private boolean tickEarthHeartTaint(ServerPlayer player) {
-        if (++taintWaitTicks > 100) {
+        if (++taintWaitTicks > 1200) {
             abortWithoutRefund("Earth Heart tainting timed out; the heart remains in your inventory",
                     Component.translatable("rsi.async.earth_heart.error.timeout"),
                     CraftFailureCode.TIMEOUT);
@@ -3542,13 +3691,21 @@ public final class AsyncCraftChain {
         ItemStack recovered = stack.split(1);
         if (stack.isEmpty()) player.getInventory().items.set(taintSlot, ItemStack.EMPTY);
         player.getInventory().setChanged();
-        addToVirtualInventory(recovered);
+        if (earthHeartTaintNodeId != null) {
+            publishTaintedEarthHeart(earthHeartTaintNodeId, recovered, player);
+        } else {
+            addToVirtualInventory(recovered);
+        }
         taintRemaining--;
+        RSIntegrationMod.LOGGER.info(ctx.format(
+                "Earth Heart tainted: remaining={} slot={} node={}"),
+                taintRemaining, taintSlot, earthHeartTaintNodeId);
         taintSlot = -1;
         if (taintRemaining > 0) {
             state = State.EXECUTING;
-            return !startEarthHeartTaint(player, taintRemaining);
+            return !startEarthHeartTaint(player, taintRemaining, earthHeartTaintNodeId);
         }
+        earthHeartTaintNodeId = null;
         currentStepIdx++;
         state = State.EXECUTING;
         // Tainted heart is back in virtualInventory and this taint step is done -
@@ -5978,19 +6135,25 @@ public final class AsyncCraftChain {
     //  delegate factory
 
     private IBatchDelegate createStepDelegate(CraftingResolver.ResolutionStep step) {
-        boolean codeKnown = false;
-        if (step.inferMode()
-                && ModIds.ID_EMBERS_ALCHEMY
-                .equals(step.modType().id())) {
-            ServerPlayer player = resolvePlayer();
-            ServerLevel dataLevel = player != null ? player.serverLevel() : server.overworld();
-            KnownCodeSavedData savedData = KnownCodeSavedData.get(dataLevel);
-            savedData.setWorldSeed(dataLevel.getSeed());
-            codeKnown = savedData.hasCode(step.recipeId().toString());
-        }
+        boolean codeKnown = embersCodeKnown(step);
         boolean useInference = EreAlchemyDelegateMode.shouldUseInference(
                 step.modType().id(), step.inferMode(), codeKnown);
         return useInference ? step.modType().createInferDelegate() : createDelegate(step.modType());
+    }
+
+    /**
+     * Embers 的配方代码一旦已经猜出（缓存或已保存），后续合成就不再是“推断中”，
+     * 应与固定配方一样允许并行；只有真正未知的推断才保持独占。
+     */
+    private boolean embersCodeKnown(CraftingResolver.ResolutionStep step) {
+        if (!step.inferMode() || !ModIds.ID_EMBERS_ALCHEMY.equals(step.modType().id())) {
+            return false;
+        }
+        ServerPlayer player = resolvePlayer();
+        ServerLevel dataLevel = player != null ? player.serverLevel() : server.overworld();
+        KnownCodeSavedData savedData = KnownCodeSavedData.get(dataLevel);
+        savedData.setWorldSeed(dataLevel.getSeed());
+        return savedData.hasCode(step.recipeId().toString());
     }
 
     private IBatchDelegate createStepDelegate(CraftingResolver.ResolutionStep step,

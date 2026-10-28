@@ -25,12 +25,22 @@ import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ParallelCraftGroupSchedulingTest extends BootstrapTest {
+
+    @Test
+    void balancedSharesPreferCeilForEarlierWorkers() {
+        assertArrayEquals(new int[]{2, 1}, ParallelCraftGroup.balancedShares(3, 2));
+        assertArrayEquals(new int[]{1, 1, 1}, ParallelCraftGroup.balancedShares(3, 3));
+        assertArrayEquals(new int[]{2, 1, 1}, ParallelCraftGroup.balancedShares(4, 3));
+        assertArrayEquals(new int[0], ParallelCraftGroup.balancedShares(0, 3));
+        assertArrayEquals(new int[0], ParallelCraftGroup.balancedShares(3, 0));
+    }
 
     @Test
     void waitingDiagnosticsRequireNoProgressAndAreRateLimited() {
@@ -40,6 +50,15 @@ class ParallelCraftGroupSchedulingTest extends BootstrapTest {
         assertTrue(ParallelCraftGroup.shouldReportWait(700, 0, 100));
         assertFalse(ParallelCraftGroup.shouldReportWait(700, 650, 100));
         assertFalse(ParallelCraftGroup.shouldReportWait(700, -1, -1));
+    }
+
+    @Test
+    void stalledStartIsAbortedAfterTimeout() {
+        assertFalse(ParallelCraftGroup.shouldAbortStalledStart(1199, 0, 2, 0));
+        assertTrue(ParallelCraftGroup.shouldAbortStalledStart(1200, 0, 2, 0));
+        assertFalse(ParallelCraftGroup.shouldAbortStalledStart(1200, 0, 2, 1));
+        assertFalse(ParallelCraftGroup.shouldAbortStalledStart(1200, -1, 2, 0));
+        assertFalse(ParallelCraftGroup.shouldAbortStalledStart(1200, 0, 0, 0));
     }
 
     @Test

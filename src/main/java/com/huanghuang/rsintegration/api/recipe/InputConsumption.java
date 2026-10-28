@@ -84,4 +84,15 @@ public record InputConsumption(
         return new InputConsumption(
                 Kind.FUEL, 0, burnTicksPerOperation, outputPortId);
     }
+
+    /**
+     * 该输入是否按“每台并行 worker 预留一份”处理。
+     *
+     * <p>催化剂和耐久工具不会被单次操作消耗掉整份库存：并行执行时每台机器
+     * 各需要一份，因此可并行机器数受库存数量限制。燃料不是复用材料，它按
+     * 每个 worker 的实际操作数分别计算燃烧时间。</p>
+     */
+    public boolean reusableWithinWorkerBatch() {
+        return kind == Kind.CATALYST || kind == Kind.DURABILITY;
+    }
 }

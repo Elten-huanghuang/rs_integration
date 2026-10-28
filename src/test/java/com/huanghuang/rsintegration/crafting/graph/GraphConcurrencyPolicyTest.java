@@ -17,6 +17,8 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.phys.AABB;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -28,26 +30,18 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class GraphConcurrencyPolicyTest extends BootstrapTest {
 
     @Test
-    void disabledModOverridesDelegateCapability() {
-        assertTrue(GraphConcurrencyPolicy.isModDisabled("malum", List.of(" MALUM ", "goety")));
-        assertFalse(GraphConcurrencyPolicy.isModDisabled("embers", List.of("malum")));
-        assertTrue(GraphConcurrencyPolicy.decide("test", new FakeDelegate(safe()),
-                List.of("test"), List.of()).exclusive());
-    }
-
-    @Test
     void unknownAndLegacyOnlyDelegatesStayExclusive() {
         assertTrue(GraphConcurrencyPolicy.isExclusive("test", null));
-        GraphConcurrencyPolicy.Decision unknown = GraphConcurrencyPolicy.decide(
-                "test", new FakeDelegate(null), List.of(), List.of());
+        GraphConcurrencyPolicy.Decision unknown =
+                GraphConcurrencyPolicy.decide("test", new FakeDelegate(null));
         assertTrue(unknown.exclusive());
         assertEquals("delegate has no concurrency capability", unknown.reason());
     }
 
     @Test
     void completeMachineLocalCapabilityCanRunConcurrently() {
-        GraphConcurrencyPolicy.Decision decision = GraphConcurrencyPolicy.decide(
-                "test", new FakeDelegate(safe()), List.of(), List.of());
+        GraphConcurrencyPolicy.Decision decision =
+                GraphConcurrencyPolicy.decide("test", new FakeDelegate(safe()));
         assertFalse(decision.exclusive());
     }
 
@@ -68,7 +62,7 @@ class GraphConcurrencyPolicyTest extends BootstrapTest {
     }
 
     @Test
-    void runtimeDescriptorMustAgreeWithPlannedCapability() {
+    void runtimeSafeOwnershipWinsOverPlanningUpperBound() {
         GraphConcurrencyPolicy.Decision decision =
                 GraphConcurrencyPolicy.decide(
                         "integration_api",
@@ -77,11 +71,9 @@ class GraphConcurrencyPolicyTest extends BootstrapTest {
                         safe()
                 );
 
-        assertTrue(decision.exclusive());
-        assertEquals(
-                "output ownership is ambiguous or entity-owned",
-                decision.reason()
-        );
+        assertFalse(decision.exclusive());
+        assertEquals(BatchConcurrencyCapabilities.OutputOwnership.DELEGATE_RESULT,
+                decision.capabilities().outputOwnership());
     }
 
     @Test
@@ -110,10 +102,78 @@ class GraphConcurrencyPolicyTest extends BootstrapTest {
     }
 
     @Test
+    void planningSupportScopeIsKeptWhenRuntimeHasNoExplicitPositions() {
+        BatchConcurrencyCapabilities planned = new BatchConcurrencyCapabilities(
+                BatchConcurrencyCapabilities.MaterialOwnership.CHAIN_RESERVED,
+                BatchConcurrencyCapabilities.OutputOwnership.OWNED_WORLD_CAPTURE,
+                BatchConcurrencyCapabilities.CleanupContract.SEPARABLE_OFFLINE,
+                BatchConcurrencyCapabilities.SideEffects.ADJACENT_MACHINE,
+                BatchConcurrencyCapabilities.PreparationContract.RETRY_SAFE,
+                List.of(new BlockPos(1, 0, 0), new BlockPos(2, 0, 0))
+        );
+        BatchConcurrencyCapabilities runtime = BatchConcurrencyCapabilities.ownedWorldCapture();
+
+        BatchConcurrencyCapabilities merged =
+                GraphConcurrencyPolicy.intersectCapabilities(planned, runtime);
+
+        assertEquals(List.of(new BlockPos(1, 0, 0), new BlockPos(2, 0, 0)),
+                merged.supportOffsets());
+    }
+
+    @Test
+    void runtimeMachineSlotOverridesConservativeWorldCaptureBound() {
+        BatchConcurrencyCapabilities planned = new BatchConcurrencyCapabilities(
+                BatchConcurrencyCapabilities.MaterialOwnership.CHAIN_RESERVED,
+                BatchConcurrencyCapabilities.OutputOwnership.OWNED_WORLD_CAPTURE,
+                BatchConcurrencyCapabilities.CleanupContract.SEPARABLE_OFFLINE,
+                BatchConcurrencyCapabilities.SideEffects.ADJACENT_MACHINE,
+                BatchConcurrencyCapabilities.PreparationContract.RETRY_SAFE,
+                List.of()
+        );
+        BatchConcurrencyCapabilities runtime = BatchConcurrencyCapabilities.machineSlot();
+
+        BatchConcurrencyCapabilities merged =
+                GraphConcurrencyPolicy.intersectCapabilities(planned, runtime);
+        GraphConcurrencyPolicy.Decision decision = GraphConcurrencyPolicy.decide(
+                "youkaishomecoming_steamer", new FakeDelegate(runtime), planned);
+
+        assertEquals(BatchConcurrencyCapabilities.OutputOwnership.MACHINE_SLOT,
+                merged.outputOwnership());
+        assertFalse(decision.exclusive());
+    }
+
+    @Test
+    void defaultDelegateInfersWorldCaptureFromExpectedOutput() {
+        GraphConcurrencyPolicy.Decision decision = GraphConcurrencyPolicy.decide(
+                "test", new ExpectedOutputDelegate());
+
+        assertFalse(decision.exclusive());
+        assertEquals(BatchConcurrencyCapabilities.OutputOwnership.OWNED_WORLD_CAPTURE,
+                decision.capabilities().outputOwnership());
+    }
+
+    @Test
+    void inferenceRecipesAreDeniedEvenWhenAWorkerContractLooksSafe() {
+        BatchConcurrencyCapabilities infer = new BatchConcurrencyCapabilities(
+                BatchConcurrencyCapabilities.MaterialOwnership.CHAIN_RESERVED,
+                BatchConcurrencyCapabilities.OutputOwnership.DELEGATE_RESULT,
+                BatchConcurrencyCapabilities.CleanupContract.SEPARABLE_OFFLINE,
+                BatchConcurrencyCapabilities.SideEffects.INFER,
+                BatchConcurrencyCapabilities.PreparationContract.RETRY_SAFE,
+                List.of());
+
+        GraphConcurrencyPolicy.Decision decision =
+                GraphConcurrencyPolicy.decide("embers_alchemy", new FakeDelegate(infer));
+
+        assertTrue(decision.exclusive());
+        assertEquals("inference recipes are stateful and must run sequentially",
+                decision.reason());
+    }
+
+    @Test
     void localWorldRemaindersRemainConcurrencySafe() {
         GraphConcurrencyPolicy.Decision decision = GraphConcurrencyPolicy.decide(
-                "test", new FakeDelegate(BatchConcurrencyCapabilities.machineSlotWithLocalWorldItems()),
-                List.of(), List.of());
+                "test", new FakeDelegate(BatchConcurrencyCapabilities.machineSlotWithLocalWorldItems()));
 
         assertFalse(decision.exclusive());
         assertEquals(BatchConcurrencyCapabilities.SideEffects.LOCAL_WORLD_ITEMS,
@@ -125,9 +185,9 @@ class GraphConcurrencyPolicyTest extends BootstrapTest {
     @Test
     void realCookingDelegatesKeepOnlyProvenConcurrencyContracts() {
         GraphConcurrencyPolicy.Decision farmersDelight = GraphConcurrencyPolicy.decide(
-                "farmersdelight_cooking_pot", new CookingPotBatchDelegate(), List.of(), List.of());
+                "farmersdelight_cooking_pot", new CookingPotBatchDelegate());
         GraphConcurrencyPolicy.Decision crockPot = GraphConcurrencyPolicy.decide(
-                "crockpot", new CrockPotBatchDelegate(), List.of(), List.of());
+                "crockpot", new CrockPotBatchDelegate());
 
         assertFalse(farmersDelight.exclusive());
         assertEquals(BatchConcurrencyCapabilities.SideEffects.LOCAL_WORLD_ITEMS,
@@ -140,7 +200,7 @@ class GraphConcurrencyPolicyTest extends BootstrapTest {
     @Test
     void monsterPotsCanRunConcurrentlyWithOwnedSlotsAndSharedReservations() {
         GraphConcurrencyPolicy.Decision decision = GraphConcurrencyPolicy.decide(
-                ModIds.ID_DD_MONSTER_POT, new MonsterPotBatchDelegate(), List.of(), List.of());
+                ModIds.ID_DD_MONSTER_POT, new MonsterPotBatchDelegate());
 
         assertFalse(decision.exclusive());
         assertEquals(BatchConcurrencyCapabilities.MaterialOwnership.CHAIN_RESERVED,
@@ -149,14 +209,12 @@ class GraphConcurrencyPolicyTest extends BootstrapTest {
                 decision.capabilities().outputOwnership());
         assertEquals(BatchConcurrencyCapabilities.CleanupContract.SEPARABLE_OFFLINE,
                 decision.capabilities().cleanup());
-        assertTrue(GraphConcurrencyPolicy.decide(ModIds.ID_DD_MONSTER_POT,
-                new MonsterPotBatchDelegate(), List.of(ModIds.ID_DD_MONSTER_POT), List.of()).exclusive());
     }
 
     @Test
     void vanillaBrewingStandCanUseIndependentMachineSlotsConcurrently() {
         GraphConcurrencyPolicy.Decision decision = GraphConcurrencyPolicy.decide(
-                null, new BrewingStandBatchDelegate(), List.of(), List.of());
+                null, new BrewingStandBatchDelegate());
 
         assertFalse(decision.exclusive());
         assertEquals(BatchConcurrencyCapabilities.OutputOwnership.MACHINE_SLOT,
@@ -168,7 +226,7 @@ class GraphConcurrencyPolicyTest extends BootstrapTest {
     @Test
     void vanillaMachineDelegateHasStructuredConcurrencyContract() {
         GraphConcurrencyPolicy.Decision decision = GraphConcurrencyPolicy.decide(
-                "vanilla_stonecutter", new VanillaMachineBatchDelegate(), List.of(), List.of());
+                "vanilla_stonecutter", new VanillaMachineBatchDelegate());
 
         assertFalse(decision.exclusive());
         assertEquals(BatchConcurrencyCapabilities.OutputOwnership.MACHINE_SLOT,
@@ -178,7 +236,7 @@ class GraphConcurrencyPolicyTest extends BootstrapTest {
     @Test
     void aetherworksAnvilCanUseIndependentMachineSlotsConcurrently() {
         GraphConcurrencyPolicy.Decision decision = GraphConcurrencyPolicy.decide(
-                ModIds.ID_AETHERWORKS_ANVIL, new AetherworksBatchDelegate(), List.of(), List.of());
+                ModIds.ID_AETHERWORKS_ANVIL, new AetherworksBatchDelegate());
 
         assertFalse(decision.exclusive());
         assertEquals(BatchConcurrencyCapabilities.OutputOwnership.MACHINE_SLOT,
@@ -190,7 +248,7 @@ class GraphConcurrencyPolicyTest extends BootstrapTest {
     @Test
     void cookingWrapperCanBeProbedBeforeSelectingTheBoundFurnace() {
         GraphConcurrencyPolicy.Decision decision = GraphConcurrencyPolicy.decide(
-                "vanilla_furnace", new CookingMachineBatchDelegate(), List.of(), List.of());
+                "vanilla_furnace", new CookingMachineBatchDelegate());
 
         assertFalse(decision.exclusive());
         assertEquals(BatchConcurrencyCapabilities.OutputOwnership.MACHINE_SLOT,
@@ -198,7 +256,7 @@ class GraphConcurrencyPolicyTest extends BootstrapTest {
     }
 
     @Test
-    void unsafeCapabilityDimensionsRemainExclusiveEvenWhenForced() {
+    void unsafeCapabilityDimensionsRemainExclusive() {
         BatchConcurrencyCapabilities unsafe = new BatchConcurrencyCapabilities(
                 BatchConcurrencyCapabilities.MaterialOwnership.SELF_EXTRACTING,
                 BatchConcurrencyCapabilities.OutputOwnership.OWNED_WORLD_CAPTURE,
@@ -207,19 +265,9 @@ class GraphConcurrencyPolicyTest extends BootstrapTest {
                 BatchConcurrencyCapabilities.PreparationContract.RELIABLE,
                 List.of());
         GraphConcurrencyPolicy.Decision decision = GraphConcurrencyPolicy.decide(
-                "test", new FakeDelegate(unsafe), List.of(),
-                List.of("test=FORCE_WITH_GUARDS"));
+                "test", new FakeDelegate(unsafe));
         assertTrue(decision.exclusive());
         assertEquals("materials are not fully chain-reserved", decision.reason());
-    }
-
-    @Test
-    void delegateSpecificOffOverridesModAuto() {
-        GraphConcurrencyPolicy.Decision decision = GraphConcurrencyPolicy.decide(
-                "test", new FakeDelegate(safe()), List.of(),
-                List.of("test=AUTO", "FakeDelegate=OFF"));
-        assertTrue(decision.exclusive());
-        assertEquals("delegate policy is OFF", decision.reason());
     }
 
     private static BatchConcurrencyCapabilities safe() {
@@ -234,6 +282,19 @@ class GraphConcurrencyPolicyTest extends BootstrapTest {
         }
 
         @Override public BatchConcurrencyCapabilities concurrencyCapabilities() { return capabilities; }
+        @Override public boolean validateAndInit(ServerPlayer p, ResourceLocation r, ResourceLocation d, BlockPos pos) { return false; }
+        @Override public boolean startOperation(OperationStartContext context) { return false; }
+        @Override public boolean isCraftComplete(ServerLevel level) { return false; }
+        @Override public ItemStack collectResult(ServerPlayer p) { return ItemStack.EMPTY; }
+        @Override public void onBatchFailed(ServerPlayer p, String reason) { }
+        @Override public void onBatchFinished(ServerPlayer p) { }
+        @Override public BlockPos getMachinePos() { return BlockPos.ZERO; }
+    }
+
+    /** 不覆盖 concurrencyCapabilities，用来验证默认推断。 */
+    private static final class ExpectedOutputDelegate implements IBatchDelegate {
+        @Override public ItemStack getExpectedOutput() { return new ItemStack(Items.STONE); }
+        @Override public AABB getOutputCaptureRegion() { return new AABB(BlockPos.ZERO); }
         @Override public boolean validateAndInit(ServerPlayer p, ResourceLocation r, ResourceLocation d, BlockPos pos) { return false; }
         @Override public boolean startOperation(OperationStartContext context) { return false; }
         @Override public boolean isCraftComplete(ServerLevel level) { return false; }

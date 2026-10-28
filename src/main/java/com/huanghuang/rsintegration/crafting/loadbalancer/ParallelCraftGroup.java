@@ -96,6 +96,9 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     private List<ExtractionLedger.ReservationToken> reservationTokens = List.of();
     /** Reservations for reusable materials, grouped by physical worker. */
     private List<ExtractionLedger.ReservationToken> reusableReservationTokens = List.of();
+    /** 每个 worker 的固定份额；3 个操作/2 台机器得到 2+1，而不是动态抢批。 */
+    private int[] plannedShares = new int[0];
+    private int[] assignedShares = new int[0];
     private boolean[] reusableReservationsSettled = new boolean[0];
     private List<IngredientSpec> baseSpecs;
     private List<IngredientSpec> graphSpecs = List.of();
@@ -116,6 +119,8 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     private boolean started;
     private boolean draining;
     private boolean queuedMaterialsRecovered;
+    private long waitingSinceTick = -1;
+    private String lastStartFailure = "";
     private String failureDetail = "";
     private long lastProgressTick = -1;
     private long lastWaitReportTick = -1;
@@ -220,6 +225,9 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             if (!needsMoreWorkers(workers.size(), maxWorkers, totalOperations)) break;
             ChildPreparation preparation = prepareChildDelegate(machine, player);
             if (preparation.state() != ChildPreparationState.READY || preparation.delegate() == null) {
+                if (preparation.detail() != null && !preparation.detail().isBlank()) {
+                    this.failureDetail = preparation.detail();
+                }
                 if (preparation.state() == ChildPreparationState.FATAL) {
                     RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] Rejecting worker {}: {}",
                             machine.pos(), preparation.detail());
@@ -229,6 +237,8 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             workers.add(new WorkerSlot(workerId++, machine, preparation.delegate()));
             if (representativePos.equals(BlockPos.ZERO)) representativePos = machine.pos();
         }
+        this.plannedShares = balancedShares(totalOperations, workers.size());
+        this.assignedShares = new int[workers.size()];
         try {
             refreshMaterialSpecs();
         } catch (RuntimeException exception) {
@@ -241,6 +251,31 @@ public final class ParallelCraftGroup implements IBatchDelegate {
 
     static boolean needsMoreWorkers(int readyWorkers, int maxWorkers, int totalOperations) {
         return readyWorkers < Math.min(Math.max(0, maxWorkers), Math.max(0, totalOperations));
+    }
+
+    /**
+     * 把总操作数均衡拆成每个 worker 的固定份额：余数从前往后各加一。
+     * 例如 3 个操作、2 台机器 -> [2, 1]，而不是让第一个 worker 抢走 2、
+     * 第二个再拿 1 这种依赖执行顺序的结果。
+     */
+    static int[] balancedShares(int totalOperations, int workerCount) {
+        if (workerCount <= 0 || totalOperations <= 0) return new int[0];
+        int[] shares = new int[workerCount];
+        int base = totalOperations / workerCount;
+        int remainder = totalOperations % workerCount;
+        for (int i = 0; i < workerCount; i++) {
+            shares[i] = base + (i < remainder ? 1 : 0);
+        }
+        return shares;
+    }
+
+    @Override
+    public IBatchDelegate.PreparationResult prepare(ServerPlayer player, ResourceLocation recipeId,
+                                                    @Nullable ResourceLocation dim, BlockPos pos) {
+        if (!workers.isEmpty()) return IBatchDelegate.PreparationResult.ready();
+        return IBatchDelegate.PreparationResult.retry(
+                failureDetail == null || failureDetail.isBlank()
+                        ? "no validated worker is available" : failureDetail);
     }
 
     @Override
@@ -542,7 +577,11 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         ChildPreparation preparation = reusingPreparedDelegate
                 ? ChildPreparation.ready(worker.delegate)
                 : prepareChildDelegate(worker.machine, player);
-        if (preparation.state() == ChildPreparationState.RETRY) return false;
+        if (preparation.state() == ChildPreparationState.RETRY) {
+            lastStartFailure = "machine " + worker.machine.pos() + " retry: "
+                    + (preparation.detail().isEmpty() ? "no detail" : preparation.detail());
+            return false;
+        }
         if (preparation.state() == ChildPreparationState.FATAL || preparation.delegate() == null) {
             worker.pristineDelegate = false;
             beginDraining(preparation.detail().isEmpty()
@@ -553,10 +592,20 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         IBatchDelegate delegate = preparation.delegate();
         int batchSize;
         try {
-            int requestedBatch = sharedMaterialMode
-                    ? Math.max(1, delegate.preferredParallelBatchSize(
-                            operations.totalOperations(), workers.size()))
-                    : 1;
+            int shareRemaining = worker.id < plannedShares.length && worker.id < assignedShares.length
+                    ? Math.max(0, plannedShares[worker.id] - assignedShares[worker.id]) : 0;
+            int requestedBatch;
+            if (!sharedMaterialMode) {
+                requestedBatch = 1;
+            } else if (shareRemaining > 0) {
+                int preferred = Math.max(1, delegate.preferredParallelBatchSize(
+                        operations.totalOperations(), workers.size()));
+                requestedBatch = Math.min(shareRemaining, preferred);
+            } else {
+                // 所有固定份额都已派完后仍有剩余，说明某个 worker 提前失败；
+                // 此时才允许其它 worker 以单操作粒度接管遗留工作。
+                requestedBatch = 1;
+            }
             batchSize = compatibleBatchSize(delegate, operationId,
                     Math.min(requestedBatch, operations.queuedOperations()));
             delegate.prepareGraphBatch(batchSize);
@@ -583,6 +632,8 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         }
         if (!acquired) {
             if (!reusingPreparedDelegate) releasePreparationQuietly(delegate, worker.machine);
+            lastStartFailure = "machine " + worker.machine.pos()
+                    + " could not acquire operation resources";
             return false;
         }
         List<Integer> claimedOperations = operations.claimBatch(worker.id, batchSize);
@@ -594,6 +645,10 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         worker.pristineDelegate = false;
         worker.delegate = delegate;
         worker.operationIds = claimedOperations;
+        lastStartFailure = "";
+        if (worker.id < assignedShares.length) {
+            assignedShares[worker.id] += claimedOperations.size();
+        }
         if (claimedOperations.size() > 1) {
             RSIntegrationMod.LOGGER.debug(
                     "[RSI-ParallelBatch] recipe={} worker={} batch={} queuedAfterClaim={}",
@@ -800,6 +855,18 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         if (!draining && operations.queuedOperations() > 0) {
             dispatchQueuedOperations();
         }
+        long tick = level.getGameTime();
+        if (!draining && operations.queuedOperations() > 0 && operations.runningOperations() == 0) {
+            if (waitingSinceTick < 0) waitingSinceTick = tick;
+            if (shouldAbortStalledStart(tick, waitingSinceTick,
+                    operations.queuedOperations(), operations.runningOperations())) {
+                beginDraining("parallel group waited " + START_TIMEOUT_TICKS / 20
+                        + "s without a startable worker: "
+                        + (lastStartFailure.isEmpty() ? "no detail" : lastStartFailure));
+            }
+        } else {
+            waitingSinceTick = -1;
+        }
         if (draining && operations.isDrained()) {
             return new CraftObservation(CraftPhase.FAILED, failureDetail);
         }
@@ -825,9 +892,10 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         if (!shouldReportWait(tick, lastProgressTick, lastWaitReportTick)) return;
         lastWaitReportTick = tick;
         RSIntegrationMod.LOGGER.warn(
-                "[RSI-ParallelWait] craft={} node={} recipe={} completed={}/{} running={} queued={} draining={}",
+                "[RSI-ParallelWait] craft={} node={} recipe={} completed={}/{} running={} queued={} draining={} lastStartFailure={}",
                 craftId, nodeId, recipeId, completed, operations.totalOperations(),
-                operations.runningOperations(), operations.queuedOperations(), draining);
+                operations.runningOperations(), operations.queuedOperations(), draining,
+                lastStartFailure);
         for (WorkerSlot worker : workers) {
             if (!worker.running()) continue;
             ExpectedProduction production = worker.delegate.getExpectedProduction();
@@ -853,6 +921,15 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     static boolean shouldReportWait(long tick, long lastProgressTick, long lastReportTick) {
         return lastProgressTick >= 0 && tick - lastProgressTick >= 100
                 && (lastReportTick < 0 || tick - lastReportTick >= 600);
+    }
+
+    /** 排队操作在超时内始终没有 worker 能启动时，避免整条链无限等待。 */
+    static final int START_TIMEOUT_TICKS = 1200;
+
+    static boolean shouldAbortStalledStart(long tick, long waitingSinceTick,
+                                           int queuedOperations, int runningOperations) {
+        return waitingSinceTick >= 0 && queuedOperations > 0 && runningOperations == 0
+                && tick - waitingSinceTick >= START_TIMEOUT_TICKS;
     }
 
     private void dispatchQueuedOperations() {

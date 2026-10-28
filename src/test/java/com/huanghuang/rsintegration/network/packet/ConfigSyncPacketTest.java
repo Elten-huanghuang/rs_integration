@@ -33,6 +33,6 @@ class ConfigSyncPacketTest {
 
     private static ConfigSyncPacket packetWithRepeatLimit(int repeatLimit) {
         return new ConfigSyncPacket(true, 5, false, true, true, true, true, true, true, true,
-                true, true, false, true, true, 8, repeatLimit, false);
+                true, true, false, true, true, repeatLimit, false);
     }
 }

@@ -63,7 +63,7 @@ final class CraftMachineBindingSupport {
             if (copperPot != null) return copperPot;
         }
         ModRecipeHandler claimed = ModRecipeHandlers.claimFor(recipe).winner();
-        ModType claimedType = claimed == null ? null : claimed.modType();
+        ModType claimedType = claimed == null ? null : claimed.modType(recipe);
         if (claimedType == null || claimedType == ModType.GENERIC) {
             return ModType.classifyRecipe(recipe);
         }

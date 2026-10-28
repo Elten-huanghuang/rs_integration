@@ -65,4 +65,16 @@ public record PlannedConcurrency(
                 List.of()
         );
     }
+
+    /** 明确声明该机器族只能独占执行。 */
+    public static PlannedConcurrency exclusive() {
+        return new PlannedConcurrency(
+                MaterialOwnership.UNKNOWN,
+                OutputOwnership.AMBIGUOUS,
+                CleanupContract.UNKNOWN,
+                SideEffects.UNKNOWN,
+                PreparationContract.UNKNOWN,
+                List.of()
+        );
+    }
 }

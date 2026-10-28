@@ -126,7 +126,6 @@ public final class RSIntegrationConfig {
     public static final int DEFAULT_CRAFTING_GLOBAL_VANILLA_OPERATIONS_PER_TICK = 24;
     public static final int DEFAULT_CRAFTING_STABLE_BATCH_RETRY_SECONDS = 5;
     public static final int DEFAULT_CRAFTING_SERVER_TICK_BUDGET_MS = 8;
-    public static final int DEFAULT_CRAFTING_OPERATIONS_PER_DISPATCH = 32;
     public static final int DEFAULT_CRAFTING_SETTLEMENT_STACKS_PER_TICK = 16;
     public static final int DEFAULT_CRAFTING_COMPLETION_CALLBACKS_PER_TICK = 1;
     public static final int DEFAULT_CRAFTING_VIRTUAL_EXCHANGE_BATCH_LIMIT = 0;
@@ -396,23 +395,12 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue CRAFTING_GLOBAL_VANILLA_OPERATIONS_PER_TICK;
     public static ForgeConfigSpec.IntValue CRAFTING_STABLE_BATCH_RETRY_SECONDS;
     public static ForgeConfigSpec.IntValue CRAFTING_SERVER_TICK_BUDGET_MS;
-    public static ForgeConfigSpec.IntValue CRAFTING_OPERATIONS_PER_DISPATCH;
     public static ForgeConfigSpec.IntValue CRAFTING_SETTLEMENT_STACKS_PER_TICK;
     public static ForgeConfigSpec.IntValue CRAFTING_COMPLETION_CALLBACKS_PER_TICK;
     public static ForgeConfigSpec.IntValue CRAFTING_VIRTUAL_EXCHANGE_BATCH_LIMIT;
-    public static ForgeConfigSpec.IntValue CRAFTING_MAX_CONCURRENT_GRAPH_NODES;
-    public static ForgeConfigSpec.IntValue CRAFTING_GRAPH_DISPATCH_PER_TICK;
-    public static ForgeConfigSpec.IntValue CRAFTING_GRAPH_DISPATCH_PER_CRAFT;
-    public static ForgeConfigSpec.IntValue CRAFTING_MAX_CONCURRENT_OPERATIONS;
-    public static ForgeConfigSpec.IntValue CRAFTING_OPERATION_DISPATCH_PER_CRAFT;
     public static ForgeConfigSpec.IntValue CRAFTING_PROBABILISTIC_ATTEMPT_MULTIPLIER;
     public static ForgeConfigSpec.IntValue CRAFTING_PROBABILISTIC_MAX_ATTEMPTS;
-    public static ForgeConfigSpec.ConfigValue<List<? extends String>> CRAFTING_PARALLEL_DISABLED_MODS;
-    public static ForgeConfigSpec.ConfigValue<List<? extends String>> CRAFTING_PARALLEL_DELEGATE_POLICIES;
-    public static ForgeConfigSpec.IntValue RECIPE_TREE_MAX_DEPTH;
-    public static ForgeConfigSpec.IntValue RECIPE_TREE_MAX_NODES;
     public static ForgeConfigSpec.IntValue RECIPE_TREE_BATCH_DEBOUNCE_MS;
-    public static ForgeConfigSpec.IntValue RECIPE_TREE_MAX_CANDIDATES;
     public static ForgeConfigSpec.BooleanValue REQUIRE_RS_NETWORK_FOR_RECIPE_TREE;
 
     //  client-only
@@ -1296,11 +1284,6 @@ public final class RSIntegrationConfig {
                         "达到时间预算后剩余任务延到后续 tick；无法中断已开始的第三方接口调用。")
                 .defineInRange("craftingServerTickBudgetMs",
                         DEFAULT_CRAFTING_SERVER_TICK_BUDGET_MS, 1, 40);
-        CRAFTING_OPERATIONS_PER_DISPATCH = s
-                .comment("单次机器派发操作上限",
-                        "限制单次非原版派发的预留、存储调用和产物工作量；大节点使用分 tick 执行器，已适配机器可提升到一次有界实体批次。")
-                .defineInRange("craftingOperationsPerDispatch",
-                        DEFAULT_CRAFTING_OPERATIONS_PER_DISPATCH, 1, 256);
         CRAFTING_SETTLEMENT_STACKS_PER_TICK = s
                 .comment("单条合成链每 tick 结算堆叠上限",
                         "已完成产物分多个 tick 送回，避免大任务阻塞终端交互。")
@@ -1317,26 +1300,6 @@ public final class RSIntegrationConfig {
                 .defineInRange("craftingVirtualExchangeBatchLimit",
                         DEFAULT_CRAFTING_VIRTUAL_EXCHANGE_BATCH_LIMIT,
                         0, MAX_CRAFTING_VIRTUAL_EXCHANGE_BATCH_LIMIT);
-        CRAFTING_MAX_CONCURRENT_GRAPH_NODES = s
-                .comment("并行配方节点上限",
-                        "只派发不存在材料、机器或捕获冲突的节点；1 表示串行，增大可利用多台机器。")
-                .defineInRange("craftingMaxConcurrentGraphNodes", 4, 1, 16);
-        CRAFTING_GRAPH_DISPATCH_PER_TICK = s
-                .comment("单条任务每 tick 新节点上限",
-                        "限制一次合成在一个 tick 中派发的新图节点数量；接收重试不计入。")
-                .defineInRange("craftingGraphDispatchPerTick", 4, 1, 16);
-        CRAFTING_GRAPH_DISPATCH_PER_CRAFT = s
-                .comment("单次合成节点派发总上限",
-                        "防止重试或回调错误无限派发；常规大计划应高于步骤上限。")
-                .defineInRange("craftingGraphDispatchPerCraft", 8192, 16, 32768);
-        CRAFTING_MAX_CONCURRENT_OPERATIONS = s
-                .comment("单次合成并发机器操作上限",
-                        "普通节点计一次，平行组每个运行中的工作单元计一次。")
-                .defineInRange("craftingMaxConcurrentOperations", 8, 1, 64);
-        CRAFTING_OPERATION_DISPATCH_PER_CRAFT = s
-                .comment("单次合成机器启动总上限",
-                        "限制机器实际操作启动次数，委托启动之前的重试不计入。")
-                .defineInRange("craftingOperationDispatchPerCraft", 16384, 16, 65536);
         CRAFTING_PROBABILISTIC_ATTEMPT_MULTIPLIER = s
                 .comment("概率材料尝试次数倍数",
                         "递归概率材料的最大尝试次数倍数，以最初计划的执行次数为基数。",
@@ -1346,32 +1309,10 @@ public final class RSIntegrationConfig {
                 .comment("概率材料尝试次数绝对上限",
                         "每个递归概率材料目标的绝对尝试次数上限，同时受全任务操作预算限制。")
                 .defineInRange("craftingProbabilisticMaxAttempts", 4096, 1, 65536);
-        CRAFTING_PARALLEL_DISABLED_MODS = s
-                .comment("禁止并行的模组或委托类型",
-                        "填写类型 ID，例如 malum、goety；强制对应图节点独占运行，覆盖委托自身的并发声明。")
-                .defineList("craftingParallelDisabledMods", List.of(),
-                        obj -> obj instanceof String str && ResourceLocation.tryParse(str + ":dummy") != null);
-        CRAFTING_PARALLEL_DELEGATE_POLICIES = s
-                .comment("模组或委托并行策略",
-                        "格式为 id=AUTO、id=OFF 或 id=FORCE_WITH_GUARDS；完整或简短委托类名比模组类型更具体，强制模式也不会绕过安全检查。")
-                .defineList("craftingParallelDelegatePolicies", List.of(),
-                        obj -> obj instanceof String str && str.contains("="));
-        RECIPE_TREE_MAX_DEPTH = s
-                .comment("配方树深度上限",
-                        "限制客户端配方树显示的嵌套层数。")
-                .defineInRange("recipeTreeMaxDepth", 16, 4, 32);
-        RECIPE_TREE_MAX_NODES = s
-                .comment("配方树节点上限",
-                        "限制显示节点数量，避免渲染占用过多客户端资源。")
-                .defineInRange("recipeTreeMaxNodes", 512, 64, 4096);
         RECIPE_TREE_BATCH_DEBOUNCE_MS = s
                 .comment("配方树数量防抖（毫秒）",
                         "批次数量滚动停止后等待的时间；越短越灵敏，越长服务端请求越少。")
                 .defineInRange("recipeTreeBatchDebounceMs", 300, 100, 2000);
-        RECIPE_TREE_MAX_CANDIDATES = s
-                .comment("配方树备选配方上限",
-                        "每个节点下拉列表最多显示的配方数量；超出的配方会被隐藏并标记为受限。")
-                .defineInRange("recipeTreeMaxCandidates", 8, 2, 32);
         REQUIRE_RS_NETWORK_FOR_RECIPE_TREE = s
                 .comment("配方树预览要求 RS 网络",
                         "关闭后可仅用玩家背包预览，无需无线终端；实际合成仍进行正常网络校验。")

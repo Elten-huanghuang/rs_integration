@@ -49,6 +49,16 @@ class GraphConcurrencyEligibilityTest {
     }
 
     @Test
+    void fixedEmbersAlchemyKeepsResultsInMachineSlot() {
+        BatchConcurrencyCapabilities capabilities =
+                capability("embers_alchemy", "pkg.AlchemyRecipe", false);
+        assertEquals(BatchConcurrencyCapabilities.OutputOwnership.MACHINE_SLOT,
+                capabilities.outputOwnership());
+        assertEquals(BatchConcurrencyCapabilities.SideEffects.MACHINE_LOCAL,
+                capabilities.sideEffects());
+    }
+
+    @Test
     void explicitDenyTypesRemainUnknown() {
         assertNull(GraphConcurrencyEligibility.capabilities(new GraphConcurrencyEligibility.Context(
                 "immortalers_delight", "pkg.CoolerRecipe", false)));

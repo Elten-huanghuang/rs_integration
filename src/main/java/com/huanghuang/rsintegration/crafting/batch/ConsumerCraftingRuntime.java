@@ -1156,7 +1156,7 @@ public final class ConsumerCraftingRuntime {
                 == IntegrationResourceKey.ResourceKind.ITEM
                 ? itemStack(targetResource)
                 : InkFluidSupport.tokenFor(targetResource, 1);
-        ModType type = ModType.byId(handler.modType().id());
+        ModType type = ModType.byId(handler.modType(recipe).id());
         if (targetResource.kind()
                 == IntegrationResourceKey.ResourceKind.ITEM) {
             target = CraftMachineBindingSupport.routeRecipeOutput(
