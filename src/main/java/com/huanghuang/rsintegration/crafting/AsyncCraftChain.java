@@ -140,6 +140,8 @@ public final class AsyncCraftChain {
     private static final int GRAPH_RETRY_MAX_DELAY_TICKS = 40;
     /** 同一个节点连续等待到达这个次数后，向玩家提示一次具体原因，避免只看到“准备中”。 */
     private static final int GRAPH_RETRY_NOTIFY_ATTEMPTS = 5;
+    /** 图节点连续重试超过这个时长仍未推进，就判定为卡死并中止，避免整条链永远停在“准备中”。 */
+    private static final int GRAPH_RETRY_ABORT_TICKS = 600;
 
     public enum State {
         PENDING,        // Created, not yet started
@@ -260,6 +262,8 @@ public final class AsyncCraftChain {
     private final Map<NodeId, Integer> graphRetryUntilTick = new HashMap<>();
     private final Map<NodeId, Integer> graphRetryAttempts = new HashMap<>();
     private final Map<String, Integer> graphRetryCounts = new HashMap<>();
+    /** 每个节点第一次进入等待的 tick，用于判定“卡死”。 */
+    private final Map<NodeId, Integer> graphRetrySinceTick = new HashMap<>();
     /** 已经向玩家提示过“长时间等待”的节点，避免同一次等待反复刷屏。 */
     private final Set<NodeId> graphRetryNotified = new HashSet<>();
     @Nullable
@@ -1836,8 +1840,21 @@ public final class AsyncCraftChain {
     private ConcurrentNodeExecutor.StartResult graphRetry(
             NodeId nodeId, String detail, List<MaterialBroker.Request> requests) {
         int attempts = Math.min(graphRetryAttempts.merge(nodeId, 1, Integer::sum), 6);
+        int now = server.getTickCount();
+        int since = graphRetrySinceTick.computeIfAbsent(nodeId, key -> now);
+        // 长时间原地等待说明机器/材料永远不会就绪。中止并报告原因，比永远停在“准备中”更有用，
+        // 也避免一条卡死的链长期占住执行线程，让后面的合成全部排队。
+        if (now - since > GRAPH_RETRY_ABORT_TICKS) {
+            RSIntegrationMod.LOGGER.warn(ctx.format(
+                    "Graph node {} stalled for {} ticks, aborting: {}"),
+                    nodeId, now - since, detail);
+            graphFailureDetails.put(nodeId, detail);
+            graphFailureCodes.put(nodeId, CraftFailureCode.START_REJECTED);
+            clearGraphRetry(nodeId);
+            return ConcurrentNodeExecutor.StartResult.failed();
+        }
         int delay = Math.min(GRAPH_RETRY_MAX_DELAY_TICKS, 1 << attempts);
-        graphRetryUntilTick.put(nodeId, server.getTickCount() + delay);
+        graphRetryUntilTick.put(nodeId, now + delay);
         logGraphRetry(nodeId, detail, requests);
         notifySlowRetry(nodeId, detail);
         return ConcurrentNodeExecutor.StartResult.retry();
@@ -1847,6 +1864,7 @@ public final class AsyncCraftChain {
         graphRetryUntilTick.remove(nodeId);
         graphRetryAttempts.remove(nodeId);
         graphRetryNotified.remove(nodeId);
+        graphRetrySinceTick.remove(nodeId);
     }
 
     /**
@@ -1866,9 +1884,16 @@ public final class AsyncCraftChain {
         String key = craftId + ":" + detail;
         int count = graphRetryCounts.merge(key, 1, Integer::sum);
         if (GRAPH_RETRY_LOGS.allow(key)) {
-            RSIntegrationMod.LOGGER.debug(ctx.format(
-                    "[RSI-GraphRetry] node={} detail={} attemptsSinceLog={} requests={}"),
-                    nodeId, detail, count, requests);
+            // 前两次重试按 INFO 输出：现场只有 INFO 级日志，静默重试会让玩家只看到“准备中”。
+            if (count <= 2) {
+                RSIntegrationMod.LOGGER.info(ctx.format(
+                        "[RSI-GraphRetry] node={} detail={} attemptsSinceLog={} requests={}"),
+                        nodeId, detail, count, requests);
+            } else {
+                RSIntegrationMod.LOGGER.debug(ctx.format(
+                        "[RSI-GraphRetry] node={} detail={} attemptsSinceLog={} requests={}"),
+                        nodeId, detail, count, requests);
+            }
             graphRetryCounts.put(key, 0);
         }
     }
@@ -1897,12 +1922,19 @@ public final class AsyncCraftChain {
         }
     }
 
+    @Nullable
+    private Recipe<?> recipeForDiagnostics(@Nullable ResourceLocation recipeId) {
+        if (server == null || recipeId == null) return null;
+        return server.getRecipeManager().byKey(recipeId).orElse(null);
+    }
+
     private PreparationResult prepareGraphNode(NodeId nodeId,
                                                CraftingResolver.ResolutionStep step,
                                                ServerPlayer online) {
         List<BoundMachine> machines = MachineDispatchPlanner.deduplicate(
                 AltarBindingRegistry.getBoundMachinesForRecipe(
                 online, step.modType(), step.recipeId()));
+        int boundCount = machines.size();
         machines.sort((a, b) -> {
             ResourceLocation playerDim = online.level().dimension().location();
             boolean aSame = a.dim().equals(playerDim);
@@ -1950,7 +1982,16 @@ public final class AsyncCraftChain {
                     List.of(virtual), 1, false));
         }
         if (machines.isEmpty()) {
-            return PreparationResult.fatal("No bound machine matches " + step.recipeId());
+            // 诊断：逐层报告绑定过滤结果，便于从日志直接定位是哪一步清空了候选机器。
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-Binding] no machine recipe={} type={} subType={} bound={} afterSelection={} diagnostics={}",
+                    step.recipeId(), step.modType().id(),
+                    AltarBindingRegistry.recipeSubTypeHint(step.recipeId()),
+                    boundCount, machines.size(),
+                    AltarBindingRegistry.diagnoseMachines(online, step.modType(),
+                            step.recipeId(), recipeForDiagnostics(step.recipeId())));
+            return PreparationResult.fatal("No bound machine matches " + step.recipeId()
+                    + " (type=" + step.modType().id() + ")");
         }
         List<BoundMachine> available = LoadBalancer.filterAvailable(machines, server, delegate);
         available = MachineDispatchPlanner.filterUnleased(

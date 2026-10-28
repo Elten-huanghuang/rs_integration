@@ -227,6 +227,9 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
         // cannot be distinguished from this craft's later physical results.
         for (int i = 0; i < itemHandler.getContainerSize(); i++) {
             if (!itemHandler.getItem(i).isEmpty()) {
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-Ferment] Inventory not empty, refusing to start recipe={} slot={} item={}",
+                        recipe.getId(), i, itemHandler.getItem(i));
                 player.sendSystemMessage(Component.translatable("rsi.generic.error.machine_valid_failed", recipe.getId()));
                 forceChunkLoad(false);
                 return false;
@@ -359,6 +362,9 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
             }
             if (!inserted) {
                 // Restore snapshot
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-Ferment] No empty slot for input {} of recipe {}",
+                        single, recipe.getId());
                 for (int i = 0; i < snapshot.length; i++) {
                     itemHandler.setItem(i, snapshot[i]);
                 }

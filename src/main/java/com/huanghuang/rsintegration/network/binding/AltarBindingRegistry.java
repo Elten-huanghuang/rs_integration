@@ -32,6 +32,7 @@ import com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule;
 import com.huanghuang.rsintegration.mods.pmmo.PmmoSalvageCatalog;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.util.CuriosAccess;
+import java.util.HashSet;
 import java.util.Locale;
 import java.util.Set;
 import net.minecraft.core.registries.Registries;
@@ -710,7 +711,54 @@ public final class AltarBindingRegistry {
                 }
             }
         }
+        // 类型根回退：部分处理器把整族配方挂在根类型上（如 youkaishomecoming），
+        // 而机器实际绑定在具体的机器子类型（youkaishomecoming_ferment）。根类型
+        // 查不到机器时，按配方类映射出的具体类型再查一次，避免“机器已绑定却提示
+        // 没有可用机器”。
+        if (result.isEmpty() && recipe != null) {
+            collectRootTypeFallback(player, type, recipeId, recipe, blocked, result);
+        }
         return result;
+    }
+
+    /**
+     * 根类型查不到机器时的补充查找：先按配方类映射出的具体机器类型查，
+     * 再按“根类型 id + 下划线”前缀枚举同族子类型。只在根类型结果为空时执行，
+     * 因此不会改变原本按根类型绑定的工作流。
+     */
+    private static void collectRootTypeFallback(ServerPlayer player, ModType type,
+                                                @Nullable ResourceLocation recipeId,
+                                                Recipe<?> recipe,
+                                                Set<MachineFavoriteKey> blocked,
+                                                List<BoundMachine> out) {
+        if (type == null || type == ModType.GENERIC
+                || type == ModType.EXTERNAL_INTEGRATION) return;
+        Set<String> tried = new HashSet<>();
+        tried.add(type.id());
+        String classHint = ModType.filterForRecipeClass(recipe.getClass().getName());
+        if (classHint != null && tried.add(classHint)) {
+            ModType mapped = ModType.byId(classHint);
+            if (mapped != ModType.GENERIC) {
+                collectForSpecificType(player, mapped, recipeId, recipe, blocked, out);
+            }
+        }
+        if (!out.isEmpty()) return;
+        for (ModType candidate : ModType.values()) {
+            if (candidate == ModType.GENERIC || !tried.add(candidate.id())) continue;
+            if (!candidate.id().startsWith(type.id() + "_")) continue;
+            collectForSpecificType(player, candidate, recipeId, recipe, blocked, out);
+            if (!out.isEmpty()) return;
+        }
+    }
+
+    private static void collectForSpecificType(ServerPlayer player, ModType specificType,
+                                               @Nullable ResourceLocation recipeId,
+                                               Recipe<?> recipe,
+                                               Set<MachineFavoriteKey> blocked,
+                                               List<BoundMachine> out) {
+        String subType = recipeMachineSubType(recipe, specificType);
+        forEachInventoryGroup(player, stacks -> collectBindingsForType(
+                stacks, specificType, subType, recipeId, recipe, player, blocked, out));
     }
 
     private static boolean scanBindingsForType(List<ItemStack> stacks, ServerPlayer player, ModType type) {
@@ -803,6 +851,76 @@ public final class AltarBindingRegistry {
                 out.add(new BoundMachine(entry.dim(), entry.pos(), executionType, entry.blockKey()));
             }
         }
+    }
+
+    /**
+     * 诊断：说明某个配方 + 机器类型为什么找不到可用绑定机器。
+     * 返回各层过滤的命中计数，玩家反馈日志时可直接看出是哪一步把候选清空。
+     */
+    public static String diagnoseMachines(ServerPlayer player, ModType type,
+                                          @Nullable ResourceLocation recipeId,
+                                          @Nullable Recipe<?> recipe) {
+        if (player == null || type == null || player.server == null) return "unavailable";
+        // 0 总数 1 黑名单 2 类型不兼容 3 不可自动化 4 配方不兼容
+        // 5 方块实体失效 6 无存储端点 7 子类型过滤
+        int[] counts = new int[8];
+        List<String> matched = new ArrayList<>();
+        Set<MachineFavoriteKey> blocked = blockedMachines(player);
+        String normalized = recipe != null ? recipeMachineSubType(recipe, type) : null;
+        forEachInventoryGroup(player, stacks -> {
+            for (ItemStack stack : stacks) {
+                if (stack.isEmpty()) continue;
+                for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
+                    ModType entryType = ModType.fromBlockKey(entry.blockKey());
+                    boolean sameFamily = type.equals(entryType)
+                            || entry.blockKey() != null
+                            && entry.blockKey().startsWith(type.id() + "||");
+                    if (!sameFamily) continue;
+                    counts[0]++;
+                    if (isAutomationBlocked(blocked, entry)) {
+                        counts[1]++;
+                        continue;
+                    }
+                    if (!isCompatibleMachineType(type, entryType)
+                            && !(PmmoRSModule.TYPE_ID.equals(type.id())
+                            && isPmmoSalvageBinding(entry))) {
+                        counts[2]++;
+                        continue;
+                    }
+                    if (!isExecutableBinding(type, entry.blockKey())) {
+                        counts[3]++;
+                        continue;
+                    }
+                    if (recipe != null
+                            && !isRecipeBindingCompatible(recipe, type, entry.blockKey())) {
+                        counts[4]++;
+                        continue;
+                    }
+                    if (normalized != null && entry.blockKey() != null
+                            && !entry.blockKey().toLowerCase(Locale.ROOT)
+                            .contains(normalized)) {
+                        counts[7]++;
+                        continue;
+                    }
+                    ResourceKey<Level> dim = ResourceKey.create(
+                            Registries.DIMENSION, entry.dim());
+                    ServerLevel level = player.server.getLevel(dim);
+                    if (!isBindingFresh(level, dim, entry.pos(), entry.blockKey())) {
+                        counts[5]++;
+                        continue;
+                    }
+                    if (!hasUsableStorageBinding(player, dim, entry.pos())) {
+                        counts[6]++;
+                        continue;
+                    }
+                    if (matched.size() < 4) matched.add(entry.dim() + "@" + entry.pos());
+                }
+            }
+        });
+        return "matched=" + matched + " total=" + counts[0] + " blocked=" + counts[1]
+                + " incompatible=" + counts[2] + " notExecutable=" + counts[3]
+                + " recipeIncompatible=" + counts[4] + " stale=" + counts[5]
+                + " noStorage=" + counts[6] + " subtype=" + counts[7];
     }
 
     static boolean isExternalRecipeBinding(
