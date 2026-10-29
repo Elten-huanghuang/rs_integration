@@ -4,6 +4,7 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.BucketItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.material.Fluids;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fluids.FluidType;
 import net.minecraftforge.fluids.FluidUtil;
@@ -92,12 +93,18 @@ public final class FluidContainerBucketSupport {
     private static IFluidHandlerItem handler(ItemStack stack,
             Function<ItemStack, IFluidHandlerItem> original) {
         IFluidHandlerItem handler = original.apply(stack);
-        // Forge 仅为 BucketItem 本类附加默认能力，未声明能力的桶子类需要回退。
-        return handler == null && stack.getItem() instanceof BucketItem ? new FluidBucketWrapper(stack) : handler;
+        return handler == null && supportsStandardFallback(stack) ? new FluidBucketWrapper(stack) : handler;
+    }
+
+    private static boolean supportsStandardFallback(ItemStack stack) {
+        if (stack.isEmpty() || !(stack.getItem() instanceof BucketItem bucket)) return false;
+        // 子类可能携带生物、容量或无限取液规则，只为流体注册的标准桶补能力。
+        return bucket.getClass() == BucketItem.class
+                || bucket.getFluid() != Fluids.EMPTY && bucket.getFluid().getBucket() == bucket;
     }
 
     public static boolean needsFallback(ItemStack stack) {
-        return !stack.isEmpty() && stack.getItem() instanceof BucketItem
+        return supportsStandardFallback(stack)
                 && !FluidUtil.getFluidHandler(stack.copyWithCount(1)).isPresent();
     }
 

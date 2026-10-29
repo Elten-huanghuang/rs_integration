@@ -4,8 +4,10 @@ import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.api.execution.CollectedOutput;
 import com.huanghuang.rsintegration.crafting.MaterialMatcher;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
+import com.mojang.logging.LogUtils;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.ItemStack;
+import org.slf4j.Logger;
 import java.util.Locale;
 import java.util.stream.Collectors;
 
@@ -17,7 +19,7 @@ import java.util.Objects;
 
 /** Accumulates actual node outputs and publishes each declared unit once. */
 public final class NodeOutputAccumulator {
-    private static final org.slf4j.Logger LOGGER = com.mojang.logging.LogUtils.getLogger();
+    private static final Logger LOGGER = LogUtils.getLogger();
     private final List<OutputDeclaration> declarations;
     private final Map<OutputPortId, Long> published = new LinkedHashMap<>();
     private final List<ItemStack> pending = new ArrayList<>();
@@ -156,6 +158,20 @@ public final class NodeOutputAccumulator {
                 pendingResources.remove(index);
                 index--;
             }
+        }
+        // 内置机器和容器转换仍以凭据返回流体；必须按真实流体身份入账。
+        for (ItemStack stack : pending) {
+            if (remaining <= 0L) break;
+            if (stack.isEmpty()) continue;
+            IntegrationResourceKey resource = InkFluidSupport.resource(stack);
+            if (resource == null || !matchesResource(declaration.resource(), resource)) continue;
+            int take = (int) Math.min(remaining, stack.getCount());
+            ItemStack fragment = stack.copyWithCount(take);
+            stack.shrink(take);
+            publications.add(new Publication(declaration.id(), declaration.material(),
+                    fragment, resource));
+            published.merge(declaration.id(), (long) take, Long::sum);
+            remaining -= take;
         }
     }
 

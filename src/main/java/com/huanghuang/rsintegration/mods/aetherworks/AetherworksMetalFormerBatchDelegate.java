@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.mods.common.MachineWaterSupply;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mods.aetherworks.AetherworksMetalFormerRecipeHandler;
@@ -129,7 +130,10 @@ public final class AetherworksMetalFormerBatchDelegate extends AbstractBatchDele
     }
 
     @Override public List<IngredientSpec> getRequiredMaterials() { return required; }
-    @Override public ItemStack getExpectedOutput() { return expected.copy(); }
+    // 产物留在各自的槽位中，不申请会与相邻成型台重叠的世界掉落物收取区域。
+    @Override public BatchConcurrencyCapabilities concurrencyCapabilities() {
+        return BatchConcurrencyCapabilities.machineSlot();
+    }
     @Override public ExpectedProduction getExpectedProduction() {
         return expected.isEmpty() ? null : new ExpectedProduction(expected.copy(), expected.getCount());
     }

@@ -28,6 +28,28 @@ public final class FluidContainerBucketTestFixtures {
 
     public record Buckets(Item empty, Item filled) {}
 
+    static synchronized Item nonCanonicalBucket(String name) {
+        ResourceLocation id = new ResourceLocation("rs_integration_test", name);
+        if (ForgeRegistries.ITEMS.containsKey(id)) return ForgeRegistries.ITEMS.getValue(id);
+        ForgeRegistry<Item> registry = (ForgeRegistry<Item>) ForgeRegistries.ITEMS;
+        boolean locked = registry.isLocked();
+        registry.unfreeze();
+        try {
+            Method unfreeze = BuiltInRegistries.ITEM.getClass().getMethod("unfreeze");
+            unfreeze.setAccessible(true);
+            unfreeze.invoke(BuiltInRegistries.ITEM);
+            Item item = new BucketItem(() -> Fluids.WATER,
+                    new Item.Properties().stacksTo(1).craftRemainder(Items.BUCKET)) {};
+            registry.register(id, item);
+            return item;
+        } catch (ReflectiveOperationException failure) {
+            throw new IllegalStateException("无法注册测试特殊桶", failure);
+        } finally {
+            BuiltInRegistries.ITEM.freeze();
+            if (locked) registry.freeze();
+        }
+    }
+
     public static synchronized Buckets buckets(String name) {
         ResourceLocation emptyId = new ResourceLocation("rs_integration_test", name + "_bucket");
         ResourceLocation filledId = new ResourceLocation("rs_integration_test", name + "_water_bucket");

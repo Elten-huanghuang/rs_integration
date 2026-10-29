@@ -1,11 +1,27 @@
 package com.huanghuang.rsintegration.mods.aetherworks;
 
+import com.electronwill.nightconfig.core.CommentedConfig;
+import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.crafting.OperationExecutionKernel;
+import com.huanghuang.rsintegration.crafting.OperationResourceCoordinator;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities.OutputOwnership;
+import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
+import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate.CraftObservation;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate.CraftPhase;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate.PreparationState;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
+import com.huanghuang.rsintegration.crafting.graph.GraphConcurrencyPolicy;
+import com.huanghuang.rsintegration.crafting.graph.CaptureLeaseRegistry;
+import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
+import com.huanghuang.rsintegration.crafting.graph.NodeId;
+import com.huanghuang.rsintegration.crafting.graph.OperationBudget;
+import com.huanghuang.rsintegration.crafting.loadbalancer.ParallelCraftGroup;
+import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry.BoundMachine;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.storage.StorageBackendId;
@@ -27,6 +43,8 @@ import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.level.Level;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fluids.capability.templates.FluidTank;
+import net.minecraftforge.eventbus.api.IEventBus;
+import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraftforge.items.ItemStackHandler;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -37,6 +55,7 @@ import net.sirplop.aetherworks.recipe.MetalFormerRecipe;
 import net.sirplop.aetherworks.recipe.IMetalFormerRecipe;
 import net.sirplop.aetherworks.power.DefaultHeatCapability;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeAll;
 import org.mockito.MockedStatic;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.Opcodes;
@@ -48,12 +67,100 @@ import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 class AetherworksMetalFormerBatchDelegateTest extends BootstrapTest {
+    @BeforeAll
+    static void configureSchedulerEnvironment() {
+        CommentedConfig config = CommentedConfig.inMemory();
+        RSIntegrationConfig.SERVER_SPEC.correct(config);
+        RSIntegrationConfig.SERVER_SPEC.setConfig(config);
+        FMLJavaModLoadingContext context = mock(FMLJavaModLoadingContext.class);
+        when(context.getModEventBus()).thenReturn(mock(IEventBus.class));
+        try (MockedStatic<FMLJavaModLoadingContext> loading = mockStatic(FMLJavaModLoadingContext.class)) {
+            loading.when(FMLJavaModLoadingContext::get).thenReturn(context);
+            assertNotNull(RSIntegrationMod.LOGGER);
+        }
+    }
+
+    @Test
+    void slotOutputDoesNotReserveAnOverlappingWorldCaptureRegion() throws Exception {
+        Fixture fixture = new Fixture();
+        assertNull(fixture.delegate.getExpectedOutput());
+        assertEquals(OutputOwnership.MACHINE_SLOT,
+                fixture.delegate.concurrencyCapabilities().outputOwnership());
+        assertFalse(GraphConcurrencyPolicy.isExclusive("aetherworks_metal_former", fixture.delegate));
+        var production = fixture.delegate.getExpectedProduction();
+        assertNotNull(production);
+        assertEquals(Items.EMERALD, production.item().getItem());
+        assertEquals(1, production.count());
+    }
+
+    @Test
+    void nearbyFormersStartTogetherAndCollectOnlyTheirOwnSlotResults() throws Exception {
+        ServerPlayer player = mock(ServerPlayer.class);
+        ServerLevel level = mock(ServerLevel.class);
+        when(player.serverLevel()).thenReturn(level);
+        ResourceLocation dimension = Level.OVERWORLD.location();
+        ResourceLocation recipeId = new ResourceLocation("aetherworks", "metal_former/ingot_aether");
+        ModType type = mock(ModType.class);
+        when(type.id()).thenReturn("aetherworks_metal_former");
+        BlockPos firstPos = new BlockPos(-683, 67, -418);
+        BlockPos secondPos = new BlockPos(-683, 67, -416);
+        AetherworksMetalFormerBatchDelegate first = preparedWorker(player, recipeId, dimension, firstPos);
+        AetherworksMetalFormerBatchDelegate second = preparedWorker(player, recipeId, dimension, secondPos);
+        when(type.createDelegate()).thenReturn(first, second);
+        MachineLeaseRegistry machines = new MachineLeaseRegistry();
+        CaptureLeaseRegistry captures = new CaptureLeaseRegistry();
+        OperationBudget globalBudget = new OperationBudget(2, 2);
+        OperationBudget craftBudget = new OperationBudget(2, 2);
+        OperationExecutionKernel kernel = new OperationExecutionKernel(
+                new OperationResourceCoordinator(machines, captures, globalBudget));
+
+        ParallelCraftGroup group = new ParallelCraftGroup(List.of(
+                new BoundMachine(dimension, firstPos, type, "aetherworks:forge_metal_former"),
+                new BoundMachine(dimension, secondPos, type, "aetherworks:forge_metal_former")),
+                type, recipeId, player, 2);
+        group.setOperationKernel(kernel, UUID.randomUUID(), new NodeId(0), craftBudget);
+        try {
+            assertEquals(2, group.getChildCount());
+            assertTrue(group.startOperation(OperationStartContext.delegateExtracted(
+                    player, new ExtractionLedger())));
+            assertEquals(2, craftBudget.active());
+            assertEquals(2, machines.size());
+            assertEquals(0, captures.size());
+            verify(first).startSingleOperation(player);
+            verify(second).startSingleOperation(player);
+
+            doReturn(new CraftObservation(CraftPhase.DONE)).when(first).observeCraft(level);
+            doReturn(new CraftObservation(CraftPhase.DONE)).when(second).observeCraft(level);
+            doReturn(new ItemStack(Items.EMERALD)).when(first).collectResult(player);
+            doReturn(new ItemStack(Items.EMERALD)).when(second).collectResult(player);
+            assertEquals(CraftPhase.DONE, group.observeCraft(level).phase());
+            assertEquals(2, group.collectAllResults(player).stream().mapToInt(ItemStack::getCount).sum());
+            assertEquals(0, craftBudget.active());
+            assertEquals(0, machines.size());
+        } finally {
+            group.onBatchFinished(player);
+        }
+    }
+
+    private static AetherworksMetalFormerBatchDelegate preparedWorker(
+            ServerPlayer player, ResourceLocation recipeId, ResourceLocation dimension, BlockPos pos)
+            throws Exception {
+        AetherworksMetalFormerBatchDelegate delegate = spy(new AetherworksMetalFormerBatchDelegate());
+        set(delegate, "pos", pos);
+        set(delegate, "expected", new ItemStack(Items.EMERALD));
+        doReturn(IBatchDelegate.PreparationResult.ready()).when(delegate).prepare(
+                player, recipeId, dimension, pos);
+        doReturn(true).when(delegate).startSingleOperation(player);
+        return delegate;
+    }
+
     @Test
     void nativeForgeFlagIsFalseAndMetalFormerTickDoesNotCheckIt() throws Exception {
         // 不初始化模组注册表，直接验证实际测试依赖 JAR 的接口契约。

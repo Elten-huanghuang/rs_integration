@@ -1,10 +1,13 @@
 package com.huanghuang.rsintegration.crafting.graph;
 
+import com.huanghuang.rsintegration.api.IntegrationResourceKey;
+import com.huanghuang.rsintegration.api.execution.CollectedOutput;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidItem;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidTestFixtures;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.material.Fluids;
@@ -166,6 +169,89 @@ class NodeOutputAccumulatorTest extends BootstrapTest {
         assertEquals(1, publications.size());
         assertEquals(1000, publications.get(0).stack().getCount());
         assertTrue(accumulator.isComplete());
+    }
+
+    @Test
+    void nativeFluidDeclarationAcceptsEveryMelterBatchAsTokens() {
+        ItemStack token = fluidToken(360);
+        OutputDeclaration declaration = fluidDeclaration(token, 12960);
+        NodeOutputAccumulator accumulator = new NodeOutputAccumulator(List.of(declaration));
+
+        for (int batch = 0; batch < 36; batch++) {
+            List<NodeOutputAccumulator.Publication> publications = accumulator.add(List.of(token));
+            assertEquals(360, publications.get(0).stack().getCount());
+            assertEquals(IntegrationResourceKey.ResourceKind.FLUID,
+                    publications.get(0).resource().kind());
+        }
+
+        assertTrue(accumulator.isComplete());
+        assertEquals(12960, accumulator.publishedQuantity(declaration.id()));
+        assertTrue(accumulator.drainSurplus().isEmpty());
+        assertEquals(360, token.getCount());
+    }
+
+    @Test
+    void nativeFluidDeclarationAcceptsDrainedBucketsAndReturnsOnlySurplus() {
+        ItemStack token = fluidToken(4000);
+        token.getOrCreateTag().putInt("Amount", 1000);
+        OutputDeclaration declaration = fluidDeclaration(token, 3000);
+        NodeOutputAccumulator accumulator = new NodeOutputAccumulator(List.of(declaration));
+
+        assertTrue(accumulator.canCompleteWith(List.of(token)));
+        assertEquals(0, accumulator.publishedQuantity(declaration.id()));
+        assertEquals(3000, accumulator.add(List.of(token)).get(0).stack().getCount());
+        assertTrue(accumulator.isComplete());
+        assertEquals(1000, accumulator.drainSurplus().get(0).getCount());
+        assertTrue(accumulator.add(List.of()).isEmpty());
+        assertEquals(3000, accumulator.publishedQuantity(declaration.id()));
+    }
+
+    @Test
+    void nativeAndTokenFluidResultsContributeOnceToTheSameDeclaration() {
+        ItemStack token = fluidToken(200);
+        OutputDeclaration declaration = fluidDeclaration(token, 350);
+        NodeOutputAccumulator accumulator = new NodeOutputAccumulator(List.of(declaration));
+        CollectedOutput nativeOutput = CollectedOutput.primary(
+                declaration.resource(), 150, new ResourceLocation("test", "fluid"));
+
+        var publications = accumulator.add(List.of(token), List.of(nativeOutput));
+
+        assertEquals(350, publications.stream().mapToInt(p -> p.stack().getCount()).sum());
+        assertEquals(350, accumulator.publishedQuantity(declaration.id()));
+        assertTrue(accumulator.isComplete());
+        assertTrue(accumulator.add(List.of(), List.of()).isEmpty());
+        assertTrue(accumulator.drainSurplus().isEmpty());
+    }
+
+    @Test
+    void nativeFluidDeclarationRejectsOtherFluidsAndNbtVariants() {
+        ItemStack expected = fluidToken(1000);
+        CompoundTag fluidTag = new CompoundTag();
+        fluidTag.putString("variant", "pure");
+        expected.getOrCreateTag().put("Tag", fluidTag);
+        ItemStack wrongVariant = fluidToken(1000);
+        ItemStack lava = InkFluidSupport.token(InkFluidTestFixtures.tokenItem(),
+                new FluidStack(Fluids.LAVA, 1000));
+        OutputDeclaration declaration = fluidDeclaration(expected, 1000);
+        NodeOutputAccumulator accumulator = new NodeOutputAccumulator(List.of(declaration));
+
+        assertFalse(accumulator.canCompleteWith(List.of(lava, wrongVariant)));
+        assertTrue(accumulator.add(List.of(lava, wrongVariant)).isEmpty());
+        assertEquals(1000, accumulator.shortages().get(0).missing());
+        assertEquals(1000, accumulator.add(List.of(expected)).get(0).stack().getCount());
+        assertTrue(accumulator.isComplete());
+        assertEquals(2, accumulator.drainSurplus().size());
+    }
+
+    private static ItemStack fluidToken(int amount) {
+        return InkFluidSupport.token(InkFluidTestFixtures.tokenItem(),
+                new FluidStack(Fluids.WATER, amount));
+    }
+
+    private static OutputDeclaration fluidDeclaration(ItemStack token, long amount) {
+        return new OutputDeclaration(new OutputPortId(new NodeId(10), 0),
+                MaterialKey.of(token), amount, OutputKind.PRIMARY, amount, amount,
+                OutputProbability.guaranteed(), false, null, InkFluidSupport.resource(token));
     }
 
     @Test

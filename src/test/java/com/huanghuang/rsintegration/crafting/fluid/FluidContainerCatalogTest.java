@@ -120,6 +120,30 @@ class FluidContainerCatalogTest extends BootstrapTest {
         assertEquals(1000, fill.specs().get(1).count());
     }
 
+    @Test void missingCapabilitiesDoNotTurnMobBucketsIntoPlainWaterRecipes() {
+        var recipes = FluidContainerCatalog.discover(
+                List.of(new ItemStack(Items.COD_BUCKET), new ItemStack(Items.AXOLOTL_BUCKET)),
+                List.of(), stack -> null, FluidContainerCatalogTest::token);
+
+        assertTrue(recipes.isEmpty());
+        assertFalse(FluidContainerBucketSupport.needsFallback(new ItemStack(Items.COD_BUCKET)));
+    }
+
+    @Test void nonCanonicalBucketSubclassesRequireTheirRealFluidCapabilities() {
+        Item special = FluidContainerBucketTestFixtures.nonCanonicalBucket("special_water_bucket");
+        ItemStack sample = new ItemStack(special);
+
+        assertTrue(FluidContainerCatalog.discover(List.of(sample), List.of(),
+                stack -> null, FluidContainerCatalogTest::token).isEmpty());
+
+        var recipes = FluidContainerCatalog.discover(List.of(sample), List.of(),
+                stack -> stack.is(special) || stack.is(Items.BUCKET) || stack.is(Items.WATER_BUCKET)
+                        ? new FluidBucketWrapper(stack) : null,
+                FluidContainerCatalogTest::token);
+        assertTrue(recipes.stream().anyMatch(recipe -> !recipe.filling()
+                && recipe.filledContainer().is(special)));
+    }
+
     @Test void bucketsWithoutCapabilitiesKeepTheirDeclaredEmptyContainers() {
         var buckets = FluidContainerBucketTestFixtures.buckets("missing_capability_wood");
         var recipes = FluidContainerCatalog.discover(List.of(new ItemStack(buckets.filled())), List.of(),
