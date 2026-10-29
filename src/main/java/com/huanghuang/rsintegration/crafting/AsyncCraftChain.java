@@ -2806,27 +2806,30 @@ public final class AsyncCraftChain {
         List<ItemStack> remaining = StackCopies.excludingEmpty(actualOutputs);
         Map<OutputDeclaration, List<ItemStack>> matched = new LinkedHashMap<>();
         List<String> checks = new ArrayList<>();
+        List<String> mismatches = new ArrayList<>();
         for (OutputDeclaration output : node.outputs()) {
             List<ItemStack> fragments = removeMatchingFragments(
                     remaining, output.material(), output.quantity());
             long actualCount = fragments.stream().mapToLong(ItemStack::getCount).sum();
-            checks.add(describeOutputCheck(output, actualCount));
-            if (actualCount != output.quantity()) {
-                RSIntegrationMod.LOGGER.warn(ctx.format(
-                                "[RSI-GraphOutputMismatch] node={} recipe={} modType={} "
-                                        + "recipeType={} executions={} failed={} checks={} "
-                                        + "declarations={} actual={} unmatched={}"),
-                        node.id().value(), node.recipeId(), node.modTypeId(),
-                        node.recipeTypeId(), node.executions(),
-                        describeOutputCheck(output, actualCount), checks,
-                        describeOutputDeclarations(node.outputs()),
-                        describeStacksForLogging(actualOutputs),
-                        describeStacksForLogging(remaining));
-                for (ItemStack stack : actualOutputs) addToVirtualInventory(stack);
-                actualOutputs.clear();
-                return false;
-            }
+            String check = describeOutputCheck(output, actualCount);
+            checks.add(check);
+            if (actualCount != output.quantity()) mismatches.add(check);
             matched.put(output, fragments);
+        }
+        if (!mismatches.isEmpty()) {
+            // 所有声明都先核对完再报告，failed= 才是真实的失败个数，mismatches= 给出逐条明细。
+            RSIntegrationMod.LOGGER.warn(ctx.format(
+                            "[RSI-GraphOutputMismatch] node={} recipe={} modType={} "
+                                    + "recipeType={} executions={} failed={} mismatches={} "
+                                    + "checks={} declarations={} actual={} unmatched={}"),
+                    node.id().value(), node.recipeId(), node.modTypeId(),
+                    node.recipeTypeId(), node.executions(), mismatches.size(), mismatches,
+                    checks, describeOutputDeclarations(node.outputs()),
+                    describeStacksForLogging(actualOutputs),
+                    describeStacksForLogging(remaining));
+            for (ItemStack stack : actualOutputs) addToVirtualInventory(stack);
+            actualOutputs.clear();
+            return false;
         }
 
         for (Map.Entry<OutputDeclaration, List<ItemStack>> entry : matched.entrySet()) {
