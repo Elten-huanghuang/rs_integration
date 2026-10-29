@@ -9,6 +9,8 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
+import com.huanghuang.rsintegration.crafting.batch.OperationInputRecovery;
+import com.huanghuang.rsintegration.crafting.batch.OperationInputRecovery.Input;
 import com.huanghuang.rsintegration.reflection.probes.ArsNouveauReflection;
 import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.huanghuang.rsintegration.util.PlayerUtils;
@@ -72,6 +74,9 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
     private ArsPedestalLayout pedestalLayout;
     private List<IngredientSpec> requiredMaterials;
     private final List<OwnedPedestalCatalyst> activePedestalCatalysts = new ArrayList<>();
+    private OperationInputRecovery inputRecovery = new OperationInputRecovery();
+    @Nullable
+    private Input activeInput;
     private boolean pedestalCatalystsInstalled;
     private boolean craftStarted;
     private long craftStartTick;
@@ -81,7 +86,7 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
     private static final int SOURCE_FALLBACK_INTERVAL_TICKS = 20;
     private static final long CRAFT_TIMEOUT_GRACE_TICKS = 200;
 
-    private record OwnedPedestalCatalyst(BlockPos position, int count) {}
+    private record OwnedPedestalCatalyst(BlockEntity owner, Input input) {}
 
     // ── IBatchDelegate implementation ─────────────────────────────────────────
 
@@ -145,6 +150,8 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
         this.craftStartTick = 0;
         this.activePedestalCatalysts.clear();
         this.pedestalCatalystsInstalled = false;
+        this.inputRecovery = new OperationInputRecovery();
+        this.activeInput = null;
 
         if (!level.hasChunkAt(pos)) return false;
         BlockEntity be = level.getBlockEntity(pos);
@@ -193,6 +200,12 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
     public boolean startPreparedOperation(@Nonnull ServerPlayer player,
                                         @Nonnull List<ItemStack> materials,
                                         @Nonnull ExtractionLedger sharedLedger) {
+        useSharedLedger(sharedLedger);
+        List<Input> ownedInputs = materials.stream().map(inputRecovery::hold).toList();
+        if (pedestalCatalystsInstalled && ownedInputs.size() > 1) {
+            // 后续操作只重用已投放的催化剂视图，不能在提前拒绝启动时重复退款。
+            ownedInputs.subList(1, ownedInputs.size()).forEach(Input::release);
+        }
         ServerLevel level = getLevel();
         if (level == null) {
             refundRejectedStart(player, player.serverLevel(), materials);
@@ -252,7 +265,7 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
         if (!pedestalStacks.isEmpty()) {
-            if (!placePedestalItems(level, pedestalStacks)) {
+            if (!placePedestalItems(level, pedestalStacks, ownedInputs.subList(1, ownedInputs.size()))) {
                 RSIntegrationMod.LOGGER.warn("[RSI-ArsImbuement] Failed to place pedestal items");
                 refundRejectedStart(player, level, materials);
                 return false;
@@ -260,15 +273,14 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
         }
 
         // Place input item in slot 0 — this triggers the recipe check via canPlaceItem
+        activeInput = ownedInputs.get(0);
+        activeInput.place(be, container, 0);
         container.setItem(0, inputStack.copy());
         be.setChanged();
 
         // Verify recipe is active (the tile's own recipe matching)
         if (!isRecipeActive(be)) {
             RSIntegrationMod.LOGGER.warn("[RSI-ArsImbuement] Recipe did not activate after placement");
-            // Try to clean up
-            container.setItem(0, ItemStack.EMPTY);
-            discardPedestalCatalysts(level);
             refundRejectedStart(player, level, materials);
             return false;
         }
@@ -361,6 +373,8 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
         }
 
         ItemStack result = container.removeItem(0, 64);
+        if (activeInput != null) activeInput.release();
+        activeInput = null;
         be.setChanged();
 
         // Clear pedestal items if any
@@ -371,18 +385,24 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         RSIntegrationMod.LOGGER.debug("[RSI-ArsImbuement] Clearing machine state");
-        // Try to recover items if craft didn't start or failed early
-        if (be instanceof Container container) {
-            ItemStack remaining = container.removeItem(0, 64);
-            if (!usingSharedLedger && !remaining.isEmpty() && player != null) {
-                player.addItem(remaining);
-            }
-        }
+        recoverOwnedInputs(player);
+    }
 
-        ServerLevel level = resolveMachineLevel(player);
-        if (level != null) {
-            discardPedestalCatalysts(level);
-        }
+    @Override
+    protected void clearMissingMachineState(@Nullable ServerPlayer player) {
+        recoverOwnedInputs(player);
+    }
+
+    @Override
+    protected void clearUnavailableMachineState(@Nullable ServerPlayer player) {
+        recoverOwnedInputs(player);
+    }
+
+    private void recoverOwnedInputs(@Nullable ServerPlayer player) {
+        settleFailureRecoveredInputs(inputRecovery.recover(resolveMachineLevel(player)), player);
+        activeInput = null;
+        activePedestalCatalysts.clear();
+        pedestalCatalystsInstalled = false;
     }
 
     @Override
@@ -398,10 +418,7 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
 
         int recovered = 0;
         for (OwnedPedestalCatalyst owned : List.copyOf(activePedestalCatalysts)) {
-            BlockEntity pedestalBe = level.getBlockEntity(owned.position());
-            if (!(pedestalBe instanceof Container pedestalContainer)) continue;
-            ItemStack catalyst = pedestalContainer.removeItem(0, owned.count());
-            pedestalBe.setChanged();
+            ItemStack catalyst = owned.input().take(level);
             if (catalyst.isEmpty()) continue;
             recovered += catalyst.getCount();
             returnCatalyst(player, level, catalyst);
@@ -467,7 +484,8 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
         return Reflect.<List<Ingredient>>getField(recipe, "pedestalItems").orElse(List.of());
     }
 
-    private boolean placePedestalItems(ServerLevel level, List<ItemStack> pedestalStacks) {
+    private boolean placePedestalItems(ServerLevel level, List<ItemStack> pedestalStacks,
+                                       List<Input> ownedInputs) {
         if (pedestalLayout == null) return false;
 
         List<BlockPos> positions = pedestalLayout.pedestalPositions();
@@ -480,7 +498,9 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
         if (pedestalCatalystsInstalled) {
             for (int i = 0; i < pedestalStacks.size(); i++) {
                 BlockEntity pedestalBe = level.getBlockEntity(positions.get(i));
-                if (!(pedestalBe instanceof Container pedestalContainer)
+                if (i >= activePedestalCatalysts.size()
+                        || pedestalBe != activePedestalCatalysts.get(i).owner()
+                        || !(pedestalBe instanceof Container pedestalContainer)
                         || !ItemStack.isSameItemSameTags(
                         pedestalContainer.getItem(0), pedestalStacks.get(i))) {
                     return false;
@@ -496,40 +516,24 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
             BlockEntity pedestalBe = level.getBlockEntity(pedestalPos);
             if (pedestalBe instanceof Container pedestalContainer) {
                 ItemStack installed = pedestalContainer.getItem(0);
-                if (!installed.isEmpty()
-                        && (!ItemStack.isSameItemSameTags(installed, required)
-                        || installed.getCount() < required.getCount())) {
+                if (!installed.isEmpty()) {
                     RSIntegrationMod.LOGGER.warn("[RSI-ArsImbuement] Pedestal at {} is occupied", pedestalPos);
-                    discardPedestalCatalysts(level);
                     return false;
                 }
-                if (installed.isEmpty()) {
-                    pedestalContainer.setItem(0, required.copy());
-                    pedestalBe.setChanged();
-                }
+                Input owned = ownedInputs.get(i);
+                owned.place(pedestalBe, pedestalContainer, 0);
+                pedestalContainer.setItem(0, required.copy());
+                pedestalBe.setChanged();
                 activePedestalCatalysts.add(new OwnedPedestalCatalyst(
-                        pedestalPos, required.getCount()));
+                        pedestalBe, owned));
             } else {
                 RSIntegrationMod.LOGGER.warn("[RSI-ArsImbuement] Pedestal at {} is not a container", pedestalPos);
-                discardPedestalCatalysts(level);
                 return false;
             }
         }
 
         pedestalCatalystsInstalled = true;
         return true;
-    }
-
-    private void discardPedestalCatalysts(ServerLevel level) {
-        for (OwnedPedestalCatalyst owned : List.copyOf(activePedestalCatalysts)) {
-            BlockEntity pedestalBe = level.getBlockEntity(owned.position());
-            if (pedestalBe instanceof Container pedestalContainer) {
-                pedestalContainer.removeItem(0, owned.count());
-                pedestalBe.setChanged();
-            }
-        }
-        activePedestalCatalysts.clear();
-        pedestalCatalystsInstalled = false;
     }
 
     static long timeoutTicksForSourceCost(int sourceCost) {
@@ -541,20 +545,7 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
 
     private void refundRejectedStart(ServerPlayer player, ServerLevel level,
                                      List<ItemStack> materials) {
-        if (!hasStorageAccess()) {
-            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(
-                    player, level.dimension(), machinePos).orElse(null));
-        }
-        for (ItemStack material : materials) {
-            if (material == null || material.isEmpty()) continue;
-            ItemStack remainder = insertIntoStorage(player, material, false);
-            if (!remainder.isEmpty()) {
-                PlayerUtils.safeGiveToStorage(player, remainder, storageEndpoint());
-            }
-        }
-        RSIntegrationMod.LOGGER.debug(
-                "[RSI-ArsImbuement] Refunded {} material stack(s) after rejected start",
-                materials.stream().filter(stack -> stack != null && !stack.isEmpty()).count());
+        settleFailureRecoveredInputs(inputRecovery.recover(level), player);
     }
 
     private void returnCatalyst(ServerPlayer player, ServerLevel level, ItemStack catalyst) {

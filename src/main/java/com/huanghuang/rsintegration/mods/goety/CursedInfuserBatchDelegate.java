@@ -22,6 +22,7 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.AABB;
 import java.util.Arrays;
+import java.util.ArrayList;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -40,6 +41,7 @@ public final class CursedInfuserBatchDelegate extends AbstractBatchDelegate {
     private ItemStack expected = ItemStack.EMPTY;
     private ItemStack queuedInput = ItemStack.EMPTY;
     private ItemStack inputTemplate = ItemStack.EMPTY;
+    private BlockEntity activeMachine;
     private int cookingTime;
     private int preparedCapacity = 1;
     private int requestedBatch = 1;
@@ -101,6 +103,7 @@ public final class CursedInfuserBatchDelegate extends AbstractBatchDelegate {
         this.activeOwnedSlots.clear();
         this.queuedInput = ItemStack.EMPTY;
         this.inputTemplate = ItemStack.EMPTY;
+        this.activeMachine = null;
         markCraftStarted();
         return PreparationResult.ready();
     }
@@ -189,20 +192,16 @@ public final class CursedInfuserBatchDelegate extends AbstractBatchDelegate {
         if (!expectedPlan.enabled() || expectedPlan.operations() != plan.operations()) return false;
 
         requestedBatch = plan.operations();
+        useSharedLedger(sharedLedger);
         queuedInput = input.stack().copy();
         inputTemplate = input.stack().copyWithCount(1);
         activeOwnedSlots.clear();
         BlockEntity blockEntity = level.getBlockEntity(pos);
+        activeMachine = blockEntity;
         if (blockEntity == null || !fillAvailableSlots(blockEntity)
                 || !queuedInput.isEmpty() || activeOwnedSlots.isEmpty()) {
-            queuedInput = ItemStack.EMPTY;
-            inputTemplate = ItemStack.EMPTY;
-            activeOwnedSlots.clear();
-            requestedBatch = 1;
             return false;
         }
-        this.sharedLedger = sharedLedger;
-        this.usingSharedLedger = true;
         markCraftStarted();
         return true;
     }
@@ -256,18 +255,16 @@ public final class CursedInfuserBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
+        useSharedLedger(sharedLedger);
         queuedInput = material.copy();
         inputTemplate = material.copyWithCount(1);
         activeOwnedSlots.clear();
         BlockEntity blockEntity = level.getBlockEntity(pos);
+        activeMachine = blockEntity;
         if (blockEntity == null || !fillAvailableSlots(blockEntity)
                 || activeOwnedSlots.isEmpty()) {
-            queuedInput = ItemStack.EMPTY;
-            inputTemplate = ItemStack.EMPTY;
-            activeOwnedSlots.clear();
             return false;
         }
-        usingSharedLedger = true;
         markCraftStarted();
         return true;
     }
@@ -285,7 +282,8 @@ public final class CursedInfuserBatchDelegate extends AbstractBatchDelegate {
     @Override
     protected CraftObservation observeMachineCraft(@Nonnull ServerLevel level,
                                                     @Nonnull BlockEntity blockEntity) {
-        if (GoetyInfuserMachineSupport.kindOf(blockEntity) != machineKind) {
+        if (blockEntity != activeMachine
+                || GoetyInfuserMachineSupport.kindOf(blockEntity) != machineKind) {
             return failObservation("cursed infuser block entity changed");
         }
         if (GoetyInfuserMachineSupport.prerequisite(level, pos, machineKind)
@@ -301,7 +299,8 @@ public final class CursedInfuserBatchDelegate extends AbstractBatchDelegate {
     }
 
     private boolean fillAvailableSlots(BlockEntity blockEntity) {
-        List<ItemStack> slots = GoetyInfuserMachineSupport.recipeItems(blockEntity);
+        List<ItemStack> slots = blockEntity == activeMachine
+                ? GoetyInfuserMachineSupport.recipeItems(blockEntity) : null;
         if (slots == null) return false;
         Set<Integer> completedSlots = new HashSet<>();
         for (int slot : activeOwnedSlots) {
@@ -359,13 +358,17 @@ public final class CursedInfuserBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     protected void clearMachineState(BlockEntity blockEntity, @Nullable ServerPlayer player) {
-        List<ItemStack> slots = GoetyInfuserMachineSupport.recipeItems(blockEntity);
+        List<ItemStack> recovered = new ArrayList<>();
+        if (!queuedInput.isEmpty()) recovered.add(queuedInput.copy());
+        List<ItemStack> slots = blockEntity == activeMachine
+                ? GoetyInfuserMachineSupport.recipeItems(blockEntity) : null;
         if (slots != null) {
             for (int slot : activeOwnedSlots) {
                 if (slot < 0 || slot >= slots.size()) continue;
                 ItemStack stack = slots.get(slot);
                 if (!stack.isEmpty() && ItemStack.isSameItemSameTags(stack, inputTemplate)) {
-                    slots.set(slot, ItemStack.EMPTY);
+                    // 每个原生配方槽只接收本订单的一个材料。
+                    recovered.add(stack.split(1));
                 }
             }
             blockEntity.setChanged();
@@ -373,7 +376,20 @@ public final class CursedInfuserBatchDelegate extends AbstractBatchDelegate {
                 level.sendBlockUpdated(pos, level.getBlockState(pos), level.getBlockState(pos), 3);
             }
         }
+        recordFailureRecoveredInputs(recovered);
         clearLocalState();
+    }
+
+    @Override
+    protected void clearMissingMachineState(@Nullable ServerPlayer player) {
+        recordFailureRecoveredInputs(queuedInput.isEmpty()
+                ? List.of() : List.of(queuedInput));
+        clearLocalState();
+    }
+
+    @Override
+    protected void clearUnavailableMachineState(@Nullable ServerPlayer player) {
+        clearMissingMachineState(player);
     }
 
     @Override
@@ -390,6 +406,7 @@ public final class CursedInfuserBatchDelegate extends AbstractBatchDelegate {
         expected = ItemStack.EMPTY;
         queuedInput = ItemStack.EMPTY;
         inputTemplate = ItemStack.EMPTY;
+        activeMachine = null;
         cookingTime = 0;
         preparedCapacity = 1;
         requestedBatch = 1;

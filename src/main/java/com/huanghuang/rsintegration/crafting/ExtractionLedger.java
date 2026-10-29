@@ -74,6 +74,8 @@ public final class ExtractionLedger implements AutoCloseable {
     private State state = State.IDLE;
     @Nullable private UUID refundOwner;
     @Nullable private MinecraftServer refundServer;
+    /** 仅退款使用提交时的身份；离线后仍由原端点检查写入权限。 */
+    @Nullable private ServerPlayer refundActor;
 
     @Nullable
     private CraftLogContext logContext;
@@ -775,6 +777,7 @@ public final class ExtractionLedger implements AutoCloseable {
         if (state == State.COMMITTED) return true;
         refundOwner = player.getUUID();
         refundServer = player.server;
+        refundActor = player;
         // Allow IDLE only for no-op commit (no entries)
         if (state == State.IDLE && entries.isEmpty()) {
             transition(State.COMMITTED);
@@ -1179,6 +1182,7 @@ public final class ExtractionLedger implements AutoCloseable {
         clearReservationSnapshot();
         refundOwner = null;
         refundServer = null;
+        refundActor = null;
         // A chain reuses its master ledger across vanilla steps. The settlement
         // mirror is a per-commit scope and must be reset with the legacy ledger;
         // otherwise the next step calls beginCommit() on COMMITTED state.
@@ -1997,8 +2001,9 @@ public final class ExtractionLedger implements AutoCloseable {
         }
         switch (e.source) {
             case NETWORK, ALTAR_BINDING -> {
-                if (destination != null && player != null) {
-                    var result = destination.insert(player, refund, false);
+                ServerPlayer actor = player != null ? player : refundActor;
+                if (destination != null && actor != null) {
+                    var result = destination.insert(actor, refund, false);
                     ItemStack leftover = refundRemainder(result, e.id, refund);
                     if (!leftover.isEmpty()) {
                         LOGGER.warn("[RSI-Ledger] Endpoint refund had leftover for {} x{}",

@@ -7,6 +7,8 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.OperationInputRecovery;
+import com.huanghuang.rsintegration.crafting.batch.OperationInputRecovery.Input;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.PreparationMessageScope;
 import com.huanghuang.rsintegration.crafting.plan.MachineCandidateView;
@@ -19,6 +21,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.AABB;
 
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
+import com.huanghuang.rsintegration.crafting.CraftItemRecovery;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
@@ -70,7 +73,11 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     private BlockPos myPos;
     private Object altar;                 // DarkAltarBlockEntity
     private Object ritualRecipe;          // RitualRecipe
-    private List<Object> filledPedestals;
+    private List<PlacedPedestal> filledPedestals;
+    private final List<ItemStack> unplacedRitualInputs = new ArrayList<>();
+    private ItemStack ritualActivationTemplate = ItemStack.EMPTY;
+    private boolean altarStartAttempted;
+    private boolean activationPlacedInAltar;
     private int soulCost;
     @Nullable
     private GoetySoulCraftingTask soulTask;
@@ -93,8 +100,11 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     private ItemStack substituteActivationTemplate = ItemStack.EMPTY;
     private boolean ritualPreparedForManualStart;
 
+    record PlacedPedestal(Object pedestal, ItemStack template) {}
+
     // Brazier-mode state
     private boolean isBrazier;
+    private OperationInputRecovery brazierInputRecovery = new OperationInputRecovery();
     private Object brazier;               // NecroBrazierBlockEntity
     private Object brazierRecipeObj;      // BrazierRecipe
     private int brazierSoulCost;
@@ -379,6 +389,11 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         this.pendingRitualResult = ItemStack.EMPTY;
         this.substituteActivationTemplate = ItemStack.EMPTY;
         this.ritualPreparedForManualStart = false;
+        this.unplacedRitualInputs.clear();
+        this.brazierInputRecovery = new OperationInputRecovery();
+        this.ritualActivationTemplate = ItemStack.EMPTY;
+        this.altarStartAttempted = false;
+        this.activationPlacedInAltar = false;
 
         ServerLevel machineLevel = resolveMachineLevel(player);
         if (myPos != null && machineLevel != null && machineLevel.isLoaded(myPos)) {
@@ -444,7 +459,6 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
         ItemStack activationItemStack = extractActivation(activationIng);
         if (activationItemStack == null) return false;
-        rememberSubstituteActivation(activationItemStack);
 
         if (specList.isEmpty()) {
             return startRitualDirectly(ritual, activationItemStack);
@@ -494,6 +508,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             refundActivationToPlayer();
             return false;
         }
+        rememberCommittedRitualInputs(activationItem, reservedStacks);
 
         // 4. Place REAL items (post-commit) on pedestals
         if (availablePedestals != null) {
@@ -503,11 +518,10 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                     RSIntegrationMod.LOGGER.error(
                             "[RSI-Batch-Goety] Failed to verify material placement on pedestal {}", ped);
                     refundActivationToPlayer();
-                    ledger.refundCommittedToEndpoint(storageEndpoint(), player);
-                    recoverFromPedestals();
+                    refundRitualInputs((BlockEntity) altar, player);
                     return false;
                 }
-                filledPedestals.add(ped);
+                rememberPlacedPedestal(ped, reservedStacks.get(i));
             }
         }
 
@@ -533,8 +547,20 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                 return null;
             }
             this.activationExtractedFromPlayer = stack.copy();
+            unplacedRitualInputs.add(stack.copy());
         }
+        rememberActivation(stack);
         return stack;
+    }
+
+    private void rememberCommittedRitualInputs(ItemStack activation, List<ItemStack> materials) {
+        // RS 预留模板只有提交后才成为实物；玩家背包取出的激活物已单独登记。
+        if (activationExtractedFromPlayer == null && !activation.isEmpty()) {
+            unplacedRitualInputs.add(activation.copy());
+        }
+        for (ItemStack stack : materials) {
+            if (!stack.isEmpty()) unplacedRitualInputs.add(stack.copy());
+        }
     }
 
     private boolean startRitualDirectly(Object ritual, ItemStack activationItemStack) {
@@ -546,17 +572,18 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                 closeSoulTask();
                 return false;
             }
+            rememberCommittedRitualInputs(activationItemStack, List.of());
             if (!checkRitualIsValid(ritual, activationItemStack)) {
                 player.sendSystemMessage(Component.translatable("rsi.goety.error.ritual_invalid"));
                 refundActivationToPlayer();
-                ledger.refundCommittedToEndpoint(storageEndpoint(), player);
+                refundRitualInputs((BlockEntity) altar, player);
                 closeSoulTask();
                 return false;
             }
             if (!startAltarRitual(altar, player, activationItemStack, ritualRecipe)) {
                 player.sendSystemMessage(Component.translatable("rsi.goety.error.ritual_start_failed"));
                 refundActivationToPlayer();
-                ledger.refundCommittedToEndpoint(storageEndpoint(), player);
+                refundRitualInputs((BlockEntity) altar, player);
                 closeSoulTask();
                 return false;
             }
@@ -564,7 +591,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Failed to start ritual", e);
             refundActivationToPlayer();
-            ledger.refundCommittedToEndpoint(storageEndpoint(), player);
+            refundRitualInputs((BlockEntity) altar, player);
             closeSoulTask();
             return false;
         }
@@ -612,6 +639,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             closeSoulTask();
             return false;
         }
+        rememberCommittedRitualInputs(activationItemStack, templates);
 
         try {
             for (int i = 0; i < templates.size(); i++) {
@@ -621,22 +649,20 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                 if (!writePedestalItem(ped, stack)) {
                     throw new IllegalStateException("Goety pedestal rejected ritual material");
                 }
-                filledPedestals.add(ped);
+                rememberPlacedPedestal(ped, stack);
             }
 
             if (!checkRitualIsValid(ritual, activationItemStack)) {
                 player.sendSystemMessage(Component.translatable("rsi.goety.error.ritual_invalid"));
                 refundActivationToPlayer();
-                ledger.refundCommittedToEndpoint(storageEndpoint(), player);
-                recoverFromPedestals();
+                refundRitualInputs((BlockEntity) altar, player);
                 closeSoulTask();
                 return false;
             }
             if (!startAltarRitual(altar, player, activationItemStack, ritualRecipe)) {
                 player.sendSystemMessage(Component.translatable("rsi.goety.error.ritual_start_failed"));
                 refundActivationToPlayer();
-                ledger.refundCommittedToEndpoint(storageEndpoint(), player);
-                recoverFromPedestals();
+                refundRitualInputs((BlockEntity) altar, player);
                 closeSoulTask();
                 return false;
             }
@@ -644,8 +670,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Placement/start failed:", e);
             refundActivationToPlayer();
-            ledger.refundCommittedToEndpoint(storageEndpoint(), player);
-            recoverFromPedestals();
+            refundRitualInputs((BlockEntity) altar, player);
             closeSoulTask();
             return false;
         }
@@ -693,6 +718,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         }
 
         // Physical placement AFTER commit — refund if setup fails
+        rememberBrazierPlacement(toPlace);
         Reflect.invoke(brazier, GoetyReflection.M_SET_ITEMS, toPlace);
         // Set recipe directly (bypass updateRecipe) — yzzzfix overrides
         // updateRecipe to call stopBrazier(false) when recipe is null,
@@ -711,33 +737,20 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         if (bzrRecipe == null) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Brazier recipe not set: {}",
                     ((Recipe<?>) brazierRecipeObj).getId());
-            Reflect.invoke(brazier, GoetyReflection.M_SET_ITEMS,
-                    NonNullList.withSize(containerSize, ItemStack.EMPTY));
-            Reflect.setField(brazier, GoetyReflection.F_RECIPE_ID, null);
-            ledger.refundCommittedToEndpoint(storageEndpoint(), player);
+            refundBrazierInputs((BlockEntity) brazier, player);
             return false;
         }
 
         // Start the brazier — activate() validates soul energy and begins processing
         if (!beginBrazierSoulTask()) {
-            Reflect.invoke(brazier, GoetyReflection.M_SET_ITEMS,
-                    NonNullList.withSize(containerSize, ItemStack.EMPTY));
-            Reflect.setField(brazier, GoetyReflection.F_RECIPE, null);
-            Reflect.setField(brazier, GoetyReflection.F_RECIPE_ID, null);
-            Reflect.setField(brazier, GoetyReflection.F_CURRENT_TIME, 0);
-            ledger.refundCommittedToEndpoint(storageEndpoint(), player);
+            refundBrazierInputs((BlockEntity) brazier, player);
             return false;
         }
         boolean activated = Reflect.<Boolean>invoke(brazier, GoetyReflection.M_ACTIVATE, level).orElse(false);
         if (!activated) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Brazier activate returned false for recipe: {}",
                     ((Recipe<?>) brazierRecipeObj).getId());
-            Reflect.invoke(brazier, GoetyReflection.M_SET_ITEMS,
-                    NonNullList.withSize(containerSize, ItemStack.EMPTY));
-            Reflect.setField(brazier, GoetyReflection.F_RECIPE, null);
-            Reflect.setField(brazier, GoetyReflection.F_RECIPE_ID, null);
-            Reflect.setField(brazier, GoetyReflection.F_CURRENT_TIME, 0);
-            ledger.refundCommittedToEndpoint(storageEndpoint(), player);
+            refundBrazierInputs((BlockEntity) brazier, player);
             closeSoulTask();
             return false;
         }
@@ -805,6 +818,14 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         this.pendingRitualResult = ItemStack.EMPTY;
         this.substituteActivationTemplate = ItemStack.EMPTY;
         this.ritualPreparedForManualStart = false;
+        this.unplacedRitualInputs.clear();
+        this.brazierInputRecovery = new OperationInputRecovery();
+        for (ItemStack material : materials) {
+            if (!material.isEmpty()) this.unplacedRitualInputs.add(material.copy());
+        }
+        this.ritualActivationTemplate = ItemStack.EMPTY;
+        this.altarStartAttempted = false;
+        this.activationPlacedInAltar = false;
 
         // Verify the cached BlockEntity is still valid
         ServerLevel machineLevel = resolveMachineLevel(player);
@@ -853,9 +874,10 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                     return false;
                 }
                 this.activationExtractedFromPlayer = activationItem.copy();
+                unplacedRitualInputs.add(activationItem.copy());
             }
         }
-        rememberSubstituteActivation(activationItem);
+        rememberActivation(activationItem);
 
         if (remainingMaterials.isEmpty()) {
             try {
@@ -904,7 +926,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                 if (!writePedestalItem(ped, stack)) {
                     throw new IllegalStateException("Goety pedestal rejected ritual material");
                 }
-                filledPedestals.add(ped);
+                rememberPlacedPedestal(ped, stack);
             }
 
             if (requiresManualStart(ritualRecipe, ritual)) {
@@ -965,6 +987,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             toPlace.set(slot++, mat.copy());
         }
 
+        rememberBrazierPlacement(toPlace);
         Reflect.invoke(brazier, GoetyReflection.M_SET_ITEMS, toPlace);
         // Set recipe directly (bypass updateRecipe) — yzzzfix overrides
         // updateRecipe to call stopBrazier(false) when recipe is null,
@@ -983,31 +1006,21 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         if (bzrRecipe == null) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Brazier recipe not set in startPreparedOperation: {}",
                     ((Recipe<?>) brazierRecipeObj).getId());
-            Reflect.invoke(brazier, GoetyReflection.M_SET_ITEMS,
-                    NonNullList.withSize(containerSize, ItemStack.EMPTY));
-            Reflect.setField(brazier, GoetyReflection.F_RECIPE_ID, null);
+            refundBrazierInputs((BlockEntity) brazier, player);
             player.sendSystemMessage(Component.translatable("rsi.goety.error.one_click_failed"));
             return false;
         }
 
         // Start the brazier — activate() validates soul energy and begins processing
         if (!beginBrazierSoulTask()) {
-            Reflect.invoke(brazier, GoetyReflection.M_SET_ITEMS,
-                    NonNullList.withSize(containerSize, ItemStack.EMPTY));
-            Reflect.setField(brazier, GoetyReflection.F_RECIPE, null);
-            Reflect.setField(brazier, GoetyReflection.F_RECIPE_ID, null);
-            Reflect.setField(brazier, GoetyReflection.F_CURRENT_TIME, 0);
+            refundBrazierInputs((BlockEntity) brazier, player);
             return false;
         }
         boolean activated = Reflect.<Boolean>invoke(brazier, GoetyReflection.M_ACTIVATE, level).orElse(false);
         if (!activated) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] Brazier activate returned false in startPreparedOperation: {}",
                     ((Recipe<?>) brazierRecipeObj).getId());
-            Reflect.invoke(brazier, GoetyReflection.M_SET_ITEMS,
-                    NonNullList.withSize(containerSize, ItemStack.EMPTY));
-            Reflect.setField(brazier, GoetyReflection.F_RECIPE, null);
-            Reflect.setField(brazier, GoetyReflection.F_RECIPE_ID, null);
-            Reflect.setField(brazier, GoetyReflection.F_CURRENT_TIME, 0);
+            refundBrazierInputs((BlockEntity) brazier, player);
             player.sendSystemMessage(Component.translatable("rsi.goety.error.one_click_failed"));
             closeSoulTask();
             return false;
@@ -1057,6 +1070,8 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             if (!pendingManualActivation.isEmpty()) {
                 ItemStack activation = pendingManualActivation.copy();
                 pendingManualActivation = ItemStack.EMPTY;
+                forgetUnplacedInput(activation);
+                activationExtractedFromPlayer = null;
                 ItemHandlerHelper.giveItemToPlayer(player, activation);
                 Ingredient activationIng = effectiveActivationIngredient();
                 Component itemName = CraftPacketUtils.describeIngredient(activationIng);
@@ -1331,39 +1346,48 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         if (isBrazier) {
-            recoverBrazierItems();
+            refundBrazierInputs(be, player);
         } else {
+            refundRitualInputs(be, player);
             ritualEverSeenActive = false;
             ritualStartRequested = false;
             ritualStoppedSinceGameTime = -1L;
             ritualIdleSinceGameTime = -1L;
             recoverPendingRitualResult(player);
-            refundActivationToPlayer();
-            recoverFromPedestals();
         }
         pendingManualActivation = ItemStack.EMPTY;
         pendingRitualResult = ItemStack.EMPTY;
         substituteActivationTemplate = ItemStack.EMPTY;
         ritualPreparedForManualStart = false;
         closeSoulTask();
+        clearRitualInputTracking();
         resetState();
         activationExtractedFromPlayer = null;
     }
 
     @Override
     protected void clearMissingMachineState(@Nullable ServerPlayer player) {
+        if (isBrazier) refundBrazierInputs(null, player);
+        else refundRitualInputs(null, player);
         recoverPendingRitualResult(player);
         pendingManualActivation = ItemStack.EMPTY;
         pendingRitualResult = ItemStack.EMPTY;
         substituteActivationTemplate = ItemStack.EMPTY;
         ritualPreparedForManualStart = false;
         closeSoulTask();
+        clearRitualInputTracking();
         resetState();
         activationExtractedFromPlayer = null;
     }
 
     @Override
+    protected void clearUnavailableMachineState(@Nullable ServerPlayer player) {
+        clearMissingMachineState(player);
+    }
+
+    @Override
     public void onBatchFinished(@NotNull ServerPlayer player) {
+        if (!markTerminalCleanup()) return;
         if (isBrazier) {
             brazierCraftStarted = false;
         } else {
@@ -1384,44 +1408,65 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         substituteActivationTemplate = ItemStack.EMPTY;
         ritualPreparedForManualStart = false;
         closeSoulTask();
+        clearRitualInputTracking();
         resetState();
         activationExtractedFromPlayer = null;
     }
 
-    @SuppressWarnings("unchecked")
-    private void recoverBrazierItems() {
-        if (brazier == null) return;
-        NonNullList<ItemStack> items = Reflect.<NonNullList<ItemStack>>invoke(brazier, "getItems")
-                .orElse(NonNullList.withSize(0, ItemStack.EMPTY));
-        boolean hasItems = false;
-        for (ItemStack stack : items) {
-            if (!stack.isEmpty()) {
-                hasItems = true;
-                break;
-            }
+    void rememberBrazierPlacement(List<ItemStack> inputs) {
+        for (int slot = 0; slot < inputs.size(); slot++) {
+            ItemStack stack = inputs.get(slot);
+            if (stack.isEmpty()) continue;
+            Input input = brazierInputRecovery.hold(stack);
+            int index = slot;
+            input.place((BlockEntity) brazier,
+                    () -> invokeBrazierItem(brazier, "getItem", "m_8020_", index)
+                            .orElse(ItemStack.EMPTY),
+                    amount -> invokeBrazierRemoveItem(brazier, index, amount)
+                            .orElse(ItemStack.EMPTY));
+            forgetUnplacedInput(stack);
         }
-        if (!hasItems) return;
+    }
 
-        // When player != null, abort() refunds the ledger — don't double-refund
-        // physical items from the brazier to RS. Only refund when player is offline
-        // (abortSilently does NOT refund the ledger).
-        if (player == null) {
-            for (ItemStack stack : items) {
-                if (!stack.isEmpty() && storageEndpoint() != null) {
-                    insertIntoStorage(player, stack.copy(), false);
-                }
-            }
+    private void refundBrazierInputs(@Nullable BlockEntity current,
+                                    @Nullable ServerPlayer owner) {
+        List<ItemStack> recovered = new ArrayList<>();
+        for (ItemStack pending : unplacedRitualInputs) {
+            if (!pending.isEmpty()) recovered.add(pending.copy());
         }
-        Object container = Reflect.invoke(brazier, GoetyReflection.M_GET_CONTAINER).orElse(null);
-        int containerSize = container != null
-                ? Reflect.<Integer>invoke(container, GoetyReflection.M_GET_CONTAINER_SIZE, "m_6643_").orElse(3)
-                : 3;
-        Reflect.invoke(brazier, GoetyReflection.M_SET_ITEMS,
-                NonNullList.withSize(containerSize, ItemStack.EMPTY));
-        Reflect.setField(brazier, GoetyReflection.F_RECIPE, null);
-        Reflect.setField(brazier, GoetyReflection.F_RECIPE_ID, null);
-        Reflect.setField(brazier, GoetyReflection.F_CURRENT_TIME, 0);
+        unplacedRitualInputs.clear();
+        recovered.addAll(brazierInputRecovery.recover(resolveMachineLevel(owner)));
+        if (current == brazier) {
+            Object recipe = Reflect.getField(brazier, GoetyReflection.F_RECIPE).orElse(null);
+            if (recipe == brazierRecipeObj) {
+                // 先提取已审计的剩余物，再清除订单状态，避免原生停止再次掉落。
+                Reflect.setField(brazier, GoetyReflection.F_RECIPE, null);
+                Reflect.setField(brazier, GoetyReflection.F_RECIPE_ID, null);
+                Reflect.setField(brazier, GoetyReflection.F_CURRENT_TIME, 0);
+                Reflect.invoke(brazier, "markUpdated");
+            }
+            current.setChanged();
+        }
+        settleFailureRecoveredInputs(recovered, owner);
         brazierCraftStarted = false;
+    }
+
+    private static Optional<ItemStack> invokeBrazierItem(
+            Object brazier, String mcpName, String srgName, int slot) {
+        Optional<ItemStack> result = Reflect.invokeExact(
+                brazier, mcpName, new Class<?>[]{int.class}, slot);
+        if (result.isPresent()) return result;
+        return Reflect.invokeExact(
+                brazier, srgName, new Class<?>[]{int.class}, slot);
+    }
+
+    private static Optional<ItemStack> invokeBrazierRemoveItem(
+            Object brazier, int slot, int amount) {
+        Optional<ItemStack> result = Reflect.invokeExact(
+                brazier, "removeItem", new Class<?>[]{int.class, int.class}, slot, amount);
+        if (result.isPresent()) return result;
+        return Reflect.invokeExact(
+                brazier, "m_7407_", new Class<?>[]{int.class, int.class}, slot, amount);
     }
 
     @Override
@@ -1467,7 +1512,9 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         return RecipeIndex.tryGetResultItem(recipe, level.registryAccess());
     }
 
-    private void rememberSubstituteActivation(ItemStack activation) {
+    private void rememberActivation(ItemStack activation) {
+        ritualActivationTemplate = activation == null || activation.isEmpty()
+                ? ItemStack.EMPTY : activation.copyWithCount(1);
         if (ritualRecipe instanceof Recipe<?> recipe
                 && GoetyRecipeHandler.isRuntimeTransformedSubstituteRecipe(recipe)
                 && activation != null && !activation.isEmpty()) {
@@ -1747,12 +1794,12 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
     private void clearFilledPedestals() {
         if (filledPedestals == null) return;
-        for (Object ped : filledPedestals) {
-            ItemStack stack = readPedestalItem(ped);
+        for (PlacedPedestal placed : filledPedestals) {
+            Object ped = placed.pedestal();
+            if (!isCurrentRitualHolder(ped)) continue;
+            ItemStack stack = extractOwnedRitualInput(ped, placed.template());
             if (stack != null && !stack.isEmpty()) {
-                if (usingSharedLedger) {
-                    // Shared ledger owns the refund — don't double-insert.
-                } else if (storageEndpoint() != null || storageEndpoint() != null) {
+                if (storageEndpoint() != null) {
                     ItemStack leftover = insertIntoStorage(player, stack, false);
                     if (!leftover.isEmpty()) {
                         ItemHandlerHelper.giveItemToPlayer(player, leftover);
@@ -1761,66 +1808,153 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                     ItemHandlerHelper.giveItemToPlayer(player, stack);
                 }
             }
-            writePedestalItem(ped, ItemStack.EMPTY);
         }
     }
 
     private void recoverFromPedestals() {
         if (filledPedestals == null) return;
-        // Refund physical items only when the ledger will not. Note that
-        // `player == null` does not by itself mean "no ledger refund":
-        // terminate() nulls the player under SILENT_REFUND, which still sets
-        // refundLedger = true. The usingSharedLedger branch below is what
-        // actually prevents the double refund.
-        boolean refundToRS = player == null;
-        for (Object ped : filledPedestals) {
-            ItemStack stack = readPedestalItem(ped);
-            if (stack != null && !stack.isEmpty()) {
-                if (usingSharedLedger) {
-                    // Shared ledger will refund the original extraction — do NOT
-                    // re-insert items into RS or we double-refund (dupe exploit).
-                } else if (refundToRS && (storageEndpoint() != null || storageEndpoint() != null)) {
-                    ItemStack leftover = insertIntoStorage(player, stack, false);
-                    if (!leftover.isEmpty()) {
-                        ItemHandlerHelper.giveItemToPlayer(player, leftover);
-                    }
-                } else if (refundToRS && player != null) {
-                    ItemHandlerHelper.giveItemToPlayer(player, stack);
-                }
-            }
-            writePedestalItem(ped, ItemStack.EMPTY);
+        for (PlacedPedestal placed : filledPedestals) {
+            if (!isCurrentRitualHolder(placed.pedestal())) continue;
+            ItemStack removed = extractOwnedRitualInput(placed.pedestal(), placed.template());
+            if (!removed.isEmpty()) unplacedRitualInputs.add(removed);
+        }
+        filledPedestals = null;
+    }
 
-            // IItemHandler capability fallback — extracts items that the reflection-based
-            // itemStackHandler field access may have missed (prevents permanent item loss).
-            if (ped instanceof BlockEntity be) {
-                LazyOptional<IItemHandler> handler = be.getCapability(ForgeCapabilities.ITEM_HANDLER);
-                handler.ifPresent(h -> {
-                    for (int i = 0; i < h.getSlots(); i++) {
-                        ItemStack s = h.extractItem(i, 64, false);
-                        if (!s.isEmpty()) {
-                            if (usingSharedLedger) {
-                                // Shared ledger will refund — do not double-insert
-                            } else if (refundToRS && (storageEndpoint() != null || storageEndpoint() != null)) {
-                                ItemStack leftover = insertIntoStorage(player, s, false);
-                                if (!leftover.isEmpty()) {
-                                    ItemHandlerHelper.giveItemToPlayer(player, leftover);
-                                }
-                            } else if (refundToRS && player != null) {
-                                ItemHandlerHelper.giveItemToPlayer(player, s);
-                            }
-                        }
+    private void rememberPlacedPedestal(Object pedestal, ItemStack stack) {
+        filledPedestals.add(new PlacedPedestal(pedestal, stack.copy()));
+        forgetUnplacedInput(stack);
+    }
+
+    private void forgetUnplacedInput(ItemStack placed) {
+        int remaining = placed.getCount();
+        for (ItemStack pending : unplacedRitualInputs) {
+            if (remaining <= 0) break;
+            if (!ItemStack.isSameItemSameTags(pending, placed)) continue;
+            int moved = Math.min(remaining, pending.getCount());
+            pending.shrink(moved);
+            remaining -= moved;
+        }
+        unplacedRitualInputs.removeIf(ItemStack::isEmpty);
+    }
+
+    private void refundRitualInputs(@Nullable BlockEntity currentAltar,
+                                   @Nullable ServerPlayer owner) {
+        List<ItemStack> recovered = recoverRitualInputs(currentAltar, owner);
+        settleFailureRecoveredInputs(recovered, owner);
+    }
+
+    private List<ItemStack> recoverRitualInputs(@Nullable BlockEntity currentAltar,
+                                              @Nullable ServerPlayer owner) {
+        List<ItemStack> recovered = new ArrayList<>();
+        if (!activationPlacedInAltar) refundActivationToPlayer(owner);
+        for (ItemStack stack : unplacedRitualInputs) {
+            if (!stack.isEmpty()) recovered.add(stack.copy());
+        }
+        unplacedRitualInputs.clear();
+        if (filledPedestals != null) {
+            for (PlacedPedestal placed : filledPedestals) {
+                Object pedestal = placed.pedestal();
+                if (!isCurrentRitualHolder(pedestal)) continue;
+                ItemStack removed = extractOwnedRitualInput(pedestal, placed.template());
+                if (!removed.isEmpty()) recovered.add(removed);
+            }
+            filledPedestals = null;
+        }
+        if (altarStartAttempted && altar != null && currentAltar == altar) {
+            Object currentRecipe = Reflect.getField(
+                    altar, GoetyReflection.F_CURRENT_RITUAL_RECIPE).orElse(null);
+            Object currentId = Reflect.getField(altar, "currentRitualRecipeId").orElse(null);
+            boolean ownedRecipe = currentRecipe == ritualRecipe
+                    || ritualRecipe instanceof Recipe<?> recipe && recipe.getId().equals(currentId);
+            if (ownedRecipe) {
+                ItemStack removed = activationPlacedInAltar
+                        ? extractOwnedRitualInput(altar, ritualActivationTemplate) : ItemStack.EMPTY;
+                if (!removed.isEmpty()) {
+                    if (activationExtractedFromPlayer != null) {
+                        givePlayerActivation(removed, owner);
+                        activationExtractedFromPlayer = null;
+                    } else {
+                        recovered.add(removed);
                     }
-                });
+                }
+                if (currentRecipe == ritualRecipe || currentId != null) {
+                    // 先收回中心物品，避免原生中断把同一物品再次抛到世界中。
+                    try {
+                        altar.getClass().getMethod("stopRitual", boolean.class).invoke(altar, false);
+                    } catch (ReflectiveOperationException exception) {
+                        RSIntegrationMod.LOGGER.error("[RSI-Goety] Failed to stop interrupted ritual", exception);
+                    }
+                }
+                Reflect.setField(altar, "currentRitualRecipeId", null);
+                Reflect.setField(altar, GoetyReflection.F_CURRENT_RITUAL_RECIPE, null);
+                Reflect.setField(altar, "castingPlayer", null);
+                Reflect.setField(altar, "castingPlayerId", null);
+                Reflect.setField(altar, "currentTime", 0);
+                Reflect.setField(altar, "structureTime", 0);
+                Reflect.setField(altar, "remainingAdditionalIngredients", List.of());
+                List<?> consumed = Reflect.<List<?>>getField(altar, "consumedIngredients").orElse(null);
+                if (consumed != null) consumed.clear();
+                if (altar instanceof BlockEntity blockEntity) blockEntity.setChanged();
             }
         }
+        return recovered;
+    }
+
+    private static ItemStack extractOwnedRitualInput(Object holder, ItemStack template) {
+        if (template.isEmpty()) return ItemStack.EMPTY;
+        Object value = Reflect.getField(holder, "itemStackHandler").orElse(null);
+        if (!(value instanceof LazyOptional<?> lazy)
+                || !(lazy.resolve().orElse(null) instanceof IItemHandler handler)
+                || handler.getSlots() <= 0) return ItemStack.EMPTY;
+        ItemStack available = handler.getStackInSlot(0);
+        if (!ItemStack.isSameItemSameTags(available, template)) return ItemStack.EMPTY;
+        ItemStack removed = handler.extractItem(0,
+                Math.min(available.getCount(), template.getCount()), false);
+        if (holder instanceof BlockEntity be && !removed.isEmpty()) {
+            be.setChanged();
+            Level level = be.getLevel();
+            if (level != null) {
+                level.sendBlockUpdated(be.getBlockPos(), be.getBlockState(), be.getBlockState(), 3);
+            }
+        }
+        return removed;
+    }
+
+    private static boolean isCurrentRitualHolder(Object holder) {
+        return holder instanceof BlockEntity be && !be.isRemoved() && be.getLevel() != null
+                && be.getLevel().hasChunkAt(be.getBlockPos())
+                && be.getLevel().getBlockEntity(be.getBlockPos()) == be;
+    }
+
+    private void clearRitualInputTracking() {
+        unplacedRitualInputs.clear();
+        ritualActivationTemplate = ItemStack.EMPTY;
+        altarStartAttempted = false;
+        activationPlacedInAltar = false;
+        filledPedestals = null;
+        brazierInputRecovery.release();
     }
 
     private void refundActivationToPlayer() {
-        if (activationExtractedFromPlayer != null && !activationExtractedFromPlayer.isEmpty() && player != null) {
-            // Always refund: the activation item was extracted directly from the player's
-            // inventory, not through the ledger — shared/private ledger doesn't matter.
-            ItemHandlerHelper.giveItemToPlayer(player, activationExtractedFromPlayer.copy());
+        refundActivationToPlayer(player);
+    }
+
+    private void refundActivationToPlayer(@Nullable ServerPlayer owner) {
+        if (!activationPlacedInAltar && activationExtractedFromPlayer != null
+                && !activationExtractedFromPlayer.isEmpty() && player != null) {
+            forgetUnplacedInput(activationExtractedFromPlayer);
+            givePlayerActivation(activationExtractedFromPlayer.copy(), owner);
             activationExtractedFromPlayer = null;
+        }
+    }
+
+    private void givePlayerActivation(ItemStack stack, @Nullable ServerPlayer owner) {
+        if (player == null || stack.isEmpty()) return;
+        if (owner == null || player.hasDisconnected() || player.isRemoved()) {
+            CraftItemRecovery.get(player.server).retain(player.getUUID(), stack);
+        } else {
+            ItemHandlerHelper.giveItemToPlayer(player, stack);
         }
     }
 
@@ -2119,10 +2253,12 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
     /** Start a ritual on the altar via reflection (DarkAltarBlockEntity.startRitual).
      * @return true if the ritual started successfully */
-    private static boolean startAltarRitual(Object altar, ServerPlayer player, ItemStack activation, Object recipe) {
+    private boolean startAltarRitual(Object altar, ServerPlayer player, ItemStack activation, Object recipe) {
+        int before = activation.getCount();
         try {
 
             Method m = GoetyReflection.darkAltarBEClass.getMethod("startRitual", Player.class, ItemStack.class, GoetyReflection.ritualRecipeClass);
+            altarStartAttempted = true;
             m.invoke(altar, player, activation, recipe);
             boolean active = Reflect.getField(
                     altar, GoetyReflection.F_CURRENT_RITUAL_RECIPE).orElse(null) != null;
@@ -2134,6 +2270,12 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-Goety] startRitual failed", e);
             return false;
+        } finally {
+            int moved = before - activation.getCount();
+            if (moved > 0) {
+                activationPlacedInAltar = true;
+                forgetUnplacedInput(ritualActivationTemplate.copyWithCount(moved));
+            }
         }
     }
 

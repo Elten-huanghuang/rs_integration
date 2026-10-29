@@ -135,6 +135,17 @@ public final class ArsDynamicApparatusRecipe {
         return setArmorTier(machineInput, 0) ? machineInput : ItemStack.EMPTY;
     }
 
+    /**
+     * 撤销投放前由 RSI 补入的临时 NBT，保留原材料身份。
+     * 仅还原仍与投放模板完全一致的实物；产物或外部替换物保持原样，
+     * 交由通用回收追踪拒绝认领。数量始终来自实际读取或提取的堆叠。
+     */
+    static ItemStack restorePreparedInput(ItemStack materialInput, ItemStack preparedInput,
+                                          ItemStack actual) {
+        return ItemStack.isSameItemSameTags(preparedInput, actual)
+                ? materialInput.copyWithCount(actual.getCount()) : actual;
+    }
+
     private static ItemStack invokeGetResult(Recipe<?> recipe, ItemStack input) {
         try {
             for (Class<?> type = recipe.getClass(); type != null; type = type.getSuperclass()) {

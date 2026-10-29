@@ -74,6 +74,11 @@ public final class ArsTileAccess {
         return v.isPresent() ? v.getAsInt() : -1;
     }
 
+    /** 制作中 getItem 会隐藏中心物品，停止仪式前用真实字段验证订单归属。 */
+    public static ItemStack apparatusInput(BlockEntity be) {
+        return Reflect.<ItemStack>getField(be, "stack").orElse(ItemStack.EMPTY);
+    }
+
     // ── crafting-state reads (Imbuement) ──────────────────────────
 
     /** Imbuement {@code craftTicks} countdown (package int, 100..0). Returns -1 when unreadable. */

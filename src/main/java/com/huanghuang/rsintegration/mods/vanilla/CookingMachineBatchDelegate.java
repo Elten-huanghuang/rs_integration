@@ -263,7 +263,20 @@ public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
-        if (delegate != null) delegate.onBatchFailed(player, "cooking delegate aborted");
+        clearChildState(player);
+    }
+
+    @Override
+    protected void clearMissingMachineState(@Nullable ServerPlayer player) {
+        clearChildState(player);
+    }
+
+    private void clearChildState(@Nullable ServerPlayer player) {
+        if (delegate != null) {
+            delegate.onBatchFailed(player, "cooking delegate aborted");
+            List<ItemStack> recovered = delegate.failureRecoveredInputs();
+            if (recovered != null) recordFailureRecoveredInputs(recovered);
+        }
         delegate = null;
         resetState();
     }

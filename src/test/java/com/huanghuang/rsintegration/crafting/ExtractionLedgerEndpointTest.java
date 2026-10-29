@@ -190,6 +190,59 @@ class ExtractionLedgerEndpointTest extends BootstrapTest {
     }
 
     @Test
+    void offlineNetworkRefundUsesTheOriginalEndpointAndCommitIdentity() {
+        reserve(3, StorageOperationResult.extracted(StorageOperationMode.PERFORM, 3,
+                List.of(named("first", 3))));
+        assertTrue(ledger.commitToEndpoint(null, player));
+
+        ledger.refundCommittedToEndpoint(null, null);
+        ledger.refundCommittedToEndpoint(null, null);
+
+        assertStacks(List.of(named("first", 3)), refunds);
+        verify(session, times(1)).insert(eq(player), any(ItemStack.class), eq(false));
+    }
+
+    @Test
+    void offlinePartialNetworkRefundPersistsOnlyTheUnstoredRemainder() {
+        UUID owner = UUID.randomUUID();
+        when(player.getUUID()).thenReturn(owner);
+        reserve(3, StorageOperationResult.extracted(StorageOperationMode.PERFORM, 3,
+                List.of(named("first", 3))));
+        assertTrue(ledger.commitToEndpoint(null, player));
+        doReturn(StorageOperationResult.inserted(StorageOperationMode.PERFORM,
+                named("first", 3), named("first", 1)))
+                .when(session).insert(eq(player), any(ItemStack.class), eq(false));
+        CraftItemRecovery recovery = mock(CraftItemRecovery.class);
+        try (MockedStatic<CraftItemRecovery> data = mockStatic(CraftItemRecovery.class)) {
+            data.when(() -> CraftItemRecovery.get(player.server)).thenReturn(recovery);
+            ledger.refundCommittedToEndpoint(null, null);
+            ledger.refundCommittedToEndpoint(null, null);
+        }
+        verify(recovery).retain(eq(owner), argThat(stack ->
+                ItemStack.isSameItemSameTags(stack, named("first", 1)) && stack.getCount() == 1));
+        verify(session, times(1)).insert(eq(player), any(ItemStack.class), eq(false));
+    }
+
+    @Test
+    void offlineEndpointAccessDenialKeepsItemsInOwnerRecovery() {
+        UUID owner = UUID.randomUUID();
+        when(player.getUUID()).thenReturn(owner);
+        reserve(2, StorageOperationResult.extracted(StorageOperationMode.PERFORM, 2,
+                List.of(named("first", 2))));
+        assertTrue(ledger.commitToEndpoint(null, player));
+        doReturn(StorageOperationResult.failedInsert(StorageOperationMode.PERFORM,
+                named("first", 2), StorageOperationStatus.DENIED))
+                .when(session).insert(eq(player), any(ItemStack.class), eq(false));
+        CraftItemRecovery recovery = mock(CraftItemRecovery.class);
+        try (MockedStatic<CraftItemRecovery> data = mockStatic(CraftItemRecovery.class)) {
+            data.when(() -> CraftItemRecovery.get(player.server)).thenReturn(recovery);
+            ledger.refundCommittedToEndpoint(null, null);
+        }
+        verify(recovery).retain(eq(owner), argThat(stack -> stack.getCount() == 2));
+        verify(session).insert(eq(player), any(ItemStack.class), eq(false));
+    }
+
+    @Test
     void partialFluidRefundKeepsOnlyTheUnstoredAmountInRecovery() {
         when(player.getUUID()).thenReturn(UUID.randomUUID());
         ItemStack fluid = InkFluidSupport.token(InkFluidTestFixtures.tokenItem(),

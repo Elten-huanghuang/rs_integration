@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.mods.arsnouveau;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.world.item.EnchantedBookItem;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraft.world.item.enchantment.Enchantments;
@@ -12,6 +13,35 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ArsDynamicApparatusRecipeTest extends BootstrapTest {
+    @Test
+    void preparedInputRecoveryRestoresOnlyRsiAddedMetadataAndUsesActualCount() {
+        ItemStack material = new ItemStack(Items.DIAMOND_HELMET, 3);
+        material.getOrCreateTag().putString("owner", "original");
+        ItemStack prepared = material.copy();
+        prepared.getOrCreateTag().put("an_stack_perks", new CompoundTag());
+
+        ItemStack recovered = ArsDynamicApparatusRecipe.restorePreparedInput(
+                material, prepared, prepared.copyWithCount(1));
+
+        assertEquals(1, recovered.getCount());
+        assertTrue(ItemStack.isSameItemSameTags(material, recovered));
+    }
+
+    @Test
+    void preparedInputRecoveryDoesNotNormalizeOutputOrForeignMetadata() {
+        ItemStack material = new ItemStack(Items.DIAMOND_HELMET);
+        ItemStack prepared = material.copy();
+        prepared.getOrCreateTag().putInt("tier", 0);
+        ItemStack output = prepared.copy();
+        output.getOrCreateTag().putInt("tier", 1);
+
+        ItemStack recovered = ArsDynamicApparatusRecipe.restorePreparedInput(
+                material, prepared, output);
+
+        assertTrue(ItemStack.isSameItemSameTags(output, recovered));
+        assertEquals(1, recovered.getTag().getInt("tier"));
+    }
+
     @Test
     void levelOneEnchantStartsFromPlainBook() {
         var input = ArsDynamicApparatusRecipe.buildEnchantmentInput(Enchantments.FIRE_ASPECT, 1);

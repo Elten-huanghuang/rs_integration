@@ -20,12 +20,6 @@ class ArsApparatusMaterialsTest extends BootstrapTest {
     }
 
     @Test
-    void sharedLedgerOwnsRejectedStartRefund() {
-        assertFalse(ArsApparatusBatchDelegate.ownsRejectedStartRefund(true));
-        assertTrue(ArsApparatusBatchDelegate.ownsRejectedStartRefund(false));
-    }
-
-    @Test
     void reagentAndPedestalItemsAreConsumedByTheTransformation() {
         var specs = ArsApparatusMaterials.build(
                 Ingredient.of(Items.DIAMOND_HELMET),

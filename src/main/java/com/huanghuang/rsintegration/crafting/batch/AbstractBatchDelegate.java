@@ -297,12 +297,18 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
                 return;
             }
             ServerLevel level = resolveMachineLevel(player != null ? player.serverLevel() : null);
-            if (level == null) return;
+            if (level == null) {
+                clearUnavailableMachineState(player);
+                physicalFailureCleanupCompleted = failureRecoveredInputs != null;
+                return;
+            }
             if (!level.hasChunkAt(pos)) {
                 RSIntegrationMod.LOGGER.warn(
                         "[RSI-Delegate] Skipping physical cleanup for unloaded machine chunk at {} in {}; "
                                 + "the transaction ledger remains authoritative",
                         pos, level.dimension().location());
+                clearUnavailableMachineState(player);
+                physicalFailureCleanupCompleted = failureRecoveredInputs != null;
                 return;
             }
             BlockEntity be = level.getBlockEntity(pos);
@@ -461,6 +467,19 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
         failureRecoveredInputs = List.copyOf(copy);
     }
 
+    /**
+     * 统一发布回收凭据并结算私有账本。共享账本只能由外层执行链结算。
+     * 必须传入实际取回物，不能传入原始订单需求量。
+     */
+    protected final void settleFailureRecoveredInputs(
+            @Nonnull List<ItemStack> recovered, @Nullable ServerPlayer player) {
+        recordFailureRecoveredInputs(recovered);
+        if (!usingSharedLedger && ledger != null && ledger.isCommitted()) {
+            ledger.retainCommittedRefunds(recovered);
+            ledger.refundCommittedToEndpoint(storageEndpoint(), player);
+        }
+    }
+
     @Nullable
     @Override
     public final List<ItemStack> failureRecoveredInputs() {
@@ -469,6 +488,14 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
 
     /** Release delegate-owned state when the prepared block entity no longer exists. */
     protected void clearMissingMachineState(@Nullable ServerPlayer player) {
+    }
+
+    /**
+     * 世界或主机器区块不可用时，仅认领仍由 delegate 持有或可验证取回的材料。
+     * 可审计的适配器可以使用 OperationInputRecovery；不得强制加载区块，
+     * 也不得把暂时读不到的机器输入视为已取回。
+     */
+    protected void clearUnavailableMachineState(@Nullable ServerPlayer player) {
     }
 
     /** Clear delegate-local transient state when there is no physical machine to clean. */

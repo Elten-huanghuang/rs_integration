@@ -6,18 +6,85 @@ import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import org.mockito.MockedStatic;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.lang.reflect.Field;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
 
 class GoetyInfuserCompatibilityTest extends BootstrapTest {
+    @Test
+    void failureRecoversOnlyQueuedAndRemainingOwnedSlots() throws Exception {
+        CursedInfuserBatchDelegate delegate = new CursedInfuserBatchDelegate();
+        BlockEntity machine = mock(BlockEntity.class);
+        ItemStack template = new ItemStack(Items.IRON_INGOT);
+        template.getOrCreateTag().putString("owner", "order");
+        ItemStack differentTag = new ItemStack(Items.IRON_INGOT);
+        differentTag.getOrCreateTag().putString("owner", "external");
+        List<ItemStack> slots = new ArrayList<>(List.of(
+                template.copyWithCount(2), ItemStack.EMPTY, differentTag, new ItemStack(Items.GOLD_INGOT)));
+        set(delegate, "inputTemplate", template);
+        set(delegate, "activeMachine", machine);
+        set(delegate, "queuedInput", template.copyWithCount(3));
+        Field field = CursedInfuserBatchDelegate.class.getDeclaredField("activeOwnedSlots");
+        field.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        Set<Integer> owned = (Set<Integer>) field.get(delegate);
+        owned.addAll(List.of(0, 1, 2));
+        try (MockedStatic<GoetyInfuserMachineSupport> support =
+                     mockStatic(GoetyInfuserMachineSupport.class)) {
+            support.when(() -> GoetyInfuserMachineSupport.recipeItems(machine)).thenReturn(slots);
+            delegate.clearMachineState(machine, null);
+        }
+        assertEquals(2, delegate.failureRecoveredInputs().size());
+        assertEquals(3, delegate.failureRecoveredInputs().get(0).getCount());
+        assertEquals(1, delegate.failureRecoveredInputs().get(1).getCount());
+        assertEquals(1, slots.get(0).getCount());
+        assertEquals("external", slots.get(2).getTag().getString("owner"));
+        assertEquals(Items.GOLD_INGOT, slots.get(3).getItem());
+    }
+
+    @Test
+    void missingInfuserReturnsOnlyInputsNotYetPlaced() throws Exception {
+        CursedInfuserBatchDelegate delegate = new CursedInfuserBatchDelegate();
+        set(delegate, "queuedInput", new ItemStack(Items.IRON_INGOT, 3));
+        delegate.clearMissingMachineState(null);
+        assertEquals(3, delegate.failureRecoveredInputs().get(0).getCount());
+    }
+
+    @Test
+    void cancelledInfuserDoesNotRemoveItemsFromReplacementMachine() throws Exception {
+        CursedInfuserBatchDelegate delegate = new CursedInfuserBatchDelegate();
+        set(delegate, "activeMachine", mock(BlockEntity.class));
+        set(delegate, "queuedInput", new ItemStack(Items.IRON_INGOT, 2));
+        set(delegate, "inputTemplate", new ItemStack(Items.IRON_INGOT));
+        BlockEntity replacement = mock(BlockEntity.class);
+        try (MockedStatic<GoetyInfuserMachineSupport> support =
+                     mockStatic(GoetyInfuserMachineSupport.class)) {
+            delegate.clearMachineState(replacement, null);
+            support.verifyNoInteractions();
+        }
+        assertEquals(1, delegate.failureRecoveredInputs().size());
+        assertEquals(2, delegate.failureRecoveredInputs().get(0).getCount());
+    }
+
+    private static void set(Object target, String name, Object value) throws Exception {
+        Field field = target.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        field.set(target, value);
+    }
+
     @Test
     void bindingIncludesAllThreeSharedRecipeMachines() {
         assertEquals(List.of(
