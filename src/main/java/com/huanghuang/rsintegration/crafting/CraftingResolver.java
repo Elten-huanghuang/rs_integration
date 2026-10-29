@@ -30,6 +30,7 @@ import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.util.PerformanceMonitor;
 import com.huanghuang.rsintegration.mods.farmersdelight.MinersDelightCopperPotSupport;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mods.slashblade.SlashBladeRecipeHandler;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.TagParser;
@@ -43,6 +44,7 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.level.Level;
 import net.minecraftforge.common.crafting.StrictNBTIngredient;
+import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.registries.ForgeRegistries;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import java.nio.charset.StandardCharsets;
@@ -907,7 +909,12 @@ public final class CraftingResolver {
         }
 
         long candStart = System.nanoTime();
-        List<RecipeIndex.Entry> candidates = CandidateEngine.findCandidates(ingredient, ctx);
+        // 调试日志开启时顺手记下被跳过的候选与原因：玩家报告「计划树里有的配方执行时不见了」，
+        // 现有日志只能看到剩下几个候选，看不到是谁按什么规则被滤掉的。
+        List<CandidateEngine.CandidateDiagnostic> candidateDiag =
+                RSIntegrationMod.isDebugLoggingEnabled() ? new ArrayList<>() : null;
+        List<RecipeIndex.Entry> candidates =
+                CandidateEngine.findCandidates(ingredient, ctx, candidateDiag, remaining);
         if (forceProduction) {
             candidates = prioritizeForcedCandidate(candidates,
                     candidate -> candidate.recipe().getId(), forcedRecipeId);
@@ -920,6 +927,7 @@ public final class CraftingResolver {
         }
         if (candidates.isEmpty()) {
             if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient FAILED: no candidates for " + describeFirstItem(ingredient));
+            logSkippedCandidates("no-candidates", ingredient, candidateDiag);
             if (recordBestEffortUnresolved(ctx, consumer, ingredient, count, "no-candidates")) {
                 return true;
             }
@@ -989,6 +997,7 @@ public final class CraftingResolver {
                 RSIntegrationMod.debug("[RSI-ensure] no viable candidates for {} ({} total candidates rejected, alive-building took {}ms)",
                         describeFirstItem(ingredient), candidates.size(), aliveMs);
             }
+            logSkippedCandidates("no-viable-candidates", ingredient, candidateDiag);
             if (recordBestEffortUnresolved(ctx, consumer, ingredient, count, "no-viable-candidates")) {
                 return true;
             }
@@ -998,9 +1007,17 @@ public final class CraftingResolver {
 
         if (RSIntegrationMod.isDebugLoggingEnabled() && alive.size() > 1) {
             StringBuilder sb = new StringBuilder("[RSI-ensure] ").append(alive.size())
-                    .append(" alive candidates for ").append(describeFirstItem(ingredient)).append(":");
+                    .append(" alive candidates for ").append(describeFirstItem(ingredient))
+                    .append(" remaining=").append(remaining).append(":");
             for (AliveCandidate a : alive) {
-                sb.append(" [").append(a.entry.recipe().getId()).append(" netGain=").append(a.netGain).append("]");
+                // 一并打印补齐剩余量需要几炉：块/锭/粒之争就是靠这个数字决定的，
+                // 日志里没有它就只能看到「树选了块、实际烧了粒」却查不出原因。
+                sb.append(" [").append(a.entry.recipe().getId())
+                        .append(" netGain=").append(a.netGain)
+                        .append(" perOp=").append(a.output.getCount())
+                        .append(" ops=").append(CandidateEngine.estimatedOperations(
+                                remaining, a.output.getCount()))
+                        .append("]");
             }
             RSIntegrationMod.debug(sb.toString());
         }
@@ -1539,15 +1556,38 @@ public final class CraftingResolver {
         return stack.getDescriptionId();
     }
 
+    /** 打印被过滤掉的候选及原因，用来对照「计划树里明明有这条配方，执行时却不见了」。 */
+    private static void logSkippedCandidates(String phase, Ingredient ingredient,
+                                             @Nullable List<CandidateEngine.CandidateDiagnostic> diag) {
+        if (diag == null || diag.isEmpty()) return;
+        StringBuilder sb = new StringBuilder("[RSI-ensure] ")
+                .append(phase).append(" skipped=").append(diag.size())
+                .append(" for ").append(describeFirstItem(ingredient)).append(":");
+        for (CandidateEngine.CandidateDiagnostic d : diag) {
+            sb.append(" [").append(d.recipeId()).append(" -> ").append(d.skipReason()).append("]");
+        }
+        RSIntegrationMod.debug(sb.toString());
+    }
+
     private static String describeFirstItem(Ingredient ingredient) {
         String base = null;
+        ItemStack first = ItemStack.EMPTY;
         for (ItemStack stack : ingredient.getItems()) {
             if (!stack.isEmpty()) {
                 base = stack.getDescriptionId();
+                first = stack;
                 break;
             }
         }
         if (base == null) return "???";
+        // 流体需求在 RSI 里是同一个凭据物品，真正的流体身份只写在 NBT 里；
+        // 日志不带流体名时，多种流体的候选列表混在一起根本分不清哪条对应哪种流体。
+        if (InkFluidSupport.isToken(first)) {
+            FluidStack fluid = InkFluidSupport.fluid(first);
+            ResourceLocation fluidId = fluid.isEmpty()
+                    ? null : ForgeRegistries.FLUIDS.getKey(fluid.getFluid());
+            if (fluidId != null) base = base + "[" + fluidId + "]";
+        }
         String nbtHint = SlashBladeRecipeHandler
                 .describeNbtRequirements(ingredient);
         return nbtHint != null ? base + nbtHint : base;

@@ -119,6 +119,50 @@ class CandidateEngineTest extends BootstrapTest {
     }
 
     @Test
+    void equalScoreCoverageAndGroupsPreferFewerOperations() {
+        // 同一份 810 mB 流体：粒每炉 10 mB（81 炉）、块每炉 1000 mB（1 炉）。
+        ResourceLocation nuggets = new ResourceLocation("embers", "melting/nuggets/iron");
+        ResourceLocation blocks = new ResourceLocation("embers", "melting/blocks/iron");
+        Map<ResourceLocation, Integer> scores = Map.of(nuggets, 24, blocks, 24);
+        Map<ResourceLocation, Integer> availability = Map.of(nuggets, 1, blocks, 1);
+        Map<ResourceLocation, Integer> inputGroups = Map.of(nuggets, 1, blocks, 1);
+        Map<ResourceLocation, Integer> operations = Map.of(nuggets, 81, blocks, 1);
+
+        int comparison = CandidateEngine.compareCandidateMetrics(
+                blocks, nuggets, scores, availability, inputGroups, operations);
+
+        assertTrue(comparison < 0);
+        assertTrue(CandidateEngine.compareCandidateMetrics(
+                nuggets, blocks, scores, availability, inputGroups, operations) > 0);
+    }
+
+    @Test
+    void stockedInputsOutrankFewerOperations() {
+        // 库存差异先体现在分数上：块配方原料不在库存（分数低）时，
+        // 不能因为「少烧几次」就去用库存里没有的原料，粒配方仍应优先。
+        ResourceLocation nuggets = new ResourceLocation("embers", "melting/nuggets/iron");
+        ResourceLocation blocks = new ResourceLocation("embers", "melting/blocks/iron");
+        Map<ResourceLocation, Integer> scores = Map.of(nuggets, 24, blocks, 4);
+        Map<ResourceLocation, Integer> availability = Map.of(nuggets, 1, blocks, 0);
+        Map<ResourceLocation, Integer> inputGroups = Map.of(nuggets, 1, blocks, 1);
+        Map<ResourceLocation, Integer> operations = Map.of(nuggets, 81, blocks, 1);
+
+        int comparison = CandidateEngine.compareCandidateMetrics(
+                nuggets, blocks, scores, availability, inputGroups, operations);
+
+        assertTrue(comparison < 0);
+    }
+
+    @Test
+    void operationEstimateRoundsUpAndIgnoresUnknownDemand() {
+        assertEquals(0, CandidateEngine.estimatedOperations(0L, 10L));
+        assertEquals(81, CandidateEngine.estimatedOperations(810L, 10L));
+        assertEquals(1, CandidateEngine.estimatedOperations(810L, 1000L));
+        assertEquals(1, CandidateEngine.estimatedOperations(10L, 10L));
+        assertEquals(Integer.MAX_VALUE, CandidateEngine.estimatedOperations(810L, 0L));
+    }
+
+    @Test
     void repeatedCraftingSlotsRequireTheirFullQuantity() {
         ShapedRecipe recipe = new ShapedRecipe(
                 new ResourceLocation("test", "four_iron"), "", CraftingBookCategory.MISC,

@@ -55,10 +55,29 @@ final class CandidateEngine {
     }
 
     /**
+     * 同上，但额外知道本次还差多少 {@code remaining}。
+     * 流体在 RSI 里被建模成 token 物品（stack 数量就是 mB 数），于是「1 块 → 1000 mB 一炉」
+     * 与「81 粒 → 810 mB 八十一炉」在原有分数上完全同分，只有操作次数能把两者区分开。
+     */
+    static List<RecipeIndex.Entry> findCandidates(Ingredient ingredient, ResolutionContext ctx,
+                                                  long remaining) {
+        return findCandidates(ingredient, ctx, null, remaining);
+    }
+
+    /**
      * Same as above, but fills {@code diag} with per-candidate scoring/skip info.
      */
     static List<RecipeIndex.Entry> findCandidates(Ingredient ingredient, ResolutionContext ctx,
                                                    @Nullable List<CandidateDiagnostic> diag) {
+        return findCandidates(ingredient, ctx, diag, 0L);
+    }
+
+    /**
+     * 实现版。{@code remaining <= 0} 表示需求量未知，此时不比较操作次数。
+     */
+    static List<RecipeIndex.Entry> findCandidates(Ingredient ingredient, ResolutionContext ctx,
+                                                   @Nullable List<CandidateDiagnostic> diag,
+                                                   long remaining) {
         // Shared recipes can have distinct machine routes and runtime outputs.
         Map<CandidateKey, RecipeIndex.Entry> byId = new LinkedHashMap<>();
         long p1Start = System.nanoTime();
@@ -206,12 +225,16 @@ final class CandidateEngine {
         Map<CandidateKey, Integer> scoreCache = new HashMap<>();
         Map<CandidateKey, Integer> availCache = new HashMap<>();
         Map<CandidateKey, Integer> inputGroupCache = new HashMap<>();
+        Map<CandidateKey, Integer> operationCache = new HashMap<>();
         for (RecipeIndex.Entry entry : result) {
             if (ctx.timedOut()) break; // don't burn remaining budget on scoring
             CandidateKey key = CandidateKey.of(entry);
             scoreCache.put(key, scoreEntry(entry, ctx, nbtStrict, matchCache));
             availCache.put(key, countAvailableIngredients(entry, ctx, matchCache));
             inputGroupCache.put(key, distinctInputGroups(entry, ctx));
+            operationCache.put(key, remaining > 0L
+                    ? estimatedOperations(entry, ctx, remaining)
+                    : Integer.MAX_VALUE);
         }
 
         long sortStart = System.nanoTime();
@@ -219,7 +242,7 @@ final class CandidateEngine {
             CandidateKey keyA = CandidateKey.of(a);
             CandidateKey keyB = CandidateKey.of(b);
             int cmp = compareCandidateMetrics(keyA, keyB,
-                    scoreCache, availCache, inputGroupCache);
+                    scoreCache, availCache, inputGroupCache, operationCache);
             if (cmp != 0) return cmp;
             cmp = a.recipe().getId().compareTo(b.recipe().getId());
             return cmp != 0 ? cmp : a.modType().id().compareTo(b.modType().id());
@@ -265,8 +288,28 @@ final class CandidateEngine {
                                             Map<K, Integer> scoreCache,
                                             Map<K, Integer> availCache,
                                             Map<K, Integer> inputGroupCache) {
+        return compareCandidateMetrics(keyA, keyB, scoreCache, availCache, inputGroupCache,
+                Map.of());
+    }
+
+    /**
+     * 完整排序：分数 → 需求补满所需操作次数 → 满足的原料种类数 → 独立原料组数 → recipeId。
+     *
+     * <p>操作次数排在分数之后、其余指标之前：同一种流体既有一块熔一炉（810/1000 mB）、
+     * 也有一粒熔一炉（10 mB）时，少烧几次比「刚好凑够数量」更省时间，所以块优先。
+     * 库存差异仍然先体现在分数里（原料不可用要扣分，全齐才有产出加成），
+     * 因此不会为了大批量而动用库存里没有的原料。
+     */
+    static <K> int compareCandidateMetrics(K keyA, K keyB,
+                                            Map<K, Integer> scoreCache,
+                                            Map<K, Integer> availCache,
+                                            Map<K, Integer> inputGroupCache,
+                                            Map<K, Integer> operationCache) {
         int cmp = Integer.compare(scoreCache.getOrDefault(keyB, 0),
                 scoreCache.getOrDefault(keyA, 0));
+        if (cmp != 0) return cmp;
+        cmp = Integer.compare(operationCache.getOrDefault(keyA, Integer.MAX_VALUE),
+                operationCache.getOrDefault(keyB, Integer.MAX_VALUE));
         if (cmp != 0) return cmp;
         cmp = Integer.compare(availCache.getOrDefault(keyB, 0),
                 availCache.getOrDefault(keyA, 0));
@@ -636,6 +679,27 @@ final class CandidateEngine {
      *  bonus smaller than two ingredient-availability checks. */
     private static int cappedOutputBonus(int outputCount) {
         return Math.min((outputCount - 1) * 5, 15);
+    }
+
+    /**
+     * 估算补满需求需要几次执行。每批产量越大、炉数越少。流体 token 的 stack 数量就是
+     * mB 数，所以「一块 1000 mB」估出 1 炉，「一粒 10 mB」估出 81 炉——这正是让预览树
+     * 与执行派发保持一致的关键维度。需求未知（{@code remaining <= 0}）时返回 0，
+     * 表示该维度不参与比较。
+     */
+    static int estimatedOperations(RecipeIndex.Entry entry, ResolutionContext ctx, long remaining) {
+        if (remaining <= 0L) return 0;
+        ItemStack output = outputForDemand(entry, Ingredient.EMPTY, ctx);
+        if (output.isEmpty()) return Integer.MAX_VALUE;
+        return estimatedOperations(remaining, output.getCount());
+    }
+
+    /** 向上取整的炉数估算，防溢出；每批产量非正时视为不可比较（排最后）。 */
+    static int estimatedOperations(long remaining, long perOperation) {
+        if (perOperation <= 0L) return Integer.MAX_VALUE;
+        if (remaining <= 0L) return 0;
+        long batches = remaining / perOperation + (remaining % perOperation == 0L ? 0L : 1L);
+        return (int) Math.min(batches, Integer.MAX_VALUE);
     }
 
     /** Returns true when every non-empty ingredient has at least one matching item available. */

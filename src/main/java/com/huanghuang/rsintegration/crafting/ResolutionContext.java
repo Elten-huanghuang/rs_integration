@@ -159,7 +159,7 @@ final class ResolutionContext {
         this.abortOnTimeout = false;
         this.bestEffort = false;
         this.missingOut = null;
-        this.diagLog = Diagnostics.isEnabled() ? new ArrayList<>() : null;
+        this.diagLog = diagnosticsRequested() ? new ArrayList<>() : null;
 
         for (ItemStack stack : available) addInitial(stack);
         buildInventoryIndex();
@@ -238,7 +238,7 @@ final class ResolutionContext {
         this.abortOnTimeout = abortOnTimeout;
         this.bestEffort = bestEffort;
         this.missingOut = missingOut;
-        this.diagLog = Diagnostics.isEnabled() ? new ArrayList<>() : null;
+        this.diagLog = diagnosticsRequested() ? new ArrayList<>() : null;
         for (Map.Entry<CraftingResolver.StackKey, ? extends Number> entry : keyedCounts.entrySet()) {
             long amount = entry.getValue() == null ? 0L : entry.getValue().longValue();
             if (amount > 0L) {
@@ -359,6 +359,16 @@ final class ResolutionContext {
 
     boolean diagnosticsEnabled() {
         return diagLog != null;
+    }
+
+    /**
+     * 诊断开关或调试日志任一开启都记录解析轨迹。
+     *
+     * <p>只认 {@link Diagnostics} 时，玩家遇到的「计划树里的配方执行时消失」在日志里
+     * 完全没有候选被滤掉的痕迹；调试日志已经打开的场景应当同时拿到这份轨迹。</p>
+     */
+    private static boolean diagnosticsRequested() {
+        return Diagnostics.isEnabled() || RSIntegrationMod.isDebugLoggingEnabled();
     }
 
     int missingCount() {
