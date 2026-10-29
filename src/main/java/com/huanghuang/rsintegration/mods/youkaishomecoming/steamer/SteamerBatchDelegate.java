@@ -114,8 +114,12 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
 
     // -- 批量契约 --
     // 蒸锅的"多份"落在蒸笼格上：每格一份、各自累计蒸制进度，装满后整批一起等。
-    // 这三台锅具的 ModType 已在 GraphConcurrencyEligibility.WORLD_CAPTURE_TYPES 里，
-    // 所以下面的 concurrencyCapabilities() 只是契约完整性，实际并发由资格表决定。
+    // 注意：GraphConcurrencyEligibility 把蒸锅登记为 WORLD_CAPTURE_TYPES，但
+    // GraphConcurrencyPolicy.intersectCapabilities 里运行时声明（下面的 machineSlot）
+    // 只要不是 AMBIGUOUS/ENTITY 就会胜出，所以并发行为实际由本方法决定。
+    // 蒸笼格里的成品由 canCollectResultWithoutWorldCapture() 权威收取，因此本委托不再
+    // 声明 getExpectedOutput()：非空 expected 会被图派发当成「必须世界捕获」，
+    // 与 machineSlot 声明冲突，节点会以 START_REJECTED（机器拒绝启动此配方）失败。
 
     @Override
     public BatchConcurrencyCapabilities concurrencyCapabilities() {
@@ -517,16 +521,6 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
                 .filter(stack -> stack != null && !stack.isEmpty())
                 .map(stack -> new OutputAccounting.CollectedOutput(port.portId(), port.source(), stack))
                 .toList();
-    }
-
-    @Override
-    public ItemStack getExpectedOutput() {
-        // Non-null enables the chain's missing-output detection (see collectAllResults).
-        // Also lets CraftOutputInterceptor match by item type instead of grabbing
-        // any newborn entity in the capture box.
-        if (recipe == null || myLevel == null) return null;
-        ItemStack out = getRecipeResult();
-        return out.isEmpty() ? null : out;
     }
 
     @Override
