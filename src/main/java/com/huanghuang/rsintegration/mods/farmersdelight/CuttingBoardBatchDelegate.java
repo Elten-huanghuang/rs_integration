@@ -1,6 +1,5 @@
 package com.huanghuang.rsintegration.mods.farmersdelight;
 
-import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
@@ -28,6 +27,8 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.items.ItemStackHandler;
 import net.minecraftforge.items.wrapper.RecipeWrapper;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
 import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
@@ -42,9 +43,10 @@ import java.util.List;
 /**
  * Recursive execution for Farmer's Delight cutting-board recipes.
  *
- * <p>The board is used only as the bound machine and must be empty. Recipe
- * execution happens against a temporary one-slot inventory, so a failed batch
- * cannot leave a real board half-filled. The knife/shears tool is supplied by
+ * <p>The board is used only as the bound machine. Recipe execution happens
+ * against a temporary one-slot inventory, so a failed batch cannot leave a real
+ * board half-filled and an item already resting on the board is neither consumed
+ * nor duplicated by the staged run. The knife/shears tool is supplied by
  * the selected storage backend, damaged exactly once per operation, and its
  * remainder is returned with the exact rolled outputs. The two FD 1.20.1
  * releases expose different {@code rollResults} signatures, so that call is
@@ -56,6 +58,7 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
             "vectorwing.farmersdelight.common.crafting.CuttingBoardRecipe";
     private static final String BLOCK_ENTITY_CLASS =
             "vectorwing.farmersdelight.common.block.entity.CuttingBoardBlockEntity";
+    private static final Logger LOGGER = LogManager.getLogger("RS Integration");
 
     private ServerPlayer player;
     private ServerLevel myLevel;
@@ -71,6 +74,8 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
     private int resonanceToolSlot = -1;
     @Nullable
     private CraftStorageEndpoint toolReturnEndpoint;
+    @Nullable
+    private String startFailureDetail;
 
     public record ToolPlanCheck(List<Component> warnings, boolean blocksExecution) {
         public ToolPlanCheck {
@@ -101,6 +106,7 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
         this.recipe = found;
         this.preparedExecutions = 1;
         this.craftDone = false;
+        this.startFailureDetail = null;
         this.pendingResults.clear();
         this.reusableTools.clear();
         this.resonanceToolView = null;
@@ -233,7 +239,12 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
     public boolean startPreparedOperation(@NotNull ServerPlayer player,
                                          @NotNull List<ItemStack> materials,
                                          @NotNull ExtractionLedger sharedLedger) {
-        if (recipe == null || materials.size() != 2) return false;
+        this.startFailureDetail = null;
+        if (recipe == null) return rejectStart("cutting board: recipe not resolved before start", materials);
+        if (materials.size() != 2) {
+            return rejectStart("cutting board: expected 2 reserved materials, got " + materials.size(),
+                    materials);
+        }
         this.player = player;
         this.sharedLedger = sharedLedger;
         this.usingSharedLedger = true;
@@ -246,19 +257,42 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
         craftDone = false;
 
         BlockEntity board = myLevel.getBlockEntity(myPos);
-        if (!isBoard(board)) return false;
-        if (!isBoardEmpty(board)) return false;
+        if (!isBoard(board)) {
+            return rejectStart("cutting board: block entity at " + myPos
+                    + " is not a FarmersDelight cutting board (" + describeBoard(board) + ")", materials);
+        }
+        // 板上已有的物品与本次执行无关：配方始终针对临时输入槽求值，既不会消耗也不会
+        // 复制它。这里只记录一条日志，不能因为玩家把东西放在砧板上就让整条合成链失败。
+        if (!isBoardEmpty(board)) {
+            LOGGER.info(
+                    "[RSI-CuttingBoard] Board at {} already holds an item; staged execution ignores it (recipe={})",
+                    myPos, recipe.getId());
+        }
 
         int executions = executionsFor(materials);
-        if (executions <= 0) return false;
+        if (executions <= 0) {
+            return rejectStart("cutting board: reserved materials do not match the planned batch (planned="
+                    + preparedExecutions + ", input=" + countOf(materials.get(0))
+                    + ", tool=" + countOf(materials.get(1)) + ")", materials);
+        }
         List<IngredientSpec> specs = getRequiredMaterials();
-        if (specs == null || specs.size() != 2
-                || !specs.get(0).ingredient().test(materials.get(0))
-                || !specs.get(1).ingredient().test(materials.get(1))) return false;
+        if (specs == null || specs.size() != 2) {
+            return rejectStart("cutting board: recipe does not expose an input and a tool slot", materials);
+        }
+        if (!specs.get(0).ingredient().test(materials.get(0))) {
+            return rejectStart("cutting board: reserved input " + materials.get(0).getItem()
+                    + " does not satisfy the recipe input", materials);
+        }
+        if (!specs.get(1).ingredient().test(materials.get(1))) {
+            return rejectStart("cutting board: reserved tool " + materials.get(1).getItem()
+                    + " does not satisfy the recipe tool", materials);
+        }
 
         ItemStack toolTemplate = materials.get(1).copyWithCount(1);
         int toolUnits = materials.get(1).getCount();
-        if (toolUnits <= 0 || toolTemplate.isEmpty()) return false;
+        if (toolUnits <= 0 || toolTemplate.isEmpty()) {
+            return rejectStart("cutting board: no usable tool units were reserved", materials);
+        }
         if (sharedLedger != null) {
             if (toolReturnEndpoint == null) toolReturnEndpoint = sharedLedger.storageEndpoint();
             ExtractionLedger.ResonanceReturnTarget target = sharedLedger
@@ -275,7 +309,8 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
             player.sendSystemMessage(Component.translatable(
                     "rsi.farmersdelight.cutting_board.tool_durability_insufficient",
                     toolTemplate.getHoverName(), availableUses * toolUnits, executions));
-            return false;
+            return rejectStart("cutting board: tool durability " + (availableUses * toolUnits)
+                    + " is below the " + executions + " planned operation(s)", materials);
         }
 
         try {
@@ -289,7 +324,10 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
             unusedToolUnits--;
             for (int operation = 0; operation < executions; operation++) {
                 if (tool.isEmpty()) {
-                    if (unusedToolUnits <= 0) return false;
+                    if (unusedToolUnits <= 0) {
+                        return rejectStart("cutting board: tool was used up after " + operation
+                                + " of " + executions + " operation(s)", materials);
+                    }
                     tool = toolTemplate.copy();
                     unusedToolUnits--;
                 }
@@ -312,9 +350,48 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
             }
             return true;
         } catch (ReflectiveOperationException | RuntimeException exception) {
-            RSIntegrationMod.LOGGER.error("[RSI-CuttingBoard] Failed to execute {}", recipe.getId(), exception);
-            return false;
+            LOGGER.error("[RSI-CuttingBoard] Failed to execute {}", recipe.getId(), exception);
+            return rejectStart("cutting board: rollResults failed ("
+                    + exception.getClass().getSimpleName() + ")", materials);
         }
+    }
+
+    @Nullable
+    @Override
+    public String lastStartFailureDetail() {
+        return startFailureDetail;
+    }
+
+    /** 记录启动失败原因并返回 false，便于执行链把真实原因写进日志与故障报告。 */
+    private boolean rejectStart(@NotNull String detail, @NotNull List<ItemStack> materials) {
+        this.startFailureDetail = detail;
+        LOGGER.warn(
+                "[RSI-CuttingBoard] start rejected at {} recipe={} planned={} materials={} detail={}",
+                myPos, recipe == null ? "unknown" : recipe.getId(), preparedExecutions,
+                describeMaterials(materials), detail);
+        return false;
+    }
+
+    private static String describeMaterials(@NotNull List<ItemStack> materials) {
+        StringBuilder text = new StringBuilder("[");
+        for (int i = 0; i < materials.size(); i++) {
+            if (i > 0) text.append(", ");
+            ItemStack stack = materials.get(i);
+            if (stack == null || stack.isEmpty()) {
+                text.append("empty");
+            } else {
+                text.append(stack.getCount()).append('x').append(stack.getItem());
+            }
+        }
+        return text.append(']').toString();
+    }
+
+    private static String describeBoard(@Nullable BlockEntity board) {
+        return board == null ? "no block entity" : board.getClass().getName();
+    }
+
+    private static int countOf(@Nullable ItemStack stack) {
+        return stack == null ? 0 : stack.getCount();
     }
 
     @Override

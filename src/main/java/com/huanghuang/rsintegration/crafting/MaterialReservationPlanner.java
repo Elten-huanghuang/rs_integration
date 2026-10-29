@@ -38,7 +38,12 @@ final class MaterialReservationPlanner {
     static List<IngredientSpec> scaleGraphSpecsForExecutions(
             List<IngredientSpec> specs,
             int executions) {
-        int multiplier = Math.max(1, executions);
+        if (executions <= 1) {
+            // 单次执行的规格已经是最终形态：耐久类输入在规划阶段就换算成了物理件数，
+            // 再按 1 次执行重算会被压成 1 件，把"需要两把刀"错误地改成一把。
+            return List.copyOf(specs);
+        }
+        int multiplier = executions;
         List<IngredientSpec> scaledSpecs = new ArrayList<>(specs.size());
         for (int i = 0; i < specs.size(); i++) {
             IngredientSpec spec = specs.get(i);

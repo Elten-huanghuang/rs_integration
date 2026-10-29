@@ -27,6 +27,22 @@ class MaterialReservationPlannerTest extends BootstrapTest {
     }
 
     @Test
+    void singleExecutionKeepsThePlannedDurabilityItemCount() {
+        // 规划阶段已经把"执行这么多次需要几件工具"换算成物理件数，
+        // 再按 1 次执行重算会被压成 1 件，导致砧板等机器只预留一把工具。
+        IngredientSpec tool = new IngredientSpec(
+                Ingredient.of(Items.IRON_SWORD), 2, InputConsumption.durability(1L));
+
+        List<IngredientSpec> scaled = MaterialReservationPlanner.scaleGraphSpecsForExecutions(
+                List.of(tool),
+                1);
+
+        assertEquals(2, scaled.get(0).count());
+        assertEquals(InputConsumption.Kind.DURABILITY,
+                scaled.get(0).consumption().kind());
+    }
+
+    @Test
     void reusableCatalystIsNotMultipliedByExecutions() {
         IngredientSpec catalyst = new IngredientSpec(
                 Ingredient.of(Items.DIAMOND), 1, InputConsumption.catalyst());
