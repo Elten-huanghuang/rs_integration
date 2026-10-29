@@ -8,6 +8,8 @@ import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponseDraft;
+import com.huanghuang.rsintegration.feature.resonance.bridge.ResonanceInventoryBridge;
+import com.huanghuang.rsintegration.mods.lychee.LycheeVirtualCatalysts;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.storage.StorageReference;
@@ -343,6 +345,16 @@ public final class PlanningStateValidator {
         return dimension.location() + ":" + pos.asLong() + ':' + type + ':'
                 + level.getBlockState(pos).getBlock() + ':'
                 + (persisted == null ? "none" : persisted.blockKey())
-                + ":blocked=" + Long.toHexString(blockedHash);
+                + ":blocked=" + Long.toHexString(blockedHash)
+                + ":catalysts=" + Integer.toHexString(virtualCatalystMask(player));
+    }
+
+    /**
+     * 虚拟配方（Lychee 原液/岩浆块等）的「占位催化剂」放在共鸣盘里，不是机器绑定，
+     * 所以必须单独计入指纹：玩家把空桶拿走之后旧计划不能再算有效，否则预览树会继续
+     * 展示一个执行侧已经判定不可用的配方来源（例如树里是 Lychee、实际却走 Embers）。
+     */
+    private static int virtualCatalystMask(ServerPlayer player) {
+        return LycheeVirtualCatalysts.catalystMask(ResonanceInventoryBridge.getViews(player));
     }
 }
