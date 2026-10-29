@@ -106,8 +106,23 @@ class MaterialMatcherTest extends BootstrapTest {
         assertNotNull(declaration.tag());
         assertTrue(MaterialMatcher.matchesOutputDeclaration(declaration, runtimeOutput));
         assertFalse(MaterialMatcher.matchesExact(declaration, runtimeOutput));
-        assertFalse(MaterialMatcher.matchesOutputDeclaration(declaration, damaged));
+        // 声明只带默认伤害时不再约束实产的磨损值：底材带进产物的耐久是配方的真实行为。
+        assertTrue(MaterialMatcher.matchesOutputDeclaration(declaration, damaged));
+        assertFalse(MaterialMatcher.matchesExact(declaration, damaged));
         assertNotNull(MaterialKey.of(damaged).tag());
+    }
+
+    @Test
+    void smithingProductInheritingBaseDamageSatisfiesPristineDeclaration() {
+        ItemStack pristine = new ItemStack(Items.DIAMOND_SWORD);
+        pristine.getOrCreateTag().putInt("Damage", 0);
+        ItemStack inherited = pristine.copy();
+        inherited.setDamageValue(4);
+
+        assertTrue(IngredientMatcher.matchesProducedOutput(pristine, inherited));
+        assertTrue(MaterialMatcher.matchesOutputDeclaration(MaterialKey.of(pristine), inherited));
+        assertFalse(MaterialMatcher.matchesExact(MaterialKey.of(pristine), inherited));
+        assertEquals(4, MaterialKey.of(inherited).toStack(1).getDamageValue());
     }
 
     @Test

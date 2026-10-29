@@ -201,14 +201,16 @@ public final class IngredientMatcher {
      * pristine unbreakable tool may legitimately retain runtime state such as
      * RepairCost or an item modifier while it is upgraded; that state must not
      * make the final product fall through to storage. Other tagged outputs stay
-     * exact, and a damaged tool never matches a pristine template.
+     * exact. 声明里只带默认伤害（{Damage:0}）时按"不约束运行时数值"处理：锻造、
+     * 升级一类的配方会把底材的耐久原样带进产物，实产带着耐久是配方的真实行为，
+     * 不能因为声明停在全新状态就判成没能确认完整产物。
      */
     public static boolean matchesProducedOutput(ItemStack expected, ItemStack actual) {
         if (expected == null || actual == null || expected.isEmpty() || actual.isEmpty()
                 || expected.getItem() != actual.getItem()) return false;
         if (!expected.hasTag()) return true;
         if (ItemStack.isSameItemSameTags(expected, actual)) return true;
-        if (isDefaultDamageOnly(expected.getTag())) return isDefaultDamage(actual.getTag());
+        if (isDefaultDamageOnly(expected.getTag())) return true;
         if (matchesPotionIgnoringPurity(expected, actual)) return true;
         return expected.getMaxDamage() > 0 && isUnbreakable(expected.getTag())
                 && nbtMatches(expected.getTag(), actual.getTag(), true);
