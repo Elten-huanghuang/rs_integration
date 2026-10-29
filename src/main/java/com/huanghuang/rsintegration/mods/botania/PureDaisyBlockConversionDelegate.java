@@ -9,20 +9,20 @@ import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 
 import net.minecraftforge.items.ItemHandlerHelper;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import vazkii.botania.api.recipe.PureDaisyRecipe;
 import vazkii.botania.common.block.flower.PureDaisyBlockEntity;
-import net.minecraft.core.registries.Registries;
-import net.minecraft.resources.ResourceKey;
 
 import javax.annotation.Nonnull;
 import java.util.ArrayList;
@@ -30,7 +30,6 @@ import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 
 public final class PureDaisyBlockConversionDelegate extends AbstractBatchDelegate {
     private static final BlockPos[] OFFSETS = {
@@ -47,10 +46,11 @@ public final class PureDaisyBlockConversionDelegate extends AbstractBatchDelegat
     private ItemStack expected = ItemStack.EMPTY;
     private final List<BlockPos> targets = new ArrayList<>();
     private final Set<BlockPos> placed = new LinkedHashSet<>();
+    /** 已转化完成、但合成链还没领取的产物。 */
+    private final List<ItemStack> harvestedOutputs = new ArrayList<>();
     private boolean harvested;
     private int requestedBatch = 1;
     private long startTick;
-    private Set<UUID> entitiesBefore = Set.of();
 
     @Override
     public boolean validateAndInit(@Nonnull ServerPlayer player, @Nonnull ResourceLocation recipeId,
@@ -143,7 +143,6 @@ public final class PureDaisyBlockConversionDelegate extends AbstractBatchDelegat
         }
 
         input = stack.copy();
-        entitiesBefore = BotaniaDelegateSupport.snapshot(level, captureRegion());
         placed.clear();
         for (BlockPos target : available) {
             if (!level.setBlock(target, state, 3)) {
@@ -154,6 +153,7 @@ public final class PureDaisyBlockConversionDelegate extends AbstractBatchDelegat
             placed.add(target);
         }
         harvested = false;
+        harvestedOutputs.clear();
         startTick = level.getGameTime();
         markCraftStarted();
         return true;
@@ -166,20 +166,35 @@ public final class PureDaisyBlockConversionDelegate extends AbstractBatchDelegat
         // duration has elapsed (for example during a same-tick block update).
         // Keep the RS batch pending for at least the native Pure Daisy time.
         if (current.getGameTime() - startTick < recipe.getTime()) return false;
-        if (!harvested && placed.stream().allMatch(target ->
+        if (harvested) return true;
+        if (!placed.stream().allMatch(target ->
                 current.getBlockState(target).is(recipe.getOutputState().getBlock()))) {
-            harvested = true;
-            for (BlockPos target : placed) current.destroyBlock(target, true);
+            return false;
         }
-        if (!harvested) return false;
-        int found = current.getEntitiesOfClass(ItemEntity.class, captureRegion(), this::isExpectedDrop)
-                .stream().mapToInt(entity -> entity.getItem().getCount()).sum();
-        return found >= placed.size();
+        harvest(current);
+        return true;
     }
 
-    private boolean isExpectedDrop(ItemEntity entity) {
-        return BotaniaDelegateSupport.isNew(entity, entitiesBefore)
-                && entity.isAlive() && ItemStack.isSameItem(entity.getItem(), expected);
+    /**
+     * 收走已经转化好的方块。
+     * <p>
+     * 这里刻意不让方块产生掉落实体：白雏菊的转化产物就是该方块本身，直接记账并交给
+     * 合成链结算即可。旧的实现用 {@code destroyBlock(target, true)} 生成掉落物再回到世界里
+     * 扫描 ItemEntity，一旦掉落被捕获器、拾取或区块卸载吞掉，就会表现为「方块被破坏但产物没了」。
+     */
+    private void harvest(ServerLevel current) {
+        harvested = true;
+        BlockState outputState = recipe.getOutputState();
+        int converted = 0;
+        for (BlockPos target : placed) {
+            if (current.getBlockState(target).is(outputState.getBlock())
+                    && current.destroyBlock(target, false)) {
+                converted++;
+            }
+        }
+        if (converted > 0) {
+            harvestedOutputs.add(expected.copyWithCount(converted));
+        }
     }
 
     @Override
@@ -190,37 +205,56 @@ public final class PureDaisyBlockConversionDelegate extends AbstractBatchDelegat
 
     @Override
     public List<ItemStack> collectAllResults(@Nonnull ServerPlayer player) {
-        List<ItemStack> results = new ArrayList<>();
-        for (ItemEntity entity : level.getEntitiesOfClass(ItemEntity.class, captureRegion(), this::isExpectedDrop)) {
-            results.add(entity.getItem().copy());
-            entity.discard();
+        if (harvestedOutputs.isEmpty()) return List.of();
+        List<ItemStack> results = new ArrayList<>(harvestedOutputs.size());
+        for (ItemStack stack : harvestedOutputs) {
+            results.add(stack.copy());
         }
+        harvestedOutputs.clear();
         return results;
     }
 
+    /**
+     * 中止时回收现场：把已放入世界的方块（无论还没转化还是已经转化完）都清掉，
+     * 并按「输入物品」的数量退回，保证退款账目与登记的原材料一致。
+     * <p>
+     * 退货一律折成输入物品而不是产物：账本里登记的原材料是输入，
+     * 上报产物无法抵消账本退款，会造成一次失败同时拿到产物和退款。
+     */
     @Override
     protected void clearMachineState(BlockEntity blockEntity, ServerPlayer player) {
-        List<ItemStack> recovered = new ArrayList<>();
-        if (harvested || placed.isEmpty()) {
-            recordFailureRecoveredInputs(recovered);
-            return;
-        }
-        int recoveredCount = 0;
-        BlockItem inputBlock = input.getItem() instanceof BlockItem blockItem ? blockItem : null;
-        for (BlockPos target : placed) {
-            if (inputBlock != null && level.getBlockState(target).is(inputBlock.getBlock())) {
-                level.destroyBlock(target, false);
-                recoveredCount++;
+        int recovered = 0;
+        // 已收获但没来得及交给合成链的产物也折回输入。
+        for (ItemStack stack : harvestedOutputs) recovered += stack.getCount();
+        harvestedOutputs.clear();
+        if (!harvested) {
+            BlockItem inputBlock = input.getItem() instanceof BlockItem blockItem ? blockItem : null;
+            BlockState outputState = recipe == null ? null : recipe.getOutputState();
+            for (BlockPos target : placed) {
+                BlockState currentState = level.getBlockState(target);
+                boolean restorable = inputBlock != null && currentState.is(inputBlock.getBlock())
+                        || outputState != null && currentState.is(outputState.getBlock());
+                if (restorable && level.destroyBlock(target, false)) recovered++;
             }
         }
-        if (recoveredCount > 0) recovered.add(input.copyWithCount(recoveredCount));
-        recordFailureRecoveredInputs(recovered);
-        if (!usingSharedLedger && recoveredCount > 0) {
-            ItemStack leftover = insertIntoStorage(player,
-                    input.copyWithCount(recoveredCount), false);
-            if (!leftover.isEmpty() && player != null && !player.hasDisconnected()) {
-                ItemHandlerHelper.giveItemToPlayer(player, leftover);
-            }
+        placed.clear();
+        List<ItemStack> recoveredInputs = new ArrayList<>();
+        if (recovered > 0 && !input.isEmpty()) recoveredInputs.add(input.copyWithCount(recovered));
+        recordFailureRecoveredInputs(recoveredInputs);
+        if (!usingSharedLedger) {
+            for (ItemStack stack : recoveredInputs) deliver(stack, player);
+        }
+    }
+
+    private void deliver(ItemStack stack, ServerPlayer player) {
+        if (stack.isEmpty()) return;
+        ItemStack leftover = insertIntoStorage(player, stack.copy(), false);
+        if (leftover.isEmpty()) return;
+        if (player != null && !player.hasDisconnected()) {
+            ItemHandlerHelper.giveItemToPlayer(player, leftover);
+        } else if (level != null && pos != null) {
+            // 玩家已离线：把回收到的物品留在机器旁，之后可以捡回，避免直接蒸发。
+            Block.popResource(level, pos, leftover);
         }
     }
 
@@ -244,5 +278,10 @@ public final class PureDaisyBlockConversionDelegate extends AbstractBatchDelegat
     }
     @Override public AABB getOutputCaptureRegion() { return pos == null ? null : captureRegion(); }
     @Override public BlockPos getMachinePos() { return pos; }
-    @Override public void onBatchFinished(@Nonnull ServerPlayer player) { resetState(); }
+    @Override public void onBatchFinished(@Nonnull ServerPlayer player) {
+        harvestedOutputs.clear();
+        placed.clear();
+        harvested = false;
+        resetState();
+    }
 }

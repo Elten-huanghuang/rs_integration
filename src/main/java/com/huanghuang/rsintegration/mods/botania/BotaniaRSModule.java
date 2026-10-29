@@ -89,9 +89,12 @@ public final class BotaniaRSModule implements IModIntegration {
                 RSIntegrationConfig.ENABLE_BOTANIA,
                 List.of("mythicbotany.infuser.BlockManaInfuser"),
                 "mana_infuser", false));
+        // 浮空白雏菊与白雏菊共用同一个方块实体（PureDaisyBlockEntity），转化能力完全一致，
+        // 因此按方块注册名一并允许绑定；浮空特种花共用 FloatingSpecialFlowerBlock，
+        // 无法按类名区分，只能逐个列出注册名。
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "botania", ModType.byId("botania_pure_daisy"), RSIntegrationConfig.ENABLE_BOTANIA,
-                List.of(), List.of("botania:pure_daisy"), "pure_daisy", false));
+                List.of(), List.of("botania:pure_daisy", "botania:floating_pure_daisy"), "pure_daisy", false));
     }
 
     private static void target(String type, String key, String blockClass) {
