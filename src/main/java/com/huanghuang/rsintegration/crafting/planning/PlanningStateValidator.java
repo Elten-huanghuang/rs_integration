@@ -111,6 +111,16 @@ public final class PlanningStateValidator {
                 plan == null ? null : plan.graph(), dimension, lookupPos, selectedReference);
     }
 
+    /** 后台纯规划与缓存执行共用同一份实际初始供料核验。 */
+    public static boolean revalidateGraphForExecution(
+            ServerPlayer player, PlanningSnapshot snapshot, PlanGraphView graph,
+            ResourceKey<Level> dimension, BlockPos lookupPos,
+            @Nullable StorageReference selectedReference) {
+        if (player.hasDisconnected() || player.isRemoved()
+                || !CraftPlanningRevision.isCurrent(snapshot.recipeRevision())) return false;
+        return revalidateRelevantGraph(player, snapshot, graph, dimension, lookupPos, selectedReference);
+    }
+
     private static boolean revalidateRelevantGraph(ServerPlayer player, PlanningSnapshot snapshot,
                                                    @Nullable PlanGraphView graph,
                                                    ResourceKey<Level> dimension, BlockPos lookupPos,
@@ -143,7 +153,7 @@ public final class PlanningStateValidator {
 
     /**
      * 校验已完成预览。预览不是库存锁：有图时只核验实际初始供料，
-     * 无图或缺材料时只核验请求、网络与绑定；执行阶段会重新规划。
+     * 无图或缺材料时只核验请求、网络与绑定；成功计划执行时复验已记录的供料。
      */
     public static boolean revalidatePreview(ServerPlayer player, PlanningSnapshot snapshot,
                                             PlanResponseDraft draft,
@@ -181,8 +191,8 @@ public final class PlanningStateValidator {
 
     /**
      * Preview reuse may ignore unrelated inventory churn, but only when the cached DAG declares
-     * every initial item it consumes and those exact supplies are still present. Execution never
-     * trusts this shortcut and performs its normal authoritative resolution.
+     * every initial item it consumes and those exact supplies are still present.
+     * Execution revalidates those supplies again before atomically reserving them.
      */
     public static boolean sameRelevantState(PlanningSnapshot cached, PlanningSnapshot current,
                                             PlanResponse plan) {
@@ -204,10 +214,7 @@ public final class PlanningStateValidator {
                                             Map<StackKey, Long> available) {
         PlanGraphView graph = plan.graph();
         if (graph == null) {
-            // Pure responses intentionally do not carry a server DAG. Their
-            // material table includes craftable intermediates, so it cannot be
-            // used as an initial-supply bill. The execution ledger performs
-            // the authoritative atomic extraction instead.
+            // 旧响应或失败预览可能没有图；展示材料表不能充当初始供料清单。
             return true;
         }
         return graph.unresolved().isEmpty()

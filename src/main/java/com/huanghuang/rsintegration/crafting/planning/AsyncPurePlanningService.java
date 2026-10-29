@@ -220,6 +220,7 @@ public final class AsyncPurePlanningService {
                 graph, stock, SelfAmplifyingRecipePolicy.planningRoots(target, repeatCount),
                 maxSteps, maxSearchStates, maxMemoizedFailures, deadlineNanos,
                 System::nanoTime, planningRootGuard(target), forcedRecipes, preferences);
+        if (SelfAmplifyingRecipePolicy.isSelfAmplifying(target)) result = result.withOutputTarget();
         if (result.feasible()
                 || !SelfAmplifyingRecipePolicy.isUnseededReverseTarget(target, graph, stock)) {
             return result;
@@ -228,7 +229,7 @@ public final class AsyncPurePlanningService {
                 graph, stock,
                 SelfAmplifyingRecipePolicy.directProductionRoots(target, repeatCount),
                 maxSteps, maxSearchStates, maxMemoizedFailures, deadlineNanos,
-                System::nanoTime, Set.of(), forcedRecipes, preferences);
+                System::nanoTime, Set.of(), forcedRecipes, preferences).withOutputTarget();
         return direct.feasible() || !direct.missing().isEmpty() ? direct : result;
     }
 

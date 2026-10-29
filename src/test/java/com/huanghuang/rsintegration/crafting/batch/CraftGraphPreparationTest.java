@@ -94,6 +94,27 @@ class CraftGraphPreparationTest extends BootstrapTest {
     }
 
     @Test
+    void contextualRootReplacesTheSameRecipeIdEvenWhenItsOutputChanged() {
+        MaterialRef previousOutput = material("old_output");
+        MaterialRef newOutput = material("new_output");
+        MaterialRef untouchedOutput = material("untouched_output");
+        RecipeNode previous = recipe("same_id", previousOutput);
+        RecipeNode root = new RecipeNode(previous.recipeId(), newOutput, 7,
+                List.of(new IngredientRef(List.of(material("contextual_input")), 13)));
+        RecipeNode untouched = recipe("untouched", untouchedOutput);
+        ImmutableRecipeGraph original = new ImmutableRecipeGraph(Map.of(
+                previousOutput, List.of(previous), untouchedOutput, List.of(untouched)));
+
+        ImmutableRecipeGraph replaced = CraftPureExecutionPlanner.withPlanningRoot(original, root);
+
+        assertSame(root, replaced.recipesById().get(root.recipeId()));
+        assertEquals(Set.of(newOutput, untouchedOutput), replaced.recipesByOutput().keySet());
+        assertSame(original.recipesByOutput().get(untouchedOutput),
+                replaced.recipesByOutput().get(untouchedOutput));
+        assertSame(previous, original.recipesById().get(previous.recipeId()));
+    }
+
+    @Test
     void physicalRootFallsBackToFrozenRecipeInputsWhenRuntimeSpecsCannotProject() {
         MaterialRef output = material("tacz_output");
         MaterialRef brick = material("archaic_brick");

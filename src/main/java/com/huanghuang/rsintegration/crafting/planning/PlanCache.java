@@ -79,7 +79,13 @@ public final class PlanCache {
      */
     public void put(Key key, PlanResponse plan, PlanningSnapshot snapshot,
                     PureRecipePlanner.Result purePlan, CraftPlanGraph resolvedGraph, long now) {
-        Entry entry = new Entry(plan, snapshot, purePlan, resolvedGraph, now);
+        put(key, plan, snapshot, purePlan, resolvedGraph, false, now);
+    }
+
+    public void put(Key key, PlanResponse plan, PlanningSnapshot snapshot,
+                    PureRecipePlanner.Result purePlan, CraftPlanGraph resolvedGraph,
+                    boolean terminalEmbedded, long now) {
+        Entry entry = new Entry(plan, snapshot, purePlan, resolvedGraph, terminalEmbedded, now);
         entries.put(key, entry);
         Key executionKey = key.withoutPreferences();
         executionLeases.put(key.playerId(), new ExecutionLease(executionKey, entry));
@@ -256,7 +262,13 @@ public final class PlanCache {
 
     public record Entry(PlanResponse plan, PlanningSnapshot snapshot,
                         PureRecipePlanner.Result purePlan,
-                        CraftPlanGraph resolvedGraph, long createdNanos) {}
+                        CraftPlanGraph resolvedGraph, boolean terminalEmbedded, long createdNanos) {
+        public Entry(PlanResponse plan, PlanningSnapshot snapshot,
+                     PureRecipePlanner.Result purePlan,
+                     CraftPlanGraph resolvedGraph, long createdNanos) {
+            this(plan, snapshot, purePlan, resolvedGraph, false, createdNanos);
+        }
+    }
 
     /**
      * 租约直接持有完整 PlanningSnapshot，不能由调用方用部分 key 重新构造。

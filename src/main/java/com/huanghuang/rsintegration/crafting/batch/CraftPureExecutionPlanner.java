@@ -5,13 +5,15 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.CraftingPlanningTimeoutException;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
-import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.MachineSelectionMode;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.crafting.OutputDestination;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.crafting.ScaledIngredientSpec;
 import com.huanghuang.rsintegration.crafting.SelfAmplifyingRecipePolicy;
+import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
+import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
 import com.huanghuang.rsintegration.crafting.planning.AsyncPlanningCoordinator.StalePlanningResultException;
 import com.huanghuang.rsintegration.crafting.planning.AsyncPurePlanningService;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
@@ -23,6 +25,8 @@ import com.huanghuang.rsintegration.crafting.planning.PlanningSnapshotFactory;
 import com.huanghuang.rsintegration.crafting.planning.PlanningStateValidator;
 import com.huanghuang.rsintegration.crafting.planning.PureDemandTreeInspector;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
+import com.huanghuang.rsintegration.crafting.planning.PurePlanGraphAdapter;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.storage.StorageReference;
 import net.minecraft.core.BlockPos;
@@ -82,7 +86,7 @@ final class CraftPureExecutionPlanner {
                 player, recipeId, forcedRecipes, dimension, position, repeatCount, inferMode,
                 baseItem, targetOutput, outputDestination, machineSelectionMode,
                 storageEndpoint, storageReference, Map.of(), recipeGraph,
-                bindingGraph.blockedOutputIds(), "pure");
+                bindingGraph.blockedOutputIds(), "pure", null);
         return true;
     }
 
@@ -116,6 +120,8 @@ final class CraftPureExecutionPlanner {
             return false;
         }
         ImmutableRecipeGraph baseGraph = bindingGraph.graph();
+        RecipeNode indexed = baseGraph.recipesById().get(recipeId);
+        if (indexed != null && SelfAmplifyingRecipePolicy.isSelfAmplifying(indexed)) return false;
         List<ImmutableRecipeGraph.IngredientRef> inputs = physicalRootInputs(
                 baseGraph, recipeId, scaledSpecs, repeatCount);
         if (inputs == null || inputs.isEmpty()) return false;
@@ -123,7 +129,9 @@ final class CraftPureExecutionPlanner {
         MaterialRef outputRef = ImmutableRecipeGraphProjector.material(
                 recipeOutput, recipeOutput.hasTag());
         RecipeNode syntheticRoot = new RecipeNode(
-                recipeId, outputRef, Math.max(1, recipeOutput.getCount()), inputs);
+                recipeId, outputRef,
+                Math.multiplyExact((long) Math.max(1, recipeOutput.getCount()), Math.max(1, repeatCount)),
+                inputs);
         ImmutableRecipeGraph planningGraph = withPlanningRoot(baseGraph, syntheticRoot);
 
         submit(
@@ -131,7 +139,7 @@ final class CraftPureExecutionPlanner {
                 baseItem, targetOutput, outputDestination, machineSelectionMode,
                 storageEndpoint, storageReference, materialLocks, planningGraph,
                 bindingGraph.blockedOutputIds(),
-                "physical");
+                "physical", List.copyOf(scaledSpecs));
         return true;
     }
 
@@ -165,14 +173,22 @@ final class CraftPureExecutionPlanner {
     }
 
     static ImmutableRecipeGraph withPlanningRoot(ImmutableRecipeGraph baseGraph, RecipeNode root) {
-        // 依赖桶已经不可变，只复制新增根节点所在的桶。
+        // 替换同 ID 的旧终端，避免 recipesById 继续指向没有上下文的旧输入。
         Map<MaterialRef, List<RecipeNode>> projected = new HashMap<>();
-        baseGraph.recipesByOutput().forEach(projected::put);
+        baseGraph.recipesByOutput().forEach((output, recipes) -> {
+            List<RecipeNode> remaining = recipes.stream()
+                    .filter(recipe -> !recipe.recipeId().equals(root.recipeId())).toList();
+            if (!remaining.isEmpty()) {
+                projected.put(output, remaining.size() == recipes.size() ? recipes : remaining);
+            }
+        });
         List<RecipeNode> candidates = new ArrayList<>(
                 projected.getOrDefault(root.output(), List.of()));
         candidates.add(root);
         projected.put(root.output(), candidates);
-        return new ImmutableRecipeGraph(projected);
+        Map<ResourceLocation, RecipeNode> indexed = new HashMap<>(baseGraph.recipesById());
+        indexed.put(root.recipeId(), root);
+        return new ImmutableRecipeGraph(projected, indexed);
     }
 
     private static void submit(
@@ -185,11 +201,11 @@ final class CraftPureExecutionPlanner {
             @Nullable StorageReference storageReference,
             Map<String, ItemStack> materialLocks, ImmutableRecipeGraph planningGraph,
             Set<ResourceLocation> blockedOutputIds,
-            String planKind) {
+            String planKind, @Nullable List<ScaledIngredientSpec> terminalInputs) {
         submit(player, recipeId, forcedRecipes, dimension, position, repeatCount,
                 inferMode, baseItem, targetOutput, outputDestination,
                 machineSelectionMode, storageEndpoint, storageReference,
-                materialLocks, planningGraph, blockedOutputIds, planKind, true);
+                materialLocks, planningGraph, blockedOutputIds, planKind, terminalInputs, true);
     }
 
     private static void submit(
@@ -202,8 +218,10 @@ final class CraftPureExecutionPlanner {
             @Nullable StorageReference storageReference,
             Map<String, ItemStack> materialLocks, ImmutableRecipeGraph planningGraph,
             Set<ResourceLocation> blockedOutputIds,
-            String planKind, boolean retryOnStale) {
-        int plannedExecutions = Math.max(1, repeatCount);
+            String planKind, @Nullable List<ScaledIngredientSpec> terminalInputs,
+            boolean retryOnStale) {
+        // 机器合成根已包含整批输入，后台搜索不能再次乘以执行次数。
+        int plannedExecutions = terminalInputs == null ? Math.max(1, repeatCount) : 1;
         MaterialSources.invalidateFor(player, storageEndpoint);
         Map<StackKey, Long> available = MaterialSources.listAllAvailable(player, storageEndpoint);
         var routeInputs = new AsyncPurePlanningService.RouteInputs(
@@ -280,23 +298,36 @@ final class CraftPureExecutionPlanner {
                                 snapshot.bindingBlockedOutputIds());
                         return;
                     }
-                    if (!PlanningStateValidator.revalidateForExecution(
-                            player, snapshot,
-                            ResourceKey.create(Registries.DIMENSION, effectiveDimension),
-                            effectivePosition, selectedReference)) {
-                        player.sendSystemMessage(Component.translatable(
-                                "rsi.plan.failure.missing_materials"));
+                    Recipe<?> executionRecipe = CraftRecipeResolver.resolve(player.serverLevel(), recipeId);
+                    if (executionRecipe == null) {
+                        player.sendSystemMessage(Component.translatable("rsi.plan.failure.planning_cancelled"));
                         return;
                     }
-                    RSIntegrationMod.LOGGER.info(
-                            "[RSI-exec] async {} plan validated recipe={} states={}; "
-                                    + "execution will be rebuilt as a complete graph",
-                            planKind, recipeId, result.expandedStates());
-                    GenericCraftPacket.tryResolveTypedGraphOnly(
-                            player, recipeId, forcedRecipes, dimension, position,
-                            repeatCount, inferMode, baseItem, targetOutput,
-                            outputDestination, machineSelectionMode,
-                            storageReference, materialLocks);
+                    try {
+                        CraftPlanGraph graph = executionGraph(result, snapshot.availableItems(),
+                                planningGraph.recipesById().get(recipeId), terminalInputs,
+                                executionRecipe, player, repeatCount, inferMode, targetOutput);
+                        if (!PlanningStateValidator.revalidateGraphForExecution(
+                                player, snapshot, PlanGraphView.from(graph),
+                                ResourceKey.create(Registries.DIMENSION, effectiveDimension),
+                                effectivePosition, selectedReference)) {
+                            player.sendSystemMessage(Component.translatable(
+                                    "rsi.plan.failure.planning_cancelled"));
+                            return;
+                        }
+                        RSIntegrationMod.LOGGER.info(
+                                "[RSI-exec] async {} plan validated recipe={} states={} graphNodes={}",
+                                planKind, recipeId, result.expandedStates(), graph.nodes().size());
+                        CraftExecutionLauncher.launchGraph(player, graph, storageEndpoint,
+                                recipeId, forcedRecipes, dimension, position, targetOutput,
+                                outputDestination, machineSelectionMode, materialLocks);
+                    } catch (IllegalArgumentException | ArithmeticException mismatch) {
+                        RSIntegrationMod.LOGGER.warn(
+                                "[RSI-exec] Cannot execute recorded {} material flow recipe={}",
+                                planKind, recipeId, mismatch);
+                        player.sendSystemMessage(Component.translatable(
+                                "rsi.plan.failure.planning_cancelled"));
+                    }
                 },
                 failure -> {
                     if (failure instanceof StalePlanningResultException && retryOnStale) {
@@ -310,7 +341,7 @@ final class CraftPureExecutionPlanner {
                                 repeatCount, inferMode, baseItem, targetOutput,
                                 outputDestination, machineSelectionMode, storageEndpoint,
                                 storageReference, materialLocks, planningGraph,
-                                blockedOutputIds, planKind, false);
+                                blockedOutputIds, planKind, terminalInputs, false);
                         return;
                     }
                     if (!(failure instanceof CancellationException)) {
@@ -325,6 +356,36 @@ final class CraftPureExecutionPlanner {
                 });
         RSIntegrationMod.debug("[RSI-exec] queued async {} planning recipe={} repeat={}",
                 planKind, recipeId, repeatCount);
+    }
+
+    private static CraftPlanGraph executionGraph(
+            PureRecipePlanner.Result result, Map<StackKey, Long> available,
+            RecipeNode target, @Nullable List<ScaledIngredientSpec> terminalInputs,
+            Recipe<?> recipe, ServerPlayer player, int repeatCount, boolean inferMode,
+            @Nullable ItemStack targetOutput) {
+        if (PurePlanGraphAdapter.targetsOutput(result, target)) {
+            return PurePlanGraphAdapter.toOutputGraph(result, available);
+        }
+        ItemStack output = ModRecipeHandlers.tryGetResultItem(
+                recipe, player.serverLevel().registryAccess());
+        List<ScaledIngredientSpec> specs = terminalInputs;
+        if (specs == null) {
+            if (!(recipe instanceof CraftingRecipe crafting)) {
+                throw new IllegalArgumentException("Missing physical terminal inputs");
+            }
+            specs = CraftIngredientPlanMath.scaleTerminalIngredientSpecs(recipe,
+                    CraftIngredientPlanMath.extractPlanIngredientSpecs(crafting), output, repeatCount);
+            ModRecipeHandler handler = ModRecipeHandlers.claimFor(recipe).winner();
+            if (handler != null) specs = handler.getRecursiveScaledIngredients(recipe, specs);
+        }
+        CraftPlanGraph input = PurePlanGraphAdapter.toInputGraph(result, available, specs);
+        ResolutionStep terminal = terminalInputs == null
+                ? CraftTerminalSteps.genericTerminalStep(recipe.getId(), repeatCount)
+                : CraftTerminalSteps.backgroundPhysicalTerminalStep(recipe.getId(),
+                        GenericCraftPacket.modTypeForCachedExecution(recipe), inferMode, repeatCount);
+        return CraftTerminalSteps.composeEquivalentTerminalGraph(input, terminal,
+                CraftTerminalSteps.selectTerminalGraphOutput(recipe, output, targetOutput),
+                player.serverLevel());
     }
 
     private static Map<ResourceLocation, ResourceLocation> forcedRecipeOverrides(

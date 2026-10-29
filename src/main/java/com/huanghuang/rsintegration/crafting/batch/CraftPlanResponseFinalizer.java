@@ -38,6 +38,7 @@ final class CraftPlanResponseFinalizer {
             @Nullable StorageReference planStorageReference, PlanCache.Key cacheKey,
             @Nullable PureRecipePlanner.Result precomputedPlan,
             @Nullable CraftPlanGraph resolvedGraphForCache,
+            boolean terminalEmbedded,
             int responseStepCount, int responseGraphNodes, boolean responseFeasible,
             long planStartNanos, CraftPlanResultDispatcher.Sink sink) {
         PlanningProgressServer.finalizing(player.getUUID(), previewGeneration);
@@ -73,7 +74,7 @@ final class CraftPlanResponseFinalizer {
                             cacheKey, plan, planningSnapshot,
                             CraftPlanDecisionRules.canUsePrecomputedPlan(precomputedPlan)
                                     ? precomputedPlan : null,
-                            resolvedGraphForCache, System.nanoTime());
+                            resolvedGraphForCache, terminalEmbedded, System.nanoTime());
                     if (Diagnostics.isEnabled()) {
                         RSIntegrationMod.LOGGER.info(
                                 "[RSI-Diag] preview cache stored recipe={} graphRoots={} graphNodes={}",
