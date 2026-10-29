@@ -305,11 +305,13 @@ final class StepExecutor {
             ResolutionContext ctx, int depth,
             CraftingResolver.EdgeTracker edges, int batches) {
         if (depth > maxDepth() || ctx.steps.size() + 1 > maxSteps()) return null;
-        List<InputDemand> inputs = new ArrayList<>();
         // Machine specs describe physical slots. Keep equal predicates as separate
         // ports: two wool slots may legally choose different colours, while each
         // individual slot must still be backed by one concrete stack variant.
         List<IngredientSpec> physicalSpecs = machineSpecsForGraph(specs);
+        // 解析顺序可以打乱，但 inputs 列表必须按端口索引（槽位）排列：
+        // 机器委托按槽位逐个校验和摆放材料，列表顺序错位会让工具与原料互换。
+        InputDemand[] slotInputs = new InputDemand[physicalSpecs.size()];
         // Resolve consumed inputs before reusable catalysts. A CraftTweaker
         // recipe can use the same catalyst in both a terminal recipe and an
         // intermediate recipe; resolving the catalyst first temporarily
@@ -345,8 +347,12 @@ final class StepExecutor {
             if (plannedIngredient == null) {
                 return null;
             }
-            inputs.add(new InputDemand(port, plannedIngredient, quantity,
-                    effectiveConsumption(spec), firstDisplay(plannedIngredient)));
+            slotInputs[originalIndex] = new InputDemand(port, plannedIngredient, quantity,
+                    effectiveConsumption(spec), firstDisplay(plannedIngredient));
+        }
+        List<InputDemand> inputs = new ArrayList<>(slotInputs.length);
+        for (InputDemand input : slotInputs) {
+            if (input != null) inputs.add(input);
         }
         return inputs;
     }

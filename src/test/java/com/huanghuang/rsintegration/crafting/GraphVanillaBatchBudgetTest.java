@@ -68,4 +68,28 @@ class GraphVanillaBatchBudgetTest extends BootstrapTest {
                 specs.get(0).consumption().kind());
         assertEquals(3, specs.get(1).count());
     }
+
+    @Test
+    void durabilityGraphSpecsFollowPortIndexNotResolutionOrder() {
+        // 规划期先解析窄条件（工具=单物品），再解析宽的标签输入，
+        // 于是 inputs 的解析顺序是 [工具, 原料]；派发必须还原成槽位顺序。
+        List<InputDemand> inputs = List.of(
+                new InputDemand(
+                        new InputPortId(new NodeId(0), 1),
+                        Ingredient.of(Items.IRON_PICKAXE),
+                        1L,
+                        InputConsumption.durability(1L),
+                        new ItemStack(Items.IRON_PICKAXE)),
+                new InputDemand(
+                        new InputPortId(new NodeId(0), 0),
+                        Ingredient.of(Items.OAK_PLANKS),
+                        1L,
+                        InputConsumption.consumed(),
+                        new ItemStack(Items.OAK_PLANKS)));
+
+        List<IngredientSpec> specs = AsyncCraftChain.plannedDurabilityGraphSpecs(inputs);
+
+        assertEquals(InputConsumption.Kind.CONSUMED, specs.get(0).consumption().kind());
+        assertEquals(InputConsumption.Kind.DURABILITY, specs.get(1).consumption().kind());
+    }
 }

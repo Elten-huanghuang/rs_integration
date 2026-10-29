@@ -2304,8 +2304,12 @@ public final class AsyncCraftChain {
                 input.consumption().kind() == InputConsumption.Kind.DURABILITY)) {
             return null;
         }
-        List<IngredientSpec> specs = new ArrayList<>(inputs.size());
-        for (InputDemand input : inputs) {
+        // 委托按槽位摆放材料，所以这里按端口索引还原成槽位顺序，
+        // 不能直接沿用规划期的解析顺序（先消耗、后可复用），否则工具和原料会互换。
+        List<InputDemand> ordered = new ArrayList<>(inputs);
+        ordered.sort((left, right) -> Integer.compare(left.id().index(), right.id().index()));
+        List<IngredientSpec> specs = new ArrayList<>(ordered.size());
+        for (InputDemand input : ordered) {
             specs.add(new IngredientSpec(
                     input.ingredient(),
                     SaturatingLongMath.clampToInt(input.quantity()),
