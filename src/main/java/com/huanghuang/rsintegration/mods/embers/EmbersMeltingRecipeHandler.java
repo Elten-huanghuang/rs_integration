@@ -6,7 +6,6 @@ import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.rekindled.embers.recipe.IMeltingRecipe;
-import com.rekindled.embers.recipe.MeltingRecipe;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
@@ -28,8 +27,14 @@ public final class EmbersMeltingRecipeHandler implements ModRecipeHandler {
         Ingredient input = ((IMeltingRecipe) recipe).getDisplayInput();
         return input == null || input.isEmpty() ? null : List.of(new IngredientSpec(input, 1));
     }
+    /**
+     * 任何 {@link IMeltingRecipe} 都能投影：展示用的输入/产出是接口方法，
+     * 不依赖具体实现类。以前只放行 {@code MeltingRecipe} 本身，附加模组（或其他
+     * 数据包）注册的熔炼配方会因此进不了预览图，预览只能把熔融金属当成「库存里已有」，
+     * 执行侧却又能真的去熔化，于是预览与实际派发对不上。
+     */
     @Override public boolean supportsBackgroundPlanning(Recipe<?> recipe) {
-        return recipe.getClass() == MeltingRecipe.class
+        return recipe instanceof IMeltingRecipe
                 && ModRecipeHandler.super.supportsBackgroundPlanning(recipe);
     }
     @Override public boolean supportsIntermediateProjection(Recipe<?> recipe) {
