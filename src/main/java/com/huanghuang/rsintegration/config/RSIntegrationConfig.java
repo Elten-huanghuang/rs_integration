@@ -1121,8 +1121,8 @@ public final class RSIntegrationConfig {
                 .defineList("preferredIngredientVariants", DEFAULT_PREFERRED_INGREDIENT_VARIANTS,
                         obj -> obj instanceof String str && ResourceLocation.tryParse(str) != null);
         MULTIBLOCK_CRAFT_TIMEOUT_SECONDS = s
-                .comment("多方块合成超时（秒）",
-                        "超过等待时间后终止该合成链并执行回收。")
+                .comment("多方块合成无进展超时（秒）",
+                        "新增产物或完成操作会重置计时；等待其他订单释放机器不计入，持续加工的大订单不受总时长限制。")
                 .defineInRange("multiblockCraftTimeoutSeconds", 300, 10, 600);
         CRAFTING_CHAIN_GLOBAL_TIMEOUT_SECONDS = s
                 .comment("合成链无进展超时（秒）",

@@ -9,11 +9,13 @@ import net.minecraft.world.item.crafting.Ingredient;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -159,6 +161,72 @@ class ConcurrentNodeExecutorTest extends BootstrapTest {
 
         assertEquals(DagScheduler.NodeState.READY, scheduler.state(new NodeId(0)));
         assertEquals(0, executor.runningCount());
+    }
+
+    @Test
+    void retryProbesAreBoundedAndRotateAcrossTicks() {
+        int limit = ConcurrentNodeExecutor.MAX_DISPATCH_PROBES_PER_TICK;
+        DagScheduler scheduler = new DagScheduler(independentNodes(limit * 2));
+        List<NodeId> attempted = new ArrayList<>();
+        ConcurrentNodeExecutor executor = new ConcurrentNodeExecutor(
+                scheduler, (ConcurrentNodeExecutor.AdmissionWorkerFactory) node -> {
+                    attempted.add(node);
+                    return ConcurrentNodeExecutor.StartResult.retry();
+                }, 1, node -> false,
+                (node, worker) -> ConcurrentNodeExecutor.CompletionStatus.SUCCEEDED,
+                1, Integer.MAX_VALUE);
+
+        executor.tick();
+        assertEquals(limit, attempted.size());
+        executor.tick();
+        assertEquals(limit * 2, attempted.size());
+        assertEquals(limit * 2, attempted.stream().distinct().count());
+        assertEquals(limit * 2, scheduler.readyCount());
+    }
+
+    @Test
+    void boundedCandidateScanDoesNotStarveLaterDispatchableNodes() {
+        int limit = ConcurrentNodeExecutor.MAX_DISPATCH_PROBES_PER_TICK;
+        DagScheduler scheduler = new DagScheduler(independentNodes(limit + 1));
+        NodeId last = new NodeId(limit);
+        ConcurrentNodeExecutor executor = new ConcurrentNodeExecutor(
+                scheduler, (ConcurrentNodeExecutor.AdmissionWorkerFactory) node ->
+                        ConcurrentNodeExecutor.StartResult.started(
+                                new FakeWorker(ConcurrentNodeExecutor.Observation.WORKING)),
+                1, node -> false, (node, worker) -> { },
+                (node, worker) -> ConcurrentNodeExecutor.CompletionStatus.SUCCEEDED,
+                (node, worker) -> { }, 1, Integer.MAX_VALUE, last::equals);
+
+        executor.tick();
+        assertEquals(0, executor.runningCount());
+        executor.tick();
+        assertEquals(DagScheduler.NodeState.RUNNING, scheduler.state(last));
+    }
+
+    @Test
+    void timeBudgetStopsNewProbesButStillObservesRunningWorkers() {
+        DagScheduler scheduler = new DagScheduler(forkJoinGraph());
+        AtomicBoolean allowed = new AtomicBoolean(true);
+        AtomicInteger observations = new AtomicInteger();
+        AtomicInteger starts = new AtomicInteger();
+        ConcurrentNodeExecutor executor = new ConcurrentNodeExecutor(
+                scheduler, (ConcurrentNodeExecutor.AdmissionWorkerFactory) node -> {
+                    starts.incrementAndGet();
+                    allowed.set(false);
+                    return ConcurrentNodeExecutor.StartResult.started(() -> {
+                        observations.incrementAndGet();
+                        return ConcurrentNodeExecutor.Observation.WORKING;
+                    });
+                }, 2, node -> false);
+
+        executor.tick(allowed::get);
+        assertEquals(1, starts.get());
+        executor.tick(allowed::get);
+        assertEquals(1, observations.get());
+        assertEquals(1, starts.get());
+        allowed.set(true);
+        executor.tick(allowed::get);
+        assertEquals(2, starts.get());
     }
 
     @Test
@@ -398,6 +466,24 @@ class ConcurrentNodeExecutorTest extends BootstrapTest {
                         List.of(new RootAllocation(
                                 new MaterialSource.ProducerOutput(output), iron, 1)))),
                 List.of(), List.of(nodeId));
+    }
+
+    private static CraftPlanGraph independentNodes(int count) {
+        List<CraftNode> nodes = new ArrayList<>();
+        List<NodeId> order = new ArrayList<>();
+        List<RootDemand> roots = new ArrayList<>();
+        MaterialKey material = MaterialKey.of(new ItemStack(Items.DIAMOND));
+        for (int index = 0; index < count; index++) {
+            NodeId id = new NodeId(index);
+            OutputPortId output = new OutputPortId(id, 0);
+            order.add(id);
+            nodes.add(node(id, "queued_" + index, List.of(),
+                    List.of(OutputDeclaration.item(output, material, 1, OutputKind.PRIMARY))));
+            roots.add(new RootDemand(Ingredient.of(Items.DIAMOND), 1, 0,
+                    new ItemStack(Items.DIAMOND), List.of(new RootAllocation(
+                    new MaterialSource.ProducerOutput(output), material, 1))));
+        }
+        return new CraftPlanGraph(1, nodes, List.of(), roots, List.of(), order);
     }
 
     private static CraftPlanGraph threeLeafJoinGraph() {

@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.loadbalancer.ParallelCraftGroup;
 import com.huanghuang.rsintegration.storage.StorageOperationMode;
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
@@ -15,6 +16,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.players.PlayerList;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import org.junit.jupiter.api.BeforeAll;
@@ -26,7 +28,9 @@ import org.mockito.MockedStatic;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -77,6 +81,32 @@ class AsyncCraftChainCaptureTest extends BootstrapTest {
         verify(fixture.capture).drainAndClose();
     }
 
+    @Test
+    void incrementalParallelWorkerCaptureRenewsFlatTimeoutBeforeTheBatchCompletes() throws Exception {
+        Fixture fixture = fixture();
+        ParallelCraftGroup group = mock(ParallelCraftGroup.class);
+        when(group.observeCraft(fixture.player.serverLevel())).thenReturn(
+                new IBatchDelegate.CraftObservation(IBatchDelegate.CraftPhase.WORKING));
+        when(group.getTotalOperations()).thenReturn(1024);
+        when(group.getRunningOperations()).thenReturn(64);
+        when(group.getExpectedOutput()).thenReturn(new ItemStack(Items.DIAMOND));
+        AtomicLong production = new AtomicLong();
+        when(group.getProductionSequence()).thenAnswer(call -> production.get());
+        set(fixture.chain, "currentDelegate", group);
+
+        int timeoutTicks = RSIntegrationConfig.MULTIBLOCK_CRAFT_TIMEOUT_SECONDS.get() * 20;
+        for (int output = 0; output < 63; output++) {
+            set(fixture.chain, "waitTicks", timeoutTicks);
+            production.incrementAndGet();
+            assertFalse(fixture.chain.tick());
+            assertEquals(0, field(fixture.chain, "waitTicks"));
+            assertEquals(0, group.getCompletedOperations());
+        }
+        assertFalse(fixture.chain.tick());
+        assertEquals(1, field(fixture.chain, "waitTicks"));
+        verify(group, never()).onBatchFinished(any());
+    }
+
     @ParameterizedTest
     @ValueSource(ints = {1, 2, 3})
     void shutdownSettlesOnlyACompleteBatchAndPreservesPartialCapturedOutputs(
@@ -102,6 +132,9 @@ class AsyncCraftChainCaptureTest extends BootstrapTest {
     private static Fixture fixture() throws Exception {
         UUID owner = UUID.randomUUID();
         MinecraftServer server = mock(MinecraftServer.class);
+        RecipeManager recipes = mock(RecipeManager.class);
+        when(server.getRecipeManager()).thenReturn(recipes);
+        when(recipes.byKey(any())).thenReturn(Optional.empty());
         ServerLevel level = mock(ServerLevel.class);
         PlayerList players = mock(PlayerList.class);
         ServerPlayer player = mock(ServerPlayer.class);

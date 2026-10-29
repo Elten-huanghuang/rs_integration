@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -57,10 +58,12 @@ class AsyncCraftManagerImmediatePumpTest extends BootstrapTest {
         doAnswer(ignored -> {
             done.set(true);
             return true;
-        }).when(chain).tick(any(VanillaCraftingTickBudget.ChainAllowance.class));
+        }).when(chain).tick(any(VanillaCraftingTickBudget.ChainAllowance.class),
+                any(BooleanSupplier.class));
 
         assertTrue(manager.submitAndAdvance(chain, server));
-        verify(chain).tick(any(VanillaCraftingTickBudget.ChainAllowance.class));
+        verify(chain).tick(any(VanillaCraftingTickBudget.ChainAllowance.class),
+                any(BooleanSupplier.class));
         assertNull(manager.getCraft(craftId));
     }
 }

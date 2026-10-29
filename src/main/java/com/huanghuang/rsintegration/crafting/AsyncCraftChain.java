@@ -122,6 +122,7 @@ import java.util.IdentityHashMap;
 import java.util.Set;
 import java.util.HashSet;
 import java.util.function.Predicate;
+import java.util.function.BooleanSupplier;
 
 /**
  * Orchestrates execution of a crafting chain that may contain both vanilla
@@ -152,7 +153,7 @@ public final class AsyncCraftChain {
             "operation budget, machine, or capture is temporarily unavailable");
     /** 同一个节点连续等待到达这个次数后，向玩家提示一次具体原因，避免只看到“准备中”。 */
     private static final int GRAPH_RETRY_NOTIFY_ATTEMPTS = 5;
-    /** 图节点连续重试超过这个时长仍未推进，就判定为卡死并中止，避免整条链永远停在“准备中”。 */
+    /** 材料连续重试的兜底；正常等机器不使用这个固定窗口。 */
     private static final int GRAPH_RETRY_ABORT_TICKS = 600;
 
     public enum State {
@@ -194,6 +195,7 @@ public final class AsyncCraftChain {
     private int waitTicks;
     private int drainingTicks;
     private int flatObservedCompletedOperations;
+    private long flatObservedProductionSequence;
     private long flatObservedCapturedCount;
     private int stepRemaining;
     private final Map<CraftingResolver.ResolutionStep, ProbabilisticProduction> probabilityTargets = new IdentityHashMap<>();
@@ -214,6 +216,7 @@ public final class AsyncCraftChain {
     private final TerminationService terminationService = new TerminationService();
     private int machineCount = 1;
     private boolean waitingForMachineLease;
+    private List<MachineLeaseRegistry.MachineKey> flatWaitingMachines = List.of();
     private final MachineWaitNotifier machineWaitNotifier = new MachineWaitNotifier();
     private int machineLeaseWaitTicks;
     @Nullable
@@ -284,8 +287,8 @@ public final class AsyncCraftChain {
     private final Set<String> graphRetryNotified = new HashSet<>();
     /** 正在等机器的节点，机器租约一释放就立刻给它们一次机会。 */
     private final Set<NodeId> graphMachineWaits = new HashSet<>();
-    /** 等待机器时记录的租约释放计数，用于判断等待期间是否有机器空出来。 */
-    private final Map<NodeId, Long> graphMachineWaitMarks = new HashMap<>();
+    /** 只跟踪本节点实际等待的已租用机器，不响应无关机器的释放。 */
+    private final Map<NodeId, List<MachineLeaseRegistry.MachineKey>> graphWaitingMachines = new HashMap<>();
     @Nullable
     private final MaterialBroker graphMaterials;
     @Nullable
@@ -306,6 +309,7 @@ public final class AsyncCraftChain {
     private MagicResourceTaskReservation magicResourceTaskReservation;
     private int progressTickCounter;
     private boolean waitingForVanillaBudget;
+    private BooleanSupplier dispatchAllowed = () -> true;
     private int vanillaBatchDeferredTicks;
     private final Map<NodeId, GraphVanillaJob> graphVanillaJobs = new LinkedHashMap<>();
     private final CraftProgressPublisher progressPublisher;
@@ -658,6 +662,12 @@ public final class AsyncCraftChain {
     }
 
     boolean tick(VanillaCraftingTickBudget.ChainAllowance vanillaAllowance) {
+        return tick(vanillaAllowance, () -> true);
+    }
+
+    boolean tick(VanillaCraftingTickBudget.ChainAllowance vanillaAllowance,
+                 BooleanSupplier dispatchAllowed) {
+        this.dispatchAllowed = Objects.requireNonNull(dispatchAllowed, "dispatchAllowed");
         waitingForVanillaBudget = false;
         if (state == State.ABORTED || state == State.COMPLETED) return true;
 
@@ -721,6 +731,12 @@ public final class AsyncCraftChain {
                     drainingTicks = 0;
                 }
                 if (currentDelegate instanceof ParallelCraftGroup group) {
+                    if (group.isWaitingForLeasedMachine()) waitTicks = 0;
+                    long productionSequence = group.getProductionSequence();
+                    if (productionSequence > flatObservedProductionSequence) {
+                        flatObservedProductionSequence = productionSequence;
+                        waitTicks = 0;
+                    }
                     int completed = group.getCompletedOperations();
                     if (completed > flatObservedCompletedOperations) {
                         flatObservedCompletedOperations = completed;
@@ -907,6 +923,7 @@ public final class AsyncCraftChain {
                     currentDelegate = null;
                     waitTicks = 0;
                     flatObservedCompletedOperations = 0;
+                    flatObservedProductionSequence = 0;
                     flatObservedCapturedCount = 0;
                     ledger.reset();
                     stepRemaining = probability == null
@@ -1005,10 +1022,16 @@ public final class AsyncCraftChain {
             }
             currentDelegate = startModStep(step, online);
             flatObservedCompletedOperations = 0;
+            flatObservedProductionSequence = 0;
             flatObservedCapturedCount = 0;
             if (currentDelegate == null) {
                 if (waitingForMachineLease) {
-                    machineLeaseWaitTicks++;
+                    // 已知占用方仍在运行时只排队，不消耗本单的无进展窗口。
+                    if (hasLeasedMachine(flatWaitingMachines, machineLeases)) {
+                        machineLeaseWaitTicks = 0;
+                    } else {
+                        machineLeaseWaitTicks++;
+                    }
                     machineWaitNotifier.notifyWait(online, machineWaitMessage);
                     int timeoutTicks = RSIntegrationConfig.MULTIBLOCK_CRAFT_TIMEOUT_SECONDS.get() * 20;
                     if (machineLeaseWaitTicks > timeoutTicks) {
@@ -1103,7 +1126,7 @@ public final class AsyncCraftChain {
 
         // Drive the executor: observe all running, settle completed, dispatch new.
         try {
-            graphExecutor.tick();
+            graphExecutor.tick(dispatchAllowed);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error(ctx.format("Graph executor tick error"), e);
             abort("Graph executor error: " + e.getMessage(),
@@ -1140,6 +1163,11 @@ public final class AsyncCraftChain {
 
         // Check after this tick's machine observations and settlements so an
         // output produced on the deadline tick can renew the idle window.
+        if (graphMachineWaits.stream().anyMatch(nodeId ->
+                hasLeasedMachine(graphWaitingMachines.getOrDefault(nodeId, List.of()), machineLeases))) {
+            // 占用方有自己的无进展超时；排队方不因前单正常加工时间长而失败。
+            graphProgressWatchdog.markProgress();
+        }
         if (graphProgressWatchdog.tick()) {
             abort("Crafting chain made no progress for "
                     + (graphProgressWatchdog.timeoutTicks() / 20) + "s",
@@ -1857,12 +1885,15 @@ public final class AsyncCraftChain {
 
     private ConcurrentNodeExecutor.StartResult graphRetry(
             NodeId nodeId, String detail, List<MaterialBroker.Request> requests) {
+        if (isMachineWait(detail) != graphMachineWaits.contains(nodeId)) {
+            graphRetrySinceTick.remove(nodeId);
+            graphRetryAttempts.remove(nodeId);
+        }
         int attempts = Math.min(graphRetryAttempts.merge(nodeId, 1, Integer::sum), 6);
         int now = server.getTickCount();
         int since = graphRetrySinceTick.computeIfAbsent(nodeId, key -> now);
-        // 长时间原地等待说明机器/材料永远不会就绪。中止并报告原因，比永远停在“准备中”更有用，
-        // 也避免一条卡死的链长期占住执行线程，让后面的合成全部排队。
-        if (now - since > GRAPH_RETRY_ABORT_TICKS) {
+        // 正常机器排队不使用固定总时长；无进展仍由链级看门狗兜底。
+        if (shouldAbortGraphRetry(detail, now - since)) {
             RSIntegrationMod.LOGGER.warn(ctx.format(
                     "Graph node {} stalled for {} ticks, aborting: {}"),
                     nodeId, now - since, detail);
@@ -1875,10 +1906,9 @@ public final class AsyncCraftChain {
         graphRetryUntilTick.put(nodeId, now + delay);
         if (isMachineWait(detail)) {
             graphMachineWaits.add(nodeId);
-            graphMachineWaitMarks.put(nodeId, machineLeases.releaseCount());
         } else {
             graphMachineWaits.remove(nodeId);
-            graphMachineWaitMarks.remove(nodeId);
+            graphWaitingMachines.remove(nodeId);
         }
         logGraphRetry(nodeId, detail, requests);
         notifySlowRetry(nodeId, detail);
@@ -1898,17 +1928,33 @@ public final class AsyncCraftChain {
         return detail != null && MACHINE_WAIT_DETAILS.contains(detail);
     }
 
-    /**
-     * 等待机器时退避可能还剩几十 tick，但机器在这期间已经空出来了。
-     * 每发生一次租约释放就给等待中的节点补一次机会，避免“机器空闲却还在睡”。
-     */
+    static boolean shouldAbortGraphRetry(String detail, int waitedTicks) {
+        return !isMachineWait(detail) && waitedTicks > GRAPH_RETRY_ABORT_TICKS;
+    }
+
+    static boolean hasLeasedMachine(List<MachineLeaseRegistry.MachineKey> machines,
+                                    MachineLeaseRegistry leases) {
+        return machines.stream().anyMatch(leases::isLeased);
+    }
+
+    static boolean machineLeaseReleased(List<MachineLeaseRegistry.MachineKey> machines,
+                                        MachineLeaseRegistry leases) {
+        return machines.stream().anyMatch(machine -> !leases.isLeased(machine));
+    }
+
+    private List<MachineLeaseRegistry.MachineKey> leasedMachineKeys(
+            List<BoundMachine> machines, String logicalType) {
+        return machines.stream()
+                .map(machine -> new MachineLeaseRegistry.MachineKey(
+                        machine.dim(), machine.pos(), logicalType))
+                .filter(machineLeases::isLeased)
+                .toList();
+    }
+
+    /** 相关机器真正空闲才提前结束退避，无关租约释放不会唤醒本节点。 */
     private boolean wakeOnMachineRelease(NodeId nodeId) {
         if (!graphMachineWaits.contains(nodeId)) return false;
-        long released = machineLeases.releaseCount();
-        Long mark = graphMachineWaitMarks.get(nodeId);
-        if (mark == null || mark == released) return false;
-        graphMachineWaitMarks.put(nodeId, released);
-        return true;
+        return machineLeaseReleased(graphWaitingMachines.getOrDefault(nodeId, List.of()), machineLeases);
     }
 
     private void clearGraphRetry(NodeId nodeId) {
@@ -1916,7 +1962,7 @@ public final class AsyncCraftChain {
         graphRetryAttempts.remove(nodeId);
         graphRetrySinceTick.remove(nodeId);
         graphMachineWaits.remove(nodeId);
-        graphMachineWaitMarks.remove(nodeId);
+        graphWaitingMachines.remove(nodeId);
     }
 
     /**
@@ -2007,6 +2053,7 @@ public final class AsyncCraftChain {
             return IronFurnaceMachinePriority.compare(a, b);
         });
         machines = applyMachineSelection(machines, step.recipeId());
+        graphWaitingMachines.put(nodeId, leasedMachineKeys(machines, step.modType().id()));
         IBatchDelegate delegate = createStepDelegate(step);
         if (delegate == null) {
             return PreparationResult.fatal("No delegate for mod type " + step.modType().id());
@@ -2444,6 +2491,8 @@ public final class AsyncCraftChain {
                         "execution context changed before material commit");
             }
             if (delegate instanceof ParallelCraftGroup group) {
+                group.setDispatchAllowed(() -> dispatchAllowed.getAsBoolean());
+                group.setMachineLeases(machineLeases);
                 group.setReservationTokens(reserved.operationTokens());
                 group.setReusableReservationTokens(reserved.reusableTokens());
                 group.setVirtualDebits(reserved.virtualDebits());
@@ -2700,7 +2749,8 @@ public final class AsyncCraftChain {
     private void publishIncrementalGraphOutputs(NodeId nodeId, ConcurrentNodeExecutor.Worker worker) {
         if (!(worker instanceof CraftNodeRuntime runtime) || graphMaterials == null) return;
         List<NodeOutputAccumulator.Publication> publications = runtime.drainIncrementalOutputs();
-        if (runtime.consumeProgressSignal() || !publications.isEmpty()) {
+        if (runtime.consumeProgressSignal() || !publications.isEmpty()
+                || runtime.isWaitingForLeasedMachine()) {
             graphProgressWatchdog.markProgress();
         }
         for (NodeOutputAccumulator.Publication publication : publications) {
@@ -3969,6 +4019,7 @@ public final class AsyncCraftChain {
         // Duplicate bindings must never create multiple workers for one logical machine.
         machines = MachineDispatchPlanner.deduplicate(machines);
         int boundMachineCount = machines.size();
+        flatWaitingMachines = leasedMachineKeys(machines, step.modType().id());
         machines = MachineDispatchPlanner.filterUnleased(
                 machines, machineLeases, step.modType().id());
         if (MachineDispatchPlanner.classifyLeaseAvailability(
@@ -4620,6 +4671,8 @@ public final class AsyncCraftChain {
         ParallelCraftGroup group = new ParallelCraftGroup(available, step.modType(),
                 step.recipeId(), online, operationCount, step.inferMode(),
                 capabilityDecision.capabilities(), storageEndpoint, cap);
+        group.setDispatchAllowed(() -> dispatchAllowed.getAsBoolean());
+        group.setMachineLeases(machineLeases);
         if (!validatePreparedDelegate(
                 group, online, step.recipeId(), null, BlockPos.ZERO)) {
             RSIntegrationMod.LOGGER.debug(ctx.format("Parallel group empty -all children failed validateAndInit"));

@@ -251,7 +251,7 @@ public final class AsyncCraftManager {
             VanillaCraftingTickBudget.ChainAllowance allowance =
                     window.allowance(chain.getCraftId(), perChainLimit);
             try {
-                chain.tick(allowance);
+                chain.tick(allowance, window::hasTime);
             } catch (Exception exception) {
                 RSIntegrationMod.LOGGER.error("[RSI-AsyncMgr] Chain tick error", exception);
                 String message = exception.getMessage() == null

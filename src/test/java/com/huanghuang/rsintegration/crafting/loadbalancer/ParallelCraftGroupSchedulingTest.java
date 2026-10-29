@@ -62,6 +62,25 @@ class ParallelCraftGroupSchedulingTest extends BootstrapTest {
     }
 
     @Test
+    void waitingWorkerUsesBoundedBackoffAndCanResetAfterStarting() {
+        ParallelCraftGroup.RetryBackoff retry = new ParallelCraftGroup.RetryBackoff();
+        assertTrue(retry.ready(0));
+        retry.defer(0);
+        assertFalse(retry.ready(1));
+        assertTrue(retry.ready(2));
+        retry.defer(2);
+        assertFalse(retry.ready(5));
+        assertTrue(retry.ready(6));
+        for (int attempt = 0; attempt < 20; attempt++) retry.defer(100);
+        assertFalse(retry.ready(119));
+        assertTrue(retry.ready(120));
+        retry.reset();
+        assertTrue(retry.ready(100));
+        retry.defer(100);
+        assertTrue(retry.ready(102));
+    }
+
+    @Test
     void rejectedEarlierCandidatesDoNotConsumeTheSmallOrderWorkerLimit() {
         int ready = 0;
         int inspected = 0;

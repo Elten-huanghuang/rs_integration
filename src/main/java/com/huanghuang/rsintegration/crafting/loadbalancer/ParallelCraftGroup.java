@@ -44,6 +44,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 import javax.annotation.Nullable;
@@ -52,6 +53,7 @@ import java.util.AbstractList;
 import java.util.List;
 import java.util.RandomAccess;
 import java.util.function.BiFunction;
+import java.util.function.BooleanSupplier;
 
 /**
  * A dynamic pool of physical machines executing one recipe operation at a time.
@@ -64,6 +66,7 @@ import java.util.function.BiFunction;
  * calling from worker threads will cause data races.
  */
 public final class ParallelCraftGroup implements IBatchDelegate {
+    private static final int MAX_START_PROBES_PER_TICK = 32;
 
     private final List<WorkerSlot> workers = new ArrayList<>();
     private final Map<Integer, CraftOutputInterceptor.CaptureHandle> legacyCaptureHandles =
@@ -112,6 +115,8 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     private OperationBudget craftOperationBudget;
     private OperationBudget globalOperationBudget;
     private OperationExecutionKernel operationKernel;
+    @Nullable
+    private MachineLeaseRegistry machineLeases;
     private UUID craftId;
     private NodeId nodeId;
     private int operationSequenceBase;
@@ -127,6 +132,12 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     private int lastObservedCompleted;
     private long lastObservedCaptured;
     private long nextWaitCheckTick;
+    private long productionSequence;
+    private long currentTick;
+    private long probeTick = Long.MIN_VALUE;
+    private int startProbes;
+    private int dispatchCursor;
+    private BooleanSupplier dispatchAllowed = () -> true;
     /** Whether every worker requiring physical cleanup was successfully cleaned. */
     private boolean physicalFailureCleanupCompleted;
     @Nullable
@@ -162,6 +173,8 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         boolean pristineDelegate = true;
         boolean hasStartedOperation;
         boolean needsFailureCleanup;
+        long observedCapturedCount;
+        final RetryBackoff retry = new RetryBackoff();
         CraftObservation lastObservation = new CraftObservation(CraftPhase.WAITING_FOR_START);
 
         WorkerSlot(int id, BoundMachine machine, IBatchDelegate delegate) {
@@ -181,6 +194,47 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         void clearOperations() {
             operationIds = List.of();
         }
+    }
+
+    static final class RetryBackoff {
+        private int attempts;
+        private long untilTick;
+
+        boolean ready(long tick) {
+            return tick >= untilTick;
+        }
+
+        void defer(long tick) {
+            attempts = Math.min(6, attempts + 1);
+            untilTick = tick + Math.min(20, 1 << attempts);
+        }
+
+        void reset() {
+            attempts = 0;
+            untilTick = 0;
+        }
+    }
+
+    public void setDispatchAllowed(BooleanSupplier dispatchAllowed) {
+        this.dispatchAllowed = Objects.requireNonNull(dispatchAllowed, "dispatchAllowed");
+    }
+
+    public void setMachineLeases(MachineLeaseRegistry machineLeases) {
+        this.machineLeases = Objects.requireNonNull(machineLeases, "machineLeases");
+    }
+
+    /** 仅在没有在途操作、且相关机器确实被其他操作占用时暂停排队计时。 */
+    public boolean isWaitingForLeasedMachine() {
+        if (draining || machineLeases == null || operations.queuedOperations() == 0
+                || operations.runningOperations() > 0) return false;
+        return workers.stream().anyMatch(worker -> machineLeases.isLeased(
+                new MachineLeaseRegistry.MachineKey(worker.machine.dim(),
+                        worker.delegate.getOperationMachinePos(worker.machine.pos()), modType.id())));
+    }
+
+    /** 已观察到新的物理产物；不必等整个缓冲子批次完成才刷新超时。 */
+    public long getProductionSequence() {
+        return productionSequence;
     }
 
     public ParallelCraftGroup(List<BoundMachine> machines, ModType modType,
@@ -559,10 +613,10 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             beginDraining("no validated workers are available");
             return false;
         }
-        for (WorkerSlot worker : workers) {
-            startNext(worker);
-            if (operations.queuedOperations() == 0) break;
+        if (player != null && player.serverLevel() != null) {
+            currentTick = player.serverLevel().getGameTime();
         }
+        dispatchQueuedOperations();
         // Resource contention is transient. Accept the group and retry queued
         // operations from observeCraft() instead of failing after admission.
         started = true;
@@ -572,6 +626,14 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     private boolean startNext(WorkerSlot worker) {
         int operationId = operations.nextQueuedOperation();
         if (operationId < 0) return false;
+        if (probeTick != currentTick) {
+            probeTick = currentTick;
+            startProbes = 0;
+        }
+        if (!worker.retry.ready(currentTick)
+                || startProbes >= MAX_START_PROBES_PER_TICK
+                || !dispatchAllowed.getAsBoolean()) return false;
+        startProbes++;
 
         boolean reusingPreparedDelegate = worker.pristineDelegate;
         ChildPreparation preparation = reusingPreparedDelegate
@@ -580,6 +642,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         if (preparation.state() == ChildPreparationState.RETRY) {
             lastStartFailure = "machine " + worker.machine.pos() + " retry: "
                     + (preparation.detail().isEmpty() ? "no detail" : preparation.detail());
+            worker.retry.defer(currentTick);
             return false;
         }
         if (preparation.state() == ChildPreparationState.FATAL || preparation.delegate() == null) {
@@ -634,6 +697,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             if (!reusingPreparedDelegate) releasePreparationQuietly(delegate, worker.machine);
             lastStartFailure = "machine " + worker.machine.pos()
                     + " could not acquire operation resources";
+            worker.retry.defer(currentTick);
             return false;
         }
         List<Integer> claimedOperations = operations.claimBatch(worker.id, batchSize);
@@ -643,6 +707,8 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             throw new IllegalStateException("operation queue changed during resource acquisition");
         }
         worker.pristineDelegate = false;
+        worker.retry.reset();
+        worker.observedCapturedCount = 0;
         worker.delegate = delegate;
         worker.operationIds = claimedOperations;
         lastStartFailure = "";
@@ -819,6 +885,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     @Override
     public CraftObservation observeCraft(ServerLevel level) {
         if (!started && !draining) return new CraftObservation(CraftPhase.WAITING_FOR_START);
+        currentTick = level.getGameTime();
 
         for (WorkerSlot worker : workers) {
             if (!worker.running()) continue;
@@ -856,7 +923,8 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             dispatchQueuedOperations();
         }
         long tick = level.getGameTime();
-        if (!draining && operations.queuedOperations() > 0 && operations.runningOperations() == 0) {
+        if (!draining && operations.queuedOperations() > 0 && operations.runningOperations() == 0
+                && !isWaitingForLeasedMachine()) {
             if (waitingSinceTick < 0) waitingSinceTick = tick;
             if (shouldAbortStalledStart(tick, waitingSinceTick,
                     operations.queuedOperations(), operations.runningOperations())) {
@@ -933,8 +1001,12 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     }
 
     private void dispatchQueuedOperations() {
-        for (WorkerSlot worker : workers) {
+        for (int checked = 0; checked < workers.size(); checked++) {
             if (operations.queuedOperations() == 0) break;
+            if (!dispatchAllowed.getAsBoolean()
+                    || (probeTick == currentTick && startProbes >= MAX_START_PROBES_PER_TICK)) break;
+            WorkerSlot worker = workers.get(dispatchCursor);
+            dispatchCursor = (dispatchCursor + 1) % workers.size();
             if (!worker.running()) startNext(worker);
         }
     }
@@ -1467,6 +1539,11 @@ public final class ParallelCraftGroup implements IBatchDelegate {
 
     private boolean hasCapturedExpectedOutput(WorkerSlot worker) {
         List<ItemStack> captured = capturedSnapshot(worker);
+        long count = captured.stream().mapToLong(ItemStack::getCount).sum();
+        if (count > worker.observedCapturedCount) {
+            worker.observedCapturedCount = count;
+            productionSequence++;
+        }
         ExpectedProduction production = worker.delegate.getExpectedProduction();
         if (production != null) {
             return containsExpectedWorldProduction(captured, production);

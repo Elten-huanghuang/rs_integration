@@ -6,6 +6,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
 
 /**
@@ -13,6 +14,7 @@ import java.util.function.Predicate;
  * Every running node is observed before any completion changes the ready set.
  */
 public final class ConcurrentNodeExecutor {
+    static final int MAX_DISPATCH_PROBES_PER_TICK = 32;
 
     public enum Observation {
         WORKING,
@@ -196,16 +198,20 @@ public final class ConcurrentNodeExecutor {
     }
 
     public void tick() {
-        processTick(true);
+        tick(() -> true);
+    }
+
+    public void tick(BooleanSupplier dispatchAllowed) {
+        processTick(true, Objects.requireNonNull(dispatchAllowed, "dispatchAllowed"));
     }
 
     /** Observe, publish and settle once without permitting any new dispatch. */
     public void quiesceOnce() {
         stopScheduling();
-        processTick(false);
+        processTick(false, () -> false);
     }
 
-    private void processTick(boolean allowDispatch) {
+    private void processTick(boolean allowDispatch, BooleanSupplier dispatchAllowed) {
         List<Result> observations = observeAll();
         boolean failed = observations.stream().anyMatch(result -> result.observation == Observation.FAILED);
         if (failed && !scheduler.isStopping()) {
@@ -271,7 +277,9 @@ public final class ConcurrentNodeExecutor {
             }
         }
 
-        if (allowDispatch && !scheduler.isStopping()) dispatchAvailable(maxDispatchPerTick);
+        if (allowDispatch && !scheduler.isStopping()) {
+            dispatchAvailable(maxDispatchPerTick, dispatchAllowed);
+        }
     }
 
     public void stopScheduling() {
@@ -312,7 +320,7 @@ public final class ConcurrentNodeExecutor {
         return results;
     }
 
-    private void dispatchAvailable(int tickBudget) {
+    private void dispatchAvailable(int tickBudget, BooleanSupplier dispatchAllowed) {
         // An exclusive node already running blocks all further dispatch.
         if (running.keySet().stream().anyMatch(this::isExclusive)) return;
 
@@ -320,15 +328,19 @@ public final class ConcurrentNodeExecutor {
         int dispatchLimit = Math.min(tickBudget, remainingCraftBudget);
         if (dispatchLimit <= 0 || running.size() >= maxConcurrentNodes) return;
 
-        // Inspect the full ready set. Looking at only `capacity` entries lets an
-        // exclusive node at the front hide later concurrency-safe work.
-        List<NodeId> ready = scheduler.peekReady(scheduler.readyCount());
+        // 重试也消耗探测额度；未匹配的候选轮转，下一 tick 继续检查后面的节点。
+        List<NodeId> ready = scheduler.peekReady(MAX_DISPATCH_PROBES_PER_TICK);
         int dispatchedNow = 0;
+        int probes = 0;
         for (NodeId nodeId : ready) {
+            if (!dispatchAllowed.getAsBoolean()) break;
             if (running.size() >= maxConcurrentNodes || dispatchedNow >= dispatchLimit) break;
-            if (!dispatchable.test(nodeId)) continue;
-            if (isExclusive(nodeId)) continue;
+            if (!dispatchable.test(nodeId) || isExclusive(nodeId)) {
+                scheduler.deferReady(nodeId);
+                continue;
+            }
 
+            probes++;
             StartStatus status = dispatch(nodeId);
             if (status == StartStatus.STARTED || status == StartStatus.COMPLETED) {
                 dispatchedNow++;
@@ -341,8 +353,10 @@ public final class ConcurrentNodeExecutor {
         // so one unavailable machine cannot stall otherwise runnable work.
         if (!running.isEmpty() || dispatchedNow > 0 || dispatchedNow >= dispatchLimit) return;
         for (NodeId nodeId : ready) {
+            if (probes >= MAX_DISPATCH_PROBES_PER_TICK || !dispatchAllowed.getAsBoolean()) return;
             if (!dispatchable.test(nodeId)) continue;
             if (!isExclusive(nodeId)) continue;
+            probes++;
             StartStatus status = dispatch(nodeId);
             if (status != StartStatus.RETRY) return;
         }

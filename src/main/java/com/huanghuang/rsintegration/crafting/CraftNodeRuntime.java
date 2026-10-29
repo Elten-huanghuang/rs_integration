@@ -57,6 +57,7 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     private int waitTicks;
     private int drainingTicks;
     private int observedCompletedOperations;
+    private long observedProductionSequence;
     private long observedCapturedCount;
     /** Logical recipe executions owned by this physical delegate start. */
     private int logicalOperations = 1;
@@ -318,6 +319,10 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
 
     int waitTicks() { return waitTicks; }
 
+    boolean isWaitingForLeasedMachine() {
+        return delegate instanceof ParallelCraftGroup group && group.isWaitingForLeasedMachine();
+    }
+
     String failureReason() { return failureReason; }
 
     CraftFailureCode failureCode() { return failureCode; }
@@ -387,6 +392,13 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
                 return ConcurrentNodeExecutor.Observation.FAILED;
             }
             if (delegate instanceof ParallelCraftGroup group) {
+                if (group.isWaitingForLeasedMachine()) waitTicks = 0;
+                long productionSequence = group.getProductionSequence();
+                if (productionSequence > observedProductionSequence) {
+                    observedProductionSequence = productionSequence;
+                    waitTicks = 0;
+                    progressObserved = true;
+                }
                 int completed = group.getCompletedOperations();
                 if (completed > observedCompletedOperations) {
                     observedCompletedOperations = completed;

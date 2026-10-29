@@ -82,6 +82,11 @@ public final class DagScheduler {
         return List.copyOf(peeked);
     }
 
+    /** 未探测的候选轮转到队尾，避免有界扫描一直停在同一批节点上。 */
+    public void deferReady(NodeId nodeId) {
+        if (ready.remove(nodeId)) ready.add(nodeId);
+    }
+
     /** Claim one specific ready node, transitioning it READY → RUNNING. */
     public void claim(NodeId nodeId) {
         if (stopping) throw new IllegalStateException("cannot claim while stopping: " + nodeId);
