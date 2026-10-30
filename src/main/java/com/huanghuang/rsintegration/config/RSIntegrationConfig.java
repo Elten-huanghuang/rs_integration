@@ -287,6 +287,16 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.ConfigValue<String> AUTO_EAT_COST_ITEM;
     public static ForgeConfigSpec.IntValue AUTO_EAT_COST_PER_ITEM;
     public static ForgeConfigSpec.IntValue AUTO_EAT_MAX_PER_BATCH;
+    //  食物点单
+    public static ForgeConfigSpec.BooleanValue ENABLE_FOOD_ORDER;
+    public static ForgeConfigSpec.IntValue FOOD_ORDER_MAX_LIST_ENTRIES;
+    public static ForgeConfigSpec.IntValue FOOD_ORDER_MAX_RECIPES_PER_FOOD;
+    public static ForgeConfigSpec.IntValue FOOD_ORDER_MAX_ORDERS_PER_BATCH;
+    public static ForgeConfigSpec.IntValue FOOD_ORDER_ORDER_COOLDOWN_TICKS;
+    public static ForgeConfigSpec.IntValue FOOD_ORDER_ORDER_INTERVAL_TICKS;
+    public static ForgeConfigSpec.BooleanValue FOOD_ORDER_SKIP_EATEN;
+    public static ForgeConfigSpec.IntValue FOOD_ORDER_LIST_BUDGET_MICROS;
+    public static ForgeConfigSpec.IntValue FOOD_ORDER_SESSION_TIMEOUT_TICKS;
 
     public static ForgeConfigSpec.BooleanValue ENABLE_CONTAINER_TRANSFER;
     public static ForgeConfigSpec.BooleanValue ENABLE_RS_SIDE_PANEL;
@@ -814,6 +824,45 @@ public final class RSIntegrationConfig {
                 .comment("单次进食数量上限",
                         "每次批量进食最多吃掉的食物数量。")
                 .defineInRange("maxPerBatch", 64, 1, 1024);
+        c.pop();
+
+        c.comment("食物点单").push("foodOrder");
+        ENABLE_FOOD_ORDER = c
+                .comment("启用食物点单",
+                        "允许使用点餐终端查看未吃过的食物，并通过 RS Integration 自动下单。")
+                .define("enableFoodOrder", true);
+        FOOD_ORDER_MAX_LIST_ENTRIES = c
+                .comment("列表条目上限",
+                        "一次最多下发给客户端的食物数量，避免大列表造成卡顿。")
+                .defineInRange("maxListEntries", 800, 10, 5000);
+        FOOD_ORDER_MAX_RECIPES_PER_FOOD = c
+                .comment("每种食物尝试的配方数",
+                        "列表判定时每种食物最多检查多少个配方，越小越省时。")
+                .defineInRange("maxRecipesPerFood", 6, 1, 32);
+        FOOD_ORDER_MAX_ORDERS_PER_BATCH = c
+                .comment("单次下单上限",
+                        "一次「全部下单」最多提交多少道菜，受 RS Integration 批量上限约束。")
+                .defineInRange("maxOrdersPerBatch", 32, 1, 64);
+        FOOD_ORDER_ORDER_COOLDOWN_TICKS = c
+                .comment("下单冷却",
+                        "两次下单操作之间至少间隔的 tick 数，防止误触连续提交。")
+                .defineInRange("orderCooldownTicks", 20, 0, 200);
+        FOOD_ORDER_ORDER_INTERVAL_TICKS = c
+                .comment("下单步骤间隔",
+                        "下单状态机每步（查询规划/提交）之间的 tick 间隔，用于削平服务端尖峰。")
+                .defineInRange("orderIntervalTicks", 2, 1, 100);
+        FOOD_ORDER_SKIP_EATEN = c
+                .comment("跳过已吃食物",
+                        "开启后列表只显示当前玩家未吃过的食物；已吃记录来自本模组和 Sol Carrot。")
+                .define("skipEaten", true);
+        FOOD_ORDER_LIST_BUDGET_MICROS = c
+                .comment("列表判定预算",
+                        "单次构建列表允许消耗的微秒数，超出后返回部分结果，剩余条目下次刷新再算。")
+                .defineInRange("listBudgetMicros", 10000, 2000, 50000);
+        FOOD_ORDER_SESSION_TIMEOUT_TICKS = c
+                .comment("下单会话超时",
+                        "一次下单从开始到提交的最长 tick 数，超时后关闭检查会话。")
+                .defineInRange("sessionTimeoutTicks", 200, 20, 1200);
         c.pop();
 
         c.comment("容器传输").push("containerTransfer");

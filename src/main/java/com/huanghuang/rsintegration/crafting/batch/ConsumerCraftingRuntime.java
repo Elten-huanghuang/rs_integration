@@ -1156,7 +1156,9 @@ public final class ConsumerCraftingRuntime {
                 == IntegrationResourceKey.ResourceKind.ITEM
                 ? itemStack(targetResource)
                 : InkFluidSupport.tokenFor(targetResource, 1);
-        ModType type = ModType.byId(handler.modType(recipe).id());
+        // 与配方索引使用同一套细分规则：农夫乐事等处理器会声明模组级兜底类型，
+        // 但具体配方仍应落到烹饪锅等可绑定机器，否则会被当成通用批处理而瞬间完成。
+        ModType type = RecipeIndex.resolveIndexedModType(recipe, handler);
         if (targetResource.kind()
                 == IntegrationResourceKey.ResourceKind.ITEM) {
             target = CraftMachineBindingSupport.routeRecipeOutput(

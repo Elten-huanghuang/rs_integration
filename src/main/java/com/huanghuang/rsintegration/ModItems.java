@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration;
 
+import com.huanghuang.rsintegration.feature.foodorder.FoodOrderTerminalItem;
 import com.huanghuang.rsintegration.storage.disk.UnifiedDiskVisibility;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.FluidRefundItem;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidItem;
@@ -43,6 +44,8 @@ public final class ModItems {
             ITEMS.register("alchemist_ink_fluid", InkFluidItem::new);
     public static final RegistryObject<Item> FLUID_REFUND =
             ITEMS.register("fluid_refund", FluidRefundItem::new);
+    public static final RegistryObject<Item> ORDER_TERMINAL =
+            ITEMS.register("order_terminal", FoodOrderTerminalItem::new);
     public static final RegistryObject<MenuType<?>> RESONANCE_BACKPACK = MENUS.register(
             "resonance_backpack",
             () -> IForgeMenuType.create(ResonanceBackpackContainer::new));
@@ -53,6 +56,7 @@ public final class ModItems {
                     .icon(() -> new ItemStack(RESONANCE_STORAGE_DISK == null
                             ? Items.CHEST : RESONANCE_STORAGE_DISK.get()))
                     .displayItems((params, output) -> {
+                        output.accept(ORDER_TERMINAL.get());
                         if (RESONANCE_STORAGE_DISK != null) {
                             output.accept(RESONANCE_STORAGE_DISK.get());
                         }

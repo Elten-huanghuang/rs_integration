@@ -66,6 +66,8 @@ import com.huanghuang.rsintegration.network.gui.RemoteGuiAuth;
 import com.huanghuang.rsintegration.feature.autoeat.network.AutoEatNetworkHandler;
 import com.huanghuang.rsintegration.feature.autoeat.AutoEatEngine;
 import com.huanghuang.rsintegration.feature.autoeat.AutoEatRateLimiter;
+import com.huanghuang.rsintegration.feature.foodorder.FoodOrderEvents;
+import com.huanghuang.rsintegration.feature.foodorder.network.FoodOrderNetworkHandler;
 import com.huanghuang.rsintegration.feature.anvilmemory.AnvilMemoryClient;
 import com.huanghuang.rsintegration.feature.anvilmemory.AnvilMemoryEvents;
 import com.huanghuang.rsintegration.feature.anvilmemory.AnvilMemoryNetworkHandler;
@@ -995,6 +997,9 @@ public final class RSIntegrationMod {
 
         // Auto-eat system
         AutoEatNetworkHandler.register();
+        // 食物点单系统
+        FoodOrderNetworkHandler.register();
+        FoodOrderEvents.register();
         if (ModList.get().isLoaded("beyonddimensions")) {
             ResonanceStorageResolvers.register(BDResonanceDiskAccess::resolve);
         }

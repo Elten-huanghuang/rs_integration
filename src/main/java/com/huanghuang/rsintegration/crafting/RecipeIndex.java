@@ -632,7 +632,7 @@ public final class RecipeIndex {
      * <p>内部模组处理器仍按配方类细分 machine type；只有公共 API
      * 使用统一的 integration_api 类型，具体机器由 process 决定。</p>
      */
-    static ModType resolveIndexedModType(
+    public static ModType resolveIndexedModType(
             Recipe<?> recipe,
             ModRecipeHandler handler
     ) {

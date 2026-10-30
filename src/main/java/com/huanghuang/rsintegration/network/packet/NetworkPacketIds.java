@@ -142,4 +142,8 @@ public final class NetworkPacketIds {
     public static final int PLAN_RESPONSE_PAGE = 155;
     public static final int BD_BINDING_SYNC_REQUEST = 156;
     public static final int MACHINE_AUTOMATION_BLOCK_BATCH = 157;
+    public static final int FOOD_ORDER_REQUEST_LIST = 158;
+    public static final int FOOD_ORDER_SUBMIT = 159;
+    public static final int FOOD_ORDER_LIST = 160;
+    public static final int FOOD_ORDER_RESULT = 161;
 }
