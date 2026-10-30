@@ -12,7 +12,7 @@ import com.huanghuang.rsintegration.api.recipe.MaterialRequirement;
 import com.huanghuang.rsintegration.api.recipe.OutputAmount;
 import com.huanghuang.rsintegration.api.recipe.OutputDeclaration;
 import com.huanghuang.rsintegration.api.recipe.OutputKind;
-import com.huanghuang.rsintegration.api.recipe.OutputProbabilityMode;
+import com.huanghuang.rsintegration.api.recipe.OutputSemantics;
 import com.huanghuang.rsintegration.api.recipe.RecipeContext;
 import com.huanghuang.rsintegration.api.recipe.RecipeInspectionResult;
 import com.huanghuang.rsintegration.api.recipe.RecipeIntegration;
@@ -153,8 +153,8 @@ final class ExternalRecipeProjection {
         OutputDeclaration primary = primaryOutput(view);
         List<ItemStack> outputs = new ArrayList<>();
         for (OutputDeclaration output : view.outputs()) {
-            if (output == primary || !isExactDeterministicItem(output)) continue;
-            outputs.add(toStack(output.resource(), output.amount().max()));
+            if (output == primary || !isGuaranteedItem(output)) continue;
+            outputs.add(toStack(output.resource(), output.guaranteedMinimum()));
         }
         return List.copyOf(outputs);
     }
@@ -172,15 +172,16 @@ final class ExternalRecipeProjection {
         OutputDeclaration primary = primaryOutput(view);
         return primary == null || !isItem(primary.resource())
                 ? ItemStack.EMPTY
-                : toStack(primary.resource(), primary.amount().min());
+                : toStack(primary.resource(), nominalAmount(primary));
+    }
+
+    /** 概率结果可能声明零下限；显示和目标基数使用有效的单次名义数量。 */
+    static long nominalAmount(OutputDeclaration output) {
+        return output.amount().min() > 0L ? output.amount().min() : output.amount().max();
     }
 
     static boolean deterministicPrimary(RecipeView view) {
-        OutputDeclaration primary = primaryOutput(view);
-        return primary != null
-                && primary.probability().mode() == OutputProbabilityMode.GUARANTEED
-                && !primary.dynamicIdentity()
-                && primary.amount().min() == primary.amount().max();
+        return OutputSemantics.hasDeterministicPrimary(view.outputs());
     }
 
     static boolean runtimeDependentPrimary(RecipeView view) {
@@ -188,15 +189,12 @@ final class ExternalRecipeProjection {
         return primary != null && primary.dynamicIdentity();
     }
 
-    static boolean targetProducing(RecipeView view) {
-        return view.outputs().stream().anyMatch(OutputDeclaration::targetProducing);
-    }
-
     static List<RecipeNode> pureRecipeNodes(
             Recipe<?> recipe,
             RecipeView view,
             String modTypeId
     ) {
+        if (!view.flags().recursivePlanning()) return List.of();
         List<IngredientRef> inputs = pureInputs(view);
         boolean hasFluidOutputs = view.outputs().stream()
                 .anyMatch(output -> output.resource().kind()
@@ -211,9 +209,7 @@ final class ExternalRecipeProjection {
         for (OutputDeclaration output : orderedOutputs) {
             if ((output.outputKind() != OutputKind.PRIMARY
                     && !output.targetProducing())
-                    || output.probability().mode() != OutputProbabilityMode.GUARANTEED
-                    || output.amount().min() != output.amount().max()
-                    || output.amount().max() <= 0L) {
+                    || !output.supportsDeterministicProjection()) {
                 continue;
             }
             nodes.add(new RecipeNode(
@@ -222,7 +218,7 @@ final class ExternalRecipeProjection {
                             output.resource(),
                             output.dynamicIdentity()
                     ),
-                    output.amount().max(),
+                    output.guaranteedMinimum(),
                     inputs,
                     modTypeId,
                     recipe.getType() == null
@@ -547,12 +543,11 @@ final class ExternalRecipeProjection {
         return diagnostics;
     }
 
-    private static boolean isExactDeterministicItem(OutputDeclaration output) {
+    private static boolean isGuaranteedItem(OutputDeclaration output) {
         OutputAmount amount = output.amount();
         return isItem(output.resource())
-                && amount.min() == amount.max()
+                && output.guaranteedMinimum() > 0L
                 && amount.max() <= Integer.MAX_VALUE
-                && output.probability().mode() == OutputProbabilityMode.GUARANTEED
                 && !output.dynamicIdentity();
     }
 

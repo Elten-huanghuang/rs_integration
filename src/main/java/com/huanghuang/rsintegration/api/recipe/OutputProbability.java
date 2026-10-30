@@ -13,8 +13,14 @@ public record OutputProbability(
                 || rollGroup == null || rollGroup.isBlank()) {
             throw new IllegalArgumentException("probability model is incomplete");
         }
-        if (chance != null && (chance < 0.0D || chance > 1.0D)) {
+        if (chance != null && (!Double.isFinite(chance) || chance < 0.0D || chance > 1.0D)) {
             throw new IllegalArgumentException("chance must be in [0, 1]");
+        }
+        // 已知概率为 100% 时就是固定触发；动态模型不能仅凭估计概率推断必出。
+        if (mode == OutputProbabilityMode.PROBABILISTIC
+                && chance != null && chance == 1.0D) {
+            mode = OutputProbabilityMode.GUARANTEED;
+            maxAttempts = 1;
         }
         if (mode == OutputProbabilityMode.GUARANTEED
                 && (chance == null || chance != 1.0D || maxAttempts != 1)) {
@@ -25,6 +31,10 @@ public record OutputProbability(
             throw new IllegalArgumentException(
                     "probabilistic output requires explicit chance");
         }
+    }
+
+    public boolean isGuaranteed() {
+        return mode == OutputProbabilityMode.GUARANTEED;
     }
 
     public static OutputProbability guaranteed() {

@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
+import com.huanghuang.rsintegration.mods.farmersdelight.CuttingBoardRecipeHandler;
 import com.huanghuang.rsintegration.recipe.AbstractRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
@@ -14,13 +16,38 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.ShapelessRecipe;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import vectorwing.farmersdelight.common.crafting.CuttingBoardRecipe;
+import vectorwing.farmersdelight.common.crafting.ingredient.ChanceResult;
 
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RecipeIndexProjectionPolicyTest extends BootstrapTest {
+    @ParameterizedTest
+    @CsvSource({"1.0, 1.0, true", "1.0, 0.35, true",
+            "0.35, 1.0, false", "0.35, 0.35, false"})
+    void cuttingBoardProjectionUsesGuaranteedPrimaryRatherThanRecipeWideRandomness(
+            float primaryChance, float secondaryChance, boolean projectable) {
+        CuttingBoardRecipe recipe = new CuttingBoardRecipe(
+                new ResourceLocation("test", "cutting_projection"), "",
+                Ingredient.of(Items.MELON), Ingredient.of(Items.IRON_SWORD),
+                NonNullList.of(ChanceResult.EMPTY,
+                        new ChanceResult(new ItemStack(Items.MELON_SLICE, 4), primaryChance),
+                        new ChanceResult(new ItemStack(Items.MELON_SEEDS), secondaryChance)), "");
+        ModType conditional = ModType.register("testutil_cutting_projection",
+                        new String[0], new String[0], new String[0],
+                        GenericBatchDelegate::new)
+                .allowDeterministicProjection("砧板按主产物的实际概率放行");
+
+        assertEquals(projectable, RecipeIndex.isTypedPureProjectionCandidate(
+                new CuttingBoardRecipeHandler(), conditional, recipe));
+    }
+
     @Test
     void prefixHandlersUseTheirDeclaredValueOnlyContractForProjection() {
         Recipe<?> recipe = new ShapelessRecipe(

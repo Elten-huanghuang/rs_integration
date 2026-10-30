@@ -4,6 +4,10 @@ import com.huanghuang.rsintegration.api.diagnostic.IntegrationDiagnostic;
 
 import java.util.List;
 
+/**
+ * 一次操作的真实结算。{@code complete=true} 证明操作和材料处置已结算，
+ * 不表示订单数量目标已经达到；概率未命中时允许 {@code outputs} 为空。
+ */
 public record OperationCollection(
         long collectionSequence,
         List<CollectedOutput> outputs,

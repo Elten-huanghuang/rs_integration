@@ -153,12 +153,18 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     }
 
     boolean outputsComplete() {
-        if (completionTargetPort != null && completionTargetQuantity > 0L) {
-            return outputs != null
-                    && outputs.publishedQuantity(completionTargetPort) >= completionTargetQuantity
-                    && outputs.shortages().isEmpty();
-        }
+        return operationOutputsComplete() && productionTargetComplete();
+    }
+
+    /** 概率未命中不属于操作失败，数量目标由订单层继续补做。 */
+    boolean operationOutputsComplete() {
         return outputs == null || outputs.isComplete();
+    }
+
+    boolean productionTargetComplete() {
+        return completionTargetPort == null || completionTargetQuantity <= 0L
+                || outputs != null
+                && outputs.publishedQuantity(completionTargetPort) >= completionTargetQuantity;
     }
 
     List<ItemStack> drainOutputSurplus() {
@@ -425,7 +431,8 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
             boolean hasWorldCapture = capture != null
                     || (operationSession != null && operationSession.hasCaptureScope());
             boolean requiresWorldCapture = hasWorldCapture
-                    && !delegate.canCollectResultWithoutWorldCapture();
+                    && !delegate.canCollectResultWithoutWorldCapture()
+                    && !OutputAccounting.permitsEmptyResult(delegate.outputContract());
             // 先确认整批实物数量；声明的 NBT 和副产物在收集后统一校验。
             if ((!requiresWorldCapture && observation.phase() == IBatchDelegate.CraftPhase.DONE)
                     || capturedWorldOutput) {

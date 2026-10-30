@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.graph.AllocationId;
 import com.huanghuang.rsintegration.crafting.graph.CraftNode;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.crafting.graph.InputPortId;
 import com.huanghuang.rsintegration.crafting.graph.MaterialAllocation;
@@ -61,6 +62,7 @@ final class ResolutionContext {
     final List<CraftingResolver.ResolutionStep> steps;
     final RecipeCycleGuard recipeCycles;
     final Deque<Set<Item>> activeConversionFamilies = new ArrayDeque<>();
+    final Deque<List<ScaledIngredientSpec>> pendingInputs = new ArrayDeque<>();
     final long deadlineNanos;
     final boolean abortOnTimeout;
     int ensureCalls;
@@ -355,6 +357,30 @@ final class ResolutionContext {
 
     boolean isForcedRecipeActive(ResourceLocation recipeId) {
         return activeForcedRecipes.contains(recipeId);
+    }
+
+    /** 只合并后续已知的同一物品需求，不把标签中的可选物误当成必需材料。 */
+    long pendingConsumption(ItemStack output) {
+        long total = 0L;
+        for (List<ScaledIngredientSpec> inputs : pendingInputs) {
+            for (ScaledIngredientSpec input : inputs) {
+                if (input.isEmpty() || input.role() == DemandRole.CATALYST
+                        || input.consumption().kind() == InputConsumption.Kind.DURABILITY) {
+                    continue;
+                }
+                ItemStack[] options = input.ingredient().getItems();
+                if (options.length == 0) continue;
+                boolean same = true;
+                for (ItemStack option : options) {
+                    if (!ItemStack.isSameItemSameTags(option, output)) {
+                        same = false;
+                        break;
+                    }
+                }
+                if (same) total = MaterialSources.saturatedAdd(total, input.count());
+            }
+        }
+        return total;
     }
 
     boolean diagnosticsEnabled() {

@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.api.recipe;
 
 import com.huanghuang.rsintegration.api.IntegrationFingerprints;
+import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import net.minecraft.resources.ResourceLocation;
 
 import java.util.HashMap;
@@ -39,6 +40,22 @@ public record RecipeView(
      */
     public String definitionFingerprint() {
         return IntegrationFingerprints.recipeDefinition(this);
+    }
+
+    /** 包含概率缺失或可变数量的输出；不等价于所有输出都不可递归。 */
+    public boolean hasRandomizedOutputs() {
+        return OutputSemantics.hasRandomizedOutputs(outputs);
+    }
+
+    /** 能提供正数必出下限的输出，概率副产物不会阻止其他输出进入递归图。 */
+    public List<OutputDeclaration> deterministicOutputs() {
+        return outputs.stream()
+                .filter(OutputSemantics::supportsDeterministicProjection)
+                .toList();
+    }
+
+    public boolean requiresTargetedProduction(IntegrationResourceKey target) {
+        return OutputSemantics.requiresTargetedProduction(outputs, target);
     }
 
     private static void validateSemantics(
@@ -87,8 +104,7 @@ public record RecipeView(
                 OutputDeclaration::targetProducing);
         boolean runtimeIdentity = outputs.stream().anyMatch(
                 OutputDeclaration::dynamicIdentity);
-        boolean probabilistic = outputs.stream().anyMatch(output ->
-                output.probability().mode() != OutputProbabilityMode.GUARANTEED);
+        boolean probabilistic = OutputSemantics.hasRandomizedOutputs(outputs);
         boolean requiresFuel = materials.stream().anyMatch(material ->
                 material.consumption().kind() == InputConsumption.Kind.FUEL)
                 || fluids.stream().anyMatch(fluid ->

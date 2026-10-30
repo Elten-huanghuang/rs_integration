@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.api.recipe.OutputAmount;
 import com.huanghuang.rsintegration.api.recipe.OutputKind;
 import com.huanghuang.rsintegration.api.recipe.OutputProbability;
+import com.huanghuang.rsintegration.api.recipe.OutputSemantics;
 import net.minecraft.resources.ResourceLocation;
 
 import javax.annotation.Nullable;
@@ -19,7 +20,7 @@ public record OutputPort(
         boolean dynamicIdentity,
         boolean targetProducing,
         @Nullable ResourceLocation sourceInputEntryId
-) {
+) implements OutputSemantics {
     public OutputPort {
         if (portId == null || outputGroup == null || outputGroup.isBlank()
                 || resource == null
@@ -31,5 +32,20 @@ public record OutputPort(
             throw new IllegalArgumentException(
                     "dynamic output requires a non-empty identity template");
         }
+    }
+
+    @Override
+    public long guaranteedMinimum() {
+        return probability.isGuaranteed() ? amount.min() : 0L;
+    }
+
+    @Override
+    public long maximumAmount() {
+        return amount.max();
+    }
+
+    @Override
+    public boolean isPrimary() {
+        return outputKind == OutputKind.PRIMARY;
     }
 }

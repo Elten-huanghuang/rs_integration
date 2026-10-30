@@ -808,6 +808,8 @@
   "rsi.progress.reason.material_extraction_failed": "材料提取失败",
   "rsi.progress.reason.start_rejected": "机器拒绝启动此配方",
   "rsi.progress.reason.output_missing": "未能确认完整产物",
+  "rsi.progress.reason.production_target_unmet": "概率操作已结算，但实际产量未达到目标",
+  "rsi.diagnostic.hint.production_target": "概率配方允许零产出。检查剩余原料和尝试上限；已产出的物品会保留，下游只使用实际到齐的材料。",
   "rsi.progress.reason.timeout": "等待合成超时",
   "rsi.progress.reason.player_cancelled": "玩家已取消合成",
   "rsi.progress.reason.player_offline": "玩家已离线",

@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.recipe;
 
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
+import com.huanghuang.rsintegration.api.recipe.OutputSemantics;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.crafting.graph.OutputKind;
 import com.huanghuang.rsintegration.crafting.graph.OutputProbability;
@@ -18,8 +19,19 @@ public record RecipeOutputSpec(
         OutputKind kind,
         OutputProbability probability,
         boolean dynamicIdentity,
-        @Nullable Integer sourceInputIndex
-) {
+        @Nullable Integer sourceInputIndex,
+        boolean targetProducing
+) implements OutputSemantics {
+    public RecipeOutputSpec(
+            @Nullable MaterialKey material, IntegrationResourceKey resource,
+            int expectedPerOperation, int minimumPerOperation, int maximumPerOperation,
+            OutputKind kind, OutputProbability probability, boolean dynamicIdentity,
+            @Nullable Integer sourceInputIndex) {
+        this(material, resource, expectedPerOperation, minimumPerOperation,
+                maximumPerOperation, kind, probability, dynamicIdentity,
+                sourceInputIndex, false);
+    }
+
     public RecipeOutputSpec {
         Objects.requireNonNull(resource, "resource");
         Objects.requireNonNull(kind, "kind");
@@ -45,6 +57,27 @@ public record RecipeOutputSpec(
             throw new IllegalArgumentException(
                     "item output requires material projection");
         }
+    }
+
+    @Override
+    public long guaranteedMinimum() {
+        return probability.isGuaranteed() ? minimumPerOperation : 0L;
+    }
+
+    @Override
+    public long maximumAmount() {
+        return maximumPerOperation;
+    }
+
+    @Override
+    public boolean isPrimary() {
+        return kind == OutputKind.PRIMARY;
+    }
+
+    public RecipeOutputSpec withTargetProducing(boolean targeted) {
+        return new RecipeOutputSpec(material, resource, expectedPerOperation,
+                minimumPerOperation, maximumPerOperation, kind, probability,
+                dynamicIdentity, sourceInputIndex, targeted);
     }
 
     public static RecipeOutputSpec item(

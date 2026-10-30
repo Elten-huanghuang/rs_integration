@@ -17,6 +17,33 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class OutputAccountingTest extends BootstrapTest {
+    @Test
+    void guaranteedVariableAmountIsCheckedAtItsLowerBoundInsteadOfItsNominalAmount() {
+        OutputContract.Port port = new OutputContract.Port(
+                "main", 0, new ItemStack(Items.DIAMOND), 4,
+                OutputContract.Kind.PRIMARY, OutputContract.Source.SLOT, 2, 4,
+                OutputProbability.guaranteed(), false, null);
+        OutputContract contract = new OutputContract(List.of(port));
+
+        assertTrue(OutputAccounting.assess(contract, 2, List.of(
+                output("main", OutputContract.Source.SLOT, Items.DIAMOND, 4))).complete());
+        assertFalse(OutputAccounting.assess(contract, 2, List.of(
+                output("main", OutputContract.Source.SLOT, Items.DIAMOND, 3))).complete());
+    }
+
+    @Test
+    void probabilityHasNoGuaranteedCountEvenWhenTheConditionalAmountIsPositive() {
+        OutputContract.Port port = new OutputContract.Port(
+                "main", 0, new ItemStack(Items.DIAMOND), 4,
+                OutputContract.Kind.PRIMARY, OutputContract.Source.SLOT, 4, 4,
+                OutputProbability.probabilistic(0.35, 16, "main"), false, null);
+        OutputContract contract = new OutputContract(List.of(port));
+
+        assertTrue(contract.permitsEmptyResult());
+        assertTrue(OutputAccounting.assess(contract, 2, List.of()).complete());
+        assertEquals(0L, OutputAccounting.assess(contract, 2, List.of()).ports().get(0).expected());
+    }
+
 
     @Test
     void optionalProbabilityPortDoesNotRequireAFixedCount() {

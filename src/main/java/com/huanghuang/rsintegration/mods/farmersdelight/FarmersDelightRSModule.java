@@ -97,10 +97,9 @@ public final class FarmersDelightRSModule implements IModIntegration {
                 new String[]{"cutting_board", "cuttingboard"},
                 new String[]{ModIds.ID_FD_CUTTING_BOARD},
                 CuttingBoardBatchDelegate::new);
-        // 概率配方不能进纯图；产物确定的配方由处理器
-        // hasRandomizedOutputs / supportsDeterministicProjection 逐条声明放行。
+        // 按配方判断主产物是否必出，概率副产物不计入递归所需产量。
         cuttingBoard.allowDeterministicProjection(
-                "cutting board has probabilistic outputs and a durability-bearing tool");
+                "砧板仅投影必出的主产物，工具按实际耐久结算");
         ModType.configureJei(ModIds.ID_FD_CUTTING_BOARD,
                 new String[][]{{"farmersdelight:cutting", ModIds.ID_FD_CUTTING_BOARD}},
                 new String[][]{{"vectorwing.farmersdelight.common.crafting.CuttingBoardRecipe",

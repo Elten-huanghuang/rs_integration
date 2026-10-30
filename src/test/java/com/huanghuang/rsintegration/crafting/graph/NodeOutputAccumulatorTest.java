@@ -21,6 +21,57 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class NodeOutputAccumulatorTest extends BootstrapTest {
+    @Test
+    void zeroRandomOutputCompletesTheOperationWithoutPublishingMaterials() {
+        OutputPortId port = new OutputPortId(new NodeId(0), 0);
+        OutputDeclaration random = OutputDeclaration.item(port,
+                MaterialKey.of(new ItemStack(Items.DIAMOND)), 3, OutputKind.PRIMARY,
+                0, 3, OutputProbability.probabilistic(0.35, 16, "random"), false, null)
+                .withTargetProducing(true);
+        NodeOutputAccumulator accumulator = new NodeOutputAccumulator(List.of(random));
+
+        assertTrue(accumulator.add(List.of()).isEmpty());
+        assertTrue(accumulator.isComplete());
+        assertEquals(0L, accumulator.publishedQuantity(port));
+        assertTrue(random.permitsEmptyResult());
+    }
+
+    @Test
+    void optionalPortCannotConsumeTheSameItemsBeforeGuaranteedPorts() {
+        NodeId node = new NodeId(0);
+        MaterialKey diamond = MaterialKey.of(new ItemStack(Items.DIAMOND));
+        OutputDeclaration random = OutputDeclaration.item(new OutputPortId(node, 0),
+                diamond, 0, OutputKind.PRIMARY, 0, 4,
+                OutputProbability.probabilistic(0.35, 16, "random"), false, null);
+        OutputDeclaration guaranteed = OutputDeclaration.item(new OutputPortId(node, 1),
+                diamond, 2, OutputKind.SECONDARY);
+        NodeOutputAccumulator accumulator = new NodeOutputAccumulator(List.of(random, guaranteed));
+
+        accumulator.add(List.of(new ItemStack(Items.DIAMOND, 3)));
+
+        assertTrue(accumulator.isComplete());
+        assertEquals(2L, accumulator.publishedQuantity(guaranteed.id()));
+        assertEquals(1L, accumulator.publishedQuantity(random.id()));
+    }
+
+    @Test
+    void variableGuaranteedPortOnlyTakesItsMinimumBeforeOtherRequiredPorts() {
+        NodeId node = new NodeId(0);
+        MaterialKey diamond = MaterialKey.of(new ItemStack(Items.DIAMOND));
+        OutputDeclaration variable = OutputDeclaration.item(new OutputPortId(node, 0),
+                diamond, 2, OutputKind.PRIMARY, 2, 4,
+                OutputProbability.guaranteed(), false, null);
+        OutputDeclaration fixed = OutputDeclaration.item(new OutputPortId(node, 1),
+                diamond, 1, OutputKind.SECONDARY);
+        NodeOutputAccumulator accumulator = new NodeOutputAccumulator(List.of(variable, fixed));
+
+        accumulator.add(List.of(new ItemStack(Items.DIAMOND, 3)));
+
+        assertTrue(accumulator.isComplete());
+        assertEquals(2L, accumulator.publishedQuantity(variable.id()));
+        assertEquals(1L, accumulator.publishedQuantity(fixed.id()));
+    }
+
 
     @Test
     void publishesOnlyNewlyConfirmedDeclaredUnits() {

@@ -105,7 +105,8 @@ public final class CraftTerminalSteps {
                 .orElseThrow(() -> new IllegalArgumentException(
                         "terminal output must include a primary output"));
         ProductionTarget target = terminalStep.productionTarget();
-        if (target == null) {
+        if (target == null && primary.probability().isGuaranteed()
+                && primary.minimumPerOperation() > 0) {
             long perOperation = Math.max(1L, primary.perOperation());
             long quantity = Math.multiplyExact(
                     perOperation, Math.max(1, terminalStep.executions()));
@@ -158,6 +159,8 @@ public final class CraftTerminalSteps {
                 int expected = output.expectedPerOperation();
                 int minimum = output.minimumPerOperation();
                 int maximum = output.maximumPerOperation();
+                // 名义数量用于显示和按次数下单，不把零必出下限误当成空配方。
+                if (output.kind() == OutputKind.PRIMARY && expected == 0) expected = maximum;
                 OutputProbability probability = output.probability();
                 boolean dynamicIdentity = output.dynamicIdentity();
                 if (!primaryHandled
@@ -176,9 +179,11 @@ public final class CraftTerminalSteps {
                                     )
                             );
                     material = MaterialKey.of(target);
-                    expected = target.getCount();
-                    minimum = expected;
-                    maximum = expected;
+                    expected = Math.max(1, (int) Math.min(Integer.MAX_VALUE,
+                            (terminalStep.productionTarget().quantity() - 1L)
+                                    / Math.max(1, terminalStep.executions()) + 1L));
+                    minimum = 0;
+                    maximum = Math.max(maximum, expected);
                     resource = terminalStep.productionTarget().resource();
                     primaryHandled = true;
                 }

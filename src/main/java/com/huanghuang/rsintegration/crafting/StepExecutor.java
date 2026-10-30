@@ -20,6 +20,7 @@ import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.graph.OutputDeclaration;
 import com.huanghuang.rsintegration.crafting.graph.OutputKind;
 import com.huanghuang.rsintegration.crafting.graph.OutputPortId;
+import com.huanghuang.rsintegration.crafting.graph.OutputProbability;
 import com.huanghuang.rsintegration.util.PerformanceMonitor;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.goety.GoetyDynamicRitualRecipe;
@@ -28,6 +29,7 @@ import com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler;
 import com.huanghuang.rsintegration.mods.slashblade.SlashBladeRecipeHandler;
 import com.huanghuang.rsintegration.mods.slashblade.SlashBladePlanning;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+import com.huanghuang.rsintegration.recipe.RecipeOutputSpec;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.CraftingRecipe;
@@ -253,7 +255,20 @@ final class StepExecutor {
         boolean targeted = handler != null && demandedOutput != null && !demandedOutput.isEmpty()
                 && handler.requiresTargetedProduction(entry.recipe(), demandedOutput);
         ItemStack plannedPrimary = targeted ? demandedOutput : result;
-        registerGraphOutput(plannedPrimary, batches, OutputKind.PRIMARY, graphNodeId, graphOutputs, ctx);
+        if (targeted) {
+            RecipeOutputSpec declaration = handler.getDeclaredOutputs(
+                            entry.recipe(), ctx.level.registryAccess()).stream()
+                    .filter(output -> output.matchesTarget(
+                            ProductionTarget.of(plannedPrimary, 1L).resource()))
+                    .findFirst().orElse(null);
+            OutputProbability probability = declaration == null
+                    ? OutputProbability.dynamic(null, 16, "target:" + entry.recipe().getId())
+                    : declaration.probability();
+            registerTargetGraphOutput(plannedPrimary, batches, probability,
+                    graphNodeId, graphOutputs, ctx);
+        } else {
+            registerGraphOutput(plannedPrimary, batches, OutputKind.PRIMARY, graphNodeId, graphOutputs, ctx);
+        }
 
         if (handler != null && !targeted) {
             for (ItemStack secondary : handler.getSecondaryOutputs(entry.recipe(), ctx.level.registryAccess())) {
@@ -324,31 +339,45 @@ final class StepExecutor {
                 .thenComparingInt(i -> ingredientBreadthClass(physicalSpecs.get(i).ingredient())));
         var handler = ModRecipeHandlers.claimFor(recipe).winner();
         boolean bladeCrafting = SlashBladeRecipeHandler.isShapedBladeRecipe(recipe);
+        List<ScaledIngredientSpec> pendingInputs = new ArrayList<>();
         for (int originalIndex : resolutionOrder) {
             IngredientSpec spec = physicalSpecs.get(originalIndex);
             long quantityLong = spec.consumption().kind()
                     == InputConsumption.Kind.DURABILITY
-                    ? ctx.requiredDurabilityItems(spec, batches)
+                    ? 0L
                     : handler != null
                     ? handler.requiredIngredientCount(recipe, spec, originalIndex, batches)
                     : CraftPacketUtils.requiredCount(spec, batches);
             int quantity = SaturatingLongMath.clampToInt(quantityLong);
-            InputPortId port = new InputPortId(nodeId, originalIndex);
-            // 刀的展示栈只代表条件下限，不能把工作台原料锁成整份 NBT 相等。
-            Ingredient plannedIngredient;
-            if (bladeCrafting) {
-                boolean resolved = CraftingResolver.ensureIngredient(spec.ingredient(), quantity, ctx,
-                        depth + 1, edges, port, null);
-                plannedIngredient = resolved ? spec.ingredient() : null;
-            } else {
-                plannedIngredient = ensureSingleVariantMachineInput(
-                        spec.ingredient(), quantity, ctx, depth + 1, edges, port, null);
+            pendingInputs.add(ScaledIngredientSpec.of(spec, quantity));
+        }
+        ctx.pendingInputs.push(pendingInputs);
+        try {
+            for (int originalIndex : resolutionOrder) {
+                IngredientSpec spec = physicalSpecs.get(originalIndex);
+                long pendingCount = pendingInputs.remove(0).count();
+                int quantity = SaturatingLongMath.clampToInt(spec.consumption().kind()
+                        == InputConsumption.Kind.DURABILITY
+                        ? ctx.requiredDurabilityItems(spec, batches) : pendingCount);
+                InputPortId port = new InputPortId(nodeId, originalIndex);
+                // 刀的展示栈只代表条件下限，不能把工作台原料锁成整份 NBT 相等。
+                Ingredient plannedIngredient;
+                if (bladeCrafting) {
+                    boolean resolved = CraftingResolver.ensureIngredient(spec.ingredient(), quantity, ctx,
+                            depth + 1, edges, port, null);
+                    plannedIngredient = resolved ? spec.ingredient() : null;
+                } else {
+                    plannedIngredient = ensureSingleVariantMachineInput(
+                            spec.ingredient(), quantity, ctx, depth + 1, edges, port, null);
+                }
+                if (plannedIngredient == null) {
+                    return null;
+                }
+                slotInputs[originalIndex] = new InputDemand(port, plannedIngredient, quantity,
+                        effectiveConsumption(spec), firstDisplay(plannedIngredient));
             }
-            if (plannedIngredient == null) {
-                return null;
-            }
-            slotInputs[originalIndex] = new InputDemand(port, plannedIngredient, quantity,
-                    effectiveConsumption(spec), firstDisplay(plannedIngredient));
+        } finally {
+            ctx.pendingInputs.pop();
         }
         List<InputDemand> inputs = new ArrayList<>(slotInputs.length);
         for (InputDemand input : slotInputs) {
@@ -548,6 +577,19 @@ final class StepExecutor {
         outputs.add(OutputDeclaration.item(
                 port, MaterialKey.of(produced), produced.getCount(), kind));
         ctx.addProduced(produced, new MaterialSource.ProducerOutput(port));
+    }
+
+    /** 数量是递归供料目标，不是单次必出承诺；执行时只发布真实产物。 */
+    private static void registerTargetGraphOutput(
+            ItemStack stack, int batches, OutputProbability probability,
+            NodeId nodeId, List<OutputDeclaration> outputs, ResolutionContext ctx) {
+        if (stack.isEmpty()) return;
+        ItemStack planned = stack.copyWithCount(mulCount(stack.getCount(), batches));
+        OutputPortId port = new OutputPortId(nodeId, outputs.size());
+        outputs.add(OutputDeclaration.item(port, MaterialKey.of(planned), planned.getCount(),
+                OutputKind.PRIMARY, 0L, planned.getCount(), probability, false, null)
+                .withTargetProducing(true));
+        ctx.addProduced(planned, new MaterialSource.ProducerOutput(port));
     }
 
     private static CraftNode toGraphNode(NodeId nodeId, CraftingResolver.ResolutionStep step,

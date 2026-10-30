@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.graph;
 
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
+import com.huanghuang.rsintegration.api.recipe.OutputSemantics;
 import javax.annotation.Nullable;
 import java.util.Objects;
 
@@ -14,8 +15,38 @@ public record OutputDeclaration(
         OutputProbability probability,
         boolean dynamicIdentity,
         @Nullable InputPortId sourceInput,
-        IntegrationResourceKey resource
-) {
+        IntegrationResourceKey resource,
+        boolean targetProducing
+) implements OutputSemantics {
+    public OutputDeclaration(
+            OutputPortId id, MaterialKey material, long quantity, OutputKind kind,
+            long minimumQuantity, long maximumQuantity, OutputProbability probability,
+            boolean dynamicIdentity, @Nullable InputPortId sourceInput,
+            IntegrationResourceKey resource) {
+        this(id, material, quantity, kind, minimumQuantity, maximumQuantity,
+                probability, dynamicIdentity, sourceInput, resource, false);
+    }
+
+    public OutputDeclaration withTargetProducing(boolean enabled) {
+        return new OutputDeclaration(id, material, quantity, kind, minimumQuantity,
+                maximumQuantity, probability, dynamicIdentity, sourceInput, resource, enabled);
+    }
+
+    @Override
+    public long guaranteedMinimum() {
+        return probability.isGuaranteed() ? minimumQuantity : 0L;
+    }
+
+    @Override
+    public long maximumAmount() {
+        return maximumQuantity;
+    }
+
+    @Override
+    public boolean isPrimary() {
+        return kind == OutputKind.PRIMARY;
+    }
+
     public static OutputDeclaration item(
             OutputPortId id,
             MaterialKey material,

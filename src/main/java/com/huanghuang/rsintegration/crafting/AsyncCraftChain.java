@@ -3,6 +3,7 @@ import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot;
 import com.huanghuang.rsintegration.api.execution.CollectedOutput;
+import com.huanghuang.rsintegration.api.recipe.ProductionCompletionPolicy;
 import com.huanghuang.rsintegration.api.execution.CancelReason;
 
 
@@ -334,7 +335,8 @@ public final class AsyncCraftChain {
         }
 
         boolean canAttempt() {
-            return attempts < maxAttempts;
+            return ProductionCompletionPolicy.TARGET_QUANTITY.canAttempt(
+                    targetQuantity, outputs.publishedQuantity(targetPort), attempts, maxAttempts);
         }
 
         void started() {
@@ -345,7 +347,8 @@ public final class AsyncCraftChain {
         }
 
         boolean complete() {
-            return outputs.publishedQuantity(targetPort) >= targetQuantity;
+            return ProductionCompletionPolicy.TARGET_QUANTITY.isComplete(
+                    targetQuantity, outputs.publishedQuantity(targetPort), attempts, maxAttempts);
         }
     }
 
@@ -444,7 +447,7 @@ public final class AsyncCraftChain {
         catch (Exception e) { globalTimeoutSeconds = 900; }
         this.graphProgressWatchdog = new ProgressWatchdog(
                 Math.max(1, globalTimeoutSeconds) * 20);
-        if (graph != null) {
+        if (graph != null && !requiresAdaptiveProduction(graph)) {
             this.graph = graph;
             this.graphScheduler = new DagScheduler(graph);
             this.graphMaterials = new MaterialBroker();
@@ -477,6 +480,13 @@ public final class AsyncCraftChain {
                 sb.append("]");
                 RSIntegrationMod.LOGGER.debug(sb.toString());
         }
+    }
+
+    /** 数量目标可能需要追加原料子计划，使用能够动态插入步骤的串行执行器。 */
+    static boolean requiresAdaptiveProduction(CraftPlanGraph plan) {
+        return plan.nodes().stream().flatMap(node -> node.outputs().stream())
+                .anyMatch(output -> output.targetProducing()
+                        && output.requiresTargetedProduction());
     }
 
     private void initialiseGraphMaterialFlow(CraftPlanGraph plan) {
@@ -856,7 +866,8 @@ public final class AsyncCraftChain {
                                 CraftFailureCode.OUTPUT_MISSING);
                         return true;
                     }
-                    if (expected != null && expected.count() > actualCount) {
+                    if (collectedOutputs.settlement() == null
+                            && expected != null && expected.count() > actualCount) {
                         RSIntegrationMod.LOGGER.warn(ctx.format(
                                 "Craft output partially extracted: recipe={} delegate={} expected={} actual={}"),
                                 steps.get(currentStepIdx).recipeId(), currentDelegate.getClass().getSimpleName(),
@@ -878,6 +889,7 @@ public final class AsyncCraftChain {
                     ItemStack expectedWorld = currentDelegate.getExpectedOutput();
                     if (collectedOutputs.settlement() == null && expected == null
                             && expectedWorld != null && !expectedWorld.isEmpty()
+                            && !OutputAccounting.permitsEmptyResult(currentDelegate.outputContract())
                             && actualResults.isEmpty()) {
                         snapshotCommittedVirtual();
                         ledger.reset();
@@ -1006,7 +1018,7 @@ public final class AsyncCraftChain {
                     abort("Probabilistic production attempt limit reached: " + step.recipeId(),
                             Component.translatable("rsi.async.probability.limit", probability.produced(),
                                     probability.target().quantity(), probability.attempts()),
-                            CraftFailureCode.OUTPUT_MISSING);
+                            CraftFailureCode.PRODUCTION_TARGET_UNMET);
                     return true;
                 }
                 if (!prepareProbabilityInputs(step, probability, online)) {
@@ -1548,13 +1560,7 @@ public final class AsyncCraftChain {
     private ProbabilisticProduction probabilityTarget(CraftingResolver.ResolutionStep step, ServerPlayer player) {
         ProbabilisticProduction existing = probabilityTargets.get(step);
         if (existing != null || !requiresTargetedProduction(step)) return existing;
-        int multiplier = 16;
-        int maximum = 4096;
-        try {
-            multiplier = RSIntegrationConfig.CRAFTING_PROBABILISTIC_ATTEMPT_MULTIPLIER.get();
-            maximum = RSIntegrationConfig.CRAFTING_PROBABILISTIC_MAX_ATTEMPTS.get();
-        } catch (RuntimeException ignored) {}
-        int limit = (int) Math.min(maximum, (long) step.executions() * multiplier);
+        int limit = CraftExecutionPolicy.probabilityAttemptLimit(step);
         ProbabilisticProduction progress = new ProbabilisticProduction(step.productionTarget(), Math.max(1, limit));
         probabilityTargets.put(step, progress);
         player.sendSystemMessage(Component.translatable("rsi.async.probability.started",
@@ -1569,11 +1575,14 @@ public final class AsyncCraftChain {
         Recipe<?> recipe = recipeForStep(step);
         ModRecipeHandler handler = recipe == null ? null : ModRecipeHandlers.claimFor(recipe).winner();
         List<IngredientSpec> inputs = handler == null ? null : handler.getIngredients(recipe);
-        if (inputs == null || inputs.isEmpty()) {
+        if (inputs == null) {
             abort("Probabilistic recipe has no material contract: " + step.recipeId(),
-                    Component.translatable("rsi.async.probability.materials", progress.remaining()));
+                    Component.translatable("rsi.async.probability.materials", progress.remaining()),
+                    CraftFailureCode.PRODUCTION_TARGET_UNMET);
             return false;
         }
+        // 空物品合同允许纯流体或无物品投入配方，由委托校验其余输入。
+        if (inputs.isEmpty()) return true;
         inputs = MaterialLocks.narrowSpecs(step.recipeId(), inputs, supplementalMaterialLocks);
         MaterialSources.invalidateFor(player, storageEndpoint);
         Map<StackKey, Long> available =
@@ -1617,19 +1626,22 @@ public final class AsyncCraftChain {
                             progress.target().displayStack()));
         } catch (CraftingPlanningTimeoutException timeout) {
             abort("Probabilistic supplemental planning timed out: " + step.recipeId(),
-                    Component.translatable("rsi.async.probability.planning_timeout", progress.remaining()));
+                    Component.translatable("rsi.async.probability.planning_timeout", progress.remaining()),
+                    CraftFailureCode.TIMEOUT);
             return false;
         }
         if (!missing.isEmpty() || supplemental.rootDemands().stream().anyMatch(root -> root.unresolvedQuantity() > 0)) {
             abort("Probabilistic supplemental materials unavailable: " + step.recipeId(),
-                    Component.translatable("rsi.async.probability.materials", progress.remaining()));
+                    Component.translatable("rsi.async.probability.materials", progress.remaining()),
+                    CraftFailureCode.PRODUCTION_TARGET_UNMET);
             return false;
         }
         List<CraftingResolver.ResolutionStep> additional = ExecutionEquivalence.projectFlatSteps(supplemental);
         if (additional.isEmpty()) return true;
         if ((long) steps.size() + additional.size() > RSIntegrationConfig.CRAFTING_MAX_STEPS.get()) {
             abort("Probabilistic supplemental step limit reached", Component.translatable(
-                    "rsi.async.probability.materials", progress.remaining()));
+                    "rsi.async.probability.materials", progress.remaining()),
+                    CraftFailureCode.PRODUCTION_TARGET_UNMET);
             return false;
         }
         steps.addAll(currentStepIdx, additional);
@@ -2793,16 +2805,19 @@ public final class AsyncCraftChain {
             ExtractionLedger nodeLedger = runtime.nodeLedger();
             publishIncrementalGraphOutputs(nodeId, runtime);
             OperationExecutionKernel.CompletionResult completion = runtime.completeOperation(
-                    runtime::outputsComplete, () -> {
+                    runtime::operationOutputsComplete, () -> {
                         if (admission != null) graphAdmissions.settleMaterialOnce(admission);
                         if (nodeLedger != null && nodeLedger.isCommitted()) {
                             nodeLedger.settleAllCommitted();
                         }
                     });
             runtime.markResourcesClosed();
-            if (completion == OperationExecutionKernel.CompletionResult.OUTPUT_SHORTAGE) {
+            if (completion == OperationExecutionKernel.CompletionResult.OUTPUT_SHORTAGE
+                    || !runtime.productionTargetComplete()) {
                 ProductionAttemptState attempt = productionAttempts.get(nodeId);
-                if (attempt != null && attempt.canAttempt()) {
+                boolean targetUnmet = completion == OperationExecutionKernel.CompletionResult.SUCCEEDED
+                        && attempt != null && !attempt.complete();
+                if (targetUnmet && attempt.canAttempt()) {
                     for (ItemStack stack : runtime.drainOutputSurplus()) {
                         addToVirtualInventory(stack);
                     }
@@ -2816,10 +2831,15 @@ public final class AsyncCraftChain {
                             attempt.targetQuantity);
                     return ConcurrentNodeExecutor.CompletionStatus.RETRY;
                 }
-                String detail = runtime.outputShortageDetail();
-                runtime.markCompletionFailed(detail, CraftFailureCode.OUTPUT_MISSING);
+                String detail = targetUnmet
+                        ? "production target unmet after " + attempt.attempts
+                        + " operations: " + attempt.outputs.publishedQuantity(attempt.targetPort)
+                        + "/" + attempt.targetQuantity : runtime.outputShortageDetail();
+                CraftFailureCode code = targetUnmet
+                        ? CraftFailureCode.PRODUCTION_TARGET_UNMET : CraftFailureCode.OUTPUT_MISSING;
+                runtime.markCompletionFailed(detail, code);
                 graphFailureDetails.put(nodeId, detail);
-                graphFailureCodes.put(nodeId, CraftFailureCode.OUTPUT_MISSING);
+                graphFailureCodes.put(nodeId, code);
                 RSIntegrationMod.LOGGER.warn(ctx.format("Graph node {} completion failed: {}"),
                         nodeId, detail);
                 for (ItemStack stack : runtime.drainOutputSurplus()) addToVirtualInventory(stack);

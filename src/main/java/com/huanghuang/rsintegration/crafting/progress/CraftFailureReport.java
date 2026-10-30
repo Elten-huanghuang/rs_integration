@@ -189,6 +189,7 @@ public final class CraftFailureReport {
             case CONTRACT_INCOMPATIBLE -> "compatibility";
             case START_REJECTED, INPUT_CONFLICT -> "input";
             case OUTPUT_MISSING -> "output";
+            case PRODUCTION_TARGET_UNMET -> "production_target";
             case TIMEOUT -> "timeout";
             case NETWORK_UNAVAILABLE -> "network";
             case NO_BOUND_MACHINE -> "binding";

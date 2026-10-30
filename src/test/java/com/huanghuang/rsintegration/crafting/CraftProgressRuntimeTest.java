@@ -5,10 +5,12 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
+import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.crafting.graph.ConcurrentNodeExecutor;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.crafting.graph.NodeOutputAccumulator;
 import com.huanghuang.rsintegration.crafting.graph.OutputDeclaration;
+import com.huanghuang.rsintegration.crafting.graph.OutputProbability;
 import com.huanghuang.rsintegration.crafting.graph.OutputKind;
 import com.huanghuang.rsintegration.crafting.graph.OutputPortId;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
@@ -63,6 +65,28 @@ class CraftProgressRuntimeTest extends BootstrapTest {
         CommentedConfig config = CommentedConfig.inMemory();
         RSIntegrationConfig.SERVER_SPEC.correct(config);
         RSIntegrationConfig.SERVER_SPEC.setConfig(config);
+    }
+
+    @Test
+    void completedOptionalWorldOutputDoesNotWaitForeverForAnEntityThatMayNeverExist() {
+        IBatchDelegate delegate = mock(IBatchDelegate.class);
+        when(delegate.observeCraft(level)).thenReturn(
+                new IBatchDelegate.CraftObservation(IBatchDelegate.CraftPhase.DONE));
+        when(delegate.validateExecutionContext(player)).thenReturn(true);
+        when(delegate.collectAllResults(player)).thenReturn(List.of());
+        when(delegate.outputContract()).thenReturn(new OutputContract(List.of(
+                new OutputContract.Port("random", null, new ItemStack(Items.DIAMOND), 0,
+                        OutputContract.Kind.PRIMARY, OutputContract.Source.WORLD, 0, 1,
+                        OutputProbability.probabilistic(0.35, 16, "world"), false, null))));
+        CraftNodeRuntime runtime = new CraftNodeRuntime(
+                new NodeId(0), "test:random_world", delegate, null, null);
+        CaptureSession capture = mock(CaptureSession.class);
+        when(capture.snapshot()).thenReturn(List.of());
+        when(capture.drainAndClose()).thenReturn(List.of());
+        runtime.attachCapture(capture);
+        runtime.setChainContext(new ArrayList<>(), player);
+
+        assertEquals(ConcurrentNodeExecutor.Observation.SUCCEEDED, runtime.observe());
     }
 
     @Test

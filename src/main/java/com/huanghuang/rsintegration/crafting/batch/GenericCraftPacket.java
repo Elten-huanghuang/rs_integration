@@ -96,7 +96,6 @@ import com.huanghuang.rsintegration.mods.farmersdelight.MinersDelightCopperPotSu
 import com.huanghuang.rsintegration.mods.immortalersdelight.EnchantalCoolerBatchDelegate;
 import com.huanghuang.rsintegration.mods.youkaishomecoming.moka.MokaPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.embers.EmbersPlanInfo;
-import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketBatchDelegate;
 import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisGemCuttingCatalog;
 import com.huanghuang.rsintegration.mods.arsnouveau.ArsDynamicApparatusRecipe;
 import com.huanghuang.rsintegration.mods.goety.GoetyDynamicRitualRecipe;
@@ -265,7 +264,7 @@ public final class GenericCraftPacket {
     private record DirectReservationCheck(boolean available, String missingMaterial,
                                           String nbtMode) {}
 
-    private static Map<IngredientKey, PlanResponse.Availability> directMaterialView(
+    static Map<IngredientKey, PlanResponse.Availability> directMaterialView(
             DirectMaterialAllocator.Result allocation, Map<StackKey, Long> available) {
         Map<IngredientKey, Long> needed = new LinkedHashMap<>();
         Map<IngredientKey, Long> stored = new LinkedHashMap<>();
@@ -994,7 +993,8 @@ public final class GenericCraftPacket {
                 Registries.DIMENSION, dimension)
                 : player.serverLevel().dimension();
         BlockPos lookupPos = position != null ? position : player.blockPosition();
-        boolean valid = entry.plan().success()
+        boolean valid = CraftPlanDecisionRules.canExecuteCachedPlan(
+                entry.plan(), entry.resolvedGraph())
                 && PlanningStateValidator.revalidateForExecution(
                 player, entry.snapshot(), entry.plan(),
                 levelKey, lookupPos, storageReference);
@@ -1004,8 +1004,9 @@ public final class GenericCraftPacket {
                         "[RSI-Diag] execution cache state rejected recipe={} terminal={}",
                         recipeId, modType == null ? "generic" : modType.id());
             }
-            RSIntegrationMod.debug("[RSI-Generic] Rejected execution cache state: recipeId={} reason=state-or-required-supply",
-                    recipeId);
+            RSIntegrationMod.debug(
+                    "[RSI-Generic] Rejected execution cache state: recipeId={} reason=state-or-required-supply outcome={} diagnostics={}",
+                    recipeId, entry.plan().outcome(), entry.plan().diagnostics());
             // 保留失效租约直到重新预览，连续点击确认也不能悄悄重选路线。
             return new ExecutionPlanLookup(null, true);
         }
@@ -2846,18 +2847,13 @@ public final class GenericCraftPacket {
                     recipeId);
         }
 
-        // A Market trade is a fixed one-input/one-output exchange. When its
-        // payment is already present, recursive resolution cannot add useful
-        // work, but expanding a large repeat count through the generic resolver
-        // performs thousands of main-thread inventory probes. Build the exact
-        // same terminal plan arithmetically in constant time. If payment is not
-        // directly available, retain the generic path so it can craft the cost.
+        // 贸易站按整批直接分配成本并生成执行图，避免逐次兑换或进入递归搜索。
         if (recipe instanceof MarketRecipeWrapper market
                 && effectiveOverrides.isEmpty()
                 && CraftMarketPlanService.tryBuildDirectPlan(
-                        player, market, recipeId, repeatCount,
-                planTargetOutput, dim, pos, available, planningSnapshot, cacheKey,
-                planStartNanos, sink)) {
+                        player, market, recipeId, repeatCount, planTargetOutput,
+                        clickedOutput, recipeSpecs, dim, pos, available, planningSnapshot,
+                        cacheKey, planStorageReference, storageNetworks, planStartNanos, sink)) {
             return;
         }
 

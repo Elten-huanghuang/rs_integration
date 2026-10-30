@@ -432,7 +432,7 @@ public final class MySmeltingRecipeIntegration
 |---|---|
 | `recursivePlanning` | 该配方是否允许 RSI 递归补齐材料 |
 | `targetProduction` | 是否至少有一个输出声明为 `targetProducing` |
-| `deterministicOutput` | 存在概率输出时必须为 `false` |
+| `deterministicOutput` | 存在概率输出或可变数量输出时必须为 `false` |
 | `runtimeDependentIdentity` | 是否存在运行时决定身份的输出 |
 | `requiresFuel` | 是否存在 `InputConsumption.Kind.FUEL` |
 | `supportsBatching` | 机器能否接收一次性聚合投料并累计完成全部确定性输出 |
@@ -444,15 +444,49 @@ public final class MySmeltingRecipeIntegration
 
 ### 4.3 概率产物与递归图
 
-递归图要求每个声明的产物都必然出现，因此只要任一输出的
-`OutputProbability.mode()` 不是 `GUARANTEED`（此时 `deterministicOutput` 必须为
-`false`），该配方就不会作为递归合成的中间步骤使用，只能作为根节点按目标产物重试。
+产出语义由公共 `OutputSemantics` 统一描述，配方 `OutputDeclaration`、执行
+`OutputPort`、内建 `RecipeOutputSpec` 和运行时输出合同使用相同规则：
 
-这条判定由声明本身推导，集成不需要额外注册开关：把概率写进 `OutputDeclaration`
-即可。内建模组处理器走同一套语义，通过
-`ModRecipeHandler.hasRandomizedOutputs` 声明随机产物；机器类型如果整体不适合投影，
-可以用 `ModType.allowDeterministicProjection(reason)` 声明「按配方逐个判断」，
-产物确定的配方照常参与递归规划。
+- `guaranteedMinimum()` 是每次操作的必出下限。概率或动态触发输出的必出下限为零，
+  即使 `amount.min()` 为正数，也不能把它当成每次操作的保证产量。
+- `maximumAmount()` 是上限，不能把概率期望值或最大值当成已经生产的材料。
+- `permitsEmptyResult()` 表示该端口允许零产出；它不代表机器已经完成操作。
+- 已知 `probabilistic(1.0, ...)` 归一为必出触发；动态模型的 `chance=1.0`
+  仍是估计值。固定触发但数量为 2..4 时，纯规划只承诺 2。
+
+固定主产物搭配概率副产物可以进入确定性递归图，规划只使用必出数量。
+概率主产物不能投影为确定供料，但仍可在类型化递归规划中作为中间步骤：
+该步骤带独立数量目标，执行只累计真实产物，材料不足时递归追加补料步骤。
+含这种动态补料目标的计划使用串行自适应执行，以保留补料、循环保护和已经产生的材料。
+下游不会因为一次操作完成而收到虚构材料，必须等真实数量到齐后再执行。
+
+内建模组与外部 API 均通过输出声明推导这些规则。机器类型可以用
+`ModType.allowDeterministicProjection(reason)` 声明按配方判断；不可确定的配方
+保留类型化递归入口，不会因为同类型中其他配方必出而被误判为必出。
+
+### 4.4 操作完成、数量目标与尽力交付
+
+`ProductionCompletionPolicy` 统一两种生产请求语义：
+
+| 策略 | 完成条件 | 全部未命中时 |
+|---|---|---|
+| `FIXED_OPERATIONS` | 完成约定的操作次数 | 正常完成，交付真实产物，允许零交付 |
+| `TARGET_QUANTITY` | 实际收集数量达到目标 | 在有界预算内补做，不能提前放行下游 |
+
+“尽力交付”统一指 `FIXED_OPERATIONS`，不承诺名义产量；不能用它跳过递归中间步骤的
+数量要求。`CraftingResolver` 的 `bestEffort` 是另一层的“部分材料准备”，只决定规划
+是否保留可完成的分支，不改变概率产物的完成合同。
+
+概率未命中是“本次操作已完成、零产出”，不是机器失败、输出被取走或可退回投入材料。
+数量目标在尝试上限或原料耗尽后尚未达到时，报告 `PRODUCTION_TARGET_UNMET`，
+保留真实产物并停止依赖这些缺料的下游；不得补发模板产物或退回已经消耗的本次材料。
+单次未命中不会触发该终止状态。
+
+自定义 API 执行器应返回 `OperationCollection(序号, 空产物列表, 实际材料处置, true, ...)`
+表达合法零产出，材料处置仍必须完整。标准 I/O 机器必须提供能证明操作完成的信号：
+忙碌后回到空闲、进度完成，或 `IMMEDIATE_ON_INSERT` 下确认消耗材料已离开输入端口。
+仅输出增量无法证明一次零产出操作已经结束；这类机器应使用状态提供器或 `CUSTOM`，
+不能仅因为输出槽为空就报失败，也不能仅因为概率下限为零就直接宣告完成。
 
 ## 5. RecipeView 语义
 
@@ -499,8 +533,9 @@ public final class MySmeltingRecipeIntegration
 | `sourceInputEntryId` | returned/transformed 输出对应的输入 |
 
 概率输出必须使用 `OutputProbability.probabilistic(...)` 或
-`OutputProbability.dynamic(...)`。机器执行失败或概率未命中时，不得根据配方模板补发
-产物；RSI 只接受执行器实际收集到的输出。
+`OutputProbability.dynamic(...)`。概率未命中允许零产出，操作成功与否由执行完成信号
+判定；无论机器失败还是概率未命中，均不得根据配方模板补发产物。
+RSI 只接受执行器实际收集到的输出。
 
 ### 5.3 可选可用性检查
 

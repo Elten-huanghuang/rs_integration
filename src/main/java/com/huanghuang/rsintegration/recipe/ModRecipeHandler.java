@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
+import com.huanghuang.rsintegration.api.recipe.OutputSemantics;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.ScaledIngredientSpec;
@@ -200,31 +201,40 @@ public interface ModRecipeHandler {
         return false;
     }
 
+    /** 结构化处理器只声明输出合同，确定性、随机性及目标补做统一从这里推导。 */
+    @Nonnull
+    default List<? extends OutputSemantics> getOutputSemantics(@Nonnull Recipe<?> recipe) {
+        return getDeclaredOutputs(recipe, RegistryAccess.EMPTY);
+    }
+
     /** Whether one execution is guaranteed to produce the item returned by {@link #getResultItem}. */
     default boolean hasDeterministicPrimaryOutput(@Nonnull Recipe<?> recipe) {
-        return true;
+        return !hasStructuredOutputContract(recipe)
+                || OutputSemantics.hasDeterministicPrimary(getOutputSemantics(recipe));
     }
 
     /**
      * 该配方是否存在随机（概率）产物。
      *
-     * <p>纯图要求声明的每个产物都必然出现，因此只要存在概率产物（包括概率主产物），
-     * 配方就不能作为递归合成的中间步骤。默认认为配方产物全部确定；带概率结算的
-     * 处理器必须覆盖本方法，纯图审计才会把它排除在外。</p>
+     * <p>结构化合同按每个输出的必出下限与最大数量推导，不把随机副产物等同于
+     * 主产物不可递归。尚未声明结构化合同的旧处理器仍需显式覆盖本方法。</p>
      */
     default boolean hasRandomizedOutputs(@Nonnull Recipe<?> recipe) {
-        return false;
+        return hasStructuredOutputContract(recipe)
+                && OutputSemantics.hasRandomizedOutputs(getOutputSemantics(recipe));
     }
 
     /**
      * 通用判定：配方是否具备「可以进纯图」的确定性语义。
      *
-     * <p>要求主产物必然产出，且不存在任何随机产物。机器类型仍可通过
+     * <p>结构化合同只要求主产物存在正数必出下限；概率副产物不会进入确定供料。
+     * 旧合同保留「主产物必出且无随机产物」的保守规则。机器类型仍可通过
      * {@code ModType.allowDeterministicProjection} 声明按配方逐个判断，
      * 这样概率配方被排除、确定性配方照常参与递归规划。</p>
      */
     default boolean supportsDeterministicProjection(@Nonnull Recipe<?> recipe) {
-        return hasDeterministicPrimaryOutput(recipe) && !hasRandomizedOutputs(recipe);
+        return hasDeterministicPrimaryOutput(recipe)
+                && (hasStructuredOutputContract(recipe) || !hasRandomizedOutputs(recipe));
     }
 
     /** 主产物在递归与消费者语义中的真实资源身份。 */
@@ -250,11 +260,16 @@ public interface ModRecipeHandler {
 
     /** 显式声明允许按实际产物补做；手动仪式等非确定行为不能自动加入。 */
     default boolean supportsTargetedProduction(@Nonnull Recipe<?> recipe) {
-        return false;
+        return hasStructuredOutputContract(recipe)
+                && OutputSemantics.supportsTargetedProduction(getOutputSemantics(recipe));
     }
 
     /** 指定目标是否需要实际产量门槛，包括概率副产物。 */
     default boolean requiresTargetedProduction(@Nonnull Recipe<?> recipe, @Nonnull ItemStack output) {
+        if (hasStructuredOutputContract(recipe)) {
+            return !output.isEmpty() && requiresTargetedProduction(
+                    recipe, IntegrationResourceKey.item(output));
+        }
         return supportsTargetedProduction(recipe) && !hasDeterministicPrimaryOutput(recipe);
     }
 
@@ -263,6 +278,9 @@ public interface ModRecipeHandler {
             @Nonnull Recipe<?> recipe,
             @Nonnull IntegrationResourceKey output
     ) {
+        if (hasStructuredOutputContract(recipe)) {
+            return OutputSemantics.requiresTargetedProduction(getOutputSemantics(recipe), output);
+        }
         if (output.kind() == IntegrationResourceKey.ResourceKind.FLUID) {
             return supportsTargetedProduction(recipe)
                     && !hasDeterministicPrimaryOutput(recipe);

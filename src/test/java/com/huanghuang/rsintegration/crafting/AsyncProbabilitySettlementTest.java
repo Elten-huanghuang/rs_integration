@@ -13,14 +13,20 @@ import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.crafting.graph.MaterialSource;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
+import com.huanghuang.rsintegration.crafting.graph.NodeOutputAccumulator;
 import com.huanghuang.rsintegration.crafting.graph.OutputDeclaration;
 import com.huanghuang.rsintegration.crafting.graph.OutputPortId;
+import com.huanghuang.rsintegration.crafting.graph.OutputProbability;
 import com.huanghuang.rsintegration.crafting.graph.RootAllocation;
 import com.huanghuang.rsintegration.crafting.graph.RootDemand;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+import com.huanghuang.rsintegration.recipe.RecipeOutputSpec;
+import com.huanghuang.rsintegration.mods.farmersdelight.CuttingBoardRecipeHandler;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.core.RegistryAccess;
+import net.minecraft.core.NonNullList;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -30,6 +36,10 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeManager;
+import net.minecraft.world.item.crafting.CraftingBookCategory;
+import net.minecraft.world.item.crafting.ShapelessRecipe;
+import vectorwing.farmersdelight.common.crafting.CuttingBoardRecipe;
+import vectorwing.farmersdelight.common.crafting.ingredient.ChanceResult;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.eventbus.api.IEventBus;
@@ -40,6 +50,7 @@ import org.mockito.MockedStatic;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -62,6 +73,143 @@ class AsyncProbabilitySettlementTest extends BootstrapTest {
             loading.when(FMLJavaModLoadingContext::get).thenReturn(context);
             Class.forName("com.huanghuang.rsintegration.RSIntegrationMod");
         }
+    }
+
+    @Test
+    void realCuttingRecipeExpandsAsAProbabilisticIntermediateInTheTypedResolver() {
+        CuttingBoardRecipe cutting = new CuttingBoardRecipe(
+                new ResourceLocation("test", "cutting_intermediate"), "",
+                Ingredient.of(Items.PAPER), Ingredient.of(Items.IRON_SWORD),
+                NonNullList.of(ChanceResult.EMPTY,
+                        new ChanceResult(new ItemStack(Items.EGG), 0.35F)), "");
+        ShapelessRecipe terminal = new ShapelessRecipe(
+                new ResourceLocation("test", "egg_terminal"), "", CraftingBookCategory.MISC,
+                new ItemStack(Items.GOLD_NUGGET),
+                NonNullList.of(Ingredient.EMPTY, Ingredient.of(Items.EGG)));
+        ServerLevel level = mock(ServerLevel.class);
+        when(level.registryAccess()).thenReturn(RegistryAccess.EMPTY);
+        CuttingBoardRecipeHandler handler = new CuttingBoardRecipeHandler();
+        List<String> missing = new ArrayList<>();
+        try (MockedStatic<ModRecipeHandlers> handlers =
+                     mockStatic(ModRecipeHandlers.class, CALLS_REAL_METHODS);
+             MockedStatic<RecipeIndex> index = mockStatic(RecipeIndex.class)) {
+            handlers.when(() -> ModRecipeHandlers.claimFor(cutting))
+                    .thenReturn(new ModRecipeHandlers.Claim(handler, List.of(handler)));
+            index.when(() -> RecipeIndex.reusableCatalystRoutes(level)).thenReturn(Map.of());
+            index.when(() -> RecipeIndex.get(level)).thenReturn(Map.of(
+                    Items.EGG, List.of(new RecipeIndex.Entry(cutting, ModType.GENERIC,
+                            new ResourceLocation("farmersdelight", "cutting"))),
+                    Items.GOLD_NUGGET, List.of(new RecipeIndex.Entry(terminal, ModType.GENERIC,
+                            new ResourceLocation("minecraft", "crafting")))));
+
+            CraftPlanGraph graph = CraftingResolver.resolveMachineGraphForSpecsWithTypes(
+                    List.of(new IngredientSpec(Ingredient.of(Items.GOLD_NUGGET), 1)),
+                    Map.of(new CraftingResolver.StackKey(Items.PAPER, null), 1L,
+                            new CraftingResolver.StackKey(Items.IRON_SWORD, null), 1L),
+                    level, null, null, missing, null, false, 10_000);
+
+            assertTrue(missing.isEmpty(), missing.toString());
+            assertEquals(2, graph.nodes().size());
+            CraftNode intermediate = graph.nodes().stream()
+                    .filter(node -> node.recipeId().equals(cutting.getId())).findFirst().orElseThrow();
+            assertEquals(0L, intermediate.outputs().get(0).guaranteedMinimum());
+            assertTrue(intermediate.outputs().get(0).targetProducing());
+            assertTrue(AsyncCraftChain.requiresAdaptiveProduction(graph));
+        }
+    }
+
+    @Test
+    void typedIntermediateKeepsItsTargetSeparateFromGuaranteedOutput() {
+        Recipe<?> recipe = mock(Recipe.class);
+        ResourceLocation recipeId = new ResourceLocation("test", "random_intermediate");
+        when(recipe.getId()).thenReturn(recipeId);
+        ServerLevel level = mock(ServerLevel.class);
+        when(level.registryAccess()).thenReturn(RegistryAccess.EMPTY);
+        ModRecipeHandler handler = mock(ModRecipeHandler.class);
+        when(handler.getResultItem(recipe, RegistryAccess.EMPTY))
+                .thenReturn(new ItemStack(Items.EGG));
+        doCallRealMethod().when(handler).requiredIngredientCount(
+                eq(recipe), any(IngredientSpec.class), anyInt(), anyInt());
+        when(handler.requiresTargetedProduction(eq(recipe), any(ItemStack.class)))
+                .thenReturn(true);
+        when(handler.getDeclaredOutputs(recipe, RegistryAccess.EMPTY))
+                .thenReturn(List.of(RecipeOutputSpec.item(
+                        MaterialKey.of(new ItemStack(Items.EGG)), 0, 0, 1, PRIMARY,
+                        OutputProbability.probabilistic(0.35, 16, "egg"), false, null)));
+        try (MockedStatic<ModRecipeHandlers> handlers = mockStatic(ModRecipeHandlers.class);
+             MockedStatic<RecipeIndex> index = mockStatic(RecipeIndex.class);
+             MockedStatic<CraftPacketUtils> packets = mockStatic(CraftPacketUtils.class, CALLS_REAL_METHODS)) {
+            handlers.when(() -> ModRecipeHandlers.claimFor(recipe))
+                    .thenReturn(new ModRecipeHandlers.Claim(handler, List.of(handler)));
+            packets.when(() -> CraftPacketUtils.extractIngredientSpecs(recipe))
+                    .thenReturn(List.of(new IngredientSpec(Ingredient.of(Items.PAPER), 1)));
+            index.when(() -> RecipeIndex.reusableCatalystRoutes(level)).thenReturn(Map.of());
+            ResolutionContext context = new ResolutionContext(level, Map.of(),
+                    List.of(new ItemStack(Items.PAPER, 2)), null);
+            RecipeIndex.Entry entry = new RecipeIndex.Entry(recipe, ModType.GENERIC,
+                    new ResourceLocation("test", "random"));
+
+            assertTrue(StepExecutor.craftBatched(entry, context, 0, List.of(), List.of(),
+                    new CraftingResolver.EdgeTracker(), 2, new ItemStack(Items.EGG)));
+
+            OutputDeclaration output = context.graphNodes.get(0).outputs().get(0);
+            assertEquals(0L, output.guaranteedMinimum());
+            assertEquals(2L, output.quantity());
+            assertTrue(output.targetProducing());
+            assertEquals(2L, ExecutionEquivalence.projectStep(context.graphNodes.get(0))
+                    .productionTarget().quantity());
+        }
+    }
+
+    @Test
+    void probabilityGraphUsesAdaptiveInputsAndFixedAttemptsKeepTheirOwnCompletionRule() throws Exception {
+        Fixture fixture = fixture(null, 1);
+        NodeId nodeId = new NodeId(0);
+        MaterialKey egg = MaterialKey.of(new ItemStack(Items.EGG));
+        OutputDeclaration output = OutputDeclaration.item(new OutputPortId(nodeId, 0),
+                egg, 3, PRIMARY, 0, 3,
+                OutputProbability.probabilistic(0.35, 16, "egg"), false, null);
+        CraftPlanGraph fixed = singleNodeGraph(nodeId, output);
+        CraftPlanGraph targeted = singleNodeGraph(nodeId, output.withTargetProducing(true));
+
+        assertNull(ExecutionEquivalence.projectFlatSteps(fixed).get(0).productionTarget());
+        assertFalse(AsyncCraftChain.requiresAdaptiveProduction(fixed));
+        assertTrue(AsyncCraftChain.requiresAdaptiveProduction(targeted));
+        AsyncCraftChain chain = new AsyncCraftChain(UUID.randomUUID(),
+                fixture.player.getServer(), null, targeted);
+        assertFalse(chain.isGraphExecution());
+        assertEquals(3L, ExecutionEquivalence.projectFlatSteps(targeted).get(0)
+                .productionTarget().quantity());
+    }
+
+    @Test
+    void randomMissSettlesOperationWhileTheIntermediateTargetStillWaits() {
+        NodeId node = new NodeId(0);
+        OutputPortId port = new OutputPortId(node, 0);
+        OutputDeclaration output = OutputDeclaration.item(port,
+                MaterialKey.of(new ItemStack(Items.EGG)), 2, PRIMARY, 0, 2,
+                OutputProbability.probabilistic(0.35, 16, "egg"), false, null);
+        IBatchDelegate delegate = mock(IBatchDelegate.class);
+        when(delegate.publishesDeclaredGraphOutputs()).thenReturn(true);
+        CraftNodeRuntime runtime = new CraftNodeRuntime(node, "test:random", delegate, null, null);
+        runtime.attachOutputs(new NodeOutputAccumulator(List.of(output)));
+        runtime.targetCompletion(port, 2L);
+
+        assertTrue(runtime.operationOutputsComplete());
+        assertFalse(runtime.productionTargetComplete());
+        assertFalse(runtime.outputsComplete());
+        assertEquals(OperationExecutionKernel.CompletionResult.SUCCEEDED,
+                runtime.completeOperation(runtime::operationOutputsComplete, () -> {}));
+    }
+
+    private CraftPlanGraph singleNodeGraph(NodeId nodeId, OutputDeclaration output) {
+        CraftNode node = new CraftNode(nodeId, new ResourceLocation("test", "random"),
+                ModType.GENERIC.id(), new ResourceLocation("test", "random"), 3,
+                List.of(), List.of(), false, null, null, List.of(), List.of(output));
+        return new CraftPlanGraph(1, List.of(node), List.of(),
+                List.of(new RootDemand(Ingredient.of(Items.EGG), 3L, 0L, new ItemStack(Items.EGG),
+                        List.of(new RootAllocation(new MaterialSource.ProducerOutput(output.id()),
+                                output.material(), 3L)))), List.of(), List.of(nodeId));
     }
 
     @Test

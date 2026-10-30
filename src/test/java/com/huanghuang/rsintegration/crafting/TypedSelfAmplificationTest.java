@@ -6,6 +6,8 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.EdgeTracker;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
+import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
+import com.huanghuang.rsintegration.crafting.graph.CraftPlanValidator;
 import com.huanghuang.rsintegration.crafting.planning.PlanningPreferences;
 import com.huanghuang.rsintegration.mods.embers.EreAlchemyRSModule;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
@@ -16,6 +18,7 @@ import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.NonNullList;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.CraftingRecipe;
@@ -25,12 +28,16 @@ import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.MockedStatic;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -52,6 +59,80 @@ class TypedSelfAmplificationTest extends BootstrapTest {
             RSIntegrationMod.MOD_BUS.getClass();
         }
         EreAlchemyRSModule.INSTANCE.registerModType();
+    }
+
+    @Test
+    void productiveSelfEdgeDoesNotBlockTheSameCopyRecipeInAnotherBranch() {
+        EdgeTracker edges = new EdgeTracker();
+        StackKey seed = new StackKey(Items.DIAMOND, null);
+        StackKey fuel = new StackKey(Items.COAL, null);
+        edges.beginUndo();
+        edges.addEdge(seed, seed);
+        edges.addEdge(fuel, seed);
+        edges.commitUndo();
+
+        assertFalse(edges.containsReverse(seed, seed));
+        assertTrue(edges.containsReverse(seed, fuel));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"1, 4, false, false", "4, 1, false, false", "1, 4, true, false",
+            "1, 5, false, true", "1, 5, true, true", "0, 16, false, false",
+            "1, 3, false, false"})
+    void copySeedSurvivesAnIntermediateBeforeALaterRootDemand(
+            int seeds, int fuel, boolean bestEffort, boolean forced) {
+        CraftingRecipe copy = craftingRecipe("copy_calx", Items.DIAMOND, 2,
+                Items.DIAMOND, Items.COAL);
+        CraftingRecipe glass = craftingRecipe("alchemy_glass", Items.REDSTONE, 1,
+                Items.DIAMOND, Items.DIAMOND, Items.DIAMOND, Items.DIAMOND);
+        Level level = mock(Level.class);
+        when(level.registryAccess()).thenReturn(RegistryAccess.EMPTY);
+        ArrayList<String> missing = new ArrayList<>();
+        try (MockedStatic<RecipeIndex> recipeIndex = mockStatic(RecipeIndex.class)) {
+            recipeIndex.when(() -> RecipeIndex.reusableCatalystRoutes(any()))
+                    .thenReturn(Map.of());
+            recipeIndex.when(() -> RecipeIndex.get(level)).thenReturn(Map.of(
+                    Items.DIAMOND, List.of(craftingEntry(copy)),
+                    Items.REDSTONE, List.of(craftingEntry(glass))));
+
+            CraftPlanGraph graph = CraftingResolver.resolveMachineGraphForSpecsWithTypes(
+                    List.of(new IngredientSpec(Ingredient.of(Items.REDSTONE), 1),
+                            new IngredientSpec(Ingredient.of(Items.DIAMOND), 1)),
+                    Map.of(new StackKey(Items.DIAMOND, null), (long) seeds,
+                            new StackKey(Items.COAL, null), (long) fuel),
+                    level, null, null, missing,
+                    forced ? Map.of(new ResourceLocation("minecraft", "diamond"), copy.getId()) : null,
+                    bestEffort, 10_000);
+
+            CraftPlanValidator.validate(graph);
+            boolean feasible = seeds > 0 && seeds + fuel >= (forced ? 6 : 5);
+            assertEquals(feasible, missing.isEmpty(), missing.toString());
+            assertEquals(feasible, graph.unresolvedDemands().isEmpty()
+                    && graph.rootDemands().size() == 2
+                    && graph.rootDemands().stream().allMatch(root -> root.unresolvedQuantity() == 0));
+            if (feasible) {
+                assertEquals(fuel, graph.nodes().stream()
+                        .filter(node -> node.recipeId().equals(copy.getId()))
+                        .mapToInt(node -> node.executions()).sum());
+            }
+        }
+    }
+
+    private static CraftingRecipe craftingRecipe(String id, Item output,
+                                                  int count, Item... inputs) {
+        CraftingRecipe recipe = mock(CraftingRecipe.class);
+        when(recipe.getId()).thenReturn(new ResourceLocation("test", id));
+        NonNullList<Ingredient> ingredients = NonNullList.create();
+        for (var input : inputs) ingredients.add(Ingredient.of(input));
+        when(recipe.getIngredients()).thenReturn(ingredients);
+        when(recipe.getRemainingItems(any())).thenReturn(NonNullList.create());
+        when(recipe.getResultItem(any())).thenReturn(new ItemStack(output, count));
+        return recipe;
+    }
+
+    private static RecipeIndex.Entry craftingEntry(CraftingRecipe recipe) {
+        return new RecipeIndex.Entry(recipe, ModType.GENERIC,
+                new ResourceLocation("minecraft", "crafting"), false);
     }
 
     @Test

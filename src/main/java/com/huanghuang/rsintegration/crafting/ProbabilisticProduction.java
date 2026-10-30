@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.api.execution.CollectedOutput;
+import com.huanghuang.rsintegration.api.recipe.ProductionCompletionPolicy;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import net.minecraft.world.item.ItemStack;
 
@@ -25,8 +26,14 @@ final class ProbabilisticProduction {
     long produced() { return produced; }
     long remaining() { return Math.max(0L, target.quantity() - produced); }
     int maxAttempts() { return maxAttempts; }
-    boolean complete() { return remaining() == 0; }
-    boolean canAttempt() { return !complete() && attempts < maxAttempts; }
+    boolean complete() {
+        return ProductionCompletionPolicy.TARGET_QUANTITY.isComplete(
+                target.quantity(), produced, attempts, maxAttempts);
+    }
+    boolean canAttempt() {
+        return ProductionCompletionPolicy.TARGET_QUANTITY.canAttempt(
+                target.quantity(), produced, attempts, maxAttempts);
+    }
 
     void started() {
         if (!canAttempt()) throw new IllegalStateException("probabilistic attempt budget exhausted");

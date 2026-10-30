@@ -16,7 +16,7 @@ public record OutputDeclaration(
         boolean dynamicIdentity,
         boolean targetProducing,
         @Nullable ResourceLocation sourceInputEntryId
-) {
+) implements OutputSemantics {
     public OutputDeclaration {
         if (portId == null || outputGroup == null || outputGroup.isBlank()
                 || resource == null
@@ -38,5 +38,20 @@ public record OutputDeclaration(
             throw new IllegalArgumentException(
                     "returned/transformed output requires a source input entry");
         }
+    }
+
+    @Override
+    public long guaranteedMinimum() {
+        return probability.isGuaranteed() ? amount.min() : 0L;
+    }
+
+    @Override
+    public long maximumAmount() {
+        return amount.max();
+    }
+
+    @Override
+    public boolean isPrimary() {
+        return outputKind == OutputKind.PRIMARY;
     }
 }

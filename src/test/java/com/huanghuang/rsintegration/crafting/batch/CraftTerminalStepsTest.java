@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.crafting.graph.MaterialSource;
 import com.huanghuang.rsintegration.crafting.graph.OutputKind;
+import com.huanghuang.rsintegration.crafting.graph.OutputProbability;
 import com.huanghuang.rsintegration.crafting.graph.RootAllocation;
 import com.huanghuang.rsintegration.crafting.graph.RootDemand;
 import com.huanghuang.rsintegration.crafting.graph.TerminalGraphComposer;
@@ -23,9 +24,40 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CraftTerminalStepsTest extends BootstrapTest {
+    @Test
+    void fixedRandomOperationsDoNotBecomeAQuantityTarget() {
+        TerminalGraphComposer.TerminalOutput primary = TerminalGraphComposer.TerminalOutput.item(
+                MaterialKey.of(new ItemStack(Items.DIAMOND)), 1, 0, 1, OutputKind.PRIMARY,
+                OutputProbability.probabilistic(0.35, 16, "diamond"), false, null);
+        ResolutionStep terminal = terminalStep(3);
+
+        assertNull(CraftTerminalSteps.expectedTerminalStep(terminal, List.of(primary))
+                .productionTarget());
+    }
+
+    @Test
+    void explicitTotalQuantityIsNotMultipliedByTheAttemptCountAgain() {
+        CraftPlanGraph input = new CraftPlanGraph(1, List.of(), List.of(),
+                List.of(rootDemand(Items.PAPER)), List.of(), List.of());
+        ProductionTarget target = ProductionTarget.of(new ItemStack(Items.DIAMOND), 4L);
+        ResolutionStep terminal = new ResolutionStep(new ResourceLocation("test", "random_terminal"),
+                ModType.GENERIC, new ResourceLocation("test", "type"), List.of(), List.of(),
+                false, 3, null, null, target);
+        TerminalGraphComposer.TerminalOutput primary = TerminalGraphComposer.TerminalOutput.item(
+                MaterialKey.of(new ItemStack(Items.DIAMOND)), 4, 0, 4, OutputKind.PRIMARY,
+                OutputProbability.probabilistic(0.35, 16, "diamond"), false, null);
+
+        CraftPlanGraph graph = TerminalGraphComposer.compose(input, terminal, List.of(primary));
+
+        assertEquals(4L, graph.nodes().get(0).outputs().get(0).quantity());
+        assertEquals(0L, graph.nodes().get(0).outputs().get(0).guaranteedMinimum());
+        assertEquals(4L, ExecutionEquivalence.projectFlatSteps(graph).get(0).productionTarget().quantity());
+    }
+
 
     @Test
     void expectedTerminalAddsThePrimaryProductionTarget() {

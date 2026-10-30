@@ -163,6 +163,14 @@ public final class TerminalGraphComposer {
                     (long) output.maximumPerOperation(),
                     terminalStep.executions()
             );
+            boolean targeted = output.kind() == OutputKind.PRIMARY
+                    && terminalStep.productionTarget() != null;
+            if (targeted) {
+                // productionTarget 已是整单数量，不能再乘执行次数。
+                expectedTotal = terminalStep.productionTarget().quantity();
+                minimumTotal = Math.min(minimumTotal, expectedTotal);
+                maximumTotal = Math.max(maximumTotal, expectedTotal);
+            }
             InputPortId sourceInput = null;
             if (output.sourceInputIndex() != null) {
                 if (output.sourceInputIndex() >= inputs.size()) {
@@ -181,7 +189,8 @@ public final class TerminalGraphComposer {
                     output.probability(),
                     output.dynamicIdentity(),
                     sourceInput,
-                    output.resource()
+                    output.resource(),
+                    targeted
             );
             outputs.add(declaration);
             if (primary == null && output.kind() == OutputKind.PRIMARY) primary = declaration;

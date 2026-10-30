@@ -4,14 +4,19 @@ import com.huanghuang.rsintegration.mods.dungeonsdelight.DungeonsDelightRecipeHa
 import com.huanghuang.rsintegration.recipe.AbstractRecipeHandler;
 import com.huanghuang.rsintegration.recipe.CampfireRecipeSupport;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+import com.huanghuang.rsintegration.recipe.RecipeOutputSpec;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.api.recipe.OutputSemantics;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.ScaledIngredientSpec;
 import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
+import com.huanghuang.rsintegration.crafting.graph.OutputKind;
+import com.huanghuang.rsintegration.crafting.graph.OutputProbability;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -92,8 +97,8 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
             return CampfireRecipeSupport.resolveOutput(recipe, access);
         }
         if (recipe.getClass().getName().equals(CUTTING_BOARD_CLASS)) {
-            List<ItemStack> results = getCuttingBoardResults(recipe);
-            return results.isEmpty() ? ItemStack.EMPTY : results.get(0).copy();
+            List<CuttingBoardResult> results = getCuttingBoardResults(recipe);
+            return results.isEmpty() ? ItemStack.EMPTY : results.get(0).stack().copy();
         }
         return ModRecipeHandlers.tryGetResultItem(recipe, access);
     }
@@ -174,51 +179,56 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
     @Override
     public List<ItemStack> getSecondaryOutputs(Recipe<?> recipe, RegistryAccess access) {
         if (!recipe.getClass().getName().equals(CUTTING_BOARD_CLASS)) return List.of();
-        List<ItemStack> results = getCuttingBoardResults(recipe);
+        List<RecipeOutputSpec> results = cuttingBoardDeclaredOutputs(recipe);
         if (results.size() <= 1) return List.of();
-        List<ItemStack> probabilistic = getProbabilisticCuttingBoardResults(recipe);
         List<ItemStack> secondary = new ArrayList<>(results.size() - 1);
-        for (ItemStack result : results.subList(1, results.size())) {
-            // 概率产物（例如 CraftTweaker 添加的 % 概率输出）不是每次都会出现，
-            // 不能写进「必需次产物」的输出契约，否则没滚到就会被判 OUTPUT_MISSING。
-            if (probabilistic.stream().anyMatch(rolled -> ItemStack.isSameItemSameTags(rolled, result))) {
-                continue;
+        for (RecipeOutputSpec result : results.subList(1, results.size())) {
+            // 按结果条目判断，避免同种物品的概率额外产出抹掉必出数量。
+            if (result.guaranteedMinimum() > 0L) {
+                secondary.add(result.material().toStack((int) result.guaranteedMinimum()));
             }
-            secondary.add(result);
         }
         return List.copyOf(secondary);
     }
 
-    /** 概率小于 1 的切板产物，运行时由 rollResults 决定是否出现。 */
-    static List<ItemStack> getProbabilisticCuttingBoardResults(Recipe<?> recipe) {
+    /** 保留每个原生结果条目的概率与数量，预览和执行使用同一份结构化合同。 */
+    static List<RecipeOutputSpec> cuttingBoardDeclaredOutputs(Recipe<?> recipe) {
+        List<CuttingBoardResult> results = getCuttingBoardResults(recipe);
+        List<RecipeOutputSpec> outputs = new ArrayList<>(results.size());
+        for (int index = 0; index < results.size(); index++) {
+            CuttingBoardResult result = results.get(index);
+            int count = result.stack().getCount();
+            String group = "cutting:" + recipe.getId() + ":" + index;
+            OutputProbability probability = result.chance() >= 1.0F
+                    ? OutputProbability.guaranteed()
+                    : Float.isFinite(result.chance())
+                    ? OutputProbability.probabilistic(Math.max(0.0D, result.chance()), 16, group)
+                    : OutputProbability.dynamic(null, 16, group);
+            int guaranteed = probability.isGuaranteed() ? count : 0;
+            outputs.add(RecipeOutputSpec.item(MaterialKey.of(result.stack()),
+                    guaranteed, guaranteed, count,
+                    index == 0 ? OutputKind.PRIMARY : OutputKind.SECONDARY,
+                    probability, false, null));
+        }
+        return List.copyOf(outputs);
+    }
+
+    private record CuttingBoardResult(ItemStack stack, float chance) {}
+
+    /** 两个版本均用 ChanceResult 描述所有产物；省略 chance 的固定配方默认是 1。 */
+    private static List<CuttingBoardResult> getCuttingBoardResults(Recipe<?> recipe) {
+        if (!isCuttingBoardRecipe(recipe)) return List.of();
         try {
             Object values = recipe.getClass().getMethod("getRollableResults").invoke(recipe);
             if (!(values instanceof List<?> list) || list.isEmpty()) return List.of();
-            List<ItemStack> stacks = new ArrayList<>();
+            List<CuttingBoardResult> outputs = new ArrayList<>();
             for (Object value : list) {
                 if (value == null) continue;
-                Object chance = value.getClass().getMethod("getChance").invoke(value);
-                if (!(chance instanceof Number number) || number.floatValue() >= 1.0F) continue;
                 Object stack = value.getClass().getMethod("getStack").invoke(value);
-                if (stack instanceof ItemStack itemStack && !itemStack.isEmpty()) {
-                    stacks.add(itemStack.copy());
-                }
-            }
-            return List.copyOf(stacks);
-        } catch (ReflectiveOperationException e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Recipe] cutting board rollable probe failed", e);
-            return List.of();
-        }
-    }
-
-    private static List<ItemStack> getCuttingBoardResults(Recipe<?> recipe) {
-        try {
-            Object values = recipe.getClass().getMethod("getResults").invoke(recipe);
-            if (!(values instanceof List<?> list) || list.isEmpty()) return List.of();
-            List<ItemStack> outputs = new ArrayList<>();
-            for (Object value : list) {
-                if (value instanceof ItemStack stack && !stack.isEmpty()) {
-                    outputs.add(stack.copy());
+                if (!(stack instanceof ItemStack itemStack) || itemStack.isEmpty()) continue;
+                Object chance = value.getClass().getMethod("getChance").invoke(value);
+                if (chance instanceof Number number) {
+                    outputs.add(new CuttingBoardResult(itemStack.copy(), number.floatValue()));
                 }
             }
             return List.copyOf(outputs);
@@ -231,21 +241,7 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
     @Override
     public boolean hasDeterministicPrimaryOutput(Recipe<?> recipe) {
         if (!recipe.getClass().getName().equals(CUTTING_BOARD_CLASS)) return true;
-        try {
-            Object values = recipe.getClass().getMethod("getRollableResults").invoke(recipe);
-            if (!(values instanceof List<?> list) || list.isEmpty()) return false;
-            Object first = list.get(0);
-            Object chance = first == null ? null : first.getClass().getMethod("getChance").invoke(first);
-            return chance instanceof Number number && number.floatValue() >= 1.0F;
-        } catch (ReflectiveOperationException e) {
-            return false;
-        }
-    }
-
-    /** 切板配方是否带真正的小于 1 的概率结算结果。 */
-    static boolean hasProbabilisticCuttingBoardResults(Recipe<?> recipe) {
-        if (recipe == null || !recipe.getClass().getName().equals(CUTTING_BOARD_CLASS)) return false;
-        return !getProbabilisticCuttingBoardResults(recipe).isEmpty();
+        return OutputSemantics.hasDeterministicPrimary(cuttingBoardDeclaredOutputs(recipe));
     }
 
     public static List<IngredientSpec> appendOutputContainerSpec(

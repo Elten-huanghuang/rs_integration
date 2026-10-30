@@ -18,6 +18,8 @@ public enum CraftFailureCode {
             CraftProgressSnapshot.Reason.MATERIAL_EXTRACTION_FAILED),
     START_REJECTED("start_rejected", true, CraftProgressSnapshot.Reason.START_REJECTED),
     OUTPUT_MISSING("output_missing", false, CraftProgressSnapshot.Reason.OUTPUT_MISSING),
+    PRODUCTION_TARGET_UNMET("production_target_unmet", false,
+            CraftProgressSnapshot.Reason.PRODUCTION_TARGET_UNMET),
     TIMEOUT("timeout", false, CraftProgressSnapshot.Reason.TIMEOUT),
     PLAYER_CANCELLED("player_cancelled", false,
             CraftProgressSnapshot.Reason.PLAYER_CANCELLED),

@@ -805,6 +805,8 @@
   "rsi.progress.reason.material_extraction_failed": "Material extraction failed",
   "rsi.progress.reason.start_rejected": "The machine rejected this recipe",
   "rsi.progress.reason.output_missing": "The full output could not be confirmed",
+  "rsi.progress.reason.production_target_unmet": "Random operations settled, but the production target was not reached",
+  "rsi.diagnostic.hint.production_target": "Random recipes may yield nothing. Check remaining inputs and attempt limits. Actual outputs are retained and downstream steps wait for real materials.",
   "rsi.progress.reason.timeout": "Crafting timed out",
   "rsi.progress.reason.player_cancelled": "The player cancelled this craft",
   "rsi.progress.reason.player_offline": "The player disconnected",

@@ -2161,6 +2161,7 @@ public final class ConsumerCraftingRuntime {
         return switch (reason) {
             case MACHINE_BUSY, NO_BOUND_MACHINE -> FailureReason.MACHINE_INVALID;
             case OUTPUT_MISSING -> FailureReason.OUTPUT_INVALID;
+            case PRODUCTION_TARGET_UNMET -> FailureReason.PRODUCTION_TARGET_UNMET;
             case TIMEOUT -> FailureReason.TIMEOUT;
             case PLAYER_OFFLINE -> FailureReason.PLAYER_OFFLINE;
             case INTERNAL_ERROR -> FailureReason.EXECUTION_EXCEPTION;

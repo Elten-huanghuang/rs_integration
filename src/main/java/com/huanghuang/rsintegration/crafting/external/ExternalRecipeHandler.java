@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.api.diagnostic.IntegrationDiagnostic;
 import com.huanghuang.rsintegration.api.recipe.MaterialRequirement;
 import com.huanghuang.rsintegration.api.recipe.OutputDeclaration;
 import com.huanghuang.rsintegration.api.recipe.OutputProbabilityMode;
+import com.huanghuang.rsintegration.api.recipe.OutputSemantics;
 import com.huanghuang.rsintegration.api.recipe.RecipeAvailability;
 import com.huanghuang.rsintegration.api.recipe.RecipeAvailabilityContext;
 import com.huanghuang.rsintegration.api.recipe.RecipeAvailabilityProvider;
@@ -177,7 +178,7 @@ final class ExternalRecipeHandler implements ModRecipeHandler {
         if (!projection.available()) return 0L;
         OutputDeclaration primary =
                 ExternalRecipeProjection.primaryOutput(projection.view());
-        return primary == null ? 0L : primary.amount().min();
+        return primary == null ? 0L : ExternalRecipeProjection.nominalAmount(primary);
     }
 
     @Nullable
@@ -232,52 +233,9 @@ final class ExternalRecipeHandler implements ModRecipeHandler {
     }
 
     @Override
-    public boolean hasDeterministicPrimaryOutput(Recipe<?> recipe) {
+    public List<? extends OutputSemantics> getOutputSemantics(Recipe<?> recipe) {
         ExternalRecipeProjection.Result projection = project(recipe);
-        return projection.available()
-                && ExternalRecipeProjection.deterministicPrimary(projection.view());
-    }
-
-    /**
-     * 公共 API 集成已在 {@code RecipeView.outputs()} 里声明了每个产物的概率，
-     * 因此随机产物完全由集成自己声明：只要存在非 GUARANTEED 的产物，就不能进纯图。
-     */
-    @Override
-    public boolean hasRandomizedOutputs(Recipe<?> recipe) {
-        ExternalRecipeProjection.Result projection = project(recipe);
-        return projection.available()
-                && projection.view().outputs().stream().anyMatch(output ->
-                output.probability().mode() != OutputProbabilityMode.GUARANTEED);
-    }
-
-    @Override
-    public boolean supportsTargetedProduction(Recipe<?> recipe) {
-        ExternalRecipeProjection.Result projection = project(recipe);
-        if (!projection.available()) return false;
-        OutputDeclaration primary =
-                ExternalRecipeProjection.primaryOutput(projection.view());
-        return ExternalRecipeProjection.targetProducing(projection.view())
-                || (primary != null
-                && primary.probability().mode()
-                != OutputProbabilityMode.GUARANTEED);
-    }
-
-    @Override
-    public boolean requiresTargetedProduction(
-            Recipe<?> recipe,
-            IntegrationResourceKey output
-    ) {
-        ExternalRecipeProjection.Result projection = project(recipe);
-        if (!projection.available()) return false;
-        OutputDeclaration primary =
-                ExternalRecipeProjection.primaryOutput(projection.view());
-        if (primary == null
-                || !matchesTarget(primary.resource(), output)) {
-            return false;
-        }
-        return primary.targetProducing()
-                || primary.probability().mode()
-                != OutputProbabilityMode.GUARANTEED;
+        return projection.available() ? projection.view().outputs() : List.of();
     }
 
     @Override
@@ -340,7 +298,7 @@ final class ExternalRecipeHandler implements ModRecipeHandler {
                         sourceInput
                 );
             }
-            outputs.add(spec);
+            outputs.add(spec.withTargetProducing(output.targetProducing()));
         }
         return List.copyOf(outputs);
     }
@@ -474,16 +432,6 @@ final class ExternalRecipeHandler implements ModRecipeHandler {
         RSIntegrationMod.LOGGER.warn(
                 "[RSI-API] recipe {} projection from {} failed: {}",
                 recipe.getId(), integration.id(), exception.getMessage());
-    }
-
-    private static boolean matchesTarget(
-            IntegrationResourceKey declared,
-            IntegrationResourceKey target
-    ) {
-        return declared.kind() == target.kind()
-                && declared.id().equals(target.id())
-                && (target.identity().isEmpty()
-                || declared.identity().equals(target.identity()));
     }
 
     private record ProjectionKey(

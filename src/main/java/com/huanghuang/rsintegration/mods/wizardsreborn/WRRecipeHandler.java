@@ -62,11 +62,21 @@ public final class WRRecipeHandler extends AbstractRecipeHandler {
 
     @Override
     public boolean supportsBackgroundPlanning(Recipe<?> recipe) {
-        // Arcane Workbench recipes have fixed item inputs and a declared output.
-        // Crystal rituals and infusion recipes depend on a live ritual area;
-        // Arcane Iterator output can depend on the current enchantment level.
+        // 晶核等迭代器配方有固定物品产物，可作为递归中间步骤；逐级附魔仍依赖运行时等级。
         return recipe.getClass().getName().endsWith("ArcaneWorkbenchRecipe")
-                || isArcaneWorkbenchRecipeId(recipe);
+                || isArcaneWorkbenchRecipeId(recipe)
+                || hasStaticIteratorOutput(recipe);
+    }
+
+    private static boolean hasStaticIteratorOutput(Recipe<?> recipe) {
+        if (!recipe.getClass().getName().endsWith("ArcaneIteratorRecipe")) return false;
+        try {
+            return !invokeBool(recipe, "hasEnchantment")
+                    && !invokeBool(recipe, "hasArcaneEnchantment")
+                    && !scanOutputField(recipe).isEmpty();
+        } catch (Exception failure) {
+            return false;
+        }
     }
 
     @Override

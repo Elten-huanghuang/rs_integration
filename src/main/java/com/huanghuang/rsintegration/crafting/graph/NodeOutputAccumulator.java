@@ -54,39 +54,42 @@ public final class NodeOutputAccumulator {
             }
         }
         List<Publication> publications = new ArrayList<>();
+        // 同资源的可选端口不能先吃掉必出端口的份额。
         for (OutputDeclaration declaration : declarations) {
-            if (declaration.kind() == OutputKind.DYNAMIC) continue;
-            long limit = declaration.maximumQuantity();
-            long remaining = limit - published.get(declaration.id());
-            if (remaining <= 0L) continue;
-            if (declaration.resource().kind()
-                    == IntegrationResourceKey.ResourceKind.FLUID) {
-                takeFluid(
-                        declaration,
-                        remaining,
-                        publications
-                );
-                continue;
-            }
-            for (ItemStack stack : pending) {
-                if (remaining <= 0L) break;
-                if (stack.isEmpty()
-                        || !MaterialMatcher.matchesOutputDeclaration(declaration.material(), stack)) continue;
-                int take = (int) Math.min(remaining, stack.getCount());
-                ItemStack fragment = stack.copyWithCount(take);
-                stack.shrink(take);
-                publications.add(new Publication(
-                        declaration.id(),
-                        declaration.material(),
-                        fragment,
-                        declaration.resource()
-                ));
-                published.merge(declaration.id(), (long) take, Long::sum);
-                remaining -= take;
-            }
+            publishUpTo(declaration, declaration.guaranteedMinimum(), publications);
+        }
+        for (OutputDeclaration declaration : declarations) {
+            publishUpTo(declaration, declaration.maximumQuantity(), publications);
         }
         pending.removeIf(ItemStack::isEmpty);
         pendingResources.removeIf(output -> output.amount() <= 0L);
+        logUnmatchedOutputs(publications);
+        return List.copyOf(publications);
+    }
+
+    private void publishUpTo(OutputDeclaration declaration, long limit, List<Publication> publications) {
+        if (declaration.kind() == OutputKind.DYNAMIC) return;
+        long remaining = limit - published.get(declaration.id());
+        if (remaining <= 0L) return;
+        if (declaration.resource().kind() == IntegrationResourceKey.ResourceKind.FLUID) {
+            takeFluid(declaration, remaining, publications);
+            return;
+        }
+        for (ItemStack stack : pending) {
+            if (remaining <= 0L) break;
+            if (stack.isEmpty()
+                    || !MaterialMatcher.matchesOutputDeclaration(declaration.material(), stack)) continue;
+            int take = (int) Math.min(remaining, stack.getCount());
+            ItemStack fragment = stack.copyWithCount(take);
+            stack.shrink(take);
+            publications.add(new Publication(
+                    declaration.id(), declaration.material(), fragment, declaration.resource()));
+            published.merge(declaration.id(), (long) take, Long::sum);
+            remaining -= take;
+        }
+    }
+
+    private void logUnmatchedOutputs(List<Publication> publications) {
         if (publications.isEmpty()
                 && (!pending.isEmpty() || !pendingResources.isEmpty())
                 && !mismatchLogged) {
@@ -108,7 +111,6 @@ public final class NodeOutputAccumulator {
                             : actualStack.getTag(),
                     expected);
         }
-        return List.copyOf(publications);
     }
 
     private void takeFluid(
@@ -213,12 +215,11 @@ public final class NodeOutputAccumulator {
     public List<Shortage> shortages() {
         List<Shortage> shortages = new ArrayList<>();
         for (OutputDeclaration declaration : declarations) {
-            if (declaration.kind() == OutputKind.DYNAMIC
-                    || !declaration.probability().isGuaranteed()) continue;
+            if (declaration.kind() == OutputKind.DYNAMIC) continue;
             long actual = published.get(declaration.id());
-            if (actual < declaration.minimumQuantity()) {
+            if (actual < declaration.guaranteedMinimum()) {
                 shortages.add(new Shortage(declaration.id(), declaration.kind(),
-                        declaration.resource(), declaration.minimumQuantity(), actual));
+                        declaration.resource(), declaration.guaranteedMinimum(), actual));
             }
         }
         return List.copyOf(shortages);

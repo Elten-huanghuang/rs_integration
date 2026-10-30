@@ -13,6 +13,10 @@ import java.util.Map;
 public final class OutputAccounting {
     private OutputAccounting() {}
 
+    public static boolean permitsEmptyResult(OutputContract contract) {
+        return contract != null && contract.permitsEmptyResult();
+    }
+
     public record CollectedOutput(String portId, OutputContract.Source source, ItemStack stack) {
         public CollectedOutput {
             if (portId == null || portId.isBlank()) {
@@ -130,7 +134,7 @@ public final class OutputAccounting {
                     actualCount = Math.addExact(actualCount, (long) output.stack().getCount());
                 }
             }
-            settlements.add(new PortSettlement(port, port.expectedCount(operations), actualCount, matching));
+            settlements.add(new PortSettlement(port, port.guaranteedCount(operations), actualCount, matching));
         }
 
         byPort.values().forEach(unexpected::addAll);

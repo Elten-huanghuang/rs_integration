@@ -87,6 +87,8 @@ import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemStackHandler;
 import net.minecraftforge.registries.ForgeRegistries;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -112,6 +114,111 @@ import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.withSettings;
 
 class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void randomZeroOutputWaitsForAnOperationSignalAndThenCompletes(boolean busySignal)
+            throws ReflectiveOperationException {
+        ResourceLocation recipeId = resource("random_zero");
+        ResourceLocation processId = resource("random_process");
+        RecipeView view = randomRecipeView(recipeId, processId);
+        DefaultRSIIntegrationApi api = new DefaultRSIIntegrationApi();
+        ItemStackHandler inventory = new ItemStackHandler(3);
+        StubMachineIntegration machine = new StubMachineIntegration(processId)
+                .withInternalItemHandler(inventory);
+        AtomicReference<MachineState> state = new AtomicReference<>(
+                new MachineState(true, true, false, 0, 0, null, null, 1L, null));
+        if (busySignal) machine.stateProvider = (context, blockEntity) -> state.get();
+        api.beginRegistration();
+        api.registerRecipe(new StubRecipeIntegration(view), new RegistrationOptions(10, Map.of()));
+        api.registerMachine(machine, new RegistrationOptions(10, Map.of()));
+        api.freezeRegistration();
+
+        ServerLevel level = mock(ServerLevel.class);
+        MinecraftServer server = mock(MinecraftServer.class);
+        ServerPlayer player = mock(ServerPlayer.class);
+        BlockEntity blockEntity = mock(BlockEntity.class);
+        when(level.hasChunkAt(BlockPos.ZERO)).thenReturn(true);
+        when(level.getBlockEntity(BlockPos.ZERO)).thenReturn(blockEntity);
+        when(level.registryAccess()).thenReturn(RegistryAccess.EMPTY);
+        when(level.getGameTime()).thenReturn(10L);
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        when(player.level()).thenReturn(level);
+        setServer(player, server);
+        Recipe<?> recipe = mock(Recipe.class);
+        when(recipe.getId()).thenReturn(recipeId);
+        RecipeManager recipes = mock(RecipeManager.class);
+        doReturn(Optional.of(recipe)).when(recipes).byKey(recipeId);
+        when(level.getRecipeManager()).thenReturn(recipes);
+        ExternalIntegrationBatchDelegate delegate = new ExternalIntegrationBatchDelegate(api);
+        if (!busySignal) {
+            machine.executionMode = MachineExecutionMode.OUTPUT_DELTA_ONLY;
+            assertEquals(IBatchDelegate.PreparationState.FATAL,
+                    delegate.prepare(player, recipeId, null, BlockPos.ZERO).state());
+            assertTrue(inventory.getStackInSlot(0).isEmpty());
+            machine.executionMode = MachineExecutionMode.IMMEDIATE_ON_INSERT;
+        }
+        assertEquals(IBatchDelegate.PreparationState.READY,
+                delegate.prepare(player, recipeId, null, BlockPos.ZERO).state());
+        assertTrue(delegate.startPreparedOperation(
+                player, List.of(new ItemStack(Items.DIAMOND, 2)), new ExtractionLedger()));
+        assertEquals(IBatchDelegate.CraftPhase.WORKING, delegate.observeCraft(level).phase());
+
+        if (busySignal) {
+            state.set(new MachineState(true, true, true, 1, 10,
+                    recipeId, processId, 2L, null));
+            assertEquals(IBatchDelegate.CraftPhase.WORKING, delegate.observeCraft(level).phase());
+            state.set(new MachineState(true, true, false, 0, 0, null, null, 3L, null));
+        } else {
+            when(level.getGameTime()).thenReturn(13L);
+            assertEquals(IBatchDelegate.CraftPhase.WORKING, delegate.observeCraft(level).phase());
+            inventory.setStackInSlot(0, ItemStack.EMPTY);
+        }
+        assertEquals(IBatchDelegate.CraftPhase.DONE, delegate.observeCraft(level).phase());
+        assertTrue(delegate.collectStructuredResults(player).isEmpty());
+        assertTrue(OutputAccounting.assess(delegate.outputContract(), 1, List.of()).complete());
+        delegate.onBatchFinished(player);
+    }
+
+    @Test
+    void completedCustomRandomCollectionMayContainNoOutput()
+            throws ReflectiveOperationException {
+        RecipeView view = randomRecipeView(resource("custom_zero"), resource("random_process"));
+        MaterialRequirement input = view.materials().get(0);
+        ReservedMaterial reserved = new ReservedMaterial(input.entryId().toString(),
+                IntegrationResourceKey.item(new ItemStack(Items.DIAMOND)), 2L, input.consumption());
+        ServerPlayer player = mock(ServerPlayer.class);
+        RunningOperation operation = mock(RunningOperation.class);
+        when(operation.collect(player)).thenReturn(new OperationCollection(1L, List.of(),
+                List.of(new MaterialDisposition(reserved, MaterialOutcome.CONSUMED)), true, List.of()));
+        ExternalIntegrationBatchDelegate delegate = new ExternalIntegrationBatchDelegate(
+                new DefaultRSIIntegrationApi());
+        setField(delegate, "runningOperation", operation);
+        setField(delegate, "customMaterials", new StubReservedMaterials(List.of(reserved)));
+        setField(delegate, "recipeView", view);
+        setField(delegate, "executionKind", RecipeExecutionKind.CUSTOM);
+        setField(delegate, "executionPlan", customPlan(view, List.of(),
+                List.of(outputPort(view.outputs().get(0)))));
+        setField(delegate, "operationStartContext", new OperationStartContext(player,
+                new ExtractionLedger(), OperationStartContext.MaterialOwnership.CHAIN_RESERVED,
+                MaterialPlan.none(), List.of(), null, null, UUID.randomUUID(), UUID.randomUUID(), 1));
+        Method collect = ExternalIntegrationBatchDelegate.class.getDeclaredMethod("collectCustomStep");
+        collect.setAccessible(true);
+
+        assertNull(collect.invoke(delegate));
+        assertEquals(true, getField(delegate, "customCollectionComplete"));
+        assertTrue(delegate.collectAllResults(player).isEmpty());
+    }
+
+    private static RecipeView randomRecipeView(ResourceLocation recipeId, ResourceLocation processId) {
+        RecipeView base = recipeView(recipeId, processId);
+        OutputDeclaration primary = base.outputs().get(0);
+        OutputDeclaration random = new OutputDeclaration(primary.portId(), primary.outputGroup(),
+                primary.resource(), primary.amount(), primary.outputKind(),
+                OutputProbability.probabilistic(0.35, 16, "random"), false, false, null);
+        return new RecipeView(recipeId, processId, base.materials(), base.fluids(), List.of(random),
+                new RecipeFlags(true, false, false, false, false, false, true));
+    }
+
     @Test
     void oneShotBatchLimitUsesDeclaredInputAndOutputCapacity() {
         RecipeView view = recipeView(
@@ -1332,6 +1439,7 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
         private final ResourceLocation processId;
         private final boolean directionalOutput;
         private long revision = 1L;
+        private MachineExecutionMode executionMode = MachineExecutionMode.IMMEDIATE_ON_INSERT;
         private MachineStateProvider stateProvider;
         private IItemHandler internalItemHandler;
 
@@ -1427,7 +1535,7 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
                     ),
                     List.of(),
                     List.of(),
-                    MachineExecutionMode.IMMEDIATE_ON_INSERT,
+                    executionMode,
                     false,
                     ConcurrencyCapabilities.machineSlot(),
                     new SupportScope(

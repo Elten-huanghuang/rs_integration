@@ -25,6 +25,10 @@ public record OutputProbability(
         if (chance != null && (chance < 0.0D || chance > 1.0D || chance.isNaN())) {
             throw new IllegalArgumentException("chance must be in [0, 1]");
         }
+        if (mode == Mode.PROBABILISTIC && chance != null && chance == 1.0D) {
+            mode = Mode.GUARANTEED;
+            maxAttempts = 1;
+        }
         if (mode == Mode.GUARANTEED && (chance == null || chance != 1.0D || maxAttempts != 1)) {
             throw new IllegalArgumentException(
                     "guaranteed output requires chance=1 and maxAttempts=1");

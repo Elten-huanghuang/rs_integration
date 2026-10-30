@@ -124,9 +124,14 @@ class ExternalRecipeHandlerTest extends BootstrapTest {
         assertEquals(3, outputs.get(1).maximumPerOperation());
         assertEquals(0, outputs.get(1).expectedPerOperation());
         assertEquals(0.25D, outputs.get(1).probability().chance());
-        // 公共 API 自己声明了概率产物，随机性判定直接来自视图，不再由内建处理器硬编码。
+        // 概率副产物仍然保留，但不阻止必出主产物的递归投影。
         assertTrue(handler.hasRandomizedOutputs(mock(Recipe.class)));
-        assertFalse(handler.supportsDeterministicProjection(mock(Recipe.class)));
+        assertTrue(handler.supportsDeterministicProjection(mock(Recipe.class)));
+        assertTrue(handler.requiresTargetedProduction(mock(Recipe.class),
+                IntegrationResourceKey.item(new ItemStack(Items.APPLE))));
+        assertTrue(handler.requiresTargetedProduction(mock(Recipe.class), new ItemStack(Items.APPLE)));
+        assertFalse(handler.requiresTargetedProduction(mock(Recipe.class), new ItemStack(Items.STICK)));
+        assertFalse(handler.requiresTargetedProduction(mock(Recipe.class), new ItemStack(Items.DIAMOND)));
     }
 
     @Test

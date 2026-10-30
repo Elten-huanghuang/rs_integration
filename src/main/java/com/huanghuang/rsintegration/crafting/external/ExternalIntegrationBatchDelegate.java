@@ -42,6 +42,7 @@ import com.huanghuang.rsintegration.api.machine.MachineState;
 import com.huanghuang.rsintegration.api.machine.MachineStateProvider;
 import com.huanghuang.rsintegration.api.machine.SupportScope;
 import com.huanghuang.rsintegration.api.recipe.MaterialRequirement;
+import com.huanghuang.rsintegration.api.recipe.InputConsumption;
 import com.huanghuang.rsintegration.api.recipe.FluidRequirement;
 import com.huanghuang.rsintegration.api.recipe.OutputDeclaration;
 import com.huanghuang.rsintegration.api.recipe.OutputKind;
@@ -164,6 +165,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     private boolean customCollectionComplete;
     private long recipeRevision;
     private boolean operationStarted;
+    private boolean observedMachineBusy;
     private boolean resultsCollected;
     private long lastStateRevision = -1L;
     private long startedAtTick;
@@ -519,6 +521,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         this.lastCollectionSequence = 0L;
         this.recipeRevision = projection.revision();
         this.operationStarted = false;
+        this.observedMachineBusy = false;
         this.resultsCollected = false;
         this.lastStateRevision = -1L;
         this.inputBaseline.clear();
@@ -537,6 +540,14 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                 && stateProvider == null) {
             preparationFailure = Component.literal(
                     "RSI Integration TICKED_AND_BUSY machine has no state provider");
+            return false;
+        }
+        if (!customRecipe && stateProvider == null
+                && machineDescriptor.executionMode() == MachineExecutionMode.OUTPUT_DELTA_ONLY
+                && recipeView.outputs().stream().allMatch(OutputDeclaration::permitsEmptyResult)) {
+            preparationFailure = Component.literal(
+                    "RSI Integration optional outputs require a completion signal: "
+                            + "provide machine state, immediate input consumption, or CUSTOM execution");
             return false;
         }
         return true;
@@ -572,6 +583,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         }
         this.ledger = sharedLedger;
         this.operationStarted = false;
+        this.observedMachineBusy = false;
         this.resultsCollected = false;
         this.reportedResources.clear();
         this.reportedResourceFailure = null;
@@ -711,6 +723,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                         "machine reported " + state.failure().code());
             }
             if (state.busy()) {
+                observedMachineBusy = true;
                 if (state.activeRecipeId() != null
                         && !recipe.getId().equals(state.activeRecipeId())) {
                     return failObservation(
@@ -724,18 +737,22 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                 }
                 return workingObservation();
             }
-            if (state.totalProgress() > 0
+            if (observedMachineBusy || state.totalProgress() > 0
                     && state.progress() >= state.totalProgress()) {
                 return doneObservation();
             }
         }
-        if (hasNewExpectedOutput() || hasNewExpectedFluidOutput()) {
+        if (hasNewExpectedProduction()) {
             return doneObservation();
         }
         if (executionKind == RecipeExecutionKind.STANDARD_IO
                 && descriptor.executionMode()
                 == MachineExecutionMode.IMMEDIATE_ON_INSERT
                 && level.getGameTime() - startedAtTick > 1L) {
+            if (recipeView.outputs().stream().allMatch(OutputDeclaration::permitsEmptyResult)) {
+                // 即时机器也必须确认消费已完成，不能把空输出槽当成完成信号。
+                return consumedInputsAreEmpty() ? doneObservation() : workingObservation();
+            }
             return failObservation("machine produced no declared output");
         }
         return workingObservation();
@@ -1521,9 +1538,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             for (OutputPort port : executionPlan.outputPorts()) {
                 long total = nextOutputTotals.getOrDefault(
                         port.portId(), 0L);
-                if (port.probability().mode()
-                        == OutputProbabilityMode.GUARANTEED
-                        && total < port.amount().min()) {
+                if (total < port.guaranteedMinimum()) {
                     return "custom output " + port.portId()
                             + " is below its guaranteed minimum";
                 }
@@ -1927,9 +1942,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                     != IntegrationResourceKey.ResourceKind.FLUID) {
                 continue;
             }
-            long expected = output.probability().mode()
-                    == OutputProbabilityMode.GUARANTEED
-                    ? output.amount().min() : 0L;
+            long expected = output.guaranteedMinimum();
             long remaining = Math.min(
                     Integer.MAX_VALUE, output.amount().max());
             for (MachineFluidPort port : fluidOutputPorts(
@@ -2827,7 +2840,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
 
     private long plannedOutputMinimum(OutputDeclaration output) {
         return multiplySaturating(
-                output.amount().min(), plannedBatchOperations);
+                output.guaranteedMinimum(), plannedBatchOperations);
     }
 
     private long plannedOutputMaximum(OutputDeclaration output) {
@@ -2852,48 +2865,61 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                 .thenComparing(portId);
     }
 
-    private boolean hasNewExpectedOutput() {
-        boolean sawOutput = false;
+    private boolean hasNewExpectedProduction() {
+        boolean sawGuaranteedOutput = false;
         for (OutputDeclaration output : recipeView.outputs()) {
-            if (output.resource().kind()
-                    != IntegrationResourceKey.ResourceKind.ITEM) {
-                continue;
-            }
-            sawOutput = true;
+            long minimum = plannedOutputMinimum(output);
+            if (minimum <= 0L) continue;
+            sawGuaranteedOutput = true;
             long produced = 0L;
-            for (MachineItemPort port : outputPorts(output.outputGroup())) {
-                ItemStack current = get(port, null);
-                ItemStack before = outputBaseline.get(new SlotKey(port));
-                int baseline = before == null ? 0 : before.getCount();
-                if (matches(current, output)) {
-                    produced += Math.max(
-                            0, current.getCount() - baseline);
+            if (output.resource().kind() == IntegrationResourceKey.ResourceKind.ITEM) {
+                for (MachineItemPort port : outputPorts(output.outputGroup())) {
+                    ItemStack current = get(port, null);
+                    ItemStack before = outputBaseline.get(new SlotKey(port));
+                    int baseline = before == null || !matches(before, output) ? 0 : before.getCount();
+                    if (matches(current, output)) {
+                        produced += Math.max(0, current.getCount() - baseline);
+                    }
+                }
+            } else {
+                for (MachineFluidPort port : fluidOutputPorts(output.outputGroup())) {
+                    FluidStack current = getFluid(port);
+                    FluidStack before = fluidOutputBaseline.get(new FluidSlotKey(port));
+                    int baseline = before == null || !matchesFluid(before, output.resource())
+                            ? 0 : before.getAmount();
+                    if (matchesFluid(current, output.resource())) {
+                        produced += Math.max(0, current.getAmount() - baseline);
+                    }
                 }
             }
-            if (produced < plannedOutputMinimum(output)) return false;
+            if (produced < minimum) return false;
         }
-        return sawOutput;
+        return sawGuaranteedOutput;
     }
 
-    private boolean hasNewExpectedFluidOutput() {
-        for (OutputDeclaration output : recipeView.outputs()) {
-            if (output.resource().kind()
-                    != IntegrationResourceKey.ResourceKind.FLUID) {
-                continue;
-            }
-            for (MachineFluidPort port : fluidOutputPorts(
-                    output.outputGroup())) {
-                FluidStack current = getFluid(port);
-                FluidStack before = fluidOutputBaseline.get(
-                        new FluidSlotKey(port));
-                int baseline = before == null ? 0 : before.getAmount();
-                if (current.getAmount() > baseline
-                        && matchesFluid(current, output.resource())) {
-                    return true;
-                }
+    private boolean consumedInputsAreEmpty() {
+        boolean hasConsumedInput = false;
+        for (MaterialRequirement input : recipeView.materials()) {
+            if (input.consumption().kind() != InputConsumption.Kind.CONSUMED) continue;
+            hasConsumedInput = true;
+            var ingredient = ExternalRecipeProjection.ingredient(input.ingredient());
+            for (MachineItemPort port : descriptor.itemPorts()) {
+                if (port.direction() == InputOutputAccess.INPUT
+                        && matchesGroup(port.inputGroup(), input.inputGroup())
+                        && ingredient.test(get(port, null))) return false;
             }
         }
-        return false;
+        for (FluidRequirement input : recipeView.fluids()) {
+            hasConsumedInput = true;
+            for (MachineFluidPort port : descriptor.fluidPorts()) {
+                if (port.direction() != InputOutputAccess.INPUT
+                        || !matchesGroup(port.inputGroup(), input.inputGroup())) continue;
+                FluidStack current = getFluid(port);
+                if (!current.isEmpty() && input.fluid().alternatives().stream()
+                        .anyMatch(resource -> matchesFluid(current, resource))) return false;
+            }
+        }
+        return hasConsumedInput;
     }
 
     private ItemStack extractMatching(

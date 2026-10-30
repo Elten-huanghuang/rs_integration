@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
+import com.huanghuang.rsintegration.api.IntegrationResourceKey;
+import com.huanghuang.rsintegration.api.recipe.OutputSemantics;
 import com.huanghuang.rsintegration.crafting.graph.OutputProbability;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -41,6 +43,11 @@ public record OutputContract(List<Port> ports) {
         return new OutputContract(List.of());
     }
 
+    /** 完整声明的所有端口均允许缺席时，已完成的操作可以没有任何实物产出。 */
+    public boolean permitsEmptyResult() {
+        return !ports.isEmpty() && ports.stream().allMatch(Port::permitsEmptyResult);
+    }
+
     /** Builds the runtime accounting declaration for one already-planned buffered dispatch. */
     public static OutputContract fromPlan(InputBufferPlan plan) {
         if (plan == null || plan.outputs().isEmpty()) return none();
@@ -59,7 +66,32 @@ public record OutputContract(List<Port> ports) {
             OutputProbability probability,
             boolean dynamicIdentity,
             @Nullable ResourceLocation sourceInputEntryId
-    ) {
+    ) implements OutputSemantics {
+        @Override
+        public IntegrationResourceKey resource() {
+            return IntegrationResourceKey.item(prototype);
+        }
+
+        @Override
+        public long guaranteedMinimum() {
+            return probability.isGuaranteed() ? minimumPerOperation : 0L;
+        }
+
+        @Override
+        public long maximumAmount() {
+            return maximumPerOperation;
+        }
+
+        @Override
+        public boolean isPrimary() {
+            return kind == Kind.PRIMARY;
+        }
+
+        @Override
+        public boolean targetProducing() {
+            return !supportsDeterministicProjection();
+        }
+
         public Port(String portId, Integer physicalPort, ItemStack prototype,
                     int perOperation, Kind kind, Source source) {
             this(portId, physicalPort, prototype, perOperation, kind, source,
@@ -105,12 +137,16 @@ public record OutputContract(List<Port> ports) {
             return Math.multiplyExact((long) minimumPerOperation, Math.max(0L, operations));
         }
 
+        public long guaranteedCount(long operations) {
+            return Math.multiplyExact(guaranteedMinimum(), Math.max(0L, operations));
+        }
+
         public long maximumCount(long operations) {
             return Math.multiplyExact((long) maximumPerOperation, Math.max(0L, operations));
         }
 
         public boolean requiresExactProduction() {
-            return probability.isGuaranteed() && !dynamicIdentity;
+            return guaranteedMinimum() > 0L;
         }
     }
 }

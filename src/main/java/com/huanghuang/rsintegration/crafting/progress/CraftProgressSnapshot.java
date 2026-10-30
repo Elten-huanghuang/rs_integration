@@ -83,7 +83,8 @@ public record CraftProgressSnapshot(
         NETWORK_UNAVAILABLE,
         NO_BOUND_MACHINE,
         INPUT_CONFLICT,
-        SPECIAL_RESOURCE_INSUFFICIENT;
+        SPECIAL_RESOURCE_INSUFFICIENT,
+        PRODUCTION_TARGET_UNMET;
 
         public static Reason fromOrdinal(int ordinal) {
             Reason[] values = values();

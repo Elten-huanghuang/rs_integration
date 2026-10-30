@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.ScaledIngredientSpec;
 import com.huanghuang.rsintegration.recipe.AbstractRecipeHandler;
+import com.huanghuang.rsintegration.recipe.RecipeOutputSpec;
 import com.huanghuang.rsintegration.util.ModIds;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.item.ItemStack;
@@ -48,24 +49,13 @@ public final class CuttingBoardRecipeHandler extends AbstractRecipeHandler {
     }
 
     @Override
-    public boolean hasDeterministicPrimaryOutput(Recipe<?> recipe) {
-        return semantics.hasDeterministicPrimaryOutput(recipe);
+    public List<RecipeOutputSpec> getDeclaredOutputs(Recipe<?> recipe, RegistryAccess access) {
+        return FarmersDelightRecipeHandler.cuttingBoardDeclaredOutputs(recipe);
     }
 
     @Override
-    public boolean supportsTargetedProduction(Recipe<?> recipe) {
-        // 只有真正带概率结算的切板配方才按目标产物重试，确定性配方保持一次成型。
-        return FarmersDelightRecipeHandler.hasProbabilisticCuttingBoardResults(recipe);
-    }
-
-    /**
-     * 切板配方可能带概率产物，纯图要求产物必然出现，所以有概率结算的配方不能
-     * 作为中间步骤；产物完全确定的配方由 {@link #supportsDeterministicProjection}
-     * 统一放行（机器类型通过 allowDeterministicProjection 声明按配方逐个判断）。
-     */
-    @Override
-    public boolean hasRandomizedOutputs(Recipe<?> recipe) {
-        return FarmersDelightRecipeHandler.hasProbabilisticCuttingBoardResults(recipe);
+    public boolean hasStructuredOutputContract(Recipe<?> recipe) {
+        return true;
     }
 
     @Override
