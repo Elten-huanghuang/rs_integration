@@ -3,12 +3,15 @@ package com.huanghuang.rsintegration.api;
 import com.huanghuang.rsintegration.api.consumer.DefaultRSICraftConsumerApi;
 import com.huanghuang.rsintegration.api.consumer.RSIConsumerServices;
 import com.huanghuang.rsintegration.api.machine.MachineIntegration;
+import com.huanghuang.rsintegration.api.machine.gui.MachineGuiOpener;
 import com.huanghuang.rsintegration.api.recipe.RecipeIntegration;
 import com.huanghuang.rsintegration.api.resonance.RSIResonanceServices;
 import com.huanghuang.rsintegration.api.storage.DefaultRSIStorageApi;
 import com.huanghuang.rsintegration.api.storage.RSIStorageServices;
 import com.huanghuang.rsintegration.feature.resonance.api.DefaultRSIResonanceApi;
+import com.huanghuang.rsintegration.network.gui.BlockGuiRegistry;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.block.entity.BlockEntityType;
 import org.jetbrains.annotations.ApiStatus;
 
 import java.util.List;
@@ -64,6 +67,18 @@ public final class RSIIntegrationServices {
 
     public static void clearPlayer(UUID playerId) {
         CONSUMER.clearPlayer(playerId);
+    }
+
+    /**
+     * 供公共 GUI API 调用的内部注册桥接，避免公共类直接依赖网络实现。
+     */
+    public static boolean registerMachineGui(
+            BlockEntityType<?> type,
+            MachineGuiOpener opener
+    ) {
+        return BlockGuiRegistry.registerPreferred(
+                Objects.requireNonNull(type, "type"),
+                Objects.requireNonNull(opener, "opener"));
     }
 
     /**

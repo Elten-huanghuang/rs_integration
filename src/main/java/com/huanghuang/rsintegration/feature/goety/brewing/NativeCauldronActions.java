@@ -2,6 +2,9 @@ package com.huanghuang.rsintegration.feature.goety.brewing;
 
 import com.Polarice3.Goety.common.blocks.BrewCauldronBlock;
 import com.Polarice3.Goety.common.blocks.entities.BrewCauldronBlockEntity;
+import com.Polarice3.Goety.utils.SEHelper;
+import com.huanghuang.rsintegration.feature.goety.integration.GoetyCauldronCompat;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
@@ -14,18 +17,20 @@ public final class NativeCauldronActions {
     public static boolean water(ItemStack stack) {
         return stack.is(Items.WATER_BUCKET) || stack.is(Items.POTION) && PotionUtils.getPotion(stack) == Potions.WATER;
     }
-    /** Same 8-block cube as Goety's candle search; never loads missing chunks. Called on actions only. */
+    /** 搜索范围与 Goety 的烛台查找一致；不会加载未加载区块，仅在玩家操作时调用。 */
     public static long availableSouls(BrewCauldronBlockEntity be) {
         var level = be.getLevel();
         if (level == null) return 0;
         long souls = 0;
-        for (var pos : net.minecraft.core.BlockPos.betweenClosed(be.getBlockPos().offset(-8, -8, -8), be.getBlockPos().offset(8, 8, 8))) {
-            if (level.hasChunkAt(pos) && level.getBlockEntity(pos) instanceof com.Polarice3.Goety.api.blocks.entities.ISoulCandle candle)
-                souls += Math.max(0, candle.getSouls());
+        for (var pos : BlockPos.betweenClosed(be.getBlockPos().offset(-8, -8, -8), be.getBlockPos().offset(8, 8, 8))) {
+            if (level.hasChunkAt(pos)) {
+                int candleSouls = GoetyCauldronCompat.soulCount(level.getBlockEntity(pos));
+                if (candleSouls >= 0) souls += candleSouls;
+            }
         }
         return souls;
     }
-    /** A single explicit container interaction, with no call to the broken empty-cauldron path. */
+    /** 执行一次明确的容器交互，不经过空坩埚的异常处理路径。 */
     public static ItemStack useContainer(ServerPlayer player, BrewCauldronBlockEntity be, ItemStack one) {
         var level = be.getLevel();
         var state = be.getBlockState();
@@ -33,7 +38,7 @@ public final class NativeCauldronActions {
         int water = state.getValue(BrewCauldronBlock.LEVEL);
         if (one.is(Items.GLASS_BOTTLE) && water <= 0) return one;
         if (water == 4) {
-            // Native colour animation represents a full cauldron, not a fourth serving.
+            // 原生颜色动画使用 4 表示坩埚已满，不代表还有第四份药剂。
             be.update = 0;
             state = state.setValue(BrewCauldronBlock.LEVEL, 3);
             level.setBlockAndUpdate(be.getBlockPos(), state);
@@ -51,8 +56,8 @@ public final class NativeCauldronActions {
         }
     }
     private static ItemStack creativeExchange(ServerPlayer player, BrewCauldronBlockEntity be, ItemStack one) {
-        // Block.use's creative branch routes the product into inventory. The editor instead
-        // exchanges its own real slot item using the same public cauldron rules, exactly once.
+        // 方块交互的创造模式分支会将产物放入玩家背包；编辑器需按相同规则只结算一次，
+        // 并将结果交还给自己的实际物品槽。
         ItemStack output;
         if (one.is(Items.WATER_BUCKET)) output = new ItemStack(Items.BUCKET);
         else if (water(one)) output = new ItemStack(Items.GLASS_BOTTLE);
@@ -60,10 +65,10 @@ public final class NativeCauldronActions {
             output = be.mode == BrewCauldronBlockEntity.Mode.COMPLETED ? be.getBrew().copy()
                     : PotionUtils.setPotion(new ItemStack(Items.POTION), Potions.WATER);
         } else return one;
-        int target = be.getTargetLevel(one, player); // Includes native bottling discounts; never call twice.
+        int target = be.getTargetLevel(one, player); // 包含原生装瓶折扣，此处只调用一次。
         if (target < 0) return one;
         if (one.is(Items.GLASS_BOTTLE) && be.mode == BrewCauldronBlockEntity.Mode.COMPLETED)
-            com.Polarice3.Goety.utils.SEHelper.increaseBottling(player);
+            SEHelper.increaseBottling(player);
         if (target == 0) be.mode = be.reset();
         be.getLevel().setBlockAndUpdate(be.getBlockPos(), be.getBlockState().setValue(BrewCauldronBlock.LEVEL, target));
         be.markUpdated(); return output;

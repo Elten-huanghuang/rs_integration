@@ -3,6 +3,8 @@ package com.huanghuang.rsintegration.feature.goety.menu;
 import com.Polarice3.Goety.common.blocks.BrewCauldronBlock;
 import com.Polarice3.Goety.common.blocks.entities.BrewCauldronBlockEntity;
 import com.Polarice3.Goety.common.items.ModItems;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.feature.goety.GoetyCauldronFeature;
 import com.huanghuang.rsintegration.network.gui.RemoteGuiAuth;
 import com.huanghuang.rsintegration.api.storage.*;
 import com.huanghuang.rsintegration.feature.goety.brewing.*;
@@ -17,11 +19,14 @@ import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.player.*;
 import net.minecraft.world.inventory.*;
 import net.minecraft.world.item.*;
+import net.minecraftforge.registries.ForgeRegistries;
 import java.util.*;
+import java.util.function.ToLongFunction;
+import java.util.stream.Collectors;
 
-/** All edits and real inventory operations are validated by the owning server menu. */
+/** 所有编辑与实际物品操作均由服务端菜单校验。 */
 public final class WitchCauldronMenu extends AbstractContainerMenu {
-    /** Compact wizard layout: the catalogue occupies one step at a time and the inventory stays below it. */
+    /** 紧凑的分步布局：目录每次只显示一个步骤，玩家物品栏固定在下方。 */
     public static final int WIDTH = 380, HEIGHT = 282;
     private final SimpleContainer containers = new SimpleContainer(3);
     private final BrewCauldronBlockEntity target;
@@ -83,7 +88,7 @@ public final class WitchCauldronMenu extends AbstractContainerMenu {
         rebuild(stockCounts(owner, link));
     }
     private void rebuild(Map<ResourceLocation, Long> stock) {
-        java.util.function.ToLongFunction<BrewCatalog.Entry> counts = e -> stock.getOrDefault(e.item(), 0L);
+        ToLongFunction<BrewCatalog.Entry> counts = e -> stock.getOrDefault(e.item(), 0L);
         plan = capacityTier < 0 ? BrewPlan.recommend(target.getLevel(), position, target.getBlockState(), catalog, selected, counts)
                 : BrewPlan.create(target.getLevel(), position, target.getBlockState(), catalog, capacityTier, selected, counts);
         plannedStock = stock;
@@ -92,7 +97,7 @@ public final class WitchCauldronMenu extends AbstractContainerMenu {
 
     @Override public boolean stillValid(Player player) {
         if (target == null) return true;
-        if (!com.huanghuang.rsintegration.config.RSIntegrationConfig.ENABLE_GOETY.get()) return false;
+        if (!RSIntegrationConfig.ENABLE_GOETY.get()) return false;
         var level = target.getLevel();
         if (player.isSpectator() || level == null || target.isRemoved() || !level.hasChunkAt(position)
                 || level.getBlockEntity(position) != target || !level.mayInteract(player, position)) return false;
@@ -138,7 +143,7 @@ public final class WitchCauldronMenu extends AbstractContainerMenu {
                 default -> { }
             }
         } catch (RuntimeException | LinkageError failure) {
-            com.huanghuang.rsintegration.feature.goety.GoetyCauldronFeature.LOGGER.error("Cauldron action {} failed at {}", edit.action(), position, failure);
+            GoetyCauldronFeature.LOGGER.error("Cauldron action {} failed at {}", edit.action(), position, failure);
             message = text("action_failed");
         }
         sync(player);
@@ -155,11 +160,10 @@ public final class WitchCauldronMenu extends AbstractContainerMenu {
     private void bottle(ServerPlayer player) {
         if (!containers.getItem(2).isEmpty()) { message = text("take_output"); return; }
         if (!containers.getItem(1).is(Items.GLASS_BOTTLE)) { message = text("need_bottle"); return; }
-        if (target.getBlockState().getValue(BrewCauldronBlock.LEVEL) <= 0 || target.isBrewing || target.isCrafting
-                || target.mode == BrewCauldronBlockEntity.Mode.BREWING || target.mode == BrewCauldronBlockEntity.Mode.CRAFTING) {
+        if (target.getBlockState().getValue(BrewCauldronBlock.LEVEL) <= 0 || GoetyCauldronCompat.isBusy(target)) {
             message = text("not_finished"); return;
         }
-        if (target.mode == BrewCauldronBlockEntity.Mode.CRAFTED) { message = text("not_bottled_recipe"); return; }
+        if (GoetyCauldronCompat.isCrafted(target)) { message = text("not_bottled_recipe"); return; }
         if (target.mode != BrewCauldronBlockEntity.Mode.IDLE && target.mode != BrewCauldronBlockEntity.Mode.COMPLETED) {
             message = text("not_finished"); return;
         }
@@ -182,8 +186,8 @@ public final class WitchCauldronMenu extends AbstractContainerMenu {
         for (int i = 0; i < plan.inputs().size(); i++) {
             var rule = plan.inputs().get(i);
             var candidates = catalog.alternatives(rule).stream().map(BrewCatalog.Entry::stack).toList();
-            String key = candidates.stream().map(stack -> net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem()).toString())
-                    .sorted().collect(java.util.stream.Collectors.joining("|"));
+            String key = candidates.stream().map(stack -> ForgeRegistries.ITEMS.getKey(stack.getItem()).toString())
+                    .sorted().collect(Collectors.joining("|"));
             int amount = plan.sequence().get(i).getCount() + (grouped.containsKey(key) ? grouped.get(key).amount() : 0);
             grouped.put(key, new MissingMaterialOrders.MaterialNeed(candidates, amount));
         }
@@ -196,7 +200,7 @@ public final class WitchCauldronMenu extends AbstractContainerMenu {
     }
     private void feed(ServerPlayer player, StorageLink link) {
         if (orders.busy()) { message = text("orders_busy"); return; }
-        rebuild(); // Recheck biome/poles and datapack rules immediately before taking real materials.
+        rebuild(); // 扣取真实材料前，重新检查群系、基座和数据包规则。
         if (!plan.valid()) { message = plan.error(); return; }
         if (target.mode != BrewCauldronBlockEntity.Mode.IDLE || !target.container.stream().allMatch(ItemStack::isEmpty)) { message = text("need_empty"); return; }
         if (target.getBlockState().getValue(BrewCauldronBlock.LEVEL) != 3) { message = text("need_full_water"); return; }
@@ -234,7 +238,7 @@ public final class WitchCauldronMenu extends AbstractContainerMenu {
                     target.load(before); target.markUpdated();
                 }
             }
-            reserved.clear(); // The complete reservation now belongs to the live cauldron.
+            reserved.clear(); // 预留材料已全部转交给当前坩埚。
             for (var step : plan.sequence()) if (step.hasCraftingRemainingItem()) RsiStorageLink.give(player, step.getCraftingRemainingItem());
             target.markUpdated();
             player.getInventory().setChanged(); message = text("fed");
@@ -250,14 +254,15 @@ public final class WitchCauldronMenu extends AbstractContainerMenu {
         if (!tool) { message = text(RsiStorageLink.bound(target) ? "need_network_ladle" : "need_ladle"); return; }
         if (!target.isHeated() || target.getBlockState().getValue(BrewCauldronBlock.LEVEL) < 3) { message = text("need_heat_water"); return; }
         if (NativeCauldronActions.availableSouls(target) < Math.max(1, target.totalCost - target.soulTime)) { message = text("need_souls"); return; }
-        target.brew(player); message = text(target.isBrewing || target.isCrafting ? "started" : "cannot_start");
+        GoetyCauldronCompat.brew(target, player);
+        message = text(GoetyCauldronCompat.isBusy(target) ? "started" : "cannot_start");
     }
     @Override public void broadcastChanges() {
         super.broadcastChanges();
         if (target != null && ++ticks % 10 == 0 && owner != null && owner.containerMenu == this && stillValid(owner)) {
             try { orders.tick(owner); }
             catch (RuntimeException | LinkageError failure) {
-                com.huanghuang.rsintegration.feature.goety.GoetyCauldronFeature.LOGGER.error("RSI material order failed at {}", position, failure);
+                GoetyCauldronFeature.LOGGER.error("RSI material order failed at {}", position, failure);
                 orders.close(owner); message = text("order_failed");
             }
             var orderMessage = orders.takeMessage();
@@ -284,7 +289,7 @@ public final class WitchCauldronMenu extends AbstractContainerMenu {
         var needs = new ListTag();
         for (var need : requirements()) {
             var tag = need.save(new CompoundTag());
-            long available = counts.getOrDefault(net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(need.getItem()), 0L);
+            long available = counts.getOrDefault(ForgeRegistries.ITEMS.getKey(need.getItem()), 0L);
             tag.putLong("available", available); tag.putInt("needed", need.getCount()); needs.add(tag);
         }
         data.put("needs", needs);

@@ -5,13 +5,16 @@ import com.huanghuang.rsintegration.storage.*;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import java.util.*;
+import org.jetbrains.annotations.ApiStatus;
 
-/** Adapter kept inside RSI; no backend implementation type is exposed by the API. */
-@org.jetbrains.annotations.ApiStatus.Internal
+import java.util.*;
+import java.util.function.Supplier;
+
+/** RSI 内部使用的适配器，不通过 API 暴露后端实现类型。 */
+@ApiStatus.Internal
 public final class DefaultRSIStorageApi implements RSIStorageApi {
     private static final Set<String> REPORTED = new HashSet<>();
-    private static <T> T guarded(String operation, java.util.function.Supplier<T> call, T fallback) {
+    private static <T> T guarded(String operation, Supplier<T> call, T fallback) {
         try { return call.get(); }
         catch (RuntimeException | LinkageError failure) {
             synchronized (REPORTED) {

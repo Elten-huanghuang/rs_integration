@@ -7,14 +7,17 @@ RS Integration 为第三方模组提供三套 Java API，本分支另附两项�
 | Integration API | 让 RSI 识别你的配方、机器和特殊执行流程 | `RSIIntegrationApi` |
 | Resonance Inventory API | 把共振盘内容作为额外的玩家物品来源读取或提取 | `RSIResonanceApi` |
 | Consumer API | 查询 RSI 配方目录、检查材料、提交订单、查询状态和取消订单 | `RSICraftConsumerApi` |
-| Machine GUI API（本分支扩展） | 为有原生交互副作用的机器注册远程菜单 | [`RSIMachineGuiApi`](MACHINE_GUI_API.md) |
-| Storage API（本分支扩展） | 访问玩家授权的默认存储网络 | [`RSIStorageApi`](STORAGE_API.md) |
+| Machine GUI API（本分支扩展） | 为有原生交互副作用的机器注册远程菜单 | `RSIMachineGuiApi` |
+| Storage API（本分支扩展） | 访问玩家授权的默认存储网络 | `RSIStorageApi` |
 
 完整接入说明见 [RSI_INTEGRATION_API_GUIDE.md](RSI_INTEGRATION_API_GUIDE.md)。
 
 第一次接入时，建议直接从
 [实例索引](RSI_INTEGRATION_API_GUIDE.md#实例索引) 开始，按普通机器、处理进度机器、
 自定义执行、共振盘物品访问或 Consumer 下单选择对应参考实现，再阅读完整契约。
+
+Goety 坩埚集成的编译版本选择、已验证版本及当前配方支持范围见
+[Goety 兼容说明](GOETY_COMPATIBILITY.md)。
 
 公共 API 的有限互操作授权已并入唯一的项目许可证 [LICENSE](../../LICENSE)。
 RSI 主体仍是专有软件；该许可只允许第三方针对公共 API 编译、运行和发布兼容
