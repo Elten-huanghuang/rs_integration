@@ -25,6 +25,11 @@ public final class PmmoSalvageRecipeHandler implements ModRecipeHandler {
     }
 
     @Override
+    public boolean preferHandlerIngredients() {
+        return true;
+    }
+
+    @Override
     public boolean isAvailableForPlanning(@Nonnull Recipe<?> recipe,
                                           @Nullable ServerPlayer player) {
         return recipe instanceof PmmoSalvageRecipeWrapper salvage

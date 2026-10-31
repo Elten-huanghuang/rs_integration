@@ -16,6 +16,15 @@ import java.util.List;
 
 public final class IronSpellBooksRecipeHandler implements ModRecipeHandler {
     @Override public ModType modType() { return ModType.byId(IronSpellBooksRSModule.SCROLL_FORGE_TYPE); }
+    @Override public ModType modType(Recipe<?> recipe) {
+        // 三种工作站共用配方类，执行和绑定必须使用配方声明的具体机器。
+        IronSpellBooksRecipe ironRecipe = (IronSpellBooksRecipe) recipe;
+        return ModType.byId(switch (ironRecipe.machine()) {
+            case SCROLL_FORGE -> IronSpellBooksRSModule.SCROLL_FORGE_TYPE;
+            case ARCANE_ANVIL -> IronSpellBooksRSModule.ARCANE_ANVIL_TYPE;
+            case ALCHEMIST_CAULDRON -> IronSpellBooksRSModule.ALCHEMIST_CAULDRON_TYPE;
+        });
+    }
     @Override public boolean canHandle(Recipe<?> recipe) { return recipe instanceof IronSpellBooksRecipe; }
     @Override public boolean cacheByRecipeClass() { return false; }
     @Override public boolean hasDeterministicPrimaryOutput(Recipe<?> recipe) {

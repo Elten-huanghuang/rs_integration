@@ -1,12 +1,12 @@
 package com.huanghuang.rsintegration.feature.craftingstation;
 
-import com.huanghuang.rsintegration.mixin.minecraft.AnvilMenuAccessor;
 import com.refinedmods.refinedstorage.container.GridContainerMenu;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AnvilMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.LevelEvent;
 
 import java.util.List;
 
@@ -90,7 +90,9 @@ public final class AnvilTerminalState implements CraftingStationState {
         if (!canTakeResult(player)) return;
         Slot output = anvilMenu.getSlot(2);
         ItemStack taken = output.remove(output.getItem().getCount());
-        ((AnvilMenuAccessor) (Object) anvilMenu).rsi$onTake(player, taken);
+        output.onTake(player, taken);
+        // 虚拟铁砧没有方块位置，原版回调不会播放音效，改在使用者当前位置触发。
+        player.level().levelEvent(LevelEvent.SOUND_ANVIL_USED, player.blockPosition(), 0);
         menu.broadcastChanges();
     }
 

@@ -75,6 +75,51 @@ class SummoningRitualAltarBatchDelegateTest extends BootstrapTest {
     }
 
     @Test
+    void graphBatchPlacesAllExecutionsWithOneCatalyst() throws Exception {
+        Fixture fixture = new Fixture();
+        fixture.delegate.prepareGraphBatch(6);
+
+        assertTrue(fixture.start(List.of(
+                new ItemStack(Items.STICK), new ItemStack(Items.DIAMOND, 6))));
+        fixture.delegate.onBatchFinished(fixture.player);
+
+        assertEquals(6, SummoningRitualInventoryOps.stackInSlot(fixture.inventory, 0).getCount());
+        assertEquals(1, fixture.inventory.getStackInSlot(2).getCount());
+    }
+
+    @Test
+    void graphBatchSubtractsExistingMaterialsOnlyOnce() throws Exception {
+        ItemStackHandler inventory = new ItemStackHandler(3);
+        inventory.setStackInSlot(0, new ItemStack(Items.DIAMOND, 2));
+        inventory.setStackInSlot(2, new ItemStack(Items.STICK));
+        Fixture fixture = new Fixture(inventory);
+        fixture.delegate.prepareGraphBatch(6);
+
+        assertTrue(fixture.start(List.of(new ItemStack(Items.DIAMOND, 4))));
+        fixture.delegate.onBatchFinished(fixture.player);
+
+        assertEquals(6, SummoningRitualInventoryOps.stackInSlot(inventory, 0).getCount());
+        assertEquals(1, inventory.getStackInSlot(2).getCount());
+        assertTrue(fixture.recycled.isEmpty());
+    }
+
+    @Test
+    void failedGraphBatchRecoversOnlyNewMaterials() throws Exception {
+        ItemStackHandler inventory = new ItemStackHandler(3);
+        inventory.setStackInSlot(0, new ItemStack(Items.DIAMOND, 2));
+        inventory.setStackInSlot(2, new ItemStack(Items.STICK));
+        Fixture fixture = new Fixture(inventory);
+        fixture.delegate.prepareGraphBatch(6);
+        assertTrue(fixture.start(List.of(new ItemStack(Items.DIAMOND, 4))));
+
+        fixture.delegate.onBatchFailed(fixture.player, "cancelled before completion");
+
+        assertEquals(2, SummoningRitualInventoryOps.stackInSlot(inventory, 0).getCount());
+        assertEquals(1, inventory.getStackInSlot(2).getCount());
+        assertEquals(4, countItem(fixture.delegate.failureRecoveredInputs(), Items.DIAMOND));
+    }
+
+    @Test
     void ritualLockingItemCapabilityAfterPlacementDoesNotFailPreparation() throws Exception {
         Fixture fixture = new Fixture();
         assertTrue(fixture.start());
@@ -368,6 +413,7 @@ class SummoningRitualAltarBatchDelegateTest extends BootstrapTest {
                     });
 
             set(delegate, "altarPos", BlockPos.ZERO);
+            set(delegate, "player", player);
             configureRecipe("test_ritual", Ingredient.of(Items.STICK),
                     List.of(new IngredientSpec(Ingredient.of(Items.DIAMOND), 1)));
             List<ItemStack> snapshot = new ArrayList<>();

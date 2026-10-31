@@ -51,7 +51,8 @@ public final class PmmoSalvageRecipeWrapper implements Recipe<Container> {
     public NonNullList<Ingredient> getIngredients() {
         NonNullList<Ingredient> ingredients = NonNullList.create();
         var item = ForgeRegistries.ITEMS.getValue(definition.inputId());
-        if (item != null) ingredients.add(Ingredient.of(new ItemStack(item)));
+        // PMMO 按物品 ID 查回收表，损伤、附魔、命名和词条 NBT 均不参与匹配。
+        if (item != null) ingredients.add(Ingredient.of(item));
         return ingredients;
     }
 }

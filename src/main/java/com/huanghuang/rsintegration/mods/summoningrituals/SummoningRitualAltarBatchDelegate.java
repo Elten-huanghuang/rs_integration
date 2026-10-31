@@ -151,6 +151,19 @@ public final class SummoningRitualAltarBatchDelegate extends AbstractBatchDelega
         return missingMaterials;
     }
 
+    @Override
+    public void prepareGraphBatch(int executions) {
+        if (prepareFlatBatch(executions) != executions) {
+            throw new IllegalStateException("召唤祭坛无法准备整批材料");
+        }
+    }
+
+    @Nullable
+    @Override
+    public List<IngredientSpec> getGraphBatchRequiredMaterials(int executions) {
+        return getFlatBatchRequiredMaterials(executions);
+    }
+
     /**
      * 祭坛已经具备全部所需物品时，执行链不会携带材料列表，
      * 而是走共享账本的旧入口。这里仍然走同一套校验和准备逻辑，
@@ -482,14 +495,11 @@ public final class SummoningRitualAltarBatchDelegate extends AbstractBatchDelega
                                                          @Nullable ResourceLocation dim,
                                                          @Nullable BlockPos pos,
                                                          List<IngredientSpec> requested) {
-        if (player == null || recipe == null || pos == null
+        if (player == null || recipe == null
                 || !SummoningRitualRecipeHandler.RECIPE_CLASS.equals(recipe.getClass().getName())) {
             return requested == null ? List.of() : List.copyOf(requested);
         }
-        ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
-        if (level == null || !level.isLoaded(pos)) return requested == null ? List.of() : List.copyOf(requested);
-        BlockEntity blockEntity = level.getBlockEntity(pos);
-        IItemHandler handler = itemHandler(blockEntity);
+        IItemHandler handler = planningItemHandler(player, recipe, dim, pos);
         if (!SummoningRitualInventoryOps.valid(handler)) return requested == null ? List.of() : List.copyOf(requested);
         return calculateMissing(handler, requested == null ? List.of() : requested,
                 SummoningRitualRecipeHandler.catalyst(recipe));
@@ -499,20 +509,33 @@ public final class SummoningRitualAltarBatchDelegate extends AbstractBatchDelega
             ServerPlayer player, Recipe<?> recipe,
             @Nullable ResourceLocation dim, @Nullable BlockPos pos,
             List<ScaledIngredientSpec> requested) {
-        if (player == null || recipe == null || pos == null
+        if (player == null || recipe == null
                 || !SummoningRitualRecipeHandler.RECIPE_CLASS.equals(recipe.getClass().getName())) {
             return requested == null ? List.of() : List.copyOf(requested);
         }
-        ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
-        if (level == null || !level.isLoaded(pos)) {
-            return requested == null ? List.of() : List.copyOf(requested);
-        }
-        IItemHandler handler = itemHandler(level.getBlockEntity(pos));
+        IItemHandler handler = planningItemHandler(player, recipe, dim, pos);
         if (!SummoningRitualInventoryOps.valid(handler)) {
             return requested == null ? List.of() : List.copyOf(requested);
         }
         return calculateMissingScaled(handler, requested == null ? List.of() : requested,
                 SummoningRitualRecipeHandler.catalyst(recipe));
+    }
+
+    @Nullable
+    private static IItemHandler planningItemHandler(
+            ServerPlayer player, Recipe<?> recipe,
+            @Nullable ResourceLocation dim, @Nullable BlockPos pos) {
+        // 从终端发起时请求可能没有坐标，与执行入口一样选择最近的可用祭坛。
+        if (pos == null) {
+            MachineCandidateView ready = getPlanMachineCandidates(player, recipe).stream()
+                    .filter(candidate -> candidate.state() == MachineCandidateView.State.READY)
+                    .findFirst().orElse(null);
+            if (ready == null) return null;
+            dim = new ResourceLocation(ready.dimension());
+            pos = new BlockPos(ready.x(), ready.y(), ready.z());
+        }
+        ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
+        return level == null || !level.isLoaded(pos) ? null : itemHandler(level.getBlockEntity(pos));
     }
 
     static List<IngredientSpec> calculateMissing(IItemHandler handler,
