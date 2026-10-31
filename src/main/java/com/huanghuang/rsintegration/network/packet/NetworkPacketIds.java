@@ -146,4 +146,6 @@ public final class NetworkPacketIds {
     public static final int FOOD_ORDER_SUBMIT = 159;
     public static final int FOOD_ORDER_LIST = 160;
     public static final int FOOD_ORDER_RESULT = 161;
+    public static final int EXPERIENCE_WAND_CONTROL = 162;
+    public static final int EXPERIENCE_WAND_STATE = 163;
 }

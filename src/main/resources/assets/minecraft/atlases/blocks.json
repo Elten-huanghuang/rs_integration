@@ -7,6 +7,14 @@
     {
       "type": "single",
       "resource": "rs_integration:magic/source"
+    },
+    {
+      "type": "single",
+      "resource": "rs_integration:block/experience_still"
+    },
+    {
+      "type": "single",
+      "resource": "rs_integration:block/experience_flow"
     }
   ]
 }

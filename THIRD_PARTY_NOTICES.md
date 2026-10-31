@@ -13,6 +13,20 @@ RS Integration 不通过单一项目许可证重新授权第三方组件。第�
 `verifyReleaseJar` 会拒绝新增未登记的 jar-in-jar 依赖，以及打包进主 jar 的非
 `com/huanghuang/rsintegration/` 类。
 
+## 随包分发的美术资源
+
+液态经验的以下贴图及动画元数据复制自 Beyond Dimensions：
+
+- 来源项目：`https://github.com/Frostbite-time/BeyondDimensions`
+- 作者及版权：Copyright (c) 2025 Frostbite-time
+- 许可证：MIT，完整许可随包保存在 `META-INF/licenses/MIT-BeyondDimensions.txt`
+- 原始文件：`assets/beyonddimensions/textures/block/xp_fluid_still.png`、
+  `xp_fluid_flow.png` 及各自的 `.mcmeta`
+- 本项目文件：`assets/rs_integration/textures/block/experience_still.png`、
+  `experience_flow.png` 及各自的 `.mcmeta`
+
+仅重命名资源路径，不修改贴图或动画内容；使用这些资源不要求安装 Beyond Dimensions。
+
 ## 仅编译或测试使用的模组
 
 `libs/` 中的其它模组 jar 和 Maven 依赖用于编译、测试或开发运行，不会仅因出现在

@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.feature.foodorder;
 
-import net.minecraft.ChatFormatting;
+import com.huanghuang.rsintegration.util.DiskTooltipEffects;
+import com.huanghuang.rsintegration.util.SpecialItemTooltip;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResultHolder;
@@ -23,6 +25,12 @@ public final class FoodOrderTerminalItem extends Item {
     }
 
     @Override
+    public Component getName(ItemStack stack) {
+        return DiskTooltipEffects.tint(super.getName(stack),
+                DiskTooltipEffects.Theme.FOOD, DiskTooltipEffects.Tone.MAIN);
+    }
+
+    @Override
     public InteractionResultHolder<ItemStack> use(Level level, Player player, InteractionHand hand) {
         ItemStack stack = player.getItemInHand(hand);
         if (level.isClientSide) {
@@ -34,9 +42,6 @@ public final class FoodOrderTerminalItem extends Item {
     @Override
     public void appendHoverText(ItemStack stack, @Nullable Level level,
                                 List<Component> tooltip, TooltipFlag flag) {
-        tooltip.add(Component.translatable("item.rs_integration.order_terminal.tip")
-                .withStyle(ChatFormatting.GRAY));
-        tooltip.add(Component.translatable("item.rs_integration.order_terminal.setup")
-                .withStyle(ChatFormatting.DARK_GRAY));
+        SpecialItemTooltip.appendFood(tooltip, Screen.hasShiftDown());
     }
 }

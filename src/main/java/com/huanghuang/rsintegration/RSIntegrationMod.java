@@ -68,6 +68,9 @@ import com.huanghuang.rsintegration.feature.autoeat.AutoEatEngine;
 import com.huanghuang.rsintegration.feature.autoeat.AutoEatRateLimiter;
 import com.huanghuang.rsintegration.feature.foodorder.FoodOrderEvents;
 import com.huanghuang.rsintegration.feature.foodorder.network.FoodOrderNetworkHandler;
+import com.huanghuang.rsintegration.feature.experience.ExperienceFluids;
+import com.huanghuang.rsintegration.feature.experience.ExperienceWandNetwork;
+import com.huanghuang.rsintegration.feature.experience.ExperienceWandService;
 import com.huanghuang.rsintegration.feature.anvilmemory.AnvilMemoryClient;
 import com.huanghuang.rsintegration.feature.anvilmemory.AnvilMemoryEvents;
 import com.huanghuang.rsintegration.feature.anvilmemory.AnvilMemoryNetworkHandler;
@@ -361,6 +364,7 @@ public final class RSIntegrationMod {
             SophisticatedBackpacksItems.init(MOD_BUS);
         }
         ModItems.init(MOD_BUS);
+        ExperienceFluids.register(MOD_BUS);
         if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
             RSOptionalBootstrap.registerBlocks(MOD_BUS);
             RSOptionalBootstrap.registerItems(MOD_BUS);
@@ -1000,6 +1004,8 @@ public final class RSIntegrationMod {
         // 食物点单系统
         FoodOrderNetworkHandler.register();
         FoodOrderEvents.register();
+        ExperienceWandNetwork.register();
+        MinecraftForge.EVENT_BUS.register(ExperienceWandService.class);
         if (ModList.get().isLoaded("beyonddimensions")) {
             ResonanceStorageResolvers.register(BDResonanceDiskAccess::resolve);
         }

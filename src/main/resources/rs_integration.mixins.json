@@ -7,6 +7,10 @@
   "compatibilityLevel": "JAVA_17",
   "refmap": "rs_integration.refmap.json",
   "mixins": [
+    "taxfreelevels.TaxFreeAnvilMenuMixin",
+    "taxfreelevels.TaxFreeEnchantmentMixin",
+    "taxfreelevels.TaxFreeModLevelCostsMixin",
+    "taxfreelevels.TaxFreeDisenchantingTableMixin",
     "core.BlockEntityTypeAccessor",
     "tacz.AbstractGunItemAmmoMixin",
     "tacz.ModernKineticGunScriptAmmoMixin",
@@ -56,6 +60,7 @@
     "refinedstorage.GridNetworkNodeVoidUpgradeMixin",
     "refinedstorage.NetworkNodeVoidUpgradeMixin",
     "refinedstorage.NetworkVoidUpgradeMixin",
+    "refinedstorage.NetworkExperienceFluidMixin",
     "refinedstorage.StackUtilsMixin",
     "refinedstorage.UnifiedDiskStackUtilsMixin",
     "refinedstorage.UnifiedDiskDriveMixin",
@@ -123,6 +128,7 @@
     "traderefresh.TradeRefreshTradeLockMixin"
   ],
   "client": [
+    "taxfreelevels.TaxFreeAnvilScreenMixin",
     "malum.SpiritAltarParticleEffectsMixin",
     "farmandcharm.NativeRecipeBookScreenMixin",
     "farmandcharm.NativeRecipeBookWidgetMixin",

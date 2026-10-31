@@ -1,8 +1,8 @@
 package com.huanghuang.rsintegration.feature.resonance.bd;
 
-import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.util.DiskNameStyle;
-import com.huanghuang.rsintegration.util.TextBuilder;
+import com.huanghuang.rsintegration.util.DiskTooltipEffects;
+import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
@@ -93,52 +93,43 @@ public final class BDResonanceDiskItem extends Item {
         int networkId = BDResonanceDiskAccess.getNetworkId(stack);
 
         if (!Screen.hasShiftDown()) {
-            tooltip.add(TextBuilder.translate("rsi.resonance.bd.tooltip.intro")
-                    .colorFlow(1600L, 0.0F, RSIntegrationMod.RS_FLOW_COLORS)
-                    .bold()
-                    .build());
-            tooltip.add(TextBuilder.translate("rsi.resonance.bd.tooltip.subtitle")
-                    .colorFlow(1600L, 0.35F, RSIntegrationMod.RS_FLOW_COLORS)
-                    .build());
+            tooltip.add(DiskTooltipEffects.flow("rsi.resonance.bd.tooltip.intro",
+                    DiskTooltipEffects.Theme.RESONANCE, DiskTooltipEffects.Tone.MAIN, 0.0F)
+                    .copy().withStyle(ChatFormatting.BOLD));
+            tooltip.add(DiskTooltipEffects.flow("rsi.resonance.bd.tooltip.subtitle",
+                    DiskTooltipEffects.Theme.RESONANCE, DiskTooltipEffects.Tone.MAIN, 0.35F));
             tooltip.add(Component.empty());
             appendBindingStatus(tooltip, stack, diskId, networkId);
-            tooltip.add(TextBuilder.translate("rsi.resonance.bd.tooltip.expand")
-                    .darkGray()
-                    .build());
+            tooltip.add(DiskTooltipEffects.flow("rsi.resonance.bd.tooltip.expand",
+                    DiskTooltipEffects.Theme.RESONANCE, DiskTooltipEffects.Tone.HINT, 0.7F));
             return;
         }
 
-        tooltip.add(TextBuilder.translate("rsi.resonance.bd.tooltip.title")
-                .aqua()
-                .bold()
-                .build());
+        tooltip.add(DiskTooltipEffects.flow("rsi.resonance.bd.tooltip.title",
+                DiskTooltipEffects.Theme.RESONANCE, DiskTooltipEffects.Tone.HINT, 0.0F)
+                .copy().withStyle(ChatFormatting.BOLD));
         for (int line = 1; line <= 8; line++) {
-            tooltip.add(TextBuilder.of("• ").darkAqua()
-                    .append(TextBuilder.translate("rsi.resonance.bd.tooltip.detail_" + line)
-                            .gray())
-                    .build());
+            tooltip.add(DiskTooltipEffects.flow(Component.literal("• ").append(
+                            Component.translatable("rsi.resonance.bd.tooltip.detail_" + line)),
+                    DiskTooltipEffects.Theme.RESONANCE, DiskTooltipEffects.Tone.MUTED, line * 0.09F));
         }
         tooltip.add(Component.empty());
-        tooltip.add(TextBuilder.translate("rsi.resonance.bd.tooltip.capacity", CAPACITY)
-                .gray()
-                .build());
+        tooltip.add(DiskTooltipEffects.tint("rsi.resonance.bd.tooltip.capacity",
+                DiskTooltipEffects.Theme.RESONANCE, DiskTooltipEffects.Tone.MAIN, CAPACITY));
         appendBindingStatus(tooltip, stack, diskId, networkId);
     }
 
     private static void appendBindingStatus(List<Component> tooltip, ItemStack stack,
                                             UUID diskId, int networkId) {
         if (!BDResonanceDiskAccess.isBound(stack)) {
-            tooltip.add(TextBuilder.translate("rsi.resonance.bd.tooltip.unbound")
-                    .red()
-                    .build());
+            tooltip.add(DiskTooltipEffects.flow("rsi.resonance.bd.tooltip.unbound",
+                    DiskTooltipEffects.Theme.RESONANCE, DiskTooltipEffects.Tone.WARNING, 0.0F));
         } else {
-            tooltip.add(TextBuilder.translate("rsi.resonance.bd.tooltip.network", networkId)
-                    .cornflowerBlue()
-                    .build());
-            tooltip.add(TextBuilder.translate("rsi.resonance.bd.tooltip.uuid",
-                            diskId.toString().substring(0, 8))
-                    .darkGray()
-                    .build());
+            tooltip.add(DiskTooltipEffects.tint("rsi.resonance.bd.tooltip.network",
+                    DiskTooltipEffects.Theme.RESONANCE, DiskTooltipEffects.Tone.FLUID, networkId));
+            tooltip.add(DiskTooltipEffects.tint("rsi.resonance.bd.tooltip.uuid",
+                    DiskTooltipEffects.Theme.RESONANCE, DiskTooltipEffects.Tone.MUTED,
+                    diskId.toString().substring(0, 8)));
         }
     }
 }

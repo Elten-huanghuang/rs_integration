@@ -1,10 +1,11 @@
 package com.huanghuang.rsintegration.util;
 
+import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 
 /** 磁盘提示的配色和透明度曲线，不依赖客户端渲染器。 */
 public final class DiskTooltipEffects {
-    public enum Theme { GUIXU, RESONANCE }
+    public enum Theme { GUIXU, RESONANCE, EXPERIENCE, FOOD, MANA, SOURCE, DIMENSION, VOID }
     public enum Tone { MAIN, FLUID, MUTED, HINT, WARNING }
 
     // 归墟盘使用鎏金色系，只通过明暗区分信息层级。
@@ -20,6 +21,24 @@ public final class DiskTooltipEffects {
     private static final int[] RESONANCE_MUTED = {0x91AFB8, 0xD0DFDE, 0xA5BDCC, 0x91AFB8};
     private static final int[] RESONANCE_HINT = {0xB5A0E8, 0xEED4FF, 0xA9D9ED, 0xB5A0E8};
     private static final int[] RESONANCE_WARNING = {0xF19B79, 0xFFDBA0, 0xF19B79};
+
+    private static final int[] EXPERIENCE = {0xD7FF69, 0xF5FFB2, 0xA9F75B, 0xD7FF69};
+    private static final int[] EXPERIENCE_FLUID = {0xB9F47D, 0xE9FFB4, 0xB9F47D};
+    private static final int[] EXPERIENCE_MUTED = {0xD3E6B8, 0xEBF4D5, 0xD3E6B8};
+    private static final int[] EXPERIENCE_HINT = {0xFAECA1, 0xFFFFD1, 0xFAECA1};
+    private static final int[] FOOD = {0xFFF1CB, 0xFFF9E5, 0xEBD9AD, 0xFFF1CB};
+    private static final int[] FOOD_FLUID = {0xD7ECB0, 0xEDF7CE, 0xD7ECB0};
+    private static final int[] FOOD_MUTED = {0xE7DCC1, 0xF5EAD1, 0xE7DCC1};
+    private static final int[] FOOD_HINT = {0xFFD99C, 0xFFF1C1, 0xFFD99C};
+    private static final int[] MANA = {0x9AEDE9, 0xD2FAFF, 0x83CFFF, 0x9AEDE9};
+    private static final int[] MANA_MUTED = {0xB6DBDE, 0xDCF1EB, 0xB6DBDE};
+    private static final int[] SOURCE = {0xE3B6FF, 0xFFE0F7, 0xB8BEFF, 0xE3B6FF};
+    private static final int[] SOURCE_MUTED = {0xD1C9E6, 0xEFE1EF, 0xD1C9E6};
+    private static final int[] DIMENSION = {0xFFB15E, 0xFFE1A3, 0xFFC17A, 0xFFB15E};
+    private static final int[] DIMENSION_MUTED = {0xEBD4B8, 0xFFF0D7, 0xEBD4B8};
+    private static final int[] VOID = {0xD0B6F7, 0xF3DAFF, 0xAEBBEE, 0xD0B6F7};
+    private static final int[] VOID_MUTED = {0xCFC6DF, 0xE8DEEF, 0xCFC6DF};
+    private static final int[] EQUIPMENT_HINT = {0xE9DFB3, 0xFFF4D6, 0xE9DFB3};
 
     private DiskTooltipEffects() {}
 
@@ -42,7 +61,10 @@ public final class DiskTooltipEffects {
      * Tooltip 每帧重建时会重新取时间，因此不需要客户端专用渲染钩子。
      */
     public static Component flow(Component component, Theme theme, Tone tone, float phaseShift) {
-        return TextBuilder.of(component)
+        // 逐字拆分前清掉旧式格式码，避免模组名称的 §9§o 被拆成可见的 9o。
+        String plain = ChatFormatting.stripFormatting(component.getString());
+        Component source = Component.literal(plain).withStyle(component.getStyle());
+        return TextBuilder.of(source)
                 .colorFlow(2400L, phaseShift, pulsePalette(theme, tone, System.currentTimeMillis()))
                 .build();
     }
@@ -64,22 +86,57 @@ public final class DiskTooltipEffects {
     }
 
     private static int[] pulsePalette(Theme theme, Tone tone, long millis) {
-        int[] source = theme == Theme.GUIXU ? switch (tone) {
-            case MAIN -> GOLD;
-            case FLUID -> GUIXU_FLUID;
-            case MUTED -> GUIXU_MUTED;
-            case HINT -> GUIXU_HINT;
-            case WARNING -> GUIXU_WARNING;
-        } : switch (tone) {
-            case MAIN -> RESONANCE;
-            case FLUID -> RESONANCE_FLUID;
-            case MUTED -> RESONANCE_MUTED;
-            case HINT -> RESONANCE_HINT;
-            case WARNING -> RESONANCE_WARNING;
+        int[] source = switch (theme) {
+            case GUIXU -> switch (tone) {
+                case MAIN -> GOLD;
+                case FLUID -> GUIXU_FLUID;
+                case MUTED -> GUIXU_MUTED;
+                case HINT -> GUIXU_HINT;
+                case WARNING -> GUIXU_WARNING;
+            };
+            case RESONANCE -> switch (tone) {
+                case MAIN -> RESONANCE;
+                case FLUID -> RESONANCE_FLUID;
+                case MUTED -> RESONANCE_MUTED;
+                case HINT -> RESONANCE_HINT;
+                case WARNING -> RESONANCE_WARNING;
+            };
+            case EXPERIENCE -> switch (tone) {
+                case MAIN -> EXPERIENCE;
+                case FLUID -> EXPERIENCE_FLUID;
+                case MUTED -> EXPERIENCE_MUTED;
+                case HINT, WARNING -> EXPERIENCE_HINT;
+            };
+            case FOOD -> switch (tone) {
+                case MAIN -> FOOD;
+                case FLUID -> FOOD_FLUID;
+                case MUTED -> FOOD_MUTED;
+                case HINT, WARNING -> FOOD_HINT;
+            };
+            case MANA, SOURCE, DIMENSION, VOID -> switch (tone) {
+                case MAIN, FLUID -> switch (theme) {
+                    case MANA -> MANA;
+                    case SOURCE -> SOURCE;
+                    case DIMENSION -> DIMENSION;
+                    default -> VOID;
+                };
+                case MUTED -> switch (theme) {
+                    case MANA -> MANA_MUTED;
+                    case SOURCE -> SOURCE_MUTED;
+                    case DIMENSION -> DIMENSION_MUTED;
+                    default -> VOID_MUTED;
+                };
+                case HINT -> EQUIPMENT_HINT;
+                case WARNING -> RESONANCE_WARNING;
+            };
         };
         // 用同一条淡入/呼吸曲线调节颜色亮度；Minecraft 字体没有逐字 alpha，
         // 因此通过亮度模拟淡入淡出，既有动画又不会让文字完全消失。
         double brightness = alpha(240L, millis, false) / 255.0;
+        if (theme != Theme.GUIXU && theme != Theme.RESONANCE) {
+            // 液流和暖木底板更亮，文字只做轻微呼吸，避免暗相位看不清说明。
+            brightness = 0.9 + brightness * 0.1;
+        }
         int[] result = new int[source.length];
         for (int i = 0; i < source.length; i++) {
             int rgb = source[i];

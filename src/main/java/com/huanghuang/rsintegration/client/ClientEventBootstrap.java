@@ -8,6 +8,8 @@ import com.huanghuang.rsintegration.crafting.progress.CraftProgressClientEvents;
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressKeybind;
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressOverlay;
 import com.huanghuang.rsintegration.crafting.planning.PlanningProgressOverlay;
+import com.huanghuang.rsintegration.client.storage.DiskTooltipBackground;
+import com.huanghuang.rsintegration.client.storage.EquipmentTooltipClient;
 import com.huanghuang.rsintegration.mods.aetherworks.client.AetherworksClientSetup;
 import com.huanghuang.rsintegration.mods.distantworlds.client.DistantWorldsClientSetup;
 import com.huanghuang.rsintegration.util.ModIds;
@@ -39,6 +41,8 @@ public final class ClientEventBootstrap {
         MinecraftForge.EVENT_BUS.register(CraftProgressOverlay.class);
         MinecraftForge.EVENT_BUS.register(PlanningProgressOverlay.class);
         MinecraftForge.EVENT_BUS.register(CraftFailureClientCommands.class);
+        MinecraftForge.EVENT_BUS.register(DiskTooltipBackground.class);
+        MinecraftForge.EVENT_BUS.register(EquipmentTooltipClient.class);
         MinecraftForge.EVENT_BUS.register(
                 VillagerTradeLockClient.class);
         // The auto-eat UI supports both RS Grid and the BD terminal. The
