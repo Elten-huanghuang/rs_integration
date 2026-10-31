@@ -4,8 +4,10 @@ import com.huanghuang.rsintegration.crafting.InputBufferPlanner;
 import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import net.minecraft.world.item.ItemStack;
 
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -41,6 +43,7 @@ public record InputBufferContract(
         return new InputBufferContract(0, List.of(), List.of());
     }
 
+    /** entryId 标识逻辑物料；相同消耗条目可由多个独立物理槽共同承载。 */
     public record InputSlot(String entryId, int slot, ItemStack prototype,
                             int perOperation, int capacity,
                             InputConsumption consumption) {
@@ -59,13 +62,23 @@ public record InputBufferContract(
             prototype = prototype == null ? ItemStack.EMPTY : prototype.copyWithCount(1);
         }
 
+        /** 同一消耗物料可分摊到多个独立加工槽，不重复计算配方需求。 */
+        public boolean sharesMaterialWith(InputSlot other) {
+            return entryId.equals(other.entryId())
+                    && consumption.kind() == InputConsumption.Kind.CONSUMED
+                    && consumption.equals(other.consumption())
+                    && perOperation > 0 && perOperation == other.perOperation()
+                    && !prototype.isEmpty()
+                    && ItemStack.isSameItemSameTags(prototype, other.prototype());
+        }
     }
 
     private static void validateUniqueInputs(List<InputSlot> slots) {
-        Set<String> entryIds = new HashSet<>();
+        Map<String, InputSlot> entryIds = new HashMap<>();
         Set<Integer> physicalSlots = new HashSet<>();
         for (InputSlot slot : slots) {
-            if (!entryIds.add(slot.entryId())) {
+            InputSlot previous = entryIds.putIfAbsent(slot.entryId(), slot);
+            if (previous != null && !previous.sharesMaterialWith(slot)) {
                 throw new IllegalArgumentException("duplicate input entry id " + slot.entryId());
             }
             if (!physicalSlots.add(slot.slot())) {

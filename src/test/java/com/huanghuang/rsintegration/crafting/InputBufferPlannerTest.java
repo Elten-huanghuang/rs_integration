@@ -120,6 +120,54 @@ class InputBufferPlannerTest extends BootstrapTest {
                 List.of()));
     }
 
+    @Test
+    void distributesOneMaterialAcrossIndependentLanes() {
+        List<InputBufferContract.InputSlot> lanes = List.of(
+                lane(3, 64), lane(4, 64));
+
+        InputBufferPlan plan = InputBufferPlanner.plan(63, 128, lanes, List.of());
+
+        assertEquals(63, plan.operations());
+        assertEquals(List.of(32, 31), plan.inputs().stream()
+                .map(input -> input.stack().getCount()).toList());
+        assertEquals(1, InputBufferPlanner.plan(1, 128, lanes, List.of()).inputs().size());
+        assertEquals(128, InputBufferPlanner.plan(200, 128, lanes, List.of()).operations());
+    }
+
+    @Test
+    void distributedMaterialRespectsEachLaneAndOtherMaterialCapacity() {
+        List<InputBufferContract.InputSlot> inputs = List.of(
+                lane(3, 2), lane(4, 64),
+                consumedInput(0, new ItemStack(Items.COAL), 1, 40));
+
+        InputBufferPlan plan = InputBufferPlanner.plan(64, 64, inputs, List.of());
+
+        assertEquals(40, plan.operations());
+        assertEquals(List.of(2, 38, 40), plan.inputs().stream()
+                .map(input -> input.stack().getCount()).toList());
+        InputBufferPlan reversed = InputBufferPlanner.plan(64, 64,
+                List.of(lane(3, 64), lane(4, 2)), List.of());
+        assertEquals(List.of(62, 2), reversed.inputs().stream()
+                .map(input -> input.stack().getCount()).toList());
+    }
+
+    @Test
+    void reusableMaterialsCannotBeDuplicatedAcrossLanes() {
+        assertThrows(IllegalArgumentException.class, () -> InputBufferPlanner.plan(2, 2,
+                List.of(
+                        new InputBufferContract.InputSlot(
+                                "tool", 3, new ItemStack(Items.BUCKET), 1, 1,
+                                InputConsumption.catalyst()),
+                        new InputBufferContract.InputSlot(
+                                "tool", 4, new ItemStack(Items.BUCKET), 1, 1,
+                                InputConsumption.catalyst())), List.of()));
+    }
+
+    private static InputBufferContract.InputSlot lane(int slot, int capacity) {
+        return new InputBufferContract.InputSlot("ore", slot,
+                new ItemStack(Items.IRON_INGOT), 1, capacity, InputConsumption.consumed());
+    }
+
     private static InputBufferContract.InputSlot consumedInput(
             int slot, ItemStack stack, int perOperation, int capacity) {
         return new InputBufferContract.InputSlot("legacy:input:" + slot, slot,

@@ -46,7 +46,7 @@ public record InputBufferPlan(
         return new InputBufferPlan(operations, bound, outputs);
     }
 
-    /** Bind planned slots by stable material entry id rather than list position. */
+    /** 按物料身份绑定预留，多个槽分摊同一条目时必须与预留总量一致。 */
     public InputBufferPlan withResolvedMaterials(
             List<OperationStartContext.ReservedMaterial> resolved) {
         if (resolved == null || resolved.isEmpty()) return none();
@@ -54,12 +54,20 @@ public record InputBufferPlan(
         for (OperationStartContext.ReservedMaterial material : resolved) {
             if (byId.put(material.entryId(), material.stack()) != null) return none();
         }
+        Map<String, Long> requiredCounts = new HashMap<>();
+        for (InputSlot slot : inputs) {
+            requiredCounts.merge(slot.entryId(), (long) slot.stack().getCount(), Long::sum);
+        }
+        for (Map.Entry<String, Long> entry : requiredCounts.entrySet()) {
+            ItemStack stack = byId.get(entry.getKey());
+            if (stack == null || stack.isEmpty()
+                    || stack.getCount() != entry.getValue()) return none();
+        }
         List<InputSlot> bound = new ArrayList<>(inputs.size());
         for (InputSlot slot : inputs) {
             ItemStack stack = byId.get(slot.entryId());
-            if (stack == null || stack.isEmpty()
-                    || stack.getCount() != slot.stack().getCount()) return none();
-            bound.add(new InputSlot(slot.entryId(), slot.slot(), stack,
+            bound.add(new InputSlot(slot.entryId(), slot.slot(),
+                    stack.copyWithCount(slot.stack().getCount()),
                     slot.perOperation(), slot.consumption()));
         }
         return new InputBufferPlan(operations, bound, outputs);

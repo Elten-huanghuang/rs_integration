@@ -1,10 +1,14 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
-import com.huanghuang.rsintegration.crafting.graph.OutputProbability;
+import com.huanghuang.rsintegration.crafting.ExtractionLedger;
+import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
+import com.huanghuang.rsintegration.crafting.graph.OutputProbability;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.crafting.Ingredient;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -13,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 
 class InputBufferContractTest extends BootstrapTest {
 
@@ -114,5 +119,38 @@ class InputBufferContractTest extends BootstrapTest {
         assertEquals(0, resolved.inputs().get(0).slot());
         assertTrue(resolved.inputs().get(0).stack().is(Items.RAW_IRON));
         assertFalse(plan.withResolvedInputs(List.of(new ItemStack(Items.RAW_IRON, 3))).enabled());
+    }
+
+    @Test
+    void oneReservationBindsBothPhysicalLanesWithoutDuplicatingItems() {
+        InputBufferContract contract = new InputBufferContract(64,
+                List.of(
+                        new InputBufferContract.InputSlot(
+                                "legacy:material:0", 3, new ItemStack(Items.IRON_INGOT), 1, 64,
+                                InputConsumption.consumed()),
+                        new InputBufferContract.InputSlot(
+                                "legacy:material:0", 4, new ItemStack(Items.IRON_INGOT), 1, 64,
+                                InputConsumption.consumed())), List.of());
+        ItemStack reserved = new ItemStack(Items.RAW_IRON, 63);
+        reserved.getOrCreateTag().putString("batch", "test");
+        MaterialPlan materials = MaterialPlan.fromLegacy(List.of(
+                new IngredientSpec(Ingredient.of(Items.RAW_IRON), 1)));
+
+        OperationStartContext context = OperationStartContext.chainReserved(
+                mock(ServerPlayer.class), new ExtractionLedger(), materials,
+                List.of(reserved), contract.plan(63));
+
+        assertTrue(context.buffered());
+        assertEquals(List.of(32, 31), context.inputBufferPlan().inputs().stream()
+                .map(input -> input.stack().getCount()).toList());
+        assertTrue(context.inputBufferPlan().inputs().stream()
+                .allMatch(input -> input.stack().is(Items.RAW_IRON)
+                        && "test".equals(input.stack().getTag().getString("batch"))));
+        assertEquals(63, reserved.getCount());
+        for (int count : List.of(62, 64)) {
+            assertFalse(contract.plan(63).withResolvedMaterials(List.of(
+                    new OperationStartContext.ReservedMaterial(
+                            "legacy:material:0", reserved.copyWithCount(count)))).enabled());
+        }
     }
 }
