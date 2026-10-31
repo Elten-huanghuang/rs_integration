@@ -44,9 +44,10 @@ final class PlanResponseClientPacketHandler {
             var mc = Minecraft.getInstance();
             // 页面内的候选切换必须把错误交回页面状态机，才能回滚这次草稿选择并
             // 重开原节点。旧实现只发聊天栏消息，pending 选择会永久残留。
-            if (mc.screen instanceof CraftingPlanScreen existing
-                    && existing.acceptResponse(requestId, plan)) {
-                return;
+            if (mc.screen instanceof CraftingPlanScreen existing) {
+                if (existing.acceptResponse(requestId, plan)) return;
+                // 连续编辑会替换旧规划；旧请求的取消回包不再作为当前操作失败提示。
+                if (requestId > 0L && requestId < existing.activeRequestId()) return;
             }
             if (mc.player != null) {
                 Component message = firstDiagnosticMessage(plan)

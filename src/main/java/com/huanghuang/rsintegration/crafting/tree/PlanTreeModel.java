@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.tree;
 
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
+import com.huanghuang.rsintegration.crafting.plan.ParallelPlan;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import com.huanghuang.rsintegration.crafting.plan.PlanStep;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
@@ -72,7 +73,13 @@ public final class PlanTreeModel {
                 : fromLegacySteps(plan, budget);
         // 兄弟合并、根下补挂都会改变"哪一处展开过成本"的结果，只能在整棵树建完之后再统一标记。
         markReferenceNodes(model.root);
+        if (plan.graph() != null) attachRecipeOptions(model.root, plan.graph());
         return model;
+    }
+
+    private static void attachRecipeOptions(PlanTreeNode node, PlanGraphView graph) {
+        node.recipeOptions = graph.recipeOptions().getOrDefault(node.key, List.of());
+        for (PlanTreeNode child : node.children) attachRecipeOptions(child, graph);
     }
 
     /**
@@ -89,7 +96,8 @@ public final class PlanTreeModel {
 
     private static void collectExpandedProducers(PlanTreeNode node, Set<Object> expanded) {
         if (node.step != null && !node.children.isEmpty()) {
-            expanded.add(producerIdentity(node));
+            if (node.producerNodeIds.isEmpty()) expanded.add(node.step);
+            else node.producerNodeIds.forEach(id -> expanded.add("graph:" + id));
         }
         for (PlanTreeNode child : node.children) {
             collectExpandedProducers(child, expanded);
@@ -99,17 +107,13 @@ public final class PlanTreeModel {
     private static void applyReferenceFlags(PlanTreeNode node, Set<Object> expanded) {
         // 显示上限截断的节点同样没有子节点，但那不是"成本已在别处展开"，不应画引用角标。
         if (node.step != null && node.children.isEmpty() && !node.viewTruncated
-                && expanded.contains(producerIdentity(node))) {
+                && (node.producerNodeIds.isEmpty() ? expanded.contains(node.step)
+                : node.producerNodeIds.stream().allMatch(id -> expanded.contains("graph:" + id)))) {
             node.referenceOnly = true;
         }
         for (PlanTreeNode child : node.children) {
             applyReferenceFlags(child, expanded);
         }
-    }
-
-    /** 生产者身份：图模式用稳定的 DAG 节点 id，旧版清单模式用步骤对象。 */
-    private static Object producerIdentity(PlanTreeNode node) {
-        return node.graphNodeId != null ? "graph:" + node.graphNodeId : node.step;
     }
 
     private static int maxTreeCandidates() {
@@ -246,7 +250,7 @@ public final class PlanTreeModel {
 
     private static PlanTreeModel fromGraph(PlanResponse plan, BuildBudget budget) {
         PlanGraphView graph = plan.graph();
-        GraphViewIndex index = GraphViewIndex.from(graph);
+        GraphViewIndex index = GraphViewIndex.from(graph, plan.steps());
 
         ItemStack target = plan.targetResult();
         PlanStep targetStep = null;
@@ -272,19 +276,17 @@ public final class PlanTreeModel {
         // batch is rendered as one "x4" producer reference, not four "x1" nodes.
         Set<Integer> path = new HashSet<>();
         Set<Integer> expandedProducers = new HashSet<>();
-        List<PlanGraphView.RootEdgeView> rootEdges = new ArrayList<>();
-        Map<IngredientKey, UnresolvedReference> unresolvedRoots = new LinkedHashMap<>();
+        Map<DemandKey, UnresolvedReference> unresolvedRoots = new LinkedHashMap<>();
         for (PlanGraphView.RootView demand : graph.roots()) {
-            rootEdges.addAll(demand.allocations());
             if (demand.unresolvedQuantity() > 0) {
-                IngredientKey key = IngredientKey.of(demand.display());
+                DemandKey key = new DemandKey(IngredientKey.of(demand.display()), demand.role());
                 unresolvedRoots.compute(key, (ignored, existing) -> existing == null
                         ? new UnresolvedReference(demand.display(), demand.unresolvedQuantity(),
-                                DemandRole.CONSUMED)
+                                demand.role())
                         : existing.add(demand.unresolvedQuantity()));
             }
         }
-        for (GraphReference edge : mergeRootEdges(rootEdges)) {
+        for (GraphReference edge : mergeRootEdges(graph.roots())) {
             PlanTreeNode child = buildGraphReference(edge.source(), edge.material(), edge.quantity(),
                     edge.role(), 1, index, path, expandedProducers, plan, budget);
             if (child == null) {
@@ -299,7 +301,7 @@ public final class PlanTreeModel {
                 break;
             }
             PlanTreeNode missing = new PlanTreeNode(IngredientKey.of(missingRef.display()),
-                    missingRef.display(), missingRef.quantity(), 1, null);
+                    missingRef.display(), missingRef.quantity(), 1, null, null, missingRef.role());
             missing.unresolved = missingRef.quantity();
             applyAvailability(missing, plan, missingRef.display());
             root.children.add(missing);
@@ -318,7 +320,7 @@ public final class PlanTreeModel {
             PlanGraphView.NodeView graphNode = index.node(nodeId);
             if (graphNode == null || !rootReachableNodes.contains(nodeId)
                     || renderedRecipes.contains(graphNode.recipeId())) continue;
-            PlanStep step = graphNode.asPlanStep();
+            PlanStep step = index.stepFor(graphNode);
             PlanGraphView.OutputView output = graphNode.outputs().stream().findFirst().orElse(null);
             ItemStack display = output != null && !output.display().isEmpty()
                     ? output.display().copyWithCount(1)
@@ -349,7 +351,9 @@ public final class PlanTreeModel {
             root.children.add(omitted);
             renderedRecipes.add(graphNode.recipeId());
         }
-        mergeEquivalentProducedChildren(root);
+        mergeEquivalentProducedChildren(root, index);
+        collapseRepeatedStages(root, index);
+        rebaseDepths(root, 0);
         return new PlanTreeModel(root, budget.truncated());
     }
 
@@ -394,7 +398,7 @@ public final class PlanTreeModel {
         }
         if (!path.add(producer.nodeId())) {
             PlanTreeNode cycle = new PlanTreeNode(IngredientKey.of(material), material,
-                    quantity, depth, producer.asPlanStep(), producer.nodeId(), role).markCycle();
+                    quantity, depth, index.stepFor(producer), producer.nodeId(), role).markCycle();
             cycle.edgeQuantity = quantity;
             applyAvailability(cycle, plan, material);
             return cycle;
@@ -406,7 +410,7 @@ public final class PlanTreeModel {
         ItemStack display = material.isEmpty()
                 ? producer.primaryOutput().copyWithCount(1) : material.copyWithCount(1);
         PlanTreeNode node = new PlanTreeNode(IngredientKey.of(display), display,
-                quantity, depth, producer.asPlanStep(), producer.nodeId(), role);
+                quantity, depth, index.stepFor(producer), producer.nodeId(), role);
         node.limited = node.step.alternatives().size() > maxTreeCandidates();
         node.edgeQuantity = quantity;
         for (PlanGraphView.OutputView output : producer.outputs()) {
@@ -460,7 +464,7 @@ public final class PlanTreeModel {
             applyAvailability(missing, plan, missingRef.display());
             node.children.add(missing);
         }
-        mergeEquivalentProducedChildren(node);
+        mergeEquivalentProducedChildren(node, index);
         path.remove(producer.nodeId());
         return node;
     }
@@ -471,7 +475,7 @@ public final class PlanTreeModel {
      * raw-material leaves use their item/NBT identity and are always coalesced.
      * The server graph remains unchanged; this only aggregates the tree view.
      */
-    private static void mergeEquivalentProducedChildren(PlanTreeNode parent) {
+    private static void mergeEquivalentProducedChildren(PlanTreeNode parent, GraphViewIndex index) {
         Map<VisualKey, PlanTreeNode> merged = new LinkedHashMap<>();
         List<PlanTreeNode> result = new ArrayList<>();
         for (PlanTreeNode child : parent.children) {
@@ -481,9 +485,7 @@ public final class PlanTreeModel {
             }
             VisualKey key = child.step == null
                     ? new MaterialVisualKey(child.key, child.initialSource, child.demandRole)
-                    : new VisualRecipeKey(child.step.recipeId(),
-                    child.step.modType() == null ? "" : child.step.modType().id(),
-                    child.key, child.outputKindOrdinal, child.demandRole);
+                    : recipeVisualKey(child);
             PlanTreeNode existing = merged.get(key);
             if (existing == null) {
                 merged.put(key, child);
@@ -498,10 +500,10 @@ public final class PlanTreeModel {
             // quantity. Keep one copy; amount carries the summed branch demand.
             existing.available = Math.max(existing.available, child.available);
             existing.needed = Math.max(existing.needed, child.needed);
-            existing.productionAmount = Math.max(
-                    existing.productionAmount, child.productionAmount);
+            existing.producerNodeIds.addAll(child.producerNodeIds);
+            refreshMergedProduction(existing, index);
             existing.children.addAll(child.children);
-            mergeEquivalentProducedChildren(existing);
+            mergeEquivalentProducedChildren(existing, index);
         }
         parent.children.clear();
         parent.children.addAll(result);
@@ -512,16 +514,91 @@ public final class PlanTreeModel {
     private record VisualRecipeKey(ResourceLocation recipeId,
                                    String modType, IngredientKey output,
                                    int outputKindOrdinal,
-                                   DemandRole demandRole) implements VisualKey {}
+                                   DemandRole demandRole,
+                                   List<InputVisualKey> inputs) implements VisualKey {}
+
+    private record InputVisualKey(IngredientKey material, int count, DemandRole role) {}
+
+    private static VisualRecipeKey recipeVisualKey(PlanTreeNode node) {
+        PlanStep step = node.step;
+        List<InputVisualKey> inputs = new ArrayList<>();
+        for (int i = 0; i < step.inputs().size(); i++) {
+            ItemStack input = step.inputs().get(i);
+            inputs.add(new InputVisualKey(IngredientKey.of(input), input.getCount(), step.inputRole(i)));
+        }
+        return new VisualRecipeKey(step.recipeId(), step.modType() == null ? "" : step.modType().id(),
+                node.key, node.outputKindOrdinal, node.demandRole, inputs);
+    }
+
+    /** 连续复制阶段只显示一个配方，种子回流边留在原始执行图中。 */
+    private static void collapseRepeatedStages(PlanTreeNode parent, GraphViewIndex index) {
+        for (PlanTreeNode child : parent.children) collapseRepeatedStages(child, index);
+        if (parent.step == null || parent.cycle) return;
+        VisualRecipeKey key = recipeVisualKey(parent);
+        List<PlanTreeNode> children = new ArrayList<>();
+        boolean collapsed = false;
+        for (PlanTreeNode child : parent.children) {
+            if (child.step != null && !child.cycle && key.equals(recipeVisualKey(child))) {
+                parent.producerNodeIds.addAll(child.producerNodeIds);
+                children.addAll(child.children);
+                collapsed = true;
+            } else children.add(child);
+        }
+        if (!collapsed) return;
+        parent.children.clear();
+        parent.children.addAll(children);
+        refreshMergedProduction(parent, index);
+        mergeEquivalentProducedChildren(parent, index);
+    }
+
+    private static void refreshMergedProduction(PlanTreeNode node, GraphViewIndex index) {
+        if (node.step == null || node.producerNodeIds.isEmpty()) return;
+        long batches = 0L;
+        long production = 0L;
+        List<ParallelPlan> plans = new ArrayList<>();
+        for (int id : node.producerNodeIds) {
+            PlanGraphView.NodeView producer = index.node(id);
+            batches = SaturatingLongMath.add(batches, producer.executions());
+            plans.add(producer.parallelPlan());
+            for (PlanGraphView.OutputView output : producer.outputs()) {
+                if (output.kindOrdinal() == node.outputKindOrdinal
+                        && IngredientKey.of(output.display()).equals(node.key)) {
+                    production = SaturatingLongMath.add(production, output.quantity());
+                }
+            }
+        }
+        for (int id : node.producerNodeIds) {
+            for (PlanGraphView.EdgeView edge : index.edgesFor(id)) {
+                if (!edge.source().initial()
+                        && node.producerNodeIds.contains(edge.source().producerNodeId())
+                        && IngredientKey.of(edge.material()).equals(node.key)) {
+                    production -= edge.quantity();
+                }
+            }
+        }
+        PlanStep step = node.step;
+        node.parallelPlan = ParallelPlan.mergeForDisplay(plans);
+        node.step = new PlanStep(step.recipeId(), step.output(), batches, step.inputs(),
+                step.alternatives(), step.modType(), step.depth(), step.hasOrSiblings(),
+                step.recipeWidth(), step.recipeHeight(), step.alternativeModTypes(), step.inputRoles(),
+                step.inferMode(), node.parallelPlan);
+        node.productionAmount = Math.max(0L, production);
+    }
+
+    private static void rebaseDepths(PlanTreeNode node, int depth) {
+        node.depth = depth;
+        for (PlanTreeNode child : node.children) rebaseDepths(child, depth + 1);
+    }
 
     private record MaterialVisualKey(IngredientKey material, boolean initialSource,
                                      DemandRole demandRole) implements VisualKey {}
 
-    private static List<GraphReference> mergeRootEdges(List<PlanGraphView.RootEdgeView> edges) {
+    private static List<GraphReference> mergeRootEdges(List<PlanGraphView.RootView> roots) {
         Map<GraphReferenceKey, GraphReference> merged = new LinkedHashMap<>();
-        for (PlanGraphView.RootEdgeView edge : edges) {
-            mergeGraphReference(merged, edge.source(), edge.material(), edge.quantity(),
-                    DemandRole.CONSUMED);
+        for (PlanGraphView.RootView root : roots) {
+            for (PlanGraphView.RootEdgeView edge : root.allocations()) {
+                mergeGraphReference(merged, edge.source(), edge.material(), edge.quantity(), root.role());
+            }
         }
         return List.copyOf(merged.values());
     }
@@ -542,22 +619,27 @@ public final class PlanTreeModel {
         private final Map<Integer, List<PlanGraphView.EdgeView>> edgesByConsumer;
         private final Map<Integer, List<PlanGraphView.UnresolvedView>> unresolvedByConsumer;
         private final Map<ConsumerPortKey, DemandRole> inputRoles;
+        private final Map<ResourceLocation, PlanStep> presentations;
 
         private GraphViewIndex(Map<Integer, PlanGraphView.NodeView> nodes,
                                Map<Integer, List<PlanGraphView.EdgeView>> edgesByConsumer,
                                Map<Integer, List<PlanGraphView.UnresolvedView>> unresolvedByConsumer,
-                               Map<ConsumerPortKey, DemandRole> inputRoles) {
+                               Map<ConsumerPortKey, DemandRole> inputRoles,
+                               Map<ResourceLocation, PlanStep> presentations) {
             this.nodes = nodes;
             this.edgesByConsumer = edgesByConsumer;
             this.unresolvedByConsumer = unresolvedByConsumer;
             this.inputRoles = inputRoles;
+            this.presentations = presentations;
         }
 
-        static GraphViewIndex from(PlanGraphView graph) {
+        static GraphViewIndex from(PlanGraphView graph, List<PlanStep> steps) {
             Map<Integer, PlanGraphView.NodeView> nodes = new HashMap<>();
             Map<Integer, List<PlanGraphView.EdgeView>> edgesByConsumer = new HashMap<>();
             Map<Integer, List<PlanGraphView.UnresolvedView>> unresolvedByConsumer = new HashMap<>();
             Map<ConsumerPortKey, DemandRole> inputRoles = new HashMap<>();
+            Map<ResourceLocation, PlanStep> presentations = new LinkedHashMap<>();
+            for (PlanStep step : steps) presentations.putIfAbsent(step.recipeId(), step);
             for (PlanGraphView.NodeView node : graph.nodes()) {
                 nodes.put(node.nodeId(), node);
                 for (PlanGraphView.InputView input : node.inputs()) {
@@ -572,7 +654,12 @@ public final class PlanTreeModel {
                 unresolvedByConsumer.computeIfAbsent(unresolved.consumerNodeId(),
                         ignored -> new ArrayList<>()).add(unresolved);
             }
-            return new GraphViewIndex(nodes, edgesByConsumer, unresolvedByConsumer, inputRoles);
+            return new GraphViewIndex(nodes, edgesByConsumer, unresolvedByConsumer,
+                    inputRoles, presentations);
+        }
+
+        PlanStep stepFor(PlanGraphView.NodeView node) {
+            return node.asPlanStep(presentations.get(node.recipeId()));
         }
 
         @Nullable
@@ -642,7 +729,7 @@ public final class PlanTreeModel {
     }
 
     private static void collectGraphReferences(PlanTreeNode node, Map<Integer, Integer> counts) {
-        if (node.graphNodeId != null) counts.merge(node.graphNodeId, 1, Integer::sum);
+        for (int id : node.producerNodeIds) counts.merge(id, 1, Integer::sum);
         for (PlanTreeNode child : node.children) collectGraphReferences(child, counts);
     }
 

@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.mods.apotheosis.ApothSpawnerPlanTarget;
 import com.huanghuang.rsintegration.mods.apotheosis.network.ApothSpawnerExecutePacket;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
+import com.huanghuang.rsintegration.crafting.planning.PlanningProgressSnapshot;
 import com.huanghuang.rsintegration.crafting.planning.PlanningProgressTracker;
 import com.huanghuang.rsintegration.crafting.planning.PlanningRequestIds;
 import net.minecraft.core.BlockPos;
@@ -336,6 +337,8 @@ public final class CraftingPlanScreen extends Screen {
                 plan.targetResult().getHoverName().getString()));
         this.plan = plan;
         this.responseRequests = new PlanResponseRequestState(requestId, plan.recipeId());
+        this.currentRepeat = clampRepeatCount(plan.repeatCount());
+        this.lastRefreshCount = currentRepeat;
         this.outputDestination = hasStorageBackend()
                 ? CraftingPlanPreferences.loadOutputDestination(PLAN_PREFS_PATH)
                 : OutputDestination.PLAYER_INVENTORY;
@@ -363,6 +366,7 @@ public final class CraftingPlanScreen extends Screen {
 
     @Override
     public void onClose() {
+        responseRequests.cancelConfirmation();
         if (responseRequests.pending()) {
             PlanBackgroundClient.detach(responseRequests.activeRequestId());
         }
@@ -371,6 +375,7 @@ public final class CraftingPlanScreen extends Screen {
 
     @Override
     public void removed() {
+        responseRequests.cancelConfirmation();
         treeMouseGesture.cancel();
         dragging = false;
         draggingBar = null;
@@ -385,7 +390,10 @@ public final class CraftingPlanScreen extends Screen {
                     responseRequests.expectedRecipeId());
             return false;
         }
+        // 新数量尚未发出时，旧请求的响应也不能覆盖当前输入或触发合成。
+        if (responseRequests.refreshScheduled()) return true;
         if (newPlan.recipeId() == null || newPlan.recipeId().isEmpty()) {
+            responseRequests.cancelConfirmation();
             if (minecraft != null && minecraft.player != null) {
                 List<Component> warnings = displayWarnings(newPlan);
                 if (!warnings.isEmpty()) {
@@ -394,6 +402,7 @@ public final class CraftingPlanScreen extends Screen {
             }
             rollbackPendingCandidateSwitch();
             reopenPendingCandidates();
+            updateConfirmButton();
             return true;
         }
         // 预览失败且没有目标步骤时不要清空当前可用计划。压缩/分解配方很容易
@@ -401,6 +410,7 @@ public final class CraftingPlanScreen extends Screen {
         // 从候选面板切回上一条配方。
         if (PlanPreviewDecision.keepCurrentPlan(
                 plan, newPlan, pendingCandidateSwitch != null)) {
+            responseRequests.cancelConfirmation();
             if (minecraft != null && minecraft.player != null) {
                 List<Component> warnings = displayWarnings(newPlan);
                 minecraft.player.displayClientMessage(warnings.isEmpty()
@@ -409,9 +419,17 @@ public final class CraftingPlanScreen extends Screen {
             }
             rollbackPendingCandidateSwitch();
             reopenPendingCandidates();
+            updateConfirmButton();
             return true;
         }
         updatePlan(newPlan);
+        boolean executable = (newPlan.success() && !newPlan.executionBlocked())
+                || (partialPreparation && newPlan.outcome() == PlanOutcome.MISSING_INPUTS);
+        if (responseRequests.consumeConfirmation(executable)) {
+            onConfirm();
+        } else {
+            updateConfirmButton();
+        }
         return true;
     }
 
@@ -420,6 +438,8 @@ public final class CraftingPlanScreen extends Screen {
     public void updatePlan(PlanResponse newPlan) {
         MachineCandidateView previous = selectedMachineCandidate();
         this.plan = newPlan;
+        this.currentRepeat = clampRepeatCount(newPlan.repeatCount());
+        this.lastRefreshCount = currentRepeat;
         JeiCraftingPlanContext.INSTANCE.activate(newPlan);
         // The server response is authoritative.  Accepting only non-null
         // references leaves a stale RS selection alive after a backend switch
@@ -514,8 +534,6 @@ public final class CraftingPlanScreen extends Screen {
         treeMouseGesture.cancel();
         dragging = false;
         draggingBar = null;
-        currentRepeat = clampRepeatCount(plan.repeatCount());
-        lastRefreshCount = currentRepeat;
         Font font = minecraft.font;
         if (recipeCandidatePanel == null) {
             recipeCandidatePanel = new RecipeCandidatePanel(font, recipePreview,
@@ -597,8 +615,7 @@ public final class CraftingPlanScreen extends Screen {
                 .build();
         confirmButton.setTooltip(Tooltip.create(
                 Component.translatable("rsi.plan.machine_clear_notice")));
-        confirmButton.active = partialPreparation
-                || !plan.executionBlocked() || selectedPath.isDirty();
+        updateConfirmButton();
         addRenderableWidget(confirmButton);
 
         addRenderableWidget(Button.builder(
@@ -628,9 +645,25 @@ public final class CraftingPlanScreen extends Screen {
     }
 
     private Component executionActionLabel() {
+        if (responseRequests.confirmationRequested()) {
+            return Component.translatable("rsi.plan.confirm_waiting");
+        }
         if (partialPreparation) return Component.translatable("rsi.plan.prepare.action");
         return Component.translatable(selectedPath.isDirty()
                 ? "rsi.plan.confirm_branches" : "rsi.plan.confirm");
+    }
+
+    private void updateConfirmButton() {
+        if (confirmButton == null) return;
+        confirmButton.setMessage(executionActionLabel());
+        confirmButton.active = !responseRequests.confirmationRequested()
+                && (responseRequests.waitingForPreview() || partialPreparation
+                || !plan.executionBlocked() || selectedPath.isDirty());
+    }
+
+    private void cancelQueuedConfirmation() {
+        responseRequests.cancelConfirmation();
+        updateConfirmButton();
     }
 
     private record RepeatRowLayout(int rowX, int rowW, int startX, int cardY, int buttonY,
@@ -750,6 +783,7 @@ public final class CraftingPlanScreen extends Screen {
                 ? OutputDestination.RS_NETWORK : destination;
         if (selected == outputDestination) return;
         outputDestination = selected;
+        cancelQueuedConfirmation();
         if (!CraftingPlanPreferences.saveOutputDestination(PLAN_PREFS_PATH, selected)) {
             RSIntegrationMod.LOGGER.debug("[RSI-Plan] Failed to save output destination preference");
         }
@@ -775,6 +809,13 @@ public final class CraftingPlanScreen extends Screen {
 
     private void onConfirm() {
         commitRepeatCountInput();
+        if (responseRequests.confirmationRequested()) return;
+        // 点击确认时立即发出防抖中的最新预览，避免执行请求打断仍在运行的规划。
+        if (responseRequests.refreshRequired()) refreshPlan();
+        if (responseRequests.requestConfirmation()) {
+            updateConfirmButton();
+            return;
+        }
         if (!partialPreparation && plan.executionBlocked() && !selectedPath.isDirty()) return;
         String recipeId = plan.recipeId();
         ResourceLocation targetId = ResourceLocation.tryParse(recipeId);
@@ -826,12 +867,19 @@ public final class CraftingPlanScreen extends Screen {
     private void sendCraftPacket(ResourceLocation rid, boolean preview,
                                  Map<String, String> forced, int repeatCount, boolean inferMode) {
         if (rid == null) return;
+        long requestId = preview && QuestSubmissionTargetIds.isQuestSubmission(rid)
+                ? 0L : PlanningRequestIds.next();
+        if (preview) {
+            planRefreshTick = -1;
+            lastRefreshCount = repeatCount;
+            responseRequests.beginPreview(requestId, rid.toString());
+            updateConfirmButton();
+        }
         if (preview && QuestSubmissionTargetIds.isQuestSubmission(rid)) {
             // Quest previews use their own planner and return an uncorrelated
             // PlanResponsePacket. Starting the ordinary planning HUD here would
             // leave it waiting forever because GenericCraftPacket never handles
             // synthetic quest target IDs.
-            responseRequests.beginPreview(0L, rid.toString());
             PlanningProgressTracker.clear();
             BatchCraftNetworkHandler.CHANNEL.sendToServer(
                     new QuestSubmissionRequestPacket(
@@ -851,8 +899,6 @@ public final class CraftingPlanScreen extends Screen {
             execPos = selected == null ? null
                     : new BlockPos(selected.x(), selected.y(), selected.z());
         }
-        long requestId = PlanningRequestIds.next();
-        if (preview) responseRequests.beginPreview(requestId, rid.toString());
         ItemStack requestTarget = executionTarget(plan.clickedOutput(), plan.targetResult());
         if (LongTravailCrownRecipes.isRecipeId(rid)
                 && !rid.toString().equals(plan.recipeId())
@@ -963,6 +1009,15 @@ public final class CraftingPlanScreen extends Screen {
         if (currentRepeat == lastRefreshCount) return;
         lastRefreshCount = currentRepeat;
         planRefreshTick = ticksOpen + 10;
+        responseRequests.scheduleRefresh();
+        updateConfirmButton();
+    }
+
+    private void refreshPlan() {
+        String recipeId = pendingCandidateSwitch == null
+                ? plan.recipeId() : responseRequests.expectedRecipeId();
+        ResourceLocation id = ResourceLocation.tryParse(recipeId);
+        sendCraftPacket(id, true, exportForcedSelections(), currentRepeat, false);
     }
 
     @Override
@@ -973,9 +1028,15 @@ public final class CraftingPlanScreen extends Screen {
         if (recipeCandidatePanel != null) recipeCandidatePanel.tick();
         ticksOpen++;
         if (planRefreshTick >= 0 && ticksOpen >= planRefreshTick) {
-            planRefreshTick = -1;
-            ResourceLocation id = ResourceLocation.tryParse(plan.recipeId());
-            sendCraftPacket(id, true, exportForcedSelections(), currentRepeat, false);
+            refreshPlan();
+        }
+        PlanningProgressSnapshot progress = PlanningProgressTracker.current();
+        if (!responseRequests.refreshScheduled() && progress != null
+                && progress.terminal()
+                && progress.state() != PlanningProgressSnapshot.State.SUCCEEDED
+                && responseRequests.failPreview(progress.requestId())) {
+            // 部分准入失败只回传进度终态，解除等待并让下次确认重新规划。
+            updateConfirmButton();
         }
     }
 
@@ -2463,8 +2524,7 @@ public final class CraftingPlanScreen extends Screen {
     private void selectTreeBranch(PlanTreeNode node, @Nullable ResourceLocation recipeId,
                                   boolean persistPreference) {
         closeRecipeCandidates();
-        if (node == null || node.containsCycle()
-                || node.step == null && recipeId != null) return;
+        if (node == null || !RecipeCandidateRules.canSelect(node, recipeId)) return;
 
         ResourceLocation preferenceKey = CraftingResolver
                 .preferenceKey(node.key.stack(1));
@@ -2474,7 +2534,8 @@ public final class CraftingPlanScreen extends Screen {
         if (recipeId == null) {
             selectedPath.clearBranch(node.key);
         } else {
-            int idx = Math.max(0, node.step.alternatives().indexOf(recipeId));
+            int idx = node.step == null ? 0
+                    : Math.max(0, node.step.alternatives().indexOf(recipeId));
             selectedPath.selectBranch(node.key, idx, recipeId);
         }
 
@@ -2620,6 +2681,7 @@ public final class CraftingPlanScreen extends Screen {
         candidateNode.lockedMaterial = node.lockedMaterial;
         candidateNode.materialLockKey = node.materialLockKey;
         candidateNode.materialOptions = node.materialOptions;
+        candidateNode.recipeOptions = node.recipeOptions;
         candidateNode.ingredient = node.ingredient;
         return candidateNode;
     }
@@ -3133,6 +3195,7 @@ public final class CraftingPlanScreen extends Screen {
         if (machineHit != null) {
             if (button == 0) {
                 selectedMachineIndex = machineHit.index();
+                cancelQueuedConfirmation();
                 if (machineSelectionMode == MachineSelectionMode.AUTO) {
                     machineSelectionMode = MachineSelectionMode.PREFERRED;
                 }
@@ -3147,6 +3210,7 @@ public final class CraftingPlanScreen extends Screen {
                 int index = (int) ((mx - machineModeX) / (machineModeW + 3));
                 if (index >= 0 && index < 3) {
                     machineSelectionMode = MachineSelectionMode.values()[index];
+                    cancelQueuedConfirmation();
                     if (machineSelectionMode != MachineSelectionMode.AUTO
                             && selectedMachineIndex < 0) {
                         selectedMachineIndex = plan.machineCandidates().stream()
@@ -3191,11 +3255,7 @@ public final class CraftingPlanScreen extends Screen {
             if (button == 0) {
                 partialPreparation = !partialPreparation;
                 if (partialPreparation) selectOutputDestination(OutputDestination.RS_NETWORK);
-                if (confirmButton != null) {
-                    confirmButton.setMessage(executionActionLabel());
-                    confirmButton.active = partialPreparation
-                            || !plan.executionBlocked() || selectedPath.isDirty();
-                }
+                cancelQueuedConfirmation();
             }
             return true;
         }
@@ -3328,6 +3388,7 @@ public final class CraftingPlanScreen extends Screen {
                     && mx >= embersModeCalcX && mx <= embersModeCalcX + embersModeCalcW
                     && my >= embersModeCalcY && my <= embersModeCalcY + embersModeCalcH) {
                 embersInferMode = false;
+                cancelQueuedConfirmation();
                 return true;
             }
             // Embers mode toggle: Infer
@@ -3335,6 +3396,7 @@ public final class CraftingPlanScreen extends Screen {
                     && mx >= embersModeInferX && mx <= embersModeInferX + embersModeInferW
                     && my >= embersModeInferY && my <= embersModeInferY + embersModeInferH) {
                 embersInferMode = true;
+                cancelQueuedConfirmation();
                 return true;
             }
             if (my >= stepsTop) {

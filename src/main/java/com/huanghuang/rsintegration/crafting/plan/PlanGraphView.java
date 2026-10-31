@@ -8,12 +8,15 @@ import com.huanghuang.rsintegration.crafting.graph.MaterialSource;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.graph.OutputKind;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
+import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.magic.MagicResourceCost;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -34,8 +37,15 @@ public record PlanGraphView(
         List<RootView> roots,
         List<UnresolvedView> unresolved,
         List<Integer> topologicalOrder,
-        List<MagicResourceCost> magicCosts
+        List<MagicResourceCost> magicCosts,
+        Map<IngredientKey, List<RecipeOption>> recipeOptions
 ) {
+    public PlanGraphView(int version, List<NodeView> nodes, List<EdgeView> edges,
+                         List<RootView> roots, List<UnresolvedView> unresolved,
+                         List<Integer> topologicalOrder, List<MagicResourceCost> magicCosts) {
+        this(version, nodes, edges, roots, unresolved, topologicalOrder, magicCosts, Map.of());
+    }
+
     public PlanGraphView(int version, List<NodeView> nodes, List<EdgeView> edges,
                          List<RootView> roots, List<UnresolvedView> unresolved,
                          List<Integer> topologicalOrder) {
@@ -49,6 +59,9 @@ public record PlanGraphView(
         unresolved = List.copyOf(unresolved);
         topologicalOrder = List.copyOf(topologicalOrder);
         magicCosts = MagicResourceCost.merge(magicCosts);
+        Map<IngredientKey, List<RecipeOption>> detached = new LinkedHashMap<>();
+        recipeOptions.forEach((material, options) -> detached.put(material, List.copyOf(options)));
+        recipeOptions = Collections.unmodifiableMap(detached);
     }
 
     public static PlanGraphView from(CraftPlanGraph graph) {
@@ -101,7 +114,7 @@ public record PlanGraphView(
                                         allocation.material().toStack(
                                                 SaturatingLongMath.clampToInt(allocation.quantity())),
                                         allocation.quantity()))
-                                .toList()))
+                                .toList(), root.role().ordinal()))
                 .toList();
 
         List<UnresolvedView> unresolved = graph.unresolvedDemands().stream()
@@ -126,6 +139,29 @@ public record PlanGraphView(
         for (NodeView node : nodes) if (node.nodeId() == nodeId) return node;
         return null;
     }
+
+    /** 卡片和递归树共用已经通过服务端可用性检查的候选，不改动执行节点或材料边。 */
+    public PlanGraphView withRecipeAlternatives(List<PlanStep> steps) {
+        Map<ResourceLocation, PlanStep> byRecipe = new LinkedHashMap<>();
+        for (PlanStep step : steps) byRecipe.putIfAbsent(step.recipeId(), step);
+        List<NodeView> enriched = nodes.stream().map(node -> {
+            PlanStep step = byRecipe.get(node.recipeId());
+            if (step == null) return node;
+            return new NodeView(node.nodeId(), node.recipeId(), node.modTypeId(),
+                    node.executions(), node.primaryOutput(), step.alternatives(),
+                    step.alternativeModTypes(), node.inputs(), node.outputs(), node.parallelPlan());
+        }).toList();
+        return new PlanGraphView(version, enriched, edges, roots, unresolved,
+                topologicalOrder, magicCosts, recipeOptions);
+    }
+
+    /** 库存材料的可选生产者独立于执行节点，不能伪造一条待生产步骤。 */
+    public PlanGraphView withRecipeOptions(Map<IngredientKey, List<RecipeOption>> options) {
+        return new PlanGraphView(version, nodes, edges, roots, unresolved,
+                topologicalOrder, magicCosts, options);
+    }
+
+    public record RecipeOption(ResourceLocation recipeId, String modTypeId) {}
 
     public record NodeView(int nodeId, ResourceLocation recipeId, String modTypeId,
                            int executions, ItemStack primaryOutput,
@@ -158,16 +194,62 @@ public record PlanGraphView(
         }
 
         public PlanStep asPlanStep() {
+            return asPlanStep(null);
+        }
+
+        /** 只从展示模板恢复九宫格槽位，物品状态、数量和批次仍以图节点为准。 */
+        public PlanStep asPlanStep(@Nullable PlanStep presentation) {
             int runCount = Math.max(1, executions);
             List<ItemStack> displayInputs = inputs.stream()
                     .map(input -> input.display().copyWithCount(
                             SaturatingLongMath.clampToInt(input.perExecutionQuantity(runCount))))
                     .toList();
             List<DemandRole> inputRoles = inputs.stream().map(InputView::role).toList();
+            int width = 0;
+            int height = 0;
+            if (presentation != null && recipeId.equals(presentation.recipeId())
+                    && presentation.recipeWidth() > 0 && presentation.recipeHeight() > 0) {
+                List<ItemStack> grid = restoreGrid(presentation, displayInputs, inputRoles);
+                if (grid != null) {
+                    displayInputs = grid;
+                    inputRoles = presentation.inputRoles();
+                    width = presentation.recipeWidth();
+                    height = presentation.recipeHeight();
+                }
+            }
             return new PlanStep(recipeId, primaryOutput.copy(), runCount,
                     displayInputs, alternativeIds, ModType.byId(modTypeId), 0,
-                    !alternativeIds.isEmpty(), 0, 0, alternativeModTypeIds, inputRoles,
+                    !alternativeIds.isEmpty(), width, height, alternativeModTypeIds, inputRoles,
                     false, parallelPlan);
+        }
+
+        @Nullable
+        private static List<ItemStack> restoreGrid(PlanStep presentation,
+                                                    List<ItemStack> actualInputs,
+                                                    List<DemandRole> actualRoles) {
+            long[] remaining = actualInputs.stream().mapToLong(ItemStack::getCount).toArray();
+            List<ItemStack> grid = new ArrayList<>();
+            for (int slot = 0; slot < presentation.inputs().size(); slot++) {
+                ItemStack template = presentation.inputs().get(slot);
+                if (template.isEmpty()) {
+                    grid.add(ItemStack.EMPTY);
+                    continue;
+                }
+                int matched = -1;
+                for (int i = 0; i < actualInputs.size(); i++) {
+                    if (remaining[i] >= template.getCount()
+                            && actualRoles.get(i) == presentation.inputRole(slot)
+                            && ItemStack.isSameItemSameTags(template, actualInputs.get(i))) {
+                        matched = i;
+                        break;
+                    }
+                }
+                if (matched < 0) return null;
+                grid.add(actualInputs.get(matched).copyWithCount(template.getCount()));
+                remaining[matched] -= template.getCount();
+            }
+            for (long count : remaining) if (count != 0L) return null;
+            return List.copyOf(grid);
         }
     }
 
@@ -210,10 +292,21 @@ public record PlanGraphView(
     }
 
     public record RootView(ItemStack display, long quantity, long unresolvedQuantity,
-                           List<RootEdgeView> allocations) {
+                           List<RootEdgeView> allocations, int roleOrdinal) {
+        public RootView(ItemStack display, long quantity, long unresolvedQuantity,
+                        List<RootEdgeView> allocations) {
+            this(display, quantity, unresolvedQuantity, allocations, DemandRole.CONSUMED.ordinal());
+        }
+
         public RootView {
             display = display.copyWithCount(1);
             allocations = List.copyOf(allocations);
+        }
+
+        public DemandRole role() {
+            DemandRole[] roles = DemandRole.values();
+            return roleOrdinal >= 0 && roleOrdinal < roles.length
+                    ? roles[roleOrdinal] : DemandRole.CONSUMED;
         }
     }
 

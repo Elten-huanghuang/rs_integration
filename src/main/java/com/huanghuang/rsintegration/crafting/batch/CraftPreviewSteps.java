@@ -81,10 +81,6 @@ public final class CraftPreviewSteps {
         for (int i = 0; i < steps.size(); i++) {
             ResolutionStep step = steps.get(i);
             String key = step.recipeId().toString();
-            Recipe<?> recipe = recipes.apply(step.recipeId());
-            if (recipe != null && CraftExecutionPolicy.isSelfAmplifyingRecipe(recipe, access)) {
-                key += "|amplification-stage:" + i;
-            }
             if (step.syntheticInput() != null && step.syntheticOutput() != null) {
                 key += "|" + IngredientKey.of(step.syntheticInput()).hashCode()
                         + "|" + IngredientKey.of(step.syntheticOutput()).hashCode();

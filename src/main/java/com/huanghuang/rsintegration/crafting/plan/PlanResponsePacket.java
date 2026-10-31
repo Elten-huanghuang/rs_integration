@@ -591,6 +591,7 @@ public final class PlanResponsePacket {
             InkFluidSupport.writePacket(buf, root.display());
             buf.writeVarLong(root.quantity());
             buf.writeVarLong(root.unresolvedQuantity());
+            buf.writeVarInt(root.roleOrdinal());
             buf.writeVarInt(root.allocations().size());
             for (PlanGraphView.RootEdgeView allocation : root.allocations()) {
                 writeSource(buf, allocation.source());
@@ -611,6 +612,15 @@ public final class PlanResponsePacket {
         for (MagicResourceCost cost : graph.magicCosts()) {
             buf.writeVarInt(cost.kind().ordinal());
             buf.writeVarLong(cost.amountPerOperation());
+        }
+        buf.writeVarInt(graph.recipeOptions().size());
+        for (var entry : graph.recipeOptions().entrySet()) {
+            InkFluidSupport.writePacket(buf, entry.getKey().stack(1));
+            buf.writeVarInt(entry.getValue().size());
+            for (PlanGraphView.RecipeOption option : entry.getValue()) {
+                buf.writeResourceLocation(option.recipeId());
+                buf.writeUtf(option.modTypeId(), MAX_MOD_TYPE_LENGTH);
+            }
         }
     }
 
@@ -665,12 +675,14 @@ public final class PlanResponsePacket {
             if (unresolvedQuantity > quantity) {
                 throw new DecoderException("root unresolved quantity exceeds root quantity");
             }
+            int roleOrdinal = readNonNegativeVarInt(buf, "root role ordinal");
             List<PlanGraphView.RootEdgeView> allocations = new ArrayList<>();
             for (int j = 0, m = readBoundedCount(buf); j < m; j++) {
                 allocations.add(new PlanGraphView.RootEdgeView(readSource(buf),
                         InkFluidSupport.readPacket(buf), readNonNegativeVarLong(buf, "root allocation quantity")));
             }
-            roots.add(new PlanGraphView.RootView(display, quantity, unresolvedQuantity, allocations));
+            roots.add(new PlanGraphView.RootView(
+                    display, quantity, unresolvedQuantity, allocations, roleOrdinal));
         }
         List<PlanGraphView.UnresolvedView> unresolved = new ArrayList<>();
         for (int i = 0, n = readBoundedCount(buf); i < n; i++) {
@@ -692,8 +704,18 @@ public final class PlanResponsePacket {
             magicCosts.add(new MagicResourceCost(MagicResourceKind.values()[ordinal],
                     readNonNegativeVarLong(buf, "magic resource cost")));
         }
+        Map<IngredientKey, List<PlanGraphView.RecipeOption>> recipeOptions = new LinkedHashMap<>();
+        for (int i = 0, n = readBoundedCount(buf); i < n; i++) {
+            IngredientKey material = IngredientKey.of(InkFluidSupport.readPacket(buf));
+            List<PlanGraphView.RecipeOption> options = new ArrayList<>();
+            for (int j = 0, m = readBoundedCount(buf); j < m; j++) {
+                options.add(new PlanGraphView.RecipeOption(buf.readResourceLocation(),
+                        buf.readUtf(MAX_MOD_TYPE_LENGTH)));
+            }
+            recipeOptions.put(material, options);
+        }
         return new PlanGraphView(version, nodes, edges, roots, unresolved, topological,
-                magicCosts);
+                magicCosts, recipeOptions);
     }
 
     private static void writeSource(FriendlyByteBuf buf, PlanGraphView.SourceView source) {

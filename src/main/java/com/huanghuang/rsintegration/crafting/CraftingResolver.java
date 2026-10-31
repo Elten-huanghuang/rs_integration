@@ -1545,8 +1545,10 @@ public final class CraftingResolver {
     static boolean consumesOutput(Ingredient ingredient, ItemStack output) {
         if (ingredient == null || ingredient.isEmpty()
                 || output == null || output.isEmpty()) return false;
+        // 先检查真实材料谓词，避免把共用 Item 的不同流体或 NBT 状态误判为自消耗。
+        if (!IngredientMatcher.test(ingredient, output)) return false;
         if (!IngredientMatcher.hasCompleteItemList(ingredient)) {
-            return IngredientMatcher.test(ingredient, output);
+            return true;
         }
         int candidates = 0;
         for (ItemStack template : ingredient.getItems()) {

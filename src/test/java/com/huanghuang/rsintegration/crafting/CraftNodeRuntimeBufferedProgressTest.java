@@ -193,7 +193,7 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
     void queueTimeDoesNotConsumeLaterMaterialRetryWindow() throws Exception {
         AsyncCraftChain chain = new AsyncCraftChain(
                 UUID.randomUUID(), player.getServer(), null, List.of());
-        String machineBusy = "all bound machines are busy, unloaded, or unavailable";
+        String machineBusy = "所有已绑定机器都在忙碌、未加载或不可用";
         assertEquals(ConcurrentNodeExecutor.StartStatus.RETRY, retry(chain, machineBusy));
         tick.set(1000);
         assertEquals(ConcurrentNodeExecutor.StartStatus.RETRY, retry(chain, machineBusy));

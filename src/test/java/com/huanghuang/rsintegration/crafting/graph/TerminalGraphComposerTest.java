@@ -277,6 +277,16 @@ class TerminalGraphComposerTest extends BootstrapTest {
                 resolved, step("terminal", 1), List.of()));
     }
 
+    @Test
+    void ordinaryTerminalStillRequiresStaticInputsAndPrimaryOutput() {
+        CraftPlanGraph empty = new CraftPlanGraph(
+                1, List.of(), List.of(), List.of(), List.of(), List.of());
+        assertThrows(IllegalArgumentException.class, () -> TerminalGraphComposer.compose(
+                empty, step("terminal", 1), terminalOutput(new ItemStack(Items.DIAMOND))));
+        assertThrows(IllegalArgumentException.class, () -> TerminalGraphComposer.compose(
+                empty, step("terminal", 1), List.of()));
+    }
+
     private static List<TerminalGraphComposer.TerminalOutput> terminalOutput(
             ItemStack stack
     ) {

@@ -29,6 +29,7 @@ import com.huanghuang.rsintegration.storage.StorageSnapshotStatus;
 import com.huanghuang.rsintegration.storage.StoredItem;
 import com.huanghuang.rsintegration.util.ItemStackUtils;
 import com.huanghuang.rsintegration.util.LogSampler;
+import com.huanghuang.rsintegration.util.TrackedInsertionSequence;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -83,28 +84,35 @@ public final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint 
     }
 
     @Override
+    public StorageOperationResult insert(ServerPlayer player, ItemStack stack, boolean simulate) {
+        // 递归合成持有 ServerPlayer，必须与通用玩家入口共用时间戳记录。
+        return insert((Player) player, stack, simulate);
+    }
+
+    @Override
     public StorageOperationResult insert(Player player, ItemStack stack, boolean simulate) {
+        if (simulate || player == null) return insert(stack, simulate);
         try {
-            ItemStack remainder = InkFluidSupport.isToken(stack)
-                    ? InkFluidSupport.insert(network, stack, simulate)
-                    : network.insertItem(stack.copy(), stack.getCount(),
-                    simulate ? com.refinedmods.refinedstorage.api.util.Action.SIMULATE
-                            : com.refinedmods.refinedstorage.api.util.Action.PERFORM);
-            if (!simulate && player != null) {
+            // RS 会在实际插入时同步缓存，先记录时间戳，避免同步到旧值或空值。
+            ItemStack remainder = TrackedInsertionSequence.insert(stack,
+                    (input, phase) -> insert(input,
+                            phase == TrackedInsertionSequence.Phase.SIMULATE)
+                            .remainder().orElse(ItemStack.EMPTY),
+                    accepted -> {
+                        if (InkFluidSupport.isToken(accepted)) {
+                            var tracker = network.getFluidStorageTracker();
+                            if (tracker != null) tracker.changed(player, InkFluidSupport.fluid(accepted));
+                        } else {
+                            var tracker = network.getItemStorageTracker();
+                            if (tracker != null) tracker.changed(player, accepted);
+                        }
+                    });
+            if (player instanceof ServerPlayer serverPlayer) {
                 ItemStack accepted = stack.copy();
                 accepted.shrink(remainder.getCount());
                 if (!accepted.isEmpty()) {
-                    if (InkFluidSupport.isToken(accepted)) {
-                        var tracker = network.getFluidStorageTracker();
-                        if (tracker != null) tracker.changed(player, InkFluidSupport.fluid(accepted));
-                    } else {
-                        var tracker = network.getItemStorageTracker();
-                        if (tracker != null) tracker.changed(player, accepted);
-                    }
-                    if (player instanceof ServerPlayer serverPlayer) {
-                        MaterialSources.invalidateFor(serverPlayer, this);
-                        serverPlayer.containerMenu.broadcastChanges();
-                    }
+                    MaterialSources.invalidateFor(serverPlayer, this);
+                    serverPlayer.containerMenu.broadcastChanges();
                 }
             }
             return StorageOperationResult.inserted(

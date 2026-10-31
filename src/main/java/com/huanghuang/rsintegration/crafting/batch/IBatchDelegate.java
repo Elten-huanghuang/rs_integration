@@ -258,6 +258,15 @@ public interface IBatchDelegate {
     }
 
     /**
+     * 图批次的精确材料总量，已扣除机器现有库存，执行链不能再次乘执行次数。
+     * 返回 null 时沿用单次材料声明；空列表表示整批材料已在机器中。
+     */
+    @Nullable
+    default List<IngredientSpec> getGraphBatchRequiredMaterials(int executions) {
+        return null;
+    }
+
+    /**
      * Stable material declaration for new planning and start paths. Legacy
      * delegates are projected as graph-owned ordered entries until they opt in
      * with explicit allocation and physical slot identities.

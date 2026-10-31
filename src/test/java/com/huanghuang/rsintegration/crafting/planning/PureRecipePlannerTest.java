@@ -521,15 +521,15 @@ class PureRecipePlannerTest extends BootstrapTest {
                 Map.of(duplicate.output(), 2,
                         minecraftMaterial("netherrack"), 512,
                         minecraftMaterial("diamond"), 512),
-                SelfAmplifyingRecipePolicy.planningRoots(duplicate, 65), 20);
+                SelfAmplifyingRecipePolicy.planningRoots(duplicate, 65, 2L), 20);
 
         assertTrue(planningResult.feasible(), planningResult.toString());
         assertTrue(planningResult.missing().isEmpty(), planningResult.toString());
         assertEquals(6, planningResult.steps().size());
-        assertEquals(63L, planningResult.steps().stream()
+        assertEquals(65L, planningResult.steps().stream()
                 .mapToLong(PureRecipePlanner.PlannedStep::batches)
                 .sum());
-        assertEquals(1L, planningResult.steps().get(
+        assertEquals(3L, planningResult.steps().get(
                 planningResult.steps().size() - 1).batches());
     }
 

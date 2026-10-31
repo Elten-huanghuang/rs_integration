@@ -56,6 +56,18 @@ class ForcedRecipeGraphProjectorTest {
     }
 
     @Test
+    void unprojectableProducerOfCurrentInputRequiresTypedFallback() {
+        MaterialRef pearl = material("divine_pearl");
+        MaterialRef shard = new MaterialRef(
+                new ResourceLocation("minecraft", "amethyst_shard"), "");
+        RecipeNode target = recipe("divine_pearl_recipe", pearl, 1, ingredient(shard, 1));
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(pearl, List.of(target)));
+
+        assertNull(ForcedRecipeGraphProjector.apply(graph, Map.of(shard.itemId(),
+                new ResourceLocation("farmersdelight", "cutting/amethyst_block"))));
+    }
+
+    @Test
     void ignoresSelectionsOutsideTheCurrentRecipeScope() {
         MaterialRef target = material("forced_scoped_target");
         RecipeNode targetRecipe = recipe("forced_scoped_target_recipe", target, 1,

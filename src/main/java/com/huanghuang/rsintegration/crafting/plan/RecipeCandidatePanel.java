@@ -151,16 +151,7 @@ public final class RecipeCandidatePanel {
         this.defaultRecipeId = defaultChoice == null ? null : defaultChoice.serialize();
         this.noRecipeSelected = defaultChoice == RecipeChoice.NoRecipe.INSTANCE;
         this.excludedRecipes = new LinkedHashSet<>(preferences.excludedRecipes());
-        var options = new LinkedHashMap<ResourceLocation, String>();
-        if (node.step != null) {
-            options.put(node.step.recipeId(),
-                    node.step.modType() == null ? "generic" : node.step.modType().id());
-            for (int i = 0; i < node.step.alternatives().size(); i++) {
-                String mod = i < node.step.alternativeModTypes().size()
-                        ? node.step.alternativeModTypes().get(i) : "generic";
-                options.putIfAbsent(node.step.alternatives().get(i), mod);
-            }
-        }
+        Map<ResourceLocation, String> options = RecipeCandidateRules.optionsFor(node);
         List<Candidate> candidates = new ArrayList<>();
         int widestPreview = 0;
         for (Map.Entry<ResourceLocation, String> option : options.entrySet()) {

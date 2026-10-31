@@ -426,6 +426,29 @@ class CraftPlanValidatorTest extends BootstrapTest {
         assertThrows(IllegalArgumentException.class, () -> CraftPlanValidator.validate(duplicate));
     }
 
+    @Test
+    void preparationTerminalCanBeTheGoalWithoutAnItemRoot() {
+        NodeId terminal = new NodeId(0);
+        CraftPlanGraph graph = new CraftPlanGraph(1,
+                List.of(node(terminal, "preparation", List.of(), List.of())),
+                List.of(), List.of(), List.of(), List.of(terminal));
+
+        CraftPlanValidator.validate(graph);
+        assertTrue(graph.rootDemands().isEmpty());
+    }
+
+    @Test
+    void productionGraphStillRequiresAnItemRoot() {
+        NodeId producer = new NodeId(0);
+        MaterialKey material = MaterialKey.of(new ItemStack(Items.DIAMOND));
+        CraftNode production = node(producer, "production", List.of(),
+                List.of(OutputDeclaration.item(
+                        new OutputPortId(producer, 0), material, 1, OutputKind.PRIMARY)));
+
+        assertThrows(IllegalArgumentException.class, () -> new CraftPlanGraph(
+                1, List.of(production), List.of(), List.of(), List.of(), List.of(producer)));
+    }
+
     private static MaterialKey taggedDiamond(String variant) {
         ItemStack stack = new ItemStack(Items.DIAMOND);
         CompoundTag tag = new CompoundTag();

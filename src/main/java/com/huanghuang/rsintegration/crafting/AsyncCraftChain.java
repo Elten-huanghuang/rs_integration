@@ -147,7 +147,7 @@ public final class AsyncCraftChain {
     private static final int GRAPH_RETRY_MACHINE_BUSY_MAX_DELAY_TICKS = 6;
     /** 绑定机器全被占用/未加载时的等待原因。 */
     private static final String MACHINE_BUSY_DETAIL =
-            "all bound machines are busy, unloaded, or unavailable";
+            "所有已绑定机器都在忙碌、未加载或不可用";
     /** 属于“机器暂时不可用”的等待原因；这些原因不需要长时间退避。 */
     private static final List<String> MACHINE_WAIT_DETAILS = List.of(
             MACHINE_BUSY_DETAIL,
@@ -2430,6 +2430,8 @@ public final class AsyncCraftChain {
             }
             boolean parallelGroup = delegate instanceof ParallelCraftGroup;
             MaterialPlan materialPlan = parallelGroup ? MaterialPlan.none() : materialPlanFor(delegate);
+            List<IngredientSpec> exactBatchSpecs = parallelGroup ? null
+                    : delegate.getGraphBatchRequiredMaterials(prepared.step().executions());
             List<IngredientSpec> plannedDurabilitySpecs =
                     plannedDurabilityGraphSpecs(nodeId);
             if (plannedDurabilitySpecs != null
@@ -2438,6 +2440,8 @@ public final class AsyncCraftChain {
             }
             List<IngredientSpec> graphSpecs = parallelGroup
                     ? delegate.getGraphSpecs()
+                    : exactBatchSpecs != null
+                    ? exactBatchSpecs
                     : plannedDurabilitySpecs != null
                     ? plannedDurabilitySpecs
                     : materialPlan.legacyGraphSpecs();
@@ -2447,7 +2451,7 @@ public final class AsyncCraftChain {
                 reserved = reservePlannedCheckoutMaterials(
                         online, nodeLedger, admission.materialToken());
             } else {
-                if (graphSpecs == null || graphSpecs.isEmpty()) {
+                if ((graphSpecs == null || graphSpecs.isEmpty()) && exactBatchSpecs == null) {
                     if (shouldUsePrivateLedgerGraphDispatch(delegate, graphSpecs)) {
                         GraphDispatchResult result = dispatchPrivateLedgerGraphNode(
                                 nodeId, prepared, delegate, online, admission, nodeLedger);
@@ -2458,7 +2462,8 @@ public final class AsyncCraftChain {
                 }
                 reserved = reserveGraphNodeMaterials(
                         delegate, graphSpecs,
-                        plannedDurabilitySpecs != null ? 1 : prepared.step().executions(),
+                        exactBatchSpecs != null || plannedDurabilitySpecs != null
+                                ? 1 : prepared.step().executions(),
                         online,
                         nodeLedger, admission.materialToken());
             }
@@ -2578,6 +2583,8 @@ public final class AsyncCraftChain {
                     admission, operationSession);
             if (graphInputBuffer.enabled()) {
                 runtime.setLogicalOperations(graphInputBuffer.operations());
+            } else if (exactBatchSpecs != null) {
+                runtime.setLogicalOperations(prepared.step().executions());
             }
             runtime.setReusableReservationTokens(reserved.reusableTokens());
             ProductionAttemptState attempt =

@@ -98,8 +98,21 @@ class RoutedPlanningTest extends BootstrapTest {
         var mainThreadOnly = snapshot(1, true, false);
         assertNull(compute(mainThreadOnly, routing(mainThreadOnly, Set.of(), 512), 1).plan());
 
-        var staleForced = snapshot(1, false, true);
+        var original = snapshot(1, false, false);
+        var staleForced = new PlanningSnapshot(original.playerId(), 1, 1, TARGET,
+                original.availableItems(), Map.of(id("unrelated_material"), id("old_recipe")),
+                original.recipeGraph(), "network", "binding", false);
         assertNotNull(compute(staleForced, routing(staleForced, Set.of(), 512), 1).plan());
+    }
+
+    @Test
+    void currentInputSelectionCannotBeDiscardedAsAnOutOfScopePreference() {
+        var selected = snapshot(1, false, true);
+
+        var routed = compute(selected, routing(selected, Set.of(), 512), 1);
+
+        assertFalse(routed.forcedRecipesProjected());
+        assertNull(routed.plan());
     }
 
     @Test

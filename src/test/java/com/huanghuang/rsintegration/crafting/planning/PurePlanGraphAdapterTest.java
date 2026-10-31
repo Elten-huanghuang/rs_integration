@@ -217,7 +217,7 @@ class PurePlanGraphAdapterTest extends BootstrapTest {
         var replayed = PurePlanGraphAdapter.toOutputGraph(result, stock);
         assertEquals(result.steps().stream().mapToLong(PureRecipePlanner.PlannedStep::batches).sum(),
                 replayed.nodes().stream().mapToLong(node -> node.executions()).sum());
-        assertEquals(5, replayed.rootDemands().get(0).quantity());
+        assertEquals(6, replayed.rootDemands().get(0).quantity());
 
         PlanCache cache = new PlanCache(1000);
         UUID player = UUID.randomUUID();

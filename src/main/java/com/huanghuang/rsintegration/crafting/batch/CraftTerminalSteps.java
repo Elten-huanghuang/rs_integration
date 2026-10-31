@@ -18,6 +18,7 @@ import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.recipe.RecipeOutputSpec;
+import com.huanghuang.rsintegration.util.ModIds;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Recipe;
@@ -78,13 +79,16 @@ public final class CraftTerminalSteps {
     public static CraftPlanGraph composeEquivalentTerminalGraph(
             CraftPlanGraph inputGraph, ResolutionStep terminalStep, ItemStack output,
             Level level) {
-        List<TerminalGraphComposer.TerminalOutput> terminalOutputs =
-                terminalOutputs(terminalStep, output, level);
-        CraftPlanGraph completeGraph = TerminalGraphComposer.compose(
-                inputGraph, terminalStep, terminalOutputs);
+        // 召唤祭坛只负责备料，生物及世界掉落均不属于执行图的产物。
+        boolean preparationOnly = ModIds.ID_SUMMONING_RITUALS.equals(terminalStep.modType().id());
+        List<TerminalGraphComposer.TerminalOutput> terminalOutputs = preparationOnly
+                ? List.of() : terminalOutputs(terminalStep, output, level);
+        CraftPlanGraph completeGraph = preparationOnly
+                ? TerminalGraphComposer.composePreparation(inputGraph, terminalStep)
+                : TerminalGraphComposer.compose(inputGraph, terminalStep, terminalOutputs);
         List<ResolutionStep> expectedFlat = new ArrayList<>(
                 ExecutionEquivalence.projectFlatSteps(inputGraph));
-        expectedFlat.add(expectedTerminalStep(terminalStep, terminalOutputs));
+        expectedFlat.add(preparationOnly ? terminalStep : expectedTerminalStep(terminalStep, terminalOutputs));
         ExecutionEquivalence.Report equivalence =
                 ExecutionEquivalence.compare(completeGraph, expectedFlat);
         if (!equivalence.equivalent()) {

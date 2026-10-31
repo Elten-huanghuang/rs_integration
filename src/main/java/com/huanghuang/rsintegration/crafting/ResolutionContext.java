@@ -683,7 +683,6 @@ final class ResolutionContext {
         }
         long safeOperations = Math.max(1L, operations);
         long damagePerUse = Math.max(1L, spec.consumption().unitsPerOperation());
-        long requiredUses = multiplySaturated(safeOperations, damagePerUse);
         record DurabilityCandidate(long count, long usesPerItem) {}
         List<DurabilityCandidate> candidates = new ArrayList<>();
         for (Map.Entry<CraftingResolver.StackKey, Long> entry : counts.entrySet()) {
@@ -691,7 +690,9 @@ final class ResolutionContext {
             if (count <= 0L || !matches(spec.ingredient(), entry.getKey())) continue;
             CachedStack cached = stacksByKey.get(entry.getKey());
             ItemStack stack = cached == null ? entry.getKey().toStack() : cached.stack;
-            if (stack.isEmpty() || !stack.isDamageableItem()) continue;
+            if (stack.isEmpty()) continue;
+            // 原生执行会跳过不可损坏工具的磨损，已有工具应能覆盖整批操作。
+            if (!stack.isDamageableItem()) return 1L;
             long remaining = Math.max(0L,
                     (long) stack.getMaxDamage() - stack.getDamageValue());
             long usesPerItem = ceilDiv(remaining, damagePerUse);
@@ -702,7 +703,7 @@ final class ResolutionContext {
         candidates.sort((left, right) ->
                 Long.compare(right.usesPerItem(), left.usesPerItem()));
 
-        long remainingUses = requiredUses;
+        long remainingUses = safeOperations;
         long itemCount = 0L;
         for (DurabilityCandidate candidate : candidates) {
             if (remainingUses <= 0L) break;
@@ -713,8 +714,8 @@ final class ResolutionContext {
             itemCount = saturatingAdd(itemCount, usedItems);
         }
         if (remainingUses > 0L) {
-            long freshUses = Math.max(1L,
-                    CraftPacketUtils.capacityPerItemForPlanning(spec));
+            long freshUses = Math.max(1L, ceilDiv(
+                    CraftPacketUtils.capacityPerItemForPlanning(spec), damagePerUse));
             itemCount = saturatingAdd(itemCount, ceilDiv(remainingUses, freshUses));
         }
         return Math.min(safeOperations, itemCount);

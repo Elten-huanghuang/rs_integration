@@ -264,13 +264,14 @@ public record PlanResponseDraft(
                 .map(root -> new PlanGraphView.RootView(root.display().copy(), root.quantity(),
                         root.unresolvedQuantity(), root.allocations().stream()
                         .map(allocation -> new PlanGraphView.RootEdgeView(allocation.source(),
-                                allocation.material().copy(), allocation.quantity())).toList()))
+                                allocation.material().copy(), allocation.quantity())).toList(),
+                        root.roleOrdinal()))
                 .toList();
         List<PlanGraphView.UnresolvedView> unresolved = source.unresolved().stream()
                 .map(item -> new PlanGraphView.UnresolvedView(item.consumerNodeId(),
                         item.consumerPortIndex(), item.display().copy(), item.quantity())).toList();
         return new PlanGraphView(source.version(), nodes, edges, roots, unresolved,
-                source.topologicalOrder(), source.magicCosts());
+                source.topologicalOrder(), source.magicCosts(), source.recipeOptions());
     }
 
     private static ItemStack copy(ItemStack stack) {

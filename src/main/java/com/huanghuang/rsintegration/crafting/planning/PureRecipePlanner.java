@@ -255,9 +255,9 @@ public final class PureRecipePlanner {
 
     /** 仅保留成功分支的实际供料与生产顺序，不能从展示步骤重新猜测材料分配。 */
     public record MaterialFlow(List<IngredientRef> roots, List<FlowEvent> events,
-                               boolean outputTarget) {
+                               boolean outputTarget, boolean additionalOutput) {
         public MaterialFlow(List<IngredientRef> roots, List<FlowEvent> events) {
-            this(roots, events, false);
+            this(roots, events, false, false);
         }
 
         public MaterialFlow {
@@ -327,10 +327,19 @@ public final class PureRecipePlanner {
         }
 
         Result withOutputTarget() {
-            if (materialFlow == null || materialFlow.outputTarget()) return this;
+            return withOutputTarget(false);
+        }
+
+        Result withAdditionalOutputTarget() {
+            return withOutputTarget(true);
+        }
+
+        private Result withOutputTarget(boolean additionalOutput) {
+            if (materialFlow == null || materialFlow.outputTarget()
+                    && materialFlow.additionalOutput() == additionalOutput) return this;
             return new Result(feasibility, steps, missing, remaining, magicCosts, status,
                     expandedStates, backtracks, memoHits, failureReason,
-                    new MaterialFlow(materialFlow.roots(), materialFlow.events(), true));
+                    new MaterialFlow(materialFlow.roots(), materialFlow.events(), true, additionalOutput));
         }
 
         public Result {

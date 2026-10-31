@@ -145,9 +145,7 @@ public final class CraftIngredientPlanMath {
                     allocations,
                     spec.consumption().demandRole()));
         }
-        if (roots.isEmpty()) {
-            throw new IllegalArgumentException("direct terminal plan has no inputs");
-        }
+        // 机器已备齐材料时允许空输入图；追加终端时仍校验其执行合同。
         CraftPlanGraph graph = new CraftPlanGraph(
                 CraftPlanGraph.CURRENT_VERSION,
                 List.of(),

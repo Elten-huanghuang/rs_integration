@@ -1,9 +1,12 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
+import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.MaterialMatcher;
 import com.huanghuang.rsintegration.crafting.MaterialVariantPreferences;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
+import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
+import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCatalog;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
@@ -14,15 +17,18 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.item.crafting.Recipe;
 import net.minecraftforge.fml.ModList;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiPredicate;
 
 /** 配方树/候选步骤的材料展示选择与替代配方补齐。 */
 final class CraftDisplayMaterials {
@@ -147,6 +153,32 @@ final class CraftDisplayMaterials {
         return MaterialMatcher.equivalentRuntimeFragment(left, right)
                 || (ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)
                 && IronSpellBooksRecipeCatalog.sameSpellScroll(left, right));
+    }
+
+    /** 给实际出现的材料提供候选，库存充足和缺料叶节点也能显式改选生产配方。 */
+    static PlanGraphView attachMaterialRecipeOptions(
+            PlanGraphView graph, Map<Item, List<RecipeIndex.Entry>> recipeIndex,
+            RegistryAccess access, BiPredicate<Recipe<?>, ModType> available) {
+        Set<IngredientKey> materials = new LinkedHashSet<>();
+        graph.roots().forEach(root -> {
+            materials.add(IngredientKey.of(root.display()));
+            root.allocations().forEach(edge -> materials.add(IngredientKey.of(edge.material())));
+        });
+        graph.edges().forEach(edge -> materials.add(IngredientKey.of(edge.material())));
+        graph.unresolved().forEach(demand -> materials.add(IngredientKey.of(demand.display())));
+        Map<IngredientKey, List<PlanGraphView.RecipeOption>> choices = new LinkedHashMap<>();
+        for (IngredientKey material : materials) {
+            Map<ResourceLocation, PlanGraphView.RecipeOption> options = new LinkedHashMap<>();
+            for (RecipeIndex.Entry entry : recipeIndex.getOrDefault(material.item(), List.of())) {
+                ItemStack output = ModRecipeHandlers.tryGetResultItem(entry.recipe(), access);
+                if (!sameRecipeOutput(material.stack(1), output)
+                        || !available.test(entry.recipe(), entry.modType())) continue;
+                options.putIfAbsent(entry.recipe().getId(),
+                        new PlanGraphView.RecipeOption(entry.recipe().getId(), entry.modType().id()));
+            }
+            if (!options.isEmpty()) choices.put(material, List.copyOf(options.values()));
+        }
+        return graph.withRecipeOptions(choices);
     }
 
     private static ItemStack cleanDisplayNbt(ItemStack stack) {

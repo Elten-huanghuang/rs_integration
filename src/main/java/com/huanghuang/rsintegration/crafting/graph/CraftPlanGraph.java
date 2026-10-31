@@ -37,11 +37,16 @@ public record CraftPlanGraph(
         nodes = List.copyOf(nodes);
         allocations = List.copyOf(allocations);
         rootDemands = List.copyOf(rootDemands);
-        if (rootDemands.isEmpty() && !nodes.isEmpty()) {
+        topologicalOrder = List.copyOf(topologicalOrder);
+        // 纯投料终端没有可声明的产物，最后一个节点本身即为执行目标。
+        NodeId terminalId = topologicalOrder.isEmpty()
+                ? null : topologicalOrder.get(topologicalOrder.size() - 1);
+        boolean preparationTerminal = terminalId != null && nodes.stream().anyMatch(node ->
+                node.id().equals(terminalId) && node.outputs().isEmpty());
+        if (rootDemands.isEmpty() && !nodes.isEmpty() && !preparationTerminal) {
             throw new IllegalArgumentException("non-empty graph requires at least one root demand");
         }
         unresolvedDemands = List.copyOf(unresolvedDemands);
-        topologicalOrder = List.copyOf(topologicalOrder);
     }
 
     public Map<NodeId, CraftNode> nodesById() {

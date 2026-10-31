@@ -1,16 +1,17 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
-import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
 import net.minecraft.resources.ResourceLocation;
 
 import javax.annotation.Nullable;
-import java.util.ArrayList;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -35,13 +36,25 @@ public final class ForcedRecipeGraphProjector {
             outputsByPreference.computeIfAbsent(preferenceKey(output),
                     ignored -> new ArrayList<>()).add(output);
         }
+        Set<ResourceLocation> inputPreferences = new HashSet<>();
+        for (RecipeNode recipe : graph.recipesById().values()) {
+            for (var input : recipe.inputs()) {
+                for (MaterialRef alternative : input.alternatives()) {
+                    inputPreferences.add(preferenceKey(alternative));
+                }
+            }
+        }
         boolean changed = false;
         for (Map.Entry<ResourceLocation, ResourceLocation> forced : forcedRecipes.entrySet()) {
             ResourceLocation preferenceKey = forced.getKey();
             List<MaterialRef> matchingOutputs = outputsByPreference.get(preferenceKey);
-            // 客户端可能保留其他配方树的显式选择。只处理当前依赖范围内存在的输出，
-            // 否则一个无关的旧偏好会把普通工作台链整体推回 typed 解析器。
-            if (matchingOutputs == null || matchingOutputs.isEmpty()) continue;
+            if (matchingOutputs == null || matchingOutputs.isEmpty()) {
+                // 当前输入可能只有无法投影的生产配方（例如需要消耗工具耐久的砧板）。
+                // 即使库存足够，也必须交给 typed 解析器落实显式选择。
+                if (inputPreferences.contains(preferenceKey)) return null;
+                // 客户端可能保留其他配方树的选择，只忽略当前依赖范围外的偏好。
+                continue;
+            }
 
             RecipeNode forcedNode = graph.recipesById().get(forced.getValue());
             if (forcedNode == null

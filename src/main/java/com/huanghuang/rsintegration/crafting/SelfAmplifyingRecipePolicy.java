@@ -41,15 +41,19 @@ public final class SelfAmplifyingRecipePolicy {
     }
 
     /**
-     * 普通终端规划的是“目标配方输入”；自增终端必须规划“目标产物需求”，
-     * 否则库存中的种子会被误认为已满足整个请求，产生零个生产步骤。
+     * 普通终端规划的是“目标配方输入”；自增终端按已有数量加本次净增量规划，
+     * 保证所选次数不会被种子库存抵扣。
      */
-    public static List<IngredientRef> planningRoots(RecipeNode target, int executions) {
+    public static List<IngredientRef> planningRoots(
+            RecipeNode target, int executions, long existingOutputCount) {
         if (!isSelfAmplifying(target)) {
             return scaleTargetInputs(target, executions);
         }
+        long netGain = target.outputCount() - selfConsumed(target.inputs(), target.output());
+        long additional = Math.multiplyExact(netGain, Math.max(1L, executions));
+        long total = Math.addExact(Math.max(0L, existingOutputCount), additional);
         return List.of(new IngredientRef(
-                List.of(target.output()), Math.max(1, executions),
+                List.of(target.output()), total,
                 target.output().runtimeNbt()
                         ? ImmutableRecipeGraph.NbtMatchMode.ANY
                         : ImmutableRecipeGraph.NbtMatchMode.EXACT));

@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.tree;
 
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.plan.ParallelPlan;
+import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
 import com.huanghuang.rsintegration.crafting.plan.PlanStep;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
@@ -9,7 +10,9 @@ import net.minecraft.world.item.crafting.Ingredient;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * A single node in the recipe plan tree.
@@ -27,15 +30,17 @@ public final class PlanTreeNode {
     public long amount;
     /** 配方节点计划实际产出的数量，用于和材料总需求区分。 */
     public long productionAmount;
-    public final int depth;
+    public int depth;
     @Nullable
-    public final PlanStep step;    // null = leaf (raw material)
+    public PlanStep step;    // null = leaf (raw material)
     /** 计划阶段估算的并行分派；旧计划/无机器节点为 null。 */
     @Nullable
-    public final ParallelPlan parallelPlan;
+    public ParallelPlan parallelPlan;
     /** Stable logical DAG identity. Repeated tree references share this id. */
     @Nullable
     public final Integer graphNodeId;
+    /** 合并展示所包含的真实生产节点，用于批次数去重和引用标记。 */
+    public final Set<Integer> producerNodeIds = new LinkedHashSet<>();
     /** How this material is used by its parent recipe. */
     public final DemandRole demandRole;
     public final List<PlanTreeNode> children = new ArrayList<>();
@@ -83,6 +88,8 @@ public final class PlanTreeNode {
     @Nullable
     public String materialLockKey;
     public List<ItemStack> materialOptions = List.of();
+    /** 独立的候选元数据，不代表该库存材料需要额外生产。 */
+    public List<PlanGraphView.RecipeOption> recipeOptions = List.of();
     @Nullable
     public ItemStack lockedMaterial;
 
@@ -111,6 +118,7 @@ public final class PlanTreeNode {
         this.step = step;
         this.parallelPlan = step == null ? null : step.parallelPlan();
         this.graphNodeId = graphNodeId;
+        if (graphNodeId != null) producerNodeIds.add(graphNodeId);
         this.demandRole = demandRole == null ? DemandRole.CONSUMED : demandRole;
     }
 

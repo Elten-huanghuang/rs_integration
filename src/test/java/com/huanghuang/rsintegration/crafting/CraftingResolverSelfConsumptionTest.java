@@ -13,6 +13,8 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
+import net.minecraftforge.common.crafting.PartialNBTIngredient;
+import net.minecraftforge.common.crafting.StrictNBTIngredient;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 
@@ -42,6 +44,60 @@ class CraftingResolverSelfConsumptionTest extends BootstrapTest {
 
         assertTrue(CraftingResolver.consumesOutput(
                 seeds, new ItemStack(Items.WHEAT_SEEDS)));
+    }
+
+    @Test
+    void differentFluidTokensAreNotSelfConsumption() {
+        ItemStack copper = fluidToken("embers:molten_copper", 2);
+        ItemStack dawnstone = fluidToken("embers:molten_dawnstone", 4);
+
+        assertFalse(CraftingResolver.consumesOutput(
+                StrictNBTIngredient.of(copper), dawnstone));
+        assertFalse(CraftingResolver.consumesOutput(
+                PartialNBTIngredient.of(copper.getItem(), copper.getTag()), dawnstone));
+    }
+
+    @Test
+    void sameFluidTokenRemainsSelfConsumptionRegardlessOfQuantity() {
+        ItemStack dawnstone = fluidToken("embers:molten_dawnstone", 1);
+
+        assertTrue(CraftingResolver.consumesOutput(
+                StrictNBTIngredient.of(dawnstone), dawnstone.copyWithCount(4)));
+    }
+
+    @Test
+    void vanillaIngredientStillIgnoresDisplayNbtForSelfConsumption() {
+        ItemStack copper = fluidToken("embers:molten_copper", 1);
+        ItemStack dawnstone = fluidToken("embers:molten_dawnstone", 4);
+
+        assertTrue(CraftingResolver.consumesOutput(Ingredient.of(copper), dawnstone));
+    }
+
+    @Test
+    void mixingDifferentFluidsKeepsTheFullOutputAsNetYield() {
+        Recipe<?> recipe = mock(Recipe.class);
+        when(recipe.getId()).thenReturn(new ResourceLocation("embers", "mixing/molten_dawnstone"));
+        ItemStack copper = fluidToken("embers:molten_copper", 1);
+        ItemStack gold = fluidToken("embers:molten_gold", 1);
+        ItemStack dawnstone = fluidToken("embers:molten_dawnstone", 4);
+        ModRecipeHandler handler = mock(ModRecipeHandler.class);
+        when(handler.getIngredients(any())).thenReturn(List.of(
+                new IngredientSpec(StrictNBTIngredient.of(copper), 2),
+                new IngredientSpec(StrictNBTIngredient.of(gold), 2)));
+        when(handler.getRecursiveScaledIngredients(any(), any()))
+                .thenAnswer(invocation -> invocation.getArgument(1));
+        when(handler.getDeclaredOutputs(any(), any())).thenReturn(List.of(
+                RecipeOutputSpec.item(MaterialKey.of(dawnstone), 4, OutputKind.PRIMARY)));
+        RecipeIndex.Entry entry = new RecipeIndex.Entry(
+                recipe, ModType.GENERIC, new ResourceLocation("embers", "mixing"));
+
+        try (MockedStatic<ModRecipeHandlers> handlers = mockStatic(ModRecipeHandlers.class)) {
+            handlers.when(() -> ModRecipeHandlers.claimFor(recipe))
+                    .thenReturn(new ModRecipeHandlers.Claim(handler, List.of(handler)));
+
+            assertEquals(4, CraftingResolver.netGainPerBatch(
+                    entry, dawnstone, RegistryAccess.EMPTY));
+        }
     }
 
     @Test
@@ -102,5 +158,13 @@ class CraftingResolverSelfConsumptionTest extends BootstrapTest {
 
         assertFalse(SelfAmplifyingRecipePolicy.isSelfAmplifying(
                 specs, new ItemStack(Items.DIAMOND, 3)));
+    }
+
+    private static ItemStack fluidToken(String fluidId, int count) {
+        // 使用同一种原版物品承载不同流体身份，复现内部凭据共用 Item 的情况。
+        ItemStack token = new ItemStack(Items.PAPER, count);
+        token.getOrCreateTag().putString("FluidName", fluidId);
+        token.getTag().putInt("Amount", 1);
+        return token;
     }
 }

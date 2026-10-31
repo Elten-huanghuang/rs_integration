@@ -1771,7 +1771,7 @@ public final class GenericCraftPacket {
                 // Physical recipes are fully represented by immutable values.
                 // Queue dependency planning before the bounded typed resolver.
                 boolean physicalPureQueued = false;
-                if (!typedGraphOnly && safePreferences.isEmpty()) {
+                if (!graphSpecs.isEmpty() && !typedGraphOnly && safePreferences.isEmpty()) {
                     physicalPureQueued = CraftPureExecutionPlanner.queuePhysical(
                             player, recipe, recipeId, forcedRecipes, dim, pos, repeatCount,
                             inferMode, baseItem, targetOutput, outputDestination,
@@ -1805,7 +1805,7 @@ public final class GenericCraftPacket {
                         avail = refreshed;
                     }
                 } catch (CraftingPlanningTimeoutException timeout) {
-                    if (!typedGraphOnly && safePreferences.isEmpty()
+                    if (!graphSpecs.isEmpty() && !typedGraphOnly && safePreferences.isEmpty()
                             && CraftPureExecutionPlanner.queuePhysical(player, recipe, recipeId,
                             forcedRecipes, dim, pos, repeatCount, inferMode, baseItem,
                             targetOutput, outputDestination, machineSelectionMode, storageEndpoint,
@@ -2680,6 +2680,11 @@ public final class GenericCraftPacket {
 
         targetOutput = CraftMachineBindingSupport.routeRecipeOutput(recipeModType, targetOutput);
         recipeSpecs = MaterialLocks.narrowScaledSpecs(recipeId, recipeSpecs, materialLocks);
+        if (recipeModType != null && ModIds.ID_SUMMONING_RITUALS.equals(recipeModType.id())) {
+            // 必须先按整批缩放再扣祭坛库存，催化剂只需补齐一份。
+            recipeSpecs = SummoningRitualAltarBatchDelegate.planningScaledMaterials(
+                    player, recipe, dim, pos, recipeSpecs);
+        }
 
         // ── Arcane Iterator per-level chain detection ──
         // All levels of one enchant share this recipeId and declare no static output,
@@ -2722,6 +2727,11 @@ public final class GenericCraftPacket {
         Map<ResourceLocation, ResourceLocation> forcedOverrides =
                 forcedResolution.overrides();
 
+        if (forcedOverrides != null && !forcedOverrides.isEmpty()) {
+            RSIntegrationMod.LOGGER.info(
+                    "[RSI-plan] explicit recipe choices recipe={} choices={}",
+                    recipeId, forcedOverrides);
+        }
         final PlanCache.Key cacheKey = CraftPlanCacheKeys.key(player.getUUID(), recipeId,
                 forcedRecipes, repeatCount, clickedOutput, recipeModType, materialLocks,
                 safePreferences);
@@ -2743,8 +2753,8 @@ public final class GenericCraftPacket {
         List<StorageNetworkDescriptor> storageNetworks = storageContext.networks();
 
         PlanCache.Entry cached = CraftPlanningRuntime.planCache().get(cacheKey, System.nanoTime());
-        // 印模槽属于机器实时状态，旧快照不能决定是否需要递归制作印模。
-        if (stampStateAffectsPlan(previewModType, cached == null ? null : cached.plan())) {
+        // 印模槽和祭坛材料属于机器实时状态，不能复用旧快照决定材料缺口。
+        if (machineInventoryAffectsPlan(previewModType, cached == null ? null : cached.plan())) {
             cached = null;
         }
         if (cached != null && cached.plan().success() && cached.plan().graph() != null
@@ -2859,11 +2869,14 @@ public final class GenericCraftPacket {
 
         boolean hasFixedTerminalInputs = recipeSpecs.stream()
                 .anyMatch(spec -> spec != null && !spec.isEmpty());
+        boolean altarInputsPrepared = recipeModType != null
+                && ModIds.ID_SUMMONING_RITUALS.equals(recipeModType.id())
+                && recipeSpecs.isEmpty();
         boolean executionMachineAvailable = !CraftExecutionPolicy.requiresBoundMachine(recipe, recipeModType)
                 || CraftMachineBindingSupport.hasBindingForExecutionType(player, recipe, recipeModType);
         DirectMaterialAllocator.Result directPreviewAllocation =
                 executionMachineAvailable && effectiveOverrides.isEmpty()
-                && hasFixedTerminalInputs
+                && (hasFixedTerminalInputs || altarInputsPrepared)
                         ? (CraftExecutionPolicy.requiresBoundMachine(recipe, recipeModType)
                                 ? DirectMaterialAllocator.allocateScaledSingleVariant(
                                         recipeSpecs, available)
@@ -3844,10 +3857,20 @@ public final class GenericCraftPacket {
                 recipeModType != null ? recipeModType.id() : null,
                 itemAvailable, itemSource, neededCounts, repeatCount);
 
-        PlanGraphView planGraphView = planGraph != null
-                ? PlanGraphView.from(planGraph,
-                        ParallelPlanEstimator.estimate(player, planGraph, itemAvailable))
+        CraftPlanGraph displayGraph = planGraph != null ? planGraph : cacheInputGraph;
+        PlanGraphView planGraphView = displayGraph != null
+                ? PlanGraphView.from(displayGraph,
+                        ParallelPlanEstimator.estimate(player, displayGraph, itemAvailable))
+                        .withRecipeAlternatives(steps)
                 : null;
+        if (planGraphView != null) {
+            planGraphView = CraftDisplayMaterials.attachMaterialRecipeOptions(
+                    planGraphView, recipeIndex, player.serverLevel().registryAccess(),
+                    (candidate, type) -> CraftMachineBindingSupport.isRecipeAvailableForPlanning(
+                            player, candidate)
+                            && (CraftExecutionPolicy.isSmithingRecipe(candidate)
+                            || AltarBindingRegistry.hasBindingForRecipe(player, candidate, type)));
+        }
         Map<ResourceLocation, PlanResponse.StepIssue> stepIssues = new LinkedHashMap<>();
         if (resolutionSteps != null) {
             for (ResolutionStep step : resolutionSteps) {
@@ -4131,9 +4154,10 @@ public final class GenericCraftPacket {
                 "rsi.generic.error.missing_materials", details));
     }
 
-    private static boolean stampStateAffectsPlan(@Nullable ModType terminalType,
+    private static boolean machineInventoryAffectsPlan(@Nullable ModType terminalType,
                                                  @Nullable PlanResponse plan) {
-        if (terminalType != null && ModIds.ID_EMBERS_STAMPER.equals(terminalType.id())) return true;
+        if (terminalType != null && (ModIds.ID_EMBERS_STAMPER.equals(terminalType.id())
+                || ModIds.ID_SUMMONING_RITUALS.equals(terminalType.id()))) return true;
         return plan != null && plan.steps().stream().anyMatch(step ->
                 step.modType() != null && ModIds.ID_EMBERS_STAMPER.equals(step.modType().id()));
     }

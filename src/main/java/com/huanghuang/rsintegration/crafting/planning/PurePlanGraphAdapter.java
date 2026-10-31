@@ -53,7 +53,8 @@ public final class PurePlanGraphAdapter {
     /** 自增和反向换算已经按最终产物规划，不得再追加一次原终端配方。 */
     public static CraftPlanGraph toOutputGraph(
             PureRecipePlanner.Result result, Map<StackKey, ? extends Number> available) {
-        return replay(result, available).finishOutput(result.materialFlow().roots());
+        return replay(result, available).finishOutput(
+                result.materialFlow().roots(), result.materialFlow().additionalOutput());
     }
 
     public static boolean targetsOutput(PureRecipePlanner.Result result,
@@ -280,12 +281,20 @@ public final class PurePlanGraphAdapter {
             return graph(roots);
         }
 
-        private CraftPlanGraph finishOutput(List<IngredientRef> demands) {
+        private CraftPlanGraph finishOutput(List<IngredientRef> demands, boolean additionalOutput) {
             List<RootDemand> roots = new ArrayList<>();
             for (int index = 0; index < demands.size(); index++) {
                 IngredientRef demand = demands.get(index);
                 List<RootAllocation> supply = rootSupply.getOrDefault(index, List.of());
-                roots.add(new RootDemand(exactIngredient(supply), demand.count(), 0L,
+                long quantity = demand.count();
+                if (additionalOutput) {
+                    // 旧库存只参与净增量计算，未投入本次复制的物品不能成为交付需求。
+                    supply = supply.stream().filter(allocation ->
+                            allocation.source() instanceof MaterialSource.ProducerOutput).toList();
+                    quantity = supply.stream().mapToLong(RootAllocation::quantity).reduce(0L, Math::addExact);
+                    if (quantity == 0L) throw new IllegalArgumentException("Additional output plan has no production");
+                }
+                roots.add(new RootDemand(exactIngredient(supply), quantity, 0L,
                         supply.get(0).material().toStack(1), supply, demand.role()));
             }
             return graph(roots);

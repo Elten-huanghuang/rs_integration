@@ -111,12 +111,28 @@ public final class TerminalGraphComposer {
     public static CraftPlanGraph compose(CraftPlanGraph base,
                                          CraftingResolver.ResolutionStep terminalStep,
                                          List<TerminalOutput> terminalOutputs) {
+        return compose(base, terminalStep, terminalOutputs, false);
+    }
+
+    /**
+     * 只向机器投料的终端不声明世界产物；所需输入也可能已全部在机器中。
+     * 执行时仍由委托重新校验机器库存，不能凭空视作完成合成。
+     */
+    public static CraftPlanGraph composePreparation(
+            CraftPlanGraph base, CraftingResolver.ResolutionStep terminalStep) {
+        return compose(base, terminalStep, List.of(), true);
+    }
+
+    private static CraftPlanGraph compose(CraftPlanGraph base,
+                                          CraftingResolver.ResolutionStep terminalStep,
+                                          List<TerminalOutput> terminalOutputs,
+                                          boolean preparationOnly) {
         Objects.requireNonNull(base, "base");
         Objects.requireNonNull(terminalStep, "terminalStep");
         Objects.requireNonNull(terminalOutputs, "terminalOutputs");
         CraftPlanValidator.validate(base);
-        if (terminalOutputs.isEmpty()
-                || terminalOutputs.stream().noneMatch(output -> output.kind() == OutputKind.PRIMARY)) {
+        if (!preparationOnly && (terminalOutputs.isEmpty()
+                || terminalOutputs.stream().noneMatch(output -> output.kind() == OutputKind.PRIMARY))) {
             throw new IllegalArgumentException("terminal output must include a primary output");
         }
         if (!base.unresolvedDemands().isEmpty()
@@ -125,7 +141,8 @@ public final class TerminalGraphComposer {
         }
         boolean hasSyntheticInput = terminalStep.syntheticInput() != null
                 && !terminalStep.syntheticInput().isEmpty();
-        if (base.rootDemands().isEmpty() && !hasSyntheticInput && !terminalStep.inferMode()) {
+        if (base.rootDemands().isEmpty() && !hasSyntheticInput && !terminalStep.inferMode()
+                && !preparationOnly) {
             throw new IllegalArgumentException("terminal input graph has no static inputs");
         }
 
@@ -195,7 +212,7 @@ public final class TerminalGraphComposer {
             outputs.add(declaration);
             if (primary == null && output.kind() == OutputKind.PRIMARY) primary = declaration;
         }
-        if (primary == null) {
+        if (primary == null && !preparationOnly) {
             throw new IllegalArgumentException("terminal output must include a primary output");
         }
         CraftNode terminal = new CraftNode(terminalId, terminalStep.recipeId(),
@@ -208,15 +225,18 @@ public final class TerminalGraphComposer {
         nodes.add(terminal);
         List<NodeId> order = new ArrayList<>(base.topologicalOrder());
         order.add(terminalId);
-        ItemStack finalOutput = primary.material().toStack(
-                SaturatingLongMath.clampToInt(primary.quantity()));
-        MaterialSource terminalSource = new MaterialSource.ProducerOutput(primary.id());
-        RootDemand finalDemand = new RootDemand(Ingredient.of(finalOutput), primary.quantity(), 0,
-                finalOutput, List.of(new RootAllocation(terminalSource,
-                primary.material(), primary.quantity())), DemandRole.CONSUMED);
+        List<RootDemand> finalDemands = List.of();
+        if (primary != null) {
+            ItemStack finalOutput = primary.material().toStack(
+                    SaturatingLongMath.clampToInt(primary.quantity()));
+            MaterialSource terminalSource = new MaterialSource.ProducerOutput(primary.id());
+            finalDemands = List.of(new RootDemand(Ingredient.of(finalOutput), primary.quantity(), 0,
+                    finalOutput, List.of(new RootAllocation(terminalSource,
+                    primary.material(), primary.quantity())), DemandRole.CONSUMED));
+        }
 
         CraftPlanGraph result = new CraftPlanGraph(base.version(), nodes, allocations,
-                List.of(finalDemand), List.of(), order, base.planningRevision());
+                finalDemands, List.of(), order, base.planningRevision());
         CraftPlanValidator.validate(result);
         return result;
     }

@@ -122,11 +122,6 @@ class PlanResponsePacketBoundsTest extends BootstrapTest {
             buf.writeItem(ItemStack.EMPTY);
             buf.writeVarInt(0);
             buf.writeVarInt(0);
-            buf.writeVarInt(OVERSIZED_COUNT);
-        });
-        assertGraphCountRejected(buf -> {
-            buf.writeVarInt(0);
-            buf.writeVarInt(0);
             buf.writeVarInt(0);
             buf.writeVarInt(OVERSIZED_COUNT);
         });
@@ -134,7 +129,24 @@ class PlanResponsePacketBoundsTest extends BootstrapTest {
             buf.writeVarInt(0);
             buf.writeVarInt(0);
             buf.writeVarInt(0);
+            buf.writeVarInt(OVERSIZED_COUNT);
+        });
+        assertGraphCountRejected(buf -> {
             buf.writeVarInt(0);
+            buf.writeVarInt(0);
+            buf.writeVarInt(0);
+            buf.writeVarInt(0);
+            buf.writeVarInt(OVERSIZED_COUNT);
+        });
+        // 节点、边、根、缺料、拓扑、魔力费用都为空后，检查材料候选的两层数量。
+        assertGraphCountRejected(buf -> {
+            for (int i = 0; i < 6; i++) buf.writeVarInt(0);
+            buf.writeVarInt(OVERSIZED_COUNT);
+        });
+        assertGraphCountRejected(buf -> {
+            for (int i = 0; i < 6; i++) buf.writeVarInt(0);
+            buf.writeVarInt(1);
+            buf.writeItem(ItemStack.EMPTY);
             buf.writeVarInt(OVERSIZED_COUNT);
         });
     }

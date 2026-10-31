@@ -1,9 +1,12 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
+import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
+import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -16,8 +19,32 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
-class AsyncPurePlanningServiceTest {
+class AsyncPurePlanningServiceTest extends BootstrapTest {
+    @Test
+    void stockedInputCannotHideAnUnprojectableSelectedProducer() {
+        MaterialRef pearl = new MaterialRef(id("divine_pearl"), "");
+        MaterialRef shard = new MaterialRef(
+                new ResourceLocation("minecraft", "amethyst_shard"), "");
+        RecipeNode target = new RecipeNode(id("divine_pearl_recipe"), pearl, 1,
+                List.of(new IngredientRef(List.of(shard), 1)));
+        PlanningSnapshot snapshot = new PlanningSnapshot(UUID.randomUUID(), 1, 1,
+                target.recipeId(), Map.of(new StackKey(Items.AMETHYST_SHARD, null), 24L),
+                Map.of(shard.itemId(), new ResourceLocation("farmersdelight", "cutting/amethyst_block")),
+                new ImmutableRecipeGraph(Map.of(pearl, List.of(target))),
+                "network", "binding", false);
+        var routing = new AsyncPurePlanningService.RouteInputs(
+                Map.of(shard, 24L), 100, Set.of(), Set.of(), Set.of());
+
+        var result = AsyncPurePlanningService.computeRouted(
+                snapshot, routing, 1, 100, 1000, 1000, 10_000);
+
+        assertFalse(result.forcedRecipesProjected());
+        assertNull(result.plan());
+    }
+
     @Test
     void computesFromSnapshotAndReturnsOnServerExecutor() throws Exception {
         MaterialRef log = new MaterialRef(id("log"), "");
@@ -54,7 +81,7 @@ class AsyncPurePlanningServiceTest {
         PureRecipePlanner.Result result = PureRecipePlanner.resolve(graph,
                 projectedStock,
                 com.huanghuang.rsintegration.crafting.SelfAmplifyingRecipePolicy
-                        .planningRoots(duplicate, 6), 20);
+                        .planningRoots(duplicate, 6, 1L), 20);
 
         assertTrue(result.feasible());
         assertTrue(!result.steps().isEmpty());

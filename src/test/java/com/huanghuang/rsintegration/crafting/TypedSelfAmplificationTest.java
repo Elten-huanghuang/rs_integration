@@ -21,9 +21,12 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.crafting.CraftingBookCategory;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.item.crafting.ShapelessRecipe;
 import net.minecraft.world.level.Level;
+import net.minecraftforge.common.crafting.StrictNBTIngredient;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import org.junit.jupiter.api.BeforeAll;
@@ -73,6 +76,54 @@ class TypedSelfAmplificationTest extends BootstrapTest {
 
         assertFalse(edges.containsReverse(seed, seed));
         assertTrue(edges.containsReverse(seed, fuel));
+    }
+
+    @Test
+    void fluidMixingRemainsAvailableAsAnIntermediateForIngotCrafting() {
+        // 同一物品上的不同 NBT 分别代表铜液、金液和黎明石液。
+        ItemStack copper = new ItemStack(Items.PAPER);
+        copper.getOrCreateTag().putString("FluidName", "embers:molten_copper");
+        copper.getTag().putInt("Amount", 1);
+        ItemStack gold = copper.copy();
+        gold.getTag().putString("FluidName", "embers:molten_gold");
+        ItemStack dawnstone = copper.copyWithCount(4);
+        dawnstone.getTag().putString("FluidName", "embers:molten_dawnstone");
+        Ingredient copperInput = StrictNBTIngredient.of(copper);
+        Ingredient goldInput = StrictNBTIngredient.of(gold);
+        Ingredient dawnstoneInput = StrictNBTIngredient.of(dawnstone.copyWithCount(1));
+        ShapelessRecipe mixer = new ShapelessRecipe(
+                new ResourceLocation("embers", "mixing/molten_dawnstone"), "",
+                CraftingBookCategory.MISC, dawnstone,
+                NonNullList.of(Ingredient.EMPTY, copperInput, copperInput, goldInput, goldInput));
+        ShapelessRecipe stamper = new ShapelessRecipe(
+                new ResourceLocation("embers", "stamping/ingots/dawnstone"), "",
+                CraftingBookCategory.MISC, new ItemStack(Items.GOLD_INGOT),
+                NonNullList.of(Ingredient.EMPTY,
+                        dawnstoneInput, dawnstoneInput, dawnstoneInput, dawnstoneInput));
+        Level level = mock(Level.class);
+        when(level.registryAccess()).thenReturn(RegistryAccess.EMPTY);
+        List<String> missing = new ArrayList<>();
+        try (MockedStatic<RecipeIndex> recipeIndex = mockStatic(RecipeIndex.class)) {
+            recipeIndex.when(() -> RecipeIndex.reusableCatalystRoutes(level)).thenReturn(Map.of());
+            recipeIndex.when(() -> RecipeIndex.get(level)).thenReturn(Map.of(
+                    Items.PAPER, List.of(craftingEntry(mixer)),
+                    Items.GOLD_INGOT, List.of(craftingEntry(stamper))));
+
+            CraftPlanGraph graph = CraftingResolver.resolveMachineGraphForSpecsWithTypes(
+                    List.of(new IngredientSpec(Ingredient.of(Items.GOLD_INGOT), 2)),
+                    Map.of(StackKey.of(copper, true), 4L, StackKey.of(gold, true), 4L),
+                    level, null, null, missing, null, false, 10_000);
+
+            CraftPlanValidator.validate(graph);
+            assertTrue(missing.isEmpty(), missing.toString());
+            assertTrue(graph.unresolvedDemands().isEmpty());
+            assertEquals(2, graph.nodes().stream()
+                    .filter(node -> node.recipeId().equals(mixer.getId()))
+                    .mapToInt(node -> node.executions()).sum());
+            assertEquals(2, graph.nodes().stream()
+                    .filter(node -> node.recipeId().equals(stamper.getId()))
+                    .mapToInt(node -> node.executions()).sum());
+        }
     }
 
     @ParameterizedTest

@@ -153,7 +153,7 @@ class GenericCraftPreviewTest extends BootstrapTest {
     }
 
     @Test
-    void selfAmplifyingPreviewKeepsDependentStagesSeparate() {
+    void selfAmplifyingPreviewCombinesStagesWithoutChangingExecutionSteps() {
         ResourceLocation id = new ResourceLocation("test", "amplify_redstone");
         ShapelessRecipe recipe = new ShapelessRecipe(id, "", CraftingBookCategory.MISC,
                 new ItemStack(Items.REDSTONE, 2),
@@ -166,8 +166,23 @@ class GenericCraftPreviewTest extends BootstrapTest {
         var preview = CraftPreviewSteps.merge(stages,
                 ignored -> recipe, RegistryAccess.EMPTY);
 
-        assertEquals(List.of(1, 2, 4),
+        assertEquals(List.of(7),
                 preview.stream().map(CraftPreviewSteps.PreviewStep::batches).toList());
+        assertEquals(List.of(1, 2, 4), stages.stream().map(ResolutionStep::executions).toList());
+    }
+
+    @Test
+    void eightAndOneMachineBatchesAppearAsOneNineOperationStep() {
+        ResourceLocation id = new ResourceLocation("test", "machine_recipe");
+        List<ResolutionStep> batches = List.of(8, 1).stream()
+                .map(runs -> new ResolutionStep(id, ModType.GENERIC, null,
+                        List.of(), List.of(), false, runs)).toList();
+
+        var preview = CraftPreviewSteps.merge(batches, ignored -> null, RegistryAccess.EMPTY);
+
+        assertEquals(1, preview.size());
+        assertEquals(9, preview.get(0).batches());
+        assertEquals(List.of(8, 1), batches.stream().map(ResolutionStep::executions).toList());
     }
 
     @Test

@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class AsyncCraftChainRetryBackoffTest extends BootstrapTest {
 
-    private static final String MACHINE_BUSY = "all bound machines are busy, unloaded, or unavailable";
+    private static final String MACHINE_BUSY = "所有已绑定机器都在忙碌、未加载或不可用";
 
     @Test
     void machineWaitBacksOffInTicksInsteadOfSeconds() {

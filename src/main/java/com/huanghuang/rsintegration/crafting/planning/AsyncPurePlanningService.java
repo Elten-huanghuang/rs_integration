@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.config.CraftingPlanningConfig;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.SelfAmplifyingRecipePolicy;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
 import net.minecraft.resources.ResourceLocation;
 import com.huanghuang.rsintegration.util.PerformanceMonitor;
@@ -216,11 +217,25 @@ public final class AsyncPurePlanningService {
                                                    int maxMemoizedFailures, long deadlineNanos,
                                                    Map<ResourceLocation, ResourceLocation> forcedRecipes,
                                                    PlanningPreferences preferences) {
+        boolean amplification = SelfAmplifyingRecipePolicy.isSelfAmplifying(target);
+        long existingOutputCount = 0L;
+        Map<ResourceLocation, ResourceLocation> selectedRecipes = forcedRecipes;
+        if (amplification) {
+            IngredientRef output = SelfAmplifyingRecipePolicy.planningRoots(target, repeatCount, 0L).get(0);
+            for (var entry : stock.entrySet()) {
+                if (ImmutableRecipeGraphProjector.matchesIngredient(entry.getKey(), output)) {
+                    existingOutputCount = Math.addExact(existingOutputCount, Math.max(0L, entry.getValue()));
+                }
+            }
+            // 终端指定的是实际执行的复制配方，不能被同产物的其他生产者替换。
+            selectedRecipes = new LinkedHashMap<>(forcedRecipes);
+            selectedRecipes.put(ForcedRecipeGraphProjector.preferenceKey(target.output()), target.recipeId());
+        }
         PureRecipePlanner.Result result = PureRecipePlanner.resolve(
-                graph, stock, SelfAmplifyingRecipePolicy.planningRoots(target, repeatCount),
+                graph, stock, SelfAmplifyingRecipePolicy.planningRoots(target, repeatCount, existingOutputCount),
                 maxSteps, maxSearchStates, maxMemoizedFailures, deadlineNanos,
-                System::nanoTime, planningRootGuard(target), forcedRecipes, preferences);
-        if (SelfAmplifyingRecipePolicy.isSelfAmplifying(target)) result = result.withOutputTarget();
+                System::nanoTime, planningRootGuard(target), selectedRecipes, preferences);
+        if (amplification) result = result.withAdditionalOutputTarget();
         if (result.feasible()
                 || !SelfAmplifyingRecipePolicy.isUnseededReverseTarget(target, graph, stock)) {
             return result;

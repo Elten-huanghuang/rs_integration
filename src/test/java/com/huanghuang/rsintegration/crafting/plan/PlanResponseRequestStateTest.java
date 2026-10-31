@@ -111,4 +111,156 @@ class PlanResponseRequestStateTest {
         assertTrue(state.accept(11L, POPPY));
         assertFalse(state.pending());
     }
+
+    @Test
+    void confirmationWaitsForTheLatestPreviewAndCanOnlyBeConsumedOnce() {
+        PlanResponseRequestState state = new PlanResponseRequestState(10L, POPPY);
+        state.beginPreview(11L, POPPY);
+
+        assertTrue(state.requestConfirmation());
+        assertFalse(state.consumeConfirmation(true));
+        assertFalse(state.accept(10L, POPPY));
+        assertFalse(state.consumeConfirmation(true));
+        assertTrue(state.accept(11L, POPPY));
+        assertTrue(state.consumeConfirmation(true));
+        assertFalse(state.consumeConfirmation(true));
+    }
+
+    @Test
+    void confirmationBeforeDebounceExpiresWaitsForTheScheduledPreview() {
+        PlanResponseRequestState state = new PlanResponseRequestState(10L, POPPY);
+        state.scheduleRefresh();
+
+        assertFalse(state.pending());
+        assertTrue(state.waitingForPreview());
+        assertTrue(state.requestConfirmation());
+        assertFalse(state.consumeConfirmation(true));
+
+        state.beginPreview(11L, POPPY);
+        assertFalse(state.refreshScheduled());
+        assertTrue(state.requestConfirmation());
+        assertTrue(state.accept(11L, POPPY));
+        assertTrue(state.consumeConfirmation(true));
+    }
+
+    @Test
+    void repeatedConfirmationDoesNotCreateMultipleExecutions() {
+        PlanResponseRequestState state = new PlanResponseRequestState(10L, POPPY);
+        state.beginPreview(11L, POPPY);
+
+        assertTrue(state.requestConfirmation());
+        assertTrue(state.requestConfirmation());
+        assertTrue(state.accept(11L, POPPY));
+        assertTrue(state.consumeConfirmation(true));
+        assertFalse(state.consumeConfirmation(true));
+    }
+
+    @Test
+    void editingAgainCancelsQueuedConfirmationAndWaitsForTheNewQuantity() {
+        PlanResponseRequestState state = new PlanResponseRequestState(10L, POPPY);
+        state.beginPreview(11L, POPPY);
+        state.requestConfirmation();
+        state.scheduleRefresh();
+
+        assertFalse(state.confirmationRequested());
+        assertTrue(state.accept(11L, POPPY));
+        assertTrue(state.waitingForPreview());
+        assertFalse(state.consumeConfirmation(true));
+        state.beginPreview(12L, POPPY);
+        assertTrue(state.accept(12L, POPPY));
+        assertFalse(state.consumeConfirmation(true));
+    }
+
+    @Test
+    void switchingRecipesCancelsConfirmationForThePreviousRecipe() {
+        PlanResponseRequestState state = new PlanResponseRequestState(10L, POPPY);
+        state.beginPreview(11L, POPPY);
+        state.requestConfirmation();
+        state.beginPreview(12L, DANDELION);
+
+        assertFalse(state.confirmationRequested());
+        assertFalse(state.accept(11L, POPPY));
+        assertTrue(state.accept(12L, DANDELION));
+        assertFalse(state.consumeConfirmation(true));
+    }
+
+    @Test
+    void failedPreviewDoesNotLeaveAConfirmationForALaterResponse() {
+        PlanResponseRequestState state = new PlanResponseRequestState(10L, POPPY);
+        state.beginPreview(11L, POPPY);
+        state.requestConfirmation();
+
+        assertTrue(state.accept(11L, POPPY));
+        assertFalse(state.consumeConfirmation(false));
+        assertFalse(state.confirmationRequested());
+        assertTrue(state.accept(12L, POPPY));
+        assertFalse(state.consumeConfirmation(true));
+    }
+
+    @Test
+    void closingOrChangingExecutionSettingsCancelsQueuedConfirmation() {
+        PlanResponseRequestState state = new PlanResponseRequestState(10L, POPPY);
+        state.beginPreview(11L, POPPY);
+        state.requestConfirmation();
+        state.cancelConfirmation();
+
+        assertTrue(state.pending());
+        assertTrue(state.accept(11L, POPPY));
+        assertFalse(state.consumeConfirmation(true));
+    }
+
+    @Test
+    void readyPlanDoesNotNeedToQueueConfirmation() {
+        PlanResponseRequestState state = new PlanResponseRequestState(10L, POPPY);
+
+        assertFalse(state.requestConfirmation());
+        assertFalse(state.confirmationRequested());
+        assertFalse(state.waitingForPreview());
+    }
+
+    @Test
+    void progressOnlyFailureReleasesConfirmationAndAllowsAnExplicitRetry() {
+        PlanResponseRequestState state = new PlanResponseRequestState(10L, POPPY);
+        state.beginPreview(11L, POPPY);
+        state.requestConfirmation();
+
+        assertFalse(state.failPreview(10L));
+        assertTrue(state.confirmationRequested());
+        assertTrue(state.failPreview(11L));
+        assertFalse(state.pending());
+        assertFalse(state.confirmationRequested());
+        assertFalse(state.refreshScheduled());
+        assertTrue(state.refreshRequired());
+        assertFalse(state.consumeConfirmation(true));
+
+        state.beginPreview(12L, POPPY);
+        assertFalse(state.refreshRequired());
+        assertTrue(state.requestConfirmation());
+        assertTrue(state.accept(12L, POPPY));
+        assertTrue(state.consumeConfirmation(true));
+    }
+
+    @Test
+    void fullResponseAfterFailureProgressStillFinishesThePreviewNormally() {
+        PlanResponseRequestState state = new PlanResponseRequestState(10L, POPPY);
+        state.beginPreview(11L, POPPY);
+        state.requestConfirmation();
+        state.failPreview(11L);
+
+        assertTrue(state.accept(11L, POPPY));
+        assertFalse(state.waitingForPreview());
+        assertFalse(state.consumeConfirmation(true));
+    }
+
+    @Test
+    void questConfirmationWaitsForItsUncorrelatedPreview() {
+        String quest = "rs_integration:quest_submission/42";
+        PlanResponseRequestState state = new PlanResponseRequestState(0L, quest);
+        state.beginPreview(0L, quest);
+
+        assertTrue(state.requestConfirmation());
+        assertFalse(state.consumeConfirmation(true));
+        assertTrue(state.accept(0L, quest));
+        assertTrue(state.consumeConfirmation(true));
+    }
 }
