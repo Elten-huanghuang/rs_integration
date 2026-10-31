@@ -77,6 +77,49 @@ copy {
 def farmersDelightVersion = providers.gradleProperty('farmersDelightCompatibilityVersion')
         .getOrElse('1.20.1-1.3.3')
 
+// 从文件名识别 Goety 版本，避免多个版本同时进入编译 classpath。
+def goetyVersionOf = { jar ->
+    def matcher = jar.name.toLowerCase(Locale.ROOT) =~ /goety-(\d+(?:\.\d+)+)/
+    matcher.find() ? matcher.group(1) : null
+}
+def goetyVersionFiles = fileTree(dir: 'libs', include: ['*.jar']).files.findAll {
+    goetyVersionOf(it) != null
+}
+def requestedGoetyCompileVersion = findProperty('goetyCompileVersion')?.toString()
+def goetyCompileSource
+if (requestedGoetyCompileVersion != null) {
+    def matches = goetyVersionFiles.findAll { goetyVersionOf(it) == requestedGoetyCompileVersion }
+    if (matches.size() != 1) {
+        throw new GradleException(
+                "goetyCompileVersion=${requestedGoetyCompileVersion} must match exactly one jar: ${matches}")
+    }
+    goetyCompileSource = matches[0]
+} else {
+    goetyCompileSource = goetyVersionFiles.max { left, right ->
+        def leftParts = goetyVersionOf(left).tokenize('.').collect { it.toInteger() }
+        def rightParts = goetyVersionOf(right).tokenize('.').collect { it.toInteger() }
+        for (int index = 0; index < Math.max(leftParts.size(), rightParts.size()); index++) {
+            int comparison = (index < leftParts.size() ? leftParts[index] : 0)
+                    <=> (index < rightParts.size() ? rightParts[index] : 0)
+            if (comparison != 0) return comparison
+        }
+        0
+    }
+    if (goetyCompileSource == null) {
+        throw new GradleException('libs must contain a versioned Goety jar')
+    }
+}
+def goetyCompileVersion = goetyVersionOf(goetyCompileSource)
+def modCompileJars = fileTree(dir: 'libs', include: ['*.jar'],
+        exclude: ['emi-*.jar', '*irons_spellbooks-1.20.1-3.16.3.jar', 'apothic_staff_rarities-*.jar',
+                  'fantasy_ending-1.20.1-2.7.20g-all.jar', 'improve_the_expectations-1.0.2-forge-1.20.1.jar',
+                  '*profound_curse-*.jar']).matching {
+    exclude { details ->
+        def version = goetyVersionOf(details.file)
+        version != null && version != goetyCompileVersion
+    }
+}
+
 repositories {
     flatDir { dirs 'libs' }
     flatDir { dirs ironFurnacesTestDirectory }
@@ -152,12 +195,8 @@ minecraft {
 dependencies {
     minecraft "net.minecraftforge:forge:1.20.1-47.4.13"
 
-    // All mod jars in libs — must go through fg.deobf() so ForgeGradle
-    // remaps the classes to match the dev-environment mappings.
-    compileOnly fg.deobf(fileTree(dir: 'libs', include: ['*.jar'],
-            exclude: ['emi-*.jar', '*irons_spellbooks-1.20.1-3.16.3.jar', 'apothic_staff_rarities-*.jar',
-                      'fantasy_ending-1.20.1-2.7.20g-all.jar', 'improve_the_expectations-1.0.2-forge-1.20.1.jar',
-                      '*profound_curse-*.jar']))
+    // libs 中的模组依赖必须经 fg.deobf() 映射；Goety 仅保留所选版本。
+    compileOnly fg.deobf(modCompileJars)
     compileOnly fg.deobf("local:profound_curse:${profoundCurseVersion}")
 
     // A production RS jar in run/mods is not remapped for the userdev namespace.
@@ -477,6 +516,11 @@ tasks.register('verifyReleaseJar') {
                     'com/huanghuang/rsintegration/api/resonance/ResonanceInventory.class',
                     'com/huanghuang/rsintegration/api/consumer/RSICraftConsumerApi.class',
                     'com/huanghuang/rsintegration/api/consumer/ConsumerApiCodecs.class',
+                    'com/huanghuang/rsintegration/api/machine/gui/RSIMachineGuiApi.class',
+                    'com/huanghuang/rsintegration/api/storage/RSIStorageApi.class',
+                    'com/huanghuang/rsintegration/feature/goety/GoetyCauldronFeature.class',
+                    'com/huanghuang/rsintegration/feature/goety/menu/WitchCauldronMenu.class',
+                    'assets/rs_integration/textures/gui/notebook.png',
                     'rs_integration.mixins.json',
                     'rs_integration.craftflow_compat.mixins.json',
                     'rs_integration.refmap.json'

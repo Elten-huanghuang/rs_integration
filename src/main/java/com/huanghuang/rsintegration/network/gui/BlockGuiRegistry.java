@@ -31,6 +31,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class BlockGuiRegistry {
     private static final Map<BlockEntityType<?>, IMachineGuiOpener> OPENERS = new ConcurrentHashMap<>();
+    private static final Map<BlockEntityType<?>, com.huanghuang.rsintegration.api.machine.gui.MachineGuiOpener> PREFERRED_OPENERS = new ConcurrentHashMap<>();
 
     private BlockGuiRegistry() {}
 
@@ -42,7 +43,14 @@ public final class BlockGuiRegistry {
 
     /** Check if a BlockEntityType has a registered GUI opener. */
     public static boolean hasGui(BlockEntityType<?> type) {
-        return OPENERS.containsKey(type);
+        return OPENERS.containsKey(type) || PREFERRED_OPENERS.containsKey(type);
+    }
+
+    /** Internal implementation of the public GUI API. Existing legacy handlers keep their routing. */
+    public static boolean registerPreferred(BlockEntityType<?> type,
+            com.huanghuang.rsintegration.api.machine.gui.MachineGuiOpener opener) {
+        return PREFERRED_OPENERS.putIfAbsent(java.util.Objects.requireNonNull(type),
+                java.util.Objects.requireNonNull(opener)) == null;
     }
 
     /** Open the GUI for a bound machine.
@@ -111,6 +119,15 @@ public final class BlockGuiRegistry {
 
     private static boolean openAtTarget(ServerPlayer player, ResourceKey<Level> dim, BlockPos pos,
                                         ServerLevel level, BlockEntity be) {
+        if (be != null) {
+            var preferred = PREFERRED_OPENERS.get(be.getType());
+            if (preferred != null) {
+                var previous = player.containerMenu;
+                preferred.open(player, be, dim, pos);
+                // An interaction result is insufficient: verify an actual menu was opened.
+                return player.containerMenu != previous && player.containerMenu != player.inventoryMenu;
+            }
+        }
         if (be == null) {
             // No BlockEntity (smithing table, market, etc.):
             // prefer state.getMenuProvider() which is the vanilla/Forge-approved
@@ -203,6 +220,8 @@ public final class BlockGuiRegistry {
 
     /** Get the number of registered openers (for diagnostics). */
     public static int size() {
-        return OPENERS.size();
+        var types = new java.util.HashSet<>(OPENERS.keySet());
+        types.addAll(PREFERRED_OPENERS.keySet());
+        return types.size();
     }
 }
