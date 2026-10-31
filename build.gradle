@@ -8,6 +8,9 @@ group = project.mod_group_id
 
 java.toolchain.languageVersion = JavaLanguageVersion.of(17)
 
+// Opt-in Goety GameTests use a separate source set and never enter release jars.
+apply from: 'gradle/goety-tests.gradle'
+
 mixin {
     add sourceSets.main, "rs_integration.refmap.json"
     config "rs_integration.mixins.json"
@@ -474,6 +477,11 @@ tasks.register('verifyReleaseJar') {
                     'com/huanghuang/rsintegration/api/resonance/ResonanceInventory.class',
                     'com/huanghuang/rsintegration/api/consumer/RSICraftConsumerApi.class',
                     'com/huanghuang/rsintegration/api/consumer/ConsumerApiCodecs.class',
+                    'com/huanghuang/rsintegration/api/machine/gui/RSIMachineGuiApi.class',
+                    'com/huanghuang/rsintegration/api/storage/RSIStorageApi.class',
+                    'com/huanghuang/rsintegration/feature/goety/GoetyCauldronFeature.class',
+                    'com/huanghuang/rsintegration/feature/goety/menu/WitchCauldronMenu.class',
+                    'assets/rs_integration/textures/gui/notebook.png',
                     'rs_integration.mixins.json',
                     'rs_integration.craftflow_compat.mixins.json',
                     'rs_integration.refmap.json'

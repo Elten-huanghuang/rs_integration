@@ -1,12 +1,14 @@
 # RSI Public API
 
-RS Integration 为第三方模组提供三套 Java API：
+RS Integration 为第三方模组提供三套 Java API，本分支另附两项扩展：
 
 | API | 用途 | 入口 |
 |---|---|---|
 | Integration API | 让 RSI 识别你的配方、机器和特殊执行流程 | `RSIIntegrationApi` |
 | Resonance Inventory API | 把共振盘内容作为额外的玩家物品来源读取或提取 | `RSIResonanceApi` |
 | Consumer API | 查询 RSI 配方目录、检查材料、提交订单、查询状态和取消订单 | `RSICraftConsumerApi` |
+| Machine GUI API（本分支扩展） | 为有原生交互副作用的机器注册远程菜单 | [`RSIMachineGuiApi`](MACHINE_GUI_API.md) |
+| Storage API（本分支扩展） | 访问玩家授权的默认存储网络 | [`RSIStorageApi`](STORAGE_API.md) |
 
 完整接入说明见 [RSI_INTEGRATION_API_GUIDE.md](RSI_INTEGRATION_API_GUIDE.md)。
 
@@ -47,6 +49,8 @@ datapack、`BlockEntity` 和 capability，不需要把配方改写成 RSI JSON�
 com.huanghuang.rsintegration.api
 com.huanghuang.rsintegration.api.recipe
 com.huanghuang.rsintegration.api.machine
+com.huanghuang.rsintegration.api.machine.gui
+com.huanghuang.rsintegration.api.storage
 com.huanghuang.rsintegration.api.execution
 com.huanghuang.rsintegration.api.resonance
 com.huanghuang.rsintegration.api.consumer
@@ -54,3 +58,5 @@ com.huanghuang.rsintegration.api.diagnostic
 ```
 
 其余包、实现类、网络包、内部注册表和调试入口均不是第三方契约。
+
+新增包内带有 `@ApiStatus.Internal` 的服务安装点和适配实现同样不属于公共契约。
