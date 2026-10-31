@@ -46,6 +46,11 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
 
     @Override
     public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
+        if (mixinClassName.contains(".taxfreelevels.")) {
+            // 原模组存在时整组退出，避免重复扣费或争用同一个铁砧注入点。
+            return !isClassPresent("io.github.fourmisain.taxfreelevels.TaxFreeLevels")
+                    && isClassPresent(targetClassName);
+        }
         if (mixinClassName.endsWith(".beyonddimensions.BDFluidContainerMixin")) {
             // 0.7.x 的旧版：第四个参数是 boolean shift。
             return !isModernBeyondDimensions()
