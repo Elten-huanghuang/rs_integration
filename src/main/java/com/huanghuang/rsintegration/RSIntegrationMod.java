@@ -326,6 +326,9 @@ public final class RSIntegrationMod {
 
     public RSIntegrationMod() {
         RSIIntegrationServices.initialize();
+        if (ModList.get().isLoaded(ModIds.GOETY)) {
+            com.huanghuang.rsintegration.feature.goety.GoetyCauldronFeature.initialize(MOD_BUS);
+        }
         RSIntegrationConfig.register();
         RSStorageConfig.register();
         MOD_BUS.addListener((ModConfigEvent.Loading e) -> {

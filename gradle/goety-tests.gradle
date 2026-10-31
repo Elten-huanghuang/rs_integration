@@ -1,0 +1,44 @@
+// Keep this feature's tests separate from the production mod and the upstream API smoke mod.
+if (project.hasProperty('goetyGameTests') || project.hasProperty('goetyUiSmoke')) {
+    sourceSets {
+        goetyGameTest {
+            java.srcDir 'src/gametest/java'
+            resources.srcDir 'src/gametest/resources'
+            compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+            runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
+        }
+    }
+
+    dependencies {
+        goetyGameTestRuntimeOnly fg.deobf('local:goety:2.5.56.4')
+        goetyGameTestRuntimeOnly fg.deobf('local:curios-forge:5.14.1+1.20.1')
+    }
+
+    tasks.named('compileGoetyGameTestJava', JavaCompile) {
+        options.encoding = 'UTF-8'
+    }
+
+    minecraft.runs {
+        gameTestServer {
+            workingDirectory project.file('run/goety-gametest')
+            property 'forge.enabledGameTestNamespaces', 'rs_integration'
+            args '--nogui'
+            mods {
+                rs_integration {
+                    source sourceSets.main
+                    source sourceSets.goetyGameTest
+                }
+            }
+        }
+        if (project.hasProperty('goetyUiSmoke')) {
+            client {
+                workingDirectory project.file('run/goety-ui')
+                property 'rs_integration.uiSmoke', 'true'
+                args '--quickPlaySingleplayer', 'GoetyRSI-UI-Test', '--width', '1280', '--height', '800'
+                mods {
+                    rs_integration { source sourceSets.goetyGameTest }
+                }
+            }
+        }
+    }
+}

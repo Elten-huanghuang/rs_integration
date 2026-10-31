@@ -5,6 +5,8 @@ import com.huanghuang.rsintegration.api.consumer.RSIConsumerServices;
 import com.huanghuang.rsintegration.api.machine.MachineIntegration;
 import com.huanghuang.rsintegration.api.recipe.RecipeIntegration;
 import com.huanghuang.rsintegration.api.resonance.RSIResonanceServices;
+import com.huanghuang.rsintegration.api.storage.DefaultRSIStorageApi;
+import com.huanghuang.rsintegration.api.storage.RSIStorageServices;
 import com.huanghuang.rsintegration.feature.resonance.api.DefaultRSIResonanceApi;
 import net.minecraft.server.level.ServerLevel;
 import org.jetbrains.annotations.ApiStatus;
@@ -27,6 +29,7 @@ public final class RSIIntegrationServices {
         initialized = true;
         API.beginRegistration();
         RSIResonanceServices.install(new DefaultRSIResonanceApi());
+        RSIStorageServices.install(new DefaultRSIStorageApi());
         RSIConsumerServices.install(CONSUMER);
         CONSUMER.markIndexing();
     }
@@ -43,11 +46,13 @@ public final class RSIIntegrationServices {
         API.stop();
         CONSUMER.stop();
         RSIResonanceServices.clear();
+        RSIStorageServices.clear();
     }
 
     public static void resumeAfterStop() {
         API.resumeAfterStop();
         RSIResonanceServices.install(new DefaultRSIResonanceApi());
+        RSIStorageServices.install(new DefaultRSIStorageApi());
         CONSUMER.markIndexing();
     }
 
