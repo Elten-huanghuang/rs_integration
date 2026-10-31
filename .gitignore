@@ -17,10 +17,14 @@ output/
 .DS_Store
 Thumbs.db
 
-# Python 绘图缓存
+# Python 缓存
 __pycache__/
 *.pyc
-art/
+
+# 本地美术源文件、绘图脚本与预览输出（不提交）
+/art/
+/tools/
+
 # Minecraft
 run/
 logs/
