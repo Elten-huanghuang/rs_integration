@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.storage.StorageIdentityBytes;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtAccounter;
 import net.minecraft.nbt.NbtIo;
+import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Item;
@@ -20,23 +21,38 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.Objects;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /** 身份签名和可恢复载荷分离；索引不持有调用方的可变 Stack。 */
 public final class FrozenKey {
     public enum Kind { ITEM, FLUID }
-    /** 保留缺失资源的类型和注册名，供玩家提示使用，避免解析日志文本。 */
-    public static final class MissingResourceException extends IOException {
+    /** 文件结构有效但当前环境无法原样恢复的资源，可保留原始载荷并逐条隔离。 */
+    public abstract static class UnavailableResourceException extends IOException {
         private final Kind kind;
         private final ResourceLocation resource;
 
-        public MissingResourceException(Kind kind, ResourceLocation resource) {
-            super("资源注册项不存在: " + resource);
+        protected UnavailableResourceException(Kind kind, ResourceLocation resource, String message) {
+            super(message);
             this.kind = kind;
             this.resource = resource;
         }
 
         public Kind kind() { return kind; }
         public ResourceLocation resource() { return resource; }
+    }
+    /** 保留缺失资源的类型和注册名，供玩家提示使用，避免解析日志文本。 */
+    public static final class MissingResourceException extends UnavailableResourceException {
+        public MissingResourceException(Kind kind, ResourceLocation resource) {
+            super(kind, resource, "资源注册项不存在: " + resource);
+        }
+    }
+    public static final class IdentityChangedException extends UnavailableResourceException {
+        public IdentityChangedException(Kind kind, ResourceLocation resource, String fields) {
+            super(kind, resource, "资源载荷恢复后身份发生变化: " + kind + " " + resource
+                    + "（变化字段: " + fields + "），拒绝开放该条目写入");
+        }
     }
     public static final int MAX_BYTES = 1048576;
     private final Kind kind;
@@ -144,26 +160,52 @@ public final class FrozenKey {
 
     public static FrozenKey load(Kind kind, byte[] bytes) throws IOException {
         CompoundTag tag = decode(bytes);
-        String amountField = kind == Kind.ITEM ? "Count" : "Amount";
-        if (tag.getInt(amountField) != 1) throw new IOException("模板数量必须为 1");
         String name = tag.getString(kind == Kind.ITEM ? "id" : "FluidName");
         ResourceLocation id = ResourceLocation.tryParse(name);
-        if (id == null) throw new IOException("资源注册名非法: " + name);
-        if (kind == Kind.ITEM
-                ? !ForgeRegistries.ITEMS.containsKey(id) || ForgeRegistries.ITEMS.getValue(id) == Items.AIR
-                : !ForgeRegistries.FLUIDS.containsKey(id) || ForgeRegistries.FLUIDS.getValue(id) == Fluids.EMPTY) {
-            throw new MissingResourceException(kind, id);
+        if (id == null) throw invalidPayload(kind, tag, "资源注册名非法");
+        String amountField = kind == Kind.ITEM ? "Count" : "Amount";
+        if (!tag.contains(amountField, kind == Kind.ITEM ? Tag.TAG_BYTE : Tag.TAG_INT)
+                || tag.getInt(amountField) != 1) {
+            throw invalidPayload(kind, tag, "模板数量必须为 1，字段 " + amountField + " 的类型或数值非法");
         }
-        // 不把未知资源或无法稳定比较的载荷变为空库存。
+        String tagField = kind == Kind.ITEM ? "tag" : "Tag";
+        for (String field : new String[] {tagField, "ForgeCaps"}) {
+            if (tag.contains(field) && !tag.contains(field, Tag.TAG_COMPOUND)) {
+                throw invalidPayload(kind, tag, "资源载荷字段类型非法，字段 " + field + " 必须为 CompoundTag");
+            }
+        }
         try {
-            FrozenKey key = kind == Kind.ITEM ? item(ItemStack.of(tag)) : fluid(FluidStack.loadFluidStackFromNBT(tag));
-            if (!Arrays.equals(StorageIdentityBytes.exact(key.identity()), StorageIdentityBytes.exact(tag))) {
-                throw new IOException("资源载荷恢复后身份发生变化，拒绝开放写入");
+            // 先验证原始 NBT；反序列化只能接触副本，防止模组改写待校验的身份。
+            byte[] expected = StorageIdentityBytes.exact(tag);
+            if (kind == Kind.ITEM
+                    ? !ForgeRegistries.ITEMS.containsKey(id) || ForgeRegistries.ITEMS.getValue(id) == Items.AIR
+                    : !ForgeRegistries.FLUIDS.containsKey(id) || ForgeRegistries.FLUIDS.getValue(id) == Fluids.EMPTY) {
+                throw new MissingResourceException(kind, id);
+            }
+            CompoundTag restored = tag.copy();
+            FrozenKey key = kind == Kind.ITEM ? item(ItemStack.of(restored))
+                    : fluid(FluidStack.loadFluidStackFromNBT(restored));
+            CompoundTag identity = key.identity();
+            // 扩展字段可能由模组写入；无法原样纳入身份时隔离条目，不能将其直接判作整盘损坏。
+            if (!Arrays.equals(StorageIdentityBytes.exact(identity), expected)) {
+                String changed = Stream.concat(tag.getAllKeys().stream(), identity.getAllKeys().stream())
+                        .distinct().filter(field -> !Objects.equals(tag.get(field), identity.get(field)))
+                        .sorted().collect(Collectors.joining(", "));
+                throw new IdentityChangedException(kind, id, changed);
             }
             return new FrozenKey(kind, key.type, tag, key.template, bytes);
         } catch (RuntimeException e) {
             throw new IOException("资源身份无法恢复: " + name, e);
         }
+    }
+
+    private static IOException invalidPayload(Kind kind, CompoundTag payload, String reason) {
+        String resource = payload.getString(kind == Kind.ITEM ? "id" : "FluidName");
+        String fields = payload.getAllKeys().stream().sorted().limit(16)
+                .map(field -> field + ":" + payload.get(field).getClass().getSimpleName())
+                .collect(Collectors.joining(", "));
+        return new IOException(reason + ": kind=" + kind + " resource=" + resource
+                + "（字段类型，最多 16 项: " + fields + "）");
     }
 
     public Kind kind() { return kind; }

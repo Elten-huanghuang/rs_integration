@@ -8,6 +8,8 @@ import com.huanghuang.rsintegration.storage.disk.core.ResourceTable.PageSnapshot
 import com.huanghuang.rsintegration.storage.disk.core.ResourceTable.QuarantinedResource;
 import com.huanghuang.rsintegration.magic.MagicResourceDiskStore;
 import com.huanghuang.rsintegration.magic.MagicResourceKind;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -38,6 +40,7 @@ import java.util.UUID;
 
 /** 不可变页面先落盘，manifest 原子替换后两类库存才一起提交。 */
 public final class DiskFileStore {
+    private static final Logger LOGGER = LogManager.getLogger(DiskFileStore.class);
     private static final int MAGIC = 0x52534955;
     public static final int FORMAT = 1;
     private static final int SEGMENT_BYTES = 4 * 1024 * 1024;
@@ -305,6 +308,7 @@ public final class DiskFileStore {
         List<Record> records = new ArrayList<>();
         Set<FrozenKey> uniqueKeys = new HashSet<>();
         int totalBytes = 0;
+        int changedIdentities = 0;
         for (int pageIndex = 0; pageIndex < pages.size(); pageIndex++) {
             PageFiles page = pages.get(pageIndex);
             long[] amounts = readAmounts(readChecked(reference(directory, page.amounts),
@@ -334,11 +338,20 @@ public final class DiskFileStore {
                             FrozenKey key = FrozenKey.load(kind, payload);
                             if (uniqueKeys.add(key)) totalBytes += length;
                             records.add(new Record(slot, generation, order, key, null, amount));
-                        } catch (FrozenKey.MissingResourceException missing) {
-                            // 注册项缺失不等于文件损坏；保留槽位和原始载荷，重载时再尝试恢复。
+                        } catch (FrozenKey.UnavailableResourceException unavailable) {
+                            // 缺失或身份不兼容不等于文件损坏；不接纳变化后的资源，也不丢弃原始载荷。
                             totalBytes += length;
                             records.add(new Record(slot, generation, order, null,
-                                    new QuarantinedResource(kind, missing.resource(), payload), amount));
+                                    new QuarantinedResource(kind, unavailable.resource(), payload), amount));
+                            // 与管理器的注册名提示一样只展开前 16 项，完整隔离数量仍会汇总。
+                            if (unavailable instanceof FrozenKey.IdentityChangedException && changedIdentities++ < 16) {
+                                LOGGER.warn("[RSI] 统一盘 {} 已隔离身份变化条目: kind={} resource={} slot={} reason={}",
+                                        directory.getFileName(), kind, unavailable.resource(), slot, unavailable.getMessage());
+                            }
+                        } catch (IOException | RuntimeException invalid) {
+                            throw new IOException("资源载荷读取失败: disk=" + directory.getFileName()
+                                    + " kind=" + kind + " slot=" + slot + " page=" + name
+                                    + "；" + invalid.getMessage(), invalid);
                         }
                     }
                 }

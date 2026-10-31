@@ -24,7 +24,7 @@ public final class ResourceTable {
     public record Handle(long epoch, int slot, int generation) {}
     public record PageSnapshot(int index, long keyRevision, long amountRevision,
                                byte[][] keys, int[] generations, long[] orders, long[] amounts) {}
-    /** 缺失注册项只保留原始身份，不进入可用库存索引。 */
+    /** 缺失或身份不兼容的资源只保留原始载荷，不进入可用库存索引。 */
     public record QuarantinedResource(FrozenKey.Kind kind, ResourceLocation resource, byte[] payload) {
         public QuarantinedResource { payload = payload.clone(); }
         @Override public byte[] payload() { return payload.clone(); }

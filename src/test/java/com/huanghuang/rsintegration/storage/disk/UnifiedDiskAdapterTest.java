@@ -292,7 +292,8 @@ class UnifiedDiskAdapterTest extends BootstrapTest {
         verify(level, never()).getBlockEntity(any());
     }
 
-    @Test void mountedViewsKeepHealthyContentsUsableAndPreserveMissingItemAcrossWrites() throws Exception {
+    @ParameterizedTest @ValueSource(booleans = {false, true})
+    void recoveredAndMountedViewsPreserveUnavailableItemsAcrossWrites(boolean identityChanged) throws Exception {
         setup();
         var original = manager.entry(root.id()).core;
         FrozenKey missing = FrozenKey.item(new ItemStack(Items.STONE));
@@ -302,9 +303,20 @@ class UnifiedDiskAdapterTest extends BootstrapTest {
         UnifiedDiskManager.stop(server);
         byte[] payload = missing.payload();
         try (MockedStatic<FrozenKey> keys = mockStatic(FrozenKey.class, CALLS_REAL_METHODS)) {
-            keys.when(() -> FrozenKey.load(FrozenKey.Kind.ITEM, payload)).thenThrow(
-                    new FrozenKey.MissingResourceException(FrozenKey.Kind.ITEM, new ResourceLocation("minecraft:stone")));
+            ResourceLocation id = new ResourceLocation("minecraft:stone");
+            FrozenKey.UnavailableResourceException failure = identityChanged
+                    ? new FrozenKey.IdentityChangedException(FrozenKey.Kind.ITEM, id, "ForgeCaps")
+                    : new FrozenKey.MissingResourceException(FrozenKey.Kind.ITEM, id);
+            keys.when(() -> FrozenKey.load(FrozenKey.Kind.ITEM, payload)).thenThrow(failure);
             manager = UnifiedDiskManager.get(level);
+            ItemStack replacement = spy(new ItemStack(Items.STONE));
+            UnifiedDiskItem diskItem = (UnifiedDiskItem) current.get().getItem();
+            doReturn(diskItem).when(replacement).getItem();
+            manager.restoreIdentity(original.diskId, replacement);
+            assertEquals(original.diskId, diskItem.getId(replacement));
+            assertEquals(original.worldId, diskItem.worldId(replacement));
+            assertEquals(List.of(original.diskId), manager.savedDiskIds());
+            current.set(replacement);
             root = new UnifiedDiskRoot(manager, original.diskId, original.worldId, original.owner);
             var core = manager.entry(root.id()).core;
             assertNotNull(core); assertNull(manager.entry(root.id()).error);

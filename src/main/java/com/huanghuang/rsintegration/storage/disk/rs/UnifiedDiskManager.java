@@ -217,9 +217,9 @@ public final class UnifiedDiskManager {
             logDuplicateRepairs(id, loaded);
             entry.failure = UnifiedDiskFailure.quarantined(loaded);
             if (entry.failure != null) {
-                LOGGER.warn("[RSI] 统一盘 {} 已隔离 {} 项缺失物品、{} 项缺失流体，正常库存仍可使用",
+                LOGGER.warn("[RSI] 统一盘 {} 已隔离 {} 项缺失或不兼容物品、{} 项缺失或不兼容流体，正常库存仍可使用",
                         id, loaded.items.quarantinedSize(), loaded.fluids.quarantinedSize());
-                LOGGER.warn("[RSI] 缺失物品注册名（最多 16 项）: {}；缺失流体注册名（最多 16 项）: {}",
+                LOGGER.warn("[RSI] 隔离物品注册名（最多 16 项）: {}；隔离流体注册名（最多 16 项）: {}",
                         loaded.items.quarantinedIds().stream().limit(16).toList(),
                         loaded.fluids.quarantinedIds().stream().limit(16).toList());
             }
