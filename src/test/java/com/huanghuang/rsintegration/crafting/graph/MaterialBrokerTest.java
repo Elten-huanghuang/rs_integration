@@ -10,12 +10,197 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MaterialBrokerTest extends BootstrapTest {
+
+    @Test
+    void shortageDetailsStayAccurateAcrossChecksPublicationReservationAndRefund() {
+        MaterialBroker broker = new MaterialBroker();
+        MaterialKey diamond = MaterialKey.of(new ItemStack(Items.DIAMOND));
+        MaterialSource source = new MaterialSource.InitialPool(diamond);
+        List<MaterialBroker.Request> requests = List.of(new MaterialBroker.Request(source, diamond, 5));
+
+        for (int i = 0; i < 3; i++) {
+            assertFalse(broker.canReserve(requests));
+            assertNull(broker.reserve(new NodeId(0), requests));
+            assertEquals(requests, broker.shortages(requests));
+        }
+        broker.publish(source, diamond, 3);
+        assertFalse(broker.canReserve(requests));
+        assertEquals(List.of(new MaterialBroker.Request(source, diamond, 2)), broker.shortages(requests));
+        assertEquals(3, broker.available(source, diamond));
+
+        broker.publish(source, diamond, 2);
+        assertTrue(broker.canReserve(requests));
+        assertTrue(broker.shortages(requests).isEmpty());
+        assertEquals(5, broker.available(source, diamond));
+        MaterialBroker.ReservationToken token = broker.reserve(new NodeId(0), requests);
+        assertNotNull(token);
+        assertEquals(requests, broker.shortages(requests));
+        assertEquals(5, broker.outstanding(source, diamond));
+        broker.commit(token);
+        broker.refund(token);
+        assertTrue(broker.canReserve(requests));
+        assertTrue(broker.shortages(requests).isEmpty());
+        assertEquals(5, requests.get(0).quantity());
+        assertEquals(5, broker.available(source, diamond));
+    }
+
+    @Test
+    void indexedQueriesKeepFullSourceAndMaterialIdentityAmongUnrelatedLots() {
+        MaterialBroker broker = new MaterialBroker();
+        MaterialKey diamond = MaterialKey.of(new ItemStack(Items.DIAMOND));
+        MaterialSource source = new MaterialSource.ProducerOutput(new OutputPortId(new NodeId(0), 0));
+        MaterialSource otherPort = new MaterialSource.ProducerOutput(new OutputPortId(new NodeId(0), 1));
+        MaterialSource initial = new MaterialSource.InitialPool(diamond);
+        for (int i = 1; i <= 512; i++) {
+            broker.publish(new MaterialSource.ProducerOutput(new OutputPortId(new NodeId(i), 0)), diamond, 8);
+        }
+        broker.publish(source, diamond, 2);
+        broker.publish(otherPort, diamond, 7);
+        broker.publish(initial, diamond, 11);
+        ItemStack tagged = new ItemStack(Items.DIAMOND, 3);
+        tagged.getOrCreateTag().putString("variant", "tagged");
+        MaterialKey taggedKey = MaterialKey.of(tagged);
+        broker.publishActual(source, taggedKey, tagged);
+        MaterialSource equalSource = new MaterialSource.ProducerOutput(new OutputPortId(new NodeId(0), 0));
+        MaterialKey equalKey = MaterialKey.of(tagged.copy());
+
+        assertEquals(2, broker.available(source, diamond));
+        assertEquals(3, broker.available(equalSource, equalKey));
+        assertEquals(3, broker.outstanding(equalSource, equalKey));
+        List<MaterialBroker.Request> requests =
+                List.of(new MaterialBroker.Request(equalSource, equalKey, 4));
+        assertFalse(broker.canReserve(requests));
+        assertNull(broker.reserve(new NodeId(600), requests));
+        assertEquals(List.of(new MaterialBroker.Request(source, taggedKey, 1)), broker.shortages(requests));
+
+        List<ItemStack> drained = broker.drainAvailable(equalSource, equalKey, 5);
+        assertEquals(1, drained.size());
+        assertEquals(3, drained.get(0).getCount());
+        assertEquals("tagged", drained.get(0).getTag().getString("variant"));
+        assertEquals(0, broker.outstanding(source, taggedKey));
+        assertEquals(2, broker.available(source, diamond));
+        assertEquals(7, broker.available(otherPort, diamond));
+        assertEquals(11, broker.available(initial, diamond));
+        assertEquals(512L * 8 + 2 + 7 + 11, broker.totalAvailable());
+    }
+
+    @Test
+    void indexedLotsKeepRuntimeNbtAndPublicationOrderWhenReturnedAndDrained() {
+        MaterialBroker broker = new MaterialBroker();
+        MaterialKey declared = MaterialKey.of(new ItemStack(Items.POTION));
+        MaterialSource source = new MaterialSource.ProducerOutput(new OutputPortId(new NodeId(0), 0));
+        MaterialSource other = new MaterialSource.ProducerOutput(new OutputPortId(new NodeId(1), 0));
+        ItemStack first = new ItemStack(Items.POTION, 2);
+        first.getOrCreateTag().putInt("Purity", 1);
+        ItemStack second = new ItemStack(Items.POTION, 3);
+        second.getOrCreateTag().putInt("Purity", 2);
+        broker.publishActual(source, declared, first);
+        broker.publish(other, declared, 9);
+        broker.publishActual(source, declared, second);
+        List<MaterialBroker.Request> requests = List.of(
+                new MaterialBroker.Request(source, declared, 3),
+                new MaterialBroker.Request(source, declared, 1));
+        assertFalse(broker.canReserve(List.of(new MaterialBroker.Request(source, declared, 6))));
+        assertTrue(broker.canReserve(requests));
+        MaterialBroker.ReservationToken token = broker.reserve(new NodeId(2), requests);
+        assertNotNull(token);
+        List<ItemStack> checkout = broker.checkout(token).producerStacks();
+        assertEquals(List.of(2, 2), checkout.stream().map(ItemStack::getCount).toList());
+        assertEquals(List.of(1, 2), checkout.stream().map(stack -> stack.getTag().getInt("Purity")).toList());
+        broker.release(token);
+        assertEquals(5, broker.available(source, declared));
+
+        token = broker.reserve(new NodeId(2), requests);
+        assertNotNull(token);
+        broker.commit(token);
+        broker.refundCommittedProducerFragments(token, List.of(second.copyWithCount(1)));
+        broker.settle(token);
+        assertEquals(2, broker.outstanding(source, declared));
+        List<ItemStack> drained = broker.drainAvailable(source, declared, 5);
+        assertEquals(1, drained.size());
+        assertEquals(2, drained.get(0).getCount());
+        assertEquals(2, drained.get(0).getTag().getInt("Purity"));
+        assertEquals(9, broker.totalAvailable());
+        assertEquals(9, broker.drainAvailableProducerAssets().get(0).getCount());
+        assertEquals(0, broker.totalAvailable());
+    }
+
+    @Test
+    void consumingAndEmptyTransitionsDoNotAdvanceAvailabilityRevision() {
+        MaterialBroker broker = brokerWithDiamonds(4);
+        long revision = broker.availabilityRevision();
+        MaterialKey diamond = MaterialKey.of(new ItemStack(Items.DIAMOND));
+        MaterialSource source = new MaterialSource.InitialPool(diamond);
+        MaterialBroker.ReservationToken token = broker.reserve(new NodeId(0),
+                List.of(new MaterialBroker.Request(source, diamond, 2)));
+        broker.commit(token);
+        broker.settle(token);
+        broker.takeAvailable(source, diamond, 1);
+        assertEquals(revision, broker.availabilityRevision());
+
+        MaterialBroker.ReservationToken empty = broker.reserve(new NodeId(1), List.of());
+        broker.release(empty);
+        MaterialBroker.ReservationToken committedEmpty = broker.reserve(new NodeId(2), List.of());
+        broker.commit(committedEmpty);
+        broker.refund(committedEmpty);
+        assertEquals(revision, broker.availabilityRevision());
+    }
+
+    @Test
+    void availabilityRevisionTracksEveryReturnPathAndIgnoresUnrelatedRecovery() {
+        MaterialBroker broker = new MaterialBroker();
+        MaterialKey diamond = MaterialKey.of(new ItemStack(Items.DIAMOND));
+        MaterialSource source = new MaterialSource.ProducerOutput(new OutputPortId(new NodeId(7), 0));
+        long revision = broker.availabilityRevision();
+        broker.publish(source, diamond, 6);
+        assertTrue(broker.availabilityRevision() > revision);
+        MaterialBroker.ReservationToken token = broker.reserve(new NodeId(8),
+                List.of(new MaterialBroker.Request(source, diamond, 6)));
+        revision = broker.availabilityRevision();
+        broker.releaseUnusedReservedFragments(token, List.of(),
+                List.of(new ItemStack(Items.DIAMOND)));
+        assertTrue(broker.availabilityRevision() > revision);
+        broker.commit(token);
+        revision = broker.availabilityRevision();
+        broker.refundCommittedProducerFragments(token, List.of(new ItemStack(Items.DIAMOND)));
+        assertTrue(broker.availabilityRevision() > revision);
+        revision = broker.availabilityRevision();
+        broker.refundRecoveredProducerFragments(token, List.of(new ItemStack(Items.IRON_INGOT)));
+        assertEquals(revision, broker.availabilityRevision());
+        broker.refundRecoveredProducerFragments(token, List.of(new ItemStack(Items.DIAMOND)));
+        assertTrue(broker.availabilityRevision() > revision);
+        revision = broker.availabilityRevision();
+        broker.refund(token);
+        assertTrue(broker.availabilityRevision() > revision);
+        assertEquals(6, broker.available(source, diamond));
+        token = broker.reserve(new NodeId(9),
+                List.of(new MaterialBroker.Request(source, diamond, 6)));
+        revision = broker.availabilityRevision();
+        broker.release(token);
+        assertTrue(broker.availabilityRevision() > revision);
+    }
+
+    @Test
+    void partialReturnStillAdvancesRevisionWhenExcessFragmentsAreRejected() {
+        MaterialBroker broker = brokerWithDiamonds(1);
+        MaterialKey diamond = MaterialKey.of(new ItemStack(Items.DIAMOND));
+        MaterialSource source = new MaterialSource.InitialPool(diamond);
+        MaterialBroker.ReservationToken token = broker.reserve(new NodeId(0),
+                List.of(new MaterialBroker.Request(source, diamond, 1)));
+        long revision = broker.availabilityRevision();
+        assertThrows(IllegalArgumentException.class, () -> broker.releaseUnusedReservedFragments(
+                token, List.of(new ItemStack(Items.DIAMOND, 2)), List.of()));
+        assertEquals(1, broker.available(source, diamond));
+        assertTrue(broker.availabilityRevision() > revision);
+    }
 
     @Test
     void accessFromAnotherThreadFailsBeforeStateCanChange() throws InterruptedException {
@@ -196,9 +381,11 @@ class MaterialBrokerTest extends BootstrapTest {
         MaterialSource goldSource = new MaterialSource.InitialPool(gold);
         broker.publish(ironSource, iron, 1);
 
-        MaterialBroker.ReservationToken token = broker.reserve(new NodeId(0), List.of(
+        List<MaterialBroker.Request> requests = List.of(
                 new MaterialBroker.Request(ironSource, iron, 1),
-                new MaterialBroker.Request(goldSource, gold, 1)));
+                new MaterialBroker.Request(goldSource, gold, 1));
+        assertFalse(broker.canReserve(requests));
+        MaterialBroker.ReservationToken token = broker.reserve(new NodeId(0), requests);
 
         assertNull(token);
         assertEquals(1, broker.available(ironSource, iron));
@@ -210,9 +397,11 @@ class MaterialBrokerTest extends BootstrapTest {
         MaterialKey diamond = MaterialKey.of(new ItemStack(Items.DIAMOND));
         MaterialSource source = new MaterialSource.InitialPool(diamond);
 
-        MaterialBroker.ReservationToken token = broker.reserve(new NodeId(0), List.of(
+        List<MaterialBroker.Request> requests = List.of(
                 new MaterialBroker.Request(source, diamond, 2),
-                new MaterialBroker.Request(source, diamond, 2)));
+                new MaterialBroker.Request(source, diamond, 2));
+        assertFalse(broker.canReserve(requests));
+        MaterialBroker.ReservationToken token = broker.reserve(new NodeId(0), requests);
 
         assertNull(token);
         assertEquals(3, broker.available(source, diamond));

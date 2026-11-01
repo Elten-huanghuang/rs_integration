@@ -292,9 +292,11 @@ public final class AsyncCraftChain {
     private final Map<NodeId, List<MachineLeaseRegistry.MachineKey>> graphWaitingMachines = new HashMap<>();
     @Nullable
     private final MaterialBroker graphMaterials;
+    private long graphRefreshedAvailabilityRevision = -1L;
     @Nullable
     private final NodeAdmissionCoordinator graphAdmissions;
     private final Map<NodeId, List<MaterialBroker.Request>> graphRequests = new HashMap<>();
+    private final Predicate<NodeId> graphMaterialReadiness = this::canReserveGraphNodeMaterials;
     private final Map<NodeId, CraftNode> graphNodes = new HashMap<>();
     private final ProgressWatchdog graphProgressWatchdog;
     private final int graphRunningNodeCap;
@@ -502,6 +504,8 @@ public final class AsyncCraftChain {
                         allocation.quantity(), SaturatingLongMath::add);
             }
         }
+        // 图内需求在构造后只读，避免每次就绪检查和预留都重新复制列表。
+        graphRequests.replaceAll((nodeId, requests) -> List.copyOf(requests));
         if (graphMaterials != null) {
             for (Map.Entry<InitialLotKey, Long> entry : initial.entrySet()) {
                 graphMaterials.publish(
@@ -1134,7 +1138,9 @@ public final class AsyncCraftChain {
 
         // Process synchronous GENERIC nodes outside the executor.
         // They complete immediately and don't wait for observation ticks.
+        refreshBlockedGraphNodes();
         settleReadyVanillaNodes(online, vanillaAllowance);
+        refreshBlockedGraphNodes();
 
         // Drive the executor: observe all running, settle completed, dispatch new.
         try {
@@ -2786,10 +2792,19 @@ public final class AsyncCraftChain {
                 ExternalItemProgressBridge.enqueueCrafted(resolvePlayer(), publication.stack());
             }
         }
-        if (graphScheduler != null && !graphScheduler.isStopping()) {
-            graphScheduler.refreshBlocked(candidate -> graphMaterials.canReserve(
-                    graphRequests.getOrDefault(candidate, List.of())));
-        }
+        refreshBlockedGraphNodes();
+    }
+
+    private void refreshBlockedGraphNodes() {
+        if (graphMaterials == null || graphScheduler == null || graphScheduler.isStopping()) return;
+        long revision = graphMaterials.availabilityRevision();
+        if (revision == graphRefreshedAvailabilityRevision) return;
+        graphScheduler.refreshBlocked(graphMaterialReadiness);
+        graphRefreshedAvailabilityRevision = revision;
+    }
+
+    private boolean canReserveGraphNodeMaterials(NodeId nodeId) {
+        return graphMaterials.canReserve(graphRequests.getOrDefault(nodeId, List.of()));
     }
 
     private void recordGraphRuntimeFailure(NodeId nodeId, ConcurrentNodeExecutor.Worker worker) {

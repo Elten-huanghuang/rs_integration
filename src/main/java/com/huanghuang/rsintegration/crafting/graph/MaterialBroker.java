@@ -83,10 +83,19 @@ public final class MaterialBroker {
     }
 
     private final Map<Long, AssetLot> lots = new LinkedHashMap<>();
+    // 只保存原批次的引用，桶内沿用发布顺序；数量和退款仍由原账本维护。
+    private final Map<MaterialSource, Map<MaterialKey, List<AssetLot>>> lotsBySource = new HashMap<>();
     private final Map<ReservationToken, Reservation> reservations = new HashMap<>();
     private final Thread ownerThread = Thread.currentThread();
     private long nextLotId;
     private long nextToken;
+    private long availabilityRevision;
+
+    /** 仅在可用材料增加时变化，用于跳过不可能唤醒阻塞节点的复查。 */
+    public long availabilityRevision() {
+        requireOwnerThread();
+        return availabilityRevision;
+    }
 
     public long publish(MaterialSource source, MaterialKey material, long quantity) {
         if (quantity <= 0) throw new IllegalArgumentException("published quantity must be positive");
@@ -117,14 +126,32 @@ public final class MaterialBroker {
             throw new IllegalArgumentException("published stack does not match material key");
         }
         long lotId = nextLotId++;
-        lots.put(lotId, new AssetLot(lotId, source, material, stack));
+        AssetLot lot = new AssetLot(lotId, source, material, stack);
+        lots.put(lotId, lot);
+        lotsBySource.computeIfAbsent(source, ignored -> new HashMap<>())
+                .computeIfAbsent(material, ignored -> new ArrayList<>())
+                .add(lot);
+        availabilityRevision++;
         return lotId;
     }
 
     public boolean canReserve(List<Request> requests) {
         requireOwnerThread();
         Objects.requireNonNull(requests, "requests");
-        return plan(List.copyOf(requests)) != null;
+        List<Request> immutableRequests = List.copyOf(requests);
+        // 单项就绪检查只判断数量，不必生成扣料明细；多项仍共用原子分配计划。
+        if (immutableRequests.size() == 1) {
+            Request request = immutableRequests.get(0);
+            long remaining = request.quantity();
+            List<AssetLot> candidates = matchingLots(request.source(), request.material());
+            for (int i = 0; i < candidates.size(); i++) {
+                AssetLot lot = candidates.get(i);
+                remaining -= Math.min(remaining, lot.available);
+                if (remaining == 0L) return true;
+            }
+            return false;
+        }
+        return plan(immutableRequests) != null;
     }
 
     /**
@@ -137,10 +164,8 @@ public final class MaterialBroker {
         List<Request> shortages = new ArrayList<>();
         for (Request request : requests) {
             long remaining = request.quantity();
-            for (AssetLot lot : lots.values()) {
+            for (AssetLot lot : matchingLots(request.source(), request.material())) {
                 if (remaining <= 0L) break;
-                if (!lot.source.equals(request.source())
-                        || !lot.material.equals(request.material())) continue;
                 remaining -= Math.min(remaining, lot.available);
             }
             if (remaining > 0L) {
@@ -193,6 +218,7 @@ public final class MaterialBroker {
             AssetLot lot = lots.get(claim.lotId);
             lot.reserved -= claim.quantity;
             lot.available += claim.quantity;
+            if (claim.quantity > 0L) availabilityRevision++;
         }
         reservation.state = ReservationState.RELEASED;
     }
@@ -215,6 +241,7 @@ public final class MaterialBroker {
             AssetLot lot = lots.get(claim.lotId);
             lot.committed -= claim.quantity;
             lot.available += claim.quantity;
+            if (claim.quantity > 0L) availabilityRevision++;
         }
         reservation.state = ReservationState.REFUNDED;
     }
@@ -256,6 +283,7 @@ public final class MaterialBroker {
                 stack.shrink(giveBack);
                 lot.reserved -= giveBack;
                 lot.available += giveBack;
+                availabilityRevision++;
                 claim.quantity -= giveBack;
                 refundable -= giveBack;
             }
@@ -289,6 +317,7 @@ public final class MaterialBroker {
                 stack.shrink(giveBack);
                 lot.committed -= giveBack;
                 lot.available += giveBack;
+                availabilityRevision++;
                 claim.quantity -= giveBack;
                 refundable -= giveBack;
             }
@@ -318,6 +347,7 @@ public final class MaterialBroker {
                 stack.shrink(giveBack);
                 lot.committed -= giveBack;
                 lot.available += giveBack;
+                availabilityRevision++;
                 claim.quantity -= giveBack;
                 refundable -= giveBack;
             }
@@ -325,21 +355,28 @@ public final class MaterialBroker {
     }
 
     private Map<Long, Long> plan(List<Request> requests) {
-        Map<Long, Long> planned = new LinkedHashMap<>();
+        // 缺料复查通常没有任何可分配批次，等首次分配时再创建计划表。
+        Map<Long, Long> planned = null;
         for (Request request : requests) {
             long remaining = request.quantity();
-            for (AssetLot lot : lots.values()) {
+            for (AssetLot lot : matchingLots(request.source(), request.material())) {
                 if (remaining <= 0) break;
-                if (!lot.source.equals(request.source()) || !lot.material.equals(request.material())) continue;
-                long available = lot.available - planned.getOrDefault(lot.id, 0L);
+                long available = lot.available;
+                if (planned != null) available -= planned.getOrDefault(lot.id, 0L);
                 if (available <= 0) continue;
                 long take = Math.min(available, remaining);
+                if (planned == null) planned = new LinkedHashMap<>();
                 planned.merge(lot.id, take, Long::sum);
                 remaining -= take;
             }
             if (remaining > 0) return null;
         }
-        return planned;
+        return planned == null ? Map.of() : planned;
+    }
+
+    private List<AssetLot> matchingLots(MaterialSource source, MaterialKey material) {
+        Map<MaterialKey, List<AssetLot>> materials = lotsBySource.get(source);
+        return materials == null ? List.of() : materials.getOrDefault(material, List.of());
     }
 
     public Checkout checkout(ReservationToken token) {
@@ -369,10 +406,8 @@ public final class MaterialBroker {
     public long available(MaterialSource source, MaterialKey material) {
         requireOwnerThread();
         long total = 0L;
-        for (AssetLot lot : lots.values()) {
-            if (lot.source.equals(source) && lot.material.equals(material)) {
-                total = saturatingAdd(total, lot.available);
-            }
+        for (AssetLot lot : matchingLots(source, material)) {
+            total = saturatingAdd(total, lot.available);
         }
         return total;
     }
@@ -381,8 +416,7 @@ public final class MaterialBroker {
     public long outstanding(MaterialSource source, MaterialKey material) {
         requireOwnerThread();
         long total = 0L;
-        for (AssetLot lot : lots.values()) {
-            if (!lot.source.equals(source) || !lot.material.equals(material)) continue;
+        for (AssetLot lot : matchingLots(source, material)) {
             total = saturatingAdd(total, lot.available);
             total = saturatingAdd(total, lot.reserved);
             total = saturatingAdd(total, lot.committed);
@@ -425,9 +459,8 @@ public final class MaterialBroker {
         if (quantity <= 0) throw new IllegalArgumentException("take quantity must be positive");
         long remaining = quantity;
         List<ItemStack> drained = new ArrayList<>();
-        for (AssetLot lot : lots.values()) {
+        for (AssetLot lot : matchingLots(source, material)) {
             if (remaining <= 0) break;
-            if (!lot.source.equals(source) || !lot.material.equals(material)) continue;
             int take = (int) Math.min(lot.available, remaining);
             if (take <= 0) continue;
             drained.add(lot.stack.copyWithCount(take));
