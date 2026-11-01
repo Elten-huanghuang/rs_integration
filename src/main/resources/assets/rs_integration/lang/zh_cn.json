@@ -1763,5 +1763,11 @@
   "gui.rs_integration.notebook.search": "搜索药酿或材料…",
   "gui.rs_integration.notebook.tools": "坩埚工具",
   "gui.rs_integration.notebook.chosen": "已选 %s 种效果",
-  "gui.rs_integration.notebook.pick_modifier": "选择左侧强化，再选择等级。可直接下一步。"
+  "gui.rs_integration.notebook.pick_modifier": "选择左侧强化，再选择等级。可直接下一步。",
+  "config.jade.plugin_rs_integration.witch_cauldron": "女巫坩埚炼制",
+  "jade.rs_integration.cauldron.output": "当前制作：%s",
+  "jade.rs_integration.cauldron.souls": "灵魂进度：%s / %s",
+  "jade.rs_integration.cauldron.running": "正在炼制",
+  "jade.rs_integration.cauldron.paused": "等待搅拌 / 已暂停",
+  "jade.rs_integration.cauldron.water": "水位：%s / 3"
 }
