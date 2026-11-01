@@ -1628,7 +1628,7 @@ public final class ConsumerCraftingRuntime {
     ) {
         Map<String, RecipeChoice> recipeChoices = new HashMap<>();
         preferences.forcedRecipes().forEach((key, recipe) ->
-                recipeChoices.put(key, new RecipeChoice.Normal(recipe)));
+                recipeChoices.put(key, RecipeChoice.parse(recipe.toString())));
         Map<String, ItemStack> ingredientChoices = new HashMap<>();
         preferences.materialLocks().forEach((key, resource) -> {
             if (resource.kind()
@@ -1649,7 +1649,7 @@ public final class ConsumerCraftingRuntime {
         Map<ResourceLocation, ResourceLocation> forced = new HashMap<>();
         preferences.forcedRecipes().forEach((key, recipe) -> {
             ResourceLocation output = ResourceLocation.tryParse(key);
-            if (output != null) forced.put(output, recipe);
+            if (output != null && !RecipeChoice.NO_RECIPE_ID.equals(recipe)) forced.put(output, recipe);
         });
         return forced;
     }

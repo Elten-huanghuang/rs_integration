@@ -10,6 +10,7 @@ import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.api.execution.CollectedOutput;
 import com.huanghuang.rsintegration.api.recipe.OutputKind;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
+import com.huanghuang.rsintegration.crafting.plan.RecipeChoice;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
@@ -38,6 +39,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
 class ConsumerCraftingRuntimeTest extends BootstrapTest {
+    @Test
+    void stockOnlyPreferenceSurvivesConsumerConversionWithoutForcingAFakeRecipe() throws Exception {
+        var preferences = new ConsumerPlanningPreferences(
+                Map.of("minecraft:diamond", RecipeChoice.NO_RECIPE_ID), Map.of(), Set.of());
+        var typed = ConsumerCraftingRuntime.class.getDeclaredMethod(
+                "planningPreferences", ConsumerPlanningPreferences.class);
+        typed.setAccessible(true);
+        var result = (PlanningPreferences) typed.invoke(null, preferences);
+        assertTrue(result.isNoRecipe(new ItemStack(Items.DIAMOND)));
+        var forced = ConsumerCraftingRuntime.class.getDeclaredMethod(
+                "forcedRecipes", ConsumerPlanningPreferences.class);
+        forced.setAccessible(true);
+        assertEquals(Map.of(), forced.invoke(null, preferences));
+    }
+
     @Test
     void configuredPlannerHonorsForcedAndExcludedRecipes() {
         MaterialRef input = material("input");
