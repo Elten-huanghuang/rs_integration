@@ -1,10 +1,15 @@
 package com.huanghuang.rsintegration.feature.experience;
 
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import com.huanghuang.rsintegration.testutil.ExperienceWandTestItems;
+import com.huanghuang.rsintegration.feature.resonance.bridge.ClientDiskData;
 import net.minecraft.network.protocol.game.ClientboundSetExperiencePacket;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.ServerGamePacketListenerImpl;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.ItemStack;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.atomic.AtomicInteger;
@@ -16,8 +21,44 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class FlattenedExperienceCostsTest extends BootstrapTest {
+    @BeforeEach
+    void clearClientDiskState() {
+        ClientDiskData.clear();
+    }
+
+    @Test
+    void noWandUsesTheOriginalLevelCostWithoutRewritingPlayerExperience() {
+        Player player = player(100, 0.5F);
+        player.getInventory().clearContent();
+        long before = ExperiencePoints.current(player);
+
+        FlattenedExperienceCosts.chargeLevels(player, -3, 0,
+                change -> player.experienceLevel += change);
+
+        assertEquals(97, player.experienceLevel);
+        assertEquals(0.5F, player.experienceProgress);
+        assertTrue(before - ExperiencePoints.current(player) > 27L);
+    }
+
+    @Test
+    void removingTheWandImmediatelyRestoresVanillaCosts() {
+        Player player = player(100, 0.0F);
+        long before = ExperiencePoints.current(player);
+        FlattenedExperienceCosts.chargeLevels(player, -3, 0,
+                change -> player.experienceLevel += change);
+        assertEquals(27L, before - ExperiencePoints.current(player));
+        player.getInventory().clearContent();
+        int level = player.experienceLevel;
+
+        FlattenedExperienceCosts.chargeLevels(player, -3, 0,
+                change -> player.experienceLevel += change);
+
+        assertEquals(level - 3, player.experienceLevel);
+    }
+
     @Test
     void anvilChargesTheSamePointsAtLowAndHighLevels() {
         for (int level : new int[]{3, 30, 100, 100_000_000, ExperiencePoints.MAX_LEVEL}) {
@@ -117,6 +158,7 @@ class FlattenedExperienceCostsTest extends BootstrapTest {
     @Test
     void hugeBalancesRemainLongAndTheClientIsExplicitlySynchronized() {
         ServerPlayer player = mock(ServerPlayer.class);
+        giveWand(player);
         player.connection = mock(ServerGamePacketListenerImpl.class);
         player.experienceLevel = 100_000_000;
         player.experienceProgress = 0;
@@ -146,10 +188,19 @@ class FlattenedExperienceCostsTest extends BootstrapTest {
 
     private static Player player(int level, float progress) {
         Player player = mock(Player.class);
+        giveWand(player);
         player.experienceLevel = level;
         player.experienceProgress = progress;
         player.totalExperience = (int) Math.min(Integer.MAX_VALUE, ExperiencePoints.current(player));
         return player;
+    }
+
+    private static void giveWand(Player player) {
+        Inventory inventory = new Inventory(player);
+        inventory.setItem(0, ExperienceWandTestItems.wand());
+        when(player.getInventory()).thenReturn(inventory);
+        when(player.getMainHandItem()).thenReturn(ItemStack.EMPTY);
+        when(player.getOffhandItem()).thenReturn(ItemStack.EMPTY);
     }
 
     private static void verifyNoScoreAward(Player player) {

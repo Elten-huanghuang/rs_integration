@@ -19,7 +19,7 @@ public final class FlattenedExperienceCosts {
 
     public static void chargeLevels(Player player, int change, int requiredLevel,
                                     IntConsumer original) {
-        if (change >= 0 || !ExperiencePoints.supported(player)) {
+        if (change >= 0 || !ExperiencePoints.supported(player) || !ExperienceWandAccess.hasWand(player)) {
             original.accept(change);
             return;
         }

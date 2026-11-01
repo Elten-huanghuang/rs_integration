@@ -69,12 +69,31 @@ class TaxFreeLevelsCompatibilityTest {
         MethodNode create = method(anvil, "createResult");
         assertEquals(2, calls(create, "net/minecraft/world/inventory/DataSlot", "get", "()I"));
         assertEquals(2, fields(create, "net/minecraft/world/entity/player/Abilities", "instabuild"));
+        assertEquals("(Lnet/minecraft/world/entity/player/Player;Z)Z", method(anvil, "mayPickup").desc);
         ClassNode player = readClass(PLAYER.replace('/', '.'));
         assertEquals(1, calls(method(player, "onEnchantmentPerformed"),
                 PLAYER, "giveExperienceLevels", "(I)V"));
         ClassNode screen = readClass("net.minecraft.client.gui.screens.inventory.AnvilScreen");
         assertEquals(1, fields(method(screen, "renderLabels"),
                 "net/minecraft/world/entity/player/Abilities", "instabuild"));
+    }
+
+    @Test
+    void taxFreeCostsAndAnvilDisplayRequireTheWandAndUseTheMappedParentField() throws Exception {
+        String access = "com/huanghuang/rsintegration/feature/experience/ExperienceWandAccess";
+        ClassNode costs = readClass("com.huanghuang.rsintegration.feature.experience.FlattenedExperienceCosts");
+        assertEquals(1, calls(method(costs, "chargeLevels"),
+                access, "hasWand", "(Lnet/minecraft/world/entity/player/Player;)Z"));
+        ClassNode menu = readClass(TaxFreeAnvilMenuMixin.class.getName());
+        assertEquals("net/minecraft/world/inventory/ItemCombinerMenu", menu.superName);
+        ClassNode parent = readClass(menu.superName.replace('/', '.'));
+        assertTrue(parent.fields.stream().anyMatch(field -> "player".equals(field.name)
+                && "Lnet/minecraft/world/entity/player/Player;".equals(field.desc)));
+        assertEquals(1, calls(method(menu, "rsi$refreshWandPresence"),
+                access, "hasWand", "(Lnet/minecraft/world/entity/player/Player;)Z"));
+        ClassNode screen = readClass(TaxFreeAnvilScreenMixin.class.getName());
+        assertEquals(1, calls(method(screen, "rsi$showActualRepairCost"),
+                access, "hasWand", "(Lnet/minecraft/world/entity/player/Player;)Z"));
     }
 
     @Test

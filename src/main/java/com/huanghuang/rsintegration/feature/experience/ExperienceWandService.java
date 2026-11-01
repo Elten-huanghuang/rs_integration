@@ -42,18 +42,13 @@ public final class ExperienceWandService {
                 || !(event.player instanceof ServerPlayer player)
                 || !player.isAlive() || player.isSpectator()
                 || player.tickCount % 5 != 0) return;
-        ItemStack wand = selected(player);
-        if (!wand.isEmpty()) tick(player, wand);
+        ExperienceWandAccess.Selection selected = ExperienceWandAccess.selected(player);
+        if (selected != null) selected.use(player, wand -> tick(player, wand));
     }
 
     static ItemStack selected(ServerPlayer player) {
-        // 同一玩家只运行一根杖，防止不同目标等级相互拉扯。
-        if (ExperienceWandData.active(player.getMainHandItem())) return player.getMainHandItem();
-        if (ExperienceWandData.active(player.getOffhandItem())) return player.getOffhandItem();
-        for (ItemStack stack : player.getInventory().items) {
-            if (ExperienceWandData.active(stack)) return stack;
-        }
-        return ItemStack.EMPTY;
+        ExperienceWandAccess.Selection selected = ExperienceWandAccess.selected(player);
+        return selected == null ? ItemStack.EMPTY : selected.stack();
     }
 
     @Nullable

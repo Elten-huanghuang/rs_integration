@@ -14,6 +14,10 @@ public record ExperienceWandSettings(Mode mode, int targetLevel, boolean mending
         manualLevels = Math.max(1, Math.min(ExperiencePoints.MAX_LEVEL, manualLevels));
     }
 
+    public ExperienceWandSettings withoutLevelControl() {
+        return new ExperienceWandSettings(Mode.OFF, targetLevel, mending, manualLevels);
+    }
+
     public static ExperienceWandSettings fromStack(ItemStack stack) {
         CompoundTag root = stack.getTag();
         CompoundTag tag = root == null ? new CompoundTag() : root.getCompound(KEY);

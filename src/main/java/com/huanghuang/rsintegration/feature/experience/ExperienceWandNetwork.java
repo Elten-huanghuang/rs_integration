@@ -21,7 +21,13 @@ import java.util.function.Supplier;
 
 /** 设置包只允许修改当前手持的同一根杖，不接受客户端库存、经验或缓冲量。 */
 public final class ExperienceWandNetwork {
-    public enum Action { REFRESH, SAVE, STORE_LEVELS, TAKE_LEVELS, STORE_ALL, TAKE_ALL, STOP }
+    public enum Action {
+        REFRESH, SAVE, STORE_LEVELS, TAKE_LEVELS, STORE_ALL, TAKE_ALL, STOP;
+
+        public boolean isManualTransfer() {
+            return this == STORE_LEVELS || this == TAKE_LEVELS || this == STORE_ALL || this == TAKE_ALL;
+        }
+    }
 
     private static boolean registered;
 
@@ -65,16 +71,18 @@ public final class ExperienceWandNetwork {
         if (limited && packet.action() != Action.SAVE) return;
         playerData.putLong(rateKey, now);
         if (!refresh) {
-            packet.settings().save(stack);
+            // 手动存取会改变当前等级，必须先停用自动控制，避免完成后立即反向存取。
+            ExperienceWandSettings settings = packet.settingsForAction();
+            settings.save(stack);
             CompoundTag data = ExperienceWandData.tag(stack);
             data.remove(ExperienceWandData.PENDING_TARGET);
             long target = switch (packet.action()) {
                 case STORE_ALL -> 0L;
                 case TAKE_ALL -> ExperiencePoints.MAX_POINTS;
                 case STORE_LEVELS -> ExperiencePoints.forLevel(Math.max(0,
-                        player.experienceLevel - packet.settings().manualLevels()));
+                        player.experienceLevel - settings.manualLevels()));
                 case TAKE_LEVELS -> ExperiencePoints.forLevel((int) Math.min(ExperiencePoints.MAX_LEVEL,
-                        (long) player.experienceLevel + packet.settings().manualLevels()));
+                        (long) player.experienceLevel + settings.manualLevels()));
                 default -> -1L;
             };
             if (target >= 0L && ExperiencePoints.supported(player)) {
@@ -101,6 +109,10 @@ public final class ExperienceWandNetwork {
 
     public record ControlPacket(Action action, InteractionHand hand, UUID id,
                                 ExperienceWandSettings settings) {
+        ExperienceWandSettings settingsForAction() {
+            return action.isManualTransfer() ? settings.withoutLevelControl() : settings;
+        }
+
         static void encode(ControlPacket packet, FriendlyByteBuf buffer) {
             buffer.writeEnum(packet.action());
             buffer.writeEnum(packet.hand());

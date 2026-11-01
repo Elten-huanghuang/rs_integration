@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.util;
 
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import com.huanghuang.rsintegration.feature.experience.ExperienceWandSettings;
 import com.huanghuang.rsintegration.feature.experience.ResonantExperienceWandItem;
 import com.huanghuang.rsintegration.feature.foodorder.FoodOrderTerminalItem;
@@ -15,6 +17,9 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.io.IOException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -54,7 +59,7 @@ class SpecialItemTooltipTest extends BootstrapTest {
         SpecialItemTooltip.appendExperience(wand, SETTINGS, true);
         assertTrue(contains(wand, "experience.rs_integration.open"));
         assertFalse(contains(wand, "experience.rs_integration.tooltip.expand"));
-        for (int i = 1; i <= 4; i++) {
+        for (int i = 1; i <= 7; i++) {
             assertTrue(contains(wand, "experience.rs_integration.tooltip.detail_" + i));
         }
 
@@ -64,6 +69,20 @@ class SpecialItemTooltipTest extends BootstrapTest {
         assertFalse(contains(food, "item.rs_integration.order_terminal.tooltip.expand"));
         for (int i = 1; i <= 3; i++) {
             assertTrue(contains(food, "item.rs_integration.order_terminal.tooltip.detail_" + i));
+        }
+    }
+
+    @Test
+    void wandGuidesExplainDiskActivationTaxFreeCostsAndManualModeInBothLanguages() throws IOException {
+        for (String language : List.of("zh_cn", "en_us")) {
+            Path path = Path.of("src/main/resources/assets/rs_integration/lang", language + ".json");
+            JsonObject translations = JsonParser.parseString(Files.readString(path)).getAsJsonObject();
+            for (int i = 1; i <= 7; i++) {
+                assertTrue(translations.has("experience.rs_integration.tooltip.detail_" + i));
+            }
+            assertFalse(translations.get("experience.rs_integration.tooltip.detail_5").getAsString().isBlank());
+            assertFalse(translations.get("experience.rs_integration.tooltip.detail_6").getAsString().isBlank());
+            assertFalse(translations.get("experience.rs_integration.tooltip.detail_7").getAsString().isBlank());
         }
     }
 

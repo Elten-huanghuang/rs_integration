@@ -40,7 +40,38 @@ class ResonanceSyncPacketTest extends BootstrapTest {
         assertEquals(catalysts, decoded.lycheeCatalystMask);
         assertEquals(ResonanceDiskAbilities.MALUM_VOID_FAVOR, decoded.abilityMask);
         assertEquals(42L, decoded.revision);
+        assertFalse(decoded.experienceWand);
         assertEquals(0, buffer.readableBytes());
+    }
+
+    @Test
+    void roundTripsExperienceWandPresenceWithoutChangingOtherState() {
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+        try {
+            ResonanceSyncPacket.encode(new ResonanceSyncPacket(17, 3, 4, 42L, List.of(), true), buffer);
+            ResonanceSyncPacket decoded = ResonanceSyncPacket.decode(buffer);
+
+            assertTrue(decoded.experienceWand);
+            assertEquals(17, decoded.diskGems);
+            assertEquals(3, decoded.lycheeCatalystMask);
+            assertEquals(4, decoded.abilityMask);
+            assertEquals(42L, decoded.revision);
+            assertEquals(0, buffer.readableBytes());
+        } finally {
+            buffer.release();
+        }
+    }
+
+    @Test
+    void removedOrDisconnectedDiskWandsCannotBeRestoredByStalePackets() {
+        ClientDiskData.apply(0, 0, 0, 1L, List.of(), true);
+        assertTrue(ClientDiskData.hasExperienceWand());
+        ClientDiskData.apply(0, 0, 0, 2L, List.of(), false);
+        ClientDiskData.apply(0, 0, 0, 1L, List.of(), true);
+        assertFalse(ClientDiskData.hasExperienceWand());
+        ClientDiskData.apply(0, 0, 0, 3L, List.of(), true);
+        ClientDiskData.clear();
+        assertFalse(ClientDiskData.hasExperienceWand());
     }
 
     @Test

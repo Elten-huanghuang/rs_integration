@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.feature.resonance.passive;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.feature.experience.ExperienceWandAccess;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.huanghuang.rsintegration.network.packet.ResonanceSyncPacket;
 import com.huanghuang.rsintegration.mods.lychee.LycheeVirtualCatalysts;
@@ -70,12 +71,15 @@ public final class PassiveEffectEngine {
     private static void syncDiskState(ServerPlayer player, List<ResonanceStorageView> views) {
         int gemCount = 0;
         int abilityMask = 0;
+        boolean experienceWand = false;
         List<ItemStack> taczAmmo = new ArrayList<>();
         boolean includeAmmo = RSIntegrationConfig.ENABLE_RS_PASSIVE_EFFECTS.get()
                 && RSIntegrationConfig.ENABLE_TACZ.get();
         for (ResonanceStorageView disk : views) {
             for (ResonanceStorageView.StoredStack stored : disk.storedStacks()) {
                 ItemStack stack = stored.stack();
+                if (RSIntegrationConfig.ENABLE_RS_PASSIVE_EFFECTS.get()
+                        && ExperienceWandAccess.isWand(stack)) experienceWand = true;
                 if (!stack.isEmpty() && stack.is(Tags.Items.GEMS)) {
                     gemCount += stack.getCount();
                 }
@@ -91,15 +95,18 @@ public final class PassiveEffectEngine {
         boolean changed = previous == null || previous.gemCount() != gemCount
                 || previous.lycheeCatalystMask() != catalystMask
                 || previous.abilityMask() != abilityMask
+                || previous.experienceWand() != experienceWand
                 || !sameAmmo(previous.taczAmmo(), taczAmmo);
         if (changed) {
             revision++;
         }
         SYNC_CACHE.put(player.getUUID(),
-                new DiskSyncState(gemCount, catalystMask, abilityMask, revision, List.copyOf(taczAmmo)));
+                new DiskSyncState(gemCount, catalystMask, abilityMask, revision,
+                        List.copyOf(taczAmmo), experienceWand));
         if (!changed) return;
         NetworkHandler.CHANNEL.sendTo(
-                new ResonanceSyncPacket(gemCount, catalystMask, abilityMask, revision, taczAmmo),
+                new ResonanceSyncPacket(gemCount, catalystMask, abilityMask, revision,
+                        taczAmmo, experienceWand),
                 player.connection.connection,
                 NetworkDirection.PLAY_TO_CLIENT);
     }
@@ -113,6 +120,7 @@ public final class PassiveEffectEngine {
     }
 
     private record DiskSyncState(int gemCount, int lycheeCatalystMask,
-                                 int abilityMask, long revision, List<ItemStack> taczAmmo) {}
+                                 int abilityMask, long revision, List<ItemStack> taczAmmo,
+                                 boolean experienceWand) {}
 
 }

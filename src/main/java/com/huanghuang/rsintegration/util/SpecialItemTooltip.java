@@ -26,7 +26,7 @@ public final class SpecialItemTooltip {
         }
         tooltip.add(DiskTooltipEffects.flow("experience.rs_integration.open",
                 theme, DiskTooltipEffects.Tone.HINT, 0));
-        appendDetails(tooltip, "experience.rs_integration.tooltip.", theme, expanded, 4);
+        appendDetails(tooltip, "experience.rs_integration.tooltip.", theme, expanded, 7);
     }
 
     public static void appendFood(List<Component> tooltip, boolean expanded) {

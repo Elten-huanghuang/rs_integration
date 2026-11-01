@@ -67,6 +67,7 @@ public final class ExperienceWandScreen extends Screen {
     public void accept(StatePacket packet) {
         if (state.id().equals(packet.id()) && state.hand() == packet.hand()) {
             state = packet;
+            if (!dirty) mode = packet.settings().mode();
             updateButtons();
         }
     }
@@ -222,6 +223,7 @@ public final class ExperienceWandScreen extends Screen {
             return;
         }
         if (!valid()) return;
+        if (action.isManualTransfer()) mode = Mode.OFF;
         ExperienceWandNetwork.send(action, state.hand(), state.id(), draft());
         dirty = false;
         if (action != Action.SAVE) actionCooldown = 4;
@@ -284,8 +286,9 @@ public final class ExperienceWandScreen extends Screen {
         int statusColor = state.uncertainMb() > 0L ? ERROR
                 : !state.effective() || !state.connected() ? 0x8E692E : state.busy() ? CYAN : GREEN;
         Component current = text("level", format(state.playerLevel()));
-        Component amounts = text("amounts", state.networkMb() < 0L ? "?" : format(state.networkMb()),
-                format(state.bufferedMb()));
+        Component networkAmount = text("network_label").copy().append(": ")
+                .append(state.networkMb() < 0L ? "?" : format(state.networkMb()));
+        Component bufferedAmount = text("buffer_label").copy().append(": ").append(format(state.bufferedMb()));
         graphics.fill(left, top + 28, left + panelWidth, overviewBottom, 0xFFEAF0E3);
         graphics.fill(left + 12, top + 35, left + 16, top + 39, 0xFF000000 | statusColor);
         drawTrimmed(graphics, status, left + 22, top + 33, panelWidth - 34, statusColor);
@@ -312,14 +315,20 @@ public final class ExperienceWandScreen extends Screen {
         super.render(graphics, mouseX, mouseY, partialTick);
         if (mouseX >= left + 12 && mouseX < left + panelWidth - 12
                 && mouseY >= top + 29 && mouseY < overviewBottom) {
-            graphics.renderTooltip(font, List.of(status, amounts, current).stream()
+            graphics.renderTooltip(font, List.of(status, networkAmount, bufferedAmount, current).stream()
                     .map(Component::getVisualOrderText).toList(), mouseX, mouseY);
         }
     }
 
     private void metric(GuiGraphics graphics, String label, String value, int x, int y, int maxWidth, int color) {
         drawTrimmed(graphics, text(label), x, y, maxWidth, MUTED);
-        drawTrimmed(graphics, Component.literal(value), x, y + 14, maxWidth, color);
+        // 保留 long 数量的所有位数，缩放只影响绘制，不把数值转成浮点数。
+        float scale = Math.min(1.0F, (float) maxWidth / Math.max(1, font.width(value)));
+        graphics.pose().pushPose();
+        graphics.pose().translate(x, y + 14 + font.lineHeight * (1.0F - scale) / 2.0F, 0);
+        graphics.pose().scale(scale, scale, 1.0F);
+        graphics.drawString(font, value, 0, 0, color, false);
+        graphics.pose().popPose();
     }
 
     private void fieldFrame(GuiGraphics graphics, EditBox field, boolean valid) {
@@ -395,7 +404,7 @@ public final class ExperienceWandScreen extends Screen {
         return text("mode." + mode.name().toLowerCase(Locale.ROOT));
     }
 
-    private static String format(long amount) {
+    static String format(long amount) {
         return NumberFormat.getIntegerInstance(Locale.ROOT).format(amount);
     }
 
