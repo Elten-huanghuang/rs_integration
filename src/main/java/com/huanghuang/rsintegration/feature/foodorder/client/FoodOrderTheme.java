@@ -147,6 +147,22 @@ public final class FoodOrderTheme {
                 y + (height - 8) / 2, textColor, false);
     }
 
+    public static void bookmark(GuiGraphics graphics, Font font, Component message,
+                                int x, int y, int width, int height,
+                                boolean hovered, boolean favorite) {
+        int red = hovered ? 0xFFBB5960 : favorite ? 0xFFA4444C : 0xFFC88083;
+        graphics.fill(x + 6, y + 2, x + width, y + height + 2, 0x3549362B);
+        for (int row = 0; row < height; row++) {
+            int notch = Math.min(row, height - row - 1) / 2;
+            graphics.fill(x + notch, y + row, x + width - 2, y + row + 1, red);
+        }
+        graphics.fill(x + 1, y + 1, x + width - 4, y + 2, 0xFFE1A3A0);
+        graphics.fill(x + width - 3, y, x + width, y + height - 2, 0xFF813B43);
+        String label = font.plainSubstrByWidth(message.getString(), Math.max(0, width - 12));
+        graphics.drawString(font, label, x + (width - font.width(label)) / 2,
+                y + (height - 8) / 2, 0xFFFFF4DF, false);
+    }
+
     /** 与原版一致的状态颜色：就绪绿、缺料/机器蓝、等待/无配方红、索引灰。 */
     public static int statusColor(FoodOrderKind kind) {
         return switch (kind) {

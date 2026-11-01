@@ -1,22 +1,30 @@
 package com.huanghuang.rsintegration.feature.foodorder.client;
 
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.feature.foodorder.FoodOrderClient;
 import com.huanghuang.rsintegration.feature.foodorder.FoodOrderEntry;
 import com.huanghuang.rsintegration.feature.foodorder.network.FoodOrderListPacket;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.inventory.tooltip.ClientTooltipComponent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.util.FormattedCharSequence;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.fml.loading.FMLPaths;
 import net.minecraftforge.registries.ForgeRegistries;
 import org.lwjgl.glfw.GLFW;
 
+import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.IdentityHashMap;
 import java.util.List;
-import java.util.Locale;
+import java.util.Map;
 
 /** 点餐终端界面：左侧食物列表，右侧详情与下单按钮。布局按旧附属 1.0.19 还原。 */
 @OnlyIn(Dist.CLIENT)
@@ -31,11 +39,15 @@ public final class FoodOrderScreen extends Screen {
 
     private final List<FoodOrderEntry> entries = new ArrayList<>();
     private final List<FoodOrderEntry> shown = new ArrayList<>();
+    private final Map<FoodOrderEntry, FoodOrderSearchIndex> searchIndex = new IdentityHashMap<>();
+    private final FoodOrderFavorites favorites = new FoodOrderFavorites();
 
     private EditBox searchBox;
     private FoodOrderButton orderOneButton;
     private FoodOrderButton orderAllButton;
-    private FoodOrderButton filterButton;
+    private FoodOrderDropdown filterDropdown;
+    private FoodOrderBookmarkButton bookmarkButton;
+    private Path favoritesPath;
 
     private Component sources = Component.empty();
     private int totalUneaten;
@@ -45,11 +57,17 @@ public final class FoodOrderScreen extends Screen {
     private long epoch;
     private long receivedAt = System.currentTimeMillis();
     private boolean loading = true;
-    private boolean orderableOnly;
+    private FoodOrderViewMode viewMode = FoodOrderViewMode.ALL;
     private int scrollRows;
     private int selected = -1;
     private int lastClicked = -1;
     private long lastClickAt;
+    private FoodOrderEntry detailEntry;
+    private List<ClientTooltipComponent> detailLines = List.of();
+    private int detailScroll;
+    private int detailLineWidth;
+    private int detailModifiers;
+    private long detailUpdatedAt;
 
     private int panelX;
     private int panelY;
@@ -77,13 +95,21 @@ public final class FoodOrderScreen extends Screen {
         panelY = (height - panelH) / 2;
         listX = panelX + 8;
         listY = panelY + 64;
-        listW = Math.max(40, Math.min(190, panelW - 26));
+        listW = Math.max(40, Math.min(190, (panelW - 26) * 45 / 100));
         listH = Math.max(ROW_H * 3, panelH - 104);
         detailX = listX + listW + 10;
         detailY = panelY + 42;
         detailW = Math.max(40, panelW - listW - 26);
         buttonY = panelY + panelH - 22;
+        if (favoritesPath == null) {
+            favoritesPath = FMLPaths.CONFIGDIR.get().resolve("rs_integration")
+                    .resolve("food-order-favorites.json");
+            if (!favorites.load(favoritesPath)) {
+                RSIntegrationMod.LOGGER.warn("[RSI-FoodOrder] 无法读取食物收藏：{}", favoritesPath);
+            }
+        }
 
+        String query = searchBox == null ? "" : searchBox.getValue();
         searchBox = new EditBox(font, listX + 13, panelY + 46,
                 Math.max(30, listW - 87), 14,
                 Component.translatable("rsi.food_order.search"));
@@ -91,16 +117,13 @@ public final class FoodOrderScreen extends Screen {
         searchBox.setTextColor(FoodOrderTheme.TEXT);
         searchBox.setMaxLength(60);
         searchBox.setHint(Component.translatable("rsi.food_order.search"));
+        searchBox.setTooltip(Tooltip.create(Component.translatable("rsi.food_order.search_hint")));
+        searchBox.setValue(query);
         searchBox.setResponder(text -> rebuild());
         addRenderableWidget(searchBox);
 
-        filterButton = addRenderableWidget(new FoodOrderButton(
-                listX + listW - 68, panelY + 42, 68, 16,
-                Component.translatable("rsi.food_order.filter.all"),
-                button -> {
-                    orderableOnly = !orderableOnly;
-                    rebuild();
-                }));
+        filterDropdown = addRenderableWidget(new FoodOrderDropdown(
+                font, listX + listW - 68, panelY + 42, 68, 16, viewMode, this::selectViewMode));
         addRenderableWidget(new FoodOrderButton(
                 panelX + panelW - 54, panelY + 3, 46, 16,
                 Component.translatable("rsi.food_order.refresh"),
@@ -117,6 +140,10 @@ public final class FoodOrderScreen extends Screen {
                 detailX, buttonY, Math.min(96, Math.max(40, detailW)), 16,
                 Component.translatable("rsi.food_order.order_one"),
                 button -> orderSelected()));
+        int bookmarkWidth = Math.min(56, Math.max(24, detailW - 12));
+        bookmarkButton = addRenderableWidget(new FoodOrderBookmarkButton(
+                detailX + detailW - bookmarkWidth + 4, detailY + detailCardHeight() - 34,
+                bookmarkWidth, 16, button -> toggleFavorite()));
 
         FoodOrderClient.requestList();
         rebuild();
@@ -125,6 +152,12 @@ public final class FoodOrderScreen extends Screen {
     public void setData(FoodOrderListPacket packet) {
         entries.clear();
         entries.addAll(packet.entries());
+        searchIndex.clear();
+        for (FoodOrderEntry entry : entries) {
+            var key = ForgeRegistries.ITEMS.getKey(entry.stack().getItem());
+            searchIndex.put(entry, new FoodOrderSearchIndex(
+                    entry.stack().getHoverName().getString(), key == null ? "" : key.toString()));
+        }
         sources = packet.sources();
         totalUneaten = packet.totalUneaten();
         totalOrderable = packet.totalOrderable();
@@ -138,35 +171,81 @@ public final class FoodOrderScreen extends Screen {
     }
 
     private void rebuild() {
-        String query = searchBox == null ? "" : searchBox.getValue().trim().toLowerCase(Locale.ROOT);
+        List<String> terms = FoodOrderSearchIndex.queryTerms(searchBox == null ? "" : searchBox.getValue());
+        FoodOrderEntry previousSelection = selected >= 0 && selected < shown.size()
+                ? shown.get(selected) : null;
         shown.clear();
         for (FoodOrderEntry entry : entries) {
-            if (orderableOnly && !entry.orderable()) {
+            if (viewMode == FoodOrderViewMode.ORDERABLE && !entry.orderable()) {
                 continue;
             }
-            if (!query.isEmpty() && !matches(entry, query)) {
+            if (viewMode == FoodOrderViewMode.FAVORITES && !isFavorite(entry)) {
+                continue;
+            }
+            if (!terms.isEmpty() && !searchIndex.get(entry).matches(terms)) {
                 continue;
             }
             shown.add(entry);
         }
-        if (selected >= shown.size()) {
-            selected = shown.isEmpty() ? -1 : 0;
+        Comparator<FoodOrderEntry> favoritesFirst = Comparator.comparing(entry -> !isFavorite(entry));
+        if (viewMode == FoodOrderViewMode.NUTRITION) {
+            // 饱食度是主排序键，收藏只在饱食度相同时置顶。
+            Map<FoodOrderEntry, Integer> nutrition = new IdentityHashMap<>();
+            for (FoodOrderEntry entry : shown) {
+                FoodOrderFoodInfo info = FoodOrderFoodInfo.from(entry.stack(),
+                        minecraft == null ? null : minecraft.player);
+                nutrition.put(entry, info == null ? -1 : info.nutrition());
+            }
+            shown.sort(Comparator.comparingInt((FoodOrderEntry entry) -> nutrition.get(entry))
+                    .reversed().thenComparing(favoritesFirst));
+        } else {
+            // 其余模式继续收藏置顶，保持服务端原有的状态顺序。
+            shown.sort(favoritesFirst);
         }
+        // 筛选后按条目保留选择，不能让原行号指向另一道菜。
+        selected = previousSelection == null ? -1 : shown.indexOf(previousSelection);
         scrollRows = 0;
-        if (filterButton != null) {
-            filterButton.setMessage(Component.translatable(orderableOnly
-                    ? "rsi.food_order.filter.orderable"
-                    : "rsi.food_order.filter.all"));
+        lastClicked = -1;
+        lastClickAt = 0L;
+        detailEntry = null;
+        detailScroll = 0;
+        if (filterDropdown != null) {
+            filterDropdown.setMode(viewMode);
         }
         updateButtons();
     }
 
-    private boolean matches(FoodOrderEntry entry, String query) {
-        if (entry.stack().getHoverName().getString().toLowerCase(Locale.ROOT).contains(query)) {
-            return true;
+    private void selectViewMode(FoodOrderViewMode mode) {
+        viewMode = mode;
+        rebuild();
+    }
+
+    private boolean isFavorite(FoodOrderEntry entry) {
+        return favorites.contains(ForgeRegistries.ITEMS.getKey(entry.stack().getItem()));
+    }
+
+    private void toggleFavorite() {
+        FoodOrderEntry entry = selectedEntry();
+        if (entry == null) {
+            return;
         }
         var key = ForgeRegistries.ITEMS.getKey(entry.stack().getItem());
-        return key != null && key.toString().toLowerCase(Locale.ROOT).contains(query);
+        if (!favorites.toggle(key)) {
+            return;
+        }
+        try {
+            if (favoritesPath != null) {
+                favorites.save(favoritesPath);
+            }
+        } catch (IOException exception) {
+            favorites.toggle(key);
+            RSIntegrationMod.LOGGER.warn("[RSI-FoodOrder] 保存食物收藏失败", exception);
+            if (minecraft != null && minecraft.player != null) {
+                minecraft.player.displayClientMessage(
+                        Component.translatable("rsi.food_order.favorite.save_failed"), true);
+            }
+        }
+        rebuild();
     }
 
     private void updateButtons() {
@@ -178,6 +257,12 @@ public final class FoodOrderScreen extends Screen {
             orderAllButton.active = totalOrderable > 0 && !loading;
             orderAllButton.setMessage(Component.translatable("rsi.food_order.order_all")
                     .append(" (" + totalOrderable + ")"));
+        }
+        if (bookmarkButton != null) {
+            FoodOrderEntry entry = selectedEntry();
+            bookmarkButton.visible = entry != null;
+            bookmarkButton.active = entry != null;
+            bookmarkButton.setFavorite(entry != null && isFavorite(entry));
         }
     }
 
@@ -199,9 +284,15 @@ public final class FoodOrderScreen extends Screen {
             }
         }
         super.render(graphics, mouseX, mouseY, partialTick);
+        if (filterDropdown != null && filterDropdown.isExpanded()) {
+            filterDropdown.renderPopup(graphics, mouseX, mouseY);
+            return;
+        }
         int hovered = indexAt(mouseX, mouseY);
         if (hovered >= 0) {
             graphics.renderTooltip(font, shown.get(hovered).stack(), mouseX, mouseY);
+        } else {
+            renderDetailTooltip(graphics, mouseX, mouseY);
         }
     }
 
@@ -257,6 +348,11 @@ public final class FoodOrderScreen extends Screen {
                 graphics.fill(listX + 4, rowY, listX + listW - 4, rowY + 1, FoodOrderTheme.LINE);
             }
             graphics.renderItem(entry.stack(), listX + 5, rowY + 2);
+            if (isFavorite(entry)) {
+                graphics.fill(listX + 22, rowY + 3, listX + 25, rowY + 9, FoodOrderTheme.ACCENT);
+                graphics.fill(listX + 22, rowY + 9, listX + 23, rowY + 11, FoodOrderTheme.ACCENT);
+                graphics.fill(listX + 24, rowY + 9, listX + 25, rowY + 11, FoodOrderTheme.ACCENT);
+            }
             String status = Component.translatable(entry.kind().statusKey()).getString();
             int statusWidth = font.width(status);
             int statusX = listX + listW - 5 - statusWidth;
@@ -282,43 +378,52 @@ public final class FoodOrderScreen extends Screen {
     }
 
     private void renderDetail(GuiGraphics graphics) {
-        int cardHeight = Math.max(30, buttonY - 12 - detailY);
+        int cardHeight = detailCardHeight();
         FoodOrderTheme.card(graphics, detailX, detailY, detailW, cardHeight);
-        if (selected >= 0 && selected < shown.size()) {
-            FoodOrderEntry entry = shown.get(selected);
+        FoodOrderEntry entry = selectedEntry();
+        if (entry != null) {
             String name = font.plainSubstrByWidth(entry.stack().getHoverName().getString(),
                     detailW - 12);
-            graphics.drawString(font, name, detailX + 1, detailY + 2,
+            graphics.drawString(font, name, detailX + 5, detailY + 5,
                     FoodOrderTheme.TITLE, false);
-            FoodOrderTheme.divider(graphics, detailX, detailY + 13, detailW);
+            FoodOrderTheme.divider(graphics, detailX + 5, detailY + 18, detailW - 10);
 
-            int slotY = detailY + 17;
-            FoodOrderTheme.slot(graphics, detailX, slotY, SLOT, false);
-            graphics.renderItem(entry.stack(), detailX + 1, slotY + 1);
-            graphics.drawString(font, Component.translatable(entry.kind().statusKey()),
-                    detailX + SLOT + 6, slotY + 5,
+            int slotY = detailY + 23;
+            FoodOrderTheme.slot(graphics, detailX + 5, slotY, SLOT, false);
+            graphics.renderItem(entry.stack(), detailX + 6, slotY + 1);
+            String status = font.plainSubstrByWidth(
+                    Component.translatable(entry.kind().statusKey()).getString(), detailW - SLOT - 18);
+            graphics.drawString(font, status, detailX + SLOT + 11, slotY + 5,
                     FoodOrderTheme.statusColor(entry.kind()), false);
 
-            int dividerY = slotY + SLOT + 8;
-            FoodOrderTheme.divider(graphics, detailX, dividerY - 4, detailW);
-            int textY = dividerY;
-            for (FormattedCharSequence line : font.split(entry.detail(), Math.max(20, detailW - 8))) {
-                graphics.drawString(font, line, detailX, textY,
-                        FoodOrderTheme.TEXT_DIM, false);
-                textY += 10;
-                if (textY > buttonY - 14) {
-                    break;
+            int contentWidth = Math.max(20, detailW - 18);
+            int modifiers = (Screen.hasShiftDown() ? 1 : 0) | (Screen.hasControlDown() ? 2 : 0)
+                    | (Screen.hasAltDown() ? 4 : 0);
+            long now = System.currentTimeMillis();
+            if (entry != detailEntry || contentWidth != detailLineWidth
+                    || modifiers != detailModifiers || now - detailUpdatedAt >= 500L) {
+                boolean changedEntry = entry != detailEntry;
+                List<ClientTooltipComponent> lines = new ArrayList<>(
+                        FoodOrderTooltip.gather(minecraft, font, entry.stack(), contentWidth, height));
+                addDetailLines(lines, Component.translatable("rsi.food_order.materials.status"),
+                        FoodOrderTheme.TITLE, contentWidth);
+                addDetailLines(lines, entry.detail(), FoodOrderTheme.TEXT_DIM, contentWidth);
+                detailLines = List.copyOf(lines);
+                detailEntry = entry;
+                detailLineWidth = contentWidth;
+                detailModifiers = modifiers;
+                detailUpdatedAt = now;
+                if (changedEntry) {
+                    detailScroll = 0;
                 }
             }
-            if (entry.recipeId() != null && textY + 10 <= buttonY - 14) {
-                graphics.drawString(font, Component.literal(entry.recipeId().toString()),
-                        detailX, textY, FoodOrderTheme.TEXT_DIM, false);
-            }
-            if (partial) {
-                graphics.drawString(font, Component.translatable("rsi.food_order.partial"),
-                        detailX + 1, detailY + cardHeight - 12,
-                        FoodOrderTheme.TEXT_DIM, false);
-            }
+            detailScroll = Math.max(0, Math.min(detailScroll, maxDetailScroll()));
+            FoodOrderTooltip.render(graphics, font, detailLines, detailX + 5, detailContentY(),
+                    contentWidth, detailContentBottom() - detailContentY(), detailScroll);
+            FoodOrderTheme.scrollbar(graphics, detailX + detailW - 5, detailContentY(),
+                    detailContentBottom() - detailContentY(),
+                    detailScroll, FoodOrderTooltip.height(detailLines, font, contentWidth),
+                    detailContentBottom() - detailContentY());
         } else {
             if (!loading && !shown.isEmpty()) {
                 FoodOrderTheme.sectionLabel(graphics, font,
@@ -331,7 +436,56 @@ public final class FoodOrderScreen extends Screen {
                         detailX + 1, detailY + 20, FoodOrderTheme.TEXT_DIM);
             }
         }
+        if (partial) {
+            String warning = font.plainSubstrByWidth(
+                    Component.translatable("rsi.food_order.partial").getString(), detailW - 10);
+            graphics.drawString(font, warning, detailX + 5, detailY + cardHeight - 12,
+                    FoodOrderTheme.TEXT_DIM, false);
+        }
         renderFooter(graphics);
+    }
+
+    private void addDetailLines(List<ClientTooltipComponent> lines, Component text, int color, int width) {
+        for (FormattedCharSequence line : font.split(
+                text.copy().withStyle(style -> style.withColor(color & 0xFFFFFF)), width)) {
+            lines.add(ClientTooltipComponent.create(line));
+        }
+    }
+
+    private void renderDetailTooltip(GuiGraphics graphics, int mouseX, int mouseY) {
+        FoodOrderEntry entry = selectedEntry();
+        if (entry == null) {
+            return;
+        }
+        if (mouseX >= detailX + 5 && mouseX < detailX + 5 + SLOT
+                && mouseY >= detailY + 23 && mouseY < detailY + 23 + SLOT) {
+            graphics.renderTooltip(font, entry.stack(), mouseX, mouseY);
+        } else if (entry.recipeId() != null && mouseX >= detailX && mouseX < detailX + detailW
+                && mouseY >= detailY && mouseY < detailY + 18) {
+            graphics.renderTooltip(font, Component.translatable("rsi.food_order.recipe_id",
+                    entry.recipeId().toString()), mouseX, mouseY);
+        }
+    }
+
+    private FoodOrderEntry selectedEntry() {
+        return selected >= 0 && selected < shown.size() ? shown.get(selected) : null;
+    }
+
+    private int detailCardHeight() {
+        return Math.max(30, buttonY - 12 - detailY);
+    }
+
+    private int detailContentY() {
+        return detailY + 48;
+    }
+
+    private int detailContentBottom() {
+        return Math.max(detailContentY() + 10, detailY + detailCardHeight() - 38);
+    }
+
+    private int maxDetailScroll() {
+        return Math.max(0, FoodOrderTooltip.height(detailLines, font, Math.max(20, detailW - 18))
+                - (detailContentBottom() - detailContentY()));
     }
 
     private void renderFooter(GuiGraphics graphics) {
@@ -342,11 +496,25 @@ public final class FoodOrderScreen extends Screen {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        // 列表和纸面不是原生控件，点击后也要同时释放输入框与容器的焦点。
+        if (searchBox != null && !searchBox.isMouseOver(mouseX, mouseY)) {
+            searchBox.setFocused(false);
+            if (getFocused() == searchBox) {
+                setFocused(null);
+            }
+        }
+        if (filterDropdown != null && filterDropdown.isExpanded()) {
+            return filterDropdown.mouseClicked(mouseX, mouseY, button);
+        }
         if (super.mouseClicked(mouseX, mouseY, button)) {
             return true;
         }
         int index = indexAt(mouseX, mouseY);
         if (button == 0 && index >= 0) {
+            if (selected != index) {
+                detailEntry = null;
+                detailScroll = 0;
+            }
             long now = System.currentTimeMillis();
             if (index == lastClicked && now - lastClickAt < 250L) {
                 selected = index;
@@ -364,9 +532,18 @@ public final class FoodOrderScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
+        if (filterDropdown != null && filterDropdown.isExpanded()) {
+            return filterDropdown.mouseScrolled(mouseX, mouseY, delta);
+        }
         if (isInList(mouseX, mouseY)) {
             scrollRows = Math.max(0, Math.min(maxScroll(),
                     scrollRows - (int) Math.signum(delta) * 2));
+            return true;
+        }
+        if (selectedEntry() != null && mouseX >= detailX && mouseX < detailX + detailW
+                && mouseY >= detailContentY() && mouseY < detailContentBottom()) {
+            detailScroll = Math.max(0, Math.min(maxDetailScroll(),
+                    detailScroll - (int) Math.signum(delta) * 20));
             return true;
         }
         return super.mouseScrolled(mouseX, mouseY, delta);
@@ -374,6 +551,10 @@ public final class FoodOrderScreen extends Screen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (filterDropdown != null && (filterDropdown.isExpanded() || filterDropdown.isFocused())
+                && filterDropdown.keyPressed(keyCode, scanCode, modifiers)) {
+            return true;
+        }
         if (searchBox != null && searchBox.isFocused()) {
             return super.keyPressed(keyCode, scanCode, modifiers);
         }

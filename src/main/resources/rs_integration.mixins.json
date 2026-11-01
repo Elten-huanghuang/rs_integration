@@ -129,6 +129,7 @@
     "traderefresh.TradeRefreshTradeLockMixin"
   ],
   "client": [
+    "minecraft.FoodOrderFontMixin",
     "modernui.ModernUITooltipMixin",
     "obscuretooltips.ObscureTooltipConfigMixin",
     "taxfreelevels.TaxFreeAnvilScreenMixin",

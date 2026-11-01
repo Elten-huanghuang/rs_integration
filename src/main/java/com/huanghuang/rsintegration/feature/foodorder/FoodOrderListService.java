@@ -160,7 +160,10 @@ public final class FoodOrderListService {
         List<Item> foods = FoodOrderFoods.uneaten(player);
         int maxList = Math.max(10, RSIntegrationConfig.FOOD_ORDER_MAX_LIST_ENTRIES.get());
         String apiVersion = RSICraftConsumerApi.get()
-                .map(api -> api.version().toString())
+                .map(api -> {
+                    var version = api.version();
+                    return version.major() + "." + version.minor() + "." + version.patch();
+                })
                 .orElse("-");
 
         if (!RecipeIndex.isReady(player.serverLevel())) {
@@ -228,6 +231,7 @@ public final class FoodOrderListService {
             List<RecipeIndex.Entry> recipes = index.get(food);
             FoodOrderKind kind = FoodOrderKind.NORECIPE;
             ResourceLocation chosenRecipe = null;
+            List<IngredientSpec> missingSpecs = List.of();
             if (recipes != null && !recipes.isEmpty()) {
                 kind = FoodOrderKind.WAITING;
                 int attempted = 0;
@@ -240,7 +244,8 @@ public final class FoodOrderListService {
                         partial = true;
                         break;
                     }
-                    FoodOrderKind evaluated = evaluate(player, entry, available);
+                    Evaluation evaluation = evaluate(player, entry, available);
+                    FoodOrderKind evaluated = evaluation.kind();
                     if (evaluated == FoodOrderKind.READY) {
                         kind = evaluated;
                         Recipe<?> recipe = entry.recipe();
@@ -252,14 +257,26 @@ public final class FoodOrderListService {
                     }
                     if (evaluated.rank() < kind.rank()) {
                         kind = evaluated;
+                        chosenRecipe = entry.recipe() == null ? null : entry.recipe().getId();
+                        missingSpecs = evaluation.specs();
                     }
                 }
             }
             if (kind == FoodOrderKind.READY) {
                 orderable++;
             }
-            entries.add(new FoodOrderEntry(new ItemStack(food), kind, chosenRecipe,
-                    Component.translatable(kind.detailKey())));
+            Component detail = Component.translatable(kind.detailKey());
+            if (kind == FoodOrderKind.MISSING && !missingSpecs.isEmpty()) {
+                try {
+                    detail = FoodOrderMaterials.describe(missingSpecs, available, deadline);
+                } catch (RuntimeException | LinkageError ignored) {
+                    // 特殊材料无法枚举时保留状态说明，不影响其他食物。
+                }
+            }
+            entries.add(new FoodOrderEntry(new ItemStack(food), kind, chosenRecipe, detail));
+            if (System.nanoTime() >= deadline) {
+                partial = true;
+            }
         }
 
         entries.sort(Comparator.comparingInt(entry -> entry.kind().rank()));
@@ -273,28 +290,28 @@ public final class FoodOrderListService {
                 foods.size(), orderable, false, partial);
     }
 
-    private static FoodOrderKind evaluate(ServerPlayer player,
-                                          RecipeIndex.Entry entry,
-                                          Map<CraftingResolver.StackKey, Long> available) {
+    private static Evaluation evaluate(ServerPlayer player,
+                                       RecipeIndex.Entry entry,
+                                       Map<CraftingResolver.StackKey, Long> available) {
         Recipe<?> recipe = entry.recipe();
         if (recipe == null) {
-            return FoodOrderKind.NORECIPE;
+            return new Evaluation(FoodOrderKind.NORECIPE, List.of());
         }
         try {
             if (HistoryStagesCompat.isRecipeLocked(recipe, player)) {
-                return FoodOrderKind.LOCKED;
+                return new Evaluation(FoodOrderKind.LOCKED, List.of());
             }
             ModType modType = entry.modType();
             if (CraftExecutionPolicy.requiresBoundMachine(recipe, modType)
                     && !AltarBindingRegistry.hasBindingForRecipe(player, recipe, modType)) {
-                return FoodOrderKind.NO_MACHINE;
+                return new Evaluation(FoodOrderKind.NO_MACHINE, List.of());
             }
             List<IngredientSpec> specs = recipe instanceof CraftingRecipe craftingRecipe
                     ? CraftPacketUtils.extractCraftingIngredientSpecs(craftingRecipe)
                     : CraftPacketUtils.extractIngredientSpecs(recipe);
             if (specs == null || specs.isEmpty()
                     || specs.stream().allMatch(IngredientSpec::isEmpty)) {
-                return FoodOrderKind.NORECIPE;
+                return new Evaluation(FoodOrderKind.NORECIPE, List.of());
             }
             List<IngredientSpec> contextual = CraftPacketUtils
                     .applyPlanningIngredientContext(recipe, player, specs);
@@ -302,13 +319,14 @@ public final class FoodOrderListService {
                 specs = contextual;
             }
             MaterialAvailability availability = RecipeAvailabilityChecker.evaluate(specs, available);
-            return switch (availability) {
+            FoodOrderKind kind = switch (availability) {
                 case READY -> FoodOrderKind.READY;
                 case MISSING -> FoodOrderKind.MISSING;
                 case UNKNOWN -> FoodOrderKind.WAITING;
             };
+            return new Evaluation(kind, specs);
         } catch (Throwable throwable) {
-            return FoodOrderKind.WAITING;
+            return new Evaluation(FoodOrderKind.WAITING, List.of());
         }
     }
 
@@ -321,4 +339,5 @@ public final class FoodOrderListService {
     }
 
     private record CachedSnapshot(long builtAt, FoodOrderSnapshot snapshot) {}
+    private record Evaluation(FoodOrderKind kind, List<IngredientSpec> specs) {}
 }
