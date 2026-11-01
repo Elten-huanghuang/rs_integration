@@ -303,8 +303,10 @@ public final class SoulCookingPotBatchDelegate extends AbstractBatchDelegate {
         ItemStack container = requiredContainer();
         for (int i = 0; i < specs.size(); i++) {
             InputBufferPlan.InputSlot input = inputByEntryId(plan, "legacy:material:" + i);
+            int expectedSlot = i == specs.size() - 1 && !container.isEmpty() ? CONTAINER_SLOT : i;
             long required = (long) specs.get(i).count() * plan.operations();
-            if (input == null || input.consumption().reusableWithinWorkerBatch()
+            if (input == null || input.slot() != expectedSlot
+                    || input.consumption().reusableWithinWorkerBatch()
                     || input.perOperation() != specs.get(i).count()
                     || required > Integer.MAX_VALUE
                     || input.stack().getCount() != (int) required
@@ -314,23 +316,13 @@ public final class SoulCookingPotBatchDelegate extends AbstractBatchDelegate {
         InputBufferPlan expected = inputBufferPlan(plan.operations());
         if (!expected.enabled() || expected.operations() != plan.operations()) return false;
         plannedOperations = plan.operations();
-        return startPreparedOperation(player, ordered, sharedLedger, !container.isEmpty());
+        return startPreparedOperation(player, ordered, sharedLedger);
     }
 
+    /** 普通与预载执行都按配方拆出末尾的装盛容器，避免把碗当作食材顺序放入。 */
     @Override
     public boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
-        return startPreparedOperation(player, materials, sharedLedger, false);
-    }
-
-    /**
-     * 放料与开局。
-     *
-     * @param containerAppended 材料列表末尾是否追加了容器条目
-     *                          （预载路径由契约生成，单次路径由调用方按同一口径拼好）
-     */
-    private boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials,
-                                          ExtractionLedger sharedLedger, boolean containerAppended) {
         this.player = player;
         this.usingSharedLedger = true;
         this.craftDone = false;
@@ -357,9 +349,9 @@ public final class SoulCookingPotBatchDelegate extends AbstractBatchDelegate {
 
         List<IngredientSpec> specs = getRequiredMaterials();
         if (specs == null) return false;
-        ItemStack container = containerAppended ? requiredContainer() : ItemStack.EMPTY;
+        ItemStack container = requiredContainer();
         int ingredientCount = specs.size() - (container.isEmpty() ? 0 : 1);
-        if (ingredientCount <= 0 || materials.size() != ingredientCount + (container.isEmpty() ? 0 : 1)) {
+        if (ingredientCount <= 0 || ingredientCount > INPUT_SLOTS || materials.size() != specs.size()) {
             return false;
         }
 
@@ -400,6 +392,8 @@ public final class SoulCookingPotBatchDelegate extends AbstractBatchDelegate {
             long required = (long) specs.get(specs.size() - 1).count() * operations;
             if (containerMaterial.isEmpty() || required > Integer.MAX_VALUE
                     || containerMaterial.getCount() != (int) required
+                    || !ItemStack.isSameItemSameTags(containerMaterial, container)
+                    || !specs.get(specs.size() - 1).ingredient().test(containerMaterial)
                     || !handler.getStackInSlot(CONTAINER_SLOT).isEmpty()
                     || !handler.insertItem(CONTAINER_SLOT, containerMaterial.copy(), true).isEmpty()
                     || !handler.insertItem(CONTAINER_SLOT, containerMaterial.copy(), false).isEmpty()) {
