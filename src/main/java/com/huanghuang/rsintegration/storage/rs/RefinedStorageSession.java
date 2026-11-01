@@ -110,12 +110,14 @@ final class RefinedStorageSession implements StorageSession {
             List<StoredFluid> fluids = new ArrayList<>();
             for (FluidStack stack : driver.snapshotFluids()) {
                 if (stack == null || stack.isEmpty()) continue;
+                long amount = driver.exactStoredFluidAmount(stack, stack.getAmount());
+                if (amount <= 0L) continue;
                 FluidStack identity = stack.copy();
                 identity.setAmount(1);
                 fluids.add(new StoredFluid(
                         StorageFluidKey.fromStack(
                                 reference.backendId(), identity),
-                        stack.getAmount()
+                        amount
                 ));
             }
             return StorageFluidSnapshotResult.success(

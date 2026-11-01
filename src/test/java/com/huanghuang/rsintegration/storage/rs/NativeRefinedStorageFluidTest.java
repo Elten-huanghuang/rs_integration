@@ -4,6 +4,8 @@ import com.huanghuang.rsintegration.ModItems;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidTestFixtures;
 import com.huanghuang.rsintegration.storage.StorageItemChangeListener;
+import com.huanghuang.rsintegration.storage.disk.core.FrozenKey;
+import com.huanghuang.rsintegration.storage.disk.rs.UnifiedDiskAmountResolver;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.storage.cache.IStorageCacheListener;
@@ -20,15 +22,48 @@ import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.registries.RegistryObject;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.MockedStatic;
 
 import java.lang.reflect.Field;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class NativeRefinedStorageFluidTest extends BootstrapTest {
+    @Test
+    void fluidSnapshotCombinesNativeIdentitiesWithExactDiskAmounts() {
+        INetwork network = network();
+        FluidStack water = new FluidStack(Fluids.WATER, Integer.MAX_VALUE);
+        FrozenKey waterKey = FrozenKey.fluid(water);
+        FrozenKey lavaKey = FrozenKey.fluid(new FluidStack(Fluids.LAVA, 1));
+        when(network.getFluidStorageCache().getList().getStacks())
+                .thenReturn(List.of(new StackListEntry<>(water)));
+        try (MockedStatic<UnifiedDiskAmountResolver> amounts =
+                     mockStatic(UnifiedDiskAmountResolver.class, CALLS_REAL_METHODS)) {
+            amounts.when(() -> UnifiedDiskAmountResolver.snapshot(network, FrozenKey.Kind.FLUID))
+                    .thenReturn(Map.of(waterKey, 99_845_381_177_416L, lavaKey, Long.MAX_VALUE));
+            amounts.when(() -> UnifiedDiskAmountResolver.exactAmount(network, waterKey))
+                    .thenReturn(99_845_381_177_416L);
+            amounts.when(() -> UnifiedDiskAmountResolver.exactAmount(network, lavaKey))
+                    .thenReturn(Long.MAX_VALUE);
+            NativeRefinedStorageDriver driver = new NativeRefinedStorageDriver(network);
+
+            List<FluidStack> snapshot = driver.snapshotFluids();
+
+            assertEquals(2, snapshot.size());
+            assertEquals(waterKey, FrozenKey.queryFluid(snapshot.get(0)));
+            assertEquals(99_845_381_177_416L,
+                    driver.exactStoredFluidAmount(snapshot.get(0), snapshot.get(0).getAmount()));
+            assertEquals(lavaKey, FrozenKey.queryFluid(snapshot.get(1)));
+            assertEquals(Long.MAX_VALUE,
+                    driver.exactStoredFluidAmount(snapshot.get(1), snapshot.get(1).getAmount()));
+            assertEquals(Integer.MAX_VALUE, water.getAmount());
+        }
+    }
+
     @Test
     void nativeWaterAppearsInFullAndNarrowSnapshotsAndExtractsAsFluid() throws Exception {
         Item tokenItem = InkFluidTestFixtures.tokenItem();

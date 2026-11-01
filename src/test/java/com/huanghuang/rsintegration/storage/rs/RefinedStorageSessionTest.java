@@ -16,7 +16,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Stream;
 
@@ -160,6 +162,54 @@ class RefinedStorageSessionTest extends BootstrapTest {
     }
 
     @Test
+    void fluidSnapshotPreservesLongAmountsAndExactNbtIdentity() {
+        FluidStack water = new FluidStack(Fluids.WATER, Integer.MAX_VALUE);
+        FluidStack taggedWater = new FluidStack(Fluids.WATER, 1);
+        taggedWater.getOrCreateTag().putString("variant", "separate");
+        driver.fluids.addAll(List.of(water, taggedWater));
+        StorageFluidKey waterKey = StorageFluidKey.fromStack(RefinedStorageIds.BACKEND, water);
+        StorageFluidKey taggedKey = StorageFluidKey.fromStack(RefinedStorageIds.BACKEND, taggedWater);
+        driver.exactFluidAmounts.put(taggedKey, 5_000_000_000L);
+
+        for (long amount : new long[]{(long) Integer.MAX_VALUE + 1L,
+                99_845_381_177_416L, Long.MAX_VALUE}) {
+            driver.exactFluidAmounts.put(waterKey, amount);
+
+            StorageFluidSnapshot snapshot = session.snapshotFluids(player).snapshotValue().orElseThrow();
+
+            assertEquals(amount, snapshot.countExact(waterKey));
+            assertEquals(5_000_000_000L, snapshot.countExact(taggedKey));
+            assertEquals(Integer.MAX_VALUE, water.getAmount());
+            assertEquals(1, taggedWater.getAmount());
+        }
+    }
+
+    @Test
+    void fluidSnapshotSkipsZeroExactAmountsAndRetainsNativeCountsForOtherFluids() {
+        FluidStack water = new FluidStack(Fluids.WATER, 1);
+        FluidStack lava = new FluidStack(Fluids.LAVA, 500);
+        driver.fluids.addAll(List.of(water, lava));
+        StorageFluidKey waterKey = StorageFluidKey.fromStack(RefinedStorageIds.BACKEND, water);
+        StorageFluidKey lavaKey = StorageFluidKey.fromStack(RefinedStorageIds.BACKEND, lava);
+        driver.exactFluidAmounts.put(waterKey, 0L);
+
+        StorageFluidSnapshot snapshot = session.snapshotFluids(player).snapshotValue().orElseThrow();
+
+        assertEquals(0L, snapshot.countExact(waterKey));
+        assertEquals(500L, snapshot.countExact(lavaKey));
+    }
+
+    @Test
+    void deniedOrUnavailableFluidSnapshotsDoNotReadStorage() {
+        driver.allowed = false;
+        assertEquals(StorageSnapshotStatus.DENIED, session.snapshotFluids(player).status());
+        driver.allowed = true;
+        driver.available = false;
+        assertEquals(StorageSnapshotStatus.UNAVAILABLE, session.snapshotFluids(player).status());
+        assertEquals(0, driver.fluidReads);
+    }
+
+    @Test
     void failureAfterOneVariantPreservesConfirmedExtractionAndNextReadIsFresh() {
         driver.items.addAll(List.of(namedIron("first", 2), namedIron("second", 3)));
         driver.failVariant = "second";
@@ -192,9 +242,11 @@ class RefinedStorageSessionTest extends BootstrapTest {
     private static final class FakeDriver implements RefinedStorageDriver {
         final List<ItemStack> items = new ArrayList<>();
         final List<FluidStack> fluids = new ArrayList<>();
+        final Map<StorageFluidKey, Long> exactFluidAmounts = new HashMap<>();
         boolean available = true;
         boolean allowed = true;
         int reads;
+        int fluidReads;
         Set<Item> lastTypes;
         String failVariant;
 
@@ -208,7 +260,12 @@ class RefinedStorageSessionTest extends BootstrapTest {
                     .filter(stack -> types == null || types.contains(stack.getItem())).toList());
         }
         @Override public List<FluidStack> snapshotFluids() {
+            fluidReads++;
             return fluids.stream().map(FluidStack::copy).toList();
+        }
+        @Override public long exactStoredFluidAmount(FluidStack stack, long nativeAmount) {
+            return exactFluidAmounts.getOrDefault(
+                    StorageFluidKey.fromStack(RefinedStorageIds.BACKEND, stack), nativeAmount);
         }
         @Override public FluidStack extractFluid(
                 FluidStack template,

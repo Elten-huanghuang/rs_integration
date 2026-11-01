@@ -36,6 +36,11 @@ interface RefinedStorageDriver {
         return nativeAmount;
     }
 
+    /** 返回流体的精确 long 库存，避免被原生 FluidStack 的 int 数量截断。 */
+    default long exactStoredFluidAmount(FluidStack stack, long nativeAmount) {
+        return nativeAmount;
+    }
+
     boolean hasPermission(ServerPlayer player, StoragePermission permission);
 
     ItemStack extract(ItemStack template, int amount, boolean simulate);

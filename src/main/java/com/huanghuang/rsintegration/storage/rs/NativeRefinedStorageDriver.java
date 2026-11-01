@@ -68,14 +68,36 @@ final class NativeRefinedStorageDriver implements RefinedStorageDriver {
     public List<FluidStack> snapshotFluids() {
         requireAvailable();
         var cache = network.getFluidStorageCache();
-        if (cache == null || cache.getList() == null) return List.of();
         List<FluidStack> fluids = new ArrayList<>();
-        for (var entry : cache.getList().getStacks()) {
-            FluidStack stack = entry.getStack();
-            if (stack == null || stack.isEmpty()) continue;
-            fluids.add(stack.copy());
+        if (cache != null && cache.getList() != null) {
+            for (var entry : cache.getList().getStacks()) {
+                FluidStack stack = entry.getStack();
+                if (stack == null || stack.isEmpty()) continue;
+                fluids.add(stack.copy());
+            }
         }
+        appendMissingDiskFluids(fluids,
+                UnifiedDiskAmountResolver.snapshot(network, FrozenKey.Kind.FLUID));
         return List.copyOf(fluids);
+    }
+
+    static void appendMissingDiskFluids(List<FluidStack> fluids, Map<FrozenKey, Long> diskAmounts) {
+        Set<FrozenKey> nativeKeys = new HashSet<>();
+        for (FluidStack stack : fluids) {
+            if (stack == null || stack.isEmpty()) continue;
+            try {
+                nativeKeys.add(FrozenKey.queryFluid(stack));
+            } catch (RuntimeException ignored) {
+                // 单个无法冻结的缓存项仍交给后续快照转换处理。
+            }
+        }
+        diskAmounts.forEach((key, amount) -> {
+            if (amount == null || amount <= 0L || key.kind() != FrozenKey.Kind.FLUID
+                    || nativeKeys.contains(key)) return;
+            // 这里只补齐身份，实际数量通过精确 long 库存读取，不能塞入 FluidStack。
+            FluidStack stack = key.fluidStack(1);
+            if (!stack.isEmpty()) fluids.add(stack);
+        });
     }
 
     private void requireAvailable() {
@@ -139,6 +161,11 @@ final class NativeRefinedStorageDriver implements RefinedStorageDriver {
     @Override
     public long exactStoredAmount(ItemStack stack, long nativeAmount) {
         return UnifiedDiskAmountResolver.itemAmount(network, stack, nativeAmount);
+    }
+
+    @Override
+    public long exactStoredFluidAmount(FluidStack stack, long nativeAmount) {
+        return UnifiedDiskAmountResolver.fluidAmount(network, stack, nativeAmount);
     }
 
     @Override
