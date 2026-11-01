@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
@@ -49,13 +50,15 @@ class ArsNouveauRecipeHandlerModTypeTest {
     }
 
     private static void assertRecipeTypeResolvesTo(String recipeTypeId, String expectedMachineTypeId) {
+        ArsNouveauRecipeHandler handler = new ArsNouveauRecipeHandler();
+        assertFalse(handler.cacheByRecipeClass());
         assertEquals(expectedMachineTypeId,
                 ArsNouveauRecipeHandler.machineTypeId(recipeTypeId));
 
         Recipe<?> recipe = mock(Recipe.class);
         try (MockedStatic<ArsTileAccess> access = mockStatic(ArsTileAccess.class)) {
             access.when(() -> ArsTileAccess.recipeTypeId(recipe)).thenReturn(recipeTypeId);
-            ModType resolved = new ArsNouveauRecipeHandler().modType(recipe);
+            ModType resolved = handler.modType(recipe);
             assertNotSame(ModType.GENERIC, resolved,
                     "测试用的 Ars 机器类型没有注册");
             assertEquals(expectedMachineTypeId, resolved.id());

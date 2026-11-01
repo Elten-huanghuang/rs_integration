@@ -10,6 +10,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RecentSearchStoreTest {
@@ -71,5 +72,16 @@ class RecentSearchStoreTest {
         assertFalse(result.accepted());
         assertTrue(result.corrupt());
         assertTrue(result.entries().isEmpty());
+    }
+
+    @Test
+    void scopeHashIsStableAndDoesNotExposeTheServerAddress() {
+        String address = "multiplayer:example.org:25565";
+        String hash = RecentSearchScope.hashScope(address);
+
+        assertEquals(hash, RecentSearchScope.hashScope(address));
+        assertEquals(24, hash.length());
+        assertNotEquals(address, hash);
+        assertNotEquals(hash, RecentSearchScope.hashScope("multiplayer:other.example.org"));
     }
 }
