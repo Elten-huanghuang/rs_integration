@@ -170,6 +170,10 @@ public final class RSIntegrationConfig {
     public static final ForgeConfigSpec CLIENT_SPEC;
     private static ModConfig clientModConfig;
 
+    public static ForgeConfigSpec.BooleanValue TOOLTIP_CUSTOM_BACKGROUNDS;
+    public static ForgeConfigSpec.BooleanValue TOOLTIP_OBSCURE_COMPAT;
+    public static ForgeConfigSpec.BooleanValue TOOLTIP_MODERN_UI_COMPAT;
+
     //  master switches
     public static ForgeConfigSpec.BooleanValue ENABLE_BINDING;
     public static ForgeConfigSpec.IntValue NEARBY_BINDING_HORIZONTAL_RADIUS;
@@ -1485,6 +1489,25 @@ public final class RSIntegrationConfig {
         //  CLIENT
 
         ForgeConfigSpec.Builder cl = new ForgeConfigSpec.Builder();
+        cl.comment("物品提示框",
+                        "仅影响本地客户端，重新加载配置后生效。兼容开关仅作用于启用了 RSI 自定义底板的物品。")
+                .push("tooltips");
+        TOOLTIP_CUSTOM_BACKGROUNDS = cl
+                .comment("启用 RSI 自定义提示框底板",
+                        "为共振盘、归墟盘、经验杖、点餐终端和次元升级等特殊物品绘制主题底板。",
+                        "关闭后不绘制 RSI 底板，也不阻止其他提示框模组接管这些物品。")
+                .define("customBackgrounds", true);
+        TOOLTIP_OBSCURE_COMPAT = cl
+                .comment("防止 Obscure Tooltips 覆盖 RSI 底板",
+                        "开启后，拥有 RSI 自定义底板的物品跳过 Obscure Tooltips 的整套提示框渲染。",
+                        "关闭后允许 Obscure Tooltips 接管；其他物品始终遵循该模组的原有设置。")
+                .define("obscureTooltipsCompat", true);
+        TOOLTIP_MODERN_UI_COMPAT = cl
+                .comment("防止 Modern UI 圆角提示框覆盖 RSI 底板",
+                        "开启后，拥有 RSI 自定义底板的物品跳过 Modern UI 的提示框绘制和取消事件。",
+                        "关闭后允许 Modern UI 接管；不影响其他物品的圆角、字体和界面效果。")
+                .define("modernUiCompat", true);
+        cl.pop();
         cl.comment("版本更新").push("updates");
         ENABLE_UPDATE_CHECK = cl
                 .comment("检测 Modrinth 更新",

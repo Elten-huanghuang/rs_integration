@@ -85,6 +85,16 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
         if (mixinClassName.contains(".aetherworks.")) {
             return isClassPresent(targetClassName);
         }
+        if (mixinClassName.contains(".obscuretooltips.")) {
+            return hasMethod(targetClassName, "isIgnored",
+                    "(Lnet/minecraft/world/item/Item;)Z");
+        }
+        if (mixinClassName.contains(".modernui.")) {
+            return hasMethod(targetClassName, "onRenderTooltipH",
+                    "(Lnet/minecraftforge/client/event/RenderTooltipEvent$Pre;)V")
+                    && hasMethod(targetClassName, "onRenderTooltipL",
+                    "(Lnet/minecraftforge/client/event/RenderTooltipEvent$Pre;)V");
+        }
         if (mixinClassName.endsWith(
                 ".arsnouveau.AbstractSourceMachineLongTransferMixin")) {
             return isClassPresent(targetClassName)

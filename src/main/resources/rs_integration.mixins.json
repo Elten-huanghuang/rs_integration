@@ -129,6 +129,8 @@
     "traderefresh.TradeRefreshTradeLockMixin"
   ],
   "client": [
+    "modernui.ModernUITooltipMixin",
+    "obscuretooltips.ObscureTooltipConfigMixin",
     "taxfreelevels.TaxFreeAnvilScreenMixin",
     "malum.SpiritAltarParticleEffectsMixin",
     "farmandcharm.NativeRecipeBookScreenMixin",

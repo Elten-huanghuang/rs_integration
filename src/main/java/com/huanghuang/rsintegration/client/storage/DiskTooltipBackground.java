@@ -1,14 +1,17 @@
 package com.huanghuang.rsintegration.client.storage;
 
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.inventory.tooltip.ClientTooltipComponent;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.client.event.RenderTooltipEvent;
+import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.registries.ForgeRegistries;
 
@@ -73,7 +76,7 @@ public final class DiskTooltipBackground {
         return new Theme(texture("dimension_circuit"), first, second, first, second, Artwork.DIMENSION);
     }
 
-    @SubscribeEvent
+    @SubscribeEvent(priority = EventPriority.LOWEST)
     public static void onTooltipColor(RenderTooltipEvent.Color event) {
         Theme theme = themeFor(event.getItemStack());
         if (theme == null || event.getComponents().isEmpty()) return;
@@ -102,7 +105,14 @@ public final class DiskTooltipBackground {
         return id == null ? null : themeFor(id);
     }
 
+    /** 让提示框美化模组避开已经由 RSI 绘制底板的物品。 */
+    public static boolean hasCustomBackground(Item item) {
+        return item != null && themeFor(ForgeRegistries.ITEMS.getKey(item)) != null;
+    }
+
     static Theme themeFor(ResourceLocation id) {
+        if (!RSIntegrationConfig.enabled(RSIntegrationConfig.CLIENT_SPEC,
+                RSIntegrationConfig.TOOLTIP_CUSTOM_BACKGROUNDS)) return null;
         if (id == null || !MOD_ID.equals(id.getNamespace())) return null;
         return switch (id.getPath()) {
             case "resonance_storage_disk", "resonance_network_generator" -> RESONANCE;
