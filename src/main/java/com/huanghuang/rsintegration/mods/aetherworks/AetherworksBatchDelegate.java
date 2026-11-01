@@ -27,6 +27,8 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.items.ItemHandlerHelper;
+import net.sirplop.aetherworks.blockentity.AetheriumAnvilBlockEntity;
+import net.sirplop.aetherworks.blockentity.IForge;
 import org.jetbrains.annotations.NotNull;
 
 import javax.annotation.Nullable;
@@ -262,7 +264,23 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
             }
         }
 
-        // 2. Auto-hammer — call onHit() when hitTimeout > 0 and hasEmber
+        // 2. 自动锤击前同步原生锻造状态。Aetherworks 会在 onForgeTick 中
+        // 刷新 cachedRecipe/hasEmber；缺少这一步时，自动锤击可能读取过期
+        // 的能量状态，导致原生 Ember 扣除逻辑无法按锤击进度触发。
+        if (forgeBE != null) {
+            try {
+                syncNativeForgeState(be, forgeBE);
+            } catch (Exception e) {
+                abortTimer++;
+                if (abortTimer > 300) {
+                    craftTimedOut = true;
+                    warnOnce("anvil_on_forge_tick_failed",
+                            "[RSI-Aetherworks] Anvil onForgeTick failed >300 ticks, aborting craft", e);
+                }
+            }
+        }
+
+        // 3. 自动锤击：在命中窗口内且有足够 Ember 时调用 onHit()
         try {
             int ht = Reflect.getIntField(be, "hitTimeout").orElse(0);
             boolean ember = Reflect.<Boolean>getField(be, "hasEmber").orElse(false);
@@ -279,7 +297,7 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
 
         if (craftTimedOut) return true;
 
-        // 3. Craft completion — check if slot 0 item type changed
+        // 4. 合成完成：检查槽位 0 的物品类型是否发生变化
         Object inv = Reflect.getField(be, "inventory").orElse(null);
         if (inv == null) return false;
         ItemStack slotItem = Reflect.invoke(inv, "getStackInSlot", 0)
@@ -293,6 +311,13 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
         }
 
         return false;
+    }
+
+    static void syncNativeForgeState(Object anvil, Object forge) {
+        if (anvil instanceof AetheriumAnvilBlockEntity anvilEntity
+                && forge instanceof IForge forgeEntity) {
+            anvilEntity.onForgeTick(forgeEntity);
+        }
     }
 
     @Override
