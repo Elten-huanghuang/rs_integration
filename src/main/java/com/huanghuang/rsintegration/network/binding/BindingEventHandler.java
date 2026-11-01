@@ -33,6 +33,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.machine.FurnaceMachineAccess;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.feature.goety.brewing.CauldronAccess;
 import com.huanghuang.rsintegration.mods.touhoulittlemaid.TlmAltarStructure;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.mods.youkaishomecoming.YoukaiRegistryIds;
@@ -139,6 +140,7 @@ public final class BindingEventHandler {
         if (!player.isShiftKeyDown() && !EXPLICIT_BIND_REQUEST.get()) return;
 
         Block block = event.getLevel().getBlockState(event.getPos()).getBlock();
+        if (CauldronAccess.isTarget(block)) return;
         String className = block.getClass().getName();
 
         // 共振方块复用本入口的 Shift + 右键绑定协议；处理完成后不再进入
@@ -426,6 +428,7 @@ public final class BindingEventHandler {
     }
 
     static boolean isPotentialNearbyTarget(Block block) {
+        if (CauldronAccess.isTarget(block)) return false;
         if (isEnabledRegisteredTarget(block)) return true;
         ResourceLocation id = ForgeRegistries.BLOCKS.getKey(block);
         return id != null && RSIntegrationConfig.CUSTOM_GUI_MACHINE_MODS.get().stream()
@@ -440,6 +443,7 @@ public final class BindingEventHandler {
     static NearbyTarget prepareNearbyTarget(ServerLevel level,
                                             BlockPos clickedPos) {
         Block block = level.getBlockState(clickedPos).getBlock();
+        if (CauldronAccess.isTarget(block)) return null;
         String className = block.getClass().getName();
         MachineBindingTarget target = findEnabledTarget(block);
         if (target == null) {
@@ -520,6 +524,7 @@ public final class BindingEventHandler {
     }
 
     private static MachineBindingTarget findEnabledTarget(Block block) {
+        if (CauldronAccess.isTarget(block)) return null;
         String className = block.getClass().getName();
         MachineBindingTarget best = null;
         for (MachineBindingTarget target : TARGETS) {

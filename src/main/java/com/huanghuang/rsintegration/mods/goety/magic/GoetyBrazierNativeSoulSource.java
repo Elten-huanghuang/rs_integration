@@ -11,7 +11,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
-/** 亡灵火盆的原生灵魂来源，保留灵魂烛台和 Arca 作为网络不足时的补差。 */
+/** 烛台机器的原生灵魂来源，供亡灵火炉和女巫坩埚共用。 */
 public final class GoetyBrazierNativeSoulSource implements GoetyNativeSoulSource {
     private final ServerPlayer player;
     private final BlockEntity brazier;
@@ -69,7 +69,7 @@ public final class GoetyBrazierNativeSoulSource implements GoetyNativeSoulSource
             return;
         }
         long now = level.getGameTime();
-        if (now - lastScan < 40L) return;
+        if (lastScan != Long.MIN_VALUE && now - lastScan < 40L) return;
         lastScan = now;
         if (GoetyReflection.soulCandlestickBEClass == null) {
             candles = List.of();

@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.api.RSIIntegrationApi;
 import com.huanghuang.rsintegration.api.machine.gui.RSIMachineGuiApi;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.feature.goety.brewing.CauldronInteraction;
+import com.huanghuang.rsintegration.feature.goety.integration.CauldronSoulAutomation;
 import com.huanghuang.rsintegration.feature.goety.menu.GoetyRsiMenus;
 import com.huanghuang.rsintegration.feature.goety.network.BrewNetwork;
 import net.minecraftforge.api.distmarker.Dist;
@@ -27,6 +28,7 @@ public final class GoetyCauldronFeature {
         BrewNetwork.register();
         bus.addListener(GoetyCauldronFeature::commonSetup);
         MinecraftForge.EVENT_BUS.register(CauldronInteraction.class);
+        MinecraftForge.EVENT_BUS.register(CauldronSoulAutomation.class);
         DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
                 () -> () -> bus.addListener(
                         com.huanghuang.rsintegration.feature.goety.client.GoetyRsiClient::setup));
@@ -34,7 +36,7 @@ public final class GoetyCauldronFeature {
 
     private static void commonSetup(FMLCommonSetupEvent event) {
         event.enqueueWork(() -> {
-            if (!RSIntegrationConfig.ENABLE_GOETY.get()) return;
+            if (!RSIntegrationConfig.isGoetyCauldronEnabled()) return;
             GoetyRsiRegistrations.register(RSIIntegrationApi.get().orElseThrow());
             if (!RSIMachineGuiApi.register(ModBlockEntities.BREWING_CAULDRON.get(),
                     (player, entity, dimension, position) -> {

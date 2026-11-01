@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.feature.goety.brewing;
 
 import com.Polarice3.Goety.common.blocks.entities.BrewCauldronBlockEntity;
+import com.huanghuang.rsintegration.feature.goety.integration.GoetyCauldronCompat;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -12,6 +13,15 @@ import java.util.*;
 public record BrewPlan(List<ItemStack> sequence, int capacity, int used, int soulCost, int capacityTier,
                        ItemStack output, Component error, List<BrewCatalog.Entry> inputs) {
     public boolean valid() { return error == null; }
+
+    /** Jade 查询只在副本上读取产物，避免原生 getBrew 的 markUpdated 改动真实机器。 */
+    public static ItemStack previewCurrentOutput(BrewCauldronBlockEntity cauldron) {
+        var shadow = new PreviewCauldron(cauldron.getBlockPos(), cauldron.getBlockState());
+        shadow.setLevel(new BrewPreviewLevel(cauldron.getLevel(), cauldron.getBlockPos(), cauldron.getBlockState()));
+        shadow.load(cauldron.saveWithoutMetadata());
+        return GoetyCauldronCompat.isCrafting(shadow) || GoetyCauldronCompat.isCrafted(shadow)
+                ? GoetyCauldronCompat.craftedOutput(shadow) : shadow.getBrew().copy();
+    }
 
     /** Uses Goety's actual insertItem and getBrew rules on a detached, write-isolated cauldron. */
     public static BrewPlan create(Level source, BlockPos pos, BlockState state, BrewCatalog catalog,
@@ -97,6 +107,8 @@ public record BrewPlan(List<ItemStack> sequence, int capacity, int used, int sou
 
     private static final class PreviewCauldron extends BrewCauldronBlockEntity {
         PreviewCauldron(BlockPos pos, BlockState state) { super(pos, state); }
+        // RevelationFix 用 getDeclaredMethod 查找清空方法；必须在预演类声明，避免触发其退出分支。
+        @Override public void clearContent() { container.clear(); clearSacrifices(); }
         @Override public void markUpdated() {}
         @Override public Mode fail() { return Mode.FAILED; }
         @Override public void setColor(int color) { liquidColor = color; }

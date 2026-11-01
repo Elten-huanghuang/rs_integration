@@ -221,7 +221,8 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
                     && hasField(targetClassName, "soulEnergy")
                     && hasMethod(targetClassName, "increaseSE");
         }
-        if (mixinClassName.contains("goety.NecroBrazierVirtualCandleMixin")) {
+        if (mixinClassName.contains("goety.NecroBrazierVirtualCandleMixin")
+                || mixinClassName.contains("goety.BrewCauldronVirtualCandleMixin")) {
             return isClassPresent(targetClassName)
                     && hasMethod(targetClassName, "findCandlesticks");
         }

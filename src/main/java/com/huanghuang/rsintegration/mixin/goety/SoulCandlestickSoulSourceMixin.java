@@ -12,13 +12,6 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(targets = "com.Polarice3.Goety.common.blocks.entities.SoulCandlestickBlockEntity",
         remap = false)
 public abstract class SoulCandlestickSoulSourceMixin {
-    @Inject(method = "checkCage", at = @At("HEAD"), cancellable = true, require = 0)
-    private void rsi$useVirtualSoulSource(CallbackInfoReturnable<Boolean> cir) {
-        if (GoetyVirtualSoulAccess.isActive(this)) {
-            cir.setReturnValue(true);
-        }
-    }
-
     @Inject(method = "getSouls", at = @At("HEAD"), cancellable = true, require = 0)
     private void rsi$readUnifiedSouls(CallbackInfoReturnable<Integer> cir) {
         int virtual = GoetyVirtualSoulAccess.souls(this);
@@ -29,8 +22,9 @@ public abstract class SoulCandlestickSoulSourceMixin {
 
     @Inject(method = "drainSouls", at = @At("HEAD"), cancellable = true, require = 0)
     private void rsi$consumeUnifiedSouls(int amount, BlockPos pos, CallbackInfo ci) {
-        if (GoetyVirtualSoulAccess.isActive(this)
-                && GoetyVirtualSoulAccess.consume(this, amount)) {
+        if (GoetyVirtualSoulAccess.isActive(this)) {
+            // 预算耗尽也不能回落到实体笼路径：虚拟烛台可能没有绑定诅咒笼。
+            GoetyVirtualSoulAccess.consume(this, amount);
             ci.cancel();
         }
     }

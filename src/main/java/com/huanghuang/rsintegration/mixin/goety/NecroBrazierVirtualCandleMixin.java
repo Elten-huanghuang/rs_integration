@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mixin.goety;
 
-import com.huanghuang.rsintegration.mods.goety.magic.BrazierSoulPort;
+import com.huanghuang.rsintegration.mods.goety.magic.GoetyCandleSoulPort;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Pseudo;
@@ -26,7 +26,7 @@ public abstract class NecroBrazierVirtualCandleMixin {
     @Inject(method = "findCandlesticks", at = @At("RETURN"), require = 0)
     private void rsi$addRecursiveCraftCandle(CallbackInfo callback) {
         if (!candlestickBlockEntityList.isEmpty()) return;
-        Object virtualCandle = BrazierSoulPort.virtualCandle(this);
+        Object virtualCandle = GoetyCandleSoulPort.virtualCandle(this);
         if (virtualCandle != null) {
             candlestickBlockEntityList.add(virtualCandle);
         }
@@ -37,11 +37,8 @@ public abstract class NecroBrazierVirtualCandleMixin {
                     target = "Lcom/Polarice3/Goety/common/crafting/BrazierRecipe;getSoulCost()I"),
             require = 0)
     private void rsi$accelerateRecursiveCraft(CallbackInfo callback) {
-        int extraSpeed = BrazierSoulPort.virtualCandleSpeed(this) - 1;
+        int extraSpeed = GoetyCandleSoulPort.virtualCandleSpeed(this) - 1;
         if (extraSpeed <= 0) return;
-        extraSpeed = Math.min(extraSpeed, BrazierSoulPort.souls(this));
-        if (extraSpeed > 0 && BrazierSoulPort.consume(this, extraSpeed)) {
-            currentTime += extraSpeed;
-        }
+        currentTime += GoetyCandleSoulPort.advance(this, extraSpeed);
     }
 }

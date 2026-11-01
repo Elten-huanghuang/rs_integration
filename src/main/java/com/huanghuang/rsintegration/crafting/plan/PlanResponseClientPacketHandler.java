@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.feature.goety.client.GoetyRsiClient;
+import com.huanghuang.rsintegration.feature.goety.integration.BrewMaterialPlan;
 import com.huanghuang.rsintegration.crafting.planning.PlanningProgressTracker;
 import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
@@ -153,6 +155,10 @@ final class PlanResponseClientPacketHandler {
     }
 
     private static void openScreen(PlanResponse plan, long requestId) {
+        if (BrewMaterialPlan.isTarget(plan.recipeId())) {
+            GoetyRsiClient.acceptPlan(plan, requestId);
+            return;
+        }
         RSIntegrationMod.LOGGER.debug(
                 "[RSI-PlanPkt] openScreen called: success={} steps={} graphNodes={}",
                 plan.success(), plan.steps().size(),

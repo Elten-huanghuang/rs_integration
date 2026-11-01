@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.network.binding;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.feature.goety.brewing.CauldronAccess;
 import com.huanghuang.rsintegration.feature.resonance.magic.ResonantMagicBlockMarker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -44,6 +45,12 @@ public final class BindingHintOverlay {
             held = mc.player.getOffhandItem();
         }
         if (AltarBindingRegistry.findHook(held).isEmpty()) return;
+        if (CauldronAccess.isTarget(mc.level.getBlockState(hit.getBlockPos()).getBlock())) {
+            if (RSIntegrationConfig.isGoetyCauldronEnabled()) {
+                drawHint(event, Component.translatable("gui.rs_integration.cauldron_hint.open"), BIND);
+            }
+            return;
+        }
         if (blockEntity != null
                 && "dev.shadowsoffire.apotheosis.spawn.spawner.ApothSpawnerTile"
                 .equals(blockEntity.getClass().getName())) {

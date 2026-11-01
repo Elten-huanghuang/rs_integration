@@ -157,6 +157,13 @@ public final class GoetySoulCraftingTask implements AutoCloseable {
                 total, 20, total, sharedReservation);
     }
 
+    /** 女巫坩埚沿用亡灵火炉的总量预算、网络路由与虚拟烛台。 */
+    public static @Nullable GoetySoulCraftingTask reserveCauldron(
+            ServerPlayer player, @Nullable CraftStorageEndpoint endpoint, int total) {
+        return reserve(player, null, endpoint, Mode.TOTAL_BATCHED,
+                total, 20, total, null);
+    }
+
     private static @Nullable GoetySoulCraftingTask reserve(
             ServerPlayer player, @Nullable INetwork network,
             @Nullable CraftStorageEndpoint endpoint, Mode mode,
@@ -379,7 +386,7 @@ public final class GoetySoulCraftingTask implements AutoCloseable {
                 return false;
             }
             directAltar = altar;
-            BrazierSoulPort.attach(altar, directCoordinator, candles,
+            GoetyCandleSoulPort.attach(altar, directCoordinator, candles,
                     virtualCandle, virtualCandleSpeed);
             RSIntegrationMod.LOGGER.info(
                     "[RSI-Goety] Using RS/BD network soul source directly for brazier: reserved={} available={} virtualCandleSpeed={}",
@@ -391,7 +398,7 @@ public final class GoetySoulCraftingTask implements AutoCloseable {
 
     static int virtualBrazierCandleCount(int soulCost, int configured) {
         return Math.max(1, Math.min(Math.max(0, soulCost),
-                Math.max(1, configured)));
+                Math.min(1024, Math.max(1, configured))));
     }
 
     private static int configuredVirtualCandleCount(int soulCost) {
@@ -399,7 +406,7 @@ public final class GoetySoulCraftingTask implements AutoCloseable {
         try {
             configured = RSIntegrationConfig.GOETY_BRAZIER_VIRTUAL_CANDLE_COUNT.get();
         } catch (RuntimeException ignored) {
-            // 配置尚未加载时使用上限值。
+            // 配置尚未加载时使用默认值。
         }
         return virtualBrazierCandleCount(soulCost, configured);
     }
@@ -522,7 +529,7 @@ public final class GoetySoulCraftingTask implements AutoCloseable {
         closed = true;
         if (directAltar != null) {
             DarkAltarSoulPort.detach(directAltar);
-            BrazierSoulPort.detach(directAltar);
+            GoetyCandleSoulPort.detach(directAltar);
             directAltar = null;
         }
         if (directCoordinator != null) {

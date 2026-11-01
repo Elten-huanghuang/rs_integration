@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.feature.goety.brewing;
 
 import com.Polarice3.Goety.common.blocks.BrewCauldronBlock;
 import com.Polarice3.Goety.common.blocks.entities.BrewCauldronBlockEntity;
+import com.Polarice3.Goety.utils.BrewUtils;
 import com.Polarice3.Goety.utils.SEHelper;
 import com.huanghuang.rsintegration.feature.goety.integration.GoetyCauldronCompat;
 import net.minecraft.core.BlockPos;
@@ -14,6 +15,25 @@ import net.minecraft.world.phys.*;
 
 public final class NativeCauldronActions {
     private NativeCauldronActions() {}
+    /** 调用方校验巨勺与供能后直接启动原生炼制，不改动玩家手持物品。 */
+    public static boolean stir(ServerPlayer player, BrewCauldronBlockEntity be) {
+        GoetyCauldronCompat.brew(be, player);
+        return be.isBrewing;
+    }
+    /** 使用一个玻璃瓶执行原生装瓶，并返回实际产物；失败时返回空栈。 */
+    public static ItemStack bottle(ServerPlayer player, BrewCauldronBlockEntity be) {
+        if (be.mode != BrewCauldronBlockEntity.Mode.COMPLETED
+                || be.getBlockState().getValue(BrewCauldronBlock.LEVEL) <= 0) {
+            return ItemStack.EMPTY;
+        }
+        int beforeWater = be.getBlockState().getValue(BrewCauldronBlock.LEVEL);
+        var beforeMode = be.mode;
+        ItemStack result = useContainer(player, be, new ItemStack(Items.GLASS_BOTTLE));
+        boolean changed = beforeWater != be.getBlockState().getValue(BrewCauldronBlock.LEVEL)
+                || beforeMode != be.mode;
+        if (!changed || result.isEmpty() || result.is(Items.GLASS_BOTTLE)) return ItemStack.EMPTY;
+        return result;
+    }
     public static boolean water(ItemStack stack) {
         return stack.is(Items.WATER_BUCKET) || stack.is(Items.POTION) && PotionUtils.getPotion(stack) == Potions.WATER;
     }
@@ -62,7 +82,7 @@ public final class NativeCauldronActions {
         if (one.is(Items.WATER_BUCKET)) output = new ItemStack(Items.BUCKET);
         else if (water(one)) output = new ItemStack(Items.GLASS_BOTTLE);
         else if (one.is(Items.GLASS_BOTTLE)) {
-            output = be.mode == BrewCauldronBlockEntity.Mode.COMPLETED ? be.getBrew().copy()
+            output = be.mode == BrewCauldronBlockEntity.Mode.COMPLETED ? bottledBrew(be)
                     : PotionUtils.setPotion(new ItemStack(Items.POTION), Potions.WATER);
         } else return one;
         int target = be.getTargetLevel(one, player); // 包含原生装瓶折扣，此处只调用一次。
@@ -72,5 +92,9 @@ public final class NativeCauldronActions {
         if (target == 0) be.mode = be.reset();
         be.getLevel().setBlockAndUpdate(be.getBlockPos(), be.getBlockState().setValue(BrewCauldronBlock.LEVEL, target));
         be.markUpdated(); return output;
+    }
+    private static ItemStack bottledBrew(BrewCauldronBlockEntity be) {
+        ItemStack brew = be.getBrew().copy();
+        return BrewUtils.setCustomEffects(brew, PotionUtils.getMobEffects(brew), BrewUtils.getBrewEffects(brew));
     }
 }

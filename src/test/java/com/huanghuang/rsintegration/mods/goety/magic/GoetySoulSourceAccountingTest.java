@@ -112,6 +112,49 @@ class GoetySoulSourceAccountingTest {
         assertEquals(0, coordinator.available());
     }
 
+    @Test
+    void cauldronAndBrazierShareTheCandlePortWithoutSharingTheirBudgets() {
+        Object cauldron = new Object();
+        Object brazier = new Object();
+        Object cauldronCandle = new Object();
+        Object brazierCandle = new Object();
+        FakeNetworkPool first = new FakeNetworkPool(1500);
+        FakeNetworkPool second = new FakeNetworkPool(20);
+        GoetySoulSourceCoordinator cauldronSource = GoetySoulSourceCoordinator.create(
+                1500, first, new FakeNativeSource(0));
+        GoetySoulSourceCoordinator brazierSource = GoetySoulSourceCoordinator.create(
+                20, second, new FakeNativeSource(0));
+        GoetyCandleSoulPort.attach(cauldron, cauldronSource, List.of(cauldronCandle), cauldronCandle, 1024);
+        GoetyCandleSoulPort.attach(brazier, brazierSource, List.of(brazierCandle), brazierCandle, 64);
+        try {
+            assertEquals(1024, GoetyCandleSoulPort.virtualCandleSpeed(cauldron));
+            assertEquals(List.of(cauldronCandle), GoetyCandleSoulPort.candles(cauldron));
+            assertEquals(1024, GoetyCandleSoulPort.advance(cauldron, 1024));
+            assertEquals(476, GoetyCandleSoulPort.candleSouls(cauldronCandle));
+            assertEquals(20, GoetyCandleSoulPort.souls(brazier));
+            assertEquals(476, GoetyCandleSoulPort.advance(cauldron, 1024));
+            assertEquals(0, GoetyCandleSoulPort.advance(cauldron, 1));
+            assertEquals(20, GoetyCandleSoulPort.advance(brazier, 64));
+            assertEquals(0, first.remaining);
+            assertEquals(0, second.remaining);
+        } finally {
+            GoetyCandleSoulPort.detach(cauldron);
+            GoetyCandleSoulPort.detach(brazier);
+            cauldronSource.close();
+            brazierSource.close();
+        }
+        assertFalse(GoetyCandleSoulPort.isActive(cauldron));
+        assertEquals(-1, GoetyCandleSoulPort.candleSouls(cauldronCandle));
+    }
+
+    @Test
+    void virtualCandleCountIsLimitedBy1024AndTheActualRecipeCost() {
+        assertEquals(1024, GoetySoulCraftingTask.virtualBrazierCandleCount(2000, 1024));
+        assertEquals(1024, GoetySoulCraftingTask.virtualBrazierCandleCount(2000, 4096));
+        assertEquals(20, GoetySoulCraftingTask.virtualBrazierCandleCount(20, 1024));
+        assertEquals(1, GoetySoulCraftingTask.virtualBrazierCandleCount(20, 0));
+    }
+
     private static final class FakeContainer {
         private int souls;
 

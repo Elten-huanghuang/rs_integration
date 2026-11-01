@@ -5,6 +5,17 @@ import com.Polarice3.Goety.common.blocks.entities.BrewCauldronBlockEntity;
 import com.Polarice3.Goety.common.items.ModItems;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.feature.goety.GoetyCauldronFeature;
+import com.huanghuang.rsintegration.mods.common.MachineWaterSupply;
+import com.huanghuang.rsintegration.mods.goety.magic.GoetySoulCraftingTask;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
+import com.huanghuang.rsintegration.api.IntegrationResourceKey;
+import com.huanghuang.rsintegration.api.consumer.ConsumerPlanningPreferences;
+import com.huanghuang.rsintegration.crafting.MaterialSources;
+import com.huanghuang.rsintegration.crafting.CraftingResolver;
+import com.huanghuang.rsintegration.crafting.CraftingPlanningTimeoutException;
+import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
+import com.huanghuang.rsintegration.crafting.plan.PlanResponsePublisher;
+import com.huanghuang.rsintegration.crafting.planning.PlanningPreferences;
 import com.huanghuang.rsintegration.network.gui.RemoteGuiAuth;
 import com.huanghuang.rsintegration.api.storage.*;
 import com.huanghuang.rsintegration.feature.goety.brewing.*;
@@ -38,8 +49,11 @@ public final class WitchCauldronMenu extends AbstractContainerMenu {
     private int capacityTier = -1, revision, ticks;
     private long requestTick = Long.MIN_VALUE;
     private int requestsThisTick;
+    private int materialPreviewRevision = -1;
     private Component message = text("choose");
     private MissingMaterialOrders orders;
+    private boolean pendingBrew;
+    private StorageLink brewingStorage;
     private boolean sentCatalog;
     private ServerPlayer owner;
     private Map<ResourceLocation, Long> plannedStock = Map.of();
@@ -84,7 +98,7 @@ public final class WitchCauldronMenu extends AbstractContainerMenu {
         return Map.copyOf(result);
     }
     private void rebuild() {
-        var link = owner == null ? null : RsiStorageLink.resolve(owner, target).orElse(null);
+        var link = owner == null ? null : RsiStorageLink.resolve(owner).orElse(null);
         rebuild(stockCounts(owner, link));
     }
     private void rebuild(Map<ResourceLocation, Long> stock) {
@@ -97,7 +111,7 @@ public final class WitchCauldronMenu extends AbstractContainerMenu {
 
     @Override public boolean stillValid(Player player) {
         if (target == null) return true;
-        if (!RSIntegrationConfig.ENABLE_GOETY.get()) return false;
+        if (!RSIntegrationConfig.isGoetyCauldronEnabled()) return false;
         var level = target.getLevel();
         if (player.isSpectator() || level == null || target.isRemoved() || !level.hasChunkAt(position)
                 || level.getBlockEntity(position) != target || !level.mayInteract(player, position)) return false;
@@ -110,18 +124,17 @@ public final class WitchCauldronMenu extends AbstractContainerMenu {
         if (requestTick != now) { requestTick = now; requestsThisTick = 0; }
         if (++requestsThisTick > 8) { revision = edit.revision(); sync(player); return; }
         revision = edit.revision();
+        materialPreviewRevision = -1;
         try {
-            if (orders.busy() && (capacityTier != edit.capacity() || !selected.equals(edit.selected()))) {
+            if (pendingBrew || orders.busy()) {
                 message = text("orders_busy"); sync(player); return;
             }
             if (capacityTier != edit.capacity() || !selected.equals(edit.selected())) {
                 capacityTier = edit.capacity(); selected = List.copyOf(edit.selected()); rebuild();
             }
-            var link = RsiStorageLink.resolve(player, target).orElse(null);
+            var link = RsiStorageLink.resolve(player).orElse(null);
             switch (edit.action()) {
                 case "preview" -> message = plan.valid() ? text("preview_ready") : plan.error();
-                case "bind" -> { message = text(RsiStorageLink.bind(player, target) ? "bound" : "bind_failed"); rebuild(); }
-                case "unbind" -> { if (!orders.busy()) { RsiStorageLink.unbind(target); rebuild(); message = text("unbound"); } }
                 case "water" -> addWater(player);
                 case "bottle" -> bottle(player);
                 case "clear" -> {
@@ -132,30 +145,50 @@ public final class WitchCauldronMenu extends AbstractContainerMenu {
                         target.markUpdated(); message = text("cleared");
                     }
                 }
-                case "feed" -> feed(player, link);
-                case "stir" -> stir(player, link);
-                case "craft" -> {
-                    if (!orders.busy()) rebuild();
-                    if (!plan.valid()) message = plan.error();
-                    else if (link == null || !RsiStorageLink.isCurrentDefault(player, link)) message = text("bind_failed");
-                    else message = orders.startAlternatives(player, materialNeeds(), link);
-                }
+                case "brew" -> brew(player, link);
                 default -> { }
             }
         } catch (RuntimeException | LinkageError failure) {
+            pendingBrew = false;
+            orders.close(player);
             GoetyCauldronFeature.LOGGER.error("Cauldron action {} failed at {}", edit.action(), position, failure);
             message = text("action_failed");
         }
         sync(player);
     }
     private void addWater(ServerPlayer player) {
-        var stack = containers.getItem(0);
-        if (!NativeCauldronActions.water(stack)) { message = text("need_water_container"); return; }
-        if (target.mode != BrewCauldronBlockEntity.Mode.IDLE && target.mode != BrewCauldronBlockEntity.Mode.FAILED) { message = text("busy"); return; }
-        if (target.getBlockState().getValue(BrewCauldronBlock.LEVEL) >= 3) { message = text("water_full"); return; }
-        var result = NativeCauldronActions.useContainer(player, target, stack.copyWithCount(1));
-        stack.shrink(1);
-        RsiStorageLink.give(player, result); containers.setChanged(); message = text("water_added");
+        if (target.mode != BrewCauldronBlockEntity.Mode.IDLE
+                || GoetyCauldronCompat.hasIngredients(target)) { message = text("busy"); return; }
+        int water = target.getBlockState().getValue(BrewCauldronBlock.LEVEL);
+        if (water >= 3) { message = text("water_full"); return; }
+        boolean free = MachineWaterSupply.isFree("goety_witch_cauldron");
+        var link = free ? null : RsiStorageLink.resolve(player).orElse(null);
+        if (MachineWaterSupply.fillProperty("goety_witch_cauldron", ((3 - water) * 1000 + 2) / 3,
+                free ? null : RsiStorageLink.endpoint(player, link), player, () -> {
+                    boolean updated = target.getLevel().setBlockAndUpdate(position,
+                            target.getBlockState().setValue(BrewCauldronBlock.LEVEL, 3));
+                    if (updated) { target.update = 0; target.markUpdated(); }
+                    return updated;
+                })) {
+            message = text("water_added");
+            return;
+        }
+        // 关闭免费补水且网络缺水时，仍允许使用槽位或背包中的原生水容器。
+        while (target.getBlockState().getValue(BrewCauldronBlock.LEVEL) < 3) {
+            var stack = containers.getItem(0);
+            if (!NativeCauldronActions.water(stack)) {
+                stack = player.getInventory().items.stream().filter(NativeCauldronActions::water).findFirst().orElse(ItemStack.EMPTY);
+            }
+            if (stack.isEmpty()) { message = text("need_water_supply"); return; }
+            int before = target.getBlockState().getValue(BrewCauldronBlock.LEVEL);
+            var result = NativeCauldronActions.useContainer(player, target, stack.copyWithCount(1));
+            if (target.getBlockState().getValue(BrewCauldronBlock.LEVEL) <= before) { message = text("need_water_supply"); return; }
+            stack.shrink(1);
+            RsiStorageLink.give(player, result);
+            containers.setChanged();
+            player.getInventory().setChanged();
+        }
+        message = text("water_added");
     }
     private void bottle(ServerPlayer player) {
         if (!containers.getItem(2).isEmpty()) { message = text("take_output"); return; }
@@ -194,18 +227,136 @@ public final class WitchCauldronMenu extends AbstractContainerMenu {
         return List.copyOf(grouped.values());
     }
     public static int inventoryCount(ServerPlayer player, ItemStack item) {
-        int count = 0;
-        for (var stack : player.getInventory().items) if (ItemStack.isSameItemSameTags(stack, item)) count += stack.getCount();
-        return count;
+        return RsiStorageLink.inventoryCount(player, item);
     }
-    private void feed(ServerPlayer player, StorageLink link) {
-        if (orders.busy()) { message = text("orders_busy"); return; }
-        rebuild(); // 扣取真实材料前，重新检查群系、基座和数据包规则。
-        if (!plan.valid()) { message = plan.error(); return; }
-        if (target.mode != BrewCauldronBlockEntity.Mode.IDLE || !target.container.stream().allMatch(ItemStack::isEmpty)) { message = text("need_empty"); return; }
-        if (target.getBlockState().getValue(BrewCauldronBlock.LEVEL) != 3) { message = text("need_full_water"); return; }
-        if (!target.isHeated()) { message = text("need_heat"); return; }
-        if (NativeCauldronActions.availableSouls(target) < Math.max(1, plan.soulCost())) { message = text("need_souls"); return; }
+    private boolean readyToBrew(ServerPlayer player, StorageLink link) {
+        if (!plan.valid()) { message = plan.error(); return false; }
+        if (target.mode != BrewCauldronBlockEntity.Mode.IDLE || GoetyCauldronCompat.isBusy(target)
+                || GoetyCauldronCompat.hasIngredients(target)) { message = text("need_empty"); return false; }
+        if (target.getBlockState().getValue(BrewCauldronBlock.LEVEL) != 3) { message = text("need_full_water"); return false; }
+        if (!target.isHeated()) { message = text("need_heat"); return false; }
+        if (!hasLadle(player, link)) { message = text("need_ladle"); return false; }
+        var endpoint = RsiStorageLink.endpoint(player, link);
+        long souls = SaturatingLongMath.add(GoetySoulCraftingTask.nativeAvailableBrazier(player, target),
+                Math.max(0, GoetySoulCraftingTask.availableInEndpoint(player, endpoint)));
+        if (souls < Math.max(1, plan.soulCost())) { message = text("need_souls"); return false; }
+        return true;
+    }
+    private boolean hasLadle(ServerPlayer player, StorageLink link) {
+        var ladle = ModItems.CAULDRON_LADLE.get();
+        return player.getInventory().items.stream().anyMatch(stack -> stack.is(ladle))
+                || player.getOffhandItem().is(ladle)
+                || link != null && RsiStorageLink.hasTool(player, link, ladle);
+    }
+    private void brew(ServerPlayer player, StorageLink link) {
+        rebuild();
+        if (!readyToBrew(player, link)) return;
+        if (requirements().stream().allMatch(need ->
+                inventoryCount(player, need) + RsiStorageLink.count(player, link, need) >= need.getCount())) {
+            feedAndBrew(player, link);
+            return;
+        }
+        if (link == null || !RsiStorageLink.isCurrentDefault(player, link)) { message = text("bind_failed"); return; }
+        materialPreviewRevision = revision;
+        PlanResponsePublisher.send(player, previewMaterials(player, link, Map.of(), Map.of(),
+                PlanningPreferences.empty()), 0L);
+    }
+    private PlanResponse previewMaterials(ServerPlayer player, StorageLink link,
+                                          Map<String, String> forced, Map<String, ItemStack> locks,
+                                          PlanningPreferences preferences) {
+        var endpoint = RsiStorageLink.endpoint(player, link);
+        return BrewMaterialPlan.create(BrewMaterialPlan.targetId(containerId, revision),
+                materialNeeds(), plan.output(), MaterialSources.listAllAvailableFresh(player, endpoint),
+                player.serverLevel(), player, endpoint, forced, locks, preferences);
+    }
+    public void handlePlan(ServerPlayer player, BrewNetwork.PlanAction request) {
+        if (!stillValid(player) || request.revision() != revision || materialPreviewRevision != revision) {
+            failPreview(player, request, text("storage_changed"));
+            return;
+        }
+        long now = player.serverLevel().getGameTime();
+        if (requestTick != now) { requestTick = now; requestsThisTick = 0; }
+        if (++requestsThisTick > 8 || pendingBrew || orders.busy()) {
+            failPreview(player, request, text("orders_busy"));
+            return;
+        }
+        try {
+            rebuild();
+            var link = RsiStorageLink.resolve(player).orElse(null);
+            if (!readyToBrew(player, link)) {
+                failPreview(player, request, message);
+                return;
+            }
+            var preview = previewMaterials(player, link, request.forced(), request.locks(), request.preferences());
+            if (request.preview()) {
+                PlanResponsePublisher.send(player, preview, request.requestId());
+                return;
+            }
+            // 确认时重新规划整批需求，缺基础原料的预览不能变成可执行订单。
+            if (!preview.success() || preview.executionBlocked()) {
+                message = text("storage_changed");
+                return;
+            }
+            materialPreviewRevision = -1;
+            if (link == null || !RsiStorageLink.isCurrentDefault(player, link)) {
+                message = text("bind_failed");
+                return;
+            }
+            startMaterialOrders(player, link, request, preview);
+        } catch (CraftingPlanningTimeoutException timeout) {
+            message = Component.translatable("rsi.plan.failure.planning_timeout");
+            failPreview(player, request, message);
+        } catch (RuntimeException | LinkageError failure) {
+            GoetyCauldronFeature.LOGGER.error("Cauldron material planning failed at {}", position, failure);
+            pendingBrew = false;
+            orders.close(player);
+            message = text("action_failed");
+            failPreview(player, request, message);
+        } finally {
+            sync(player);
+        }
+    }
+    private void failPreview(ServerPlayer player, BrewNetwork.PlanAction request, Component reason) {
+        if (request.preview()) PlanResponsePublisher.send(player,
+                new PlanResponse(false, "", ItemStack.EMPTY, List.of(), Map.of(), List.of(),
+                        "", null, null, 0, 0, 0, List.of(reason), 1), request.requestId());
+    }
+    private void startMaterialOrders(ServerPlayer player, StorageLink link, BrewNetwork.PlanAction request,
+                                     PlanResponse preview) {
+        var forced = new LinkedHashMap<String, ResourceLocation>();
+        request.preferences().recipeChoices().forEach((key, choice) ->
+                forced.put(key, ResourceLocation.parse(choice.serialize())));
+        request.forced().forEach((key, value) -> {
+            var recipe = ResourceLocation.tryParse(value);
+            if (recipe != null) forced.put(key, recipe);
+        });
+        // 已确认的整批树决定实际分支，逐项下单不能悄悄改选第一条可用配方。
+        for (var node : preview.graph().nodes()) {
+            var key = CraftingResolver.preferenceKey(node.primaryOutput());
+            if (key != null) forced.put(key.toString(), node.recipeId());
+        }
+        var locks = new LinkedHashMap<String, IntegrationResourceKey>();
+        request.preferences().ingredientChoices().forEach((key, stack) ->
+                locks.put(key, IntegrationResourceKey.item(stack)));
+        request.locks().forEach((key, stack) -> locks.put(key, IntegrationResourceKey.item(stack)));
+        var preferences = new ConsumerPlanningPreferences(forced, locks, request.preferences().excludedRecipes());
+        message = orders.startAlternatives(player, materialNeeds(), link, preferences);
+        pendingBrew = orders.busy() || orders.succeeded();
+        brewingStorage = link;
+        if (pendingBrew && !orders.busy()) continueBrewing(player);
+    }
+    private void continueBrewing(ServerPlayer player) {
+        if (!pendingBrew || orders.busy()) return;
+        pendingBrew = false;
+        if (!orders.succeeded()) return;
+        if (!RsiStorageLink.isCurrentDefault(player, brewingStorage)) { message = text("bind_failed"); return; }
+        // 递归材料到货后重新匹配替代品，并复核环境，不能沿用下单时的库存方案。
+        rebuild();
+        feedAndBrew(player, brewingStorage);
+    }
+    private void feedAndBrew(ServerPlayer player, StorageLink link) {
+        rebuild();
+        if (!readyToBrew(player, link)) return;
         var needs = requirements();
         for (var need : needs) if (inventoryCount(player, need) + RsiStorageLink.count(player, link, need) < need.getCount()) {
             message = Component.translatable("gui.rs_integration.missing_item", need.getHoverName()); return;
@@ -226,14 +377,21 @@ public final class WitchCauldronMenu extends AbstractContainerMenu {
             var before = target.saveWithFullMetadata();
             var blockBefore = target.getBlockState();
             boolean committed = false;
+            GoetySoulCraftingTask soulTask = null;
             try {
                 for (var step : plan.sequence()) {
                     target.mode = target.insertItem(step.copy());
                     if (target.mode == BrewCauldronBlockEntity.Mode.FAILED) { message = text("native_failed"); return; }
                 }
+                soulTask = GoetySoulCraftingTask.reserveCauldron(player, RsiStorageLink.endpoint(player, link),
+                        Math.max(1, target.getBrewCost()));
+                if (soulTask == null || !soulTask.prepareBeforeStart(target)) { message = text("need_souls"); return; }
+                if (!NativeCauldronActions.stir(player, target)) { message = text("cannot_start"); return; }
+                CauldronSoulAutomation.retain(target, player, soulTask);
                 committed = true;
             } finally {
                 if (!committed) {
+                    if (soulTask != null) soulTask.close();
                     target.getLevel().setBlockAndUpdate(position, blockBefore);
                     target.load(before); target.markUpdated();
                 }
@@ -241,38 +399,37 @@ public final class WitchCauldronMenu extends AbstractContainerMenu {
             reserved.clear(); // 预留材料已全部转交给当前坩埚。
             for (var step : plan.sequence()) if (step.hasCraftingRemainingItem()) RsiStorageLink.give(player, step.getCraftingRemainingItem());
             target.markUpdated();
-            player.getInventory().setChanged(); message = text("fed");
+            player.getInventory().setChanged(); message = text("started");
         } finally {
             reserved.stream().filter(s -> !s.isEmpty()).forEach(s -> RsiStorageLink.give(player, s));
             player.getInventory().setChanged();
         }
     }
-    private void stir(ServerPlayer player, StorageLink link) {
-        var ladle = new ItemStack(ModItems.CAULDRON_LADLE.get());
-        boolean tool = RsiStorageLink.bound(target) ? link != null && RsiStorageLink.hasTool(player, link, ladle.getItem())
-                : player.getMainHandItem().is(ladle.getItem()) || player.getOffhandItem().is(ladle.getItem());
-        if (!tool) { message = text(RsiStorageLink.bound(target) ? "need_network_ladle" : "need_ladle"); return; }
-        if (!target.isHeated() || target.getBlockState().getValue(BrewCauldronBlock.LEVEL) < 3) { message = text("need_heat_water"); return; }
-        if (NativeCauldronActions.availableSouls(target) < Math.max(1, target.totalCost - target.soulTime)) { message = text("need_souls"); return; }
-        GoetyCauldronCompat.brew(target, player);
-        message = text(GoetyCauldronCompat.isBusy(target) ? "started" : "cannot_start");
-    }
     @Override public void broadcastChanges() {
+        if (target != null && owner != null && owner.containerMenu == this
+                && !RSIntegrationConfig.isGoetyCauldronEnabled()) {
+            // 关闭菜单会返还暂存物品，并取消尚未完成的缺料订单。
+            owner.closeContainer();
+            return;
+        }
         super.broadcastChanges();
         if (target != null && ++ticks % 10 == 0 && owner != null && owner.containerMenu == this && stillValid(owner)) {
-            try { orders.tick(owner); }
+            try {
+                orders.tick(owner);
+                var orderMessage = orders.takeMessage();
+                if (orderMessage != null) message = orderMessage;
+                continueBrewing(owner);
+            }
             catch (RuntimeException | LinkageError failure) {
                 GoetyCauldronFeature.LOGGER.error("RSI material order failed at {}", position, failure);
-                orders.close(owner); message = text("order_failed");
+                pendingBrew = false; orders.close(owner); message = text("order_failed");
             }
-            var orderMessage = orders.takeMessage();
-            if (orderMessage != null) message = orderMessage;
             sync(owner);
         }
     }
     public void sync(ServerPlayer player) {
         owner = player;
-        var link = RsiStorageLink.resolve(player, target).orElse(null);
+        var link = RsiStorageLink.resolve(player).orElse(null);
         var counts = stockCounts(player, link);
         if (!orders.busy() && target.mode == BrewCauldronBlockEntity.Mode.IDLE && !counts.equals(plannedStock)) rebuild(counts);
         var data = new CompoundTag();
@@ -281,7 +438,7 @@ public final class WitchCauldronMenu extends AbstractContainerMenu {
         data.putString("message", Component.Serializer.toJson(message));
         data.putInt("water", Math.min(3, target.getBlockState().getValue(BrewCauldronBlock.LEVEL)));
         data.putString("mode", target.mode.name()); data.putBoolean("heated", target.isHeated());
-        data.putBoolean("bound", RsiStorageLink.bound(target)); data.putBoolean("ordersBusy", orders.busy());
+        data.putBoolean("ordersBusy", orders.busy() || pendingBrew);
         data.putBoolean("online", link != null);
         data.putInt("capacity", plan.capacity()); data.putInt("used", plan.used()); data.putInt("souls", plan.soulCost());
         data.putBoolean("valid", plan.valid()); data.put("output", plan.output().save(new CompoundTag()));
@@ -326,6 +483,7 @@ public final class WitchCauldronMenu extends AbstractContainerMenu {
     @Override public void removed(Player player) {
         super.removed(player);
         if (player instanceof ServerPlayer server) {
+            pendingBrew = false;
             clearContainer(player, containers);
             if (orders != null) orders.close(server);
             if (remote) RemoteGuiAuth.deauthorize(player.getUUID(), this);

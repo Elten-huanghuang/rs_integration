@@ -6,12 +6,12 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** 亡灵火盆到统一灵魂账本的运行时端口。 */
-public final class BrazierSoulPort {
+/** 亡灵火炉和女巫坩埚共用的烛台与统一灵魂账本端口。 */
+public final class GoetyCandleSoulPort {
     private static final Map<Object, ActiveSource> ACTIVE =
             new IdentityHashMap<>();
 
-    private BrazierSoulPort() {}
+    private GoetyCandleSoulPort() {}
 
     static void attach(Object brazier, GoetySoulSourceCoordinator coordinator,
                        List<Object> candles) {
@@ -23,7 +23,8 @@ public final class BrazierSoulPort {
                        int virtualCandleSpeed) {
         synchronized (ACTIVE) {
             ACTIVE.put(brazier, new ActiveSource(
-                    coordinator, virtualCandle, Math.max(1, virtualCandleSpeed)));
+                    coordinator, candles == null ? List.of() : List.copyOf(candles),
+                    virtualCandle, Math.max(1, virtualCandleSpeed)));
         }
         GoetyVirtualSoulAccess.attach(
                 brazier, coordinator, candles == null ? List.of() : candles);
@@ -40,6 +41,17 @@ public final class BrazierSoulPort {
         return find(brazier) != null;
     }
 
+    public static List<Object> candles(Object machine) {
+        ActiveSource active = find(machine);
+        return active == null ? List.of() : active.candles();
+    }
+
+    /** 加速只消耗当前剩余配方预算，不能超扣或透支灵魂。 */
+    public static int advance(Object machine, int requested) {
+        int amount = Math.min(Math.max(0, requested), Math.max(0, souls(machine)));
+        return amount > 0 && consume(machine, amount) ? amount : 0;
+    }
+
     /** 未接管时返回 -1。 */
     public static int souls(Object brazier) {
         ActiveSource active = find(brazier);
@@ -52,7 +64,7 @@ public final class BrazierSoulPort {
         return active != null && active.coordinator().consume(amount);
     }
 
-    /** RSI 递归合成无实体烛台时注入的内存烛台；手动合成返回 null。 */
+    /** RSI 自动炼制无实体烛台时注入的内存烛台；原生手动合成返回 null。 */
     @Nullable
     public static Object virtualCandle(Object brazier) {
         ActiveSource active = find(brazier);
@@ -83,6 +95,7 @@ public final class BrazierSoulPort {
     }
 
     private record ActiveSource(GoetySoulSourceCoordinator coordinator,
+                                List<Object> candles,
                                 @Nullable Object virtualCandle,
                                 int virtualCandleSpeed) {}
 }

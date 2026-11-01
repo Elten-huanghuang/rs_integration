@@ -22,13 +22,15 @@ public final class WitchCauldronScreen extends AbstractContainerScreen<WitchCaul
     private List<BrewCatalog.Entry> catalog = List.of();
     private List<BrewCatalog.Group> effects = List.of(), modifiers = List.of();
     private List<BrewCatalog.Group> filtered = List.of();
+    private final Map<BrewCatalog.Group, BrewSearchIndex> searchIndex = new HashMap<>();
     private int page, offset, needsOffset, accepted = -1, levelOffset;
     private BrewCatalog.Group focus;
     private EditBox search;
-    private Button back, next, feed, craft, stir, bind, clear, remove;
+    private Button back, next, brew, water, bottle, clear, remove;
     private final List<Button> levels = new ArrayList<>();
     private double scale = 1;
     private String query = "";
+    private int materialPlanRevision = -1;
 
     public WitchCauldronScreen(WitchCauldronMenu menu, Inventory inventory, Component title) {
         super(menu, inventory, title);
@@ -38,7 +40,7 @@ public final class WitchCauldronScreen extends AbstractContainerScreen<WitchCaul
     private Button add(String key, int x, int y, int w, Runnable action) {
         var b = new Button(leftPos + x, topPos + y, w, 18, tr(key), ignored -> action.run(), n -> n.get()) {
             @Override public void renderWidget(GuiGraphics g, int mx, int my, float dt) {
-                boolean primary = this == next || this == feed;
+                boolean primary = this == next || this == brew;
                 int bg = primary ? (isHoveredOrFocused() ? 0xFF577762 : 0xFF405D4D)
                         : (isHoveredOrFocused() && active ? 0xFFF4E7CB : 0xFFE5D5B5);
                 if (!active) bg = 0xFFD8CFBB;
@@ -75,13 +77,10 @@ public final class WitchCauldronScreen extends AbstractContainerScreen<WitchCaul
         remove = add("remove_modifier", 277, 127, 82, () -> {
             if (focus != null) { selected.removeIf(id -> belongs(id,focus)); send("preview"); }
         });
-        add("add_water", 9, 110, 78, () -> send("water"));
-        add("bottle", 9, 132, 78, () -> send("bottle"));
-        bind = add("bind_button", 9, 160, 78, () -> send(menu.clientState.getBoolean("bound") ? "unbind" : "bind"));
-        clear = add("clear_failed", 9, 183, 78, () -> send("clear"));
-        craft = add("craft_missing", 277, 193, 94, () -> send("craft"));
-        feed = add("feed", 277, 216, 94, () -> send("feed"));
-        stir = add("stir", 277, 239, 94, () -> send("stir"));
+        water = add("add_water", 9, 110, 78, () -> send("water"));
+        bottle = add("bottle", 9, 132, 78, () -> send("bottle"));
+        clear = add("clear_failed", 9, 160, 78, () -> send("clear"));
+        brew = add("brew", 277, 216, 94, () -> send("brew"));
         filter();
     }
     private void changePage(int p) {
@@ -106,18 +105,35 @@ public final class WitchCauldronScreen extends AbstractContainerScreen<WitchCaul
     }
     private void send(String action) {
         menu.clientRevision++;
+        materialPlanRevision = action.equals("brew") ? menu.clientRevision : -1;
         BrewNetwork.CHANNEL.sendToServer(new BrewNetwork.Edit(menu.containerId,menu.clientRevision,-1,List.copyOf(selected),action));
     }
+    public boolean consumeMaterialPlan(int revision) {
+        if (materialPlanRevision != revision) return false;
+        materialPlanRevision = -1;
+        return true;
+    }
     private void filter() {
-        String q=query.toLowerCase(Locale.ROOT);
-        filtered=(page==0?effects:modifiers).stream().filter(g -> g.name().getString().toLowerCase(Locale.ROOT).contains(q)
-                || g.entries().stream().anyMatch(e -> e.item().toString().contains(q)
-                || e.stack().getHoverName().getString().toLowerCase(Locale.ROOT).contains(q))).toList();
+        filtered=(page==0?effects:modifiers).stream()
+                .filter(group -> searchIndex.get(group).matches(query)).toList();
+    }
+    private void indexSearch() {
+        searchIndex.clear();
+        for (var groups : List.of(effects, modifiers)) for (var group : groups) {
+            var labels = new ArrayList<String>();
+            labels.add(group.name().getString());
+            for (var entry : group.entries()) {
+                labels.add(entry.name().getString());
+                labels.add(entry.item().toString());
+                labels.add(entry.stack().getHoverName().getString());
+            }
+            searchIndex.put(group, new BrewSearchIndex(labels));
+        }
     }
     private void update() {
         if (catalog != menu.clientCatalog) {
             catalog=menu.clientCatalog; effects=BrewCatalog.groups(catalog,BrewCatalog.EFFECT);
-            modifiers=BrewCatalog.groups(catalog,BrewCatalog.MODIFIER); filter();
+            modifiers=BrewCatalog.groups(catalog,BrewCatalog.MODIFIER); indexSearch(); filter();
         }
         var s=menu.clientState; int rev=s.getInt("revision");
         if (rev==menu.clientRevision && accepted!=rev && s.contains("selected")) {
@@ -130,11 +146,11 @@ public final class WitchCauldronScreen extends AbstractContainerScreen<WitchCaul
         search.visible=page<2; search.setEditable(ready);
         back.visible=page>0; back.active=ready;
         next.visible=page<2; next.active=ready && hasEffect();
-        bind.active=ready; bind.setMessage(tr(s.getBoolean("bound")?"unbind_button":"bind_button"));
         clear.active=ready && s.getString("mode").equals("FAILED");
-        craft.active=page==2 && ready && s.getBoolean("valid") && s.getBoolean("online");
-        feed.active=page==2 && ready && s.getBoolean("valid");
-        stir.active=ready;
+        water.active=ready && s.getString("mode").equals("IDLE") && s.getInt("water")<3;
+        bottle.active=ready && (s.getString("mode").equals("IDLE") || s.getString("mode").equals("COMPLETED"))
+                && s.getInt("water")>0;
+        brew.active=page==2 && ready && s.getBoolean("valid") && s.getString("mode").equals("IDLE");
         var tiers=focus==null?List.<Integer>of():focus.levels();
         levelOffset=Math.min(levelOffset, Math.max(0,tiers.size()-4));
         for(int i=0;i<levels.size();i++) {

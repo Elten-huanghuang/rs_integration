@@ -15,13 +15,13 @@ import java.util.List;
 public final class RSIntegrationConfig {
     public static final int REPEAT_COUNT_DEFAULT = 1024;
     public static final int REPEAT_COUNT_ABSOLUTE_MAX = 1024;
-    public static final int SERVER_CONFIG_SCHEMA = 7;
+    public static final int SERVER_CONFIG_SCHEMA = 8;
     public static final List<String> DEFAULT_ANVIL_MEMORY_ADAPTERS = List.of(
             "minecraft_anvil", "goety_dark_anvil", "irons_spellbooks_arcane_anvil");
     public static final List<String> DEFAULT_FREE_WATER_MACHINES = List.of(
             "farmersrespite_kettle", "youkaishomecoming_kettle", "youkaishomecoming_ferment",
             "youkaishomecoming_moka", "youkaishomecoming_steamer", "irons_spellbooks_alchemist_cauldron",
-            "eidolon_crucible", "botania_petal_apothecary", "wizards_reborn_alchemy");
+            "eidolon_crucible", "botania_petal_apothecary", "wizards_reborn_alchemy", "goety_witch_cauldron");
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> FREE_WATER_MACHINES;
     private static final List<String> LEGACY_DEFAULT_PASSIVE_TICK_ITEMS = List.of(
             "reliquary:pyromancer_staff|mutates",
@@ -190,6 +190,7 @@ public final class RSIntegrationConfig {
 
     //  per-mod integration
     public static ForgeConfigSpec.BooleanValue ENABLE_GOETY;
+    public static ForgeConfigSpec.BooleanValue ENABLE_GOETY_CAULDRON;
     public static ForgeConfigSpec.BooleanValue ENABLE_GOETY_SOUL_REVERSE_REFILL;
     public static ForgeConfigSpec.IntValue GOETY_BRAZIER_VIRTUAL_CANDLE_COUNT;
     public static ForgeConfigSpec.BooleanValue ENABLE_MALUM;
@@ -468,16 +469,22 @@ public final class RSIntegrationConfig {
                 .comment("启用诡厄巫法兼容",
                         "支持黑暗祭坛等机器绑定与远程合成。")
                 .define("enableGoety", true);
+        ENABLE_GOETY_CAULDRON = c
+                .comment("启用女巫坩埚集成",
+                        "启用 RSI 的女巫坩埚访问器入口、补水和递归炼制；同时需要 enableGoety 开启。",
+                        "关闭后保留 Goety 原生坩埚及已有数据，不影响其他 Goety 集成；修改后需重启游戏。")
+                .worldRestart()
+                .define("enableGoetyCauldron", true);
         ENABLE_GOETY_SOUL_REVERSE_REFILL = c
                 .comment("允许 RS 灵魂能量反向补货灵魂方舟",
                         "开启后，灵魂方舟发生灵魂消耗时从绑定 RS 网络按剩余容量一次补满；每 20 tick 最多尝试一次",
                         "关闭时只保留灵魂方舟溢出写入 RS 的原行为")
                 .define("enableGoetySoulReverseRefill", false);
         GOETY_BRAZIER_VIRTUAL_CANDLE_COUNT = c
-                .comment("亡灵火炉递归合成虚拟烛台数",
+                .comment("亡灵火炉与女巫坩埚自动炼制虚拟烛台数",
                         "无实体灵魂烛台时，递归合成使用指定数量的内存烛台。每 tick 每个烛台推进 1 点进度并消耗 1 点灵魂，总成本不变。",
-                        "仅影响 RSI 递归合成；玩家手动点火仍遵循 Goety 原版烛台结构。")
-                .defineInRange("goetyBrazierVirtualCandleCount", 64, 1, 64);
+                        "亡灵火炉递归合成和女巫坩埚一键炼制共用，最多 1024；玩家手动点火仍遵循 Goety 原版烛台结构。")
+                .defineInRange("goetyBrazierVirtualCandleCount", 64, 1, 1024);
         ENABLE_MALUM = c
                 .comment("启用灵灾兼容",
                         "支持精魂祭坛、精魂坩埚等机器绑定与远程合成。")
@@ -1147,7 +1154,8 @@ public final class RSIntegrationConfig {
                         "未列出的机器从 RS 流体存储扣除补入的水；已有的水可以继续使用。",
                         "Supported: farmersrespite_kettle, youkaishomecoming_kettle, youkaishomecoming_ferment,",
                         "youkaishomecoming_moka, youkaishomecoming_steamer, irons_spellbooks_alchemist_cauldron,",
-                        "eidolon_crucible, botania_petal_apothecary, wizards_reborn_alchemy.",
+                        "eidolon_crucible, botania_petal_apothecary, wizards_reborn_alchemy, goety_witch_cauldron.",
+                        "女巫坩埚按一桶水 1000 mB 计算，补齐当前缺少的水位；也可使用水桶或水瓶。",
                         "摩卡壶、蒸锅和花药台每次从无水变为有水时消耗 1000 mB，其余机器按缺水量扣除。")
                 .defineListAllowEmpty("freeWaterMachines", DEFAULT_FREE_WATER_MACHINES,
                         value -> value instanceof String name && name.matches("[a-z0-9_]+"));
@@ -1663,8 +1671,11 @@ public final class RSIntegrationConfig {
     }
 
     public static List<? extends String> migrateFreeWaterMachines(int schema, List<? extends String> currentValue) {
-        List<String> oldDefaults = DEFAULT_FREE_WATER_MACHINES.subList(0, DEFAULT_FREE_WATER_MACHINES.size() - 1);
-        return schema < 7 && currentValue.equals(oldDefaults) ? DEFAULT_FREE_WATER_MACHINES : currentValue;
+        List<String> beforeAlchemy = DEFAULT_FREE_WATER_MACHINES.subList(0, DEFAULT_FREE_WATER_MACHINES.size() - 2);
+        List<String> beforeCauldron = DEFAULT_FREE_WATER_MACHINES.subList(0, DEFAULT_FREE_WATER_MACHINES.size() - 1);
+        return schema < 7 && currentValue.equals(beforeAlchemy)
+                || schema < 8 && currentValue.equals(beforeCauldron)
+                ? DEFAULT_FREE_WATER_MACHINES : currentValue;
     }
 
     public static List<? extends String> migrateAnvilMemoryAdapters(
@@ -1711,6 +1722,11 @@ public final class RSIntegrationConfig {
     /** 构造阶段配置尚未加载；开发环境直接取值会抛异常，正式环境则返回默认值。 */
     public static boolean enabled(ForgeConfigSpec spec, ForgeConfigSpec.BooleanValue value) {
         return spec.isLoaded() ? value.get() : value.getDefault();
+    }
+
+    /** 女巫坩埚同时受 Goety 总开关和独立功能开关控制。 */
+    public static boolean isGoetyCauldronEnabled() {
+        return enabled(COMMON_SPEC, ENABLE_GOETY) && enabled(COMMON_SPEC, ENABLE_GOETY_CAULDRON);
     }
 
     /** 按键码在 RegisterKeyMappingsEvent 前读取，未加载时使用定义中的默认键。 */

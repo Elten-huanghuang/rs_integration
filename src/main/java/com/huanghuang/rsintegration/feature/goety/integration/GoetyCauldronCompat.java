@@ -4,6 +4,8 @@ import com.Polarice3.Goety.common.blocks.entities.BrewCauldronBlockEntity;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.Container;
+import net.minecraft.world.item.ItemStack;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
@@ -14,6 +16,8 @@ public final class GoetyCauldronCompat {
     private static final Field IS_CRAFTING = optionalField("isCrafting");
     private static final Field RECIPE_ID = optionalField("recipeId");
     private static final Method BREW_FOR_PLAYER = optionalMethod("brew", Player.class);
+    private static final Method GET_CRAFT_CONTAINER = optionalMethod("getCraftContainer");
+    private static final Method GET_CRAFTED_ITEM = optionalMethod("getCraftedItem");
     private static final Class<?> SOUL_CANDLE_API = optionalClass(
             "com.Polarice3.Goety.api.blocks.entities.ISoulCandle");
     private static final Class<?> SOUL_CANDLE_BLOCK_ENTITY = optionalClass(
@@ -34,8 +38,34 @@ public final class GoetyCauldronCompat {
         return cauldron.isBrewing || isCrafting(cauldron) || hasMode(cauldron, "BREWING");
     }
 
+    public static boolean isRunning(BrewCauldronBlockEntity cauldron) {
+        return cauldron.isBrewing || booleanField(IS_CRAFTING, cauldron);
+    }
+
+    public static ItemStack craftedOutput(BrewCauldronBlockEntity cauldron) {
+        if (GET_CRAFTED_ITEM == null) return ItemStack.EMPTY;
+        try {
+            Object value = GET_CRAFTED_ITEM.invoke(cauldron);
+            return value instanceof ItemStack stack ? stack.copy() : ItemStack.EMPTY;
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalStateException("无法读取 Goety 坩埚工艺产物", exception);
+        }
+    }
+
     public static boolean isCrafted(BrewCauldronBlockEntity cauldron) {
         return hasMode(cauldron, "CRAFTED");
+    }
+
+    public static boolean hasIngredients(BrewCauldronBlockEntity cauldron) {
+        if (cauldron.container.stream().anyMatch(stack -> !stack.isEmpty())
+                || cauldron.sacrificed.values().stream().anyMatch(entity -> entity != null)) return true;
+        if (GET_CRAFT_CONTAINER == null) return false;
+        try {
+            Object value = GET_CRAFT_CONTAINER.invoke(cauldron);
+            return value instanceof Container container && !container.isEmpty();
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalStateException("无法读取 Goety 坩埚工艺材料", exception);
+        }
     }
 
     public static ResourceLocation recipeId(BrewCauldronBlockEntity cauldron) {

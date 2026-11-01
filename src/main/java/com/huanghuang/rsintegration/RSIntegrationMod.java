@@ -447,7 +447,7 @@ public final class RSIntegrationMod {
         var migratedFreeWater = RSIntegrationConfig.migrateFreeWaterMachines(schema, currentFreeWater);
         if (!migratedFreeWater.equals(currentFreeWater)) {
             RSIntegrationConfig.FREE_WATER_MACHINES.set(migratedFreeWater);
-            LOGGER.info("[RSI-Config] 已启用炼金机免费补水");
+            LOGGER.info("[RSI-Config] 已更新机器免费补水默认列表");
         }
 
         int currentMax = RSIntegrationConfig.REPEAT_COUNT_MAX.get();

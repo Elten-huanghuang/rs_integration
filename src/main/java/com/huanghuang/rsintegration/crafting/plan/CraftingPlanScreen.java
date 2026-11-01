@@ -12,6 +12,7 @@ import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.planning.PlanningProgressSnapshot;
 import com.huanghuang.rsintegration.crafting.planning.PlanningProgressTracker;
 import com.huanghuang.rsintegration.crafting.planning.PlanningRequestIds;
+import com.huanghuang.rsintegration.crafting.planning.PlanningPreferences;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.item.TooltipFlag;
 import net.minecraftforge.fml.ModList;
@@ -332,10 +333,22 @@ public final class CraftingPlanScreen extends Screen {
     /** 当前悬停的是否为引用节点（成本已在树中别处展开）。 */
     private boolean hoveredTooltipReference;
 
-    protected CraftingPlanScreen(PlanResponse plan, long requestId) {
+    /** 外部终端复用计划树，同时保留自己的执行入口与父界面。 */
+    public interface RequestHandler {
+        void request(boolean preview, long requestId, Map<String, String> forced,
+                     Map<String, ItemStack> locks, PlanningPreferences preferences);
+    }
+
+    private final RequestHandler externalRequest;
+    private final Runnable returnToParent;
+
+    public CraftingPlanScreen(PlanResponse plan, long requestId,
+                              RequestHandler externalRequest, Runnable returnToParent) {
         super(Component.translatable("rsi.plan.title",
                 plan.targetResult().getHoverName().getString()));
         this.plan = plan;
+        this.externalRequest = externalRequest;
+        this.returnToParent = returnToParent;
         this.responseRequests = new PlanResponseRequestState(requestId, plan.recipeId());
         this.currentRepeat = clampRepeatCount(plan.repeatCount());
         this.lastRefreshCount = currentRepeat;
@@ -355,6 +368,10 @@ public final class CraftingPlanScreen extends Screen {
         JeiCraftingPlanContext.INSTANCE.activate(plan);
     }
 
+    protected CraftingPlanScreen(PlanResponse plan, long requestId) {
+        this(plan, requestId, null, null);
+    }
+
     /** Exposed for {@link PlanResponsePacket} dedup check. */
     public String getRecipeId() {
         return plan.recipeId();
@@ -367,6 +384,10 @@ public final class CraftingPlanScreen extends Screen {
     @Override
     public void onClose() {
         responseRequests.cancelConfirmation();
+        if (externalRequest != null) {
+            returnToParent.run();
+            return;
+        }
         if (responseRequests.pending()) {
             PlanBackgroundClient.detach(responseRequests.activeRequestId());
         }
@@ -408,7 +429,7 @@ public final class CraftingPlanScreen extends Screen {
         // 预览失败且没有目标步骤时不要清空当前可用计划。压缩/分解配方很容易
         // 形成 锭→块→锭 的闭环；若直接替换计划树，原节点会消失，玩家就无法
         // 从候选面板切回上一条配方。
-        if (PlanPreviewDecision.keepCurrentPlan(
+        if (externalRequest == null && PlanPreviewDecision.keepCurrentPlan(
                 plan, newPlan, pendingCandidateSwitch != null)) {
             responseRequests.cancelConfirmation();
             if (minecraft != null && minecraft.player != null) {
@@ -579,7 +600,7 @@ public final class CraftingPlanScreen extends Screen {
 
         boolean questSubmission = QuestSubmissionTargetIds.isQuestSubmission(
                 ResourceLocation.tryParse(plan.recipeId()));
-        if (!questSubmission) {
+        if (!questSubmission && externalRequest == null) {
             outputSegmentW = 132;
             outputSelectorH = 20;
             outputSelectorX = width / 2 - outputSegmentW / 2;
@@ -615,6 +636,7 @@ public final class CraftingPlanScreen extends Screen {
                 .build();
         confirmButton.setTooltip(Tooltip.create(
                 Component.translatable("rsi.plan.machine_clear_notice")));
+        if (externalRequest != null) confirmButton.setTooltip(null);
         updateConfirmButton();
         addRenderableWidget(confirmButton);
 
@@ -693,6 +715,7 @@ public final class CraftingPlanScreen extends Screen {
     }
 
     private void createRepeatCountInput(Font font) {
+        if (externalRequest != null) return;
         RepeatRowLayout layout = repeatRowLayout(font);
         repeatCountBox = new EditBox(font, layout.inputX(), layout.inputY(),
                 REPEAT_INPUT_W, layout.inputH(), Component.translatable("rsi.plan.repeat_count"));
@@ -734,7 +757,7 @@ public final class CraftingPlanScreen extends Screen {
     }
 
     private void setRepeatCount(int count, boolean updateInput) {
-        int normalized = clampRepeatCount(count);
+        int normalized = externalRequest == null ? clampRepeatCount(count) : 1;
         boolean changed = normalized != currentRepeat;
         currentRepeat = normalized;
         if (updateInput && repeatCountBox != null
@@ -874,6 +897,11 @@ public final class CraftingPlanScreen extends Screen {
             lastRefreshCount = repeatCount;
             responseRequests.beginPreview(requestId, rid.toString());
             updateConfirmButton();
+        }
+        if (externalRequest != null) {
+            externalRequest.request(preview, requestId, forced, Map.copyOf(materialLocks),
+                    CraftingPlanPreferences.load(PLAN_PREFS_PATH).toPlanningPreferences());
+            return;
         }
         if (preview && QuestSubmissionTargetIds.isQuestSubmission(rid)) {
             // Quest previews use their own planner and return an uncorrelated
@@ -1348,6 +1376,10 @@ public final class CraftingPlanScreen extends Screen {
     // ── Repeat count row ─────────────────────────────────────────────
 
     private void drawRepeatRow(GuiGraphics gfx, Font font) {
+        if (externalRequest != null) {
+            renderRepeatMissingSummary(gfx, font, repeatRowLayout(font));
+            return;
+        }
         String[] leftLabels = {"1", "-10", "-5", "-"};
         String[] rightLabels = {"+", "+5", "+10", "+64"};
 
@@ -2966,7 +2998,7 @@ public final class CraftingPlanScreen extends Screen {
     private void layoutBottomStack() {
         int repeatAreaH = 38;
         // Leave separate rows for preparation mode and output destination.
-        repeatRowY = height - 75 - repeatAreaH;
+        repeatRowY = height - (externalRequest == null ? 75 : 32) - repeatAreaH;
         int effMaterialH = (viewMode == ViewMode.CARD) ? materialAreaHeight : 0;
         materialAreaTop = repeatRowY - effMaterialH;
         missingAreaTop = materialAreaTop - missingAreaHeight;

@@ -1,30 +1,25 @@
 package com.huanghuang.rsintegration.feature.goety.integration;
 
 import com.huanghuang.rsintegration.api.storage.*;
-import com.Polarice3.Goety.common.blocks.entities.BrewCauldronBlockEntity;
-import net.minecraft.nbt.CompoundTag;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
+import com.huanghuang.rsintegration.storage.StorageBackendId;
+import com.huanghuang.rsintegration.storage.StorageReference;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import java.util.*;
 
-/** Cauldron bindings use the public storage API; legacy world bindings remain readable. */
+/** 每次操作使用玩家当前默认网络，坩埚不保存独立存储绑定。 */
 public final class RsiStorageLink {
-    private static final String KEY = "goety_rsi_storage";
     private RsiStorageLink() {}
-    public static boolean bound(BrewCauldronBlockEntity be) { return be.getPersistentData().contains(KEY); }
-    public static boolean bind(ServerPlayer player, BrewCauldronBlockEntity be) {
-        var session = RSIStorageApi.get().flatMap(api -> api.defaultStorage(player));
-        if (session.isEmpty()) return false;
-        var tag = new CompoundTag();
-        tag.putString("backend", session.get().backendId()); tag.putString("network", session.get().networkId());
-        be.getPersistentData().put(KEY, tag); be.markUpdated(); return true;
+    public static Optional<StorageLink> resolve(ServerPlayer player) {
+        return RSIStorageApi.get().flatMap(api -> api.defaultStorage(player));
     }
-    public static void unbind(BrewCauldronBlockEntity be) { be.getPersistentData().remove(KEY); be.markUpdated(); }
-    public static Optional<StorageLink> resolve(ServerPlayer player, BrewCauldronBlockEntity be) {
-        if (!bound(be)) return Optional.empty();
-        var tag = be.getPersistentData().getCompound(KEY);
-        return RSIStorageApi.get().flatMap(api -> api.resolve(player, tag.getString("backend"), tag.getString("network")));
+    public static CraftStorageEndpoint endpoint(ServerPlayer player, StorageLink link) {
+        if (link == null || !isCurrentDefault(player, link)) return null;
+        return CraftStorageEndpoints.resolve(
+                new StorageReference(new StorageBackendId(link.backendId()), link.networkId()), player).orElse(null);
     }
     public static boolean isCurrentDefault(ServerPlayer player, StorageLink link) {
         return RSIStorageApi.get().map(api -> api.isCurrentDefault(player, link)).orElse(false);
@@ -47,5 +42,12 @@ public final class RsiStorageLink {
     }
     public static void give(ServerPlayer player, ItemStack stack) {
         var remainder = stack.copy(); if (!player.getInventory().add(remainder)) player.drop(remainder, false);
+    }
+    public static int inventoryCount(ServerPlayer player, ItemStack item) {
+        int count = 0;
+        for (var stack : player.getInventory().items) {
+            if (ItemStack.isSameItemSameTags(stack, item)) count += stack.getCount();
+        }
+        return count;
     }
 }
