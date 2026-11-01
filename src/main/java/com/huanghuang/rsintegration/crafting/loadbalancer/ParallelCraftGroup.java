@@ -700,6 +700,24 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             worker.retry.defer(currentTick);
             return false;
         }
+        if (!reusingPreparedDelegate && worker.hasStartedOperation) {
+            try {
+                if (!worker.delegate.transferReusableMaterialsTo(delegate)) {
+                    closeOperationResources(worker);
+                    releasePreparationQuietly(delegate, worker.machine);
+                    beginDraining("worker reusable material handoff failed at " + worker.machine.pos());
+                    return false;
+                }
+            } catch (RuntimeException exception) {
+                closeOperationResources(worker);
+                releasePreparationQuietly(delegate, worker.machine);
+                beginDraining("worker reusable material handoff threw at " + worker.machine.pos());
+                RSIntegrationMod.LOGGER.warn(
+                        "[RSI-ParallelGroup] Reusable material handoff failed at {}",
+                        worker.machine.pos(), exception);
+                return false;
+            }
+        }
         List<Integer> claimedOperations = operations.claimBatch(worker.id, batchSize);
         if (claimedOperations.isEmpty() || claimedOperations.get(0) != operationId) {
             closeOperationResources(worker);
@@ -1312,6 +1330,17 @@ public final class ParallelCraftGroup implements IBatchDelegate {
                 releasePreparationQuietly(worker.delegate, worker.machine);
             }
         }
+    }
+
+    @Override
+    public List<ItemStack> collectReusableMaterials(@NotNull ServerPlayer player) {
+        List<ItemStack> recovered = new ArrayList<>();
+        for (WorkerSlot worker : workers) {
+            if (worker.delegate != null && worker.hasStartedOperation) {
+                recovered.addAll(worker.delegate.collectReusableMaterials(player));
+            }
+        }
+        return List.copyOf(recovered);
     }
 
     @Override

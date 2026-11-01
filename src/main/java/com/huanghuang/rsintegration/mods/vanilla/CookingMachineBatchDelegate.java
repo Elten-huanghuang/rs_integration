@@ -257,8 +257,22 @@ public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
+    public List<ItemStack> collectReusableMaterials(@Nonnull ServerPlayer player) {
+        return delegate == null ? List.of() : delegate.collectReusableMaterials(player);
+    }
+
+    @Override
+    public boolean transferReusableMaterialsTo(@Nonnull IBatchDelegate successor) {
+        if (delegate == null) return true;
+        return successor instanceof CookingMachineBatchDelegate next
+                && next.delegate != null && delegate.transferReusableMaterialsTo(next.delegate);
+    }
+
+    @Override
     public void releaseReusableMaterials(@Nonnull ServerPlayer player) {
         if (delegate != null) delegate.releaseReusableMaterials(player);
+        // 失败路径先归还复用材料、后清理机器，不能在失败清理前丢弃子实例。
+        if (isTerminalCleanupDone()) delegate = null;
     }
 
     @Override
@@ -283,8 +297,9 @@ public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public void onBatchFinished(@Nonnull ServerPlayer player) {
+        if (!markTerminalCleanup()) return;
         if (delegate != null) delegate.onBatchFinished(player);
-        delegate = null;
+        // 整个节点稍后才收取或归还可复用材料，子批次结束时仍需保留其所有权。
         resetState();
     }
 

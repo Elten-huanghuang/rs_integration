@@ -1065,8 +1065,43 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     }
 
     @Override
+    public List<ItemStack> collectReusableMaterials(@NotNull ServerPlayer player) {
+        if (!hasReusableCatalystInput() || invCatalyst == null) return List.of();
+        List<ItemStack> recovered = new ArrayList<>();
+        for (int i = 0; i < invCatalyst.getSlots(); i++) {
+            ItemStack catalyst = invCatalyst.getStackInSlot(i);
+            if (catalyst.isEmpty()) continue;
+            ItemStack actual = catalyst.copy();
+            setSlot(invCatalyst, i, ItemStack.EMPTY);
+            if (invCatalyst.getStackInSlot(i).isEmpty()) recovered.add(actual);
+        }
+        if (!catalystStock.isEmpty()) {
+            recovered.add(catalystStock.copy());
+            catalystStock = ItemStack.EMPTY;
+        }
+        if (crucibleBE instanceof BlockEntity be) be.setChanged();
+        return List.copyOf(recovered);
+    }
+
+    @Override
     public void releaseReusableMaterials(@NotNull ServerPlayer player) {
         releaseCatalystSlot(player);
+    }
+
+    @Override
+    public boolean transferReusableMaterialsTo(@NotNull IBatchDelegate successor) {
+        if (!(successor instanceof MalumSpiritCrucibleBatchDelegate next)
+                || crucibleBE != next.crucibleBE || invCatalyst != next.invCatalyst
+                || next.catalystStockInitialized || !next.catalystStock.isEmpty()) return false;
+        next.catalystStock = catalystStock;
+        next.catalystStockInitialized = catalystStockInitialized;
+        next.catalystReturnEndpoint = catalystReturnEndpoint;
+        catalystStock = ItemStack.EMPTY;
+        catalystStockInitialized = false;
+        catalystReturnEndpoint = null;
+        // 槽位的材料所有权也已移交，前驱不能再次收取同一枚催化剂。
+        invCatalyst = null;
+        return true;
     }
 
     private void releaseCatalystSlot(@Nullable ServerPlayer returnPlayer) {

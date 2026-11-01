@@ -8,6 +8,7 @@ import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.crafting.graph.ConcurrentNodeExecutor;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
+import com.huanghuang.rsintegration.crafting.graph.InputPortId;
 import com.huanghuang.rsintegration.crafting.graph.NodeOutputAccumulator;
 import com.huanghuang.rsintegration.crafting.graph.OutputDeclaration;
 import com.huanghuang.rsintegration.crafting.graph.OutputProbability;
@@ -87,6 +88,104 @@ class CraftProgressRuntimeTest extends BootstrapTest {
         runtime.setChainContext(new ArrayList<>(), player);
 
         assertEquals(ConcurrentNodeExecutor.Observation.SUCCEEDED, runtime.observe());
+    }
+
+    @Test
+    void graphPublishesTheActualCatalystBeforeFinishCleanupAndOnlyOnce() {
+        ItemStack catalyst = new ItemStack(Items.STICK);
+        catalyst.getOrCreateTag().putString("owner", "original");
+        List<String> calls = new ArrayList<>();
+        StubDelegate delegate = new StubDelegate(IBatchDelegate.CraftPhase.DONE, "") {
+            @Override
+            public ItemStack collectResult(ServerPlayer player) {
+                return new ItemStack(Items.DIAMOND, 4);
+            }
+
+            @Override
+            public List<ItemStack> collectReusableMaterials(ServerPlayer player) {
+                calls.add("collect");
+                return List.of(catalyst.copy());
+            }
+
+            @Override
+            public void onBatchFinished(ServerPlayer player) {
+                calls.add("finish");
+            }
+
+            @Override
+            public void releaseReusableMaterials(ServerPlayer player) {
+                calls.add("release");
+            }
+        };
+        NodeId node = new NodeId(20);
+        CraftNodeRuntime runtime = new CraftNodeRuntime(
+                node, "test:catalyst-return", delegate, null, null);
+        runtime.setChainContext(new ArrayList<>(), player);
+        runtime.attachOutputs(new NodeOutputAccumulator(List.of(
+                OutputDeclaration.item(new OutputPortId(node, 0),
+                        MaterialKey.of(new ItemStack(Items.DIAMOND)), 4, OutputKind.PRIMARY),
+                OutputDeclaration.item(new OutputPortId(node, 1), MaterialKey.of(catalyst), 1,
+                        OutputKind.CATALYST_RETURN, 1, 1, OutputProbability.guaranteed(),
+                        false, new InputPortId(node, 0)))));
+
+        assertEquals(ConcurrentNodeExecutor.Observation.SUCCEEDED, runtime.observe());
+        var published = runtime.drainIncrementalOutputs();
+
+        assertTrue(runtime.outputsComplete());
+        assertEquals(List.of("collect", "finish", "release"), calls);
+        assertEquals(2, published.size());
+        assertTrue(ItemStack.isSameItemSameTags(catalyst, published.get(1).stack()));
+        assertTrue(runtime.drainIncrementalOutputs().isEmpty());
+    }
+
+    @Test
+    void reusableCollectionFailureStillCleansTheMachineAndPreservesItsActualOutput() {
+        NodeId node = new NodeId(18);
+        StubDelegate delegate = new StubDelegate(IBatchDelegate.CraftPhase.DONE, "") {
+            @Override
+            public ItemStack collectResult(ServerPlayer player) {
+                return new ItemStack(Items.DIAMOND);
+            }
+
+            @Override
+            public List<ItemStack> collectReusableMaterials(ServerPlayer player) {
+                throw new IllegalStateException("catalyst inventory unavailable");
+            }
+        };
+        CraftNodeRuntime runtime = new CraftNodeRuntime(
+                node, "test:catalyst_collection_error", delegate, null, null);
+        runtime.setChainContext(new ArrayList<>(), player);
+        runtime.attachOutputs(new NodeOutputAccumulator(List.of(OutputDeclaration.item(
+                new OutputPortId(node, 0), MaterialKey.of(new ItemStack(Items.DIAMOND)),
+                1, OutputKind.PRIMARY))));
+
+        assertEquals(ConcurrentNodeExecutor.Observation.FAILED, runtime.observe());
+        runtime.cleanupFailure();
+        runtime.cleanupFailure();
+
+        assertEquals(1, delegate.failureCleanups);
+        assertEquals(0, delegate.finishCleanups);
+        assertEquals(1, runtime.drainIncrementalOutputs().get(0).stack().getCount());
+        assertTrue(runtime.drainIncrementalOutputs().isEmpty());
+    }
+
+    @Test
+    void graphStillRejectsAnUnrecoveredCatalyst() {
+        StubDelegate delegate = new StubDelegate(IBatchDelegate.CraftPhase.DONE, "");
+        NodeId node = new NodeId(21);
+        CraftNodeRuntime runtime = new CraftNodeRuntime(
+                node, "test:missing-catalyst", delegate, null, null);
+        runtime.setChainContext(new ArrayList<>(), player);
+        runtime.attachOutputs(new NodeOutputAccumulator(List.of(
+                OutputDeclaration.item(new OutputPortId(node, 0),
+                        MaterialKey.of(new ItemStack(Items.STICK)), 1,
+                        OutputKind.CATALYST_RETURN, 1, 1, OutputProbability.guaranteed(),
+                        false, new InputPortId(node, 0)))));
+
+        assertEquals(ConcurrentNodeExecutor.Observation.SUCCEEDED, runtime.observe());
+        assertTrue(runtime.drainIncrementalOutputs().isEmpty());
+        assertFalse(runtime.outputsComplete());
+        assertTrue(runtime.outputShortageDetail().contains("catalyst_return"));
     }
 
     @Test

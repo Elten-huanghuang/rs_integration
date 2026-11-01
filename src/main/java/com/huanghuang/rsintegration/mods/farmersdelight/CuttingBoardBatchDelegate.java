@@ -8,6 +8,7 @@ import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.ResonanceCraftingSource;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.plan.PlanStep;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.mods.farmersdelight.FarmersDelightRecipeHandler;
@@ -69,6 +70,7 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
     private boolean craftDone;
     private final List<ItemStack> pendingResults = new ArrayList<>();
     private final List<ItemStack> reusableTools = new ArrayList<>();
+    private boolean toolStockInitialized;
     @Nullable
     private ResonanceStorageView resonanceToolView;
     private int resonanceToolSlot = -1;
@@ -109,6 +111,7 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
         this.startFailureDetail = null;
         this.pendingResults.clear();
         this.reusableTools.clear();
+        this.toolStockInitialized = false;
         this.resonanceToolView = null;
         this.resonanceToolSlot = -1;
         this.toolReturnEndpoint = null;
@@ -250,10 +253,11 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
         this.usingSharedLedger = true;
         if (sharedLedger.storageEndpoint() != null) setStorageEndpoint(sharedLedger.storageEndpoint());
         pendingResults.clear();
-        reusableTools.clear();
-        resonanceToolView = null;
-        resonanceToolSlot = -1;
-        toolReturnEndpoint = sharedLedger.storageEndpoint();
+        if (!toolStockInitialized) {
+            resonanceToolView = null;
+            resonanceToolSlot = -1;
+            toolReturnEndpoint = sharedLedger.storageEndpoint();
+        }
         craftDone = false;
 
         BlockEntity board = myLevel.getBlockEntity(myPos);
@@ -288,12 +292,21 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
                     + " does not satisfy the recipe tool", materials);
         }
 
-        ItemStack toolTemplate = materials.get(1).copyWithCount(1);
-        int toolUnits = materials.get(1).getCount();
-        if (toolUnits <= 0 || toolTemplate.isEmpty()) {
+        List<ItemStack> toolStock = new ArrayList<>();
+        if (toolStockInitialized) {
+            reusableTools.stream().filter(stack -> !stack.isEmpty())
+                    .map(ItemStack::copy).forEach(toolStock::add);
+        } else if (!materials.get(1).isEmpty()) {
+            toolStock.add(materials.get(1).copy());
+        }
+        if (toolStock.isEmpty()) {
             return rejectStart("cutting board: no usable tool units were reserved", materials);
         }
-        if (sharedLedger != null) {
+        ItemStack toolTemplate = toolStock.get(0).copyWithCount(1);
+        if (!specs.get(1).ingredient().test(toolTemplate)) {
+            return rejectStart("cutting board: carried tool does not satisfy the recipe tool", materials);
+        }
+        if (!toolStockInitialized) {
             if (toolReturnEndpoint == null) toolReturnEndpoint = sharedLedger.storageEndpoint();
             ExtractionLedger.ResonanceReturnTarget target = sharedLedger
                     .resonanceReturnTarget(toolTemplate, specs.get(1).ingredient());
@@ -302,14 +315,13 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
                 resonanceToolSlot = target.slot();
             }
         }
-        long availableUses = CuttingBoardToolSemantics.remainingDurability(toolTemplate);
-        if (toolTemplate.isDamageableItem()
-                && availableUses < (long) executions
-                && availableUses * toolUnits < (long) executions) {
+        long availableUses = toolStock.stream().mapToLong(stack ->
+                (long) CuttingBoardToolSemantics.remainingDurability(stack) * stack.getCount()).sum();
+        if (availableUses < executions) {
             player.sendSystemMessage(Component.translatable(
                     "rsi.farmersdelight.cutting_board.tool_durability_insufficient",
-                    toolTemplate.getHoverName(), availableUses * toolUnits, executions));
-            return rejectStart("cutting board: tool durability " + (availableUses * toolUnits)
+                    toolTemplate.getHoverName(), availableUses, executions));
+            return rejectStart("cutting board: tool durability " + availableUses
                     + " is below the " + executions + " planned operation(s)", materials);
         }
 
@@ -319,17 +331,14 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
             ItemStackHandler inputInventory = new ItemStackHandler(1);
             Component toolName = toolTemplate.getHoverName().copy();
             boolean toolBroke = false;
-            int unusedToolUnits = toolUnits;
-            ItemStack tool = toolTemplate.copy();
-            unusedToolUnits--;
+            ItemStack tool = takeNextTool(toolStock);
             for (int operation = 0; operation < executions; operation++) {
                 if (tool.isEmpty()) {
-                    if (unusedToolUnits <= 0) {
+                    tool = takeNextTool(toolStock);
+                    if (tool.isEmpty()) {
                         return rejectStart("cutting board: tool was used up after " + operation
                                 + " of " + executions + " operation(s)", materials);
                     }
-                    tool = toolTemplate.copy();
-                    unusedToolUnits--;
                 }
                 ItemStack input = materials.get(0).copyWithCount(1);
                 inputInventory.setStackInSlot(0, input);
@@ -338,10 +347,11 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
                 CuttingBoardToolSemantics.damageOnce(tool, myLevel.getRandom(), player);
                 toolBroke |= tool.isEmpty();
             }
+            reusableTools.clear();
             if (!tool.isEmpty()) reusableTools.add(tool.copy());
-            if (unusedToolUnits > 0) {
-                reusableTools.add(toolTemplate.copyWithCount(unusedToolUnits));
-            }
+            toolStock.stream().filter(stack -> !stack.isEmpty())
+                    .map(ItemStack::copy).forEach(reusableTools::add);
+            toolStockInitialized = true;
             pendingResults.addAll(stagedResults);
             craftDone = true;
             if (toolBroke) {
@@ -414,7 +424,6 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public void releaseReusableMaterials(@NotNull ServerPlayer player) {
-        if (reusableTools.isEmpty()) return;
         boolean resonanceAvailable = resonanceToolView != null && resonanceToolSlot >= 0;
         for (ItemStack stored : List.copyOf(reusableTools)) {
             ItemStack leftover = stored.copy();
@@ -432,9 +441,29 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
             if (!leftover.isEmpty()) PlayerUtils.safeGiveToStorage(player, leftover, endpoint);
         }
         reusableTools.clear();
+        toolStockInitialized = false;
         resonanceToolView = null;
         resonanceToolSlot = -1;
         toolReturnEndpoint = null;
+    }
+
+    @Override
+    public boolean transferReusableMaterialsTo(@NotNull IBatchDelegate successor) {
+        if (!toolStockInitialized) return true;
+        if (!(successor instanceof CuttingBoardBatchDelegate next)
+                || myLevel != next.myLevel || !myPos.equals(next.myPos)
+                || next.toolStockInitialized || !next.reusableTools.isEmpty()) return false;
+        next.reusableTools.addAll(reusableTools);
+        next.toolStockInitialized = true;
+        next.resonanceToolView = resonanceToolView;
+        next.resonanceToolSlot = resonanceToolSlot;
+        next.toolReturnEndpoint = toolReturnEndpoint;
+        reusableTools.clear();
+        toolStockInitialized = false;
+        resonanceToolView = null;
+        resonanceToolSlot = -1;
+        toolReturnEndpoint = null;
+        return true;
     }
 
     @Override
@@ -459,6 +488,7 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
         // original inputs, so unpublished staged outputs must be discarded.
         pendingResults.clear();
         reusableTools.clear();
+        toolStockInitialized = false;
         resonanceToolView = null;
         resonanceToolSlot = -1;
         toolReturnEndpoint = null;
@@ -579,11 +609,22 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
     }
 
     private int selectedToolOperationCapacity() {
+        if (toolStockInitialized) {
+            return Math.max(1, Math.min(MAX_INSTANT_BATCH, reusableTools.stream()
+                    .mapToInt(CuttingBoardToolSemantics::remainingDurability).max().orElse(0)));
+        }
         if (player == null || recipe == null) return 1;
         ToolSelection selection = selectTool(player, recipe, storageEndpoint());
         if (selection == null) return 1;
         int remaining = CuttingBoardToolSemantics.remainingDurability(selection.stack());
         return Math.max(1, Math.min(MAX_INSTANT_BATCH, remaining));
+    }
+
+    private static ItemStack takeNextTool(List<ItemStack> stock) {
+        for (ItemStack stack : stock) {
+            if (!stack.isEmpty()) return stack.split(1);
+        }
+        return ItemStack.EMPTY;
     }
 
     private static boolean isBoard(BlockEntity be) {

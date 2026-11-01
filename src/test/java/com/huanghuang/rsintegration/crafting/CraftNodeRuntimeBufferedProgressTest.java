@@ -10,6 +10,14 @@ import com.huanghuang.rsintegration.crafting.graph.ConcurrentNodeExecutor;
 import com.huanghuang.rsintegration.crafting.graph.CaptureLeaseRegistry;
 import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.crafting.graph.InputPortId;
+import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
+import com.huanghuang.rsintegration.crafting.graph.NodeOutputAccumulator;
+import com.huanghuang.rsintegration.crafting.graph.OutputDeclaration;
+import com.huanghuang.rsintegration.crafting.graph.OutputKind;
+import com.huanghuang.rsintegration.crafting.graph.OutputPortId;
+import com.huanghuang.rsintegration.crafting.graph.OutputProbability;
 import com.huanghuang.rsintegration.crafting.graph.OperationBudget;
 import com.huanghuang.rsintegration.crafting.graph.OperationId;
 import com.huanghuang.rsintegration.crafting.loadbalancer.ParallelCraftGroup;
@@ -31,6 +39,7 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.event.entity.EntityJoinLevelEvent;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
+import net.minecraftforge.items.ItemStackHandler;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -45,6 +54,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -127,6 +137,190 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
         }
         assertTrue(tick.get() > timeoutTicks());
         assertEquals(operations, runtime.completedOperations());
+    }
+
+    @Test
+    void parallelWorkerKeepsCatalystUntilItsWholeBufferedOrderCompletes() {
+        int operations = 129;
+        ItemStackHandler inventory = new ItemStackHandler(1);
+        AtomicInteger collections = new AtomicInteger();
+        BufferedDelegate delegate = new BufferedDelegate() {
+            @Override
+            public List<IngredientSpec> getRequiredMaterials() {
+                return List.of(
+                        new IngredientSpec(Ingredient.of(Items.STICK), 1, DemandRole.CATALYST),
+                        new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 1));
+            }
+
+            @Override
+            public boolean supportsReusableBatchAggregation() {
+                return true;
+            }
+
+            @Override
+            public boolean startOperation(OperationStartContext context) {
+                if (inventory.getStackInSlot(0).isEmpty()) {
+                    inventory.setStackInSlot(0, context.legacyMaterials().get(0).copy());
+                }
+                return true;
+            }
+
+            @Override
+            public List<ItemStack> collectReusableMaterials(ServerPlayer player) {
+                collections.incrementAndGet();
+                ItemStack catalyst = inventory.extractItem(0, 1, false);
+                return catalyst.isEmpty() ? List.of() : List.of(catalyst);
+            }
+        };
+        ModType type = ModType.register("test_buffered_catalyst_return",
+                new String[0], new String[0], new String[0], () -> delegate);
+        BoundMachine machine = new BoundMachine(Level.OVERWORLD.location(), BlockPos.ZERO, type, "test");
+        ParallelCraftGroup group = new ParallelCraftGroup(
+                List.of(machine), type, new ResourceLocation("test", "catalyst"), player, operations);
+        group.setReservationTokens(Collections.nCopies(
+                operations, mock(ExtractionLedger.ReservationToken.class)));
+        group.setVirtualDebits(Collections.nCopies(operations, List.of()));
+        List<ItemStack> materials = new ArrayList<>();
+        for (int i = 0; i < operations; i++) {
+            materials.add(new ItemStack(Items.STICK));
+            materials.add(new ItemStack(Items.IRON_INGOT));
+        }
+        assertTrue(group.startOperation(OperationStartContext.repeatedChainReserved(
+                player, mock(ExtractionLedger.class), group.operationMaterialPlan(),
+                operations, 2, materials)));
+        NodeId node = new NodeId(0);
+        CraftNodeRuntime runtime = runtime(group);
+        runtime.attachOutputs(new NodeOutputAccumulator(List.of(
+                OutputDeclaration.item(new OutputPortId(node, 0),
+                        MaterialKey.of(new ItemStack(Items.DIAMOND)), operations * 8L, OutputKind.PRIMARY),
+                OutputDeclaration.item(new OutputPortId(node, 1),
+                        MaterialKey.of(new ItemStack(Items.STICK)), 1, OutputKind.CATALYST_RETURN,
+                        1, 1, OutputProbability.guaranteed(), false, new InputPortId(node, 0)))));
+
+        for (int i = 1; i <= operations; i++) {
+            produceOutput();
+            tick.incrementAndGet();
+            assertEquals(i == operations ? ConcurrentNodeExecutor.Observation.SUCCEEDED
+                    : ConcurrentNodeExecutor.Observation.WORKING, runtime.observe());
+            runtime.drainIncrementalOutputs();
+            if (i < operations) {
+                assertEquals(0, collections.get());
+                assertEquals(1, inventory.getStackInSlot(0).getCount());
+            }
+        }
+
+        assertEquals(1, collections.get());
+        assertTrue(inventory.getStackInSlot(0).isEmpty());
+        assertTrue(runtime.outputsComplete());
+        assertTrue(runtime.drainIncrementalOutputs().isEmpty());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void freshWorkerDelegatesTransferTheirActualCatalystOrStopWithoutLosingIt(boolean rejectHandoff) {
+        int operations = 129;
+        AtomicInteger created = new AtomicInteger();
+        AtomicInteger starts = new AtomicInteger();
+        AtomicInteger handoffs = new AtomicInteger();
+        List<ItemStack> returned = new ArrayList<>();
+        class OwnedCatalystDelegate extends BufferedDelegate {
+            final boolean first = created.getAndIncrement() == 0;
+            ItemStack held = ItemStack.EMPTY;
+            boolean finished;
+
+            @Override
+            public List<IngredientSpec> getRequiredMaterials() {
+                return List.of(
+                        new IngredientSpec(Ingredient.of(Items.STICK), 1, DemandRole.CATALYST),
+                        new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 1));
+            }
+
+            @Override
+            public boolean supportsReusableBatchAggregation() {
+                return true;
+            }
+
+            @Override
+            public boolean startOperation(OperationStartContext context) {
+                assertFalse(finished, "已经结束的操作实例不能再次启动");
+                if (first) held = context.legacyMaterials().get(0).copy();
+                if (held.isEmpty()) return false;
+                starts.incrementAndGet();
+                return true;
+            }
+
+            @Override
+            public void onBatchFinished(ServerPlayer player) {
+                assertFalse(finished);
+                finished = true;
+            }
+
+            @Override
+            public boolean transferReusableMaterialsTo(IBatchDelegate successor) {
+                assertTrue(finished);
+                handoffs.incrementAndGet();
+                if (rejectHandoff) return false;
+                OwnedCatalystDelegate next = (OwnedCatalystDelegate) successor;
+                assertTrue(next.held.isEmpty());
+                next.held = held;
+                held = ItemStack.EMPTY;
+                return true;
+            }
+
+            @Override
+            public List<ItemStack> collectReusableMaterials(ServerPlayer player) {
+                if (held.isEmpty()) return List.of();
+                List<ItemStack> actual = List.of(held);
+                returned.add(held);
+                held = ItemStack.EMPTY;
+                return actual;
+            }
+
+            @Override
+            public void releaseReusableMaterials(ServerPlayer player) {
+                collectReusableMaterials(player);
+            }
+        }
+        ModType type = ModType.register("test_fresh_catalyst_" + rejectHandoff,
+                new String[0], new String[0], new String[0], OwnedCatalystDelegate::new);
+        BoundMachine machine = new BoundMachine(Level.OVERWORLD.location(), BlockPos.ZERO, type, "test");
+        ParallelCraftGroup group = new ParallelCraftGroup(
+                List.of(machine), type, new ResourceLocation("test", "fresh_catalyst"), player, operations);
+        group.setReservationTokens(Collections.nCopies(
+                operations, mock(ExtractionLedger.ReservationToken.class)));
+        group.setVirtualDebits(Collections.nCopies(operations, List.of()));
+        List<ItemStack> materials = new ArrayList<>();
+        for (int i = 0; i < operations; i++) {
+            ItemStack catalyst = new ItemStack(Items.STICK);
+            catalyst.getOrCreateTag().putString("owner", "only-real-catalyst");
+            materials.add(catalyst);
+            materials.add(new ItemStack(Items.IRON_INGOT));
+        }
+        assertTrue(group.startOperation(OperationStartContext.repeatedChainReserved(
+                player, mock(ExtractionLedger.class), group.operationMaterialPlan(),
+                operations, 2, materials)));
+        CraftNodeRuntime runtime = runtime(group);
+        int completed = rejectHandoff ? 64 : operations;
+        for (int i = 1; i <= completed; i++) {
+            produceOutput();
+            tick.incrementAndGet();
+            assertEquals(i == completed
+                            ? rejectHandoff ? ConcurrentNodeExecutor.Observation.FAILED
+                            : ConcurrentNodeExecutor.Observation.SUCCEEDED
+                            : ConcurrentNodeExecutor.Observation.WORKING,
+                    runtime.observe());
+            if (i < completed) assertTrue(returned.isEmpty());
+        }
+        if (rejectHandoff) runtime.cleanupFailure();
+
+        assertEquals(rejectHandoff ? 2 : 3, created.get());
+        assertEquals(rejectHandoff ? 1 : 3, starts.get());
+        assertEquals(rejectHandoff ? 1 : 2, handoffs.get());
+        assertEquals(completed, group.getCompletedOperations());
+        assertEquals(1, returned.size());
+        assertEquals("only-real-catalyst", returned.get(0).getTag().getString("owner"));
+        assertEquals(1, returned.get(0).getCount());
+        assertEquals(0, group.getRunningOperations());
     }
 
     @Test
@@ -257,7 +451,7 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
                 player, ledger, group.operationMaterialPlan(), operations, 1, materials)));
     }
 
-    private static final class BufferedDelegate implements IBatchDelegate {
+    private static class BufferedDelegate implements IBatchDelegate {
         private int batchSize = 1;
 
         @Override

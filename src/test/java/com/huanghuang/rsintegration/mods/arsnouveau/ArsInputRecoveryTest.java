@@ -201,6 +201,94 @@ class ArsInputRecoveryTest extends BootstrapTest {
         verifyNoInteractions(fixture.endpoint);
     }
 
+    @Test
+    void imbuementPublishesOnlyActualOwnedPedestalSurvivors() throws Exception {
+        Fixture fixture = new Fixture(false);
+        assertTrue(fixture.start());
+        fixture.pedestal.stack.shrink(2);
+
+        List<ItemStack> returned = fixture.delegate.collectReusableMaterials(fixture.player);
+
+        assertEquals(1, returned.size());
+        assertEquals(2, returned.get(0).getCount());
+        assertEquals("pedestal", returned.get(0).getTag().getString("owner"));
+        assertTrue(fixture.pedestal.stack.isEmpty());
+        assertEquals(3, fixture.machine.stack.getCount());
+        assertTrue(fixture.delegate.collectReusableMaterials(fixture.player).isEmpty());
+        verifyNoInteractions(fixture.endpoint);
+    }
+
+    @Test
+    void imbuementDoesNotPublishForeignOrReplacedPedestalContents() throws Exception {
+        Fixture fixture = new Fixture(false);
+        assertTrue(fixture.start());
+        fixture.pedestal.stack = tagged("foreign", 4);
+        assertTrue(fixture.delegate.collectReusableMaterials(fixture.player).isEmpty());
+        assertEquals("foreign", fixture.pedestal.stack.getTag().getString("owner"));
+
+        fixture = new Fixture(false);
+        assertTrue(fixture.start());
+        Machine replacement = fixture.holder(BlockPos.ZERO.east(), false);
+        replacement.stack = tagged("pedestal", 4);
+        assertTrue(fixture.delegate.collectReusableMaterials(fixture.player).isEmpty());
+        assertEquals(4, replacement.stack.getCount());
+        assertEquals(4, fixture.pedestal.stack.getCount());
+    }
+
+    @Test
+    void imbuementHandsOffPedestalOwnershipAndRecoversItOnceAfterRejectedStart() throws Exception {
+        Fixture fixture = new Fixture(false);
+        assertTrue(fixture.start());
+        fixture.machine.stack = new ItemStack(Items.NETHERITE_INGOT);
+        fixture.delegate.collectResult(fixture.player);
+        fixture.delegate.onBatchFinished(fixture.player);
+        ArsImbuementBatchDelegate next = fixture.nextImbuement();
+        assertTrue(fixture.delegate.transferReusableMaterialsTo(next));
+
+        // 交接后的前驱不再拥有基座物品，即使误收到了失败通知也不能取回。
+        fixture.delegate.onBatchFailed(null, "old operation already handed off");
+        assertTrue(fixture.delegate.failureRecoveredInputs().isEmpty());
+        assertEquals(4, fixture.pedestal.stack.getCount());
+        fixture.machine.stack = new ItemStack(Items.GOLD_INGOT);
+        assertFalse(next.startPreparedOperation(fixture.player,
+                List.of(tagged("central", 3), tagged("pedestal", 4)), fixture.ledger));
+        next.onBatchFailed(null, "busy");
+        next.onBatchFailed(null, "repeat");
+
+        assertEquals(List.of(3, 4), next.failureRecoveredInputs()
+                .stream().map(ItemStack::getCount).toList());
+        assertTrue(fixture.pedestal.stack.isEmpty());
+        assertEquals(Items.GOLD_INGOT, fixture.machine.stack.getItem());
+        assertTrue(next.collectReusableMaterials(fixture.player).isEmpty());
+        verifyNoInteractions(fixture.endpoint);
+    }
+
+    @Test
+    void freshImbuementOperationReusesTheSamePedestalAndPublishesItAtTheEnd() throws Exception {
+        Fixture fixture = new Fixture(false);
+        assertTrue(fixture.start());
+        fixture.machine.stack = new ItemStack(Items.NETHERITE_INGOT);
+        fixture.delegate.collectResult(fixture.player);
+        fixture.delegate.onBatchFinished(fixture.player);
+        ArsImbuementBatchDelegate next = fixture.nextImbuement();
+        assertTrue(fixture.delegate.transferReusableMaterialsTo(next));
+        assertTrue(next.startPreparedOperation(fixture.player,
+                List.of(tagged("central", 3), tagged("pedestal", 4)), fixture.ledger));
+        fixture.machine.stack = new ItemStack(Items.NETHERITE_INGOT);
+        next.collectResult(fixture.player);
+        next.onBatchFinished(fixture.player);
+
+        assertTrue(fixture.delegate.collectReusableMaterials(fixture.player).isEmpty());
+        List<ItemStack> returned = next.collectReusableMaterials(fixture.player);
+
+        assertEquals(1, returned.size());
+        assertEquals(4, returned.get(0).getCount());
+        assertEquals("pedestal", returned.get(0).getTag().getString("owner"));
+        assertTrue(fixture.pedestal.stack.isEmpty());
+        assertTrue(next.collectReusableMaterials(fixture.player).isEmpty());
+        verifyNoInteractions(fixture.endpoint);
+    }
+
     public static final class Machine extends BlockEntity implements Container {
         public ItemStack stack = ItemStack.EMPTY;
         public boolean isCrafting;
@@ -275,6 +363,18 @@ class ArsInputRecoveryTest extends BootstrapTest {
         boolean start() {
             return delegate.startPreparedOperation(player,
                     List.of(tagged("central", 3), tagged("pedestal", 4)), ledger);
+        }
+
+        ArsImbuementBatchDelegate nextImbuement() throws Exception {
+            ArsImbuementBatchDelegate next = new ArsImbuementBatchDelegate();
+            next.setMachineDim(Level.OVERWORLD.location());
+            next.setMachineServer(player.server);
+            set(next, "player", player);
+            set(next, "dimension", Level.OVERWORLD);
+            set(next, "machinePos", BlockPos.ZERO);
+            set(next, "expectedOutput", new ItemStack(Items.NETHERITE_INGOT));
+            set(next, "pedestalLayout", ArsPedestalLayout.captureAllowEmpty(level, BlockPos.ZERO));
+            return next;
         }
     }
 

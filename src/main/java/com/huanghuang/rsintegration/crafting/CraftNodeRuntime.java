@@ -571,12 +571,19 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
 
     private void doSucceed() {
         if (terminal) return;
-        terminal = true;
         List<ItemStack> captured = disarmCapture();
         ItemStack expectedWorldOutput = delegate == null ? null : delegate.getExpectedOutput();
         List<ItemStack> results = collectResults(player);
         confirmedOutputs = OutputAccounting.mergeLegacyOutputs(
                 captured, results, expectedWorldOutput);
+        if (delegate != null) {
+            // 催化剂返还也是图的实物输出，必须在机器清理前取出并参与结算。
+            List<ItemStack> completed = new ArrayList<>(confirmedOutputs);
+            completed.addAll(delegate.collectReusableMaterials(player));
+            confirmedOutputs = List.copyOf(completed);
+        }
+        // 收取实物失败时仍允许失败清理，不能提前封死材料回收入口。
+        terminal = true;
         if (delegate != null) {
             try {
                 delegate.onBatchFinished(player);

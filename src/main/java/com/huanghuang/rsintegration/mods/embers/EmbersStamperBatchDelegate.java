@@ -6,6 +6,8 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
@@ -51,6 +53,8 @@ public final class EmbersStamperBatchDelegate extends AbstractBatchDelegate {
     private ItemStack initialStamp = ItemStack.EMPTY;
     private ItemStack placedStamp = ItemStack.EMPTY;
     private ItemStack replacedStamp = ItemStack.EMPTY;
+    @Nullable
+    private CraftStorageEndpoint stampReturnEndpoint;
     private FluidStack placedFluid = FluidStack.EMPTY;
     private boolean needsStamp;
     private boolean started;
@@ -245,7 +249,11 @@ public final class EmbersStamperBatchDelegate extends AbstractBatchDelegate {
                     recipe.getDisplayStamp())) return false;
             replacedStamp = initialStamp.copy();
             placedStamp = replacement.copy();
+            stampReturnEndpoint = storageEndpoint();
             remaining.set(stampIndex, ItemStack.EMPTY);
+        } else if (!placedStamp.isEmpty()) {
+            // 前一子批次已经投放了这枚印模，材料视图中的副本不是另一份实物。
+            remaining.set(required.size() - 1, ItemStack.EMPTY);
         }
         index = 0;
         if (needsItem) {
@@ -341,6 +349,42 @@ public final class EmbersStamperBatchDelegate extends AbstractBatchDelegate {
             if (!drained.isEmpty()) recovered.add(InkFluidSupport.token(drained));
         }
         return recovered;
+    }
+
+    @Override public List<ItemStack> collectReusableMaterials(ServerPlayer player) {
+        // 只发布本次投放的印模，玩家原先安装的印模仍属于机器。
+        if (!started || placedStamp.isEmpty() || !structureValid()
+                || !sameStack(stamper.stamp.getStackInSlot(0), placedStamp)) return List.of();
+        ItemStack removed = stamper.stamp.extractItem(0, placedStamp.getCount(), false);
+        if (removed.isEmpty()) return List.of();
+        stamper.setChanged();
+        placedStamp.shrink(removed.getCount());
+        return List.of(removed.copy());
+    }
+
+    @Override public boolean transferReusableMaterialsTo(IBatchDelegate successor) {
+        if (placedStamp.isEmpty()) return true;
+        if (!(successor instanceof EmbersStamperBatchDelegate next)
+                || !structureValid() || next.stamper != stamper || next.base != base
+                || next.needsStamp || !next.placedStamp.isEmpty()
+                || !sameStack(stamper.stamp.getStackInSlot(0), placedStamp)) return false;
+        next.placedStamp = placedStamp;
+        next.required = required;
+        next.stampReturnEndpoint = stampReturnEndpoint;
+        placedStamp = ItemStack.EMPTY;
+        stampReturnEndpoint = null;
+        return true;
+    }
+
+    @Override public void releaseReusableMaterials(ServerPlayer player) {
+        CraftStorageEndpoint endpoint = stampReturnEndpoint != null
+                ? stampReturnEndpoint : storageEndpoint();
+        for (ItemStack stamp : collectReusableMaterials(player)) {
+            ItemStack leftover = endpoint == null ? stamp : endpoint.insert(player, stamp, false)
+                    .remainder().orElse(ItemStack.EMPTY);
+            if (!leftover.isEmpty()) PlayerUtils.safeGiveToStorage(player, leftover, endpoint);
+        }
+        if (placedStamp.isEmpty()) stampReturnEndpoint = null;
     }
 
     private void recoverInstalledStamp(List<ItemStack> recovered, @Nullable ServerPlayer player) {

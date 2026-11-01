@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
+import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.OperationInputRecovery;
 import com.huanghuang.rsintegration.crafting.batch.OperationInputRecovery.Input;
 import com.huanghuang.rsintegration.reflection.probes.ArsNouveauReflection;
@@ -399,7 +400,13 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
     }
 
     private void recoverOwnedInputs(@Nullable ServerPlayer player) {
-        settleFailureRecoveredInputs(inputRecovery.recover(resolveMachineLevel(player)), player);
+        ServerLevel level = resolveMachineLevel(player);
+        List<ItemStack> recovered = new ArrayList<>(inputRecovery.recover(level));
+        for (OwnedPedestalCatalyst catalyst : activePedestalCatalysts) {
+            ItemStack actual = catalyst.input().take(level);
+            if (!actual.isEmpty()) recovered.add(actual);
+        }
+        settleFailureRecoveredInputs(recovered, player);
         activeInput = null;
         activePedestalCatalysts.clear();
         pedestalCatalystsInstalled = false;
@@ -415,17 +422,41 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
     public void releaseReusableMaterials(@Nonnull ServerPlayer player) {
         ServerLevel level = getLevel();
         if (level == null) return;
+        for (ItemStack catalyst : collectReusableMaterials(player)) {
+            returnCatalyst(player, level, catalyst);
+        }
+    }
 
-        int recovered = 0;
+    @Override
+    public List<ItemStack> collectReusableMaterials(@Nonnull ServerPlayer player) {
+        ServerLevel level = getLevel();
+        if (level == null) return List.of();
+        List<ItemStack> recovered = new ArrayList<>();
         for (OwnedPedestalCatalyst owned : List.copyOf(activePedestalCatalysts)) {
             ItemStack catalyst = owned.input().take(level);
             if (catalyst.isEmpty()) continue;
-            recovered += catalyst.getCount();
-            returnCatalyst(player, level, catalyst);
+            recovered.add(catalyst);
         }
         activePedestalCatalysts.clear();
         pedestalCatalystsInstalled = false;
-        RSIntegrationMod.LOGGER.debug("[RSI-ArsImbuement] Recovered {} pedestal catalyst item(s)", recovered);
+        RSIntegrationMod.LOGGER.debug("[RSI-ArsImbuement] Recovered {} pedestal catalyst item(s)",
+                recovered.stream().mapToInt(ItemStack::getCount).sum());
+        return List.copyOf(recovered);
+    }
+
+    @Override
+    public boolean transferReusableMaterialsTo(@Nonnull IBatchDelegate successor) {
+        if (activePedestalCatalysts.isEmpty()) return true;
+        if (!(successor instanceof ArsImbuementBatchDelegate next)
+                || getLevel() != next.getLevel() || !machinePos.equals(next.machinePos)
+                || !next.activePedestalCatalysts.isEmpty()) return false;
+        next.activePedestalCatalysts.addAll(activePedestalCatalysts);
+        next.pedestalCatalystsInstalled = pedestalCatalystsInstalled;
+        activePedestalCatalysts.clear();
+        pedestalCatalystsInstalled = false;
+        // 前驱账本也持有同一批 Input；交接后不能再通过失败清理认领它们。
+        inputRecovery = new OperationInputRecovery();
+        return true;
     }
 
     @Nonnull

@@ -311,6 +311,24 @@ public interface IBatchDelegate {
     default void releaseReusableMaterials(@Nonnull ServerPlayer player) {}
 
     /**
+     * 图节点结束时取出仍由机器持有的可复用材料，交给执行链发布或回收。
+     * 只能返回实际取出的物品；批次内的单次操作结束时不得调用。
+     * 已取出的材料不能再由 {@link #releaseReusableMaterials} 退回仓库。
+     */
+    default List<ItemStack> collectReusableMaterials(@Nonnull ServerPlayer player) {
+        return List.of();
+    }
+
+    /**
+     * 同一 worker 切换到下一操作实例时移交可复用材料的实际所有权。
+     * 后继已完成准备；交接后前驱不得再次退回这些材料。
+     * 无法确认机器或材料归属时返回 false，由执行链停止派发并回收。
+     */
+    default boolean transferReusableMaterialsTo(@Nonnull IBatchDelegate successor) {
+        return true;
+    }
+
+    /**
      * The portion of {@link #getRequiredMaterials()} that the graph planner
      * should allocate via MaterialBroker checkout. Defaults to the full list
      * for delegates that do not override it.
