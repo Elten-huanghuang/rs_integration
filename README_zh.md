@@ -16,9 +16,9 @@
 
 RS Integration（RSI）为 Refined Storage 和 Beyond Dimensions 增加递归合成、机器远程访问、存储联动及可选魔法资源集成。它是附属模组，不替代两种存储网络。
 
-**当前版本：1.5.2.3 | Minecraft 1.20.1**
+**当前版本：1.5.3 | Minecraft 1.20.1**
 
-[1.5.2.3 更新公告](docs/announcements/RELEASE_NOTES_1.5.2.3.md)
+[1.5.3 更新公告](docs/announcements/RELEASE_NOTES_1.5.3.md)
 
 ## 目录
 
@@ -268,13 +268,19 @@ long souls = session.amount(BdMagicApi.SOUL_KEY);
 - `saves/<世界>/serverconfig/rs_integration/server.toml`：服务端合成、机器和魔法资源行为。
 - `config/rs_integration/client.toml`：界面、JEI 和 Tetra 显示设置。
 
+客户端 `[tooltips]` 中的 `customBackgrounds` 控制 RSI 特殊物品的主题底板，`obscureTooltipsCompat` 和 `modernUiCompat` 分别防止 Obscure Tooltips、Modern UI 圆角提示框接管这些物品。三个选项默认开启，配置重新加载后生效，也可在游戏内客户端配置界面编辑；关闭总开关后，两项兼容处理一起退出，不影响其他物品或原模组的字体设置。
+
 可配置规划深度/节点预算、优先配方与材料变体、保留物品、概率材料尝试上限、输入预载、DAG/机器并发和并行委托策略。服务端 `magicResources.pinnedBackend` 只会在没有生效空间管辖时决定后端，不会合并 RS 与 BD。
+
+`integrations.enableGoetyCauldron` 默认开启，控制访问器右键打开女巫坩埚、一键补水与一键炼制，且受 `integrations.enableGoety` 总开关约束。坩埚直接使用玩家当前默认存储网络，无需绑定终端；缺料自动递归合成，到货后按原生顺序投料并使用巨勺搅拌，灵魂供能与亡灵火炉共用。清水锅可以打开，已有药液、废液、材料或正在炼制时需要先处理原有内容。设为 `false` 不影响其他 Goety 集成；修改后需重启游戏。
+
+女巫坩埚目录支持中文、全拼、拼音首字母、多关键词与按顺序跳字搜索。巨勺可放在背包、副手或当前存储网络中，自动搅拌直接调用原生炼制函数，不替换主手物品。安装 Jade 后，注视坩埚可查看当前产物、药酿效果、炼制状态、灵魂进度、水位和加热状态；服务端与客户端均需安装本模组和 Jade 才能同步制作信息。
 
 `integrations.enableGoetySoulReverseRefill` 默认关闭。开启后，灵魂方舟发生灵魂消耗时会从绑定的 RS 网络按剩余容量补满；同一玩家每 20 tick 最多尝试一次。
 
-`integrations.goetyBrazierVirtualCandleCount` 默认 `64`。RSI 递归合成亡灵火炉且没有实体灵魂烛台时，会使用该数量的内存烛台推进进度；每个烛台每 tick 消耗 1 点灵魂，配方总成本不变，手动点火仍遵循 Goety 原版结构要求。
+`integrations.goetyBrazierVirtualCandleCount` 默认 `64`，上限 `1024`，由亡灵火炉递归合成与女巫坩埚一键炼制共用。没有实体灵魂烛台时使用内存烛台推进进度，按实际进度消耗灵魂，配方总成本不变；玩家手动点火仍遵循 Goety 原版结构要求。
 
-`autoCrafting.freeWaterMachines` 控制免费补水。列表中的机器免费补水，未列出的机器消耗所选 RS 网络中的流体；设为 `[]` 可关闭全部免费补水，配置注释中列有完整默认机器 ID。
+`autoCrafting.freeWaterMachines` 控制免费补水，女巫坩埚的 ID 为 `goety_witch_cauldron`，默认启用。列表中的机器免费补水，未列出的机器消耗所选存储网络中的流体；坩埚也支持水槽或背包中的水桶、水瓶。设为 `[]` 可关闭全部免费补水，配置注释中列有完整默认机器 ID。
 
 升级时通常会保留已有设置，新增列表项可能需要手动补充。
 

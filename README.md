@@ -16,9 +16,9 @@
 
 RS Integration (RSI) extends Refined Storage and Beyond Dimensions with recursive crafting, remote machine access, storage-aware interactions, and optional magic-resource integration. It is an add-on, not a replacement for either storage mod.
 
-**Current version: 1.5.2.3 | Minecraft 1.20.1**
+**Current version: 1.5.3 | Minecraft 1.20.1**
 
-[1.5.2.3 release notes (Chinese)](docs/announcements/RELEASE_NOTES_1.5.2.3.md)
+[1.5.3 release notes (Chinese)](docs/announcements/RELEASE_NOTES_1.5.3.md)
 
 ## Contents
 
@@ -274,13 +274,19 @@ Recipe handlers describe instant execution through `InstantRecipePolicy`: `NONE`
 - `saves/<world>/serverconfig/rs_integration/server.toml`: server crafting, machine, and magic-resource behavior.
 - `config/rs_integration/client.toml`: UI, JEI, and Tetra display options.
 
+The client `[tooltips]` section provides `customBackgrounds` for RSI's themed item backgrounds, plus `obscureTooltipsCompat` and `modernUiCompat` to keep Obscure Tooltips and Modern UI's rounded tooltips from replacing them. All three default to `true`, take effect after configuration reload, and are available in the in-game client config editor. Disabling the background master switch also disables both compatibility overrides; other items and font settings are unchanged.
+
 Planning limits, preferred recipes/material variants, retained-item rules, probability-attempt caps, input-buffer limits, graph/operation concurrency, creative magic-container deposit size, and parallel delegate policies are configurable. The server-side `magicResources.pinnedBackend` only breaks ties when no active scope claims the route and never merges RS with BD.
+
+`integrations.enableGoetyCauldron` defaults to `true` and enables opening the Witch Cauldron with a terminal, refilling water, and brewing in one action. It also requires `integrations.enableGoety`. The cauldron uses the player's current default storage without a separate binding, recursively crafts missing materials, adds them in native order, and stirs with a ladle. Soul supply is shared with the Necro Brazier. Plain water is allowed when opening; existing brews, waste, ingredients, or active operations must be handled first. Restart the game after changing this switch.
 
 `integrations.enableGoetySoulReverseRefill` is disabled by default. When enabled, soul consumption from an Arca refills it to capacity from the bound RS network. Attempts are limited to once per player every 20 ticks.
 
-`integrations.goetyBrazierVirtualCandleCount` defaults to `64`. When an RSI recursive Necro Brazier craft has no physical Soul Candlesticks, this many in-memory candles advance the craft; each consumes 1 soul per tick, the recipe total remains unchanged, and manual ignition still follows Goety's original structure requirements.
+`integrations.goetyBrazierVirtualCandleCount` defaults to `64` with a maximum of `1024`, shared by recursive Necro Brazier crafting and Witch Cauldron automation. Without physical Soul Candlesticks, in-memory candles advance the operation and consume souls for actual progress, preserving the recipe's total cost. Manual ignition keeps Goety's original structure requirements.
 
-`autoCrafting.freeWaterMachines` controls free water refills. Listed machines refill freely; omitted machines consume fluid from the selected RS network. `[]` disables all free refills, and the config comments list the exact default machine IDs.
+The Witch Cauldron catalog supports localized names, full pinyin, pinyin initials, multiple search terms and ordered fuzzy matching. Automated stirring calls the native brewing function without replacing the held item; the ladle may remain in the inventory, offhand or current storage network. With RSI and Jade installed on both sides, Jade shows the current output, brew effects, brewing state, soul progress, water level and heat status.
+
+`autoCrafting.freeWaterMachines` controls free water refills and includes `goety_witch_cauldron` by default. Omitted machines consume fluid from the selected storage network; the cauldron also accepts water buckets or bottles from its slot or the player's inventory. `[]` disables all free refills, and the config comments list the default machine IDs.
 
 Settings retain existing values during upgrades when possible. New list entries may need to be added manually.
 
