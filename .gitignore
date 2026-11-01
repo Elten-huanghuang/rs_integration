@@ -39,12 +39,13 @@ libs/
 .agent/
 .agents/
 
-# 文档目录：仅更新公告和 API 文档允许提交
+# 文档目录：仅更新公告、API 文档和 Goety 兼容说明允许提交
 /docs/*
 !/docs/announcements/
 !/docs/announcements/**
 !/docs/api/
 !/docs/api/**
+!/docs/GOETY_COMPATIBILITY.md
 
 # 公告 TXT 版本仅保留在本地
 /docs/announcements/*.txt

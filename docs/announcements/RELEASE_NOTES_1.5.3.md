@@ -91,5 +91,5 @@
 
 - 多人游戏请同步更新客户端与服务端，使用相同版本的 RSI。
 - 点餐功能已内置；从旧 `rsfoodorder` 附属迁移时，终端物品与已吃记录由兼容逻辑处理。
-- Goety 坩埚功能可通过独立配置关闭；新版原生制作配方的支持范围见 [Goety 兼容说明](../api/GOETY_COMPATIBILITY.md)。
+- Goety 坩埚功能可通过独立配置关闭；新版原生制作配方的支持范围见 [Goety 兼容说明](../GOETY_COMPATIBILITY.md)。
 - 发布文件名：`rs_integration-1.5.3.jar`。

@@ -233,12 +233,15 @@ Custom GUI defaults include Crabber's Delight, Metal Barrels, PGP, EMX Arms, Apo
 
 ## Developer API
 
-RS and BD expose separate APIs. They do not share inventories or merge balances.
-
-Third-party recipe, machine, execution, and Consumer integrations are documented
+Third-party recipe, machine, execution, resonance inventory, and Consumer integrations are documented
 in [docs/api/README.md](docs/api/README.md). The single project [LICENSE](LICENSE)
 contains the proprietary terms for RSI and the limited interoperability terms
 for the public API.
+
+The magic-resource entry points below are specific to RS and BD; their balances
+are not shared or merged. Their scope differs from the three public APIs above.
+See [additional entry points and boundaries](docs/api/README.md#17-补充入口与边界)
+in the guide before using these entry points.
 
 RS magic resources are available through [`RsiMagicApi`](src/main/java/com/huanghuang/rsintegration/api/magic/RsiMagicApi.java):
 

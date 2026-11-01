@@ -45,8 +45,9 @@ public interface MachineIntegration {
     /**
      * 声明各 process 在绑定具体方块前即可确定的并发合同。
      *
-     * <p>返回值以 process ID 为 key。未声明或声明不完整的 process 仍会
-     * 按 exclusive 处理；运行期 descriptor 必须与声明兼容。</p>
+     * <p>返回值以 process ID 为 key。任一支持该 process 的集成未声明时，
+     * 就无法获得完整的 process 级预声明；尚无运行期 descriptor 时按独占处理。
+     * 选中具体机器后，还会结合实际 descriptor 的能力判断并发。</p>
      */
     default Map<ResourceLocation, PlannedConcurrency>
     planningConcurrency() {

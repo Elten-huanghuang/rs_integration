@@ -228,21 +228,22 @@ RS Integration（RSI）为 Refined Storage 和 Beyond Dimensions 增加递归合
 
 ## 开发者 API
 
-RS 与 BD 使用独立 API，不共享库存，也不会自动合并余额。
-
-第三方配方、机器、执行器和 Consumer 接入文档见
+第三方配方、机器、执行器、共振盘物品访问和 Consumer 接入统一见
 [docs/api/README.md](docs/api/README.md)。唯一项目许可证 [LICENSE](LICENSE)
 同时包含 RSI 主体专有条款和公共 API 的有限互操作许可。
+
+下面的魔法资源入口按 RS 与 BD 后端拆分，余额不会自动共享或合并；它们与前述三套
+公共 API 的范围不同，接入前请阅读指南中的“补充入口与边界”。
 
 RS 魔法资源入口：[`RsiMagicApi`](src/main/java/com/huanghuang/rsintegration/api/magic/RsiMagicApi.java)
 
 ```java
 RsiMagicApi.Session session = RsiMagicApi.network(network);
-int available = session.available(MagicResourceKind.SOUL);
+long available = session.available(MagicResourceKind.SOUL);
 
 try (MagicResourceNetworkPool pool =
              session.reserve(MagicResourceKind.SOUL, available)) {
-    int extracted = pool.withdraw(available);
+    long extracted = pool.withdraw(available);
     // 使用提取出的灵魂能量。
 }
 ```

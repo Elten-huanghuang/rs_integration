@@ -96,7 +96,10 @@ public interface RSICraftConsumerApi {
     );
 
     /**
-     * 原子提交一组订单。批次中每个订单仍保留自己的幂等结果。
+     * 逐个提交一组订单，每个订单保留独立的结果与幂等记录。
+     *
+     * <p>不保证整批全部成功或全部回滚。调用方应检查回执中的每项结果；
+     * 后续订单失败不会撤销已经提交的订单。</p>
      */
     ConsumerResult<ConsumerBatchOrderReceipt> submitBatch(
             ServerPlayer player,
