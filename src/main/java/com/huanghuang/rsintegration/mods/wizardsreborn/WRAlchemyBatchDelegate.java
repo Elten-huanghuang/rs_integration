@@ -101,7 +101,17 @@ public final class WRAlchemyBatchDelegate extends AbstractBatchDelegate {
     }
 
     private PreparationResult problem(String key) {
-        return PreparationResult.fatal("炼金结构检查失败: " + key,
+        String detail = switch (key) {
+            case "boiler_missing" -> "炼金机正上方缺少炼金锅炉";
+            case "capacity" -> "炼金配方超出容量：最多 6 种物品和 3 种液体";
+            case "item_input_required" -> "炼金机需要至少一种物品输入，无法加工纯液体输入配方";
+            case "no_energy" -> "炼金锅炉缺少蒸汽或秘蕴，请自行供应能量";
+            case "output_full" -> "炼金锅炉没有足够空间接收液体产物";
+            case "fluid_storage" -> "所选存储网络没有足够的流体存储空间容纳本次产物";
+            case "recovery_storage" -> "存储网络无法接收炼金机和锅炉中的全部旧物品、液体，请检查存储容量";
+            default -> "炼金机状态异常";
+        };
+        return PreparationResult.fatal("炼金结构检查失败: " + detail,
                 Component.translatable("rsi.wr.alchemy.error." + key));
     }
 
