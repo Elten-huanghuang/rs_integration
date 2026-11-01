@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.feature.experience.ExperienceWandSettings;
 import com.huanghuang.rsintegration.feature.experience.ResonantExperienceWandItem;
 import com.huanghuang.rsintegration.feature.foodorder.FoodOrderTerminalItem;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import net.minecraft.client.StringSplitter;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.Style;
@@ -83,6 +84,34 @@ class SpecialItemTooltipTest extends BootstrapTest {
             assertFalse(translations.get("experience.rs_integration.tooltip.detail_5").getAsString().isBlank());
             assertFalse(translations.get("experience.rs_integration.tooltip.detail_6").getAsString().isBlank());
             assertFalse(translations.get("experience.rs_integration.tooltip.detail_7").getAsString().isBlank());
+        }
+    }
+
+    @Test
+    void wrappedWandGuidesKeepTheBulletWithTheirText() throws IOException {
+        var tooltip = new ArrayList<Component>();
+        SpecialItemTooltip.appendExperience(tooltip, SETTINGS, true);
+        var splitter = new StringSplitter((codePoint, style) -> 1.0F);
+        for (String language : List.of("zh_cn", "en_us")) {
+            Path path = Path.of("src/main/resources/assets/rs_integration/lang", language + ".json");
+            JsonObject translations = JsonParser.parseString(Files.readString(path)).getAsJsonObject();
+            for (int i = 5; i <= 7; i++) {
+                String key = "experience.rs_integration.tooltip.detail_" + i;
+                String untranslated = Component.translatable(key).getString();
+                Component line = tooltip.stream()
+                        .filter(component -> component.getString().contains(untranslated))
+                        .findFirst().orElseThrow();
+                // 使用真实译文和原版分行器复现窄提示框，保留生产代码生成的前缀。
+                Component localized = Component.literal(line.getString()
+                        .replace(untranslated, translations.get(key).getAsString()));
+                for (int width : new int[]{24, 40}) {
+                    var wrapped = splitter.splitLines(localized, width, Style.EMPTY);
+                    assertTrue(wrapped.size() > 1, language + ": " + key);
+                    assertTrue(wrapped.get(0).getString().codePoints()
+                            .anyMatch(Character::isLetterOrDigit),
+                            language + ": " + key + " 的圆点不应独占首行");
+                }
+            }
         }
     }
 

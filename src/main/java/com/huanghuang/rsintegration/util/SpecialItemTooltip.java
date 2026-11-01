@@ -49,7 +49,8 @@ public final class SpecialItemTooltip {
         tooltip.add(DiskTooltipEffects.flow(prefix + "title",
                 theme, DiskTooltipEffects.Tone.HINT, 0).copy().withStyle(ChatFormatting.BOLD));
         for (int i = 1; i <= lines; i++) {
-            tooltip.add(DiskTooltipEffects.tint(Component.literal("• ")
+            // 不在圆点后断行，避免长中文说明把圆点单独留在上一行。
+            tooltip.add(DiskTooltipEffects.tint(Component.literal("•\u00a0")
                     .append(Component.translatable(prefix + "detail_" + i)),
                     theme, DiskTooltipEffects.Tone.MUTED));
         }
