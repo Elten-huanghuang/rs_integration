@@ -1075,12 +1075,8 @@ public final class GenericCraftPacket {
                     "[RSI-Generic] Refusing preview without material flow recipe={}", recipeId);
             return true;
         }
-        ItemStack recipeOutput = recipe instanceof CraftingRecipe craftingRecipe
-                ? craftingRecipe.getResultItem(player.serverLevel().registryAccess()).copy()
-                : ModRecipeHandlers.tryGetResultItem(recipe, player.serverLevel().registryAccess());
-        if (GoetyDynamicRitualRecipe.isSupported(recipe)) {
-            recipeOutput = GoetyDynamicRitualRecipe.validatedOutput(recipe, targetOutput);
-        }
+        ItemStack recipeOutput = resolveCachedRecipeOutput(
+                recipe, player.serverLevel().registryAccess(), targetOutput);
         if (recipeOutput.isEmpty()) {
             player.sendSystemMessage(Component.translatable("rsi.plan.failure.planning_cancelled"));
             return true;
@@ -1114,6 +1110,15 @@ public final class GenericCraftPacket {
                     recipe.getClass().getSimpleName()));
             return true;
         }
+    }
+
+    static ItemStack resolveCachedRecipeOutput(
+            Recipe<?> recipe, RegistryAccess access, @Nullable ItemStack targetOutput) {
+        ItemStack recipeOutput = ModRecipeHandlers.tryGetResultItem(recipe, access);
+        if (GoetyDynamicRitualRecipe.isSupported(recipe)) {
+            recipeOutput = GoetyDynamicRitualRecipe.validatedOutput(recipe, targetOutput);
+        }
+        return recipeOutput;
     }
 
     static ModType modTypeForCachedExecution(Recipe<?> recipe) {
@@ -1875,8 +1880,8 @@ public final class GenericCraftPacket {
                 && !CraftExecutionPolicy.isPhysicalMachineRecipe(recipe, modType)
                 && forcedRecipes.isEmpty() && materialLocks.isEmpty()
                 && safePreferences.isEmpty()) {
-            ItemStack recipeOutput = cr.getResultItem(
-                    player.serverLevel().registryAccess()).copy();
+            ItemStack recipeOutput = ModRecipeHandlers.tryGetResultItem(
+                    cr, player.serverLevel().registryAccess());
             List<ScaledIngredientSpec> graphSpecs =
                     CraftIngredientPlanMath.scaleTerminalIngredientSpecs(
                     recipe, CraftIngredientPlanMath.extractPlanIngredientSpecs(cr), recipeOutput, repeatCount);
@@ -1944,8 +1949,8 @@ public final class GenericCraftPacket {
             Map<StackKey, Long> avail = listAvailable(player, storageEndpoint);
             logExecutionAvailability(recipeId, avail);
             List<String> missingCheck = new ArrayList<>();
-            ItemStack recipeOutput = cr2.getResultItem(
-                    player.serverLevel().registryAccess()).copy();
+            ItemStack recipeOutput = ModRecipeHandlers.tryGetResultItem(
+                    cr2, player.serverLevel().registryAccess());
             List<ScaledIngredientSpec> scaledSpecs =
                     CraftIngredientPlanMath.scaleTerminalIngredientSpecs(
                     recipe, CraftPacketUtils.extractIngredientSpecs(cr2), recipeOutput, repeatCount);
@@ -3663,11 +3668,8 @@ public final class GenericCraftPacket {
                     // 花冠根节点可切换花朵；中间步骤仍须保持产物 NBT 一致。
                     if (targetHasTag) {
                         ItemStack altOut;
-                        if (e.recipe() instanceof CraftingRecipe cr) {
-                            altOut = cr.getResultItem(player.serverLevel().registryAccess());
-                        } else {
-                            altOut = ModRecipeHandlers.tryGetResultItem(e.recipe(), player.serverLevel().registryAccess());
-                        }
+                        altOut = ModRecipeHandlers.tryGetResultItem(
+                                e.recipe(), player.serverLevel().registryAccess());
                         boolean crownVariant = recipe instanceof CraftingRecipe
                                 && e.recipe() instanceof CraftingRecipe
                                 && LongTravailCrownRecipes.isVariantAlternative(

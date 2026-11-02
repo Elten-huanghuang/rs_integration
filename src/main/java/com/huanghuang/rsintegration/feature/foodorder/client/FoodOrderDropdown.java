@@ -108,10 +108,14 @@ final class FoodOrderDropdown extends Button {
         int option = optionAt(mouseX, mouseY);
         if (button == 0 && option >= 0) {
             select(option);
-        } else {
-            expanded = false;
+            return true;
         }
-        return true;
+        boolean clickedButton = isMouseOver(mouseX, mouseY);
+        expanded = false;
+        if (!clickedButton) {
+            setFocused(false);
+        }
+        return clickedButton;
     }
 
     @Override

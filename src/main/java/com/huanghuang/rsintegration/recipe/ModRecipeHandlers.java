@@ -204,9 +204,31 @@ public final class ModRecipeHandlers {
             logClientUnsafeFallback(recipe.getClass(), null);
         }
 
+        ItemStack handlerResult = tryGetHandlerResultItem(recipe, access);
+        if (!handlerResult.isEmpty()) return handlerResult;
+
         ItemStack craftTweakerResult = tryGetCraftTweakerOutput(recipe);
         if (!craftTweakerResult.isEmpty()) return craftTweakerResult;
         return tryGetOutputField(recipe);
+    }
+
+    private static ItemStack tryGetHandlerResultItem(Recipe<?> recipe, RegistryAccess access) {
+        if (DISPATCH_GUARD.get() == recipe.getClass()) return ItemStack.EMPTY;
+        ModRecipeHandler handler = claimFor(recipe).winner();
+        if (handler == null) return ItemStack.EMPTY;
+
+        Class<?> previous = DISPATCH_GUARD.get();
+        DISPATCH_GUARD.set(recipe.getClass());
+        try {
+            ItemStack result = handler.getResultItem(recipe, access);
+            return result == null || result.isEmpty() ? ItemStack.EMPTY : result.copy();
+        } finally {
+            if (previous == null) {
+                DISPATCH_GUARD.remove();
+            } else {
+                DISPATCH_GUARD.set(previous);
+            }
+        }
     }
 
     private static void logClientUnsafeFallback(Class<?> recipeClass, Throwable failure) {

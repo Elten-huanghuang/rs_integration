@@ -504,7 +504,12 @@ public final class FoodOrderScreen extends Screen {
             }
         }
         if (filterDropdown != null && filterDropdown.isExpanded()) {
-            return filterDropdown.mouseClicked(mouseX, mouseY, button);
+            if (filterDropdown.mouseClicked(mouseX, mouseY, button)) {
+                return true;
+            }
+            if (getFocused() == filterDropdown) {
+                setFocused(null);
+            }
         }
         if (super.mouseClicked(mouseX, mouseY, button)) {
             return true;
