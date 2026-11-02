@@ -8,6 +8,8 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.List;
 import java.util.Map;
 
@@ -17,6 +19,54 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DagSchedulerTest extends BootstrapTest {
+    @Test
+    void selectiveRefreshOnlyChecksBlockedCandidatesAndNeverRepeatsReadyNodes() {
+        DagScheduler scheduler = new DagScheduler(forkJoinGraph());
+        BitSet candidates = new BitSet();
+        candidates.set(0);
+        List<NodeId> checked = new ArrayList<>();
+        scheduler.refreshBlocked(candidates, nodeId -> {
+            checked.add(nodeId);
+            return true;
+        });
+        assertTrue(checked.isEmpty());
+        assertEquals(DagScheduler.NodeState.BLOCKED, scheduler.state(new NodeId(2)));
+        candidates.set(2);
+        scheduler.refreshBlocked(candidates, nodeId -> {
+            checked.add(nodeId);
+            return true;
+        });
+        assertEquals(List.of(new NodeId(2)), checked);
+        checked.clear();
+        scheduler.refreshBlocked(candidates, nodeId -> {
+            checked.add(nodeId);
+            return true;
+        });
+        assertTrue(checked.isEmpty());
+    }
+
+    @Test
+    void selectiveRefreshRejectsOutOfRangePositionsBeforeChangingState() {
+        DagScheduler scheduler = new DagScheduler(forkJoinGraph());
+        BitSet candidates = new BitSet();
+        candidates.set(2);
+        candidates.set(3);
+        assertThrows(IllegalArgumentException.class,
+                () -> scheduler.refreshBlocked(candidates, ignored -> true));
+        assertEquals(DagScheduler.NodeState.BLOCKED, scheduler.state(new NodeId(2)));
+    }
+
+    @Test
+    void selectiveRefreshDoesNotWakeCancelledNodes() {
+        DagScheduler scheduler = new DagScheduler(forkJoinGraph());
+        scheduler.stopScheduling();
+        BitSet candidates = new BitSet();
+        candidates.set(2);
+        scheduler.refreshBlocked(candidates, ignored -> {
+            throw new AssertionError("stopped scheduler must not check readiness");
+        });
+        assertEquals(DagScheduler.NodeState.CANCELLED, scheduler.state(new NodeId(2)));
+    }
     @Test
     void claimsMatchingReadyNodeBehindQueueHead() {
         DagScheduler scheduler = new DagScheduler(forkJoinGraph());

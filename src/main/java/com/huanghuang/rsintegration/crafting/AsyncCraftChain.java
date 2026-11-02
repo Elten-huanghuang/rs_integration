@@ -113,6 +113,7 @@ import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -123,6 +124,7 @@ import java.util.IdentityHashMap;
 import java.util.Set;
 import java.util.HashSet;
 import java.util.function.Predicate;
+import java.util.function.Consumer;
 import java.util.function.BooleanSupplier;
 
 /**
@@ -296,6 +298,9 @@ public final class AsyncCraftChain {
     @Nullable
     private final NodeAdmissionCoordinator graphAdmissions;
     private final Map<NodeId, List<MaterialBroker.Request>> graphRequests = new HashMap<>();
+    private final Map<MaterialSource, int[]> graphConsumersBySource = new HashMap<>();
+    private final BitSet graphRefreshCandidates = new BitSet();
+    private final Consumer<MaterialSource> graphMaterialIncrease = this::includeGraphMaterialConsumers;
     private final Predicate<NodeId> graphMaterialReadiness = this::canReserveGraphNodeMaterials;
     private final Map<NodeId, CraftNode> graphNodes = new HashMap<>();
     private final ProgressWatchdog graphProgressWatchdog;
@@ -506,6 +511,22 @@ public final class AsyncCraftChain {
         }
         // 图内需求在构造后只读，避免每次就绪检查和预留都重新复制列表。
         graphRequests.replaceAll((nodeId, requests) -> List.copyOf(requests));
+        Map<MaterialSource, List<Integer>> consumers = new HashMap<>();
+        for (int index = 0; index < plan.topologicalOrder().size(); index++) {
+            NodeId nodeId = plan.topologicalOrder().get(index);
+            for (MaterialBroker.Request request : graphRequests.getOrDefault(nodeId, List.of())) {
+                List<Integer> positions = consumers.computeIfAbsent(
+                        request.source(), ignored -> new ArrayList<>());
+                if (positions.isEmpty() || positions.get(positions.size() - 1) != index) {
+                    positions.add(index);
+                }
+            }
+        }
+        consumers.forEach((source, positions) -> {
+            int[] indices = new int[positions.size()];
+            for (int index = 0; index < indices.length; index++) indices[index] = positions.get(index);
+            graphConsumersBySource.put(source, indices);
+        });
         if (graphMaterials != null) {
             for (Map.Entry<InitialLotKey, Long> entry : initial.entrySet()) {
                 graphMaterials.publish(
@@ -2799,8 +2820,20 @@ public final class AsyncCraftChain {
         if (graphMaterials == null || graphScheduler == null || graphScheduler.isStopping()) return;
         long revision = graphMaterials.availabilityRevision();
         if (revision == graphRefreshedAvailabilityRevision) return;
-        graphScheduler.refreshBlocked(graphMaterialReadiness);
+        graphMaterials.drainIncreasedSources(graphMaterialIncrease);
+        if (graphRefreshedAvailabilityRevision == -1L) {
+            graphScheduler.refreshBlocked(graphMaterialReadiness);
+        } else {
+            graphScheduler.refreshBlocked(graphRefreshCandidates, graphMaterialReadiness);
+        }
+        graphRefreshCandidates.clear();
         graphRefreshedAvailabilityRevision = revision;
+    }
+
+    private void includeGraphMaterialConsumers(MaterialSource source) {
+        int[] positions = graphConsumersBySource.get(source);
+        if (positions == null) return;
+        for (int position : positions) graphRefreshCandidates.set(position);
     }
 
     private boolean canReserveGraphNodeMaterials(NodeId nodeId) {

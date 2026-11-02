@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.graph;
 
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -144,11 +145,30 @@ public final class DagScheduler {
         Objects.requireNonNull(readiness, "readiness");
         if (stopping) return;
         for (NodeId nodeId : graph.topologicalOrder()) {
-            if (states.get(nodeId) != NodeState.BLOCKED) continue;
-            if (readiness.test(nodeId)) {
-                states.put(nodeId, NodeState.READY);
-                ready.add(nodeId);
-            }
+            refreshBlockedNode(nodeId, readiness);
+        }
+    }
+
+    /** 候选位对应拓扑位置，确保多个来源的通知去重后仍沿用原就绪顺序。 */
+    public void refreshBlocked(BitSet candidates, Predicate<NodeId> readiness) {
+        Objects.requireNonNull(candidates, "candidates");
+        Objects.requireNonNull(readiness, "readiness");
+        if (stopping) return;
+        List<NodeId> order = graph.topologicalOrder();
+        if (candidates.length() > order.size()) {
+            throw new IllegalArgumentException("candidate position exceeds graph order");
+        }
+        for (int index = candidates.nextSetBit(0); index >= 0;
+             index = candidates.nextSetBit(index + 1)) {
+            refreshBlockedNode(order.get(index), readiness);
+        }
+    }
+
+    private void refreshBlockedNode(NodeId nodeId, Predicate<NodeId> readiness) {
+        if (states.get(nodeId) != NodeState.BLOCKED) return;
+        if (readiness.test(nodeId)) {
+            states.put(nodeId, NodeState.READY);
+            ready.add(nodeId);
         }
     }
 

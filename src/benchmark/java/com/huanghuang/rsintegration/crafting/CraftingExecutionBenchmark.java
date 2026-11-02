@@ -126,6 +126,8 @@ public class CraftingExecutionBenchmark extends BootstrapTest {
     public static class ExecutionData extends CatalogData {
         @Param({"256", "2048"})
         public int activeNodes;
+        @Param({"distributed", "shared"})
+        public String sourceFanout = "distributed";
         AsyncCraftChain chain;
         MaterialBroker broker;
         DagScheduler scheduler;
@@ -163,7 +165,8 @@ public class CraftingExecutionBenchmark extends BootstrapTest {
                             DemandRole.CONSUMED, new ItemStack(Items.IRON_INGOT)));
                     allocations.add(new MaterialAllocation(new AllocationId(allocations.size()), port,
                             new MaterialSource.ProducerOutput(new OutputPortId(
-                                    new NodeId((i - WORKERS) % WORKERS), 0)), iron, 2));
+                                    new NodeId("shared".equals(sourceFanout)
+                                            ? 0 : (i - WORKERS) % WORKERS), 0)), iron, 2));
                 }
                 nodes.add(new CraftNode(node, id("recipe_" + i), ModType.CUSTOM_GUI.id(), null,
                         1, List.of(), List.of(), false, null, null, inputs, outputs));
@@ -243,9 +246,15 @@ public class CraftingExecutionBenchmark extends BootstrapTest {
 
     /** 在非计时运行中统计真实 readiness 调用；不把计数器放进 JMH 热路径。 */
     public static void main(String[] args) throws Throwable {
+        System.out.println("source_fanout,scenario,rounds,callbacks,readiness_checks,expected_checks");
+        for (String fanout : List.of("distributed", "shared")) verifyReadinessCounts(fanout);
+    }
+
+    private static void verifyReadinessCounts(String fanout) throws Throwable {
         ExecutionData data = new ExecutionData();
         data.stockTypes = 100_000;
         data.activeNodes = 2048;
+        data.sourceFanout = fanout;
         data.createCatalog();
         data.createExecution();
         CountingRequests counted = new CountingRequests();
@@ -258,7 +267,15 @@ public class CraftingExecutionBenchmark extends BootstrapTest {
         requestField.set(data.chain, counted);
         data.callbacks();
         CraftingExecutionBenchmark benchmark = new CraftingExecutionBenchmark();
-        System.out.println("scenario,rounds,callbacks,readiness_checks,full_scans");
+        boolean selective;
+        try {
+            AsyncCraftChain.class.getDeclaredField("graphConsumersBySource");
+            selective = true;
+        } catch (NoSuchFieldException ignored) {
+            selective = false;
+        }
+        long checksPerRefresh = data.activeNodes - WORKERS;
+        if (selective && "distributed".equals(fanout)) checksPerRefresh /= WORKERS;
         for (String scenario : List.of("waiting", "one_return", "every_return")) {
             counted.checks = 0L;
             for (int i = 0; i < 100; i++) {
@@ -269,8 +286,14 @@ public class CraftingExecutionBenchmark extends BootstrapTest {
                     default -> throw new AssertionError(scenario);
                 }
             }
-            System.out.println(scenario + ",100,3200," + counted.checks + ","
-                    + counted.checks / (data.activeNodes - WORKERS));
+            long expected = checksPerRefresh * switch (scenario) {
+                case "waiting" -> 0;
+                case "one_return" -> 100;
+                case "every_return" -> 3200;
+                default -> throw new AssertionError(scenario);
+            };
+            check(counted.checks == expected);
+            System.out.println(fanout + "," + scenario + ",100,3200," + counted.checks + "," + expected);
             data.verifyConservation();
         }
     }

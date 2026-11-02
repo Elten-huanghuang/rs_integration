@@ -5,10 +5,13 @@ import net.minecraft.world.item.ItemStack;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.function.Consumer;
 
 /**
  * Server-thread material arbiter for graph node assets.
@@ -86,6 +89,7 @@ public final class MaterialBroker {
     // 只保存原批次的引用，桶内沿用发布顺序；数量和退款仍由原账本维护。
     private final Map<MaterialSource, Map<MaterialKey, List<AssetLot>>> lotsBySource = new HashMap<>();
     private final Map<ReservationToken, Reservation> reservations = new HashMap<>();
+    private final Set<MaterialSource> increasedSources = new HashSet<>();
     private final Thread ownerThread = Thread.currentThread();
     private long nextLotId;
     private long nextToken;
@@ -95,6 +99,19 @@ public final class MaterialBroker {
     public long availabilityRevision() {
         requireOwnerThread();
         return availabilityRevision;
+    }
+
+    /** 只消费可用量增加的来源通知，不修改材料数量、预留或缺料信息。 */
+    public void drainIncreasedSources(Consumer<MaterialSource> consumer) {
+        requireOwnerThread();
+        Objects.requireNonNull(consumer, "consumer");
+        for (MaterialSource source : increasedSources) consumer.accept(source);
+        increasedSources.clear();
+    }
+
+    private void markAvailabilityIncreased(MaterialSource source) {
+        availabilityRevision++;
+        increasedSources.add(source);
     }
 
     public long publish(MaterialSource source, MaterialKey material, long quantity) {
@@ -131,7 +148,7 @@ public final class MaterialBroker {
         lotsBySource.computeIfAbsent(source, ignored -> new HashMap<>())
                 .computeIfAbsent(material, ignored -> new ArrayList<>())
                 .add(lot);
-        availabilityRevision++;
+        markAvailabilityIncreased(source);
         return lotId;
     }
 
@@ -218,7 +235,7 @@ public final class MaterialBroker {
             AssetLot lot = lots.get(claim.lotId);
             lot.reserved -= claim.quantity;
             lot.available += claim.quantity;
-            if (claim.quantity > 0L) availabilityRevision++;
+            if (claim.quantity > 0L) markAvailabilityIncreased(lot.source);
         }
         reservation.state = ReservationState.RELEASED;
     }
@@ -241,7 +258,7 @@ public final class MaterialBroker {
             AssetLot lot = lots.get(claim.lotId);
             lot.committed -= claim.quantity;
             lot.available += claim.quantity;
-            if (claim.quantity > 0L) availabilityRevision++;
+            if (claim.quantity > 0L) markAvailabilityIncreased(lot.source);
         }
         reservation.state = ReservationState.REFUNDED;
     }
@@ -283,7 +300,7 @@ public final class MaterialBroker {
                 stack.shrink(giveBack);
                 lot.reserved -= giveBack;
                 lot.available += giveBack;
-                availabilityRevision++;
+                markAvailabilityIncreased(lot.source);
                 claim.quantity -= giveBack;
                 refundable -= giveBack;
             }
@@ -317,7 +334,7 @@ public final class MaterialBroker {
                 stack.shrink(giveBack);
                 lot.committed -= giveBack;
                 lot.available += giveBack;
-                availabilityRevision++;
+                markAvailabilityIncreased(lot.source);
                 claim.quantity -= giveBack;
                 refundable -= giveBack;
             }
@@ -347,7 +364,7 @@ public final class MaterialBroker {
                 stack.shrink(giveBack);
                 lot.committed -= giveBack;
                 lot.available += giveBack;
-                availabilityRevision++;
+                markAvailabilityIncreased(lot.source);
                 claim.quantity -= giveBack;
                 refundable -= giveBack;
             }

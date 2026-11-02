@@ -6,7 +6,9 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -18,6 +20,42 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MaterialBrokerTest extends BootstrapTest {
+
+    @Test
+    void increasedSourceNotificationsAreDeduplicatedAndDoNotChangeMaterialState() {
+        MaterialBroker broker = new MaterialBroker();
+        MaterialKey diamond = MaterialKey.of(new ItemStack(Items.DIAMOND));
+        MaterialSource source = new MaterialSource.ProducerOutput(new OutputPortId(new NodeId(0), 0));
+        MaterialSource equalSource = new MaterialSource.ProducerOutput(new OutputPortId(new NodeId(0), 0));
+        MaterialSource otherPort = new MaterialSource.ProducerOutput(new OutputPortId(new NodeId(0), 1));
+        broker.publish(source, diamond, 2);
+        broker.publish(equalSource, diamond, 1);
+        broker.publish(otherPort, diamond, 7);
+        List<MaterialBroker.Request> requests = List.of(new MaterialBroker.Request(source, diamond, 5));
+        long revision = broker.availabilityRevision();
+        List<MaterialSource> sources = drainSources(broker);
+
+        assertEquals(2, sources.size());
+        assertEquals(Set.of(source, otherPort), Set.copyOf(sources));
+        assertEquals(revision, broker.availabilityRevision());
+        assertEquals(10, broker.totalAvailable());
+        assertEquals(List.of(new MaterialBroker.Request(source, diamond, 2)), broker.shortages(requests));
+        assertTrue(drainSources(broker).isEmpty());
+        broker.publish(source, diamond, 2);
+        assertEquals(List.of(source), drainSources(broker));
+        assertTrue(broker.shortages(requests).isEmpty());
+    }
+
+    @Test
+    void failedNotificationConsumerLeavesSourcesAvailableForRetry() {
+        MaterialBroker broker = brokerWithDiamonds(2);
+        assertThrows(IllegalStateException.class, () -> broker.drainIncreasedSources(source -> {
+            throw new IllegalStateException("retry");
+        }));
+        MaterialKey diamond = MaterialKey.of(new ItemStack(Items.DIAMOND));
+        assertEquals(List.of(new MaterialSource.InitialPool(diamond)), drainSources(broker));
+        assertEquals(2, broker.totalAvailable());
+    }
 
     @Test
     void shortageDetailsStayAccurateAcrossChecksPublicationReservationAndRefund() {
@@ -136,6 +174,7 @@ class MaterialBrokerTest extends BootstrapTest {
     @Test
     void consumingAndEmptyTransitionsDoNotAdvanceAvailabilityRevision() {
         MaterialBroker broker = brokerWithDiamonds(4);
+        drainSources(broker);
         long revision = broker.availabilityRevision();
         MaterialKey diamond = MaterialKey.of(new ItemStack(Items.DIAMOND));
         MaterialSource source = new MaterialSource.InitialPool(diamond);
@@ -152,6 +191,7 @@ class MaterialBrokerTest extends BootstrapTest {
         broker.commit(committedEmpty);
         broker.refund(committedEmpty);
         assertEquals(revision, broker.availabilityRevision());
+        assertTrue(drainSources(broker).isEmpty());
     }
 
     @Test
@@ -734,5 +774,11 @@ class MaterialBrokerTest extends BootstrapTest {
         MaterialKey diamond = MaterialKey.of(new ItemStack(Items.DIAMOND));
         broker.publish(new MaterialSource.InitialPool(diamond), diamond, count);
         return broker;
+    }
+
+    private static List<MaterialSource> drainSources(MaterialBroker broker) {
+        List<MaterialSource> sources = new ArrayList<>();
+        broker.drainIncreasedSources(sources::add);
+        return sources;
     }
 }
