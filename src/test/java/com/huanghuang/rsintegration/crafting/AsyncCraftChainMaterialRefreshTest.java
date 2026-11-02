@@ -111,6 +111,11 @@ class AsyncCraftChainMaterialRefreshTest extends BootstrapTest {
         fixture.publish(runtime);
         assertEquals(DagScheduler.NodeState.READY, fixture.scheduler.state(CONSUMER));
         assertEquals(DagScheduler.NodeState.RUNNING, fixture.scheduler.state(PRODUCER));
+        BitSet candidates = new BitSet();
+        GraphMaterialWakeIndex wakeIndex =
+                (GraphMaterialWakeIndex) field(fixture.chain, "graphMaterialWakeIndex");
+        wakeIndex.include(SOURCE, candidates);
+        assertEquals(new BitSet(), candidates);
         fixture.publish(runtime);
         verify(fixture.scheduler, times(1)).refreshBlocked(any());
         verify(fixture.scheduler, times(1)).refreshBlocked(any(BitSet.class), any());

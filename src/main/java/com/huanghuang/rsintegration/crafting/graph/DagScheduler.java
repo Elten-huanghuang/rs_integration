@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 
 /** Deterministic graph lifecycle state used by the server-thread executor. */
@@ -25,6 +26,7 @@ public final class DagScheduler {
     }
 
     private final CraftPlanGraph graph;
+    private final Consumer<NodeId> nodeBecameReady;
     private final Map<NodeId, NodeState> states = new HashMap<>();
     private final Map<NodeId, Set<NodeId>> dependencies = new HashMap<>();
     private final Map<NodeId, Set<NodeId>> dependents = new HashMap<>();
@@ -41,7 +43,13 @@ public final class DagScheduler {
     }
 
     public DagScheduler(CraftPlanGraph graph) {
+        this(graph, ignored -> {});
+    }
+
+    /** 节点首次从 BLOCKED 转为 READY 时调用监听器。 */
+    public DagScheduler(CraftPlanGraph graph, Consumer<NodeId> nodeBecameReady) {
         this.graph = Objects.requireNonNull(graph, "graph");
+        this.nodeBecameReady = Objects.requireNonNull(nodeBecameReady, "nodeBecameReady");
         CraftPlanValidator.validate(graph);
         for (NodeId nodeId : graph.topologicalOrder()) {
             Set<NodeId> nodeDependencies = new HashSet<>(graph.dependenciesOf(nodeId));
@@ -134,8 +142,7 @@ public final class DagScheduler {
             boolean allSucceeded = dependencies.getOrDefault(dependent, Set.of()).stream()
                     .allMatch(dependency -> states.get(dependency) == NodeState.SUCCEEDED);
             if (allSucceeded && readiness.test(dependent)) {
-                states.put(dependent, NodeState.READY);
-                ready.add(dependent);
+                markReady(dependent);
             }
         }
     }
@@ -167,9 +174,14 @@ public final class DagScheduler {
     private void refreshBlockedNode(NodeId nodeId, Predicate<NodeId> readiness) {
         if (states.get(nodeId) != NodeState.BLOCKED) return;
         if (readiness.test(nodeId)) {
-            states.put(nodeId, NodeState.READY);
-            ready.add(nodeId);
+            markReady(nodeId);
         }
+    }
+
+    private void markReady(NodeId nodeId) {
+        states.put(nodeId, NodeState.READY);
+        ready.add(nodeId);
+        nodeBecameReady.accept(nodeId);
     }
 
     public void fail(NodeId nodeId) {

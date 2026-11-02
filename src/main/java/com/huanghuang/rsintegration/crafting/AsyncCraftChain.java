@@ -298,7 +298,7 @@ public final class AsyncCraftChain {
     @Nullable
     private final NodeAdmissionCoordinator graphAdmissions;
     private final Map<NodeId, List<MaterialBroker.Request>> graphRequests = new HashMap<>();
-    private final Map<MaterialSource, int[]> graphConsumersBySource = new HashMap<>();
+    private final GraphMaterialWakeIndex graphMaterialWakeIndex = new GraphMaterialWakeIndex();
     private final BitSet graphRefreshCandidates = new BitSet();
     private final Consumer<MaterialSource> graphMaterialIncrease = this::includeGraphMaterialConsumers;
     private final Predicate<NodeId> graphMaterialReadiness = this::canReserveGraphNodeMaterials;
@@ -456,7 +456,7 @@ public final class AsyncCraftChain {
                 Math.max(1, globalTimeoutSeconds) * 20);
         if (graph != null && !requiresAdaptiveProduction(graph)) {
             this.graph = graph;
-            this.graphScheduler = new DagScheduler(graph);
+            this.graphScheduler = new DagScheduler(graph, graphMaterialWakeIndex::unsubscribe);
             this.graphMaterials = new MaterialBroker();
             this.graphAdmissions = new NodeAdmissionCoordinator(graphScheduler, graphMaterials);
             initialiseGraphMaterialFlow(graph);
@@ -511,22 +511,13 @@ public final class AsyncCraftChain {
         }
         // 图内需求在构造后只读，避免每次就绪检查和预留都重新复制列表。
         graphRequests.replaceAll((nodeId, requests) -> List.copyOf(requests));
-        Map<MaterialSource, List<Integer>> consumers = new HashMap<>();
         for (int index = 0; index < plan.topologicalOrder().size(); index++) {
             NodeId nodeId = plan.topologicalOrder().get(index);
+            if (graphScheduler.state(nodeId) != DagScheduler.NodeState.BLOCKED) continue;
             for (MaterialBroker.Request request : graphRequests.getOrDefault(nodeId, List.of())) {
-                List<Integer> positions = consumers.computeIfAbsent(
-                        request.source(), ignored -> new ArrayList<>());
-                if (positions.isEmpty() || positions.get(positions.size() - 1) != index) {
-                    positions.add(index);
-                }
+                graphMaterialWakeIndex.subscribe(request.source(), nodeId, index);
             }
         }
-        consumers.forEach((source, positions) -> {
-            int[] indices = new int[positions.size()];
-            for (int index = 0; index < indices.length; index++) indices[index] = positions.get(index);
-            graphConsumersBySource.put(source, indices);
-        });
         if (graphMaterials != null) {
             for (Map.Entry<InitialLotKey, Long> entry : initial.entrySet()) {
                 graphMaterials.publish(
@@ -2205,6 +2196,8 @@ public final class AsyncCraftChain {
                         retained = true;
                     }
                     eligible.add(machine);
+                    // 单次加工只使用首台成功的机器，无需继续准备其他候选。
+                    if (step.executions() == 1) break;
                 } else if (result.state() == IBatchDelegate.PreparationState.RETRY) {
                     retryableRejection = true;
                     if (firstRetryDetail.isEmpty() && result.detail() != null) {
@@ -2831,9 +2824,7 @@ public final class AsyncCraftChain {
     }
 
     private void includeGraphMaterialConsumers(MaterialSource source) {
-        int[] positions = graphConsumersBySource.get(source);
-        if (positions == null) return;
-        for (int position : positions) graphRefreshCandidates.set(position);
+        graphMaterialWakeIndex.include(source, graphRefreshCandidates);
     }
 
     private boolean canReserveGraphNodeMaterials(NodeId nodeId) {

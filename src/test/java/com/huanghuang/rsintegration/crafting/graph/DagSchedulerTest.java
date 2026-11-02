@@ -108,6 +108,26 @@ class DagSchedulerTest extends BootstrapTest {
     }
 
     @Test
+    void notifiesWhenBlockedNodesBecomeReadyThroughMaterialsOrDependencies() {
+        CraftPlanGraph graph = forkJoinGraph();
+        List<NodeId> materialTransitions = new ArrayList<>();
+        DagScheduler materialScheduler = new DagScheduler(graph, materialTransitions::add);
+
+        materialScheduler.refreshBlocked(nodeId -> nodeId.equals(new NodeId(2)));
+
+        assertEquals(List.of(new NodeId(2)), materialTransitions);
+
+        List<NodeId> dependencyTransitions = new ArrayList<>();
+        DagScheduler dependencyScheduler = new DagScheduler(graph, dependencyTransitions::add);
+        List<NodeId> producers = dependencyScheduler.claimReady(2);
+        dependencyScheduler.succeed(producers.get(0));
+        assertTrue(dependencyTransitions.isEmpty());
+        dependencyScheduler.succeed(producers.get(1));
+
+        assertEquals(List.of(new NodeId(2)), dependencyTransitions);
+    }
+
+    @Test
     void failureStopsDispatchButLetsRunningSiblingDrain() {
         DagScheduler scheduler = new DagScheduler(forkJoinGraph());
         List<NodeId> running = scheduler.claimReady(2);
