@@ -18,6 +18,10 @@ import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.crafting.graph.OutputKind;
 import com.huanghuang.rsintegration.crafting.graph.OutputProbability;
 import net.minecraft.core.RegistryAccess;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.tags.TagKey;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.CampfireCookingRecipe;
@@ -44,6 +48,8 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
      */
     private static final String DOUGH_CLASS =
             "vectorwing.farmersdelight.common.crafting.DoughRecipe";
+    private static final TagKey<Item> WATER_BUCKETS = TagKey.create(Registries.ITEM,
+            ResourceLocation.fromNamespaceAndPath("forge", "buckets/water"));
 
     @Override
     public ModType modType() { return ModType.byId("farmersdelight"); }
@@ -68,13 +74,11 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
                 && recipe.getClass().getName().equals(DOUGH_CLASS);
     }
 
-    /** 面团配方的材料，顺序即合成格槽位；水桶会作为剩余物原样返还。 */
+    /** 面团配方的材料，顺序即合成格槽位；水桶类物品按配方原样返还。 */
     static List<IngredientSpec> doughMaterials() {
-        // 主代码没有农夫乐事的编译依赖，这里按具体物品描述水桶；
-        // 该物品正好是配方匹配使用的 buckets/water 标签里唯一的实际物品。
         return List.of(
                 new IngredientSpec(Ingredient.of(Items.WHEAT), 1),
-                new IngredientSpec(Ingredient.of(Items.WATER_BUCKET), 1));
+                new IngredientSpec(Ingredient.of(WATER_BUCKETS), 1, DemandRole.CATALYST));
     }
 
     /** 模拟装配面团时放进合成格的物品，下标与 {@link #doughMaterials()} 一致。 */
@@ -107,7 +111,7 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
     @Override
     public List<IngredientSpec> getIngredients(Recipe<?> recipe) {
         if (isDoughRecipe(recipe)) {
-            // 与农夫乐事源码一致：1 个小麦 + 1 个水桶类物品，产物为小麦面团，水桶按剩余物返还。
+            // 与农夫乐事实现一致：小麦被消耗，水桶类物品按催化剂复用并返还。
             return doughMaterials();
         }
         if (recipe instanceof CampfireCookingRecipe) {

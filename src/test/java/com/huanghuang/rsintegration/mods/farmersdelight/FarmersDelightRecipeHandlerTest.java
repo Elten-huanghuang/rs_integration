@@ -109,7 +109,11 @@ class FarmersDelightRecipeHandlerTest extends BootstrapTest {
         assertEquals(2, specs.size());
         assertEquals(1, specs.get(0).count());
         assertTrue(specs.get(0).ingredient().test(new ItemStack(Items.WHEAT)));
+        assertEquals(DemandRole.CONSUMED, specs.get(0).role());
         assertEquals(1, specs.get(1).count());
+        assertEquals(DemandRole.CATALYST, specs.get(1).role());
+        assertEquals("forge:buckets/water", specs.get(1).ingredient().toJson()
+                .getAsJsonObject().get("tag").getAsString());
         assertFalse(specs.get(1).ingredient().test(new ItemStack(Items.WHEAT)));
     }
 
@@ -122,6 +126,7 @@ class FarmersDelightRecipeHandlerTest extends BootstrapTest {
 
         assertEquals(2, specs.size());
         assertTrue(specs.get(0).ingredient().test(new ItemStack(Items.WHEAT)));
+        assertEquals(DemandRole.CATALYST, specs.get(1).role());
     }
 
     private static Recipe<?> newDoughRecipe() throws Exception {
