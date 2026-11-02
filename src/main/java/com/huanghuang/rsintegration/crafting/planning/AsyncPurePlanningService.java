@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
+import com.google.common.collect.ForwardingMap;
 import com.huanghuang.rsintegration.config.CraftingPlanningConfig;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.SelfAmplifyingRecipePolicy;
@@ -131,7 +132,8 @@ public final class AsyncPurePlanningService {
                     && inspection.backgroundCompatible()
                     && !snapshot.mainThreadOnly()
                     ? computeInScope(snapshot, repeatCount, maxSteps, maxSearchStates,
-                            maxMemoizedFailures, session, routingGraph) : null;
+                            maxMemoizedFailures, session, routingGraph,
+                            routing.projectedAvailabilityFor(snapshot)) : null;
             return new RoutedPlan(snapshot, routing, inspection, plan, forcedRecipesProjected);
         });
     }
@@ -141,18 +143,19 @@ public final class AsyncPurePlanningService {
                                                             int maxMemoizedFailures,
                                                             PlanningSession session) {
         return computeInScope(snapshot, repeatCount, maxSteps, maxSearchStates,
-                maxMemoizedFailures, session, null);
+                maxMemoizedFailures, session, null, null);
     }
 
     private static PureRecipePlanner.Result computeInScope(PlanningSnapshot snapshot, int repeatCount,
                                                             int maxSteps, int maxSearchStates,
                                                             int maxMemoizedFailures,
                                                             PlanningSession session,
-                                                            ImmutableRecipeGraph projectedGraph) {
+                                                            ImmutableRecipeGraph projectedGraph,
+                                                            @Nullable Map<ImmutableRecipeGraph.MaterialRef, Long> projectedStock) {
         PlanningThreadContext.throwIfCancelled();
         setPhase(session, snapshot, PlanningSession.Phase.PREPARATION);
         Map<ImmutableRecipeGraph.MaterialRef, Long> stock =
-                ImmutableRecipeGraphProjector.projectAvailability(
+                projectedStock != null ? projectedStock : ImmutableRecipeGraphProjector.projectAvailability(
                         snapshot.availableItems());
         ImmutableRecipeGraph planningGraph;
         if (projectedGraph != null) {
@@ -283,10 +286,26 @@ public final class AsyncPurePlanningService {
                               Set<ResourceLocation> catalystRecipes,
                               Set<ResourceLocation> incompatibleOutputs) {
         public RouteInputs {
-            available = Collections.unmodifiableMap(new LinkedHashMap<>(available));
+            available = available instanceof ProjectedAvailability
+                    ? available : Collections.unmodifiableMap(new LinkedHashMap<>(available));
             catalystOutputs = Set.copyOf(catalystOutputs);
             catalystRecipes = Set.copyOf(catalystRecipes);
             incompatibleOutputs = Set.copyOf(incompatibleOutputs);
+        }
+
+        public static RouteInputs fromItems(Map<StackKey, Long> sourceItems,
+                                            int maxNodes, Set<ResourceLocation> catalystOutputs,
+                                            Set<ResourceLocation> catalystRecipes,
+                                            Set<ResourceLocation> incompatibleOutputs) {
+            return new RouteInputs(new ProjectedAvailability(sourceItems),
+                    maxNodes, catalystOutputs, catalystRecipes, incompatibleOutputs);
+        }
+
+        @Nullable
+        Map<ImmutableRecipeGraph.MaterialRef, Long> projectedAvailabilityFor(PlanningSnapshot snapshot) {
+            // 快照已将库存冻结；只有同一来源对象才保证数量和遍历顺序均未变化。
+            return available instanceof ProjectedAvailability projected
+                    && projected.sourceItems == snapshot.availableItems() ? available : null;
         }
 
         public boolean matchesPolicy(int nodes, Set<ResourceLocation> outputs,
@@ -294,6 +313,24 @@ public final class AsyncPurePlanningService {
                                       Set<ResourceLocation> incompatible) {
             return maxNodes == nodes && catalystOutputs.equals(outputs)
                     && catalystRecipes.equals(recipes) && incompatibleOutputs.equals(incompatible);
+        }
+    }
+
+    /** 保留不可变投影的来源；Map 的值比较仍由实际投影内容决定。 */
+    private static final class ProjectedAvailability
+            extends ForwardingMap<ImmutableRecipeGraph.MaterialRef, Long> {
+        private final Map<StackKey, Long> sourceItems;
+        private final Map<ImmutableRecipeGraph.MaterialRef, Long> available;
+
+        private ProjectedAvailability(Map<StackKey, Long> sourceItems) {
+            this.sourceItems = sourceItems;
+            this.available = Collections.unmodifiableMap(new LinkedHashMap<>(
+                    ImmutableRecipeGraphProjector.projectAvailability(sourceItems)));
+        }
+
+        @Override
+        protected Map<ImmutableRecipeGraph.MaterialRef, Long> delegate() {
+            return available;
         }
     }
 

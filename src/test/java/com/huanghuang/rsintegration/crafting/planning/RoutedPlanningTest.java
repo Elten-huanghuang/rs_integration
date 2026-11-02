@@ -4,12 +4,15 @@ import com.huanghuang.rsintegration.util.PerformanceMonitor;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.NbtMatchMode;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -19,6 +22,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 
 class RoutedPlanningTest extends BootstrapTest {
     private static final ResourceLocation TARGET = new ResourceLocation("test:target");
@@ -164,6 +171,119 @@ class RoutedPlanningTest extends BootstrapTest {
     }
 
     @Test
+    void sameSnapshotReusesTheOriginalProjectionAndKeepsItsValueSemantics() {
+        var snapshot = snapshot(2, false, false);
+        var routing = routing(snapshot, Set.of(), 512);
+        var legacy = new AsyncPurePlanningService.RouteInputs(
+                ImmutableRecipeGraphProjector.projectAvailability(snapshot.availableItems()),
+                512, Set.of(), Set.of(), Set.of());
+
+        assertSame(routing.available(), routing.projectedAvailabilityFor(snapshot));
+        assertNull(legacy.projectedAvailabilityFor(snapshot));
+        assertEquals(legacy, routing);
+        assertEquals(legacy.hashCode(), routing.hashCode());
+        assertEquals(legacy.toString(), routing.toString());
+        try (var projection = mockStatic(ImmutableRecipeGraphProjector.class, CALLS_REAL_METHODS)) {
+            var expected = compute(snapshot, legacy, 2);
+            projection.verify(() -> ImmutableRecipeGraphProjector.projectAvailability(
+                    snapshot.availableItems()), times(1));
+            projection.clearInvocations();
+            assertEquals(expected, compute(snapshot, routing, 2));
+            projection.verify(() -> ImmutableRecipeGraphProjector.projectAvailability(
+                    snapshot.availableItems()), never());
+        }
+        assertEquals(Map.of(IRON, 2L), routing.available());
+        assertThrows(UnsupportedOperationException.class, () -> routing.available().clear());
+    }
+
+    @Test
+    void immutableExecutionSourceCanBeProjectedBeforeTheSnapshotIsCaptured() {
+        var original = snapshot(1, false, false);
+        var routing = AsyncPurePlanningService.RouteInputs.fromItems(
+                original.availableItems(), 512, Set.of(), Set.of(), Set.of());
+        var captured = new PlanningSnapshot(original.playerId(), 2, 1, TARGET,
+                original.availableItems(), Map.of(), original.recipeGraph(), "network", "binding", false);
+
+        assertSame(original.availableItems(), captured.availableItems());
+        assertSame(routing.available(), routing.projectedAvailabilityFor(captured));
+        assertTrue(compute(captured, routing, 1).plan().feasible());
+        assertEquals(Map.of(IRON, 1L), routing.available());
+    }
+
+    @Test
+    void differentRoutingStockNeverReplacesTheSearchSnapshotOrItsMissingMaterials() {
+        for (int searchCount : List.of(0, 1)) {
+            var snapshot = snapshot(searchCount, false, false);
+            var routeSource = snapshot(1 - searchCount, false, false);
+            var routing = routing(routeSource, Set.of(), 512);
+            var legacy = new AsyncPurePlanningService.RouteInputs(
+                    new LinkedHashMap<>(routing.available()), 512, Set.of(), Set.of(), Set.of());
+
+            assertNull(routing.projectedAvailabilityFor(snapshot));
+            var actual = compute(snapshot, routing, 1);
+            assertEquals(compute(snapshot, legacy, 1), actual);
+            assertNotNull(actual.plan());
+            assertEquals(searchCount == 1, actual.plan().feasible());
+            assertEquals(searchCount == 1, actual.plan().missing().isEmpty());
+        }
+    }
+
+    @Test
+    void mutableOrEqualButDistinctSourcesCannotEnableProjectionReuse() {
+        var original = snapshot(1, false, false);
+        var source = new HashMap<>(original.availableItems());
+        var routing = AsyncPurePlanningService.RouteInputs.fromItems(
+                source, 512, Set.of(), Set.of(), Set.of());
+        var snapshot = new PlanningSnapshot(original.playerId(), 1, 1, TARGET, source,
+                Map.of(), original.recipeGraph(), "network", "binding", false);
+
+        assertEquals(source, snapshot.availableItems());
+        assertNotSame(source, snapshot.availableItems());
+        assertNull(routing.projectedAvailabilityFor(snapshot));
+        source.clear();
+        assertEquals(Map.of(IRON, 1L), routing.available());
+        var actual = compute(snapshot, routing, 2);
+        assertNotNull(actual.plan());
+        assertFalse(actual.plan().feasible());
+        assertFalse(actual.plan().missing().isEmpty());
+        assertEquals(1L, snapshot.availableItems().get(new StackKey(Items.IRON_INGOT, null)));
+    }
+
+    @Test
+    void nbtHashCollisionsKeepVariantOrderAndIndependentLedgers() {
+        MaterialRef first = new MaterialRef(IRON.itemId(), "{variant:\"Aa\"}");
+        MaterialRef second = new MaterialRef(IRON.itemId(), "{variant:\"BB\"}");
+        assertNotEquals(first, second);
+        assertEquals(first.hashCode(), second.hashCode());
+        RecipeNode target = new RecipeNode(TARGET, RESULT, 1, List.of(
+                new IngredientRef(List.of(IRON), 1, NbtMatchMode.ANY),
+                new IngredientRef(List.of(first), 1)));
+        var items = new LinkedHashMap<StackKey, Long>();
+        items.put(new StackKey(Items.IRON_INGOT, second.nbt()), 1L);
+        items.put(new StackKey(Items.IRON_INGOT, first.nbt()), 1L);
+        items.put(new StackKey(Items.DIRT, null), 0L);
+        items.put(new StackKey(Items.STONE, null), Long.MAX_VALUE);
+        var snapshot = new PlanningSnapshot(UUID.randomUUID(), 1, 1, TARGET, items,
+                Map.of(), new ImmutableRecipeGraph(Map.of(RESULT, List.of(target))),
+                "network", "binding", false);
+        var routing = routing(snapshot, Set.of(), 512);
+        var legacy = new AsyncPurePlanningService.RouteInputs(
+                ImmutableRecipeGraphProjector.projectAvailability(snapshot.availableItems()),
+                512, Set.of(), Set.of(), Set.of());
+        var order = List.copyOf(legacy.available().entrySet());
+
+        assertSame(routing.available(), routing.projectedAvailabilityFor(snapshot));
+        assertEquals(order, List.copyOf(routing.available().entrySet()));
+        for (int repeats : List.of(1, 2)) {
+            var actual = compute(snapshot, routing, repeats);
+            assertEquals(compute(snapshot, legacy, repeats), actual);
+            assertNotNull(actual.plan());
+            assertEquals(repeats == 1, actual.plan().feasible());
+            assertEquals(order, List.copyOf(routing.available().entrySet()));
+        }
+    }
+
+    @Test
     void cancelledJobDoesNotLeaveLookupScopeOrTurnIntoMissingMaterials() {
         var snapshot = snapshot(1, false, false);
         Thread.currentThread().interrupt();
@@ -211,7 +331,10 @@ class RoutedPlanningTest extends BootstrapTest {
                     result::set, failure::set);
             Runnable handoff = callbacks.poll(5, TimeUnit.SECONDS);
             assertNotNull(handoff);
-            service.submitRouted(latest, routing, 1, callbacks::add, 30, 1000, 100, 1500,
+            var legacy = new AsyncPurePlanningService.RouteInputs(
+                    new LinkedHashMap<>(routing.available()), 512, Set.of(), Set.of(), Set.of());
+            assertNull(legacy.projectedAvailabilityFor(latest));
+            service.submitRouted(latest, legacy, 1, callbacks::add, 30, 1000, 100, 1500,
                     result::set, failure::set);
             handoff.run();
             assertNull(failure.get());
@@ -277,8 +400,8 @@ class RoutedPlanningTest extends BootstrapTest {
 
     private static AsyncPurePlanningService.RouteInputs routing(PlanningSnapshot snapshot,
                                                                 Set<ResourceLocation> incompatible, int nodes) {
-        return new AsyncPurePlanningService.RouteInputs(
-                ImmutableRecipeGraphProjector.projectAvailability(snapshot.availableItems()),
+        return AsyncPurePlanningService.RouteInputs.fromItems(
+                snapshot.availableItems(),
                 nodes, Set.of(), Set.of(), incompatible);
     }
 

@@ -2908,8 +2908,8 @@ public final class GenericCraftPacket {
                 effectiveOverrides.isEmpty() || ForcedRecipeGraphProjector.apply(
                         planningSnapshot.recipeGraph(), effectiveOverrides) != null,
                 !materialLocks.isEmpty())) {
-            var routing = new AsyncPurePlanningService.RouteInputs(
-                    routingAvailability(planningSnapshot.availableItems()), demandMaxNodes,
+            var routing = AsyncPurePlanningService.RouteInputs.fromItems(
+                    planningSnapshot.availableItems(), demandMaxNodes,
                     reusableCatalystOutputIds, reusableCatalystRecipeIds, pureIncompatibleOutputIds);
             CraftPlanningRuntime.planRequests().submitRouted(planningSnapshot, routing, repeatCount, player.getServer()::execute,
                     RSIntegrationConfig.CRAFTING_MAX_STEPS.get(), completed ->

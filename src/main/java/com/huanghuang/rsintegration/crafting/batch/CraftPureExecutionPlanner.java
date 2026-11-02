@@ -224,8 +224,8 @@ final class CraftPureExecutionPlanner {
         int plannedExecutions = terminalInputs == null ? Math.max(1, repeatCount) : 1;
         MaterialSources.invalidateFor(player, storageEndpoint);
         Map<StackKey, Long> available = MaterialSources.listAllAvailable(player, storageEndpoint);
-        var routeInputs = new AsyncPurePlanningService.RouteInputs(
-                ImmutableRecipeGraphProjector.projectAvailability(available),
+        var routeInputs = AsyncPurePlanningService.RouteInputs.fromItems(
+                available,
                 RSIntegrationConfig.CRAFTING_PURE_DEMAND_MAX_NODES.get(),
                 RSIntegrationConfig.ENABLE_CATALYST_RECIPE_PREFERENCE.get()
                         ? RecipeIndex.reusableCatalystOutputIds(player.serverLevel()) : Set.of(),
