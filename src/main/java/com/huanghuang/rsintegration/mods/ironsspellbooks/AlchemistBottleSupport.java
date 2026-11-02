@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mods.ironsspellbooks;
 
+import com.huanghuang.rsintegration.feature.experience.ExperienceBottleSupport;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -28,6 +29,7 @@ public final class AlchemistBottleSupport {
     }
 
     public static boolean canBottle(FluidStack fluid) {
-        return InkFluidSupport.isInk(fluid) || !bottle(fluid).isEmpty();
+        return ExperienceBottleSupport.canBottle(fluid)
+                || InkFluidSupport.isInk(fluid) || !bottle(fluid).isEmpty();
     }
 }

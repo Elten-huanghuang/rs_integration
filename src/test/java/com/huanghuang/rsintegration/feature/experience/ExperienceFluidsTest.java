@@ -54,6 +54,7 @@ class ExperienceFluidsTest extends BootstrapTest {
 
     @BeforeAll
     static void registerFluids() throws ReflectiveOperationException {
+        if (ExperienceFluids.EXPERIENCE.isPresent()) return;
         List<DeferredRegister.EventDispatcher> dispatchers = new ArrayList<>();
         IEventBus bus = mock(IEventBus.class);
         doAnswer(call -> {

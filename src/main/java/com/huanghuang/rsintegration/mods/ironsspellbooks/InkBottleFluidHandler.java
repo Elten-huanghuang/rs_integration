@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.ironsspellbooks;
 
 import com.huanghuang.rsintegration.crafting.fluid.WaterBottleFluidSupport;
+import com.huanghuang.rsintegration.feature.experience.ExperienceBottleSupport;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -33,6 +34,8 @@ public final class InkBottleFluidHandler implements IFluidHandlerItem {
     }
 
     private static FluidStack bottledFluid(ItemStack stack) {
+        FluidStack experience = ExperienceBottleSupport.fluid(stack);
+        if (!experience.isEmpty()) return experience;
         FluidStack potion = AlchemistPotionSupport.fluid(stack);
         if (!potion.isEmpty()) return potion;
         // 墨水物品只能表示普通墨水；带自定义数据的物品保留原样。
@@ -47,12 +50,14 @@ public final class InkBottleFluidHandler implements IFluidHandlerItem {
 
     @Override public int getTanks() { return 1; }
     @Override public FluidStack getFluidInTank(int tank) { return content.copy(); }
-    @Override public int getTankCapacity(int tank) { return InkFluidSupport.BOTTLE_AMOUNT; }
+    @Override public int getTankCapacity(int tank) { return bottleAmount(content); }
     @Override public boolean isFluidValid(int tank, FluidStack fluid) {
         return !bottledItem(fluid).isEmpty();
     }
 
     private static ItemStack bottledItem(FluidStack fluid) {
+        ItemStack experienceBottle = ExperienceBottleSupport.bottle(fluid);
+        if (!experienceBottle.isEmpty()) return experienceBottle;
         ItemStack waterBottle = WaterBottleFluidSupport.bottle(fluid);
         if (!waterBottle.isEmpty()) return waterBottle;
         Item ink = inkItem(fluid);
@@ -68,21 +73,29 @@ public final class InkBottleFluidHandler implements IFluidHandlerItem {
     }
 
     @Override public int fill(FluidStack resource, FluidAction action) {
-        if (!content.isEmpty() || resource.getAmount() < InkFluidSupport.BOTTLE_AMOUNT
+        int amount = bottleAmount(resource);
+        if (!content.isEmpty() || resource.getAmount() < amount
                 || !isFluidValid(0, resource)) return 0;
         if (action.execute()) {
             content = resource.copy();
-            content.setAmount(InkFluidSupport.BOTTLE_AMOUNT);
+            content.setAmount(amount);
             filledBottle = bottledItem(resource);
         }
-        return InkFluidSupport.BOTTLE_AMOUNT;
+        return amount;
+    }
+
+    private static int bottleAmount(FluidStack fluid) {
+        return ExperienceBottleSupport.canBottle(fluid)
+                ? ExperienceBottleSupport.BOTTLE_AMOUNT : InkFluidSupport.BOTTLE_AMOUNT;
     }
 
     @Override public FluidStack drain(FluidStack resource, FluidAction action) {
         return content.isFluidEqual(resource) ? drain(resource.getAmount(), action) : FluidStack.EMPTY;
     }
     @Override public FluidStack drain(int amount, FluidAction action) {
-        if (content.isEmpty() || amount < InkFluidSupport.BOTTLE_AMOUNT) return FluidStack.EMPTY;
+        // 附魔之瓶的实际经验仍由原版随机掉落，不将均值反向当作确定的液体产出。
+        if (content.isEmpty() || ExperienceBottleSupport.canBottle(content)
+                || amount < bottleAmount(content)) return FluidStack.EMPTY;
         FluidStack drained = content.copy();
         if (action.execute()) content = FluidStack.EMPTY;
         return drained;
