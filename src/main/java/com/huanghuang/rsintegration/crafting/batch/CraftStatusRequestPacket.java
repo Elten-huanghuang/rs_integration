@@ -88,7 +88,7 @@ public final class CraftStatusRequestPacket {
     private static void sendStatus(ServerPlayer player, AsyncCraftChain chain) {
         BatchCraftNetworkHandler.CHANNEL.sendTo(
                 new CraftStartedPacket(chain.getCraftId(), chain.stepsCount(),
-                        chain.isGraphExecution(), chain.displayTarget()),
+                        chain.isGraphExecution(), chain.displayTarget(), chain.outputProgress()),
                 player.connection.connection, NetworkDirection.PLAY_TO_CLIENT);
         BatchCraftNetworkHandler.CHANNEL.sendTo(
                 new CraftProgressPacket(chain.nextStatusSnapshot()),

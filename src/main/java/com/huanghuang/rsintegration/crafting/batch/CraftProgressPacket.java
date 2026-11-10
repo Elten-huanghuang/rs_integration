@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.batch;
 import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot;
+import com.huanghuang.rsintegration.crafting.progress.CraftOutputProgress;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.util.PerformanceMonitor;
 import io.netty.handler.codec.DecoderException;
@@ -68,6 +69,7 @@ public final class CraftProgressPacket {
             buf.writeUtf(node.technicalDetail(), MAX_TECHNICAL_DETAIL_LENGTH);
             buf.writeBoolean(node.draining());
         }
+        writeOutputProgress(buf, snapshot.outputProgress());
         PerformanceMonitor.recordProgressPacketBytes(buf.writerIndex() - startIndex);
     }
 
@@ -103,7 +105,24 @@ public final class CraftProgressPacket {
                     runningOperations, machineLabel, nodeReason, nodeDetail, draining));
         }
         return new CraftProgressPacket(new CraftProgressSnapshot(craftId, sequence, result, reason,
-                completed, total, running, detail, List.copyOf(nodes)));
+                completed, total, running, detail, List.copyOf(nodes), readOutputProgress(buf)));
+    }
+
+    /** 可选尾部字段；没有数量字段的旧进度包仍按原有步骤/操作进度处理。 */
+    static void writeOutputProgress(FriendlyByteBuf buf, CraftOutputProgress progress) {
+        if (!progress.known()) return;
+        buf.writeVarLong(progress.completed());
+        buf.writeVarLong(progress.total());
+    }
+
+    static CraftOutputProgress readOutputProgress(FriendlyByteBuf buf) {
+        if (!buf.isReadable()) return CraftOutputProgress.UNKNOWN;
+        long completed = buf.readVarLong();
+        long total = buf.readVarLong();
+        if (completed < 0L || total <= 0L || completed > total) {
+            throw new DecoderException("output quantity counts out of bounds");
+        }
+        return new CraftOutputProgress(completed, total);
     }
 
     private static int readBoundedCount(FriendlyByteBuf buf) {

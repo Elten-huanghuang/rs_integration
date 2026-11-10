@@ -21,7 +21,8 @@ public record CraftProgressSnapshot(
         int totalNodes,
         int runningNodes,
         @Nullable String technicalDetail,
-        List<NodeProgress> nodes
+        List<NodeProgress> nodes,
+        CraftOutputProgress outputProgress
 ) {
     public static final int TERMINAL_SEQUENCE = Integer.MAX_VALUE;
     public static final int MAX_TECHNICAL_DETAIL_LENGTH = 1024;
@@ -32,10 +33,18 @@ public record CraftProgressSnapshot(
         result = result == null ? Result.RUNNING : result;
         reason = reason == null ? Reason.NONE : reason;
         technicalDetail = limitTechnicalDetail(technicalDetail);
+        outputProgress = outputProgress == null ? CraftOutputProgress.UNKNOWN : outputProgress;
         nodes = nodes == null ? List.of() : List.copyOf(nodes);
         if (nodes.size() > MAX_NODE_DETAILS) {
             nodes = selectNodeDetails(nodes, MAX_NODE_DETAILS);
         }
+    }
+
+    public CraftProgressSnapshot(UUID craftId, int sequence, Result result, Reason reason,
+                                 int completedNodes, int totalNodes, int runningNodes,
+                                 @Nullable String technicalDetail, List<NodeProgress> nodes) {
+        this(craftId, sequence, result, reason, completedNodes, totalNodes, runningNodes,
+                technicalDetail, nodes, CraftOutputProgress.UNKNOWN);
     }
 
     public CraftProgressSnapshot(UUID craftId, int sequence, Result result, Reason reason,

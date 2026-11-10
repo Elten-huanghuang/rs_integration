@@ -7,6 +7,9 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.graph.CraftNode;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
+import com.huanghuang.rsintegration.crafting.graph.ConcurrentNodeExecutor;
+import com.huanghuang.rsintegration.crafting.graph.NodeOutputAccumulator;
+import com.huanghuang.rsintegration.crafting.progress.CraftOutputProgress;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.crafting.graph.MaterialSource;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
@@ -23,6 +26,7 @@ import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.players.PlayerList;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
@@ -37,6 +41,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -172,8 +177,80 @@ class AsyncCraftDisplayTargetTest extends BootstrapTest {
         assertTrue(chain(server(), List.of()).displayTarget().isEmpty());
     }
 
+    @Test
+    void incrementalGraphPublicationsUpdateTheSecondaryTargetWithoutCountingThePrimaryOutput() throws Exception {
+        AsyncCraftChain chain = new AsyncCraftChain(UUID.randomUUID(), server(), null, graph(64, 16));
+        assertEquals(new CraftOutputProgress(0L, 64L), chain.nextStatusSnapshot().outputProgress());
+        NodeId node = new NodeId(0);
+        OutputPortId secondary = new OutputPortId(node, 1);
+        MaterialKey gold = MaterialKey.of(new ItemStack(Items.GOLD_INGOT));
+        MaterialKey iron = MaterialKey.of(new ItemStack(Items.IRON_INGOT));
+        CraftNodeRuntime runtime = mock(CraftNodeRuntime.class);
+        when(runtime.drainIncrementalOutputs()).thenReturn(
+                List.of(new NodeOutputAccumulator.Publication(secondary, gold,
+                        new ItemStack(Items.GOLD_INGOT, 4), IntegrationResourceKey.item(new ItemStack(Items.GOLD_INGOT)))),
+                List.of(new NodeOutputAccumulator.Publication(new OutputPortId(node, 0), iron,
+                        new ItemStack(Items.IRON_INGOT, 16), IntegrationResourceKey.item(new ItemStack(Items.IRON_INGOT)))),
+                List.of(new NodeOutputAccumulator.Publication(secondary, gold,
+                        new ItemStack(Items.GOLD_INGOT, 60), IntegrationResourceKey.item(new ItemStack(Items.GOLD_INGOT)))));
+        Method publish = AsyncCraftChain.class.getDeclaredMethod("publishIncrementalGraphOutputs",
+                NodeId.class, ConcurrentNodeExecutor.Worker.class);
+        publish.setAccessible(true);
+        publish.invoke(chain, node, runtime);
+        assertEquals(new CraftOutputProgress(4L, 64L), chain.nextStatusSnapshot().outputProgress());
+        publish.invoke(chain, node, runtime);
+        assertEquals(new CraftOutputProgress(4L, 64L), chain.outputProgress());
+        publish.invoke(chain, node, runtime);
+        assertEquals(new CraftOutputProgress(64L, 64L), chain.outputProgress());
+    }
+
+    @Test
+    void flatRecipeWithFourOutputsPerOperationShowsEightOfSixtyFourAfterTwoOperations() throws Exception {
+        var step = new CraftingResolver.ResolutionStep(new ResourceLocation("test", "batch"), ModType.GENERIC,
+                new ResourceLocation("test", "machine"), List.of(), List.of(), false, 16, null,
+                new ItemStack(Items.DIAMOND, 4), null);
+        MinecraftServer server = server();
+        Recipe<?> recipe = mock(Recipe.class);
+        RecipeManager recipes = server.getRecipeManager();
+        doReturn(Optional.of(recipe)).when(recipes).byKey(step.recipeId());
+        try (MockedStatic<ModRecipeHandlers> handlers = mockStatic(ModRecipeHandlers.class)) {
+            handlers.when(() -> ModRecipeHandlers.tryGetResultItem(recipe, RegistryAccess.EMPTY))
+                    .thenReturn(new ItemStack(Items.DIAMOND, 4));
+            AsyncCraftChain chain = chain(server, List.of(step));
+            assertEquals(new CraftOutputProgress(0L, 64L), chain.outputProgress());
+            Field remaining = AsyncCraftChain.class.getDeclaredField("stepRemaining");
+            remaining.setAccessible(true);
+            remaining.setInt(chain, 14);
+            assertEquals(new CraftOutputProgress(8L, 64L), chain.nextStatusSnapshot().outputProgress());
+        }
+    }
+
+    @Test
+    void probabilisticOutputProgressCountsRealHitsAndSurvivesCancellation() throws Exception {
+        ProductionTarget target = ProductionTarget.of(new ItemStack(Items.EGG), 64L);
+        var step = step(ModType.GENERIC, new ItemStack(Items.EGG), target);
+        AsyncCraftChain chain = chain(server(), List.of(step));
+        ProbabilisticProduction production = new ProbabilisticProduction(target, 100);
+        Field progress = AsyncCraftChain.class.getDeclaredField("probabilityTargets");
+        progress.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        Map<CraftingResolver.ResolutionStep, ProbabilisticProduction> targets =
+                (Map<CraftingResolver.ResolutionStep, ProbabilisticProduction>) progress.get(chain);
+        targets.put(step, production);
+        production.started();
+        production.settle(List.of());
+        assertEquals(new CraftOutputProgress(0L, 64L), chain.outputProgress());
+        production.settle(List.of(new ItemStack(Items.EGG, 2)));
+        assertEquals(new CraftOutputProgress(2L, 64L), chain.outputProgress());
+        Field state = AsyncCraftChain.class.getDeclaredField("state");
+        state.setAccessible(true);
+        state.set(chain, AsyncCraftChain.State.ABORTED);
+        assertEquals(new CraftOutputProgress(2L, 64L), chain.nextStatusSnapshot().outputProgress());
+    }
+
     private static MinecraftServer server() {
         MinecraftServer server = mock(MinecraftServer.class);
+        when(server.getPlayerList()).thenReturn(mock(PlayerList.class));
         RecipeManager recipes = mock(RecipeManager.class);
         when(server.getRecipeManager()).thenReturn(recipes);
         when(recipes.byKey(any())).thenReturn(Optional.empty());
@@ -196,18 +273,22 @@ class AsyncCraftDisplayTargetTest extends BootstrapTest {
     }
 
     private static CraftPlanGraph graph() {
+        return graph(1, 1);
+    }
+
+    private static CraftPlanGraph graph(int quantity, int executions) {
         NodeId id = new NodeId(0);
         OutputPortId primary = new OutputPortId(id, 0);
         OutputPortId secondary = new OutputPortId(id, 1);
         MaterialKey gold = MaterialKey.of(new ItemStack(Items.GOLD_INGOT));
         CraftNode node = new CraftNode(id, new ResourceLocation("test", "producer"),
-                ModType.GENERIC.id(), new ResourceLocation("minecraft", "crafting"), 1,
+                ModType.GENERIC.id(), new ResourceLocation("minecraft", "crafting"), executions,
                 List.of(), List.of(), false, null, null, List.of(), List.of(
-                OutputDeclaration.item(primary, MaterialKey.of(new ItemStack(Items.IRON_INGOT)), 1, OutputKind.PRIMARY),
-                OutputDeclaration.item(secondary, gold, 1, OutputKind.SECONDARY)));
-        RootDemand root = new RootDemand(Ingredient.of(Items.GOLD_INGOT), 1, 0,
+                OutputDeclaration.item(primary, MaterialKey.of(new ItemStack(Items.IRON_INGOT)), executions, OutputKind.PRIMARY),
+                OutputDeclaration.item(secondary, gold, quantity, OutputKind.SECONDARY)));
+        RootDemand root = new RootDemand(Ingredient.of(Items.GOLD_INGOT), quantity, 0,
                 new ItemStack(Items.GOLD_INGOT),
-                List.of(new RootAllocation(new MaterialSource.ProducerOutput(secondary), gold, 1)));
+                List.of(new RootAllocation(new MaterialSource.ProducerOutput(secondary), gold, quantity)));
         return new CraftPlanGraph(1, List.of(node), List.of(), List.of(root), List.of(), List.of(id));
     }
 

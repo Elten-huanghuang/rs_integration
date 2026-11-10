@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot;
+import com.huanghuang.rsintegration.crafting.progress.CraftOutputProgress;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.util.PerformanceMonitor;
 import io.netty.handler.codec.DecoderException;
@@ -29,6 +30,7 @@ public final class CraftProgressDeltaPacket {
     private final int runningNodes;
     private final String technicalDetail;
     private final List<CraftProgressSnapshot.NodeProgress> changedNodes;
+    private final CraftOutputProgress outputProgress;
 
     public CraftProgressDeltaPacket(UUID craftId, int baseSequence, CraftProgressSnapshot snapshot,
                                     List<CraftProgressSnapshot.NodeProgress> changedNodes) {
@@ -42,6 +44,7 @@ public final class CraftProgressDeltaPacket {
         this.runningNodes = snapshot.runningNodes();
         this.technicalDetail = snapshot.technicalDetail();
         this.changedNodes = List.copyOf(changedNodes);
+        this.outputProgress = snapshot.outputProgress();
     }
 
     public void encode(FriendlyByteBuf buf) {
@@ -72,6 +75,7 @@ public final class CraftProgressDeltaPacket {
             buf.writeUtf(node.technicalDetail(), MAX_DETAIL);
             buf.writeBoolean(node.draining());
         }
+        CraftProgressPacket.writeOutputProgress(buf, outputProgress);
         PerformanceMonitor.recordProgressPacketBytes(buf.writerIndex() - startIndex);
     }
 
@@ -105,7 +109,7 @@ public final class CraftProgressDeltaPacket {
                     completedOps, totalOps, runningOps, machine, nodeReason, nodeDetail, draining));
         }
         var snapshot = new CraftProgressSnapshot(id, sequence, result, reason, completed, total,
-                running, detail, nodes);
+                running, detail, nodes, CraftProgressPacket.readOutputProgress(buf));
         return new CraftProgressDeltaPacket(id, base, snapshot, nodes);
     }
 
@@ -131,4 +135,5 @@ public final class CraftProgressDeltaPacket {
     public int runningNodes() { return runningNodes; }
     public String technicalDetail() { return technicalDetail; }
     public List<CraftProgressSnapshot.NodeProgress> changedNodes() { return changedNodes; }
+    public CraftOutputProgress outputProgress() { return outputProgress; }
 }

@@ -882,6 +882,8 @@
   "rsi.progress.status.cancelled": "Craft Cancelled",
   "rsi.progress.summary": "Completed %s/%s · Running %s",
   "rsi.progress.summary_operations": "Operations %s/%s",
+  "rsi.progress.hud.steps": "Steps %s/%s",
+  "rsi.progress.hud.hint": "%s Details",
   "rsi.progress.reason.none": "Preparing the next step",
   "rsi.progress.reason.waiting_materials": "Waiting for materials",
   "rsi.progress.reason.machine_busy": "The target machine is busy",

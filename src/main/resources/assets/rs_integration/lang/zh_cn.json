@@ -885,6 +885,8 @@
   "rsi.progress.status.cancelled": "已取消合成",
   "rsi.progress.summary": "已完成 %s/%s · 运行中 %s",
   "rsi.progress.summary_operations": "操作 %s/%s",
+  "rsi.progress.hud.steps": "步骤 %s/%s",
+  "rsi.progress.hud.hint": "%s 详情",
   "rsi.progress.reason.none": "正在准备下一步",
   "rsi.progress.reason.waiting_materials": "正在等待材料",
   "rsi.progress.reason.machine_busy": "目标机器正忙",

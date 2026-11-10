@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
+import com.huanghuang.rsintegration.crafting.progress.CraftOutputProgress;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.api.distmarker.Dist;
@@ -17,16 +18,23 @@ public final class CraftStartedPacket {
     private final int totalNodes;
     private final boolean graphMode;
     private final ItemStack target;
+    private final CraftOutputProgress outputProgress;
 
     public CraftStartedPacket(UUID craftId, int totalNodes, boolean graphMode) {
         this(craftId, totalNodes, graphMode, ItemStack.EMPTY);
     }
 
     public CraftStartedPacket(UUID craftId, int totalNodes, boolean graphMode, ItemStack target) {
+        this(craftId, totalNodes, graphMode, target, CraftOutputProgress.UNKNOWN);
+    }
+
+    public CraftStartedPacket(UUID craftId, int totalNodes, boolean graphMode, ItemStack target,
+                              CraftOutputProgress outputProgress) {
         this.craftId = craftId;
         this.totalNodes = totalNodes;
         this.graphMode = graphMode;
         this.target = target == null ? ItemStack.EMPTY : target.copy();
+        this.outputProgress = outputProgress == null ? CraftOutputProgress.UNKNOWN : outputProgress;
     }
 
     public void encode(FriendlyByteBuf buf) {
@@ -34,10 +42,12 @@ public final class CraftStartedPacket {
         buf.writeVarInt(totalNodes);
         buf.writeBoolean(graphMode);
         InkFluidSupport.writePacket(buf, target);
+        CraftProgressPacket.writeOutputProgress(buf, outputProgress);
     }
 
     public static CraftStartedPacket decode(FriendlyByteBuf buf) {
-        return new CraftStartedPacket(buf.readUUID(), buf.readVarInt(), buf.readBoolean(), InkFluidSupport.readPacket(buf));
+        return new CraftStartedPacket(buf.readUUID(), buf.readVarInt(), buf.readBoolean(),
+                InkFluidSupport.readPacket(buf), CraftProgressPacket.readOutputProgress(buf));
     }
 
     public static void handle(CraftStartedPacket packet, Supplier<NetworkEvent.Context> ctx) {
@@ -50,4 +60,5 @@ public final class CraftStartedPacket {
     public int totalNodes() { return totalNodes; }
     public boolean graphMode() { return graphMode; }
     public ItemStack target() { return target.copy(); }
+    public CraftOutputProgress outputProgress() { return outputProgress; }
 }

@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot;
+import com.huanghuang.rsintegration.crafting.progress.CraftOutputProgress;
 import com.huanghuang.rsintegration.api.execution.CollectedOutput;
 import com.huanghuang.rsintegration.api.recipe.ProductionCompletionPolicy;
 import com.huanghuang.rsintegration.api.execution.CancelReason;
@@ -278,6 +279,9 @@ public final class AsyncCraftChain {
     private ConcurrentNodeExecutor graphExecutor;
     private final Map<NodeId, CraftNodeRuntime> nodeRuntimes = new HashMap<>();
     private final Map<NodeId, ProductionAttemptState> productionAttempts = new HashMap<>();
+    /** 累计真实发布的产物；最终交付或取消清理不能使 HUD 的已完成数量倒退。 */
+    private final Map<OutputPortId, Long> publishedOutputQuantities = new HashMap<>();
+    private long settledFinalOutputQuantity;
     private final Map<NodeId, String> graphFailureDetails = new HashMap<>();
     private final Map<NodeId, CraftFailureCode> graphFailureCodes = new HashMap<>();
     /** Prevents an unavailable machine/material from being rescanned every tick. */
@@ -770,6 +774,7 @@ public final class AsyncCraftChain {
                     }
                     List<ItemStack> settled = group.drainSettledResults();
                     if (!settled.isEmpty()) {
+                        recordSettledFinalOutputs(settled, List.of(), List.of());
                         reportCraftedPrimaryOutputs(online, settled,
                                 currentDelegate.getExpectedProduction(),
                                 currentStepOutputPrototype());
@@ -846,6 +851,7 @@ public final class AsyncCraftChain {
                             recordObservedProduction(currentDelegate);
                     closeFlatOperationScope();
                     List<ItemStack> actualResults = collectedOutputs.stacks();
+                    recordSettledFinalOutputs(actualResults, reported, observed);
                     for (ItemStack result : actualResults) addToVirtualInventory(result);
                     String resourceFailure =
                             currentDelegate.reportedResourceFailure();
@@ -2799,6 +2805,7 @@ public final class AsyncCraftChain {
         for (NodeOutputAccumulator.Publication publication : publications) {
             graphMaterials.publishActual(new MaterialSource.ProducerOutput(publication.port()),
                     publication.material(), publication.stack());
+            recordPublishedOutput(publication.port(), publication.stack());
             if (publication.resource().kind()
                     == IntegrationResourceKey.ResourceKind.ITEM
                     && isPrimaryGraphPublication(
@@ -2957,6 +2964,7 @@ public final class AsyncCraftChain {
             MaterialSource source = new MaterialSource.ProducerOutput(output.id());
             for (ItemStack fragment : entry.getValue()) {
                 graphMaterials.publishActual(source, output.material(), fragment);
+                recordPublishedOutput(output.id(), fragment);
             }
         }
         remaining.removeIf(ItemStack::isEmpty);
@@ -3481,7 +3489,69 @@ public final class AsyncCraftChain {
         int sequence = terminal ? CraftProgressSnapshot.TERMINAL_SEQUENCE : ++progressSequence;
         return new CraftProgressSnapshot(craftId, sequence, progressResult, progressReason,
                 completed, total, running, abortReason.isEmpty() ? null : abortReason,
-                buildNodeProgress());
+                buildNodeProgress(), outputProgress());
+    }
+
+    private void recordPublishedOutput(OutputPortId port, ItemStack stack) {
+        publishedOutputQuantities.merge(port, (long) stack.getCount(), SaturatingLongMath::add);
+    }
+
+    private void recordSettledFinalOutputs(List<ItemStack> outputs, List<CollectedOutput> reported,
+                                          List<CollectedOutput> observed) {
+        if (currentStepIdx != steps.size() - 1) return;
+        ItemStack target = displayTarget();
+        if (target.isEmpty()) return;
+        MaterialKey material = MaterialKey.of(target);
+        for (ItemStack output : outputs) {
+            if (MaterialMatcher.matchesOutputDeclaration(material, output)) {
+                settledFinalOutputQuantity = SaturatingLongMath.add(settledFinalOutputQuantity, output.getCount());
+            }
+        }
+        IntegrationResourceKey fluid = InkFluidSupport.resource(target);
+        if (fluid == null) return;
+        ProductionTarget requested = ProductionTarget.of(fluid, 1L);
+        for (CollectedOutput output : reported) {
+            if (requested.matchesFluid(output)) {
+                settledFinalOutputQuantity = SaturatingLongMath.add(settledFinalOutputQuantity, output.amount());
+            }
+        }
+        for (CollectedOutput output : observed) {
+            if (requested.matchesFluid(output)) {
+                settledFinalOutputQuantity = SaturatingLongMath.add(settledFinalOutputQuantity, output.amount());
+            }
+        }
+    }
+
+    public CraftOutputProgress outputProgress() {
+        if (useGraphExecution && graph != null) {
+            return CraftOutputProgress.fromGraph(graph, displayTarget(), publishedOutputQuantities);
+        }
+        if (steps.isEmpty()) return CraftOutputProgress.UNKNOWN;
+        int finalStepIndex = steps.size() - 1;
+        CraftingResolver.ResolutionStep step = steps.get(finalStepIndex);
+        if (step.productionTarget() != null) {
+            ProbabilisticProduction production = probabilityTargets.get(step);
+            long completed = Math.max(settledFinalOutputQuantity, production != null ? production.produced() : 0L);
+            if (state == State.COMPLETED) completed = Math.max(completed, step.productionTarget().quantity());
+            return new CraftOutputProgress(completed, step.productionTarget().quantity());
+        }
+        // syntheticOutput 仅保存身份（数量固定为 1），每次产量必须读真实配方。
+        Recipe<?> recipe = recipeForStep(step);
+        ItemStack output = recipe == null || server.overworld() == null ? ItemStack.EMPTY
+                : ModRecipeHandlers.tryGetResultItem(recipe, server.overworld().registryAccess());
+        if (output.isEmpty()) return CraftOutputProgress.UNKNOWN;
+        int totalOperations = Math.max(1, step.executions());
+        int completedOperations = state == State.COMPLETED || currentStepIdx > finalStepIndex
+                ? totalOperations : 0;
+        if (currentStepIdx == finalStepIndex && stepRemaining > 0) {
+            completedOperations = currentDelegate instanceof ParallelCraftGroup group
+                    ? completedFlatWindowOperations(totalOperations, stepRemaining, group.getCompletedOperations())
+                    : completedFlatOperations(totalOperations, stepRemaining);
+        }
+        return new CraftOutputProgress(
+                Math.max(settledFinalOutputQuantity,
+                        SaturatingLongMath.multiply(completedOperations, output.getCount())),
+                SaturatingLongMath.multiply(totalOperations, output.getCount()));
     }
 
     private CraftProgressSnapshot.Result progressResult(boolean terminal) {
@@ -3772,6 +3842,7 @@ public final class AsyncCraftChain {
         try {
             graphMaterials.publishActual(
                     new MaterialSource.ProducerOutput(output.id()), output.material(), published);
+            recordPublishedOutput(output.id(), published);
         } catch (RuntimeException exception) {
             RSIntegrationMod.LOGGER.warn(ctx.format(
                     "Failed to publish tainted Earth Heart for node={}; falling back to virtual inventory"),
@@ -6227,7 +6298,7 @@ public final class AsyncCraftChain {
         int total = useGraphExecution && graph != null
                 ? graph.topologicalOrder().size() : steps.size();
         BatchCraftNetworkHandler.CHANNEL.sendTo(
-                new CraftStartedPacket(craftId, total, useGraphExecution, displayTarget()),
+                new CraftStartedPacket(craftId, total, useGraphExecution, displayTarget(), outputProgress()),
                 online.connection.connection,
                 NetworkDirection.PLAY_TO_CLIENT);
     }

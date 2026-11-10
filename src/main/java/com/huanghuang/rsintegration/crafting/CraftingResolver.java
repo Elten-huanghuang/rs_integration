@@ -1948,7 +1948,7 @@ public final class CraftingResolver {
             tag = CanonicalNbt.normalizeSnbt(tag);
         }
 
-        static StackKey of(ItemStack stack, boolean includeNbt) {
+        public static StackKey of(ItemStack stack, boolean includeNbt) {
             Item item = stack.getItem();
             String tag = includeNbt ? CanonicalNbt.exactSnbt(stack.getTag()) : null;
             return new StackKey(item, tag);

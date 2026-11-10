@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot;
+import com.huanghuang.rsintegration.crafting.progress.CraftOutputProgress;
+import com.huanghuang.rsintegration.crafting.progress.CraftProgressTracker;
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot.NodeProgress;
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot.NodeState;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
@@ -192,5 +194,70 @@ class CraftPacketCodecTest extends BootstrapTest {
         buf.writeVarInt(0);
         buf.writeBoolean(false);
         return buf;
+    }
+
+    @Test
+    void outputQuantitiesRoundTripThroughStartedFullAndDeltaPacketsWithoutStackCountLimits() {
+        UUID id = UUID.randomUUID();
+        CraftOutputProgress progress = new CraftOutputProgress(3_000_000_000L, 4_000_000_000L);
+        var snapshot = new CraftProgressSnapshot(id, 2, CraftProgressSnapshot.Result.RUNNING,
+                CraftProgressSnapshot.Reason.NONE, 0, 1, 1, null, List.of(), progress);
+        FriendlyByteBuf started = buffer();
+        new CraftStartedPacket(id, 1, true, new ItemStack(Items.DIAMOND), progress).encode(started);
+        assertEquals(progress, CraftStartedPacket.decode(started).outputProgress());
+        assertEquals(0, started.readableBytes());
+        FriendlyByteBuf full = buffer();
+        new CraftProgressPacket(snapshot).encode(full);
+        assertEquals(progress, CraftProgressPacket.decode(full).snapshot().outputProgress());
+        assertEquals(0, full.readableBytes());
+        FriendlyByteBuf delta = buffer();
+        new CraftProgressDeltaPacket(id, 1, snapshot, List.of()).encode(delta);
+        assertEquals(progress, CraftProgressDeltaPacket.decode(delta).outputProgress());
+        assertEquals(0, delta.readableBytes());
+    }
+
+    @Test
+    void oldProgressPayloadsWithoutQuantityExtensionsStillDecode() {
+        FriendlyByteBuf full = basePayload(0, 0);
+        full.writeVarInt(0);
+        assertFalse(CraftProgressPacket.decode(full).snapshot().outputProgress().known());
+        UUID id = UUID.randomUUID();
+        FriendlyByteBuf started = buffer();
+        new CraftStartedPacket(id, 1, true).encode(started);
+        assertFalse(CraftStartedPacket.decode(started).outputProgress().known());
+        FriendlyByteBuf delta = buffer();
+        new CraftProgressDeltaPacket(id, 1, new CraftProgressSnapshot(id, 2,
+                CraftProgressSnapshot.Result.RUNNING, CraftProgressSnapshot.Reason.NONE,
+                0, 1, 0, null), List.of()).encode(delta);
+        assertFalse(CraftProgressDeltaPacket.decode(delta).outputProgress().known());
+    }
+
+    @Test
+    void deltaRetainsActualOutputQuantityWhenNoNodeChanged() {
+        UUID id = UUID.randomUUID();
+        try {
+            CraftProgressTracker.onStarted(new CraftStartedPacket(id, 1, true, new ItemStack(Items.DIAMOND),
+                    new CraftOutputProgress(0L, 64L)));
+            assertEquals(new CraftOutputProgress(0L, 64L), CraftProgressTracker.get(id).outputProgress());
+            var snapshot = new CraftProgressSnapshot(id, 1, CraftProgressSnapshot.Result.RUNNING,
+                    CraftProgressSnapshot.Reason.NONE, 0, 1, 1, null, List.of(), new CraftOutputProgress(4L, 64L));
+            FriendlyByteBuf delta = buffer();
+            new CraftProgressDeltaPacket(id, 0, snapshot, List.of()).encode(delta);
+            CraftProgressTracker.onDelta(CraftProgressDeltaPacket.decode(delta));
+            assertEquals(new CraftOutputProgress(4L, 64L), CraftProgressTracker.get(id).outputProgress());
+        } finally {
+            CraftProgressTracker.clear();
+        }
+    }
+
+    @Test
+    void malformedOutputQuantityExtensionsAreRejected() {
+        for (long[] quantities : new long[][]{{-1L, 64L}, {65L, 64L}, {0L, 0L}}) {
+            FriendlyByteBuf buf = basePayload(0, 0);
+            buf.writeVarInt(0);
+            buf.writeVarLong(quantities[0]);
+            buf.writeVarLong(quantities[1]);
+            assertThrows(DecoderException.class, () -> CraftProgressPacket.decode(buf));
+        }
     }
 }

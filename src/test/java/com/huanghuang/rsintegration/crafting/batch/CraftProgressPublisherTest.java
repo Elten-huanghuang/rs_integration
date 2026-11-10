@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot;
+import com.huanghuang.rsintegration.crafting.progress.CraftOutputProgress;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -24,6 +25,18 @@ class CraftProgressPublisherTest {
         UUID id = UUID.randomUUID();
         CraftProgressSnapshot previous = snapshot(id, 1, 0);
         CraftProgressSnapshot current = snapshot(id, 2, 1);
+        assertTrue(CraftProgressPublisher.changedNodes(previous, current).isEmpty());
+    }
+
+    @Test
+    void newOutputQuantityPublishesEvenWhenStepAndOperationCountsAreUnchanged() {
+        UUID id = UUID.randomUUID();
+        var previous = new CraftProgressSnapshot(id, 1, CraftProgressSnapshot.Result.RUNNING,
+                CraftProgressSnapshot.Reason.NONE, 0, 1, 1, null, List.of(), new CraftOutputProgress(0L, 64L));
+        var current = new CraftProgressSnapshot(id, 2, CraftProgressSnapshot.Result.RUNNING,
+                CraftProgressSnapshot.Reason.NONE, 0, 1, 1, null, List.of(), new CraftOutputProgress(4L, 64L));
+
+        assertFalse(CraftProgressPublisher.samePayload(previous, current));
         assertTrue(CraftProgressPublisher.changedNodes(previous, current).isEmpty());
     }
 

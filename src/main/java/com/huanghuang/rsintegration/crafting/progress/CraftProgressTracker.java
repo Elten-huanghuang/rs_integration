@@ -46,7 +46,7 @@ public final class CraftProgressTracker {
         ACTIVE.putIfAbsent(packet.craftId(),
                 new CraftProgressSnapshot(packet.craftId(), 0,
                         CraftProgressSnapshot.Result.RUNNING, CraftProgressSnapshot.Reason.NONE,
-                        0, packet.totalNodes(), 0, null));
+                        0, packet.totalNodes(), 0, null, List.of(), packet.outputProgress()));
         TARGETS.put(packet.craftId(), packet.target());
         LAST_UPDATED.putIfAbsent(packet.craftId(), System.currentTimeMillis());
     }
@@ -83,7 +83,7 @@ public final class CraftProgressTracker {
         for (CraftProgressSnapshot.NodeProgress node : delta.changedNodes()) nodes.put(node.nodeId(), node);
         return onProgress(new CraftProgressSnapshot(delta.craftId(), delta.sequence(), delta.result(),
                 delta.reason(), delta.completedNodes(), delta.totalNodes(), delta.runningNodes(),
-                delta.technicalDetail(), List.copyOf(nodes.values())));
+                delta.technicalDetail(), List.copyOf(nodes.values()), delta.outputProgress()));
     }
 
     private static void requestFullStatus(UUID craftId) {
