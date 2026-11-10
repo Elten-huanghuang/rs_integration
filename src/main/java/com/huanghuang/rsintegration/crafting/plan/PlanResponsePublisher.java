@@ -65,6 +65,7 @@ public final class PlanResponsePublisher {
         for (PlanResponsePagePacket page : pages) {
             BatchCraftNetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), page);
         }
+        PreviewInventorySyncManager.offer(player, plan, requestId);
     }
 
     public static void sendError(ServerPlayer player, PlanOutcome outcome,

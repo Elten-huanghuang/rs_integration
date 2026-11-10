@@ -1,12 +1,15 @@
 package com.huanghuang.rsintegration.client.recipe;
 
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
+import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.network.packet.JeiNetworkInventoryPacket;
 import com.huanghuang.rsintegration.storage.StorageReference;
 import net.minecraft.world.item.ItemStack;
 
 import javax.annotation.Nullable;
 import java.util.LinkedHashMap;
+import java.util.Collection;
+import java.util.Objects;
 import java.util.Map;
 
 /** Most recent recursive-plan demand context used for JEI shortage decoration. */
@@ -36,6 +39,18 @@ public final class JeiCraftingPlanContext {
         demands.clear();
         reference = null;
         active = false;
+    }
+
+    /** 预览数量包仅更新变化项，避免每次管道移动都重建全部 JEI 需求键。 */
+    public synchronized void updateMaterials(PlanResponse plan, Collection<IngredientKey> changed) {
+        if (!active || !Objects.equals(reference, plan.storageReference())) return;
+        for (IngredientKey key : changed) {
+            PlanResponse.Availability availability = plan.materials().get(key);
+            if (availability == null) continue;
+            ItemStack stack = key.stack(1);
+            demands.put(JeiNetworkInventoryPacket.key(stack), new Demand(
+                    availability.needed(), availability.available(), availability.missingCount(), stack.hasTag()));
+        }
     }
 
     @Nullable

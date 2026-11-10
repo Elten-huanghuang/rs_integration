@@ -240,6 +240,29 @@ class PlanCacheTest extends BootstrapTest {
         assertNotNull(cache.takeForExecution(current));
     }
 
+    @Test
+    void refreshInvalidatesTheOldSnapshotAndItsExecutionLeaseOnly() {
+        PlanCache cache = new PlanCache(1_000);
+        PlanCache.Key stale = key("stale_snapshot");
+        PlanCache.Key otherPlayer = key("other_player");
+        PlanningSnapshot oldSnapshot = snapshot(stale);
+        cache.put(stale, plan(), oldSnapshot, 100);
+        cache.put(otherPlayer, plan(), snapshot(otherPlayer), 100);
+        cache.invalidateSnapshot(oldSnapshot);
+        assertNull(cache.get(stale, 100));
+        assertNull(cache.peekForExecution(stale));
+        assertNotNull(cache.get(otherPlayer, 100));
+        assertNotNull(cache.peekForExecution(otherPlayer));
+
+        cache.put(stale, plan(), oldSnapshot, 100);
+        PlanningSnapshot newer = new PlanningSnapshot(stale.playerId(), 2, stale.recipeRevision(),
+                stale.recipeId(), Map.of(), Map.of(), new ImmutableRecipeGraph(Map.of()), "", "", false);
+        cache.put(stale, plan(), newer, 101);
+        cache.invalidateSnapshot(oldSnapshot);
+        assertSame(newer, cache.get(stale, 101).snapshot());
+        assertSame(newer, cache.peekForExecution(stale).snapshot());
+    }
+
     private static PlanCache.Key key(String path) {
         return new PlanCache.Key(UUID.randomUUID(),
                 new ResourceLocation("test", path), Map.of(), 1, "");

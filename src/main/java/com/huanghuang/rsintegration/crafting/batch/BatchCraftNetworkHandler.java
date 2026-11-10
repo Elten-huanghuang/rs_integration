@@ -11,6 +11,8 @@ import net.minecraftforge.network.NetworkDirection;
 
 import com.huanghuang.rsintegration.crafting.plan.PlanResponsePacket;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponsePagePacket;
+import com.huanghuang.rsintegration.crafting.plan.PlanInventoryWatchPacket;
+import com.huanghuang.rsintegration.crafting.plan.PlanInventoryUpdatePacket;
 import com.huanghuang.rsintegration.crafting.planning.PlanningProgressPacket;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.huanghuang.rsintegration.network.packet.NetworkPacketIds;
@@ -45,6 +47,12 @@ public final class BatchCraftNetworkHandler {
                 PlanResponsePagePacket::encode, PlanResponsePagePacket::decode,
                 PlanResponsePagePacket::handle,
                 Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+        ch.registerMessage(NetworkPacketIds.PLAN_INVENTORY_WATCH, PlanInventoryWatchPacket.class,
+                PlanInventoryWatchPacket::encode, PlanInventoryWatchPacket::decode,
+                PlanInventoryWatchPacket::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        ch.registerMessage(NetworkPacketIds.PLAN_INVENTORY_UPDATE, PlanInventoryUpdatePacket.class,
+                PlanInventoryUpdatePacket::encode, PlanInventoryUpdatePacket::decode,
+                PlanInventoryUpdatePacket::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
         ch.registerMessage(NetworkPacketIds.CRAFT_STARTED, CraftStartedPacket.class,
                 CraftStartedPacket::encode, CraftStartedPacket::decode, CraftStartedPacket::handle,
                 Optional.of(NetworkDirection.PLAY_TO_CLIENT));

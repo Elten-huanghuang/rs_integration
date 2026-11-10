@@ -211,13 +211,28 @@ final class NativeRefinedStorageDriver implements RefinedStorageDriver {
             }
         };
         cache.addListener(nativeListener);
-        // 流体也参与材料规划；变动时刷新快照，避免仍使用补水前的库存。
+        // 流体数量和缓存重建是两种事件，持续泵送不应反复解绑并扫描全部库存。
         IStorageCache<FluidStack> fluidCache = network.getFluidStorageCache();
         IStorageCacheListener<FluidStack> fluidListener = new IStorageCacheListener<>() {
             @Override public void onAttached() {}
             @Override public void onInvalidated() { listener.onInvalidated(); }
-            @Override public void onChanged(StackListResult<FluidStack> result) { listener.onInvalidated(); }
-            @Override public void onChangedBulk(List<StackListResult<FluidStack>> results) { listener.onInvalidated(); }
+            @Override public void onChanged(StackListResult<FluidStack> result) {
+                if (result == null || result.getStack() == null || result.getStack().isEmpty()) return;
+                FluidStack changed = result.getStack().copy();
+                changed.setAmount(1);
+                try {
+                    var list = fluidCache.getList();
+                    var entry = list == null ? null : list.getEntry(changed, IComparer.COMPARE_NBT);
+                    FluidStack cached = entry == null ? null : entry.getStack();
+                    long amount = exactStoredFluidAmount(changed, cached == null ? 0L : cached.getAmount());
+                    listener.onFluidChanged(changed, Math.max(0L, amount));
+                } catch (RuntimeException | LinkageError failure) {
+                    listener.onInvalidated();
+                }
+            }
+            @Override public void onChangedBulk(List<StackListResult<FluidStack>> results) {
+                if (results != null) results.forEach(this::onChanged);
+            }
         };
         try {
             if (fluidCache != null) fluidCache.addListener(fluidListener);

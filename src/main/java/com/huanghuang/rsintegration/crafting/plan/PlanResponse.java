@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.storage.StorageReference;
 
 import javax.annotation.Nullable;
 import java.util.Collections;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -111,6 +112,30 @@ public record PlanResponse(
         public StepIssue {
             warnings = warnings == null ? List.of() : List.copyOf(warnings);
         }
+    }
+
+    /** 仅替换展示材料视图，保持路线、机器条件和原始求解结论不变。 */
+    public PlanResponse withMaterialAvailability(Map<IngredientKey, Availability> updated) {
+        return new PlanResponse(success, targetName, targetResult, steps, updated, missing,
+                recipeId, executionModTypeId, executionDim, executionPosX, executionPosY,
+                executionPosZ, modWarnings, repeatCount, embersCode, embersAspectNames,
+                embersInputNames, embersSeed, embersCanInfer, embersCodeFromCache,
+                executionMachineSupportsGui, baseItem, boundMachineTypes, leftovers, clickedOutput,
+                graph, executionBlocked, machineCandidates, stepIssues, storageReference,
+                storageNetworks, outcome, diagnostics);
+    }
+
+    /** 保留本次完整计算结果，明确告知实时库存仍在变化。 */
+    public PlanResponse withInventoryChangeNotice() {
+        List<Component> warnings = new ArrayList<>(modWarnings);
+        warnings.add(Component.translatable("rsi.plan.warning.inventory_changing"));
+        return new PlanResponse(success, targetName, targetResult, steps, materials, missing,
+                recipeId, executionModTypeId, executionDim, executionPosX, executionPosY,
+                executionPosZ, List.copyOf(warnings), repeatCount, embersCode, embersAspectNames,
+                embersInputNames, embersSeed, embersCanInfer, embersCodeFromCache,
+                executionMachineSupportsGui, baseItem, boundMachineTypes, leftovers, clickedOutput,
+                graph, executionBlocked, machineCandidates, stepIssues, storageReference,
+                storageNetworks, outcome, diagnostics);
     }
 
     /** Backward-compat: plans without per-step prerequisite diagnostics. */

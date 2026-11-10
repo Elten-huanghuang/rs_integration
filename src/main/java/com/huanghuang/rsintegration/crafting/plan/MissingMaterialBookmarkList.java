@@ -8,6 +8,8 @@ import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -41,9 +43,11 @@ public final class MissingMaterialBookmarkList {
         List<TextEntry> result = new ArrayList<>();
         Set<Integer> usedCandidates = new HashSet<>();
         List<String> missing = plan.missing() == null ? List.of() : plan.missing();
+        Map<String, Boolean> satisfied = missing.isEmpty() ? Map.of() : satisfiedMaterialDiagnostics(plan);
 
         for (String raw : missing) {
             String label = raw == null ? "" : raw.trim();
+            if (satisfied.getOrDefault(normalize(label), false)) continue;
             Match match = resolve(label, candidates, usedCandidates,
                     missing.size() == 1 && candidates.size() == 1);
             if (match == null) {
@@ -118,6 +122,19 @@ public final class MissingMaterialBookmarkList {
         if (containedMatch >= 0) return new Match(containedMatch, candidates.get(containedMatch));
         if (singleFallback) return new Match(0, candidates.get(0));
         return null;
+    }
+
+    /** 库存补足后，旧快照里的物品名称诊断不能继续把这一项显示为缺 1 个。 */
+    private static Map<String, Boolean> satisfiedMaterialDiagnostics(PlanResponse plan) {
+        Map<String, Boolean> satisfied = new HashMap<>();
+        for (var entry : plan.materials().entrySet()) {
+            ItemStack stack = entry.getKey().stack(1);
+            ResourceLocation id = ForgeRegistries.ITEMS.getKey(stack.getItem());
+            boolean enough = entry.getValue().missingCount() == 0;
+            satisfied.merge(normalize(stack.getHoverName().getString()), enough, (left, right) -> left && right);
+            if (id != null) satisfied.merge(id.toString(), enough, (left, right) -> left && right);
+        }
+        return satisfied;
     }
 
     private static String normalize(String value) {

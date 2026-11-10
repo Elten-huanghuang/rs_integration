@@ -85,10 +85,15 @@ public final class MaterialSources {
      * Only counts the main inventory (36 slots) — not armor or offhand,
      */
     public static Map<StackKey, Long> countInventory(Player player) {
+        return countInventoryForTypes(player, null);
+    }
+
+    /** 预览对账仅为相关物品创建精确 NBT 身份，不反复复制背包内无关材料。 */
+    public static Map<StackKey, Long> countInventoryForTypes(Player player, @Nullable Set<Item> itemTypes) {
         Map<StackKey, Long> map = new HashMap<>();
         Inventory inv = player.getInventory();
         for (ItemStack stack : inv.items) {
-            if (!stack.isEmpty()) {
+            if (!stack.isEmpty() && (itemTypes == null || itemTypes.contains(stack.getItem()))) {
                 mergeAvailable(map, StackKey.of(stack, true), stack.getCount(), "player_inventory");
             }
         }
@@ -99,7 +104,7 @@ public final class MaterialSources {
                         .findAllBackpackInventories(sp)) {
                     for (int i = 0; i < bp.getSlots(); i++) {
                         ItemStack stack = bp.getStackInSlot(i);
-                        if (!stack.isEmpty()
+                        if (!stack.isEmpty() && (itemTypes == null || itemTypes.contains(stack.getItem()))
                                 && !InventoryProtectionPolicy.isProtectedBackpackItem(stack)) {
                             mergeAvailable(map, StackKey.of(stack, true), stack.getCount(), "backpack");
                         }

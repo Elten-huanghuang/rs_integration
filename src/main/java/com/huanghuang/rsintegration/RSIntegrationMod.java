@@ -119,6 +119,7 @@ import com.huanghuang.rsintegration.feature.resonance.bd.BDResonanceDiskAccess;
 import com.huanghuang.rsintegration.feature.resonance.bd.BDResonanceDiskItem;
 import com.huanghuang.rsintegration.feature.resonance.passive.PassiveEffectEngine;
 import com.huanghuang.rsintegration.network.packet.JeiNetworkInventorySyncManager;
+import com.huanghuang.rsintegration.crafting.plan.PreviewInventorySyncManager;
 import com.huanghuang.rsintegration.machine.client.MachineFavoritesClient;
 import com.huanghuang.rsintegration.machine.client.MachineHubPage;
 import com.huanghuang.rsintegration.client.input.WorldPickClient;
@@ -883,6 +884,7 @@ public final class RSIntegrationMod {
                 JeiNetworkInventoryResyncRequestPacket::handle,
                 Optional.of(NetworkDirection.PLAY_TO_SERVER));
         MinecraftForge.EVENT_BUS.register(JeiNetworkInventorySyncManager.class);
+        MinecraftForge.EVENT_BUS.register(PreviewInventorySyncManager.class);
 
         // Altar binding registry (BINDINGS cache + scan caches)
         if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)

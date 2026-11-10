@@ -109,6 +109,15 @@ class MissingMaterialBookmarkListTest extends BootstrapTest {
     }
 
     @Test
+    void replenishedMaterialDropsStaleMissingDiagnosticButKeepsOtherDiagnostics() {
+        PlanResponse plan = planWithMissing(Map.of(
+                IngredientKey.of(new ItemStack(Items.APPLE)), new PlanResponse.Availability(10, 12, 0)),
+                List.of("minecraft:apple", "dynamic recipe unavailable"));
+        assertEquals(List.of("dynamic recipe unavailable"), MissingMaterialBookmarkList.textEntries(plan)
+                .stream().map(MissingMaterialBookmarkList.TextEntry::label).toList());
+    }
+
+    @Test
     void structuredShortagesAreShownWhenDiagnosticsAreEmpty() {
         Map<IngredientKey, PlanResponse.Availability> materials = new LinkedHashMap<>();
         materials.put(IngredientKey.of(new ItemStack(Items.DIAMOND)),

@@ -163,6 +163,15 @@ public final class PlanCache {
         executionLeases.remove(playerId);
     }
 
+    /** 重算同一预览前移除其结果和租约，避免立刻命中刚刚过期的库存快照。 */
+    public void invalidateSnapshot(PlanningSnapshot snapshot) {
+        entries.entrySet().removeIf(entry -> entry.getValue().snapshot().equals(snapshot));
+        ExecutionLease lease = executionLeases.get(snapshot.playerId());
+        if (lease != null && lease.entry().snapshot().equals(snapshot)) {
+            executionLeases.remove(snapshot.playerId(), lease);
+        }
+    }
+
     public int size() {
         return entries.size();
     }

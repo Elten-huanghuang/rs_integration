@@ -73,6 +73,47 @@ import java.util.*;
 @OnlyIn(Dist.CLIENT)
 public final class CraftingPlanScreen extends Screen {
 
+    private PlanInventoryClientState inventoryState;
+    private final Map<IngredientKey, List<PlanTreeNode>> inventoryNodes = new HashMap<>();
+    private final Map<IngredientKey, Integer> inventoryStripIndices = new HashMap<>();
+
+    /** 材料包不进入 updatePlan：不重建树、控件或滚动位置。 */
+    public void updateInventory(PlanInventoryUpdatePacket packet) {
+        if (inventoryState == null || !inventoryState.accept(packet)) return;
+        this.plan = inventoryState.view();
+        for (IngredientKey key : inventoryState.changed()) {
+            PlanResponse.Availability value = plan.materials().get(key);
+            for (PlanTreeNode node : inventoryNodes.getOrDefault(key, List.of())) {
+                node.available = value.available();
+                node.needed = value.needed();
+            }
+            Integer index = inventoryStripIndices.get(key);
+            if (index != null) {
+                StripEntry previous = cachedTotalStrip.get(index);
+                cachedTotalStrip.set(index, new StripEntry(previous.display(), key,
+                        value.needed(), value.available(), value.missingCount() == 0));
+            }
+        }
+        JeiCraftingPlanContext.INSTANCE.updateMaterials(plan, inventoryState.changed());
+        updateConfirmButton();
+    }
+
+    private void watchInventory() {
+        if (externalRequest != null || plan.graph() == null || responseRequests.waitingForPreview()) return;
+        if (inventoryState != null && inventoryState.needsResync()) stopInventoryWatch();
+        if (inventoryState != null) return;
+        inventoryState = new PlanInventoryClientState(responseRequests.activeRequestId(), PlanningRequestIds.next(), plan);
+        BatchCraftNetworkHandler.CHANNEL.sendToServer(new PlanInventoryWatchPacket(
+                inventoryState.requestId, inventoryState.watchId, true));
+    }
+
+    private void stopInventoryWatch() {
+        if (inventoryState == null) return;
+        BatchCraftNetworkHandler.CHANNEL.sendToServer(new PlanInventoryWatchPacket(
+                inventoryState.requestId, inventoryState.watchId, false));
+        inventoryState = null;
+    }
+
     private static final Path PLAN_PREFS_PATH =
             ClientPlanningPreferences.preferencesPath();
     private static final int SLOT_SIZE = 18;
@@ -383,6 +424,7 @@ public final class CraftingPlanScreen extends Screen {
 
     @Override
     public void onClose() {
+        stopInventoryWatch();
         responseRequests.cancelConfirmation();
         if (externalRequest != null) {
             returnToParent.run();
@@ -396,6 +438,7 @@ public final class CraftingPlanScreen extends Screen {
 
     @Override
     public void removed() {
+        stopInventoryWatch();
         responseRequests.cancelConfirmation();
         treeMouseGesture.cancel();
         dragging = false;
@@ -457,6 +500,7 @@ public final class CraftingPlanScreen extends Screen {
     /** Update plan data in-place (OR-path switch, repeat-count change, etc.).
      *  Avoids creating a new screen which would lose UI state. */
     public void updatePlan(PlanResponse newPlan) {
+        stopInventoryWatch();
         MachineCandidateView previous = selectedMachineCandidate();
         this.plan = newPlan;
         this.currentRepeat = clampRepeatCount(newPlan.repeatCount());
@@ -519,6 +563,14 @@ public final class CraftingPlanScreen extends Screen {
         }
 
         treeModel = PlanTreeModel.from(plan);
+        inventoryNodes.clear();
+        Deque<PlanTreeNode> inventoryQueue = new ArrayDeque<>();
+        inventoryQueue.add(treeModel.root);
+        while (!inventoryQueue.isEmpty()) {
+            PlanTreeNode node = inventoryQueue.removeFirst();
+            inventoryNodes.computeIfAbsent(node.key, ignored -> new ArrayList<>()).add(node);
+            inventoryQueue.addAll(node.children);
+        }
         PlanTreeModel.applyCollapsedNodes(treeModel.root, collapsed);
         JeiSubtreeBuilder.enrichCarousels(treeModel.root, materialDisplayLocks());
         recipePreview.clear();
@@ -671,6 +723,10 @@ public final class CraftingPlanScreen extends Screen {
             return Component.translatable("rsi.plan.confirm_waiting");
         }
         if (partialPreparation) return Component.translatable("rsi.plan.prepare.action");
+        if (inventoryState != null && inventoryState.status() != null
+                && inventoryState.status() != PreviewInventoryModel.Status.READY) {
+            return Component.translatable("rsi.plan.inventory.refresh_confirm");
+        }
         return Component.translatable(selectedPath.isDirty()
                 ? "rsi.plan.confirm_branches" : "rsi.plan.confirm");
     }
@@ -833,6 +889,10 @@ public final class CraftingPlanScreen extends Screen {
     private void onConfirm() {
         commitRepeatCountInput();
         if (responseRequests.confirmationRequested()) return;
+        if (!partialPreparation && inventoryState != null && inventoryState.status() != null
+                && inventoryState.status() != PreviewInventoryModel.Status.READY) {
+            responseRequests.scheduleRefresh();
+        }
         // 点击确认时立即发出防抖中的最新预览，避免执行请求打断仍在运行的规划。
         if (responseRequests.refreshRequired()) refreshPlan();
         if (responseRequests.requestConfirmation()) {
@@ -1051,6 +1111,7 @@ public final class CraftingPlanScreen extends Screen {
     @Override
     public void tick() {
         super.tick();
+        watchInventory();
         if (repeatCountBox != null) repeatCountBox.tick();
         if (materialSearchBox != null && materialSearchBox.visible) materialSearchBox.tick();
         if (recipeCandidatePanel != null) recipeCandidatePanel.tick();
@@ -1102,6 +1163,16 @@ public final class CraftingPlanScreen extends Screen {
             // Subtitle — with backdrop
             String statusKey = plan.success() ? "rsi.plan.status_ok" : "rsi.plan.status_fail";
             int statusColor = plan.success() ? 0x55FF55 : 0xFF5555;
+            if (inventoryState != null && inventoryState.status() != null) {
+                statusKey = switch (inventoryState.status()) {
+                    case READY -> plan.executionBlocked() ? "rsi.plan.status_fail" : "rsi.plan.inventory.ready";
+                    case MISSING -> "rsi.plan.inventory.missing";
+                    case REPLAN -> "rsi.plan.inventory.replan";
+                    case UNAVAILABLE -> "rsi.plan.inventory.unavailable";
+                };
+                statusColor = inventoryState.status() == PreviewInventoryModel.Status.READY
+                        && !plan.executionBlocked() ? 0x55FF55 : 0xFFAA55;
+            }
             String statusStr = font.plainSubstrByWidth(
                     Component.translatable(statusKey).getString(), titleMaxW);
             UIRenderer.textBackdrop(gfx, font, width / 2 - font.width(statusStr) / 2, ty,
@@ -2371,6 +2442,8 @@ public final class CraftingPlanScreen extends Screen {
     /** 计划响应是材料条数据的唯一来源，派生显示项只在响应切换时生成。 */
     private void rebuildMaterialStripCache() {
         cachedTotalStrip = buildTotalEntries();
+        inventoryStripIndices.clear();
+        for (int i = 0; i < cachedTotalStrip.size(); i++) inventoryStripIndices.put(cachedTotalStrip.get(i).key(), i);
         cachedLeftoverStrip = buildLeftoverEntries();
         totalStripPage = MaterialStripPaging.clampPage(
                 totalStripPage, cachedTotalStrip.size(), STRIP_PAGE_SIZE);

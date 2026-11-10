@@ -100,14 +100,24 @@ class NativeRefinedStorageFluidTest extends BootstrapTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void fluidChangesInvalidateInventoryAndSubscriptionClosesBothListeners() {
+    void fluidChangesPublishAbsoluteCountsAndSubscriptionClosesBothListeners() {
         INetwork network = network();
         StorageItemChangeListener listener = mock(StorageItemChangeListener.class);
         var subscription = new NativeRefinedStorageDriver(network).subscribeItemChanges(listener).orElseThrow();
         ArgumentCaptor<IStorageCacheListener<FluidStack>> fluidListener = ArgumentCaptor.forClass(IStorageCacheListener.class);
         verify(network.getFluidStorageCache()).addListener(fluidListener.capture());
-        fluidListener.getValue().onChanged(mock(StackListResult.class));
-        verify(listener).onInvalidated();
+        FluidStack water = new FluidStack(Fluids.WATER, 1000);
+        when(network.getFluidStorageCache().getList().getEntry(any(), anyInt()))
+                .thenReturn(new StackListEntry<>(water));
+        StackListResult<FluidStack> changed = mock(StackListResult.class);
+        when(changed.getStack()).thenReturn(new FluidStack(Fluids.WATER, 250));
+        fluidListener.getValue().onChanged(changed);
+        verify(listener).onFluidChanged(argThat(stack -> stack.getFluid() == Fluids.WATER
+                && stack.getAmount() == 1), eq(1000L));
+        when(network.getFluidStorageCache().getList().getEntry(any(), anyInt())).thenReturn(null);
+        fluidListener.getValue().onChanged(changed);
+        verify(listener).onFluidChanged(any(), eq(0L));
+        verify(listener, never()).onInvalidated();
         assertTrue(subscription.isValid());
         subscription.close();
         subscription.close();

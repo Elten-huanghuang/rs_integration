@@ -171,6 +171,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.TickTask;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
@@ -2411,6 +2412,33 @@ public final class GenericCraftPacket {
                     recipeId);
             return;
         }
+        if (!(sink instanceof CraftPreviewInventoryRefresh)) {
+            ResourceKey<Level> refreshDimension = dim == null ? player.serverLevel().dimension()
+                    : ResourceKey.create(Registries.DIMENSION, dim);
+            BlockPos refreshPosition = pos == null ? player.blockPosition() : pos;
+            CraftPlanResultDispatcher.Sink refreshing = new CraftPreviewInventoryRefresh(sink,
+                    RSIntegrationConfig.serverInt(RSIntegrationConfig.CRAFTING_PREVIEW_INVENTORY_REFRESHES),
+                    () -> !player.hasDisconnected() && !player.isRemoved()
+                            && CraftPlanningRuntime.planRequests().isCurrent(player.getUUID(), previewGeneration),
+                    (snapshot, plan) -> PlanningStateValidator.previewInventoryChanged(player, snapshot, plan,
+                            refreshDimension, refreshPosition,
+                            plan.storageReference() == null ? storageReference : plan.storageReference()),
+                    snapshot -> {
+                        CraftPlanningRuntime.planCache().invalidateSnapshot(snapshot);
+                        MaterialSources.invalidateFor(player);
+                    },
+                    task -> player.getServer().tell(new TickTask(player.getServer().getTickCount(), task)),
+                    (previousPlan, nextSink) -> tryBuildPlan(player, recipeId, forcedRecipes, dim, pos,
+                            repeatCount, baseItem, clickedOutput, requestId, previewGeneration,
+                            null, null, false, false, nextSink,
+                            previousPlan.storageReference() == null ? storageReference : previousPlan.storageReference(),
+                            materialLocks, null, safePreferences));
+            tryBuildPlan(player, recipeId, forcedRecipes, dim, pos, repeatCount, baseItem,
+                    clickedOutput, requestId, previewGeneration, precomputedPlan, precomputedSnapshot,
+                    asyncAttempted, reuseValidatedSnapshot, refreshing, storageReference, materialLocks,
+                    routedPlan, safePreferences);
+            return;
+        }
         Recipe<?> recipe = CraftRecipeResolver.resolve(player.serverLevel(), recipeId);
         if (recipe == null) {
             sink.error(PlanOutcome.NO_RECIPE,
@@ -2854,7 +2882,7 @@ public final class GenericCraftPacket {
                 || cached.plan().graph() != null && PlanningStateValidator.sameRelevantState(
                 cached.snapshot(), planningSnapshot, cached.plan()))) {
             RSIntegrationMod.debug("[RSI-tryBuildPlan] Validated cache hit: recipeId={}", recipeId);
-            sink.success(cached.plan(), planningSnapshot);
+            sink.success(cached.plan(), cached.snapshot());
             return;
         }
         if (cached != null) {

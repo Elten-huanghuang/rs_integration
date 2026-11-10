@@ -8,6 +8,7 @@ import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponseDraft;
+import com.huanghuang.rsintegration.crafting.plan.PlanOutcome;
 import com.huanghuang.rsintegration.feature.resonance.bridge.ResonanceInventoryBridge;
 import com.huanghuang.rsintegration.mods.lychee.LycheeVirtualCatalysts;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
@@ -154,8 +155,8 @@ public final class PlanningStateValidator {
     }
 
     /**
-     * 校验已完成预览。预览不是库存锁：有图时只核验实际初始供料，
-     * 无图或缺材料时只核验请求、网络与绑定；成功计划执行时复验已记录的供料。
+     * 校验预览的请求、网络和绑定。库存变化由预览刷新策略处理，不作为取消原因；
+     * 执行仍通过 revalidateForExecution 严格复验初始供料。
      */
     public static boolean revalidatePreview(ServerPlayer player, PlanningSnapshot snapshot,
                                             PlanResponseDraft draft,
@@ -167,18 +168,47 @@ public final class PlanningStateValidator {
                 || !requests.isCurrent(player.getUUID(), snapshot.requestGeneration())) {
             return false;
         }
-        PlanGraphView graph = draft.graph();
-        if (draft.success() && graph != null) {
-            return revalidateRelevantGraph(player, snapshot, graph, dimension, lookupPos,
-                    selectedReference);
-        }
-
-        // 无图预览（尤其缺材料计划）只校验请求代次、网络身份和机器绑定。
-        // 预览不是库存锁；库存变化会在真正执行时重新规划并做原子预留。
-        // 若在这里要求完整库存相等，无关产物变化或中途补料会把已经算好的
-        // 缺材料树静默丢弃，客户端只能一直停在“规划已取消”。
         return revalidateRelevantGraph(player, snapshot, null, dimension, lookupPos,
                 selectedReference);
+    }
+
+    /** 只读本次计划相关物品的新鲜库存，不复用同 tick 的完整库存缓存。 */
+    public static boolean previewInventoryChanged(ServerPlayer player, PlanningSnapshot snapshot,
+                                                   PlanResponse plan, ResourceKey<Level> dimension,
+                                                   BlockPos lookupPos,
+                                                   @Nullable StorageReference selectedReference) {
+        Set<Item> types = previewItemTypes(snapshot, plan);
+        if (types.isEmpty()) return false;
+        CraftStorageEndpoint endpoint = selectedReference == null
+                ? CraftPacketUtils.resolveEndpointForCraft(player, dimension, lookupPos).orElse(null)
+                : CraftStorageEndpoints.resolve(selectedReference, player).orElse(null);
+        return previewNeedsRefresh(snapshot, plan,
+                MaterialSources.listAvailableForTypes(player, endpoint, types));
+    }
+
+    private static Set<Item> previewItemTypes(PlanningSnapshot snapshot, PlanResponse plan) {
+        if (plan.success() && plan.graph() != null) return itemTypes(requiredInitialSupply(plan.graph()));
+        if (plan.outcome() != PlanOutcome.MISSING_INPUTS) return Set.of();
+        Set<Item> types = new HashSet<>(dependencyItemTypes(snapshot.recipeGraph()));
+        plan.materials().keySet().forEach(key -> types.add(key.item()));
+        return types;
+    }
+
+    /** 数量变化只有影响可行性时才刷新：足量区间的抖动不触发重算。 */
+    static boolean previewNeedsRefresh(PlanningSnapshot snapshot, PlanResponse plan,
+                                        Map<StackKey, Long> current) {
+        if (plan.success()) {
+            return plan.graph() != null && !hasRequiredInitialSupply(plan, current);
+        }
+        Set<Item> types = previewItemTypes(snapshot, plan);
+        if (types.isEmpty()) return false;
+        // 缺料期间补入原料、中间产物或可替代变体，都可能打开新的生产路径。
+        // 只比较依赖范围；管道搬运无关物品不会重启缺料计算。
+        for (Map.Entry<StackKey, Long> entry : current.entrySet()) {
+            if (types.contains(entry.getKey().item()) && entry.getValue() != null
+                    && entry.getValue() > snapshot.availableItems().getOrDefault(entry.getKey(), 0L)) return true;
+        }
+        return false;
     }
 
     public static boolean sameState(PlanningSnapshot left, PlanningSnapshot right) {
@@ -301,7 +331,8 @@ public final class PlanningStateValidator {
     }
 
     private static String networkIdentity(String fingerprint) {
-        int separator = fingerprint == null ? -1 : fingerprint.indexOf(':');
+        // 网络 id 本身可含维度命名空间和坐标分隔符，只有最后一段是库存摘要。
+        int separator = fingerprint == null ? -1 : fingerprint.lastIndexOf(':');
         return separator < 0 ? String.valueOf(fingerprint) : fingerprint.substring(0, separator);
     }
 

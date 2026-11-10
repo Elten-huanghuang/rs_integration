@@ -1,6 +1,9 @@
 package com.huanghuang.rsintegration.network.packet;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.ModItems;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
+import net.minecraftforge.fluids.FluidStack;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.network.packet.JeiNetworkInventoryPacket;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
@@ -157,6 +160,11 @@ public final class JeiNetworkInventorySyncManager {
                     if (amount <= 0) state.current.remove(key);
                     else state.current.put(key, change);
                     state.pending.put(key, change);
+                }
+
+                @Override
+                public void onFluidChanged(FluidStack stack, long amount) {
+                    if (ModItems.ALCHEMIST_INK_FLUID.isPresent()) onChanged(InkFluidSupport.token(stack), amount);
                 }
 
                 @Override

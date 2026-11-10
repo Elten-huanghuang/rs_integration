@@ -301,20 +301,24 @@ public final class BeyondDimensionsReflection {
             }
             if (!"onDelta".equals(method.getName()) || args == null || args.length < 1) return null;
             Object nativeKey = args[0];
-            if (isFluidKey(nativeKey)) {
-                listener.onInvalidated();
-                return null;
-            }
-            if (!isItemKey(nativeKey)) return null;
+            boolean fluid = isFluidKey(nativeKey);
+            if (!fluid && !isItemKey(nativeKey)) return null;
             try {
-                ItemStack stack = keyStack(nativeKey);
-                if (stack.isEmpty()) return null;
                 Class<?> keyType = Class.forName(
                         "com.wintercogs.beyonddimensions.api.storage.key.IStackKey", false, loader);
                 Object keyAmount = storage.getClass().getMethod("getStackByKey", keyType)
                         .invoke(storage, nativeKey);
                 long absolute = keyAmount == null ? 0L : Math.max(0L, amount(keyAmount));
-                listener.onChanged(stack.copyWithCount(1), absolute);
+                if (fluid) {
+                    FluidStack stack = fluidStack(nativeKey);
+                    if (!stack.isEmpty()) {
+                        stack.setAmount(1);
+                        listener.onFluidChanged(stack, absolute);
+                    }
+                } else {
+                    ItemStack stack = keyStack(nativeKey);
+                    if (!stack.isEmpty()) listener.onChanged(stack.copyWithCount(1), absolute);
+                }
             } catch (Exception | LinkageError failure) {
                 RSIntegrationMod.LOGGER.debug("[RSI-JEI] BD delta lookup failed", failure);
                 listener.onInvalidated();
