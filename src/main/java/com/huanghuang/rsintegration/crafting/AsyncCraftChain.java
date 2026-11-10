@@ -77,6 +77,9 @@ import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
+import com.huanghuang.rsintegration.crafting.batch.CountedOperationMaterials;
+import com.huanghuang.rsintegration.crafting.batch.CountedOperationMaterials.Origin;
+import com.huanghuang.rsintegration.crafting.batch.CountedOperationMaterials.Pool;
 import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
@@ -201,7 +204,9 @@ public final class AsyncCraftChain {
     private int flatObservedCompletedOperations;
     private long flatObservedProductionSequence;
     private long flatObservedCapturedCount;
+    private long flatObservedCompletedWork;
     private int stepRemaining;
+    private int flatGroupSequence;
     private final Map<CraftingResolver.ResolutionStep, ProbabilisticProduction> probabilityTargets = new IdentityHashMap<>();
     private Map<ResourceLocation, ResourceLocation> supplementalForcedRecipes = Map.of();
     private Map<String, ItemStack> supplementalMaterialLocks = Map.of();
@@ -755,6 +760,11 @@ public final class AsyncCraftChain {
                 // produced on the deadline tick is never collected and then refunded.
                 boolean capturedOutput = hasCapturedOutput();
                 IBatchDelegate.CraftObservation observation = currentDelegate.observeCraft(online.serverLevel());
+                if (observation.phase() == IBatchDelegate.CraftPhase.WORKING
+                        && observation.completedWork() > flatObservedCompletedWork) {
+                    flatObservedCompletedWork = observation.completedWork();
+                    waitTicks = 0;
+                }
                 if (currentDelegate instanceof ParallelCraftGroup group && group.isDraining()) {
                     drainingTicks++;
                 } else {
@@ -1055,6 +1065,7 @@ public final class AsyncCraftChain {
                 machineCount = 1;
             }
             currentDelegate = startModStep(step, online);
+            flatObservedCompletedWork = 0L;
             flatObservedCompletedOperations = 0;
             flatObservedProductionSequence = 0;
             flatObservedCapturedCount = 0;
@@ -2126,7 +2137,7 @@ public final class AsyncCraftChain {
             BoundMachine virtual = new BoundMachine(online.level().dimension().location(),
                     BlockPos.ZERO, step.modType(), "virtual");
             return PreparationResult.ready(new PreparedGraphNode(step, delegate,
-                    List.of(virtual), 1, false));
+                    List.of(virtual), 1, true));
         }
         if (machines.isEmpty()) {
             // 诊断：逐层报告绑定过滤结果，便于从日志直接定位是哪一步清空了候选机器。
@@ -2249,10 +2260,8 @@ public final class AsyncCraftChain {
         // 输入缓冲只能让“一台”机器整批吞下操作；只要存在多台可并行机器，
         // 就应拆成并行组，让每台机器各自缓冲自己的份额，而不是把 11 个
         // 操作全部塞进第一台熔炉。
-        boolean bufferedNode = canBufferEntireGraphNode(delegate, desiredOperations)
-                && (eligible.size() <= 1 || !concurrencySafe);
-        boolean operationGroup = shouldUseGraphOperationGroup(desiredOperations, availableOperations)
-                && !bufferedNode && concurrencySafe;
+        boolean bufferedNode = false;
+        boolean operationGroup = shouldUseGraphOperationGroup(desiredOperations, availableOperations);
         // 不能并行不是错误：退回单 worker 顺序执行，绝不能让节点无限重试。
         MaterialPlan delegateMaterials = materialPlanFor(delegate);
         boolean workerReusable = !delegateMaterials.reusableEntries().isEmpty();
@@ -2296,7 +2305,7 @@ public final class AsyncCraftChain {
     }
 
     static boolean shouldUseGraphOperationGroup(int executions, int availableOperations) {
-        return executions >= 2 && availableOperations >= 1;
+        return executions >= 1 && availableOperations >= 1;
     }
 
     static boolean requiresGraphOperationSlot(int executions, boolean bufferedNode,
@@ -2398,279 +2407,114 @@ public final class AsyncCraftChain {
         return found ? Math.max(1, capacity) : 1;
     }
 
+    /** 单机、多机、虚拟配方和补做使用同一个执行组，区别只在材料归属与依赖调度。 */
+    private ParallelCraftGroup createExecutionGroup(PreparedGraphNode prepared,
+                                                     NodeId nodeId, ServerPlayer online) {
+        CraftingResolver.ResolutionStep step = prepared.step();
+        var capability = concurrencyDecision(step, prepared.delegate()).capabilities();
+        boolean atomicBatch = prepared.delegate().usesAtomicMaterialBatch();
+        ParallelCraftGroup group = new ParallelCraftGroup(prepared.machines(), step.modType(),
+                step.recipeId(), online, atomicBatch ? 1 : step.executions(), step.inferMode(), capability,
+                storageEndpoint, atomicBatch ? 1 : prepared.operationCost(),
+                machine -> createStepDelegate(step, machine.type()), prepared.delegate());
+        if (atomicBatch) group.setAtomicBatchOperations(step.executions());
+        group.setMachineServer(server);
+        group.setMachineLeases(machineLeases);
+        group.setDispatchAllowed(() -> dispatchAllowed.getAsBoolean());
+        attachMagicReservation(group);
+        ItemStack nodeTarget = graphNodeTargetOutput(graphNodes.get(nodeId));
+        IntegrationResourceKey resource = step.productionTarget() == null ? null : step.productionTarget().resource();
+        ItemStack display = !nodeTarget.isEmpty() ? nodeTarget
+                : step.productionTarget() != null ? step.productionTarget().displayStack()
+                : step.syntheticOutput() != null ? step.syntheticOutput()
+                : (useGraphExecution ? isGraphTerminalNode(nodeId) : isPrimaryStep(currentStepIdx))
+                        && targetOutput != null ? targetOutput : ItemStack.EMPTY;
+        if (!display.isEmpty()) {
+            group.setTargetOutput(display);
+            if (resource == null) resource = IntegrationResourceKey.item(display);
+        }
+        if (resource == null && (useGraphExecution ? isGraphTerminalNode(nodeId) : isPrimaryStep(currentStepIdx))) {
+            resource = targetResource;
+        }
+        if (resource != null) group.setTargetResource(resource);
+        if (useGraphExecution && prepared.delegate() instanceof CrockPotBatchDelegate crockPot
+                && crockPot.usesPlannedCategoryMaterials()) {
+            List<IngredientSpec> layout = new ArrayList<>();
+            List<InputDemand> inputs = new ArrayList<>(graphNodes.get(nodeId).inputs());
+            inputs.sort((left, right) -> Integer.compare(left.id().index(), right.id().index()));
+            for (InputDemand input : inputs) {
+                if (input.quantity() % step.executions() != 0L) {
+                    group.releasePreparationResources();
+                    throw new IllegalArgumentException("category input cannot be divided into declared operations");
+                }
+                layout.add(new IngredientSpec(input.ingredient(),
+                        Math.toIntExact(input.quantity() / step.executions()), input.consumption()));
+            }
+            group.setPlannedMaterialLayout(layout);
+        }
+        return group;
+    }
+
     private GraphDispatchResult dispatchPreparedGraphNode(
             NodeId nodeId, PreparedGraphNode prepared, ServerPlayer online,
             NodeAdmissionCoordinator.Admission admission) {
         ExtractionLedger nodeLedger = new ExtractionLedger();
         nodeLedger.setLogContext(ctx);
         if (storageEndpoint != null) nodeLedger.setStorageEndpoint(storageEndpoint);
-        IBatchDelegate delegate = prepared.delegate();
-        OperationExecutionKernel.Session operationSession = null;
-        OperationId operationIdentity = null;
+        ParallelCraftGroup group = null;
         boolean ownershipTransferred = false;
-        boolean terminalCleanupInvoked = false;
         try {
-            delegate.configureMaterialReservation(nodeLedger, online);
-            delegate.prepareGraphBatch(Math.max(1, prepared.step().executions()));
-            delegate.prepareOperationCount(Math.max(1, prepared.step().executions()));
-            Component outputStorageFailure = delegate.validateOutputStorage(online);
-            if (outputStorageFailure != null) {
-                online.sendSystemMessage(outputStorageFailure);
+            Component outputFailure = prepared.delegate().validateOutputStorage(online);
+            if (outputFailure != null) {
+                online.sendSystemMessage(outputFailure);
                 return GraphDispatchResult.fatal("output storage preflight rejected");
             }
-            if (prepared.parallelGroup()) {
-                List<BoundMachine> workers = new ArrayList<>(
-                        prepared.machines().subList(0, prepared.operationCost()));
-                // 原 delegate 已经在 prepareGraphNode 里完成过 prepare；
-                // 若机器带独占锁（如 Embers 炼金台），必须先释放它，
-                // 否则新建的 worker 子 delegate 会拿不到同一把锁，永远 RETRY。
-                releasePreparationQuietly(delegate);
-                var groupCapability = concurrencyDecision(prepared.step(), delegate).capabilities();
-                ParallelCraftGroup group = new ParallelCraftGroup(workers,
-                        prepared.step().modType(), prepared.step().recipeId(), online,
-                        prepared.step().executions(), prepared.step().inferMode(), groupCapability,
-                        storageEndpoint);
-                IBatchDelegate.PreparationResult groupPreparation = prepareDelegate(
-                        group, online, prepared.step().recipeId(), null, BlockPos.ZERO);
-                if (groupPreparation.state() == IBatchDelegate.PreparationState.READY) {
-                    delegate = group;
-                    group.setMachineServer(server);
-                    ItemStack nodeTarget = graphNodeTargetOutput(graphNodes.get(nodeId));
-                    if (!nodeTarget.isEmpty()) {
-                        group.setTargetOutput(nodeTarget);
-                        group.setTargetResource(
-                                IntegrationResourceKey.item(nodeTarget));
-                    } else if (targetOutput != null && isGraphTerminalNode(nodeId)) {
-                        group.setTargetOutput(targetOutput);
-                        group.setTargetResource(targetResource);
-                    } else if (isGraphTerminalNode(nodeId)
-                            && targetResource != null) {
-                        group.setTargetResource(targetResource);
-                    }
-                } else {
-                    return GraphDispatchResult.retry(
-                            "operation group could not prepare a worker for serial dispatch"
-                                    + (groupPreparation.detail().isBlank()
-                                    ? "" : ": " + groupPreparation.detail()));
-                }
+            group = createExecutionGroup(prepared, nodeId, online);
+            group.setOperationKernel(operationKernel, craftId, nodeId,
+                    craftOperationBudget, nextGraphOperationSequence(nodeId));
+            if (!validatePreparedDelegate(group, online, prepared.step().recipeId(), null, BlockPos.ZERO)) {
+                return GraphDispatchResult.retry("execution worker temporarily unavailable");
             }
-            boolean parallelGroup = delegate instanceof ParallelCraftGroup;
-            MaterialPlan materialPlan = parallelGroup ? MaterialPlan.none() : materialPlanFor(delegate);
-            List<IngredientSpec> exactBatchSpecs = parallelGroup ? null
-                    : delegate.getGraphBatchRequiredMaterials(prepared.step().executions());
-            List<IngredientSpec> plannedDurabilitySpecs =
-                    plannedDurabilityGraphSpecs(nodeId);
-            if (plannedDurabilitySpecs != null
-                    && plannedDurabilitySpecs.size() != materialPlan.entries().size()) {
-                plannedDurabilitySpecs = null;
+            if (shouldUsePrivateLedgerGraphDispatch(group, group.getGraphSpecs())) {
+                GraphDispatchResult result = dispatchPrivateLedgerGraphNode(
+                        nodeId, prepared, group, online, admission, nodeLedger);
+                ownershipTransferred = result.state() == DispatchState.STARTED;
+                return result;
             }
-            List<IngredientSpec> graphSpecs = parallelGroup
-                    ? delegate.getGraphSpecs()
-                    : exactBatchSpecs != null
-                    ? exactBatchSpecs
-                    : plannedDurabilitySpecs != null
-                    ? plannedDurabilitySpecs
-                    : materialPlan.legacyGraphSpecs();
-            GraphNodeMaterials reserved;
-            if (delegate instanceof CrockPotBatchDelegate crockPot
-                    && crockPot.usesPlannedCategoryMaterials()) {
-                reserved = reservePlannedCheckoutMaterials(
-                        online, nodeLedger, admission.materialToken());
-            } else {
-                if ((graphSpecs == null || graphSpecs.isEmpty()) && exactBatchSpecs == null) {
-                    if (shouldUsePrivateLedgerGraphDispatch(delegate, graphSpecs)) {
-                        GraphDispatchResult result = dispatchPrivateLedgerGraphNode(
-                                nodeId, prepared, delegate, online, admission, nodeLedger);
-                        ownershipTransferred = result.state() == DispatchState.STARTED;
-                        return result;
-                    }
-                    return GraphDispatchResult.fatal("delegate did not expose graph materials");
-                }
-                reserved = reserveGraphNodeMaterials(
-                        delegate, graphSpecs,
-                        exactBatchSpecs != null || plannedDurabilitySpecs != null
-                                ? 1 : prepared.step().executions(),
-                        online,
-                        nodeLedger, admission.materialToken());
-            }
+            GraphNodeMaterials reserved = reserveCountedOperationMaterials(
+                    group, online, nodeLedger, admission.materialToken());
             if (reserved == null) return GraphDispatchResult.retry("exact graph materials are temporarily unavailable");
-            List<ItemStack> materials = reserved.materials();
-
-            List<IngredientSpec> supplementalSpecs = parallelGroup
-                    ? delegate.getSupplementalSpecs() : materialPlan.legacySupplementalSpecs();
-            if (supplementalSpecs != null && !supplementalSpecs.isEmpty()) {
-                List<ItemStack> supplementalMaterials = reserveSupplementalMaterials(
-                        supplementalSpecs, online, nodeLedger);
-                if (supplementalMaterials == null) {
-                    return GraphDispatchResult.retry("supplemental materials unavailable");
-                }
-                materials = parallelGroup
-                        ? delegate.mergeSupplementalMaterials(materials, supplementalMaterials)
-                        : materialPlan.mergeLegacyReservations(materials, supplementalMaterials);
-            }
-            InputBufferPlan graphInputBuffer = canBufferEntireGraphNode(
-                    delegate, prepared.step().executions())
-                    ? delegate.inputBufferPlan(prepared.step().executions())
-                    : InputBufferPlan.none();
-            OperationStartContext startContext;
-            if (delegate instanceof ParallelCraftGroup group) {
-                List<IngredientSpec> operationSpecs = group.getFlatOperationMaterials();
-                if (operationSpecs == null || operationSpecs.isEmpty()) {
-                    return GraphDispatchResult.fatal(
-                            "parallel group has no per-operation material layout");
-                }
-                startContext = OperationStartContext.repeatedChainReserved(
-                        online, nodeLedger, group.operationMaterialPlan(),
-                        prepared.step().executions(), operationSpecs.size(), materials);
-            } else {
-                startContext = OperationStartContext.chainReserved(
-                        online, nodeLedger, materialPlan, materials, graphInputBuffer);
-            }
-            if (startContext.buffered()) {
-                RSIntegrationMod.LOGGER.info(ctx.format(
-                        "[RSI-Craft] graph buffered dispatch node={} recipe={} delegate={} operations={} inputs={} outputs={}"),
-                        nodeId, prepared.step().recipeId(), delegate.getClass().getSimpleName(),
-                        graphInputBuffer.operations(), graphInputBuffer.inputs().size(),
-                        graphInputBuffer.outputs().size());
-            }
-            if (!delegate.validateExecutionContext(online)) {
-                return GraphDispatchResult.fatal(
-                        "execution context changed before material commit");
-            }
-            if (delegate instanceof ParallelCraftGroup group) {
-                group.setDispatchAllowed(() -> dispatchAllowed.getAsBoolean());
-                group.setMachineLeases(machineLeases);
-                group.setReservationTokens(reserved.operationTokens());
-                group.setReusableReservationTokens(reserved.reusableTokens());
-                group.setVirtualDebits(reserved.virtualDebits());
-                group.setProducerDebits(reserved.producerDebits());
-                group.setOperationKernel(operationKernel, craftId, nodeId,
-                        craftOperationBudget, nextGraphOperationSequence(nodeId));
-            } else {
-                GraphConcurrencyPolicy.Decision concurrency = concurrencyDecision(
-                        prepared.step(), delegate);
-                ItemStack expected = delegate.getExpectedOutput();
-                AABB region = delegate.getOutputCaptureRegion();
-                boolean ownsWorldCapture = concurrency.capabilities() != null
-                        && concurrency.capabilities().outputOwnership()
-                        == BatchConcurrencyCapabilities.OutputOwnership.OWNED_WORLD_CAPTURE;
-                OperationResourceCoordinator.CaptureRequest capture = expected != null
-                        && !expected.isEmpty() && region != null
-                        ? new OperationResourceCoordinator.CaptureRequest(
-                        prepared.machine().dim(), region, expected,
-                        "malum".equals(prepared.step().modType().id())
-                                || delegate.allowsOverlappingOutputCaptureOrigins()) : null;
-                if (expected != null && !expected.isEmpty() && region == null) {
-                    return GraphDispatchResult.fatal("delegate expects a world output without a capture region");
-                }
-                if (!concurrency.exclusive() && expected != null && !expected.isEmpty()
-                        && !ownsWorldCapture) {
-                    return GraphDispatchResult.fatal("world capture was not declared by delegate capability");
-                }
-                List<MachineLeaseRegistry.MachineKey> machineScope = new ArrayList<>();
-                BlockPos operationMachinePos = delegate.getOperationMachinePos(prepared.machine().pos());
-                machineScope.add(new MachineLeaseRegistry.MachineKey(
-                        prepared.machine().dim(), operationMachinePos, prepared.step().modType().id()));
-                if (concurrency.capabilities() != null) {
-                    for (BlockPos offset : concurrency.capabilities().supportOffsets()) {
-                        machineScope.add(new MachineLeaseRegistry.MachineKey(
-                                prepared.machine().dim(), operationMachinePos.offset(offset),
-                                prepared.step().modType().id() + ":support"));
-                    }
-                }
-                operationIdentity = new OperationId(
-                        craftId, nodeId, nextGraphOperationSequence(nodeId));
-                operationSession = operationKernel.tryPrepare(
-                        operationIdentity,
-                        craftOperationBudget, machineScope, capture);
-                if (operationSession == null) {
-                    return GraphDispatchResult.retry("operation budget, machine, or capture is temporarily unavailable");
-                }
-            }
-            boolean committed = operationSession != null
-                    ? operationSession.commit(() -> commitLedger(nodeLedger, online))
-                    : commitLedger(nodeLedger, online);
-            if (!committed) {
-                if (operationSession != null) operationSession.close();
-                return GraphDispatchResult.retry("node ledger commit did not complete");
-            }
-            if (delegate instanceof AbstractBatchDelegate abd) abd.useSharedLedger(nodeLedger);
-            if (operationIdentity != null) {
-                startContext = startContext.withOperationIdentity(
-                        operationIdentity.craftId(),
-                        publicOperationId(operationIdentity),
-                        operationIdentity.sequence() + 1
-                );
-            }
-            attachMagicReservation(delegate);
-
-            CraftNodeRuntime runtime = new CraftNodeRuntime(nodeId,
-                    prepared.step().recipeId().toString(), delegate, nodeLedger,
-                    admission, operationSession);
-            if (graphInputBuffer.enabled()) {
-                runtime.setLogicalOperations(graphInputBuffer.operations());
-            } else if (exactBatchSpecs != null) {
-                runtime.setLogicalOperations(prepared.step().executions());
-            }
-            runtime.setReusableReservationTokens(reserved.reusableTokens());
-            ProductionAttemptState attempt =
-                    attachGraphAttempt(runtime, nodeId, prepared.step());
+            group.setReusableReservationTokens(reserved.reusableTokens());
+            if (!group.validateExecutionContext(online)) return GraphDispatchResult.fatal("execution context changed before commit");
+            if (!commitLedger(nodeLedger, online)) return GraphDispatchResult.retry("node ledger commit did not complete");
+            CraftNodeRuntime runtime = new CraftNodeRuntime(nodeId, prepared.step().recipeId().toString(),
+                    group, nodeLedger, admission, null);
+            ProductionAttemptState attempt = attachGraphAttempt(runtime, nodeId, prepared.step());
             runtime.setChainContext(virtualInventory, online);
-
             graphAdmissions.commit(admission);
-            runtime.markDispatched();
             nodeRuntimes.put(nodeId, runtime);
+            runtime.markDispatched();
             ownershipTransferred = true;
-            IBatchDelegate startDelegate = delegate;
-            List<ItemStack> startMaterials = materials;
-            OperationStartContext operationStartContext = startContext;
-            RSIntegrationMod.LOGGER.debug(ctx.format(
-                    "Graph node dispatching: node={} recipe={} delegate={} machine={} materials={}"),
-                    nodeId, prepared.step().recipeId(), delegate.getClass().getSimpleName(),
-                    prepared.machine().pos(), startMaterials.size());
-            boolean accepted = operationSession != null
-                    ? operationSession.tryStart(() ->
-                            startDelegate.startOperation(operationStartContext))
-                    : startDelegate.startOperation(operationStartContext);
-            if (!accepted) {
-                String startDetail = delegate.lastStartFailureDetail();
-                RSIntegrationMod.LOGGER.warn(ctx.format(
-                        "Graph node delegate rejected start: node={} recipe={} delegate={} machine={} detail={}"),
-                        nodeId, prepared.step().recipeId(), delegate.getClass().getSimpleName(),
-                        prepared.machine().pos(), startDetail == null ? "<none>" : startDetail);
-                runtime.markStartFailed("delegate rejected graph dispatch after start attempt: delegate="
-                        + delegate.getClass().getSimpleName()
-                        + " recipe=" + prepared.step().recipeId()
-                        + (startDetail == null || startDetail.isBlank() ? "" : " detail=" + startDetail));
-            } else {
-                if (attempt != null) attempt.started();
-                attachDeferredGraphCapture(runtime, startDelegate, prepared.machine(), nodeId);
-            }
+            if (!group.startOperation(OperationStartContext.chainReserved(online, nodeLedger,
+                    MaterialPlan.none(), List.of(), InputBufferPlan.none()))) {
+                runtime.markStartFailed("execution group rejected graph dispatch");
+            } else if (attempt != null) attempt.started();
             return GraphDispatchResult.started(runtime);
         } catch (RuntimeException exception) {
-            String message = delegate.getClass().getSimpleName() + " start threw "
-                    + exception.getClass().getSimpleName()
-                    + (exception.getMessage() != null ? ": " + exception.getMessage() : "");
-            RSIntegrationMod.LOGGER.error(ctx.format("Graph node {} dispatch threw in {}"),
-                    nodeId, delegate.getClass().getSimpleName(), exception);
+            RSIntegrationMod.LOGGER.error(ctx.format("Graph node {} dispatch failed"), nodeId, exception);
             CraftNodeRuntime runtime = nodeRuntimes.get(nodeId);
             if (runtime != null) {
                 ownershipTransferred = true;
-                runtime.markStartFailed(message);
+                runtime.markStartFailed("execution group start threw: " + exception.getMessage());
                 return GraphDispatchResult.started(runtime);
             }
-            if (operationSession != null) operationSession.close();
-            if (nodeLedger.isCommitted()) refundCommitted(nodeLedger, online);
-            try {
-                delegate.onBatchFailed(online, "graph dispatch failed before start");
-                terminalCleanupInvoked = true;
-            } catch (RuntimeException ignored) {
-                terminalCleanupInvoked = true;
-            }
-            return GraphDispatchResult.fatal(message);
+            return GraphDispatchResult.fatal("execution group preparation failed: " + exception.getMessage());
         } finally {
-            if (!ownershipTransferred && !terminalCleanupInvoked) {
-                releasePreparationQuietly(delegate);
+            if (!ownershipTransferred) {
+                if (nodeLedger.isCommitted()) refundCommitted(nodeLedger, online);
+                else nodeLedger.rollback(online);
+                nodeLedger.close();
+                releasePreparationQuietly(group == null ? prepared.delegate() : group);
             }
         }
     }
@@ -2729,7 +2573,8 @@ public final class AsyncCraftChain {
         List<MachineLeaseRegistry.MachineKey> machineScope = List.of(
                 new MachineLeaseRegistry.MachineKey(prepared.machine().dim(),
                         prepared.machine().pos(), prepared.step().modType().id()));
-        OperationExecutionKernel.Session operationSession = operationKernel.tryPrepare(
+        OperationExecutionKernel.Session operationSession = delegate instanceof ParallelCraftGroup
+                ? operationKernel.prepareLogical() : operationKernel.tryPrepare(
                 new OperationId(craftId, nodeId, nextGraphOperationSequence(nodeId)),
                 craftOperationBudget, machineScope, null);
         if (operationSession == null) {
@@ -2989,167 +2834,97 @@ public final class AsyncCraftChain {
     }
 
     private record GraphNodeMaterials(
-            List<ItemStack> materials,
-            List<ExtractionLedger.ReservationToken> operationTokens,
-            List<List<ItemStack>> virtualDebits,
-            List<List<ItemStack>> producerDebits,
             List<ExtractionLedger.ReservationToken> reusableTokens) {
         GraphNodeMaterials {
-            materials = List.copyOf(materials);
-            operationTokens = List.copyOf(operationTokens);
-            virtualDebits = List.copyOf(virtualDebits);
-            producerDebits = List.copyOf(producerDebits);
             reusableTokens = List.copyOf(reusableTokens);
         }
     }
 
+    /** 两种调度器只提供材料池；分配、整单预留及 worker 工具归属共用此入口。 */
     @Nullable
-    private GraphNodeMaterials reservePlannedCheckoutMaterials(
-            ServerPlayer online, ExtractionLedger ledger,
-            MaterialBroker.ReservationToken materialToken) {
-        if (graphMaterials == null) return null;
-        MaterialBroker.Checkout checkout = graphMaterials.checkout(materialToken);
-        if (checkout.fragments().isEmpty()) return null;
-
-        List<ItemStack> materials = new ArrayList<>();
-        for (MaterialBroker.Fragment fragment : checkout.fragments()) {
-            ItemStack planned = fragment.stack();
-            if (fragment.source() instanceof MaterialSource.InitialPool) {
-                ItemStack reserved = reserveExact(ledger, planned, planned.getCount(), online);
-                if (reserved.isEmpty()) return null;
-                materials.add(reserved);
-            } else if (fragment.source() instanceof MaterialSource.ProducerOutput) {
-                materials.add(planned.copy());
-            } else {
-                return null;
+    private GraphNodeMaterials reserveCountedOperationMaterials(
+            ParallelCraftGroup group, ServerPlayer online, ExtractionLedger targetLedger,
+            @Nullable MaterialBroker.ReservationToken graphToken) {
+        List<IngredientSpec> specs = group.getFlatOperationMaterials();
+        if (specs == null) return null;
+        specs = MaterialLocks.narrowSpecs(group.recipeId(), specs, supplementalMaterialLocks);
+        int mark = targetLedger.reservationMark();
+        List<ItemStack> virtualBefore = StackCopies.excludingEmpty(virtualInventory);
+        boolean prepared = false;
+        try {
+            group.configureMaterialReservation(targetLedger, online);
+            MaterialBroker.Checkout checkout = graphToken == null || graphMaterials == null
+                    ? new MaterialBroker.Checkout(List.of()) : graphMaterials.checkout(graphToken);
+            Pool planned = new Pool().add(Origin.PRODUCER, checkout.producerStacks())
+                    .add(Origin.INITIAL, checkout.initialStacks());
+            Pool available = new Pool();
+            if (graphToken == null) available.add(Origin.VIRTUAL, virtualInventory);
+            boolean needsAvailable = graphToken == null
+                    || !group.reservationMaterialPlan().supplementalEntries().isEmpty()
+                    || group.getChildCount() > 1 && !group.operationMaterialPlan().reusableEntries().isEmpty();
+            if (needsAvailable) {
+                for (Map.Entry<StackKey, Long> entry : MaterialSources.listAllAvailable(online, storageEndpoint).entrySet()) {
+                    available.add(Origin.INITIAL, entry.getKey().toStack(), entry.getValue());
+                }
+            }
+            if (graphToken != null) available.subtract(Origin.INITIAL, checkout.initialStacks());
+            Map<Integer, MaterialPlan.Allocation> allocations = new HashMap<>();
+            for (MaterialPlan.Entry entry : group.reservationMaterialPlan().entries()) {
+                if (entry.inputSlot() != null) allocations.put(entry.inputSlot(), entry.allocation());
+            }
+            CountedOperationMaterials.Builder builder = new CountedOperationMaterials.Builder(
+                    group.getMaterialOperations(), group.getChildCount());
+            for (int slot = 0; slot < specs.size(); slot++) {
+                IngredientSpec spec = specs.get(slot);
+                boolean graphOwned = graphToken != null
+                        && allocations.getOrDefault(slot, MaterialPlan.Allocation.GRAPH) == MaterialPlan.Allocation.GRAPH;
+                if (graphOwned && !spec.isEmpty() && spec.consumption().reusableWithinWorkerBatch()) {
+                    builder.addGraphReusable(spec, planned, available);
+                } else builder.add(spec, graphOwned ? planned : available);
+            }
+            CountedOperationMaterials counted = builder.build();
+            List<ExtractionLedger.ReservationToken> reusableTokens = new ArrayList<>();
+            // 工具先记账，普通投入后记账：按数量结算从后往前释放，避免吞掉工具 token。
+            for (int worker = 0; worker < group.getChildCount(); worker++) {
+                int reusableMark = targetLedger.reservationMark();
+                List<ItemStack> reusable = counted.reusableMaterials(Origin.INITIAL, worker);
+                if (!reserveCountedInitial(reusable, targetLedger, online)) return null;
+                reusableTokens.add(reusable.isEmpty() ? new ExtractionLedger.ReservationToken(List.of())
+                        : targetLedger.tokenSince(reusableMark));
+            }
+            if (!reserveCountedInitial(counted.materials(Origin.INITIAL, 0, group.getMaterialOperations()), targetLedger, online)) return null;
+            for (ItemStack stack : counted.materials(Origin.VIRTUAL, 0, group.getMaterialOperations())) {
+                if (!takeExactMatching(virtualInventory, stack, stack.getCount())) return null;
+            }
+            for (int worker = 0; worker < group.getChildCount(); worker++) {
+                for (ItemStack stack : counted.reusableMaterials(Origin.VIRTUAL, worker)) {
+                    if (!takeExactMatching(virtualInventory, stack, stack.getCount())) return null;
+                }
+            }
+            if (graphToken != null) releaseUnusedGraphMaterials(graphToken,
+                    planned.remaining(Origin.INITIAL), planned.remaining(Origin.PRODUCER));
+            group.setCountedOperationMaterials(counted);
+            prepared = true;
+            return new GraphNodeMaterials(reusableTokens);
+        } catch (IllegalArgumentException unavailable) {
+            materialReservationFailureDetail = "Counted material reservation unavailable: " + unavailable.getMessage();
+            return null;
+        } finally {
+            if (!prepared) {
+                targetLedger.cancelReservationsSince(mark);
+                restoreVirtualSnapshot(virtualBefore);
             }
         }
-        return new GraphNodeMaterials(materials, List.of(), List.of(), List.of(), List.of());
     }
 
-    @Nullable
-    private GraphNodeMaterials reserveGraphNodeMaterials(
-            IBatchDelegate delegate, List<IngredientSpec> specs,
-            int executions, ServerPlayer online, ExtractionLedger ledger,
-            MaterialBroker.ReservationToken materialToken) {
-        int reservationMark = ledger.reservationMark();
-        if (delegate instanceof ParallelCraftGroup group) {
-            List<IngredientSpec> operationSpecs = group.getOperationMaterials();
-            if (operationSpecs == null || operationSpecs.isEmpty()) {
-                ledger.cancelReservationsSince(reservationMark);
-                return null;
-            }
-            MaterialBroker.Checkout checkout = graphMaterials != null
-                    ? graphMaterials.checkout(materialToken) : new MaterialBroker.Checkout(List.of());
-            List<ItemStack> initialPool = new ArrayList<>(checkout.initialStacks());
-            List<ItemStack> producerPool = new ArrayList<>(checkout.producerStacks());
-            List<ItemStack> materials = new ArrayList<>();
-            List<ExtractionLedger.ReservationToken> tokens = new ArrayList<>();
-            List<List<ItemStack>> virtualDebits = new ArrayList<>();
-            List<List<ItemStack>> producerDebits = new ArrayList<>();
-            List<ItemStack> reusable = new ArrayList<>();
-            List<List<Integer>> reusableEntryIds = new ArrayList<>();
-            List<IngredientSpec> perOperationSpecs = new ArrayList<>();
-            List<Integer> reusableIndices =
-                    reusableMaterialIndices(operationSpecs, operationSpecs.size());
-            for (int i = 0; i < operationSpecs.size(); i++) {
-                if (!reusableIndices.contains(i)) {
-                    perOperationSpecs.add(operationSpecs.get(i));
-                }
-            }
-            int workers = Math.min(group.getChildCount(), group.getTotalOperations());
-            for (int worker = 0; worker < workers; worker++) {
-                reusableEntryIds.add(new ArrayList<>());
-            }
-            for (int reusableIndex : reusableIndices) {
-                IngredientSpec spec = operationSpecs.get(reusableIndex);
-                for (int worker = 0; worker < workers; worker++) {
-                    int reusableMark = ledger.reservationMark();
-                    ItemStack material;
-                    if (worker == 0) {
-                        List<ItemStack> planned = reserveGraphMaterials(
-                                List.of(spec), online, ledger, initialPool, producerPool);
-                        if (planned == null || planned.size() != 1) {
-                            ledger.cancelReservationsSince(reservationMark);
-                            return null;
-                        }
-                        material = planned.get(0);
-                    } else {
-                        material = ledger.reserve(spec.ingredient(), spec.count(),
-                                storageEndpoint, online, null, null);
-                        if (material.isEmpty() || material.getCount() != spec.count()) {
-                            ledger.cancelReservationsSince(reservationMark);
-                            return null;
-                        }
-                    }
-                    reusable.add(material);
-                    reusableEntryIds.get(worker).addAll(ledger.tokenSince(reusableMark).entryIds());
-                }
-            }
-            for (int operation = 0; operation < group.getTotalOperations(); operation++) {
-                int mark = ledger.reservationMark();
-                List<ItemStack> producerBefore = StackCopies.excludingEmpty(producerPool);
-                List<ItemStack> slice = reserveGraphMaterials(
-                        perOperationSpecs, online, ledger, initialPool, producerPool);
-                if (slice == null) {
-                    ledger.cancelReservationsSince(reservationMark);
-                    return null;
-                }
-                List<ItemStack> full = new ArrayList<>();
-                int consumedIndex = 0;
-                int reusableIndex = operation % Math.max(1, workers);
-                for (int i = 0; i < operationSpecs.size(); i++) {
-                    if (reusableIndices.contains(i)) {
-                        full.add(reusable.get(reusableIndex));
-                        reusableIndex += workers;
-                    } else {
-                        full.add(slice.get(consumedIndex++));
-                    }
-                }
-                materials.addAll(StackCopies.includingEmpty(full));
-                tokens.add(ledger.tokenSince(mark));
-                virtualDebits.add(List.of());
-                producerDebits.add(consumedFragments(producerBefore, producerPool));
-            }
-            releaseUnusedGraphMaterials(materialToken, initialPool, producerPool);
-            List<ExtractionLedger.ReservationToken> reusableTokens = reusableEntryIds.stream()
-                    .map(ExtractionLedger.ReservationToken::new)
-                    .toList();
-            return new GraphNodeMaterials(materials, tokens, virtualDebits, producerDebits,
-                    reusableTokens);
+    private boolean reserveCountedInitial(List<ItemStack> materials, ExtractionLedger targetLedger,
+                                          ServerPlayer online) {
+        for (ItemStack planned : materials) {
+            ItemStack actual = reserveExact(targetLedger, planned, planned.getCount(), online);
+            if (actual.isEmpty() || actual.getCount() != planned.getCount()
+                    || !MaterialMatcher.sameRuntimeFragment(planned, actual)) return false;
         }
-        MaterialBroker.Checkout checkout = graphMaterials != null
-                ? graphMaterials.checkout(materialToken) : new MaterialBroker.Checkout(List.of());
-        List<ItemStack> initialPool = new ArrayList<>(checkout.initialStacks());
-        List<ItemStack> producerPool = new ArrayList<>(checkout.producerStacks());
-        List<IngredientSpec> scaledSpecs = scaleGraphSpecsForExecutions(specs, executions);
-        List<Integer> reusableIndices = reusableMaterialIndices(specs, specs.size());
-        List<IngredientSpec> reusableSpecs = new ArrayList<>();
-        List<IngredientSpec> perOperationSpecs = new ArrayList<>();
-        for (int i = 0; i < scaledSpecs.size(); i++) {
-            if (reusableIndices.contains(i)) reusableSpecs.add(scaledSpecs.get(i));
-            else perOperationSpecs.add(scaledSpecs.get(i));
-        }
-        int reusableMark = ledger.reservationMark();
-        List<ItemStack> reusableMaterials = reserveGraphMaterials(
-                reusableSpecs, online, ledger, initialPool, producerPool);
-        List<ExtractionLedger.ReservationToken> reusableTokens = reusableMaterials == null
-                ? List.of() : List.of(ledger.tokenSince(reusableMark));
-        List<ItemStack> consumedMaterials = reusableMaterials == null ? null : reserveGraphMaterials(
-                perOperationSpecs, online, ledger, initialPool, producerPool);
-        if (reusableMaterials == null || consumedMaterials == null) {
-            ledger.cancelReservationsSince(reservationMark);
-            return null;
-        }
-        List<ItemStack> materials = new ArrayList<>(scaledSpecs.size());
-        int reusableIndex = 0;
-        int consumedIndex = 0;
-        for (int i = 0; i < scaledSpecs.size(); i++) {
-            if (reusableIndices.contains(i)) materials.add(reusableMaterials.get(reusableIndex++));
-            else materials.add(consumedMaterials.get(consumedIndex++));
-        }
-        releaseUnusedGraphMaterials(materialToken, initialPool, producerPool);
-        return new GraphNodeMaterials(materials, List.of(), List.of(), List.of(), reusableTokens);
+        return true;
     }
 
     private void releaseUnusedGraphMaterials(
@@ -3191,117 +2966,6 @@ public final class AsyncCraftChain {
     private static List<ItemStack> consumedFragments(
             List<ItemStack> before, List<ItemStack> after) {
         return MaterialReservationPlanner.consumedFragments(before, after);
-    }
-
-    /** Reserve initial allocations physically and checkout exact producer fragments. */
-    @Nullable
-    private List<ItemStack> reserveGraphMaterials(
-            List<IngredientSpec> specs, ServerPlayer online, ExtractionLedger ledger,
-            List<ItemStack> initialPool, List<ItemStack> producerPool) {
-        int reservationMark = ledger.reservationMark();
-        List<ItemStack> reserved;
-        try {
-            reserved = StackPoolTransaction.execute(initialPool, producerPool,
-                    (workingInitial, workingProducer) -> reserveGraphMaterialsInPlace(
-                            specs, online, ledger, workingInitial, workingProducer));
-        } catch (RuntimeException e) {
-            ledger.cancelReservationsSince(reservationMark);
-            throw e;
-        }
-        if (reserved == null) ledger.cancelReservationsSince(reservationMark);
-        return reserved;
-    }
-
-    @Nullable
-    private List<ItemStack> reserveGraphMaterialsInPlace(
-            List<IngredientSpec> specs, ServerPlayer online, ExtractionLedger ledger,
-            List<ItemStack> initialPool, List<ItemStack> producerPool) {
-        List<ItemStack> materials = new ArrayList<>(specs.size());
-        for (IngredientSpec spec : specs) {
-            if (spec.isEmpty()) {
-                materials.add(ItemStack.EMPTY);
-                continue;
-            }
-            int remaining = spec.count();
-            ItemStack combined = ItemStack.EMPTY;
-            for (ItemStack produced : producerPool) {
-                if (remaining <= 0) break;
-                if (produced.isEmpty() || !IngredientMatcher.test(spec.ingredient(), produced)) continue;
-                if (!combined.isEmpty() && !MaterialMatcher.equivalentRuntimeFragment(combined, produced)) continue;
-                int take = Math.min(remaining, produced.getCount());
-                if (combined.isEmpty()) {
-                    combined = produced.copyWithCount(take);
-                } else {
-                    combined.grow(take);
-                }
-                produced.shrink(take);
-                remaining -= take;
-            }
-            if (remaining > 0) {
-                // MaterialBroker checkout selected the item type from the planning
-                // snapshot. Preserve exact NBT when the ingredient requires it;
-                // ordinary tagless ingredients may carry harmless runtime metadata.
-                ItemStack planned = findMatching(
-                        initialPool, spec.ingredient(), remaining, true);
-                if (planned.isEmpty() || planned.getCount() != remaining) return null;
-                int reservationMark = ledger.reservationMark();
-                ItemStack exactTemplate = combined.isEmpty() ? planned : combined;
-                boolean exactNbt = requiresExactGraphReservation(spec.ingredient());
-                ItemStack initial = reserveExact(ledger, exactTemplate, remaining, online);
-                if (initial.isEmpty() && !exactNbt) {
-                    // Keep the fallback constrained to the concrete item selected
-                    // by the graph; a broad tag ingredient must not consume another
-                    // item type than the one admitted by the graph.
-                    initial = reserveIngredient(ledger,
-                            Ingredient.of(new ItemStack(planned.getItem())), remaining, online);
-                }
-                if (initial.isEmpty()) {
-                    RSIntegrationMod.LOGGER.info(ctx.format(
-                            "Graph material reservation failed: recipe={} step={} ingredient={} planned={} exactNbt={} availability={}"),
-                            currentRecipeForLogging(), currentStepIdx,
-                            CraftPacketUtils.describeIngredient(spec.ingredient()),
-                            describeStackForLogging(planned), exactNbt,
-                            ledger.describeExactAvailability(exactTemplate, online));
-                    ledger.cancelReservationsSince(reservationMark);
-                    return null;
-                }
-                boolean consumed = exactNbt
-                        ? takeExactMatching(initialPool, initial, remaining)
-                        : takeMatchingItem(initialPool, planned, remaining);
-                if (!consumed) {
-                    ledger.cancelReservationsSince(reservationMark);
-                    return null;
-                }
-                if (combined.isEmpty()) {
-                    combined = initial.copyWithCount(remaining);
-                } else if (MaterialMatcher.equivalentRuntimeFragment(combined, initial)) {
-                    combined.grow(remaining);
-                } else {
-                    ledger.cancelReservationsSince(reservationMark);
-                    return null;
-                }
-            }
-            materials.add(combined);
-        }
-        return materials;
-    }
-
-    private static boolean takeMatchingItem(List<ItemStack> pool, ItemStack planned, int count) {
-        if (planned == null || planned.isEmpty() || count <= 0) return false;
-        int available = 0;
-        for (ItemStack stack : pool) {
-            if (!stack.isEmpty() && stack.getItem() == planned.getItem()) available += stack.getCount();
-        }
-        if (available < count) return false;
-        int remaining = count;
-        for (ItemStack stack : pool) {
-            if (remaining <= 0L) break;
-            if (stack.isEmpty() || stack.getItem() != planned.getItem()) continue;
-            int take = (int) Math.min(remaining, stack.getCount());
-            stack.shrink(take);
-            remaining -= take;
-        }
-        return remaining == 0;
     }
 
     private String currentRecipeForLogging() {
@@ -4094,579 +3758,47 @@ public final class AsyncCraftChain {
     //  multi-block step execution
 
     private IBatchDelegate startModStep(CraftingResolver.ResolutionStep step, ServerPlayer online) {
-        if (!waitingForMachineLease) {
-            machineWaitMessage = null;
-            machineWaitDetail = null;
-        }
         machineStartFailureMessage = null;
         machineStartFailureDetail = null;
         machineStartFailureLabel = "";
         materialReservationFailureDetail = null;
-        if (step.modType().isVirtual()) {
-            IBatchDelegate virtualDelegate = createStepDelegate(step);
-            if (virtualDelegate == null || !validatePreparedDelegate(
-                    virtualDelegate, online, step.recipeId(), null, BlockPos.ZERO)) {
-                return null;
-            }
-            try {
-                if (virtualDelegate instanceof AbstractBatchDelegate abd) {
-                    abd.setMachineServer(server);
-                }
-            } catch (RuntimeException exception) {
-                releasePreparationQuietly(virtualDelegate);
-                RSIntegrationMod.LOGGER.error(ctx.format(
-                        "Virtual delegate configuration failed for {}"), step.recipeId(), exception);
-                return null;
-            }
-            return startGenericStep(virtualDelegate, step, online);
-        }
-        // Extract machine sub-type from recipe ID (e.g. "wissen_crystallizer"
-        // from "wizards_reborn:wissen_crystallizer/earth_crystal_seed") so we
-        // only probe machines of the correct type, not every binding for the mod.
-        List<BoundMachine> machines = AltarBindingRegistry.getBoundMachinesForRecipe(
-                online, step.modType(), step.recipeId());
-        if (machines.isEmpty()) {
-            waitingForMachineLease = false;
-            List<BoundMachine> blockedMatches =
-                    AltarBindingRegistry.getBlockedMachinesForRecipe(
-                            online, step.modType(), step.recipeId());
-            if (!blockedMatches.isEmpty()) {
-                RSIntegrationMod.LOGGER.debug(ctx.format(
-                        "All matching machines are excluded by the automation blocklist: "
-                                + "modType={} recipe={} blocked={}"),
-                        step.modType(), step.recipeId(), blockedMatches.size());
-                online.sendSystemMessage(Component.translatable(
-                        "rsi.async.error.machine_automation_blocked", step.recipeId()));
-                return null;
-            }
-            // Diagnostic: also check how many bindings exist for this mod type
-            // (without sub-type filter) so we can tell if sub-type mismatch or
-            // no binding at all.
-            int totalForMod = AltarBindingRegistry.getBoundMachinesForType(
-                    online, step.modType()).size();
-            RSIntegrationMod.LOGGER.warn(ctx.format("No bound machine for mod type {} subType={} (total {} bindings for this mod)"),
-                    step.modType(), AltarBindingRegistry.recipeSubTypeHint(step.recipeId()), totalForMod);
-            if (totalForMod > 0) {
-                // Machines of this mod ARE bound, but none match the sub-type filter
-                online.sendSystemMessage(Component.translatable(
-                        "rsi.async.error.wrong_machine_type", step.recipeId(), totalForMod));
-            } else {
-                online.sendSystemMessage(Component.translatable(
-                        "rsi.async.error.no_machine_bound", step.recipeId()));
-            }
-            return null;
-        }
-
-        // Duplicate bindings must never create multiple workers for one logical machine.
-        machines = MachineDispatchPlanner.deduplicate(machines);
-        int boundMachineCount = machines.size();
-        flatWaitingMachines = leasedMachineKeys(machines, step.modType().id());
-        machines = MachineDispatchPlanner.filterUnleased(
-                machines, machineLeases, step.modType().id());
-        if (MachineDispatchPlanner.classifyLeaseAvailability(
-                boundMachineCount, machines.size())
-                == MachineDispatchPlanner.LeaseAvailability.ALL_LEASED) {
-            if (!waitingForMachineLease) {
-                RSIntegrationMod.LOGGER.debug(ctx.format(
-                        "All bound machines for {} are leased by active operations; waiting to retry"),
-                        step.modType());
-            }
+        NodeId identity = new NodeId(flatGroupSequence);
+        PreparationResult preparation = prepareGraphNode(identity,
+                step.withExecutions(Math.max(1, stepRemaining)), online);
+        flatWaitingMachines = graphWaitingMachines.remove(identity);
+        if (flatWaitingMachines == null) flatWaitingMachines = List.of();
+        if (preparation.state() == PreparationState.RETRY) {
             waitingForMachineLease = true;
+            machineWaitDetail = preparation.detail();
+            machineWaitMessage = preparation.userMessage();
             return null;
         }
+        if (preparation.state() != PreparationState.READY || preparation.prepared() == null) {
+            machineStartFailureDetail = preparation.detail();
+            machineStartFailureMessage = preparation.userMessage();
+            return null;
+        }
+        PreparedGraphNode prepared = preparation.prepared();
+        Component storageFailure = prepared.delegate().validateOutputStorage(online);
+        if (storageFailure != null) {
+            releasePreparationQuietly(prepared.delegate());
+            machineStartFailureMessage = storageFailure;
+            return null;
+        }
+        ParallelCraftGroup group = createExecutionGroup(prepared, identity, online);
+        if (!validatePreparedDelegate(group, online, step.recipeId(), null, BlockPos.ZERO)) {
+            waitingForMachineLease = true;
+            machineWaitDetail = "execution worker temporarily unavailable";
+            return null;
+        }
+        flatGroupSequence = Math.addExact(flatGroupSequence, 1);
+        group.setOperationKernel(operationKernel, craftId, identity, craftOperationBudget);
+        machineCount = group.getTotalOperations();
         waitingForMachineLease = false;
-
-        //  Same-dimension priority
-        // Prefer machines in the player's current dimension so cross-dimension
-        // crafts only fall back to remote dimensions when no local machine exists.
-        ResourceLocation playerDim = online.level().dimension().location();
-        machines.sort((a, b) -> {
-            boolean aSame = a.dim().equals(playerDim);
-            boolean bSame = b.dim().equals(playerDim);
-            if (aSame != bSame) return aSame ? -1 : 1;
-            return IronFurnaceMachinePriority.compare(a, b);
-        });
-        machines = applyMachineSelection(machines, step.recipeId());
-
-        //  Load-balanced multi-machine dispatch
-        // When multiple machines are bound for this mod type, try to distribute
-        // work across them instead of sending everything to one machine.
-        // Only parallelize when there are multiple executions to distribute;
-        // a single-execution step would double the material requirement (one
-        // set per child) and fail if the player only has enough for one craft.
-        if (step.inferMode()) {
-            RSIntegrationMod.LOGGER.debug(ctx.format("[LB] skipped: inferMode=true"));
-        } else if (machines.size() < 2) {
-            RSIntegrationMod.LOGGER.debug(ctx.format("[LB] skipped: only {} bound machine(s)"), machines.size());
-        } else if (flatDispatchWindow(stepRemaining, configuredOperationsPerDispatch()) <= 1) {
-            RSIntegrationMod.LOGGER.debug(ctx.format("[LB] skipped: dispatchWindow<=1 remaining={}"), stepRemaining);
-        } else {
-            RSIntegrationMod.LOGGER.debug(ctx.format("[LB] attempting parallel: {} machines, {} executions"),
-                    machines.size(), step.executions());
-            IBatchDelegate parallel = tryStartParallel(machines, step, online);
-            if (parallel != null) {
-                RSIntegrationMod.LOGGER.debug(ctx.format("[LB] parallel dispatch OK: childCount={}"),
-                        parallel instanceof ParallelCraftGroup g ? g.getChildCount() : 1);
-                return parallel;
-            }
-            // Parallel dispatch failed. If it already committed materials, we must
-            // NOT fall through to the single-machine path (that would pre-reserve
-            // and extract a second time). Return null so tick() aborts, which
-            // refunds the committed ledger and recovers virtualInventory. Only a
-            // clean pre-reservation failure is safe to retry single-machine.
-            if (ledger.isCommitted()) {
-                RSIntegrationMod.LOGGER.warn(ctx.format("[LB] parallel failed after commit -aborting instead of single-machine fallback"));
-                return null;
-            }
-            // Clean failure: undo any pre-reserve drain of virtualInventory and
-            // clear stale reservations before retrying via single-machine.
-            restoreVirtualFromCommitted();
-            if (ledger.state() != ExtractionLedger.State.IDLE) {
-                ledger.reset();
-            }
-            RSIntegrationMod.LOGGER.debug(ctx.format("[LB] parallel dispatch failed, falling back to single-machine"));
-            // Fall through: single-machine path below
-        }
-
-        IBatchDelegate initialDelegate = createStepDelegate(step);
-        if (initialDelegate == null) return null;
-
-        // GenericBatchDelegate computes the result from pre-reserved materials
-        // without a physical machine.  Use the shared-ledger preReserve flow so
-        // intermediate outputs from prior chain steps (in virtualInventory) are
-        // visible to subsequent steps.
-        if (initialDelegate.getClass() == GenericBatchDelegate.class) {
-            if (!validatePreparedDelegate(
-                    initialDelegate, online, step.recipeId(), null, BlockPos.ZERO)) {
-                return null;
-            }
-            try {
-                if (initialDelegate instanceof AbstractBatchDelegate abd) {
-                    abd.setMachineServer(server);
-                }
-            } catch (RuntimeException exception) {
-                releasePreparationQuietly(initialDelegate);
-                RSIntegrationMod.LOGGER.error(ctx.format(
-                        "Generic delegate configuration failed for {}"), step.recipeId(), exception);
-                return null;
-            }
-            return startGenericStep(initialDelegate, step, online);
-        }
-
-        MachineDispatchPlanner.CandidateSelection candidateSelection =
-                MachineDispatchPlanner.filterCandidates(
-                machines,
-                machine -> {
-                    ResourceKey<Level> dimKey = ResourceKey.create(
-                            Registries.DIMENSION, machine.dim());
-                    ServerLevel machineLevel = server.getLevel(dimKey);
-                    return machineLevel != null && machineLevel.hasChunkAt(machine.pos());
-                },
-                machine -> {
-                    ResourceKey<Level> dimKey = ResourceKey.create(
-                            Registries.DIMENSION, machine.dim());
-                    ServerLevel machineLevel = server.getLevel(dimKey);
-                    return machineLevel != null
-                            && ProtectionChecker.canInteract(online, machineLevel, machine.pos());
-                });
-
-        releasePreparationQuietly(initialDelegate);
-        IBatchDelegate delegate = null;
-        // Try each bound machine until one is ready. Retryable preparation never
-        // reaches material reservation or ledger commit.
-        BoundMachine matchedMachine = null;
-        boolean retryableRejection = false;
-        boolean unloadedRejection = candidateSelection.unloadedRejected();
-        boolean protectionRejection = candidateSelection.protectionRejected();
-        String fatalDetail = "";
-        String fatalMachineLabel = "";
-        Component fatalUserMessage = null;
-        for (BoundMachine m : candidateSelection.usable()) {
-            IBatchDelegate candidate = null;
-            boolean retained = false;
-            try {
-                candidate = createStepDelegate(step, m.type());
-                if (candidate == null) continue;
-                if (candidate instanceof AbstractBatchDelegate abd) {
-                    // Preparation can inspect storage-backed availability. The
-                    // legacy flat path used to attach the selected endpoint
-                    // only after preparation, which made non-RS backends (BD)
-                    // appear disconnected and left the step retrying forever.
-                    abd.setStorageEndpoint(storageEndpoint);
-                }
-                IBatchDelegate.PreparationResult preparation = PreparationMessageScope.prepare(
-                        candidate, online, step.recipeId(), m.dim(), m.pos());
-                if (preparation.state() == IBatchDelegate.PreparationState.READY) {
-                    if (candidate instanceof AbstractBatchDelegate abd) {
-                        abd.setMachineDim(m.dim());
-                        abd.setMachineServer(server);
-                        applyTargetOutput(abd);
-                    }
-                    delegate = candidate;
-                    matchedMachine = m;
-                    retained = true;
-                    break;
-                }
-                if (preparation.state() == IBatchDelegate.PreparationState.RETRY) {
-                    retryableRejection = true;
-                    if (machineWaitDetail == null) {
-                        machineWaitDetail = preparation.detail();
-                        machineWaitMessage = preparation.userMessage();
-                    }
-                } else if (fatalDetail.isEmpty()) {
-                    fatalDetail = preparation.detail();
-                    fatalMachineLabel = m.dim() + "@" + m.pos().toShortString();
-                    fatalUserMessage = preparation.userMessage();
-                }
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug(ctx.format("prepare failed for machine at {}"), m.pos(), e);
-                if (fatalDetail.isEmpty()) {
-                    fatalDetail = e.getMessage();
-                    fatalMachineLabel = m.dim() + "@" + m.pos().toShortString();
-                }
-            } finally {
-                if (candidate != null && !retained) releasePreparationQuietly(candidate);
-            }
-        }
-        if (matchedMachine == null) {
-            if (retryableRejection) {
-                waitingForMachineLease = true;
-                RSIntegrationMod.LOGGER.debug(ctx.format(
-                        "All {} unleased machines are temporarily unavailable for {}"),
-                        machines.size(), step.recipeId());
-                return null;
-            }
-            RSIntegrationMod.LOGGER.warn(ctx.format(
-                    "All {} bound machines failed preparation for mod type {}: recipe={} detail={}"),
-                    machines.size(), step.modType(), step.recipeId(),
-                    fatalDetail);
-            machineStartFailureDetail = fatalDetail.isEmpty() ? null : fatalDetail;
-            machineStartFailureLabel = fatalMachineLabel;
-            machineStartFailureMessage = fatalUserMessage != null
-                    ? fatalUserMessage
-                    : protectionRejection
-                    ? Component.translatable("rsi.error.protection_denied")
-                    : unloadedRejection
-                    ? Component.translatable("rsi.error.chunk_unloaded")
-                    : Component.translatable("rsi.async.error.machine_valid_failed", step.recipeId());
-            return null;
-        }
-
-        if (matchedMachine.type() != step.modType()) {
-            RSIntegrationMod.LOGGER.info(ctx.format(
-                    "[RSI-Craft] compatible binding route recipe={} recipeType={} machineType={} delegate={} machine={}"),
-                    step.recipeId(), step.modType().id(), matchedMachine.type().id(),
-                    delegate.getClass().getSimpleName(), matchedMachine.pos());
-        }
-
-        final IBatchDelegate startedDelegate = delegate;
-        attachMagicReservation(startedDelegate);
-        try {
-            Component outputStorageFailure = startedDelegate.validateOutputStorage(online);
-            if (outputStorageFailure != null) {
-                machineStartFailureDetail = "output storage preflight rejected";
-                machineStartFailureMessage = outputStorageFailure;
-                releasePreparationQuietly(startedDelegate);
-                return null;
-            }
-            int configuredLimit = configuredOperationsPerDispatch();
-            int delegateLimit = startedDelegate.flatBatchOperationLimit(configuredLimit);
-            int allowedBatch = Math.min(stepRemaining, Math.max(1, delegateLimit));
-            int flatBatch = startedDelegate.prepareFlatBatch(allowedBatch);
-            if (flatBatch <= 0 || flatBatch > allowedBatch) {
-                RSIntegrationMod.LOGGER.warn(ctx.format(
-                        "Delegate selected invalid flat batch size {} for {} permitted operation(s)"),
-                        flatBatch, allowedBatch);
-                releasePreparationQuietly(startedDelegate);
-                return null;
-            }
-            machineCount = flatBatch;
-            List<IngredientSpec> flatBatchSpecs =
-                    startedDelegate.getFlatBatchRequiredMaterials(flatBatch);
-            List<IngredientSpec> specs = flatBatchSpecs != null
-                    ? flatBatchSpecs : startedDelegate.getRequiredMaterials();
-            if (specs != null && !specs.isEmpty()) {
-                if (startedDelegate instanceof AbstractBatchDelegate abstractDelegate) {
-                    abstractDelegate.setStorageEndpoint(storageEndpoint);
-                }
-                startedDelegate.configureMaterialReservation(ledger, online);
-                FlatMaterialBatch reservation = reserveFlatMaterialBatch(flatBatch,
-                        startedDelegate::prepareFlatBatch,
-                        executions -> {
-                            List<IngredientSpec> exactBatchSpecs =
-                                    startedDelegate.getFlatBatchRequiredMaterials(executions);
-                            List<IngredientSpec> reservationSpecs = exactBatchSpecs != null
-                                    ? exactBatchSpecs
-                                    : scaleGraphSpecsForExecutions(
-                                            startedDelegate.getRequiredMaterials(),
-                                            executions);
-                            return preReserveStepMaterials(reservationSpecs, online, null,
-                                    executions == 1);
-                        });
-                List<ItemStack> materials = reservation.materials();
-                if (materials == null) {
-                    RSIntegrationMod.LOGGER.warn(ctx.format("Failed to pre-reserve materials for {}"),
-                            step.recipeId());
-                    Component specific = startedDelegate.materialReservationFailureMessage(online);
-                    online.sendSystemMessage(specific != null ? specific : Component.translatable(
-                            "rsi.generic.error.missing_materials", step.recipeId()));
-                    try { delegate.onBatchFailed(online, "pre-reserve failed"); } catch (Exception fe) {
-    RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during pre-reserve cleanup"), fe);
-}
-                    return null;
-                }
-                machineCount = reservation.executions();
-                if (machineCount != flatBatch) {
-                    RSIntegrationMod.LOGGER.info(ctx.format(
-                            "Flat material batch reduced: recipe={} remainingOperations={} requestedBatch={} admittedBatch={} reason=material_reservation; later batches may reuse settled outputs"),
-                            step.recipeId(), stepRemaining, flatBatch, machineCount);
-                }
-                if (!acquireFlatOperationScope(delegate, matchedMachine, step)) {
-                    RSIntegrationMod.LOGGER.debug(ctx.format("Physical operation resources busy for {}"),
-                            step.recipeId());
-                    try { delegate.onBatchFailed(online, "operation resources busy"); } catch (Exception fe) {
-                        RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during resource cleanup"), fe);
-                    }
-                    restoreVirtualFromCommitted();
-                    if (ledger.state() != ExtractionLedger.State.IDLE) ledger.reset();
-                    waitingForMachineLease = true;
-                    return null;
-                }
-                if (!flatOperationSession.commit(() -> commitLedger(ledger, online))) {
-                    closeFlatOperationScope();
-                    RSIntegrationMod.LOGGER.warn(ctx.format("Ledger commit failed for {}"),
-                            step.recipeId());
-                    Component specific = startedDelegate.materialReservationFailureMessage(online);
-                    online.sendSystemMessage(specific != null ? specific : Component.translatable(
-                            "rsi.generic.error.missing_materials", step.recipeId()));
-                    try { delegate.onBatchFailed(online, "commit failed"); } catch (Exception fe) {
-    RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during commit cleanup"), fe);
-}
-                    return null;
-                }
-                if (delegate instanceof AbstractBatchDelegate abd) {
-                    abd.setStorageEndpoint(storageEndpoint);
-                    abd.useSharedLedger(ledger);
-                }
-                boolean bufferedStart = startedDelegate.supportsInputBuffer();
-                InputBufferPlan inputBuffer = bufferedStart
-                        ? startedDelegate.inputBufferPlan(machineCount)
-                        : InputBufferPlan.none();
-                OperationStartContext startContext = OperationStartContext.chainReserved(
-                        online, ledger, materialPlanFor(startedDelegate), materials, inputBuffer);
-                if (bufferedStart && !startContext.buffered()) {
-                    RSIntegrationMod.LOGGER.error(ctx.format(
-                            "Input-buffer plan could not bind reserved materials: recipe={} delegate={} operations={} reservedStacks={}"),
-                            step.recipeId(), startedDelegate.getClass().getSimpleName(), machineCount,
-                            materials.size());
-                }
-                if (!flatOperationSession.tryStart(
-                        () -> startedDelegate.startOperation(startContext))) {
-                    List<ItemStack> escaped = disarmOutputCapture();
-                    closeFlatOperationScope();
-                    if (!escaped.isEmpty()) {
-                        RSIntegrationMod.LOGGER.error(ctx.format(
-                                "Delegate reported start failure after producing {} captured output(s); preserving output and suppressing input refund"),
-                                escaped.size());
-                        for (ItemStack stack : escaped) addToVirtualInventory(stack);
-                        ledger.reset();
-                        // The physical machine produced real output despite its start
-                        // method returning false. Treat the step as started so the
-                        // chain owns and delivers that output exactly once; aborting
-                        // here would clear virtualInventory and either lose it or
-                        // combine an input refund with an already-produced result.
-                        return delegate;
-                    }
-                    // 必须在 onBatchFailed 清理委托状态前取出失败详情，否则报告只剩兜底文案
-                    String startDetail = startedDelegate.lastStartFailureDetail();
-                    if (startDetail != null && !startDetail.isBlank()) {
-                        machineStartFailureDetail = startDetail;
-                    }
-                    RSIntegrationMod.LOGGER.warn(ctx.format(
-                            "Delegate startPreparedOperation failed for {} detail={}"),
-                            step.recipeId(), startDetail == null ? "<none>" : startDetail);
-                    Component failureTarget = stepFailureTarget(step, online);
-                    machineStartFailureMessage = Component.translatable(
-                            "rsi.async.abort.machine_start_failed", failureTarget);
-                    online.sendSystemMessage(Component.translatable(
-                            "rsi.generic.error.craft_failed", failureTarget));
-                    try { delegate.onBatchFailed(online, "startPreparedOperation failed"); } catch (Exception fe) {
-    RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during startPreparedOperation cleanup"), fe);
-}
-                    // abort() refunds the ledger, so we must NOT refund here
-                    return null;
-                }
-                // Some machines (notably CrockPot's birdcage) determine their
-                // output only while starting. Arm a second capture after that
-                // point so its delayed world drop cannot be picked up first.
-                armOutputCapture(startedDelegate, online);
-            } else {
-                // Private-ledger path: startSingleOperation's ensureMaterialAvailable
-                // only sees network + player inventory, NOT virtualInventory. In a
-                // multi-step chain, intermediate products from earlier steps live in
-                // virtualInventory and would be invisible here -the craft fails even
-                // though the material exists (e.g. CrockPot category filler / WR
-                // arcane iterator as a mid-chain step: works alone, fails as a
-                // dependency). Flush them into the network first so this step can
-                // consume them, then re-snapshot committedVirtual to empty: the
-                // products are now network-owned, so recoverCommittedVirtual must NOT
-                // re-deliver them on abort (that would duplicate). The ledger refund
-                // on abort returns whatever this step consumed back to the network.
-                if (storageEndpoint != null && !virtualInventory.isEmpty()) {
-                    flushVirtualInventory(online);
-                    snapshotCommittedVirtual(); // virtualInventory now empty ->empty snapshot
-                }
-                if (!acquireFlatOperationScope(delegate, matchedMachine, step)) {
-                    RSIntegrationMod.LOGGER.debug(ctx.format("Physical operation resources busy for {}"),
-                            step.recipeId());
-                    try { delegate.onBatchFailed(online, "operation resources busy"); } catch (Exception fe) {
-                        RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during resource cleanup"), fe);
-                    }
-                    waitingForMachineLease = true;
-                    return null;
-                }
-                if (!flatOperationSession.commit(() -> {
-                    if (!ledger.isCommitted()) return commitLedger(ledger, online);
-                    return true;
-                })) {
-                    closeFlatOperationScope();
-                    releasePreparationQuietly(startedDelegate);
-                    return null;
-                }
-                if (!flatOperationSession.tryStart(
-                        () -> startedDelegate.startOperation(
-                                OperationStartContext.delegateExtracted(online, ledger)))) {
-                    List<ItemStack> escaped = disarmOutputCapture();
-                    closeFlatOperationScope();
-                    if (!escaped.isEmpty()) {
-                        RSIntegrationMod.LOGGER.error(ctx.format(
-                                "Delegate reported single-craft start failure after producing {} captured output(s); preserving output and suppressing input refund"),
-                                escaped.size());
-                        for (ItemStack stack : escaped) addToVirtualInventory(stack);
-                        ledger.reset();
-                        return delegate;
-                    }
-                    RSIntegrationMod.LOGGER.warn(ctx.format("Delegate startSingleOperation failed for {}"),
-                            step.recipeId());
-                    try { delegate.onBatchFailed(online, "startSingleOperation failed"); } catch (Exception fe) {
-    RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during startSingleOperation cleanup"), fe);
-}
-                    return null;
-                }
-                armOutputCapture(startedDelegate, online);
-            }
-        } catch (Exception e) {
-            List<ItemStack> escaped = disarmOutputCapture();
-            closeFlatOperationScope();
-            if (!escaped.isEmpty()) {
-                RSIntegrationMod.LOGGER.error(ctx.format(
-                        "Delegate threw after producing {} captured output(s); preserving output and suppressing input refund"),
-                        escaped.size(), e);
-                for (ItemStack stack : escaped) addToVirtualInventory(stack);
-                ledger.reset();
-                return delegate;
-            }
-            RSIntegrationMod.LOGGER.error(ctx.format("Error starting multi-block step"), e);
-            try { delegate.onBatchFailed(online, "exception in startModStep"); } catch (Exception fe) {
-    RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during exception cleanup"), fe);
-}
-            return null;
-        }
-
-        RSIntegrationMod.LOGGER.debug(ctx.format("Multi-block step started OK: recipe={} delegate={}"),
-                step.recipeId(), delegate.getClass().getSimpleName());
-        return delegate;
+        return startExecutionGroup(group, step, online);
     }
 
     //  generic (no-machine) delegate: shared-ledger pre-reserve flow
-
-    private IBatchDelegate startGenericStep(IBatchDelegate delegate,
-                                            CraftingResolver.ResolutionStep step,
-                                            ServerPlayer online) {
-        try {
-            int configuredLimit = configuredOperationsPerDispatch();
-            int allowedBatch = genericBatchLimit(delegate, stepRemaining, configuredLimit);
-            int preparedBatch = delegate.prepareFlatBatch(allowedBatch);
-            if (preparedBatch <= 0 || preparedBatch > allowedBatch) {
-                RSIntegrationMod.LOGGER.warn(ctx.format(
-                        "Generic delegate selected invalid flat batch size {} for {} permitted operation(s)"),
-                        preparedBatch, allowedBatch);
-                return null;
-            }
-            machineCount = preparedBatch;
-            List<IngredientSpec> exactBatchSpecs =
-                    delegate.getFlatBatchRequiredMaterials(preparedBatch);
-            List<IngredientSpec> specs = exactBatchSpecs != null
-                    ? exactBatchSpecs
-                    : scaleGraphSpecsForExecutions(
-                            delegate.getRequiredMaterials(),
-                            preparedBatch);
-            OperationStartContext startContext;
-            if (specs != null && !specs.isEmpty()) {
-                List<ItemStack> materials = preReserveStepMaterials(specs, online);
-                if (materials == null) {
-                    RSIntegrationMod.LOGGER.warn(ctx.format("Failed to pre-reserve for generic step {}"),
-                            step.recipeId());
-                    online.sendSystemMessage(Component.translatable(
-                            "rsi.generic.error.missing_materials", step.recipeId()));
-                    try { delegate.onBatchFailed(online, "pre-reserve failed"); } catch (Exception fe) {
-                        RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during pre-reserve cleanup"), fe);
-                    }
-                    return null;
-                }
-                if (!delegate.validateExecutionContext(online)) {
-                    RSIntegrationMod.LOGGER.warn(ctx.format(
-                            "Execution context unavailable for generic step {}"), step.recipeId());
-                    try { delegate.onBatchFailed(online, "execution context unavailable"); }
-                    catch (Exception ignored) { }
-                    return null;
-                }
-                if (!commitLedger(ledger, online)) {
-                    RSIntegrationMod.LOGGER.warn(ctx.format("Ledger commit failed for generic step {}"),
-                            step.recipeId());
-                    online.sendSystemMessage(Component.translatable(
-                            "rsi.generic.error.missing_materials", step.recipeId()));
-                    try { delegate.onBatchFailed(online, "commit failed"); } catch (Exception fe) {
-                        RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during commit cleanup"), fe);
-                    }
-                    return null;
-                }
-                if (delegate instanceof AbstractBatchDelegate abd) {
-                    abd.setStorageEndpoint(storageEndpoint);
-                    abd.useSharedLedger(ledger);
-                }
-                startContext = OperationStartContext.chainReserved(
-                        online, ledger, materialPlanFor(delegate), materials, InputBufferPlan.none());
-            } else {
-                startContext = OperationStartContext.delegateExtracted(online, ledger);
-            }
-            if (!delegate.startOperation(startContext)) {
-                RSIntegrationMod.LOGGER.warn(ctx.format(
-                        "Unified operation start failed for generic step {}"), step.recipeId());
-                Component failureTarget = stepFailureTarget(step, online);
-                machineStartFailureMessage = Component.translatable(
-                        "rsi.async.abort.machine_start_failed", failureTarget);
-                online.sendSystemMessage(Component.translatable(
-                        "rsi.generic.error.craft_failed", failureTarget));
-                try { delegate.onBatchFailed(online, "unified operation start failed"); }
-                catch (Exception fe) {
-                    RSIntegrationMod.LOGGER.error(ctx.format(
-                            "onBatchFailed threw during unified start cleanup"), fe);
-                }
-                return null;
-            }
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error(ctx.format("Error in generic step"), e);
-            try { delegate.onBatchFailed(online, "exception in startGenericStep"); } catch (Exception fe) {
-                RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during exception cleanup"), fe);
-            }
-            return null;
-        }
-
-        RSIntegrationMod.LOGGER.debug(ctx.format("Generic step started OK: recipe={}"),
-                step.recipeId());
-        return delegate;
-    }
 
     static int genericBatchLimit(IBatchDelegate delegate, int remainingOperations,
                                  int configuredLimit) {
@@ -4695,358 +3827,56 @@ public final class AsyncCraftChain {
                 : Component.literal(step.recipeId().toString());
     }
 
-    //  parallel (load-balanced) step
-
-    /**
-     * Try to dispatch work across multiple bound machines of the same type.
-     * Returns a {@link ParallelCraftGroup} if at least 2 machines are available;
-     * returns null to fall through to the single-machine path.
-     */
-    private IBatchDelegate tryStartParallel(List<BoundMachine> machines,
-                                            CraftingResolver.ResolutionStep step,
-                                            ServerPlayer online) {
-        int dispatchLimit = flatDispatchOperationLimit(machines, step, online);
-        int window = flatDispatchWindow(stepRemaining, dispatchLimit);
-        while (window > 1) {
-            materialReservationFailureDetail = null;
-            IBatchDelegate group = tryStartParallelWindow(machines, step, online, window);
-            if (group != null || ledger.isCommitted() || materialReservationFailureDetail == null) {
-                return group;
-            }
-            restoreVirtualFromCommitted();
-            if (ledger.state() != ExtractionLedger.State.IDLE) ledger.reset();
-            window /= 2;
-        }
-        return null;
-    }
-
-    private int flatDispatchOperationLimit(List<BoundMachine> machines,
-                                           CraftingResolver.ResolutionStep step,
-                                           ServerPlayer online) {
-        int configuredLimit = configuredOperationsPerDispatch();
-        if (stepRemaining <= configuredLimit) return configuredLimit;
-        List<Integer> physicalCapacities = new ArrayList<>();
-        for (BoundMachine machine : machines) {
-            IBatchDelegate candidate = null;
-            try {
-                candidate = createStepDelegate(step, machine.type());
-                if (candidate == null) continue;
-                if (candidate instanceof AbstractBatchDelegate abstractDelegate) {
-                    abstractDelegate.setStorageEndpoint(storageEndpoint);
-                }
-                IBatchDelegate.PreparationResult preparation = PreparationMessageScope.prepare(
-                        candidate, online, step.recipeId(), machine.dim(), machine.pos());
-                if (preparation.state() == IBatchDelegate.PreparationState.READY
-                        && candidate.expandsFlatBatchOperationLimit()) {
-                    // Ask for the native capacity without injecting the generic
-                    // per-dispatch baseline into every worker. The group limit is
-                    // the sum of independently usable physical buffers.
-                    physicalCapacities.add(candidate.flatBatchOperationLimit(1));
-                }
-            } catch (RuntimeException exception) {
-                RSIntegrationMod.LOGGER.debug(ctx.format(
-                        "Flat dispatch capacity probe failed at {}"), machine.pos(), exception);
-            } finally {
-                if (candidate != null) releasePreparationQuietly(candidate);
-            }
-        }
-        return MachineDispatchPlanner.combinedParallelDispatchLimit(
-                configuredLimit, physicalCapacities);
-    }
-
-    private IBatchDelegate tryStartParallelWindow(List<BoundMachine> machines,
-                                                  CraftingResolver.ResolutionStep step,
-                                                  ServerPlayer online, int operationCount) {
-        if (server == null) return null;
-
-        IBatchDelegate capabilityProbe = createStepDelegate(step, machines.get(0).type());
-        List<BoundMachine> available;
-        GraphConcurrencyPolicy.Decision capabilityDecision;
+    private IBatchDelegate startExecutionGroup(ParallelCraftGroup group,
+                                                CraftingResolver.ResolutionStep step, ServerPlayer online) {
+        boolean startInvoked = false;
         try {
-            available = LoadBalancer.filterAvailable(machines, server, capabilityProbe);
-            capabilityDecision = concurrencyDecision(step, capabilityProbe);
-        } finally {
-            if (capabilityProbe != null) releasePreparationQuietly(capabilityProbe);
-        }
-        if (available.size() < 2) {
-            RSIntegrationMod.LOGGER.debug(ctx.format("[LB] filterAvailable: {} machines ->{} available (<2, abort)"),
-                    machines.size(), available.size());
-            return null;
-        }
-        RSIntegrationMod.LOGGER.debug(ctx.format("[LB] filterAvailable: {} machines ->{} available"),
-                machines.size(), available.size());
-
-        // Apply the same interaction protection gate as the single-machine path.
-        List<BoundMachine> permitted = new ArrayList<>();
-        for (BoundMachine machine : available) {
-            try {
-                ResourceKey<Level> dimKey = ResourceKey.create(
-                        Registries.DIMENSION, machine.dim());
-                ServerLevel machineLevel = server.getLevel(dimKey);
-                if (machineLevel != null
-                        && ProtectionChecker.canInteract(online, machineLevel, machine.pos())) {
-                    permitted.add(machine);
-                }
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn(ctx.format("Parallel protection check failed at {}"),
-                        machine.pos(), e);
-            }
-        }
-        available = permitted;
-        if (available.size() < 2) return null;
-
-        // Do not start more workers than remaining operations.
-        int cap = Math.min(operationCount, Math.min(craftOperationBudget.availableCapacity(),
-                globalOperationBudget.availableCapacity()));
-        if (cap < 2) return null;
-
-        // Build a parallel group -constructor internally creates and validates
-        // one delegate per machine. Pass the same recipe-aware capability contract
-        // used by graph execution; otherwise the operation kernel accepts the group
-        // but rejects every child as capability-exclusive after materials are committed.
-        if (capabilityDecision.exclusive()) {
-            RSIntegrationMod.LOGGER.debug(ctx.format(
-                    "[LB] parallel disabled by capability policy: {}"), capabilityDecision.reason());
-            return null;
-        }
-        ParallelCraftGroup group = new ParallelCraftGroup(available, step.modType(),
-                step.recipeId(), online, operationCount, step.inferMode(),
-                capabilityDecision.capabilities(), storageEndpoint, cap);
-        group.setDispatchAllowed(() -> dispatchAllowed.getAsBoolean());
-        group.setMachineLeases(machineLeases);
-        if (!validatePreparedDelegate(
-                group, online, step.recipeId(), null, BlockPos.ZERO)) {
-            RSIntegrationMod.LOGGER.debug(ctx.format("Parallel group empty -all children failed validateAndInit"));
-            releasePreparationQuietly(group);
-            return null;
-        }
-        if (group.getChildCount() < 2) {
-            releasePreparationQuietly(group);
-            return null;
-        }
-
-        this.machineCount = operationCount;
-        group.setMachineServer(server);
-        if (step.productionTarget() != null) {
-            ItemStack display = step.productionTarget().displayStack();
-            IntegrationResourceKey resource =
-                    step.productionTarget().resource();
-            if (resource == null && !display.isEmpty()) {
-                resource = IntegrationResourceKey.item(display);
-            }
-            if (!display.isEmpty()
-                    && resource != null
-                    && resource.kind()
-                    == IntegrationResourceKey.ResourceKind.ITEM) {
-                group.setTargetOutput(display);
-            }
-            group.setTargetResource(resource);
-        } else if (step.syntheticOutput() != null
-                && !step.syntheticOutput().isEmpty()) {
-            group.setTargetOutput(step.syntheticOutput());
-            group.setTargetResource(
-                    IntegrationResourceKey.item(step.syntheticOutput()));
-        } else if (targetOutput != null && isPrimaryStep(currentStepIdx)) {
-            group.setTargetOutput(targetOutput);
-            group.setTargetResource(targetResource);
-        } else if (isPrimaryStep(currentStepIdx)
-                && targetResource != null) {
-            group.setTargetResource(targetResource);
-        }
-        IBatchDelegate started = startParallelStep(group, step, online);
-        if (started != null) {
-            RSIntegrationMod.LOGGER.info(ctx.format(
-                    "Load-balanced window: recipe={} machines={} operations={} remainingBefore={} dispatchLimit={}"),
-                    step.recipeId(), group.getChildCount(), operationCount, stepRemaining,
-                    configuredOperationsPerDispatch());
-        }
-        return started;
-    }
-
-    private IBatchDelegate startParallelStep(IBatchDelegate group,
-                                             CraftingResolver.ResolutionStep step,
-                                             ServerPlayer online) {
-        try {
-            // Mirror the single-machine path: pre-reserve from virtualInventory
-            // first so intermediate outputs from prior steps are visible to all children.
-            List<IngredientSpec> operationSpecs = group instanceof ParallelCraftGroup parallel
-                    ? parallel.getFlatOperationMaterials() : null;
-            List<IngredientSpec> specs = operationSpecs != null ? operationSpecs : group.getRequiredMaterials();
-            if (specs != null && !specs.isEmpty()) {
-                List<ItemStack> materials;
-                if (operationSpecs != null && !operationSpecs.isEmpty()
-                        && group instanceof ParallelCraftGroup parallel) {
-                    ParallelReservation reserved = preReserveParallelOperations(
-                            operationSpecs, parallel.getChildCount(),
-                            parallel.getTotalOperations(), online);
-                    if (reserved == null) {
-                        materials = null;
-                    } else {
-                        materials = new ArrayList<>();
-                        List<ExtractionLedger.ReservationToken> tokens = new ArrayList<>();
-                        List<List<ItemStack>> virtualDebits = new ArrayList<>();
-                        for (ReservedOperation operation : reserved.operations()) {
-                            materials.addAll(StackCopies.includingEmpty(operation.materials()));
-                            tokens.add(operation.token());
-                            virtualDebits.add(StackCopies.excludingEmpty(operation.virtualDebits()));
-                        }
-                        parallel.setReservationTokens(tokens);
-                        parallel.setReusableReservationTokens(reserved.reusableTokens());
-                        parallel.setVirtualDebits(virtualDebits);
-                        parallel.setOperationKernel(operationKernel, craftId,
-                                new NodeId(Math.max(0, currentStepIdx)), craftOperationBudget);
-                    }
-                } else {
-                    materials = preReserveStepMaterials(specs, online);
-                }
-                if (materials == null) {
-                    RSIntegrationMod.LOGGER.debug(ctx.format("Reducing or falling back after parallel reservation failure for {}"),
-                            step.recipeId());
-                    try { group.onBatchFailed(online, "pre-reserve failed"); } catch (Exception fe) {
-                        RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during pre-reserve cleanup"), fe);
-                    }
-                    return null;
-                }
-                if (!commitLedger(ledger, online)) {
-                    RSIntegrationMod.LOGGER.warn(ctx.format("Ledger commit failed for parallel {}"),
-                            step.recipeId());
-                    online.sendSystemMessage(Component.translatable(
-                            "rsi.generic.error.missing_materials", step.recipeId()));
-                    try { group.onBatchFailed(online, "commit failed"); } catch (Exception fe) {
-                        RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during commit cleanup"), fe);
-                    }
-                    return null;
-                }
-                OperationStartContext startContext;
-                if (group instanceof ParallelCraftGroup parallel) {
-                    List<IngredientSpec> perOperation = parallel.getFlatOperationMaterials();
-                    if (perOperation == null || perOperation.isEmpty()) {
-                        throw new IllegalStateException(
-                                "parallel group lost its per-operation material layout");
-                    }
-                    startContext = OperationStartContext.repeatedChainReserved(
-                            online, ledger, parallel.operationMaterialPlan(),
-                            parallel.getTotalOperations(), perOperation.size(), materials);
-                } else {
-                    startContext = OperationStartContext.chainReserved(
-                            online, ledger, materialPlanFor(group), materials,
-                            InputBufferPlan.none());
-                }
-                if (!group.startOperation(startContext)) {
-                    RSIntegrationMod.LOGGER.warn(ctx.format("Parallel group unified start failed for {}"),
-                            step.recipeId());
-                    Component failureTarget = stepFailureTarget(step, online);
-                    machineStartFailureMessage = Component.translatable(
-                            "rsi.async.abort.machine_start_failed", failureTarget);
-                    online.sendSystemMessage(Component.translatable(
-                            "rsi.generic.error.craft_failed", failureTarget));
-                    try { group.onBatchFailed(online, "unified start failed"); } catch (Exception fe) {
-                        RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during parallel cleanup"), fe);
-                    }
-                    // abort() refunds the ledger, so we must NOT refund here
-                    return null;
-                }
+            OperationStartContext context;
+            if (shouldUsePrivateLedgerGraphDispatch(group, group.getGraphSpecs())
+                    || group.getFlatOperationMaterials() == null) {
+                materializePrivateLedgerFlatInputs(online);
+                context = OperationStartContext.delegateExtracted(online, ledger);
             } else {
-                // Fallback: each child self-extracts (no virtualInventory visibility)
-                if (!group.startOperation(
-                        OperationStartContext.delegateExtracted(online, ledger))) {
-                    RSIntegrationMod.LOGGER.warn(ctx.format("Parallel group startSingleOperation failed for {}"),
-                            step.recipeId());
-                    Component failureTarget = stepFailureTarget(step, online);
-                    machineStartFailureMessage = Component.translatable(
-                            "rsi.async.abort.machine_start_failed", failureTarget);
-                    online.sendSystemMessage(Component.translatable(
-                            "rsi.generic.error.craft_failed", failureTarget));
-                    try { group.onBatchFailed(online, "startSingleOperation failed"); } catch (Exception fe) {
-                        RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during parallel cleanup"), fe);
-                    }
+                GraphNodeMaterials reserved = reserveCountedOperationMaterials(group, online, ledger, null);
+                if (reserved == null) {
+                    group.releasePreparationResources();
                     return null;
                 }
-            }
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error(ctx.format("Error starting parallel step"), e);
-            try { group.onBatchFailed(online, "exception in startParallelStep"); } catch (Exception fe) {
-                RSIntegrationMod.LOGGER.error(ctx.format("onBatchFailed threw during exception cleanup"), fe);
-            }
-            return null;
-        }
-
-        RSIntegrationMod.LOGGER.debug(ctx.format("Parallel step started OK: recipe={}"), step.recipeId());
-        return group;
-    }
-
-    private record ReservedOperation(List<ItemStack> materials,
-                                     ExtractionLedger.ReservationToken token,
-                                     List<ItemStack> virtualDebits) {}
-
-    private record ParallelReservation(List<ReservedOperation> operations,
-                                       List<ExtractionLedger.ReservationToken> reusableTokens) {}
-
-    private ParallelReservation preReserveParallelOperations(
-            List<IngredientSpec> specs,
-            int workerCount, int operationCount, ServerPlayer online) {
-        List<ItemStack> virtualSnapshot = StackCopies.excludingEmpty(virtualInventory);
-        List<ReservedOperation> reservations = new ArrayList<>();
-        int effectiveWorkers = Math.min(Math.max(1, workerCount), operationCount);
-        List<ItemStack> reusable = new ArrayList<>();
-        List<List<Integer>> reusableEntryIds = new ArrayList<>();
-        for (int worker = 0; worker < effectiveWorkers; worker++) {
-            reusableEntryIds.add(new ArrayList<>());
-        }
-        List<Integer> reusableIndices = reusableMaterialIndices(specs, specs.size());
-        for (int i : reusableIndices) {
-            IngredientSpec spec = specs.get(i);
-            for (int worker = 0; worker < effectiveWorkers; worker++) {
-                List<IngredientSpec> one = List.of(new IngredientSpec(
-                        spec.ingredient(), spec.count(), spec.consumption()));
-                int reusableMark = ledger.reservationMark();
-                List<ItemStack> material = preReserveStepMaterials(one, online, null, false);
-                if (material == null) {
-                    ledger.reset();
-                    restoreVirtualSnapshot(virtualSnapshot);
+                group.setReusableReservationTokens(reserved.reusableTokens());
+                if (!group.validateExecutionContext(online) || !commitLedger(ledger, online)) {
+                    group.releasePreparationResources();
                     return null;
                 }
-                reusable.addAll(material);
-                reusableEntryIds.get(worker).addAll(ledger.tokenSince(reusableMark).entryIds());
+                context = OperationStartContext.chainReserved(online, ledger,
+                        MaterialPlan.none(), List.of(), InputBufferPlan.none());
             }
+            startInvoked = true;
+            if (!group.startOperation(context)) group.onBatchFailed(online, "execution group rejected start");
+            return group;
+        } catch (RuntimeException exception) {
+            RSIntegrationMod.LOGGER.error(ctx.format("Execution group failed for {}"), step.recipeId(), exception);
+            group.onBatchFailed(online, "execution group start threw");
+            return startInvoked || ledger.isCommitted() ? group : null;
         }
-        for (int operation = 0; operation < operationCount; operation++) {
-            int mark = ledger.reservationMark();
-            List<ItemStack> virtualDebits = new ArrayList<>();
-            List<IngredientSpec> perOperation = new ArrayList<>();
-            for (int i = 0; i < specs.size(); i++) {
-                if (!reusableIndices.contains(i)) {
-                    perOperation.add(specs.get(i));
-                }
-            }
-            List<ItemStack> materials = preReserveStepMaterials(perOperation, online, virtualDebits, false);
-            if (materials == null) {
-                ledger.reset();
-                restoreVirtualSnapshot(virtualSnapshot);
-                return null;
-            }
-            List<ItemStack> full = new ArrayList<>();
-            int perIndex = 0;
-            int reusableIndex = 0;
-            for (int i = 0; i < specs.size(); i++) {
-                if (reusableIndices.contains(i)) {
-                    full.add(reusable.get((operation % effectiveWorkers) + reusableIndex));
-                    reusableIndex += effectiveWorkers;
-                } else {
-                    full.add(materials.get(perIndex++));
-                }
-            }
-            reservations.add(new ReservedOperation(full, ledger.tokenSince(mark), List.copyOf(virtualDebits)));
-        }
-        List<ExtractionLedger.ReservationToken> reusableTokens = reusableEntryIds.stream()
-                .map(ExtractionLedger.ReservationToken::new)
-                .toList();
-        return new ParallelReservation(List.copyOf(reservations), reusableTokens);
     }
 
-    private ParallelReservation preReserveParallelOperations(
-            List<IngredientSpec> specs, int operationCount, ServerPlayer online) {
-        return preReserveParallelOperations(specs, 1, operationCount, online);
+    /** 私有账本只能读取真实库存；即使交接中断，也不能再次补发已交付的中间产物。 */
+    private void materializePrivateLedgerFlatInputs(ServerPlayer online) {
+        try {
+            for (int index = 0; index < virtualInventory.size(); index++) {
+                ItemStack remainder = insertIntoStorage(online, virtualInventory.get(index));
+                // safeGiveToPlayer 会接管剩余物（包括持久恢复队列）；返回 false 也不能再次退款。
+                virtualInventory.set(index, ItemStack.EMPTY);
+                if (!remainder.isEmpty() && !safeGiveToPlayer(online, remainder)) {
+                    throw new IllegalStateException("private ledger input handoff incomplete");
+                }
+            }
+        } finally {
+            // 一次压缩和快照，避免逐项 remove(0) 与复制整个剩余库存的平方开销。
+            virtualInventory.removeIf(ItemStack::isEmpty);
+            snapshotCommittedVirtual();
+            MaterialSources.invalidateFor(online, storageEndpoint);
+        }
     }
 
     private void restoreVirtualSnapshot(List<ItemStack> snapshot) {
@@ -5062,135 +3892,6 @@ public final class AsyncCraftChain {
         MaterialReservationPlanner.FlatMaterialBatch result =
                 MaterialReservationPlanner.reserveFlatMaterialBatch(preparedBatch, prepare, reserve);
         return new FlatMaterialBatch(result.executions(), result.materials());
-    }
-
-    private List<ItemStack> preReserveStepMaterials(List<IngredientSpec> specs, ServerPlayer online) {
-        return preReserveStepMaterials(specs, online, null);
-    }
-
-    private List<ItemStack> preReserveStepMaterials(List<IngredientSpec> specs, ServerPlayer online,
-                                                    @Nullable List<ItemStack> virtualDebits) {
-        return preReserveStepMaterials(specs, online, virtualDebits, true);
-    }
-
-    private List<ItemStack> preReserveStepMaterials(List<IngredientSpec> specs, ServerPlayer online,
-                                                    @Nullable List<ItemStack> virtualDebits,
-                                                    boolean logFailure) {
-        if (currentStepIdx < steps.size()) {
-            specs = MaterialLocks.narrowSpecs(steps.get(currentStepIdx).recipeId(),
-                    specs, supplementalMaterialLocks);
-        }
-        int mark = ledger.reservationMark();
-        int debitMark = virtualDebits == null ? 0 : virtualDebits.size();
-        List<ItemStack> virtualSnapshot = StackCopies.excludingEmpty(virtualInventory);
-        boolean reserved = false;
-        try {
-            List<ItemStack> materials = reserveStepMaterials(specs, online, virtualDebits, logFailure);
-            reserved = materials != null;
-            if (reserved && materialReservationFailureDetail != null) {
-                materialReservationFailureDetail = null;
-                machineStartFailureMessage = null;
-            }
-            return materials;
-        } finally {
-            if (!reserved) {
-                ledger.cancelReservationsSince(mark);
-                restoreVirtualSnapshot(virtualSnapshot);
-                if (virtualDebits != null) virtualDebits.subList(debitMark, virtualDebits.size()).clear();
-            }
-        }
-    }
-
-    private List<ItemStack> reserveStepMaterials(List<IngredientSpec> specs, ServerPlayer online,
-                                                @Nullable List<ItemStack> virtualDebits,
-                                                boolean logFailure) {
-        List<ItemStack> materials = new ArrayList<>();
-        for (IngredientSpec spec : specs) {
-            if (spec.isEmpty()) {
-                materials.add(ItemStack.EMPTY);
-                continue;
-            }
-            int needed = spec.count();
-            ItemStack material = ItemStack.EMPTY;
-
-            var iter = virtualInventory.iterator();
-            while (iter.hasNext() && needed > 0) {
-                ItemStack vi = iter.next();
-                if (IngredientMatcher.test(spec.ingredient(), vi)) {
-                    int take = Math.min(needed, vi.getCount());
-                    ItemStack taken = vi.split(take);
-                    if (vi.isEmpty()) iter.remove();
-                    if (virtualDebits != null) virtualDebits.add(taken.copy());
-                    if (material.isEmpty()) {
-                        material = taken;
-                    } else {
-                        material.grow(take);
-                    }
-                    needed -= take;
-                }
-            }
-
-            if (needed > 0) {
-                ItemStack reserved = reserveIngredient(
-                        ledger, spec.ingredient(), needed, online);
-                if (!reserved.isEmpty()) {
-                    if (material.isEmpty()) {
-                        material = reserved;
-                    } else {
-                        material.grow(reserved.getCount());
-                    }
-                    needed -= reserved.getCount();
-                }
-            }
-
-            if (needed > 0) {
-                String ingredient = Arrays.stream(spec.ingredient().getItems())
-                        .filter(stack -> !stack.isEmpty()).limit(8)
-                        .map(stack -> String.valueOf(ForgeRegistries.ITEMS.getKey(stack.getItem())))
-                        .collect(Collectors.joining(","));
-                materialReservationFailureDetail = "Material reservation failed before machine start: recipe="
-                        + steps.get(currentStepIdx).recipeId() + " inputCandidates(first8)=" + ingredient
-                        + " spec=" + (materials.size() + 1) + "/" + specs.size()
-                        + " required=" + spec.count() + " reserved=" + (spec.count() - needed)
-                        + " unreserved=" + needed
-                        + "; source reservations are all-or-nothing, unreserved is not a measured inventory shortage";
-                machineStartFailureMessage = Component.translatable(
-                        "rsi.generic.error.missing_materials",
-                        CraftPacketUtils.describeIngredient(spec.ingredient()));
-                if (logFailure) RSIntegrationMod.LOGGER.warn(ctx.format(materialReservationFailureDetail));
-                return null;
-            }
-            materials.add(material);
-        }
-        return materials;
-    }
-
-    /** Reserve materials deliberately omitted from graph demands. */
-    @Nullable
-    private List<ItemStack> reserveSupplementalMaterials(
-            List<IngredientSpec> specs, ServerPlayer online, ExtractionLedger targetLedger) {
-        int mark = targetLedger.reservationMark();
-        List<ItemStack> materials = new ArrayList<>(specs.size());
-        for (IngredientSpec spec : specs) {
-            if (spec.isEmpty()) {
-                materials.add(ItemStack.EMPTY);
-                continue;
-            }
-            ItemStack reserved = reserveIngredient(
-                    targetLedger, spec.ingredient(), spec.count(), online);
-            if (reserved.isEmpty() || reserved.getCount() != spec.count()) {
-                while (targetLedger.reservationMark() > mark) {
-                    targetLedger.cancelLastReservation();
-                }
-                RSIntegrationMod.LOGGER.warn(ctx.format(
-                                "Supplemental reserve failed: need {} of '{}' for step {}"),
-                        spec.count(), CraftPacketUtils.describeIngredient(spec.ingredient()).getString(),
-                        steps.get(currentStepIdx).recipeId());
-                return null;
-            }
-            materials.add(reserved);
-        }
-        return materials;
     }
 
     //  output capture (magnet protection)
@@ -6012,9 +4713,12 @@ public final class AsyncCraftChain {
 
         // Delegate cleanup - works even when player is offline.
         boolean flatPhysicalCleanupRequired = flatOperationSession != null
-                && flatOperationSession.machineLease() != null;
+                && flatOperationSession.machineLease() != null
+                || currentDelegate instanceof ParallelCraftGroup;
         boolean flatFailureRefundSafe = !flatPhysicalCleanupRequired;
         List<ItemStack> flatFailureRecoveredInputs = null;
+        OperationExecutionKernel.TerminalClass flatTerminalClass = flatOperationSession == null
+                ? null : flatOperationSession.terminalClass();
         if (currentDelegate != null) {
             try {
                 CancelReason cancelReason = cancellationReason(cause);
@@ -6031,10 +4735,13 @@ public final class AsyncCraftChain {
                     flatFailureRefundSafe = group.physicalFailureCleanupCompleted();
                 }
                 if (currentDelegate instanceof ParallelCraftGroup group) {
+                    flatTerminalClass = group.failureTerminalClass();
+                    group.refundQueuedBulkMaterials(online);
                     for (ItemStack result : group.drainSettledResults()) addToVirtualInventory(result);
                     for (ItemStack material : group.drainQueuedMaterialsForRecovery()) {
                         addToVirtualInventory(material);
                     }
+                    for (ItemStack material : group.drainRecoveredVirtualInputs()) addToVirtualInventory(material);
                     snapshotCommittedVirtual();
                 }
             } catch (Exception e) {
@@ -6043,8 +4750,6 @@ public final class AsyncCraftChain {
             currentDelegate = null;
         }
 
-        OperationExecutionKernel.TerminalClass flatTerminalClass = flatOperationSession == null
-                ? null : flatOperationSession.terminalClass();
         if (flatTerminalClass == OperationExecutionKernel.TerminalClass.IN_FLIGHT
                 && flatFailureRecoveredInputs != null && ledger.isCommitted()) {
             ledger.retainCommittedRefunds(flatFailureRecoveredInputs);
@@ -6142,9 +4847,10 @@ public final class AsyncCraftChain {
             try {
                 ExtractionLedger nodeLedger = runtime.nodeLedger();
                 if (nodeLedger != null && nodeLedger.isCommitted()) {
+                    runtime.refundQueuedBulkMaterials(player);
                     for (ExtractionLedger.ReservationToken token : runtime.queuedReservationTokens()) {
                         try {
-                            refundCommitted(nodeLedger, player);
+                            nodeLedger.refundCommittedToEndpoint(token, storageEndpoint, player);
                         } catch (Exception e) {
                             RSIntegrationMod.LOGGER.error(ctx.format(
                                     "Error refunding queued reservation for graph node {}"), runtime.describe(), e);
@@ -6187,7 +4893,9 @@ public final class AsyncCraftChain {
                 // the node ledger and graph broker still treated it as consumed.
                 if (CraftNodeRuntime.shouldRefundInFlightMaterials(
                         runtime.operationTerminalClass(),
-                        runtime.physicalFailureCleanupCompleted())) {
+                        runtime.physicalFailureCleanupCompleted())
+                        || runtime.operationTerminalClass() == OperationExecutionKernel.TerminalClass.IN_FLIGHT
+                        && runtime.failureRecoveredInputs() != null) {
                     try {
                         ExtractionLedger cleanupLedger = runtime.nodeLedger();
                         if (cleanupLedger != null && cleanupLedger.isCommitted()) {
@@ -6204,9 +4912,9 @@ public final class AsyncCraftChain {
                     }
                     try {
                         if (graphAdmissions != null && runtime.admission() != null) {
-                            if (runtime.failureRecoveredInputs() != null) {
+                            if (runtime.failureRecoveredProducerInputs() != null) {
                                 graphAdmissions.refundRecoveredMaterial(runtime.admission(),
-                                        runtime.failureRecoveredInputs());
+                                        runtime.failureRecoveredProducerInputs());
                             } else {
                                 graphAdmissions.refundCommittedMaterial(runtime.admission());
                             }

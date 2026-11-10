@@ -4,8 +4,14 @@ import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
+import com.huanghuang.rsintegration.crafting.batch.CountedOperationMaterials;
+import com.huanghuang.rsintegration.crafting.batch.CountedOperationMaterials.Origin;
+import com.huanghuang.rsintegration.crafting.batch.CountedOperationMaterials.Pool;
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.graph.ConcurrentNodeExecutor;
 import com.huanghuang.rsintegration.crafting.graph.CaptureLeaseRegistry;
 import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
@@ -13,6 +19,8 @@ import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.graph.InputPortId;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
+import com.huanghuang.rsintegration.crafting.graph.MaterialBroker;
+import com.huanghuang.rsintegration.crafting.graph.MaterialSource;
 import com.huanghuang.rsintegration.crafting.graph.NodeOutputAccumulator;
 import com.huanghuang.rsintegration.crafting.graph.OutputDeclaration;
 import com.huanghuang.rsintegration.crafting.graph.OutputKind;
@@ -47,11 +55,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.MockedStatic;
+import org.mockito.ArgumentCaptor;
 
 import java.lang.reflect.Method;
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -64,8 +75,269 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.withSettings;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.eq;
+import static org.mockito.Mockito.isNull;
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.anyInt;
 
 class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
+    @Test
+    void defaultWindowUsesNativeCapacityBeyond256() {
+        assertEquals(0, RSIntegrationConfig.CRAFTING_EXECUTION_WINDOW.get());
+        ModType type = ModType.register("test_native_capacity",
+                new String[0], new String[0], new String[0], () -> new BufferedDelegate() {
+                    @Override public int preferredParallelBatchSize(int operations, int workers) {
+                        return 4096;
+                    }
+                });
+        BoundMachine machine = new BoundMachine(Level.OVERWORLD.location(), BlockPos.ZERO, type, "test");
+        ParallelCraftGroup group = new ParallelCraftGroup(List.of(machine), type,
+                new ResourceLocation("test", "native_capacity"), player, 50_000_000);
+        startBulkGroup(group, mock(ExtractionLedger.class), false);
+        assertEquals(4096, group.getRunningOperations());
+        assertEquals(50_000_000, group.getTotalOperations());
+        group.onBatchFailed(player, "test cancellation");
+    }
+
+    @Test
+    void partialRecoveryProofIsSpentOnceAcrossInitialVirtualAndProducerInputs() {
+        ModType type = ModType.register("test_mixed_recovery",
+                new String[0], new String[0], new String[0], () -> new BufferedDelegate() {
+                    @Override public List<ItemStack> failureRecoveredInputs() {
+                        return List.of(new ItemStack(Items.IRON_INGOT, 35));
+                    }
+                });
+        BoundMachine machine = new BoundMachine(Level.OVERWORLD.location(), BlockPos.ZERO, type, "test");
+        ParallelCraftGroup group = new ParallelCraftGroup(List.of(machine), type,
+                new ResourceLocation("test", "mixed_recovery"), player, 128);
+        Pool source = new Pool().add(Origin.INITIAL, new ItemStack(Items.IRON_INGOT), 10)
+                .add(Origin.VIRTUAL, new ItemStack(Items.IRON_INGOT), 20)
+                .add(Origin.PRODUCER, new ItemStack(Items.IRON_INGOT), 98);
+        group.setCountedOperationMaterials(new CountedOperationMaterials.Builder(128, 1)
+                .add(group.getFlatOperationMaterials().get(0), source).build());
+        assertTrue(group.startOperation(OperationStartContext.chainReserved(player,
+                mock(ExtractionLedger.class), MaterialPlan.none(), List.of(), InputBufferPlan.none())));
+        assertEquals(64, group.getRunningOperations());
+        group.onBatchFailed(player, "partial recovery");
+        assertEquals(10, group.failureRecoveredInputs().stream().mapToInt(ItemStack::getCount).sum());
+        assertEquals(20, group.drainRecoveredVirtualInputs().stream().mapToInt(ItemStack::getCount).sum());
+        assertEquals(5, group.failureRecoveredProducerInputs().stream().mapToInt(ItemStack::getCount).sum());
+        assertEquals(64, group.drainQueuedProducerMaterialsForRecovery().stream().mapToInt(ItemStack::getCount).sum());
+        group.onBatchFailed(player, "repeated cancellation");
+        assertTrue(group.drainRecoveredVirtualInputs().isEmpty());
+        assertTrue(group.drainQueuedProducerMaterialsForRecovery().isEmpty());
+    }
+
+    @Test
+    void missingRecoveryAccountingDoesNotEraseAnotherWorkersProofOrRefundUnknownInputs() {
+        AtomicInteger created = new AtomicInteger();
+        ModType type = ModType.register("test_incomplete_recovery",
+                new String[0], new String[0], new String[0], () -> {
+                    boolean audited = created.getAndIncrement() == 0;
+                    return new BufferedDelegate() {
+                        @Override public List<ItemStack> failureRecoveredInputs() {
+                            return audited ? List.of(new ItemStack(Items.IRON_INGOT, 7)) : null;
+                        }
+                    };
+                });
+        List<BoundMachine> machines = List.of(
+                new BoundMachine(Level.OVERWORLD.location(), BlockPos.ZERO, type, "test"),
+                new BoundMachine(Level.OVERWORLD.location(), BlockPos.ZERO.east(), type, "test"));
+        ParallelCraftGroup group = new ParallelCraftGroup(machines, type,
+                new ResourceLocation("test", "incomplete_recovery"), player, 128);
+        startBulkGroup(group, mock(ExtractionLedger.class), false);
+        assertEquals(128, group.getRunningOperations());
+        group.onBatchFailed(player, "partially audited cleanup");
+        assertEquals(7, group.failureRecoveredInputs().stream().mapToInt(ItemStack::getCount).sum());
+        assertTrue(group.failureRecoveredProducerInputs().isEmpty());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void flatReservationUsesTheSameCountedEntryForVirtualAndStoredVariants() throws Exception {
+        ParallelCraftGroup group = createGroup(50_000_000);
+        AsyncCraftChain chain = new AsyncCraftChain(UUID.randomUUID(), player.getServer(), null, List.of());
+        Field inventoryField = AsyncCraftChain.class.getDeclaredField("virtualInventory");
+        inventoryField.setAccessible(true);
+        List<ItemStack> virtual = (List<ItemStack>) inventoryField.get(chain);
+        ItemStack intermediate = new ItemStack(Items.IRON_INGOT, 7_000_000);
+        intermediate.getOrCreateTag().putString("source", "intermediate");
+        virtual.add(intermediate);
+        ExtractionLedger ledger = mock(ExtractionLedger.class);
+        when(ledger.reserveExactAcrossNetworkAndInventory(any(ItemStack.class), anyInt(), isNull(), eq(player)))
+                .thenAnswer(call -> ((ItemStack) call.getArgument(0)).copyWithCount(call.getArgument(1)));
+        Method reserve = AsyncCraftChain.class.getDeclaredMethod("reserveCountedOperationMaterials",
+                ParallelCraftGroup.class, ServerPlayer.class,
+                ExtractionLedger.class, MaterialBroker.ReservationToken.class);
+        reserve.setAccessible(true);
+        try (MockedStatic<MaterialSources> sources = mockStatic(MaterialSources.class)) {
+            sources.when(() -> MaterialSources.listAllAvailable(player, null))
+                    .thenReturn(Map.of(new StackKey(Items.IRON_INGOT, null), 43_000_000L));
+            assertNotNull(reserve.invoke(chain, group, player, ledger, null));
+        }
+        assertTrue(group.usesCountedOperationMaterials());
+        assertTrue(virtual.stream().allMatch(ItemStack::isEmpty));
+        verify(ledger).reserveExactAcrossNetworkAndInventory(any(ItemStack.class), eq(43_000_000), isNull(), eq(player));
+        assertTrue(group.startOperation(OperationStartContext.chainReserved(
+                player, ledger, MaterialPlan.none(), List.of(), InputBufferPlan.none())));
+        group.stopDispatch();
+        List<ItemStack> refunded = group.drainQueuedMaterialsForRecovery();
+        assertEquals(7_000_000 - 64, refunded.stream().mapToInt(ItemStack::getCount).sum());
+        assertEquals("intermediate", refunded.get(0).getTag().getString("source"));
+        group.onBatchFailed(player, "flat cancellation");
+    }
+
+    @Test
+    void optionalWindowRestrictsOnlyTheNativeBatchAndKeepsTheOrderQuantity() {
+        RSIntegrationConfig.CRAFTING_EXECUTION_WINDOW.set(8);
+        ParallelCraftGroup group = createGroup(50_000_000);
+        startBulkGroup(group, mock(ExtractionLedger.class), false);
+        assertEquals(8, group.getRunningOperations());
+        assertEquals(50_000_000, group.getTotalOperations());
+        group.onBatchFailed(player, "test cancellation");
+    }
+
+    @Test
+    void cancellingLargeOrdersClassifiesQuantitiesWithoutExpandingEachOperation() {
+        ParallelCraftGroup group = createGroup(50_000_000);
+        startBulkGroup(group, mock(ExtractionLedger.class), false);
+        TerminationCoordinator coordinator = new TerminationCoordinator(UUID.randomUUID(),
+                TerminationCoordinator.Cause.CANCELLED, "quantity audit");
+        runtime(group).classifyTermination(coordinator);
+        coordinator.classify(TerminationCoordinator.OperationState.SETTLED, 3_000_000_000L);
+        assertEquals(64, coordinator.report().inFlightOperations());
+        assertEquals(49_999_936, coordinator.report().preStartOperations());
+        assertEquals(3_000_000_000L, coordinator.report().settledOperations());
+        group.onBatchFailed(player, "test cancellation");
+    }
+    @Test
+    void graphReservationEntryUsesOnePhysicalReservationForFiftyMillionOperations() throws Exception {
+        int operations = 50_000_000;
+        ParallelCraftGroup group = createGroup(operations);
+        MaterialBroker broker = new MaterialBroker();
+        MaterialKey iron = MaterialKey.of(new ItemStack(Items.IRON_INGOT));
+        var source = new MaterialSource.InitialPool(iron);
+        broker.publish(source, iron, operations);
+        var token = broker.reserve(new NodeId(0), List.of(new MaterialBroker.Request(source, iron, operations)));
+        AsyncCraftChain chain = new AsyncCraftChain(UUID.randomUUID(), player.getServer(), null, List.of());
+        Field materials = AsyncCraftChain.class.getDeclaredField("graphMaterials");
+        materials.setAccessible(true);
+        materials.set(chain, broker);
+        ExtractionLedger ledger = mock(ExtractionLedger.class);
+        AtomicInteger reservationCalls = new AtomicInteger();
+        when(ledger.reserveExactAcrossNetworkAndInventory(any(ItemStack.class), anyInt(), isNull(), eq(player)))
+                .thenAnswer(call -> {
+                    assertEquals(1, reservationCalls.incrementAndGet(), "同质批量不能逐次预留");
+                    return ((ItemStack) call.getArgument(0)).copyWithCount(call.getArgument(1));
+                });
+        Method reserve = AsyncCraftChain.class.getDeclaredMethod("reserveCountedOperationMaterials",
+                ParallelCraftGroup.class, ServerPlayer.class,
+                ExtractionLedger.class, MaterialBroker.ReservationToken.class);
+        reserve.setAccessible(true);
+        assertNotNull(reserve.invoke(chain, group, player, ledger, token));
+        assertTrue(group.usesCountedOperationMaterials());
+        verify(ledger).reserveExactAcrossNetworkAndInventory(any(ItemStack.class), eq(operations), isNull(), eq(player));
+        assertEquals(operations, broker.heldBy(new NodeId(0)));
+        group.releasePreparationResources();
+    }
+
+    @Test
+    void compactPlanExecutesSeveralWorkerBatchesAndSettlesOnlyTheirQuantities() {
+        int operations = 129;
+        ParallelCraftGroup group = createGroup(operations);
+        ExtractionLedger ledger = mock(ExtractionLedger.class);
+        startBulkGroup(group, ledger, false);
+        CraftNodeRuntime runtime = runtime(group);
+        for (int i = 0; i < operations; i++) {
+            produceOutput();
+            tick.incrementAndGet();
+            assertEquals(i + 1 == operations ? ConcurrentNodeExecutor.Observation.SUCCEEDED
+                    : ConcurrentNodeExecutor.Observation.WORKING, runtime.observe());
+        }
+        ArgumentCaptor<List<ItemStack>> settled = stackLists();
+        verify(ledger, times(3)).releaseCommittedEntries(settled.capture());
+        assertEquals(List.of(64, 64, 1), settled.getAllValues().stream()
+                .map(stacks -> stacks.stream().mapToInt(ItemStack::getCount).sum()).toList());
+        assertEquals(operations, group.getCompletedOperations());
+    }
+
+    @Test
+    void fiftyMillionCompactOperationsStartWithoutExpandingAndRefundOnlyQueuedInputs() {
+        int operations = 50_000_000;
+        ParallelCraftGroup group = createGroup(operations);
+        ExtractionLedger ledger = mock(ExtractionLedger.class);
+        startBulkGroup(group, ledger, false);
+        assertEquals(64, group.getRunningOperations());
+        group.stopDispatch();
+        group.refundQueuedBulkMaterials(player);
+        group.refundQueuedBulkMaterials(player);
+        ArgumentCaptor<List<ItemStack>> refunded = stackLists();
+        verify(ledger).refundCommittedMaterials(refunded.capture(), isNull(), eq(player));
+        assertEquals(operations - 64, refunded.getValue().stream().mapToInt(ItemStack::getCount).sum());
+        group.onBatchFailed(player, "test cancellation");
+    }
+
+    @Test
+    void compactProducerRecoveryExcludesRunningBatchAndCannotRepeat() {
+        ParallelCraftGroup group = createGroup(129);
+        startBulkGroup(group, mock(ExtractionLedger.class), true);
+        produceOutput();
+        produceOutput();
+        group.stopDispatch();
+        var queued = group.drainQueuedProducerMaterialsForRecovery();
+        assertEquals(65, queued.stream().mapToInt(ItemStack::getCount).sum());
+        assertTrue(group.drainQueuedProducerMaterialsForRecovery().isEmpty());
+        group.onBatchFailed(player, "test cancellation");
+        assertEquals(16, group.drainSettledResults().stream().mapToInt(ItemStack::getCount).sum());
+    }
+
+    @Test
+    void rejectedCompactBatchRecoversOnlyUncompletedInputs() {
+        ModType type = ModType.register("test_rejected_compact",
+                new String[0], new String[0], new String[0], () -> new BufferedDelegate() {
+                    @Override public boolean startOperation(OperationStartContext context) {
+                        produceOutput();
+                        return false;
+                    }
+                });
+        BoundMachine machine = new BoundMachine(Level.OVERWORLD.location(), BlockPos.ZERO, type, "test");
+        ParallelCraftGroup group = new ParallelCraftGroup(List.of(machine), type,
+                new ResourceLocation("test", "rejected_compact"), player, 129);
+        ExtractionLedger ledger = mock(ExtractionLedger.class);
+        startBulkGroup(group, ledger, false);
+        assertTrue(group.isDraining());
+        group.refundQueuedBulkMaterials(player);
+        ArgumentCaptor<List<ItemStack>> refunded = stackLists();
+        verify(ledger).refundCommittedMaterials(refunded.capture(), isNull(), eq(player));
+        assertEquals(65, refunded.getValue().stream().mapToInt(ItemStack::getCount).sum(),
+                "接口调用后未确认恢复的 63 份投入不能直接退款");
+        ArgumentCaptor<List<ItemStack>> settled = stackLists();
+        verify(ledger).releaseCommittedEntries(settled.capture());
+        assertEquals(1, settled.getValue().get(0).getCount());
+        assertEquals(8, group.drainSettledResults().stream().mapToInt(ItemStack::getCount).sum());
+        group.onBatchFailed(player, "test rejection");
+        assertEquals(OperationExecutionKernel.TerminalClass.IN_FLIGHT, group.failureTerminalClass());
+        group.onBatchFailed(player, "repeated rejection");
+        assertEquals(OperationExecutionKernel.TerminalClass.IN_FLIGHT, group.failureTerminalClass());
+    }
+
+    private void startBulkGroup(ParallelCraftGroup group, ExtractionLedger ledger, boolean producer) {
+        List<ItemStack> pool = List.of(new ItemStack(Items.IRON_INGOT, group.getTotalOperations()));
+        Pool source = new Pool().add(producer ? Origin.PRODUCER : Origin.INITIAL, pool);
+        var builder = new CountedOperationMaterials.Builder(group.getTotalOperations(), group.getChildCount());
+        for (IngredientSpec spec : group.getFlatOperationMaterials()) builder.add(spec, source);
+        group.setCountedOperationMaterials(builder.build());
+        assertTrue(group.startOperation(OperationStartContext.chainReserved(
+                player, ledger, MaterialPlan.none(), List.of(), InputBufferPlan.none())));
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static ArgumentCaptor<List<ItemStack>> stackLists() {
+        return ArgumentCaptor.forClass((Class) List.class);
+    }
+
     private final AtomicLong tick = new AtomicLong();
     private ServerLevel level;
     private ServerPlayer player;
@@ -321,6 +593,80 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
         assertEquals("only-real-catalyst", returned.get(0).getTag().getString("owner"));
         assertEquals(1, returned.get(0).getCount());
         assertEquals(0, group.getRunningOperations());
+    }
+
+    @Test
+    void machineWorkWithoutOutputsKeepsNodeAndChainAliveThenStallsNormally() {
+        AtomicLong work = new AtomicLong();
+        IBatchDelegate delegate = new BufferedDelegate() {
+            @Override
+            public CraftObservation observeCraft(ServerLevel current) {
+                return new CraftObservation(CraftPhase.WORKING).withCompletedWork(work.get());
+            }
+        };
+        CraftNodeRuntime runtime = new CraftNodeRuntime(new NodeId(0), "test:long_work", delegate, null, null);
+        runtime.setChainContext(new ArrayList<>(), player);
+        ProgressWatchdog chainWatchdog = new ProgressWatchdog(timeoutTicks());
+        for (int elapsed = 0; elapsed < timeoutTicks() * 3; elapsed++) {
+            work.incrementAndGet();
+            assertEquals(ConcurrentNodeExecutor.Observation.WORKING, runtime.observe());
+            assertTrue(runtime.consumeProgressSignal());
+            chainWatchdog.markProgress();
+            assertFalse(chainWatchdog.tick());
+        }
+        long maximum = work.get();
+        // 进度倒退再回到旧值不属于新进度，不能靠反复重启同一工序永远续命。
+        for (int idle = 0; idle < timeoutTicks(); idle++) {
+            work.set(idle % 2 == 0 ? 0L : maximum);
+            assertEquals(ConcurrentNodeExecutor.Observation.WORKING, runtime.observe());
+            assertFalse(runtime.consumeProgressSignal());
+        }
+        assertEquals(ConcurrentNodeExecutor.Observation.FAILED, runtime.observe());
+        assertEquals(CraftFailureCode.TIMEOUT, runtime.failureCode());
+    }
+
+    @Test
+    void parallelWorkerWorkIsForwardedBeforeAnyOutputAndResetForTheNextOperation() {
+        AtomicLong work = new AtomicLong();
+        ModType type = ModType.register("test_machine_work_progress",
+                new String[0], new String[0], new String[0], () -> new BufferedDelegate() {
+                    @Override
+                    public int preferredParallelBatchSize(int operations, int workers) { return 1; }
+
+                    @Override
+                    public CraftObservation observeCraft(ServerLevel current) {
+                        return new CraftObservation(CraftPhase.WORKING).withCompletedWork(work.get());
+                    }
+                });
+        BoundMachine machine = new BoundMachine(Level.OVERWORLD.location(), BlockPos.ZERO, type, "test");
+        ParallelCraftGroup group = new ParallelCraftGroup(List.of(machine), type,
+                new ResourceLocation("test", "long_work"), player, 2);
+        startGroup(group);
+        CraftNodeRuntime runtime = runtime(group);
+        for (int elapsed = 0; elapsed < timeoutTicks() * 3; elapsed++) {
+            work.incrementAndGet();
+            tick.incrementAndGet();
+            assertEquals(ConcurrentNodeExecutor.Observation.WORKING, runtime.observe());
+            assertTrue(runtime.consumeProgressSignal());
+            assertEquals(0, group.getCompletedOperations());
+        }
+        produceOutput();
+        tick.incrementAndGet();
+        assertEquals(ConcurrentNodeExecutor.Observation.WORKING, runtime.observe());
+        assertEquals(1, group.getCompletedOperations());
+        assertTrue(runtime.consumeProgressSignal());
+        work.set(1L);
+        tick.incrementAndGet();
+        assertEquals(ConcurrentNodeExecutor.Observation.WORKING, runtime.observe());
+        assertTrue(runtime.consumeProgressSignal());
+        for (int idle = 0; idle < timeoutTicks(); idle++) {
+            tick.incrementAndGet();
+            assertEquals(ConcurrentNodeExecutor.Observation.WORKING, runtime.observe());
+            assertFalse(runtime.consumeProgressSignal());
+        }
+        assertEquals(ConcurrentNodeExecutor.Observation.FAILED, runtime.observe());
+        assertEquals(CraftFailureCode.TIMEOUT, runtime.failureCode());
+        runtime.cleanupFailure();
     }
 
     @Test

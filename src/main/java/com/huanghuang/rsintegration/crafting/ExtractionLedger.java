@@ -1150,6 +1150,36 @@ public final class ExtractionLedger implements AutoCloseable {
         resetSettlementMirror();
     }
 
+    /** 仅返还紧凑批量计划中已确认未派发的数量，保留在途操作的提交记录。 */
+    public void refundCommittedMaterials(List<ItemStack> materials,
+                                        @Nullable CraftStorageEndpoint endpoint,
+                                        @Nullable ServerPlayer player) {
+        requireState(State.COMMITTED);
+        List<ItemStack> committed = entries.stream().flatMap(entry -> entry.extracted.stream()).toList();
+        List<ItemStack> selected = matchRecoveredRefunds(committed, materials);
+        List<Entry> owners = new ArrayList<>(committed.size());
+        List<ItemStack> retained = new ArrayList<>(committed.size());
+        int index = 0;
+        for (Entry entry : entries) {
+            for (ItemStack fragment : entry.extracted) {
+                owners.add(entry);
+                retained.add(fragment.copyWithCount(fragment.getCount() - selected.get(index++).getCount()));
+            }
+        }
+        // 先注销退款数量；外部插入抛异常时沿用原退款路径的审计，不能重放插入。
+        replaceCommittedRefunds(retained);
+        for (int i = 0; i < selected.size(); i++) {
+            ItemStack fragment = selected.get(i);
+            if (fragment.isEmpty()) continue;
+            Entry owner = owners.get(i);
+            try {
+                refundFragment(owner, fragment.copy(), endpoint, player);
+            } catch (RuntimeException failure) {
+                logUncertainRefund(owner.id, fragment, failure.getClass().getSimpleName());
+            }
+        }
+    }
+
     private List<Entry> requireOwnedEntries(ReservationToken token) {
         if (token == null || token.entryIds().isEmpty()) return List.of();
         List<Entry> owned = new ArrayList<>(token.entryIds().size());

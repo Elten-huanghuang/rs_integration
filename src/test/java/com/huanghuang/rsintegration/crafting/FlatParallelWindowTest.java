@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.graph.OperationBudget;
 import com.huanghuang.rsintegration.crafting.graph.OperationId;
 import com.huanghuang.rsintegration.crafting.loadbalancer.OperationQueue;
+import com.huanghuang.rsintegration.crafting.loadbalancer.ParallelCraftGroup;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
@@ -27,12 +28,13 @@ import static org.junit.jupiter.api.Assertions.*;
 class FlatParallelWindowTest extends BootstrapTest {
     @Test
     void bothGraphAndFlatGroupsReceiveSelectedStorageBeforeChildPreparation() throws IOException {
-        List<String> flat = calls(AsyncCraftChain.class, "tryStartParallelWindow");
+        List<String> flat = calls(AsyncCraftChain.class, "startModStep");
         List<String> graph = calls(AsyncCraftChain.class, "dispatchPreparedGraphNode");
         for (List<String> methodCalls : List.of(flat, graph)) {
-            assertTrue(methodCalls.stream().anyMatch(call -> call.contains("ParallelCraftGroup#<init>")
-                    && call.contains("CraftStorageEndpoint;")));
+            assertTrue(methodCalls.stream().anyMatch(call -> call.contains("#createExecutionGroup")));
         }
+        assertTrue(calls(AsyncCraftChain.class, "createExecutionGroup").stream()
+                .anyMatch(call -> call.contains("ParallelCraftGroup#<init>") && call.contains("CraftStorageEndpoint;")));
         Class<?> group = com.huanghuang.rsintegration.crafting.loadbalancer.ParallelCraftGroup.class;
         List<String> preparation = calls(group, "prepareChildDelegate");
         int configure = indexOfCall(preparation, "#configureDelegate");
@@ -43,11 +45,11 @@ class FlatParallelWindowTest extends BootstrapTest {
     }
 
     @Test
-    void flatDispatchConsultsPreparedMachineBatchCapacity() throws IOException {
+    void flatAndGraphUseTheSamePreparedMachineCapacity() throws IOException {
         assertTrue(calls(AsyncCraftChain.class, "startModStep").stream()
-                .anyMatch(call -> call.contains("IBatchDelegate#flatBatchOperationLimit")));
-        assertTrue(calls(AsyncCraftChain.class, "flatDispatchOperationLimit").stream()
-                .anyMatch(call -> call.contains("IBatchDelegate#flatBatchOperationLimit")));
+                .anyMatch(call -> call.contains("#prepareGraphNode")));
+        assertTrue(calls(ParallelCraftGroup.class, "startNext").stream()
+                .anyMatch(call -> call.contains("IBatchDelegate#preferredParallelBatchSize")));
     }
 
     @Test
@@ -221,7 +223,7 @@ class FlatParallelWindowTest extends BootstrapTest {
                 @Override
                 public MethodVisitor visitMethod(int access, String name, String descriptor,
                                                  String signature, String[] exceptions) {
-                    if (!name.equals("tryStartParallelWindow")) return null;
+                    if (!name.equals("prepareGraphNode")) return null;
                     return new MethodVisitor(Opcodes.ASM9) {
                         @Override
                         public void visitMethodInsn(int opcode, String owner, String name,

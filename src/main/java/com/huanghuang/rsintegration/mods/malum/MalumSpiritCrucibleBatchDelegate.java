@@ -94,6 +94,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     private boolean craftWasSeenActive;
     private int bufferedOperations = 1;
     private ItemStack catalystStock = ItemStack.EMPTY;
+    private final List<ItemStack> additionalCatalystStock = new ArrayList<>();
     private boolean catalystStockInitialized;
     @Nullable
     private CraftStorageEndpoint catalystReturnEndpoint;
@@ -1079,6 +1080,8 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             recovered.add(catalystStock.copy());
             catalystStock = ItemStack.EMPTY;
         }
+        for (ItemStack extra : additionalCatalystStock) recovered.add(extra.copy());
+        additionalCatalystStock.clear();
         if (crucibleBE instanceof BlockEntity be) be.setChanged();
         return List.copyOf(recovered);
     }
@@ -1092,15 +1095,31 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     public boolean transferReusableMaterialsTo(@NotNull IBatchDelegate successor) {
         if (!(successor instanceof MalumSpiritCrucibleBatchDelegate next)
                 || crucibleBE != next.crucibleBE || invCatalyst != next.invCatalyst
-                || next.catalystStockInitialized || !next.catalystStock.isEmpty()) return false;
+                || next.catalystStockInitialized || !next.catalystStock.isEmpty()
+                || !next.additionalCatalystStock.isEmpty()) return false;
         next.catalystStock = catalystStock;
         next.catalystStockInitialized = catalystStockInitialized;
         next.catalystReturnEndpoint = catalystReturnEndpoint;
+        next.additionalCatalystStock.addAll(additionalCatalystStock);
+        additionalCatalystStock.clear();
         catalystStock = ItemStack.EMPTY;
         catalystStockInitialized = false;
         catalystReturnEndpoint = null;
         // 槽位的材料所有权也已移交，前驱不能再次收取同一枚催化剂。
         invCatalyst = null;
+        return true;
+    }
+
+    @Override
+    public boolean supportsMixedReusableStock(int inputSlot) { return inputSlot == 0 && hasReusableCatalystInput(); }
+
+    @Override
+    public boolean acceptReusableStock(int inputSlot, List<ItemStack> stock, ExtractionLedger ledger) {
+        if (!supportsMixedReusableStock(inputSlot) || catalystStockInitialized || stock.isEmpty()) return false;
+        catalystStock = stock.get(0).copy();
+        for (int index = 1; index < stock.size(); index++) additionalCatalystStock.add(stock.get(index).copy());
+        catalystStockInitialized = true;
+        catalystReturnEndpoint = ledger.storageEndpoint();
         return true;
     }
 
@@ -1123,6 +1142,11 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
                 allReturned = false;
             }
         }
+        var extraIterator = additionalCatalystStock.iterator();
+        while (extraIterator.hasNext()) {
+            if (tryReturnCrucibleItem(extraIterator.next().copy(), returnPlayer)) extraIterator.remove();
+            else allReturned = false;
+        }
         if (crucibleBE instanceof BlockEntity be) be.setChanged();
         if (allReturned) {
             catalystStockInitialized = false;
@@ -1131,6 +1155,9 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     }
 
     private ItemStack takeCatalystFromStock() {
+        if (catalystStock.isEmpty() && !additionalCatalystStock.isEmpty()) {
+            catalystStock = additionalCatalystStock.remove(0);
+        }
         if (catalystStock.isEmpty()) return ItemStack.EMPTY;
         return catalystStock.split(1);
     }
@@ -1258,6 +1285,8 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             recovered.add(catalystStock.copy());
             catalystStock = ItemStack.EMPTY;
         }
+        for (ItemStack extra : additionalCatalystStock) recovered.add(extra.copy());
+        additionalCatalystStock.clear();
         if (usingSharedLedger) {
             recordFailureRecoveredInputs(recovered);
         } else {
@@ -1285,6 +1314,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             }
         }
         catalystStock = ItemStack.EMPTY;
+        additionalCatalystStock.clear();
         catalystStockInitialized = false;
         if (crucibleBE instanceof BlockEntity be) be.setChanged();
     }

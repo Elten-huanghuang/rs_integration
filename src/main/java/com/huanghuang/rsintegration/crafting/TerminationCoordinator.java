@@ -31,8 +31,8 @@ public final class TerminationCoordinator {
     }
 
     public record Report(UUID craftId, Cause cause, String reason,
-                         int preStartOperations, int inFlightOperations,
-                         int settledOperations, int unknownOperations,
+                         long preStartOperations, long inFlightOperations,
+                         long settledOperations, long unknownOperations,
                          List<StepResult> steps) {
         public Report {
             Objects.requireNonNull(craftId, "craftId");
@@ -54,10 +54,10 @@ public final class TerminationCoordinator {
     private final Cause cause;
     private final String reason;
     private final List<StepResult> steps = new ArrayList<>();
-    private int preStartOperations;
-    private int inFlightOperations;
-    private int settledOperations;
-    private int unknownOperations;
+    private long preStartOperations;
+    private long inFlightOperations;
+    private long settledOperations;
+    private long unknownOperations;
 
     public TerminationCoordinator(UUID craftId, Cause cause, String reason) {
         this.craftId = Objects.requireNonNull(craftId, "craftId");
@@ -66,11 +66,17 @@ public final class TerminationCoordinator {
     }
 
     public void classify(OperationState state) {
+        classify(state, 1L);
+    }
+
+    /** 汇总分类不展开操作编号，取消千万量订单也只增加四个计数。 */
+    public void classify(OperationState state, long count) {
+        if (count < 0L) throw new IllegalArgumentException("negative operation count");
         switch (Objects.requireNonNull(state, "state")) {
-            case PRE_START -> preStartOperations++;
-            case IN_FLIGHT -> inFlightOperations++;
-            case SETTLED -> settledOperations++;
-            case UNKNOWN -> unknownOperations++;
+            case PRE_START -> preStartOperations = Math.addExact(preStartOperations, count);
+            case IN_FLIGHT -> inFlightOperations = Math.addExact(inFlightOperations, count);
+            case SETTLED -> settledOperations = Math.addExact(settledOperations, count);
+            case UNKNOWN -> unknownOperations = Math.addExact(unknownOperations, count);
         }
     }
 

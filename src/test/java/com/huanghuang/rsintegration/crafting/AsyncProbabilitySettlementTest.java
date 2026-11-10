@@ -405,6 +405,8 @@ class AsyncProbabilitySettlementTest extends BootstrapTest {
         when(players.getPlayer(owner)).thenReturn(player);
         when(player.serverLevel()).thenReturn(mock(ServerLevel.class));
         when(player.getServer()).thenReturn(server);
+        // 没有目标产物时，进度显示仍会查询配方；此测试的虚构配方应正常返回空。
+        when(server.getRecipeManager()).thenReturn(mock(RecipeManager.class));
         CraftingResolver.ResolutionStep step = new CraftingResolver.ResolutionStep(
                 new ResourceLocation("test", "random"), ModType.GENERIC,
                 new ResourceLocation("test", "random"), List.of(), List.of(), false,

@@ -59,6 +59,7 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     private int observedCompletedOperations;
     private long observedProductionSequence;
     private long observedCapturedCount;
+    private long observedCompletedWork;
     /** Logical recipe executions owned by this physical delegate start. */
     private int logicalOperations = 1;
     private boolean progressObserved;
@@ -262,6 +263,12 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
         return failureRecoveredInputs;
     }
 
+    @Nullable
+    List<ItemStack> failureRecoveredProducerInputs() {
+        return delegate instanceof ParallelCraftGroup group
+                ? group.failureRecoveredProducerInputs() : failureRecoveredInputs;
+    }
+
     static boolean shouldRefundInFlightMaterials(
             @Nullable OperationExecutionKernel.TerminalClass terminalClass,
             boolean physicalCleanupCompleted) {
@@ -282,15 +289,9 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
             int completed = group.getCompletedOperations();
             int running = group.getRunningOperations();
             int queued = Math.max(0, group.getTotalOperations() - completed - running);
-            for (int i = 0; i < completed; i++) {
-                coordinator.classify(TerminationCoordinator.OperationState.SETTLED);
-            }
-            for (int i = 0; i < running; i++) {
-                coordinator.classify(TerminationCoordinator.OperationState.IN_FLIGHT);
-            }
-            for (int i = 0; i < queued; i++) {
-                coordinator.classify(TerminationCoordinator.OperationState.PRE_START);
-            }
+            coordinator.classify(TerminationCoordinator.OperationState.SETTLED, completed);
+            coordinator.classify(TerminationCoordinator.OperationState.IN_FLIGHT, running);
+            coordinator.classify(TerminationCoordinator.OperationState.PRE_START, queued);
             return;
         }
         OperationExecutionKernel.TerminalClass terminalClass = operationTerminalClass();
@@ -305,9 +306,7 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
             case IN_FLIGHT -> TerminationCoordinator.OperationState.IN_FLIGHT;
             case SETTLED -> TerminationCoordinator.OperationState.SETTLED;
         };
-        for (int operation = 0; operation < logicalOperations; operation++) {
-            coordinator.classify(state);
-        }
+        coordinator.classify(state, logicalOperations);
     }
 
     boolean markResourcesClosed() {
@@ -416,6 +415,13 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
                 failureReason = observation.detail();
                 failureCode = CraftFailureCode.UNKNOWN;
                 return ConcurrentNodeExecutor.Observation.FAILED;
+            }
+            if (observation.phase() == IBatchDelegate.CraftPhase.WORKING
+                    && observation.completedWork() > observedCompletedWork) {
+                observedCompletedWork = observation.completedWork();
+                waitTicks = 0;
+                // 同时通知整条合成链，避免节点正常推进时被全链超时终止。
+                progressObserved = true;
             }
             List<ItemStack> capturedSnapshot = new ArrayList<>();
             if (operationSession != null) capturedSnapshot.addAll(operationSession.capturedSnapshot());
@@ -567,6 +573,10 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
             return group.queuedReservationTokensForRecovery();
         }
         return List.of();
+    }
+
+    void refundQueuedBulkMaterials(@Nullable ServerPlayer online) {
+        if (delegate instanceof ParallelCraftGroup group) group.refundQueuedBulkMaterials(online);
     }
 
     private void doSucceed() {

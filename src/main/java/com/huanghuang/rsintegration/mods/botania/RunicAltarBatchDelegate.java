@@ -188,6 +188,18 @@ public final class RunicAltarBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
+    protected CraftObservation observeMachineCraft(@Nonnull ServerLevel currentLevel,
+                                                    @Nonnull BlockEntity blockEntity) {
+        CraftObservation observation = super.observeMachineCraft(currentLevel, blockEntity);
+        if (started && observation.phase() == CraftPhase.WORKING
+                && blockEntity instanceof RunicAltarBlockEntity altar && altar.manaToGet > 0) {
+            // 充能很慢的祭坛也会持续推进；无魔力输入时数值不变，仍会正常超时。
+            return observation.withCompletedWork(Math.max(0, altar.getCurrentMana()));
+        }
+        return observation;
+    }
+
+    @Override
     protected boolean isMachineCraftFinished(@Nonnull ServerLevel currentLevel,
                                              @Nonnull BlockEntity blockEntity) {
         if (!started) return false;

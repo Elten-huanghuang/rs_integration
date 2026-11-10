@@ -119,8 +119,8 @@ class AsyncCraftChainMachineDedupTest extends BootstrapTest {
     }
 
     @Test
-    void operationGroupRequiresMultipleExecutionsAndAvailableCapacity() {
-        assertFalse(AsyncCraftChain.shouldUseGraphOperationGroup(1, 4));
+    void singleAndRepeatedExecutionsUseTheSameGroupWhenCapacityIsAvailable() {
+        assertTrue(AsyncCraftChain.shouldUseGraphOperationGroup(1, 4));
         assertFalse(AsyncCraftChain.shouldUseGraphOperationGroup(5, 0));
         assertTrue(AsyncCraftChain.shouldUseGraphOperationGroup(7, 4));
     }

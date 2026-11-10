@@ -35,9 +35,26 @@ public interface IBatchDelegate {
         FAILED
     }
 
-    record CraftObservation(CraftPhase phase, String detail) {
+    /**
+     * completedWork 是本次操作已完成的实际工作量，0 表示尚无可确认进度。
+     * 只有超过本次操作的历史最高值才可重置无进展超时；不能填入世界时间、
+     * 轮询次数、状态版本或“仍在工作”标记。内部连续加工多批的适配器应累计工作量。
+     */
+    record CraftObservation(CraftPhase phase, String detail, long completedWork) {
+        public CraftObservation {
+            if (completedWork < 0L) throw new IllegalArgumentException("completedWork must be non-negative");
+        }
+
+        public CraftObservation(CraftPhase phase, String detail) {
+            this(phase, detail, 0L);
+        }
+
         public CraftObservation(CraftPhase phase) {
             this(phase, "");
+        }
+
+        public CraftObservation withCompletedWork(long completedWork) {
+            return new CraftObservation(phase, detail, completedWork);
         }
     }
 
@@ -137,6 +154,9 @@ public interface IBatchDelegate {
     /** Announces the total number of operations in the surrounding graph node. */
     default void prepareOperationCount(int totalOperations) {
     }
+
+    /** 一次原生事务负责整批投料，材料是扣除机器现货后的整批缺口，不能再按次数相乘。 */
+    default boolean usesAtomicMaterialBatch() { return false; }
 
     /**
      * Preferred number of recipe executions assigned to one physical worker start.
@@ -326,6 +346,14 @@ public interface IBatchDelegate {
      */
     default boolean transferReusableMaterialsTo(@Nonnull IBatchDelegate successor) {
         return true;
+    }
+
+    /** 是否能接收同一工具槽位中不同 Damage/NBT 的备用物品。 */
+    default boolean supportsMixedReusableStock(int inputSlot) { return false; }
+
+    /** 在首次启动的归属边界内接收整份工具库存，后续实例沿用 transferReusableMaterialsTo。 */
+    default boolean acceptReusableStock(int inputSlot, List<ItemStack> stock, ExtractionLedger ledger) {
+        return stock.size() <= 1;
     }
 
     /**

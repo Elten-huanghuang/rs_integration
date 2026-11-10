@@ -184,7 +184,7 @@ class SummoningRitualGraphDispatchTest extends BootstrapTest {
         Constructor<?> constructor = preparedType.getDeclaredConstructors()[0];
         constructor.setAccessible(true);
         Object prepared = constructor.newInstance(step, delegate,
-                List.of(new BoundMachine(Level.OVERWORLD.location(), BlockPos.ZERO, type, null)), 1, false);
+                List.of(new BoundMachine(Level.OVERWORLD.location(), BlockPos.ZERO, type, null)), 1, true);
         Method dispatch = AsyncCraftChain.class.getDeclaredMethod("dispatchPreparedGraphNode",
                 NodeId.class, preparedType, ServerPlayer.class, NodeAdmissionCoordinator.Admission.class);
         dispatch.setAccessible(true);

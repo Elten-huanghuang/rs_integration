@@ -467,6 +467,30 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
+    public boolean supportsMixedReusableStock(int inputSlot) { return inputSlot == 1; }
+
+    @Override
+    public boolean acceptReusableStock(int inputSlot, List<ItemStack> stock, ExtractionLedger ledger) {
+        if (inputSlot != 1 || toolStockInitialized || !reusableTools.isEmpty()) return false;
+        for (ItemStack tool : stock) reusableTools.add(tool.copy());
+        toolStockInitialized = true;
+        toolReturnEndpoint = ledger.storageEndpoint();
+        List<IngredientSpec> specs = getRequiredMaterials();
+        if (specs != null && specs.size() > inputSlot) {
+            for (ItemStack tool : stock) {
+                ExtractionLedger.ResonanceReturnTarget target =
+                        ledger.resonanceReturnTarget(tool, specs.get(inputSlot).ingredient());
+                if (target != null) {
+                    resonanceToolView = target.view();
+                    resonanceToolSlot = target.slot();
+                    break;
+                }
+            }
+        }
+        return true;
+    }
+
+    @Override
     public boolean collectsPhysicalSecondaryOutputs() {
         return true;
     }

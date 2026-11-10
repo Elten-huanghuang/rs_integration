@@ -241,6 +241,10 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
         return new CraftObservation(phase);
     }
 
+    protected final CraftObservation workingObservation(long completedWork) {
+        return workingObservation().withCompletedWork(completedWork);
+    }
+
     protected final CraftObservation doneObservation() {
         phase = CraftPhase.DONE;
         return new CraftObservation(phase);

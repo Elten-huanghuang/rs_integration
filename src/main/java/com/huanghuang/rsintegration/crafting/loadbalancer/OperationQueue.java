@@ -1,9 +1,12 @@
 package com.huanghuang.rsintegration.crafting.loadbalancer;
 
 import java.util.HashMap;
+import java.util.AbstractList;
+import java.util.Collections;
+import java.util.Objects;
+import java.util.RandomAccess;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.IntStream;
 
 /** Tracks single-operation leases for a dynamic machine worker pool. */
 public final class OperationQueue {
@@ -37,8 +40,7 @@ public final class OperationQueue {
         if (dispatchStopped || inFlight.containsKey(workerId) || nextOperation >= totalOperations
                 || maxOperations <= 0) return List.of();
         int count = Math.min(maxOperations, totalOperations - nextOperation);
-        List<Integer> claimed = IntStream
-                .range(nextOperation, nextOperation + count).boxed().toList();
+        List<Integer> claimed = Collections.unmodifiableList(new OperationRange(nextOperation, count));
         nextOperation += count;
         inFlight.put(workerId, claimed);
         return claimed;
@@ -107,5 +109,31 @@ public final class OperationQueue {
 
     public boolean isDispatchStopped() {
         return dispatchStopped;
+    }
+
+    /** 连续编号只保存起点和长度，不随批次数分配装箱整数。 */
+    private static final class OperationRange extends AbstractList<Integer> implements RandomAccess {
+        private final int first;
+        private final int count;
+
+        private OperationRange(int first, int count) {
+            this.first = first;
+            this.count = count;
+        }
+
+        @Override public Integer get(int index) {
+            return first + Objects.checkIndex(index, count);
+        }
+
+        @Override public int size() { return count; }
+
+        @Override public List<Integer> subList(int from, int to) {
+            Objects.checkFromToIndex(from, to, count);
+            return Collections.unmodifiableList(new OperationRange(first + from, to - from));
+        }
+
+        @Override public String toString() {
+            return "[" + first + ".." + ((long) first + count) + ")";
+        }
     }
 }

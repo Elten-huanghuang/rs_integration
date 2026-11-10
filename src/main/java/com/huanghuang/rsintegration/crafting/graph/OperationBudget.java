@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.graph;
 
-import java.util.Arrays;
+import java.util.IdentityHashMap;
+import java.util.Map;
 
 /** Server-thread permit account for machine-backed craft operations. */
 public final class OperationBudget {
@@ -27,16 +28,18 @@ public final class OperationBudget {
         if (active > maxActive - cost || starts > maxStarts - cost) return null;
         active += cost;
         starts += cost;
-        OperationBudget[] owners = new OperationBudget[cost];
-        Arrays.fill(owners, this);
+        Map<OperationBudget, Integer> owners = new IdentityHashMap<>();
+        owners.put(this, cost);
         return new Permit(owners);
     }
 
     public static Permit combine(Permit first, Permit second) {
         if (first == null || second == null) throw new NullPointerException("permits");
-        OperationBudget[] owners = new OperationBudget[first.owners.length + second.owners.length];
-        System.arraycopy(first.owners, 0, owners, 0, first.owners.length);
-        System.arraycopy(second.owners, 0, owners, first.owners.length, second.owners.length);
+        if (first == second || first.owners == null || second.owners == null) {
+            throw new IllegalStateException("permit already transferred or released");
+        }
+        Map<OperationBudget, Integer> owners = new IdentityHashMap<>(first.owners);
+        second.owners.forEach((owner, cost) -> owners.merge(owner, cost, Math::addExact));
         first.owners = null;
         second.owners = null;
         return new Permit(owners);
@@ -76,29 +79,29 @@ public final class OperationBudget {
     public int starts() { return starts; }
 
     public static final class Permit implements AutoCloseable {
-        private OperationBudget[] owners;
+        private Map<OperationBudget, Integer> owners;
 
-        private Permit(OperationBudget[] owners) {
+        private Permit(Map<OperationBudget, Integer> owners) {
             this.owners = owners;
         }
 
         /** Roll back a permit when no delegate start was attempted. */
         public void cancelBeforeStart() {
-            OperationBudget[] current = owners;
+            Map<OperationBudget, Integer> current = owners;
             if (current == null) return;
             owners = null;
-            for (OperationBudget owner : current) {
-                owner.active--;
-                owner.starts--;
-            }
+            current.forEach((owner, cost) -> {
+                owner.active -= cost;
+                owner.starts -= cost;
+            });
         }
 
         @Override
         public void close() {
-            OperationBudget[] current = owners;
+            Map<OperationBudget, Integer> current = owners;
             if (current == null) return;
             owners = null;
-            for (OperationBudget owner : current) owner.active--;
+            current.forEach((owner, cost) -> owner.active -= cost);
         }
     }
 }

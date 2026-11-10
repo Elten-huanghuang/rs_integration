@@ -26,7 +26,7 @@ class AsyncCraftChainPreparationTest {
             assertEquals(List.of(0), fixture.probes);
             assertEquals(List.of(fixture.machines.get(0)), component(prepared, "machines"));
             assertEquals(1, component(prepared, "operationCost"));
-            assertFalse((boolean) component(prepared, "parallelGroup"));
+            assertTrue((boolean) component(prepared, "parallelGroup"));
             assertEquals(2, fixture.delegates.size());
             assertEquals(1, fixture.delegates.get(0).releases);
             assertEquals(0, fixture.delegates.get(1).releases);

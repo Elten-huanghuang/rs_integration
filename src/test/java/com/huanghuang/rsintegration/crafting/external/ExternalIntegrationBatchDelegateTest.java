@@ -34,6 +34,7 @@ import com.huanghuang.rsintegration.api.recipe.RecipeIntegration;
 import com.huanghuang.rsintegration.api.recipe.RecipeExecutionKind;
 import com.huanghuang.rsintegration.api.recipe.RecipeView;
 import com.huanghuang.rsintegration.api.execution.ExecutionPlan;
+import com.huanghuang.rsintegration.api.execution.CraftObservation;
 import com.huanghuang.rsintegration.api.execution.ExecutionResult;
 import com.huanghuang.rsintegration.api.execution.FluidRoute;
 import com.huanghuang.rsintegration.api.execution.InputRoute;
@@ -305,7 +306,7 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
     }
 
     @Test
-    void publicItemMachineMovesRepeatedReservedInputsAndCollectsRealOutputs() {
+    void publicItemMachineMovesRepeatedReservedInputsAndCollectsRealOutputs() throws ReflectiveOperationException {
         ResourceLocation recipeId = resource("recipe");
         ResourceLocation processId = resource("process");
         BlockPos position = new BlockPos(4, 64, 8);
@@ -422,6 +423,16 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
         assertEquals(IBatchDelegate.CraftPhase.FAILED, changed.phase());
         assertTrue(changed.detail().contains("MACHINE_DESCRIPTOR_CHANGED"));
         machineIntegration.revision = 1L;
+
+        MachineStateProvider progressing = (context, ignored) -> new MachineState(
+                true, true, true, 7, 10, recipeId, processId, 2L, null);
+        setField(delegate, "stateProvider", progressing);
+        assertEquals(7L, delegate.observeCraft(level).completedWork());
+        MachineStateProvider unchanged = (context, ignored) -> new MachineState(
+                true, true, true, 7, 10, recipeId, processId, 3L, null);
+        setField(delegate, "stateProvider", unchanged);
+        assertEquals(7L, delegate.observeCraft(level).completedWork());
+        setField(delegate, "stateProvider", null);
 
         outputSlot.set(new ItemStack(Items.STICK, 1));
         assertEquals(
@@ -1034,6 +1045,36 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
         assertEquals(1, recovered.size());
         assertEquals(Items.DIAMOND, recovered.get(0).getItem());
         assertEquals(2, recovered.get(0).getCount());
+    }
+
+    @Test
+    void customWorkForwardsActualProgressWithoutUsingPollingRevision() throws ReflectiveOperationException {
+        ServerLevel level = mock(ServerLevel.class);
+        ResourceLocation recipeId = resource("long_work");
+        Recipe<?> recipe = mock(Recipe.class);
+        when(recipe.getId()).thenReturn(recipeId);
+        RunningOperation operation = mock(RunningOperation.class);
+        when(operation.snapshot()).thenReturn(mock(OperationSnapshot.class));
+        ExternalIntegrationBatchDelegate delegate = new ExternalIntegrationBatchDelegate(new DefaultRSIIntegrationApi());
+        setField(delegate, "runningOperation", operation);
+        setField(delegate, "recipe", recipe);
+        Method observe = ExternalIntegrationBatchDelegate.class.getDeclaredMethod("observeCustomOperation", ServerLevel.class);
+        observe.setAccessible(true);
+
+        when(operation.observe(level)).thenReturn(
+                new CraftObservation(LifecyclePhase.WORKING, 7, 100, 1L, recipeId, List.of()),
+                new CraftObservation(LifecyclePhase.WORKING, 7, 100, 2L, recipeId, List.of()),
+                new CraftObservation(LifecyclePhase.WORKING, 8, 100, 3L, recipeId, List.of()),
+                new CraftObservation(LifecyclePhase.WAITING_FOR_MACHINE, 9, 100, 4L, recipeId, List.of()),
+                new CraftObservation(LifecyclePhase.WORKING, 10, 100, 5L, null, List.of()),
+                new CraftObservation(LifecyclePhase.WORKING, 11, 100, 6L, resource("another_recipe"), List.of()));
+        assertEquals(7L, ((IBatchDelegate.CraftObservation) observe.invoke(delegate, level)).completedWork());
+        assertEquals(7L, ((IBatchDelegate.CraftObservation) observe.invoke(delegate, level)).completedWork());
+        assertEquals(8L, ((IBatchDelegate.CraftObservation) observe.invoke(delegate, level)).completedWork());
+        assertEquals(0L, ((IBatchDelegate.CraftObservation) observe.invoke(delegate, level)).completedWork());
+        assertEquals(0L, ((IBatchDelegate.CraftObservation) observe.invoke(delegate, level)).completedWork());
+        assertEquals(IBatchDelegate.CraftPhase.FAILED,
+                ((IBatchDelegate.CraftObservation) observe.invoke(delegate, level)).phase());
     }
 
     @Test

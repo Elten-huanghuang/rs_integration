@@ -110,6 +110,34 @@ class CuttingBoardReusableToolTest extends BootstrapTest {
     }
 
     @Test
+    void mixedDamageToolsContinueAcrossBatchesWithoutRestoringBrokenTools() throws Exception {
+        ItemStack worn = tool(Items.IRON_SWORD.getMaxDamage() - 2, 1);
+        ItemStack spare = tool(Items.IRON_SWORD.getMaxDamage() - 5, 1);
+        spare.getOrCreateTag().putString("owner", "spare-tool");
+        CuttingBoardBatchDelegate first = delegate();
+        assertTrue(first.acceptReusableStock(1, List.of(worn, spare), ledger));
+        assertTrue(start(first, 3, worn));
+        assertEquals(3, outputCount(first));
+        first.onBatchFinished(player);
+
+        CuttingBoardBatchDelegate next = delegate();
+        assertTrue(first.transferReusableMaterialsTo(next));
+        assertTrue(start(next, 2, worn));
+        assertEquals(2, outputCount(next));
+        next.onBatchFinished(player);
+        first.releaseReusableMaterials(player);
+        next.releaseReusableMaterials(player);
+        next.releaseReusableMaterials(player);
+
+        ArgumentCaptor<ItemStack> returned = ArgumentCaptor.forClass(ItemStack.class);
+        verify(resonance).insertView(eq(7), returned.capture(), eq(1), eq(false));
+        assertEquals(Items.IRON_SWORD.getMaxDamage() - 2, returned.getValue().getDamageValue());
+        assertEquals("spare-tool", returned.getValue().getTag().getString("owner"));
+        assertEquals(Items.IRON_SWORD.getMaxDamage() - 2, worn.getDamageValue());
+        assertEquals(Items.IRON_SWORD.getMaxDamage() - 5, spare.getDamageValue());
+    }
+
+    @Test
     void anotherBoardCannotTakeOwnershipOfTheTool() throws Exception {
         CuttingBoardBatchDelegate previous = delegate();
         assertTrue(start(previous, 1, tool(0, 1)));

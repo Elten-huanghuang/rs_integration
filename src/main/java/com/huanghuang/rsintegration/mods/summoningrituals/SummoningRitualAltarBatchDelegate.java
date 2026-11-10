@@ -164,6 +164,9 @@ public final class SummoningRitualAltarBatchDelegate extends AbstractBatchDelega
         return getFlatBatchRequiredMaterials(executions);
     }
 
+    @Override
+    public boolean usesAtomicMaterialBatch() { return true; }
+
     /**
      * 祭坛已经具备全部所需物品时，执行链不会携带材料列表，
      * 而是走共享账本的旧入口。这里仍然走同一套校验和准备逻辑，

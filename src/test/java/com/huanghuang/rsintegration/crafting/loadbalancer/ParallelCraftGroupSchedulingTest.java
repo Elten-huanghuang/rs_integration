@@ -32,6 +32,20 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ParallelCraftGroupSchedulingTest extends BootstrapTest {
+    @Test
+    void compatibilityScanStopsAtNbtBoundaryAndIntegerCapacity() {
+        IngredientSpec iron = new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 1);
+        ItemStack tagged = new ItemStack(Items.IRON_INGOT);
+        tagged.getOrCreateTag().putString("variant", "other");
+        RepeatedOperationPlan repeated = new RepeatedOperationPlan(MaterialPlan.fromLegacy(List.of(iron)),
+                3, 1, List.of(new ItemStack(Items.IRON_INGOT), new ItemStack(Items.IRON_INGOT), tagged));
+        assertEquals(2, ParallelCraftGroup.compatibleBatchSize(repeated, List.of(iron), 0, 3));
+        IngredientSpec huge = new IngredientSpec(iron.ingredient(), Integer.MAX_VALUE);
+        var overflow = new RepeatedOperationPlan(MaterialPlan.fromLegacy(List.of(huge)), 2, 1,
+                List.of(new ItemStack(Items.IRON_INGOT, Integer.MAX_VALUE), new ItemStack(Items.IRON_INGOT, Integer.MAX_VALUE)));
+        assertEquals(1, ParallelCraftGroup.compatibleBatchSize(overflow, List.of(huge), 0, 2));
+    }
+
 
     @Test
     void balancedSharesPreferCeilForEarlierWorkers() {

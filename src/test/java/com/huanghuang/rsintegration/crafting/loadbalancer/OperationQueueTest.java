@@ -10,6 +10,19 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class OperationQueueTest {
+    @Test
+    void maximumSizedClaimAndSliceDoNotMaterializeOperationIds() {
+        OperationQueue queue = new OperationQueue(Integer.MAX_VALUE);
+        List<Integer> ids = queue.claimBatch(1, Integer.MAX_VALUE);
+        assertEquals(Integer.MAX_VALUE, ids.size());
+        assertEquals(0, ids.get(0));
+        assertEquals(Integer.MAX_VALUE - 1, ids.get(ids.size() - 1));
+        assertEquals(List.of(Integer.MAX_VALUE - 2, Integer.MAX_VALUE - 1),
+                ids.subList(Integer.MAX_VALUE - 2, Integer.MAX_VALUE));
+        assertThrows(UnsupportedOperationException.class, () -> ids.set(0, 1));
+        queue.completeBatch(1);
+        assertTrue(queue.isComplete());
+    }
 
     @Test
     void completedWorkerClaimsAgainWithoutWaitingForSibling() {

@@ -29,6 +29,30 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class ExtractionLedgerEndpointTest extends BootstrapTest {
+    @Test
+    void bulkPartialSettlementAndQueuedRefundKeepInFlightMaterialOwned() {
+        int requested = 50_000_000;
+        when(player.getInventory()).thenReturn(new Inventory(player));
+        when(session.snapshotItems(player)).thenReturn(StorageSnapshotResult.success(
+                new StorageSnapshot(backend, List.of(stored(new ItemStack(Items.STONE, requested))))));
+        when(session.extractExact(eq(player), any(StorageItemKey.class), eq((long) requested), eq(false)))
+                .thenReturn(StorageOperationResult.extracted(StorageOperationMode.PERFORM, requested,
+                        List.of(new ItemStack(Items.STONE, requested))));
+        assertEquals(requested, ledger.reserveExactAcrossNetworkAndInventory(
+                new ItemStack(Items.STONE), requested, endpoint, player).getCount());
+        assertTrue(ledger.commitToEndpoint(endpoint, player));
+        // 20M 已完成，10M 在途，20M 从未派发。
+        ledger.releaseCommittedEntries(List.of(new ItemStack(Items.STONE, 20_000_000)));
+        ledger.refundCommittedMaterials(List.of(new ItemStack(Items.STONE, 20_000_000)), endpoint, player);
+        assertTrue(ledger.isCommitted());
+        assertEquals(20_000_000, refunds.stream().mapToLong(ItemStack::getCount).sum());
+        // 在途实物清理只找回 3M，其余已经消耗，不能按预留数退款。
+        ledger.retainCommittedRefunds(List.of(new ItemStack(Items.STONE, 3_000_000)));
+        ledger.refundCommittedToEndpoint(endpoint, player);
+        ledger.refundCommittedToEndpoint(endpoint, player);
+        assertEquals(23_000_000, refunds.stream().mapToLong(ItemStack::getCount).sum());
+    }
+
     private final StorageBackendId backend = new StorageBackendId("test");
     private final List<ItemStack> refunds = new ArrayList<>();
     private StorageSession session;

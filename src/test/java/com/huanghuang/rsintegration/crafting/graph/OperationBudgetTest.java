@@ -7,8 +7,28 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class OperationBudgetTest {
+    @Test
+    void maximumCostAndCombinedSameOwnerRemainConstantSized() {
+        OperationBudget budget = new OperationBudget(Integer.MAX_VALUE, Integer.MAX_VALUE);
+        var first = budget.tryAcquire(Integer.MAX_VALUE - 1);
+        var last = budget.tryAcquire(1);
+        var combined = OperationBudget.combine(first, last);
+        first.close();
+        last.cancelBeforeStart();
+        assertEquals(Integer.MAX_VALUE, budget.active());
+        combined.cancelBeforeStart();
+        combined.close();
+        assertEquals(0, budget.active());
+        assertEquals(0, budget.starts());
+        assertThrows(IllegalStateException.class, () -> OperationBudget.combine(first, last));
+        var sole = budget.tryAcquire();
+        assertThrows(IllegalStateException.class, () -> OperationBudget.combine(sole, sole));
+        sole.close();
+        assertEquals(0, budget.active());
+    }
 
     @Test
     void activePermitLimitAndLifetimeStartLimitAreIndependent() {

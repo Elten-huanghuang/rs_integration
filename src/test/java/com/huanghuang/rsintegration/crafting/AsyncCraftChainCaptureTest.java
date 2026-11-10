@@ -10,6 +10,7 @@ import com.huanghuang.rsintegration.storage.StorageOperationMode;
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -34,6 +35,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -56,6 +58,31 @@ class AsyncCraftChainCaptureTest extends BootstrapTest {
             loading.when(FMLJavaModLoadingContext::get).thenReturn(context);
             Class.forName("com.huanghuang.rsintegration.RSIntegrationMod");
         }
+    }
+
+    @Test
+    void flatMachineWorkRenewsTimeoutButRepeatedOrRegressedProgressDoesNot() throws Exception {
+        Fixture fixture = fixture();
+        AtomicLong work = new AtomicLong();
+        when(fixture.delegate.observeCraft(fixture.player.serverLevel())).thenAnswer(call ->
+                new IBatchDelegate.CraftObservation(IBatchDelegate.CraftPhase.WORKING)
+                        .withCompletedWork(work.get()));
+        int timeoutTicks = RSIntegrationConfig.MULTIBLOCK_CRAFT_TIMEOUT_SECONDS.get() * 20;
+        for (int progress = 1; progress <= 3; progress++) {
+            set(fixture.chain, "waitTicks", timeoutTicks);
+            work.set(progress);
+            assertFalse(fixture.chain.tick());
+            assertEquals(0, field(fixture.chain, "waitTicks"));
+            verify(fixture.delegate, never()).onBatchFinished(any());
+        }
+        work.set(1L);
+        assertFalse(fixture.chain.tick());
+        assertEquals(1, field(fixture.chain, "waitTicks"));
+        work.set(3L);
+        set(fixture.chain, "waitTicks", timeoutTicks);
+        assertTrue(fixture.chain.tick());
+        assertEquals(AsyncCraftChain.State.ABORTED, fixture.chain.state());
+        verify(fixture.delegate, never()).onBatchFinished(any());
     }
 
     @Test
@@ -143,6 +170,7 @@ class AsyncCraftChainCaptureTest extends BootstrapTest {
         when(players.getPlayer(owner)).thenReturn(player);
         when(player.serverLevel()).thenReturn(level);
         when(player.getServer()).thenReturn(server);
+        when(player.getName()).thenReturn(Component.literal("test-player"));
 
         List<ItemStack> returned = new ArrayList<>();
         CraftStorageEndpoint endpoint = mock(CraftStorageEndpoint.class);

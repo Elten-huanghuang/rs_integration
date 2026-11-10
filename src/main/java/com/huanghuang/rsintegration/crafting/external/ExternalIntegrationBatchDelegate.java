@@ -735,7 +735,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                     return failObservation(
                             "machine active process mismatch");
                 }
-                return workingObservation();
+                return workingObservation(state.progress());
             }
             if (observedMachineBusy || state.totalProgress() > 0
                     && state.progress() >= state.totalProgress()) {
@@ -1409,8 +1409,17 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         }
         lastCustomStateRevision = observation.stateRevision();
         return switch (observation.phase()) {
-            case QUEUED, PREPARING, WAITING_FOR_MACHINE, WORKING ->
+            case QUEUED, PREPARING, WAITING_FOR_MACHINE ->
                     workingObservation();
+            case WORKING -> {
+                // 状态版本可能每次轮询都变化，只有本配方的实际加工量才算进展。
+                if (observation.activeRecipeId() != null
+                        && !recipe.getId().equals(observation.activeRecipeId())) {
+                    yield failObservation("custom operation active recipe mismatch");
+                }
+                yield observation.activeRecipeId() == null
+                        ? workingObservation() : workingObservation(observation.completedTicks());
+            }
             case READY_TO_COLLECT, COLLECTING -> {
                 String failure = collectCustomStep();
                 if (failure != null) {
