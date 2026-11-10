@@ -930,7 +930,8 @@ public final class GenericCraftPacket {
         Map<ResourceLocation, List<ImmutableRecipeGraph.IngredientRef>> replacements =
                 new HashMap<>();
         for (ImmutableRecipeGraph.RecipeNode node : filtered.graph().recipesById().values()) {
-            if (!ModIds.ID_EMBERS_STAMPER.equals(node.modTypeId())) continue;
+            if (!ModIds.ID_EMBERS_STAMPER.equals(node.modTypeId())
+                    && !ModIds.ID_EMBERS_ALCHEMY.equals(node.modTypeId())) continue;
             Recipe<?> recipe = CraftRecipeResolver.resolve(player.serverLevel(), node.recipeId());
             if (recipe == null) continue;
             List<IngredientSpec> declared =

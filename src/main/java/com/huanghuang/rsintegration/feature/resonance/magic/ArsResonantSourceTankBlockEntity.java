@@ -78,7 +78,7 @@ public final class ArsResonantSourceTankBlockEntity extends SourceJarTile
     }
 
     @Override
-    protected void saveAdditional(CompoundTag tag) {
+    public void saveAdditional(CompoundTag tag) {
         super.saveAdditional(tag);
         storage.save(tag);
     }

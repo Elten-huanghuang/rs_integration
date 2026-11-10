@@ -31,7 +31,7 @@ import com.huanghuang.rsintegration.mods.farmersrespite.FarmersRespiteRSModule;
 import com.huanghuang.rsintegration.mods.embers.EreAlchemyRSModule;
 import com.huanghuang.rsintegration.mods.embers.EmbersMachinesRSModule;
 import com.huanghuang.rsintegration.mods.farmingforblockheads.FarmingForBlockheadsRSModule;
-import com.huanghuang.rsintegration.mods.forbidden.FaRSModule;
+import com.huanghuang.rsintegration.mods.forbidden.FARSModule;
 import com.huanghuang.rsintegration.mods.goety.magic.GoetySoulBackends;
 import com.huanghuang.rsintegration.magic.MagicResourceTaskLedger;
 import com.huanghuang.rsintegration.magic.MagicStorageBackendHealth;
@@ -260,7 +260,7 @@ public final class RSIntegrationMod {
             new ModuleEntry(ModIds.EIDOLON, RSIntegrationConfig.ENABLE_EIDOLON,
                     () -> EidolonRSModule.INSTANCE),
             new ModuleEntry(ModIds.FORBIDDEN_ARCANUS, RSIntegrationConfig.ENABLE_FORBIDDEN_ARCANUS,
-                    () -> FaRSModule.INSTANCE),
+                    () -> FARSModule.INSTANCE),
             new ModuleEntry(ModIds.WIZARDS_REBORN, RSIntegrationConfig.ENABLE_WIZARDS_REBORN,
                     () -> WizardsRebornRSModule.INSTANCE),
             new ModuleEntry(ModIds.TOUHOU_LITTLE_MAID, RSIntegrationConfig.ENABLE_TOUHOU_LITTLE_MAID,

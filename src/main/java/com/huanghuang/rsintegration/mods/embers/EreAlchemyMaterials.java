@@ -35,6 +35,21 @@ public record EreAlchemyMaterials(
         return new EreAlchemyMaterials(graph, List.of());
     }
 
+    /** 推理首轮尚无确定密码，猜测用的象征不属于已确定的合成图材料。 */
+    public static EreAlchemyMaterials createInference(
+            Ingredient tablet, List<Ingredient> aspects, List<Ingredient> inputs) {
+        if (aspects.size() != inputs.size()) {
+            throw new IllegalArgumentException("aspect/input count mismatch");
+        }
+        List<IngredientSpec> graph = new ArrayList<>();
+        if (tablet != null) graph.add(new IngredientSpec(tablet, 1));
+        for (Ingredient input : inputs) graph.add(new IngredientSpec(input, 1));
+        List<IngredientSpec> supplemental = aspects.stream()
+                .map(aspect -> new IngredientSpec(aspect, 1, DemandRole.CATALYST))
+                .toList();
+        return new EreAlchemyMaterials(graph, supplemental);
+    }
+
     /** Full placement order: optional tablet, then (aspect, input) for each pedestal. */
     public List<IngredientSpec> allSpecs() {
         if (supplementalSpecs.isEmpty()) return graphSpecs;

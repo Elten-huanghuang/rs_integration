@@ -4,18 +4,14 @@ import com.huanghuang.rsintegration.network.gui.RemoteGuiAuth;
 import com.huanghuang.rsintegration.network.ProtectionChecker;
 import com.refinedmods.refinedstorage.blockentity.grid.GridBlockEntity;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.InteractionHand;
 import net.minecraft.world.MenuProvider;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.entity.player.PlayerInteractEvent;
 import net.minecraftforge.network.NetworkEvent;
@@ -64,11 +60,8 @@ public final class ReturnToRSPacket {
             var level = server.getLevel(dimKey);
             if (level == null) return;
 
-            PlayerInteractEvent.RightClickBlock event = new PlayerInteractEvent.RightClickBlock(
-                    player, InteractionHand.MAIN_HAND, packet.pos,
-                    new BlockHitResult(new Vec3(packet.pos.getX() + 0.5,
-                            packet.pos.getY() + 1.0, packet.pos.getZ() + 0.5),
-                            Direction.UP, packet.pos, false));
+            PlayerInteractEvent.RightClickBlock event =
+                    new MachineInteractionCheckEvent(player, packet.pos);
             MinecraftForge.EVENT_BUS.post(event);
             if (event.isCanceled()) {
                 player.sendSystemMessage(

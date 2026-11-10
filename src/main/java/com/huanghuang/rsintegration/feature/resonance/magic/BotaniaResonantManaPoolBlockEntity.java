@@ -118,7 +118,7 @@ public final class BotaniaResonantManaPoolBlockEntity extends ManaPoolBlockEntit
     }
 
     @Override
-    protected void saveAdditional(CompoundTag tag) {
+    public void saveAdditional(CompoundTag tag) {
         super.saveAdditional(tag);
         storage.save(tag);
         tag.putBoolean(OUTPUTTING, outputting);

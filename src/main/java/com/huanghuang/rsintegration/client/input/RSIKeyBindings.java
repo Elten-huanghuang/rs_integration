@@ -1,8 +1,14 @@
 package com.huanghuang.rsintegration.client.input;
 
 import java.lang.reflect.Field;
+import java.util.function.Consumer;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.feature.resonance.magic.ResonantMagicBlockMarker;
+import com.huanghuang.rsintegration.network.binding.AltarBinding;
+import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
+import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.network.binding.NearbyBindingRequestPacket;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.mojang.blaze3d.platform.InputConstants;
@@ -143,18 +149,39 @@ public final class RSIKeyBindings {
         }
     }
 
-    private static void onMouseInput(InputEvent.MouseButton event) {
-        if (KEY_BIND_MACHINE == null || event.getAction() != GLFW.GLFW_PRESS) return;
-        Minecraft minecraft = Minecraft.getInstance();
+    private static void onMouseInput(InputEvent.MouseButton.Pre event) {
+        handleBindingMouseInput(event, Minecraft.getInstance(),
+                packet -> NetworkHandler.CHANNEL.sendToServer(packet));
+    }
+
+    static void handleBindingMouseInput(InputEvent.MouseButton.Pre event, Minecraft minecraft,
+                                         Consumer<ExplicitMachineBindingPacket> sender) {
+        if (event.getAction() != GLFW.GLFW_PRESS) return;
         if (minecraft.player == null || minecraft.screen != null) return;
         InputConstants.Key mouseKey = InputConstants.Type.MOUSE.getOrCreate(event.getButton());
-        if (!KEY_BIND_MACHINE.isActiveAndMatches(mouseKey)) return;
+        boolean explicit = KEY_BIND_MACHINE != null
+                && KEY_BIND_MACHINE.isActiveAndMatches(mouseKey);
+        boolean legacy = event.getButton() == GLFW.GLFW_MOUSE_BUTTON_RIGHT
+                && minecraft.player.isShiftKeyDown() && RSIntegrationConfig.ENABLE_BINDING.get();
+        if (!explicit && !legacy) return;
         if (!(minecraft.hitResult instanceof BlockHitResult hit)
                 || hit.getType() != HitResult.Type.BLOCK) return;
         InteractionHand hand = isBindableConnector(minecraft.player.getMainHandItem())
                 ? InteractionHand.MAIN_HAND : InteractionHand.OFF_HAND;
         if (!isBindableConnector(minecraft.player.getItemInHand(hand))) return;
-        NetworkHandler.CHANNEL.sendToServer(
+        if (!explicit) {
+            // 旧版 Shift 手势也只发送一次请求，不能再落入原版长按右键及副手流程。
+            boolean rsConnector = AltarBindingRegistry.findHook(minecraft.player.getItemInHand(hand))
+                    .flatMap(hook -> hook.createBinding(minecraft.player.getItemInHand(hand)))
+                    .filter(binding -> AltarBinding.RS_NETWORK.equals(binding.type())).isPresent();
+            if (!rsConnector) return;
+            var block = minecraft.player.level().getBlockState(hit.getBlockPos()).getBlock();
+            if (!(block instanceof ResonantMagicBlockMarker)
+                    && !BindingEventHandler.isPotentialBindingTarget(block)) return;
+        }
+        // 在 Pre 阶段消费点击：Post 不再重发，也不会同时打开终端或触发第二次解绑。
+        event.setCanceled(true);
+        sender.accept(
                 new ExplicitMachineBindingPacket(hit.getBlockPos(),
                         hand));
     }
@@ -165,7 +192,8 @@ public final class RSIKeyBindings {
         if (id == null) return false;
         if ("beyonddimensions".equals(id.getNamespace())
                 && "net_terminal_item".equals(id.getPath())) return true;
-        return "refinedstorage".equals(id.getNamespace())
-                && (id.getPath().contains("wireless") || id.getPath().contains("network"));
+        return ("refinedstorage".equals(id.getNamespace())
+                && (id.getPath().contains("wireless") || id.getPath().contains("network")))
+                || AltarBindingRegistry.findHook(stack).isPresent();
     }
 }

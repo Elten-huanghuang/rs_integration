@@ -14,11 +14,11 @@ import net.minecraftforge.common.ForgeConfigSpec;
 
 import java.util.List;
 
-public final class FaRSModule implements IModIntegration {
+public final class FARSModule implements IModIntegration {
 
-    public static final FaRSModule INSTANCE = new FaRSModule();
+    public static final FARSModule INSTANCE = new FARSModule();
 
-    private FaRSModule() {}
+    private FARSModule() {}
 
     @Override
     public ForgeConfigSpec.BooleanValue configFlag() {

@@ -4,18 +4,14 @@ import com.huanghuang.rsintegration.network.ProtectionChecker;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.binding.BindingStorage;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.InteractionHand;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.entity.player.PlayerInteractEvent;
 
@@ -69,14 +65,7 @@ public final class MachineInteractionAccess {
 
         if (fireInteractionEvent) {
             PlayerInteractEvent.RightClickBlock event =
-                    new PlayerInteractEvent.RightClickBlock(
-                            player, InteractionHand.MAIN_HAND, position,
-                            new BlockHitResult(
-                                    new Vec3(
-                                            position.getX() + 0.5,
-                                            position.getY() + 1.0,
-                                            position.getZ() + 0.5),
-                                    Direction.UP, position, false));
+                    new MachineInteractionCheckEvent(player, position);
             MinecraftForge.EVENT_BUS.post(event);
             if (event.isCanceled()) return Result.failure(Error.PROTECTED);
         }

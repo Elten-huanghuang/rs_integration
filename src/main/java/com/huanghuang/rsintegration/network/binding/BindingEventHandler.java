@@ -24,6 +24,7 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
+import com.huanghuang.rsintegration.network.gui.MachineInteractionCheckEvent;
 import com.huanghuang.rsintegration.magic.MagicResourceKind;
 import com.huanghuang.rsintegration.feature.resonance.magic.ResonantMagicBlockMarker;
 import com.huanghuang.rsintegration.feature.resonance.magic.ResonantMagicStorage;
@@ -135,6 +136,7 @@ public final class BindingEventHandler {
 
     @SubscribeEvent
     public static void onRightClickBlock(PlayerInteractEvent.RightClickBlock event) {
+        if (event instanceof MachineInteractionCheckEvent) return;
         if (!RSIntegrationConfig.ENABLE_BINDING.get()) return;
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
         if (!player.isShiftKeyDown() && !EXPLICIT_BIND_REQUEST.get()) return;
@@ -318,6 +320,7 @@ public final class BindingEventHandler {
                 }
             }
         }
+        event.setCancellationResult(InteractionResult.CONSUME);
         event.setCanceled(true);
     }
 
@@ -427,7 +430,7 @@ public final class BindingEventHandler {
         }
     }
 
-    static boolean isPotentialNearbyTarget(Block block) {
+    public static boolean isPotentialBindingTarget(Block block) {
         if (CauldronAccess.isTarget(block)) return false;
         if (isEnabledRegisteredTarget(block)) return true;
         ResourceLocation id = ForgeRegistries.BLOCKS.getKey(block);

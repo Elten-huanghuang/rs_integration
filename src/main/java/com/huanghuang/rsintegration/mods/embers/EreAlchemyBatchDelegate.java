@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.reflection.probes.EmbersReflection;
@@ -56,6 +57,8 @@ extends AbstractBatchDelegate {
     private boolean craftStarted;
     private boolean waitingForEmber;
     private long emberWaitDeadline;
+    private final List<ItemStack> retainedCatalysts = new ArrayList<>();
+    private boolean reusingCatalysts;
     @Nullable
     private EreAlchemyLock.Lease lockLease;
     @Nullable
@@ -230,6 +233,7 @@ extends AbstractBatchDelegate {
             RSIntegrationMod.LOGGER.error("[RSI-Embers] Material count mismatch: expected >= {}, got {}", (Object)expectedMaterialCount, (Object)materials.size());
             return false;
         }
+        if (this.reusingCatalysts && !hasCompleteRetainedCatalysts()) return false;
         int matIdx = 0;
         try {
             Object tabletInv = Reflect.getField((Object)this.tablet, "inventory").orElse(null);
@@ -245,7 +249,10 @@ extends AbstractBatchDelegate {
                 if (bottomBE != null && EmbersReflection.alchemyPedestalBEClass.isInstance(bottomBE)) {
                     Object bottomInv = Reflect.getField((Object)bottomBE, "inventory").orElse(null);
                     if (bottomInv != null) {
-                        Reflect.invoke(bottomInv, "setStackInSlot", 0, materials.get(matIdx++));
+                        ItemStack aspect = this.reusingCatalysts
+                                ? this.retainedCatalysts.remove(0) : materials.get(matIdx);
+                        matIdx++;
+                        writeInventoryStack(bottomInv, aspect);
                     }
                 } else {
                     RSIntegrationMod.LOGGER.error("[RSI-Embers] No bottom pedestal at {}", (Object)bottomPos);
@@ -260,6 +267,7 @@ extends AbstractBatchDelegate {
                 }
                 ((BlockEntity) pi.be()).setChanged();
             }
+            this.reusingCatalysts = false;
             EmbersBeamCannonIgnition.Result ignition = EmbersBeamCannonIgnition.ignite(
                     this.level, this.machinePos, (BlockEntity) this.tablet);
             if (ignition == EmbersBeamCannonIgnition.Result.INSUFFICIENT_EMBER) {
@@ -373,7 +381,7 @@ extends AbstractBatchDelegate {
                     (Object)result.isEmpty());
             if (!result.isEmpty()) {
                 ((BlockEntity) this.tablet).setChanged();
-                this.clearAllSlots();
+                this.clearAllSlots(true);
                 RSIntegrationMod.LOGGER.debug("[RSI-Embers] Collected result from outputHandler: {} x{}",
                         (Object)result.getHoverName().getString(), (Object)result.getCount());
                 return result;
@@ -397,7 +405,7 @@ extends AbstractBatchDelegate {
                         (Object)result.isEmpty());
                 if (!result.isEmpty()) {
                     be.setChanged();
-                    this.clearAllSlots();
+                    this.clearAllSlots(true);
                     RSIntegrationMod.LOGGER.debug("[RSI-Embers] Collected result from IBin: {} x{}",
                             (Object)result.getHoverName().getString(), (Object)result.getCount());
                     return result;
@@ -427,6 +435,42 @@ extends AbstractBatchDelegate {
     }
 
     public void onBatchFinished(@NotNull ServerPlayer player) {
+    }
+
+    @Override
+    public List<ItemStack> collectReusableMaterials(@NotNull ServerPlayer player) {
+        List<ItemStack> recovered = List.copyOf(this.retainedCatalysts);
+        this.retainedCatalysts.clear();
+        this.reusingCatalysts = false;
+        return recovered;
+    }
+
+    @Override
+    public void releaseReusableMaterials(@NotNull ServerPlayer player) {
+        refundStacks(collectReusableMaterials(player));
+    }
+
+    @Override
+    public boolean transferReusableMaterialsTo(@NotNull IBatchDelegate successor) {
+        if (!(successor instanceof EreAlchemyBatchDelegate next)
+                || this.level != next.level || this.recipe != next.recipe
+                || this.machinePos == null || !this.machinePos.equals(next.machinePos)
+                || !next.retainedCatalysts.isEmpty() || next.reusingCatalysts
+                || !hasCompleteRetainedCatalysts()) return false;
+        next.retainedCatalysts.addAll(this.retainedCatalysts);
+        next.reusingCatalysts = true;
+        this.retainedCatalysts.clear();
+        this.reusingCatalysts = false;
+        return true;
+    }
+
+    private boolean hasCompleteRetainedCatalysts() {
+        if (this.code == null || this.retainedCatalysts.size() != this.code.size()) return false;
+        for (int i = 0; i < this.code.size(); i++) {
+            ItemStack actual = this.retainedCatalysts.get(i);
+            if (actual.getCount() != 1 || !this.code.get(i).test(actual)) return false;
+        }
+        return true;
     }
 
     public BlockPos getMachinePos() {
@@ -611,9 +655,18 @@ extends AbstractBatchDelegate {
     }
 
     private void clearAllSlots() {
+        clearAllSlots(false);
+    }
+
+    private void clearAllSlots(boolean retainCatalysts) {
         ItemStack s2;
         Object tabletInv;
         ArrayList<ItemStack> toRefund = new ArrayList<ItemStack>();
+        if (!retainCatalysts) {
+            toRefund.addAll(this.retainedCatalysts);
+            this.retainedCatalysts.clear();
+            this.reusingCatalysts = false;
+        }
         if (this.tablet != null && (tabletInv = Reflect.getField((Object)this.tablet, "inventory").orElse(null)) != null && !(s2 = Reflect.invokeInt(tabletInv, "getStackInSlot", 0).map(o -> (ItemStack)o).orElse(ItemStack.EMPTY)).isEmpty()) {
             toRefund.add(s2.copy());
             Reflect.invoke(tabletInv, "setStackInSlot", 0, ItemStack.EMPTY);
@@ -636,16 +689,23 @@ extends AbstractBatchDelegate {
                 if (!this.level.isLoaded(bottomPos = top.pos().below()) || (bottomBE = this.level.getBlockEntity(bottomPos)) == null || EmbersReflection.alchemyPedestalBEClass == null || !EmbersReflection.alchemyPedestalBEClass.isInstance(bottomBE) || (bottomInv = Reflect.getField((Object)bottomBE, "inventory").orElse(null)) == null) continue;
                 ItemStack is = readInventoryStack(bottomInv);
                 if (is.isEmpty()) continue;
-                toRefund.add(is.copy());
+                // 批次内只交接实际取出的象征，不能一边退回仓库一边复用预留模板。
+                if (retainCatalysts) this.retainedCatalysts.add(is.copy());
+                else toRefund.add(is.copy());
                 writeInventoryStack(bottomInv, ItemStack.EMPTY);
                 bottomBE.setChanged();
             }
         }
-        if (storageEndpoint() != null && !toRefund.isEmpty()) {
+        refundStacks(toRefund);
+    }
+
+    private void refundStacks(List<ItemStack> toRefund) {
+        if (!toRefund.isEmpty()) {
             for (ItemStack stack : toRefund) {
                 ItemStack leftover;
                 if (stack.isEmpty()) continue;
-                if ((leftover = insertIntoStorage(player, stack, false)).isEmpty()) continue;
+                leftover = storageEndpoint() == null ? stack : insertIntoStorage(player, stack, false);
+                if (leftover.isEmpty()) continue;
                 RSIntegrationMod.LOGGER.warn("[RSI-Embers] Refund partial: {} x{}", (Object)leftover.getHoverName().getString(), (Object)leftover.getCount());
                 if (this.player == null) continue;
                 ItemHandlerHelper.giveItemToPlayer(this.player, (ItemStack)leftover);

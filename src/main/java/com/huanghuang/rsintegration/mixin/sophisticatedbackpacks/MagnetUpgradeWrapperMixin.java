@@ -38,6 +38,7 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Group;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
@@ -112,8 +113,24 @@ public abstract class MagnetUpgradeWrapperMixin
         }
     }
 
-    @Inject(method = "tryToInsertItem", at = @At(value = "HEAD"), remap = false, cancellable = true)
-    private void tryToInsertItem(ItemEntity itemEntity, CallbackInfoReturnable<Boolean> cir) {
+    // 新版增加了 Player 参数；两种签名必须且只能命中一个，避免版本变化导致启动崩溃。
+    @Group(name = "rsi$magnetInsertHead", min = 1, max = 1)
+    @Inject(method = "tryToInsertItem(Lnet/minecraft/world/entity/item/ItemEntity;)Z",
+            at = @At("HEAD"), remap = false, cancellable = true, require = 0, expect = 0)
+    private void rsi$insertItemLegacy(ItemEntity itemEntity, CallbackInfoReturnable<Boolean> cir) {
+        rsi$insertItem(itemEntity, cir);
+    }
+
+    @Group(name = "rsi$magnetInsertHead", min = 1, max = 1)
+    @Inject(method = "tryToInsertItem(Lnet/minecraft/world/entity/player/Player;Lnet/minecraft/world/entity/item/ItemEntity;)Z",
+            at = @At("HEAD"), remap = false, cancellable = true, require = 0, expect = 0)
+    private void rsi$insertItemWithPlayer(Player player, ItemEntity itemEntity,
+                                         CallbackInfoReturnable<Boolean> cir) {
+        rsi$insertItem(itemEntity, cir);
+    }
+
+    @Unique
+    private void rsi$insertItem(ItemEntity itemEntity, CallbackInfoReturnable<Boolean> cir) {
         if (CraftOutputInterceptor.isInActiveZone(itemEntity.level(), itemEntity.position())) {
             cir.setReturnValue(false);
             cir.cancel();
@@ -132,8 +149,24 @@ public abstract class MagnetUpgradeWrapperMixin
         cir.cancel();
     }
 
-    @Inject(method = "tryToInsertItem", at = @At("RETURN"), remap = false)
-    private void rsi$reportMagnetInsertion(ItemEntity itemEntity, CallbackInfoReturnable<Boolean> cir) {
+    @Group(name = "rsi$magnetInsertReturn", min = 1)
+    @Inject(method = "tryToInsertItem(Lnet/minecraft/world/entity/item/ItemEntity;)Z",
+            at = @At("RETURN"), remap = false, require = 0, expect = 0)
+    private void rsi$reportMagnetInsertionLegacy(ItemEntity itemEntity,
+                                               CallbackInfoReturnable<Boolean> cir) {
+        rsi$reportMagnetInsertion(itemEntity);
+    }
+
+    @Group(name = "rsi$magnetInsertReturn", min = 1)
+    @Inject(method = "tryToInsertItem(Lnet/minecraft/world/entity/player/Player;Lnet/minecraft/world/entity/item/ItemEntity;)Z",
+            at = @At("RETURN"), remap = false, require = 0, expect = 0)
+    private void rsi$reportMagnetInsertionWithPlayer(Player player, ItemEntity itemEntity,
+                                                   CallbackInfoReturnable<Boolean> cir) {
+        rsi$reportMagnetInsertion(itemEntity);
+    }
+
+    @Unique
+    private void rsi$reportMagnetInsertion(ItemEntity itemEntity) {
         ItemStack input = rsi$magnetInput;
         rsi$magnetInput = ItemStack.EMPTY;
         rsi$reportInsertion(input, itemEntity.getItem());

@@ -68,6 +68,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
     private Recipe<?> recipe;
     private List<Integer> filledPedestalIndices;
     private List<?> pedestals;           // captured pedestal list
+    private MalumAltarPedestals.Lease pedestalLease;
     private boolean craftStarted;
     private boolean craftWasSeenActive;
     private int bufferedOperations = 1;
@@ -219,6 +220,16 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public boolean startSingleOperation(ServerPlayer player) {
+        boolean started = false;
+        try {
+            started = startSingleWithPedestals(player);
+            return started;
+        } finally {
+            if (!started) releasePreparationResources();
+        }
+    }
+
+    private boolean startSingleWithPedestals(ServerPlayer player) {
         this.player = player;
         this.ledger = new ExtractionLedger();
         if (storageEndpoint() == null) {
@@ -268,7 +279,8 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         int extraCount = extraItems != null ? extraItems.size() : 0;
         int spiritCount = spirits != null ? spirits.size() : 0;
 
-        if (extraCount > emptyPedestalCount) return false;
+        if (requiredPedestalSlots(extraItems) > emptyPedestalCount
+                || !reservePedestals(requiredPedestalSlots(extraItems))) return false;
 
         // Phase 1: reserve all items via ledger
         // Use a labeled break so every failure path (exception or
@@ -595,6 +607,17 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
+        boolean started = false;
+        try {
+            started = startPreparedWithPedestals(player, materials, sharedLedger);
+            return started;
+        } finally {
+            if (!started) releasePreparationResources();
+        }
+    }
+
+    private boolean startPreparedWithPedestals(ServerPlayer player, List<ItemStack> materials,
+                                              ExtractionLedger sharedLedger) {
         this.player = player;
         this.sharedLedger = sharedLedger;
         this.usingSharedLedger = true;
@@ -667,7 +690,12 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
         int emptyPedestalCount = countEmptyPedestalSlots(pedestals);
-        if (requiredPedestalSlots(extraItems) > emptyPedestalCount) return false;
+        int required = 0;
+        for (int i = 0; i < extraCount; i++) {
+            ItemStack stack = placementMaterials.get((inputObj != null ? 1 : 0) + i);
+            required += pedestalSlotsForCount(stack.getCount(), stack.getMaxStackSize());
+        }
+        if (required > emptyPedestalCount || !reservePedestals(required)) return false;
 
         this.filledPedestalIndices = new ArrayList<>();
 
@@ -868,8 +896,9 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
     private void refreshInventoryCaches() {
         updateInventoryData(invMain);
         updateInventoryData(invSpirit);
-        if (pedestals == null) return;
-        for (Object pedestal : pedestals) {
+        if (pedestals == null || filledPedestalIndices == null) return;
+        for (int index : filledPedestalIndices) {
+            Object pedestal = pedestals.get(index);
             if (isSpiritCrucible(pedestal)) continue;
             try {
                 updateInventoryData(pedestal.getClass().getMethod("getSuppliedInventory").invoke(pedestal));
@@ -987,8 +1016,16 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     protected void resetState() {
+        releasePreparationResources();
         super.resetState();
         bufferedOperations = 1;
+    }
+
+    @Override
+    public void releasePreparationResources() {
+        if (pedestalLease == null) return;
+        pedestalLease.close();
+        pedestalLease = null;
     }
 
     /** Retrieve items from altar slots for audited ledger reconciliation. */
@@ -1176,14 +1213,28 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
     private int countEmptyPedestalSlots(List<?> pedestals) {
         int count = 0;
         for (Object ap : pedestals) {
-            if (isSpiritCrucible(ap)) continue;
-            try {
-                Object inv = ap.getClass().getMethod("getSuppliedInventory").invoke(ap);
-                boolean empty = (boolean) inv.getClass().getMethod("isEmpty").invoke(inv);
-                if (empty) count++;
-            } catch (Exception ex) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", ex); }
+            if (MalumAltarPedestals.available(myLevel, ap) && emptyPedestal(ap)) count++;
         }
         return count;
+    }
+
+    private boolean reservePedestals(int required) {
+        pedestalLease = MalumAltarPedestals.tryReserve(
+                myLevel, (BlockEntity) altar, pedestals, required, MalumBatchDelegate::emptyPedestal);
+        if (pedestalLease == null) return false;
+        pedestals = pedestalLease.captured();
+        return pedestals.size() == required;
+    }
+
+    private static boolean emptyPedestal(Object pedestal) {
+        if (isSpiritCrucible(pedestal)) return false;
+        try {
+            Object inventory = pedestal.getClass().getMethod("getSuppliedInventory").invoke(pedestal);
+            return (boolean) inventory.getClass().getMethod("isEmpty").invoke(inventory);
+        } catch (ReflectiveOperationException exception) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Malum] Cannot read pedestal inventory", exception);
+            return false;
+        }
     }
 
     private int placeOnNextEmptyPedestal(List<?> pedestals, int startIdx, ItemStack stack) throws Exception {

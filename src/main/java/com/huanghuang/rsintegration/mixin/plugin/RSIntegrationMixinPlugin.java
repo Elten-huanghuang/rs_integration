@@ -159,6 +159,12 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
             return isClassPresent(targetClassName)
                     && hasMethod(targetClassName, "passiveSpiritAltarParticles");
         }
+        if (mixinClassName.endsWith(".malum.AltarCraftingHelperMixin")) {
+            return hasMethod(targetClassName, "capturePedestals",
+                    "(Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;)Ljava/util/List;")
+                    && hasMethod(targetClassName, "capturePedestals",
+                    "(Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;III)Ljava/util/List;");
+        }
         if (mixinClassName.endsWith(".emi.RecipeDisplayMixin")) {
             return isClassPresent("dev.emi.emi.screen.RecipeDisplay")
                     && hasMethod(targetClassName, "getWidgets");

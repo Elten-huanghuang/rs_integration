@@ -76,6 +76,14 @@ copy {
 // 切换真实依赖，分别验证农夫乐事两个版本的砧板语义与执行接口。
 def farmersDelightVersion = providers.gradleProperty('farmersDelightCompatibilityVersion')
         .getOrElse('1.20.1-1.3.3')
+def skipMissingTestDependencies = providers.gradleProperty('skipMissingTestDependencies')
+        .getOrElse('false').toBoolean()
+def aetherworksTestDirectory = layout.buildDirectory.dir('aetherworks-test-libs').get().asFile
+copy {
+    from fileTree(dir: 'libs', include: ['*aetherworks-1.20.1-1.1.2.jar'])
+    into aetherworksTestDirectory
+    rename { 'aetherworks-1.20.1-1.1.2.jar' }
+}
 
 // 从文件名识别 Goety 版本，避免多个版本同时进入编译 classpath。
 def goetyVersionOf = { jar ->
@@ -113,19 +121,55 @@ def goetyCompileVersion = goetyVersionOf(goetyCompileSource)
 def modCompileJars = fileTree(dir: 'libs', include: ['*.jar'],
         exclude: ['emi-*.jar', '*irons_spellbooks-1.20.1-3.16.3.jar', 'apothic_staff_rarities-*.jar',
                   'fantasy_ending-1.20.1-2.7.20g-all.jar', 'improve_the_expectations-1.0.2-forge-1.20.1.jar',
-                  '*profound_curse-*.jar']).matching {
+                  '*profound_curse-*.jar', '*rs_integration-*.jar']).matching {
     exclude { details ->
         def version = goetyVersionOf(details.file)
         version != null && version != goetyCompileVersion
     }
 }
+def modCompileDirectory = layout.buildDirectory.dir('mod-compile-libs').get().asFile
+def modCompileArtifacts = modCompileJars.files.groupBy {
+    it.name[0..-5].replaceAll(/[^A-Za-z0-9_.-]/, '_')
+}
+modCompileArtifacts.each { artifact, sources ->
+    if (sources.size() != 1) {
+        throw new GradleException("Local jar names collide after normalization: ${sources}")
+    }
+    if (artifact == 'until_eternity-1.2.0-all') {
+        // 此包的 STORED 条目带数据描述符；重建压缩容器供名称映射使用，保留原始 JAR。
+        modCompileDirectory.mkdirs()
+        new java.util.zip.ZipFile(sources[0]).withCloseable { sourceZip ->
+            new java.util.zip.ZipOutputStream(
+                    new FileOutputStream(new File(modCompileDirectory, "${artifact}.jar")))
+                    .withCloseable { outputZip ->
+                sourceZip.entries().each { entry ->
+                    def replacement = new java.util.zip.ZipEntry(entry.name)
+                    replacement.time = entry.time
+                    outputZip.putNextEntry(replacement)
+                    sourceZip.getInputStream(entry).withCloseable { input ->
+                        outputZip << input
+                    }
+                    outputZip.closeEntry()
+                }
+            }
+        }
+    } else if (sources[0].name != "${artifact}.jar") {
+        copy {
+            from sources[0]
+            into modCompileDirectory
+            rename { "${artifact}.jar" }
+        }
+    }
+}
 
 repositories {
+    flatDir { dirs modCompileDirectory }
     flatDir { dirs 'libs' }
     flatDir { dirs ironFurnacesTestDirectory }
     flatDir { dirs botaniaTestDirectory }
     flatDir { dirs arsNouveauTestDirectory }
     flatDir { dirs profoundCurseDirectory }
+    flatDir { dirs aetherworksTestDirectory }
     maven { url = 'https://maven.minecraftforge.net/' }
     maven { url = 'https://maven.blamejared.com' }
     maven { url = 'https://maven.terraformersmc.com/releases/' }
@@ -134,6 +178,14 @@ repositories {
         content { includeGroup 'org.spongepowered' }
     }
     mavenCentral()
+}
+
+// 本地模组没有远程元数据，避免逐个访问 Maven 仓库并等待网络超时。
+repositories.withType(MavenArtifactRepository).configureEach { repository ->
+    repository.content {
+        excludeGroup 'local'
+        excludeGroup 'local.compile'
+    }
 }
 
 // 独立基准源集，不进入生产模组；复用单测中的 Minecraft/RS 运行环境。
@@ -169,6 +221,11 @@ reobf {
     apismokeJar {}
 }
 
+// 将数百个联动依赖写入参数文件，避免超过 Windows 的进程命令长度上限。
+tasks.withType(net.minecraftforge.gradle.userdev.tasks.RenameJarInPlace).configureEach {
+    useArgsFile()
+}
+
 apismokeJarTask.configure {
     finalizedBy 'reobfApismokeJar'
 }
@@ -196,14 +253,21 @@ dependencies {
     minecraft "net.minecraftforge:forge:1.20.1-47.4.13"
 
     // libs 中的模组依赖必须经 fg.deobf() 映射；Goety 仅保留所选版本。
-    compileOnly fg.deobf(modCompileJars)
+    // 文件集合不会经过名称映射；使用合法模块名读取本地 JAR 或其规范化副本。
+    modCompileArtifacts.keySet().each { artifact ->
+        compileOnly fg.deobf("local.compile:${artifact}:local")
+    }
     compileOnly fg.deobf("local:profound_curse:${profoundCurseVersion}")
 
     // A production RS jar in run/mods is not remapped for the userdev namespace.
     // Keep the release artifact compile-only, but provide a deobfuscated runtime copy for dev runs.
     runtimeOnly fg.deobf("local:refinedstorage:1.12.4")
     // runClient smoke-test dependencies must be present in the dev runtime.
-    runtimeOnly fg.deobf("mezz.jei:jei-${minecraft_version}-forge:${jei_version}")
+    if (file("libs/jei-${minecraft_version}-forge-${jei_version}.jar").exists()) {
+        runtimeOnly fg.deobf("local:jei-${minecraft_version}-forge:${jei_version}")
+    } else {
+        runtimeOnly fg.deobf("mezz.jei:jei-${minecraft_version}-forge:${jei_version}")
+    }
     runtimeOnly fg.deobf("local:FarmersDelight:${farmersDelightVersion}")
     runtimeOnly fg.deobf("local:ironfurnaces:${ironFurnacesTestVersion}")
 
@@ -219,7 +283,7 @@ dependencies {
     }
 
     // Curios
-    compileOnly fg.deobf(files('libs/curios-forge-5.14.1+1.20.1.jar'))
+    compileOnly fg.deobf("local:curios-forge:5.14.1+1.20.1")
 
     // JSR-305 annotations (@Nullable / @Nonnull / @ParametersAreNonnullByDefault)
     compileOnly 'com.google.code.findbugs:jsr305:3.0.2'
@@ -263,7 +327,13 @@ dependencies {
     testImplementation fg.deobf('local:tacz:1.20.1-1.1.4-hotfix-all')
     // 用实际怪物锅配方和库存接口验证批量适配。
     testImplementation fg.deobf("local:FarmersDelight:${farmersDelightVersion}")
-    testImplementation fg.deobf('local:forge-dungeonsdelight:1.20.1-1.3.0')
+    if (!skipMissingTestDependencies
+            || file('libs/forge-dungeonsdelight-1.20.1-1.3.0.jar').exists()) {
+        testImplementation fg.deobf('local:forge-dungeonsdelight:1.20.1-1.3.0')
+    } else {
+        sourceSets.test.java.exclude '**/mods/dungeonsdelight/MonsterPotCompatibilityTest.java'
+        logger.lifecycle('本次打包跳过缺失的 Dungeons Delight 测试依赖，未删除正式联动代码。')
+    }
     // 验证魔力石板这类「能力挂在物品堆上」的容器识别与读写；用模块依赖确保 Minecraft 方法完成映射。
     testImplementation fg.deobf('local:botania:1.20.1-448-FORGE')
     testImplementation fg.deobf('local:ars_nouveau:1.20.1-4.12.6-all')
@@ -392,6 +462,10 @@ check.dependsOn tasks.named('apismokeClasses')
 
 test {
     useJUnitPlatform()
+    if (providers.gradleProperty('sophisticatedCoreCompatibilityJar').isPresent()) {
+        systemProperty 'rsintegration.sophisticatedcore.compatibilityJar',
+                providers.gradleProperty('sophisticatedCoreCompatibilityJar').get()
+    }
     if (providers.gradleProperty('jeiCompatibilityJar').isPresent()) {
         systemProperty 'rsintegration.jei.compatibilityJar',
                 providers.gradleProperty('jeiCompatibilityJar').get()

@@ -240,7 +240,7 @@ public final class NearbyBindingService {
             Block block = level.getBlockState(pos).getBlock();
             Boolean potential = targetCache.get(block);
             if (potential == null) {
-                potential = BindingEventHandler.isPotentialNearbyTarget(block);
+                potential = BindingEventHandler.isPotentialBindingTarget(block);
                 targetCache.put(block, potential);
             }
             if (!potential) return exhausted;

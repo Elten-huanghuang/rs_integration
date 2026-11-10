@@ -2,14 +2,16 @@ package com.huanghuang.rsintegration.mods.embers;
 
 import com.huanghuang.rsintegration.recipe.AbstractRecipeHandler;
 
-import java.lang.reflect.Field;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.util.Reflect;
 import net.minecraft.core.RegistryAccess;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
@@ -61,8 +63,8 @@ public final class EreAlchemyRecipeHandler extends AbstractRecipeHandler {
         // The alchemy tablet is a real consumed/reserved machine input. The
         // execution delegate extracts it into the tablet inventory, so it must
         // also be present in the recipe tree and material bill. Raw aspect
-        // entries are alternatives, and the selected aspect per pedestal is
-        // seed-dependent; the execution delegate adds those exact catalysts.
+        // entries are alternatives; getPlanningIngredients resolves the exact
+        // catalysts using the player's world and the alchemy mode.
         Reflect.findField(recipe.getClass(), "tablet").ifPresent(f -> {
             if (!Ingredient.class.isAssignableFrom(f.getType())) return;
             f.setAccessible(true);
@@ -75,8 +77,7 @@ public final class EreAlchemyRecipeHandler extends AbstractRecipeHandler {
         });
 
         // The exact aspect for each pedestal is seed-dependent and is resolved
-        // by EreAlchemyBatchDelegate. Keep recipe projection to stable inputs;
-        // execution adds the selected aspects as reusable catalyst specs.
+        // at plan time. Keep the shared recipe index limited to stable inputs.
         Reflect.findField(recipe.getClass(), "inputs").ifPresent(f -> {
             if (!List.class.isAssignableFrom(f.getType())) return;
             f.setAccessible(true);
@@ -91,5 +92,42 @@ public final class EreAlchemyRecipeHandler extends AbstractRecipeHandler {
         });
 
         return specs.isEmpty() ? null : specs;
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public List<IngredientSpec> getPlanningIngredients(
+            Recipe<?> recipe, @Nullable ServerPlayer player,
+            @Nullable List<IngredientSpec> ingredients) {
+        if (ingredients == null) return List.of();
+        if (player == null || ingredients.isEmpty()
+                || ingredients.stream().anyMatch(spec -> spec.role() == DemandRole.CATALYST)) {
+            return ingredients;
+        }
+        ServerLevel level = player.serverLevel();
+        KnownCodeSavedData savedData = KnownCodeSavedData.get(level);
+        savedData.setWorldSeed(level.getSeed());
+        List<Ingredient> selected = new ArrayList<>();
+        if (RSIntegrationConfig.ENABLE_EMBERS_ALCHEMY_CALC.get()) {
+            selected = (List<Ingredient>) Reflect.invoke(recipe, "getCode", level.getSeed())
+                    .filter(List.class::isInstance).orElse(List.of());
+        } else {
+            // 未猜出的密码不能参与规划；首轮猜测的象征由推理代理单独预留。
+            int[] code = savedData.getCode(recipe.getId().toString());
+            List<Ingredient> aspects = (List<Ingredient>) Reflect.getField(recipe, "aspects")
+                    .filter(List.class::isInstance).orElse(List.of());
+            List<?> inputs = (List<?>) Reflect.getField(recipe, "inputs")
+                    .filter(List.class::isInstance).orElse(List.of());
+            if (code == null || code.length != inputs.size()) return ingredients;
+            for (int index : code) {
+                if (index < 0 || index >= aspects.size()) return ingredients;
+                selected.add(aspects.get(index));
+            }
+        }
+        List<IngredientSpec> planned = new ArrayList<>(ingredients);
+        for (Ingredient aspect : selected) {
+            planned.add(new IngredientSpec(aspect, 1, DemandRole.CATALYST));
+        }
+        return List.copyOf(planned);
     }
 }

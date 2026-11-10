@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
+import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.DirectMaterialAllocator;
@@ -58,6 +59,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.ShapelessRecipe;
 import net.minecraft.world.item.crafting.SmithingTransformRecipe;
 import org.junit.jupiter.api.Test;
@@ -95,6 +97,52 @@ class GenericCraftPacketTest extends BootstrapTest {
     void directRecursiveTerminalPlanCountsAsASelectedPlanner() {
         assertTrue(GenericCraftPacket.hasSelectedCraftingPlanner(false, true, false));
         assertFalse(GenericCraftPacket.hasSelectedCraftingPlanner(false, false, false));
+    }
+
+    @Test
+    void scopedAlchemyGraphIncludesWorldSpecificReusableAspectsWithoutChangingTheSharedIndex() {
+        ServerPlayer player = mock(ServerPlayer.class);
+        ServerLevel level = mock(ServerLevel.class);
+        when(player.serverLevel()).thenReturn(level);
+        Recipe<?> recipe = mock(Recipe.class);
+        ResourceLocation recipeId = new ResourceLocation("embers", "alchemy/adhesive");
+        IngredientSpec input = new IngredientSpec(Ingredient.of(Items.CLAY_BALL), 1);
+        IngredientSpec catalyst = new IngredientSpec(
+                Ingredient.of(Items.GOLD_INGOT), 1, DemandRole.CATALYST);
+        ImmutableRecipeGraph.MaterialRef output = new ImmutableRecipeGraph.MaterialRef(
+                new ResourceLocation("minecraft", "slime_ball"), "");
+        ImmutableRecipeGraph.RecipeNode node = new ImmutableRecipeGraph.RecipeNode(
+                recipeId, output, 1, List.of(new ImmutableRecipeGraph.IngredientRef(
+                List.of(new ImmutableRecipeGraph.MaterialRef(
+                        new ResourceLocation("minecraft", "clay_ball"), "")), 1)),
+                ModIds.ID_EMBERS_ALCHEMY, new ResourceLocation("embers", "alchemy"));
+        ImmutableRecipeGraph shared = new ImmutableRecipeGraph(Map.of(output, List.of(node)));
+        try (var recipes = mockStatic(CraftRecipeResolver.class);
+             var bindings = mockStatic(CraftMachineBindingSupport.class);
+             var policy = mockStatic(CraftExecutionPolicy.class);
+             var materials = mockStatic(CraftPacketUtils.class)) {
+            recipes.when(() -> CraftRecipeResolver.resolve(level, recipeId)).thenReturn(recipe);
+            bindings.when(() -> CraftMachineBindingSupport.isRecipeAvailableForPlanning(player, recipe))
+                    .thenReturn(true);
+            bindings.when(() -> CraftMachineBindingSupport.hasBindingForExecutionType(
+                    player, recipe, ModType.byId(ModIds.ID_EMBERS_ALCHEMY))).thenReturn(true);
+            policy.when(() -> CraftExecutionPolicy.requiresBoundMachine(
+                    ModType.byId(ModIds.ID_EMBERS_ALCHEMY))).thenReturn(true);
+            policy.when(() -> CraftExecutionPolicy.requiresBoundMachine(
+                    recipe, ModType.byId(ModIds.ID_EMBERS_ALCHEMY))).thenReturn(true);
+            materials.when(() -> CraftPacketUtils.extractSingleOperationRecursiveIngredientSpecs(recipe))
+                    .thenReturn(List.of(input));
+            materials.when(() -> CraftPacketUtils.applyPlanningIngredientContext(
+                    recipe, player, List.of(input))).thenReturn(List.of(input, catalyst));
+
+            ImmutableRecipeGraph scoped = GenericCraftPacket.scopedBindingAwareGraph(
+                    player, shared, recipeId).graph();
+
+            assertEquals(2, scoped.recipesById().get(recipeId).inputs().size());
+            assertEquals(DemandRole.CATALYST,
+                    scoped.recipesById().get(recipeId).inputs().get(1).role());
+            assertEquals(1, shared.recipesById().get(recipeId).inputs().size());
+        }
     }
 
     @Test

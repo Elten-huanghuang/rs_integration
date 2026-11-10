@@ -705,7 +705,7 @@ extends AbstractBatchDelegate {
         for (int i = 0; i < this.inputsSize; ++i) {
             guessedAspects.add(this.aspects.get(this.currentGuess[i]));
         }
-        this.firstAttemptMaterials = EreAlchemyMaterials.create(
+        this.firstAttemptMaterials = EreAlchemyMaterials.createInference(
                 tabletIng, guessedAspects, this.inputs);
     }
 
