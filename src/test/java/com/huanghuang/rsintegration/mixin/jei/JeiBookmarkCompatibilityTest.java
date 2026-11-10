@@ -49,8 +49,7 @@ class JeiBookmarkCompatibilityTest {
             byte[] bytes = input.readAllBytes();
             ClassShape mixin = shape(new ByteArrayInputStream(bytes));
             assertEquals(Set.of("(Lmezz/jei/gui/bookmarks/IBookmark;"
-                            + "Lorg/spongepowered/asm/mixin/injection/callback/"
-                            + "CallbackInfoReturnable;)V"),
+                            + "Lcom/llamalad7/mixinextras/injector/wrapoperation/Operation;)Z"),
                     mixin.methodDescriptors().get("rsIntegration$bookmarkRemoved"));
             // 回调体必须真的去清理递归禁用偏好，否则取消收藏后拉黑会残留
             String constants = new String(bytes, StandardCharsets.ISO_8859_1);

@@ -2,13 +2,12 @@ package com.huanghuang.rsintegration.mixin.jei;
 
 import com.huanghuang.rsintegration.crafting.plan.ClientRecipeExclusions;
 import com.huanghuang.rsintegration.feature.villager.tradelock.client.VillagerTradeLockClient;
+import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import mezz.jei.gui.bookmarks.BookmarkList;
 import mezz.jei.gui.bookmarks.IBookmark;
 import mezz.jei.gui.bookmarks.RecipeBookmark;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
  * JEI 书签列表的增删回调：村民锁交易刷新，以及递归禁用（拉黑）状态同步。
@@ -20,20 +19,22 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  */
 @Mixin(value = BookmarkList.class, remap = false)
 public abstract class BookmarkListChangeMixin {
-    @Inject(method = "add", at = @At("RETURN"), remap = false)
-    private void rsIntegration$bookmarkAdded(IBookmark bookmark,
-                                             CallbackInfoReturnable<Boolean> callback) {
-        if (Boolean.TRUE.equals(callback.getReturnValue())) VillagerTradeLockClient.markDirty();
+    @WrapMethod(method = "add(Lmezz/jei/gui/bookmarks/IBookmark;)Z")
+    private boolean rsIntegration$bookmarkAdded(IBookmark bookmark, Operation<Boolean> original) {
+        boolean added = original.call(bookmark);
+        if (added) VillagerTradeLockClient.markDirty();
+        return added;
     }
 
-    @Inject(method = "remove", at = @At("RETURN"), remap = false)
-    private void rsIntegration$bookmarkRemoved(IBookmark bookmark,
-                                               CallbackInfoReturnable<Boolean> callback) {
-        if (!Boolean.TRUE.equals(callback.getReturnValue())) return;
+    @WrapMethod(method = "remove(Lmezz/jei/gui/bookmarks/IBookmark;)Z")
+    private boolean rsIntegration$bookmarkRemoved(IBookmark bookmark, Operation<Boolean> original) {
+        boolean removed = original.call(bookmark);
+        if (!removed) return false;
         VillagerTradeLockClient.markDirty();
         // 书签被移除时同步撤销该配方的递归禁用偏好
         if (bookmark instanceof RecipeBookmark<?, ?> recipeBookmark) {
             ClientRecipeExclusions.clear(recipeBookmark.getRecipeUid());
         }
+        return true;
     }
 }

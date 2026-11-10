@@ -2,6 +2,8 @@ package com.huanghuang.rsintegration.mixin.jei;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.plan.ClientRecipeExclusions;
+import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.mojang.blaze3d.platform.InputConstants;
 import mezz.jei.api.gui.builder.ITooltipBuilder;
 import mezz.jei.api.gui.inputs.IJeiUserInput;
@@ -18,7 +20,6 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /** JEI 15.74+ 收藏按钮控制器上的 RSI 红色递归禁用三态。 */
@@ -72,9 +73,10 @@ public abstract class RecipeBookmarkButtonControllerMixin {
         ClientRecipeExclusions.clear(rsi$recipeId());
     }
 
-    @Inject(method = "getTooltips", at = @At("TAIL"))
+    @WrapMethod(method = "getTooltips")
     private void rsIntegration$extendTooltip(
-            ITooltipBuilder tooltip, CallbackInfo ci) {
+            ITooltipBuilder tooltip, Operation<Void> original) {
+        original.call(tooltip);
         ResourceLocation recipeId = rsi$recipeId();
         if (!ClientRecipeExclusions.isStableRecipeId(recipeId)) {
             tooltip.add(Component.translatable(
@@ -92,10 +94,11 @@ public abstract class RecipeBookmarkButtonControllerMixin {
         tooltip.add(Component.translatable(key));
     }
 
-    @Inject(method = "drawExtras", at = @At("TAIL"))
+    @WrapMethod(method = "drawExtras")
     private void rsIntegration$drawExclusion(
             GuiGraphics graphics, Rect2i area, int mouseX, int mouseY,
-            float partialTick, CallbackInfo ci) {
+            float partialTick, Operation<Void> original) {
+        original.call(graphics, area, mouseX, mouseY, partialTick);
         if (!bookmarked || !ClientRecipeExclusions.isExcluded(rsi$recipeId())) return;
         graphics.fill(area.getX(), area.getY(),
                 area.getX() + area.getWidth(), area.getY() + area.getHeight(),

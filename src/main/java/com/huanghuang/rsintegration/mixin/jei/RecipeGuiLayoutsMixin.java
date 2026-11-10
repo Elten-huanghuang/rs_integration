@@ -82,7 +82,6 @@ import com.huanghuang.rsintegration.mods.ironsspellbooks.IronAlchemistJeiBridge;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRSModule;
 import com.huanghuang.rsintegration.mods.wizardsreborn.WRAlchemyRecipeHandler;
 import mezz.jei.api.gui.IRecipeLayoutDrawable;
-import mezz.jei.common.util.ImmutableRect2i;
 import mezz.jei.api.gui.ingredient.IRecipeSlotView;
 import mezz.jei.api.gui.ingredient.IRecipeSlotsView;
 import mezz.jei.api.recipe.RecipeIngredientRole;
@@ -585,8 +584,9 @@ public class RecipeGuiLayoutsMixin {
         rsi$refreshButtonPositions();
     }
 
+    // 新版 JEI 更换了布局参数；回调只刷新按钮位置，无需捕获原方法参数。
     @Inject(method = "updateLayout", at = @At("RETURN"), require = 0)
-    private void rsi$updatePositionsNew(ImmutableRect2i area, int maxWidth, CallbackInfo ci) {
+    private void rsi$updatePositionsNew(CallbackInfo ci) {
         rsi$refreshButtonPositions();
     }
 

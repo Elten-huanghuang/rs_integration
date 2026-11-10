@@ -1,8 +1,8 @@
 package com.huanghuang.rsintegration.mixin.jei;
 
-import java.lang.reflect.Method;
-
 import com.huanghuang.rsintegration.client.recipe.JeiNetworkOverlayRenderer;
+import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import mezz.jei.api.constants.VanillaTypes;
 import mezz.jei.api.ingredients.ITypedIngredient;
 import mezz.jei.gui.overlay.elements.IElement;
@@ -13,9 +13,6 @@ import net.minecraft.world.item.ItemStack;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
-import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.util.List;
 
@@ -23,8 +20,11 @@ import java.util.List;
 public abstract class IngredientListRendererNetworkOverlayMixin {
     @Shadow @Final private List<IngredientListSlot> slots;
 
-    @Inject(method = "render", at = @At("TAIL"))
-    private void rsi$renderNetworkAmount(GuiGraphics graphics, CallbackInfo ci) {
+    // JEI 15.74 在原方法中复用了 this 所在的局部变量槽，TAIL 回调会触发 VerifyError。
+    // 包装原方法可保留接收者和参数，并保证数量仍在 JEI 原生绘制之后叠加。
+    @WrapMethod(method = "render")
+    private void rsi$renderNetworkAmount(GuiGraphics graphics, Operation<Void> original) {
+        original.call(graphics);
         if (!JeiNetworkOverlayRenderer.shouldRender()) return;
         for (IngredientListSlot slot : slots) {
             if (slot.isBlocked() || slot.getOptionalElement().isEmpty()) continue;

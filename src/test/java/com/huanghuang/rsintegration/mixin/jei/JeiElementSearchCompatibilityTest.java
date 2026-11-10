@@ -10,6 +10,7 @@ import org.objectweb.asm.Opcodes;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -99,17 +100,21 @@ class JeiElementSearchCompatibilityTest {
     }
 
     private static List<Path> jeiJars() throws Exception {
+        List<Path> jars = new ArrayList<>();
         Path libs = Path.of("libs");
-        if (!Files.isDirectory(libs)) return List.of();
-        try (Stream<Path> entries = Files.list(libs)) {
-            return entries.filter(Files::isRegularFile)
-                    .filter(path -> {
-                        String name = path.getFileName().toString();
-                        return name.contains("jei-1.20.1-forge-") && name.endsWith(".jar");
-                    })
-                    .sorted()
-                    .toList();
+        if (Files.isDirectory(libs)) {
+            try (Stream<Path> entries = Files.list(libs)) {
+                entries.filter(Files::isRegularFile)
+                        .filter(path -> {
+                            String name = path.getFileName().toString();
+                            return name.contains("jei-1.20.1-forge-") && name.endsWith(".jar");
+                        })
+                        .forEach(jars::add);
+            }
         }
+        String configured = System.getProperty("rsintegration.jei.compatibilityJar");
+        if (configured != null && !configured.isBlank()) jars.add(Path.of(configured));
+        return jars.stream().distinct().sorted().toList();
     }
 
     private static ClassShape mixinShape(Class<?> mixinClass) throws Exception {

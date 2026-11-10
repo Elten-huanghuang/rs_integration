@@ -292,15 +292,15 @@ dependencies {
 
     // MixinExtras — common API for @WrapOperation etc. (compile + AP).
     // The annotation processor lives in mixinextras-common.
-    compileOnly(annotationProcessor("io.github.llamalad7:mixinextras-common:0.3.6"))
+    compileOnly(annotationProcessor("io.github.llamalad7:mixinextras-common:0.4.1"))
 
     // Jar-in-Jar: ForgeGradle nests mixinextras-forge.jar inside
     // META-INF/jarjar/ so Forge can do version arbitration at launch.
     // Avoids JPMS split-package conflicts with other mods that also
     // bundle MixinExtras.  Never shade or shadow — that extracts classes
     // into the root and triggers ResolutionException.
-    implementation(jarJar("io.github.llamalad7:mixinextras-forge:0.3.6")) {
-        jarJar.ranged(it, "[0.3.6,)")
+    implementation(jarJar("io.github.llamalad7:mixinextras-forge:0.4.1")) {
+        jarJar.ranged(it, "[0.4.1,)")
     }
 
     // ── Unit tests ──────────────────────────────────────────────
@@ -311,7 +311,7 @@ dependencies {
     // This does not bootstrap the mod entry point or a running Forge server.
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
     testImplementation 'org.mockito:mockito-core:5.11.0'
-    testImplementation 'io.github.llamalad7:mixinextras-common:0.3.6'
+    testImplementation 'io.github.llamalad7:mixinextras-common:0.4.1'
     testImplementation fg.deobf("local:refinedstorage:1.12.4")
     // 验证 BD 原生 Key、流体库存以及终端交互，不启动完整游戏。
     testImplementation fg.deobf("local:beyonddimensions:1.20.1-forge-0.7.30")
@@ -342,6 +342,12 @@ dependencies {
     // 混合终端与配方预览测试需要编译、加载 JEI 接口。
     testImplementation "mezz.jei:jei-${minecraft_version}-forge-api:${jei_version}"
     testImplementation "mezz.jei:jei-${minecraft_version}-common-api:${jei_version}"
+    // 书签回归测试需要真实的 JEI 实现类型，仅 API 不包含 IBookmark。
+    if (file("libs/jei-${minecraft_version}-forge-${jei_version}.jar").exists()) {
+        testImplementation fg.deobf("local:jei-${minecraft_version}-forge:${jei_version}")
+    } else {
+        testImplementation fg.deobf("mezz.jei:jei-${minecraft_version}-forge:${jei_version}")
+    }
 
     benchmarkImplementation 'org.openjdk.jmh:jmh-core:1.37'
     benchmarkAnnotationProcessor 'org.openjdk.jmh:jmh-generator-annprocess:1.37'
@@ -577,7 +583,7 @@ tasks.register('verifyReleaseJar') {
                     'META-INF/THIRD_PARTY_NOTICES_RS_INTEGRATION.md',
                     'META-INF/licenses/MIT-MixinExtras.txt',
                     'META-INF/jarjar/metadata.json',
-                    'META-INF/jarjar/mixinextras-forge-0.3.6.jar',
+                    'META-INF/jarjar/mixinextras-forge-0.4.1.jar',
                     'com/huanghuang/rsintegration/mods/emi/RSEmiPlugin.class',
                     'com/huanghuang/rsintegration/mods/jei/RSJeiPlugin.class',
                     'com/huanghuang/rsintegration/mods/historystages/HistoryStagesCompat.class',

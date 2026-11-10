@@ -8,7 +8,7 @@ RS Integration 不通过单一项目许可证重新授权第三方组件。第�
 
 | 组件 | 版本 | 许可证 | 许可文件 |
 |---|---|---|---|
-| `io.github.llamalad7:mixinextras-forge` | `0.3.6` | MIT | `META-INF/licenses/MIT-MixinExtras.txt` |
+| `io.github.llamalad7:mixinextras-forge` | `0.4.1` | MIT | `META-INF/licenses/MIT-MixinExtras.txt` |
 
 `verifyReleaseJar` 会拒绝新增未登记的 jar-in-jar 依赖，以及打包进主 jar 的非
 `com/huanghuang/rsintegration/` 类。
