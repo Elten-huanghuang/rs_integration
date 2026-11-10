@@ -60,9 +60,9 @@ public final class EreAlchemyRecipeHandler extends AbstractRecipeHandler {
 
         // The alchemy tablet is a real consumed/reserved machine input. The
         // execution delegate extracts it into the tablet inventory, so it must
-        // also be present in the recipe tree and material bill. Aspect catalysts
-        // remain omitted here because the Embers plan layout renders them
-        // separately and they are recycled across repeat batches.
+        // also be present in the recipe tree and material bill. Raw aspect
+        // entries are alternatives, and the selected aspect per pedestal is
+        // seed-dependent; the execution delegate adds those exact catalysts.
         Reflect.findField(recipe.getClass(), "tablet").ifPresent(f -> {
             if (!Ingredient.class.isAssignableFrom(f.getType())) return;
             f.setAccessible(true);
@@ -74,7 +74,9 @@ public final class EreAlchemyRecipeHandler extends AbstractRecipeHandler {
             } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI] Reflection probe failed", e); }
         });
 
-        // inputs — ArrayList<Ingredient> (material items, N pedestals)
+        // The exact aspect for each pedestal is seed-dependent and is resolved
+        // by EreAlchemyBatchDelegate. Keep recipe projection to stable inputs;
+        // execution adds the selected aspects as reusable catalyst specs.
         Reflect.findField(recipe.getClass(), "inputs").ifPresent(f -> {
             if (!List.class.isAssignableFrom(f.getType())) return;
             f.setAccessible(true);

@@ -333,9 +333,8 @@ public interface IBatchDelegate {
      * should allocate via MaterialBroker checkout. Defaults to the full list
      * for delegates that do not override it.
      * <p>
-     * Embers alchemy returns only tablet + inputs here; the missing aspects
-     * are returned by {@link #getSupplementalSpecs()} and reserved directly
-     * from the RS network without going through the graph.
+     * The graph reservation view may differ from the per-operation material
+     * layout when reusable inputs are reserved once per worker.
      */
     @Nonnull
     default List<IngredientSpec> getGraphSpecs() {
@@ -345,8 +344,7 @@ public interface IBatchDelegate {
 
     /**
      * Materials that bypass the graph planner and are reserved directly from
-     * the RS network after (or alongside) graph reservation. Used by Embers
-     * alchemy for aspect catalysts, which the planner deliberately omits.
+     * the RS network after (or alongside) graph reservation.
      * <p>
      * Return {@code Collections.emptyList()} when there are no supplemental
      * materials (the default). When non-empty, {@code AsyncCraftChain} will

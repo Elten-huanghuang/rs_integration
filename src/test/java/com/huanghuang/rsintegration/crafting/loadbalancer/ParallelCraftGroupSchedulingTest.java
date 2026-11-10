@@ -171,6 +171,27 @@ class ParallelCraftGroupSchedulingTest extends BootstrapTest {
     }
 
     @Test
+    void oneAlchemyWorkerReusesAspectCatalystsAcrossTwoOperations() {
+        IngredientSpec copperAspect = new IngredientSpec(
+                Ingredient.of(Items.COPPER_INGOT), 1, DemandRole.CATALYST);
+        IngredientSpec ironAspect = new IngredientSpec(
+                Ingredient.of(Items.IRON_INGOT), 1, DemandRole.CATALYST);
+        IngredientSpec input = new IngredientSpec(Ingredient.of(Items.CLAY_BALL), 1);
+        List<IngredientSpec> operationSpecs = List.of(
+                copperAspect, copperAspect, ironAspect, ironAspect, input);
+
+        List<IngredientSpec> reservation = ParallelCraftGroup.graphReservationSpecs(
+                operationSpecs, 2, 1);
+
+        assertEquals(4, reservation.stream()
+                .filter(spec -> spec.role() == DemandRole.CATALYST)
+                .mapToInt(IngredientSpec::count).sum());
+        assertEquals(2, reservation.stream()
+                .filter(spec -> spec.role() == DemandRole.CONSUMED)
+                .mapToInt(IngredientSpec::count).sum());
+    }
+
+    @Test
     void repeatedSpecsKeepOperationMajorOrderWithoutMaterializingAnArray() {
         IngredientSpec bowl = new IngredientSpec(Ingredient.of(Items.BOWL), 1);
         IngredientSpec sugar = new IngredientSpec(Ingredient.of(Items.SUGAR), 1);

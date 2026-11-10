@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import com.rekindled.embers.recipe.AlchemyRecipe;
 import net.minecraft.core.RegistryAccess;
@@ -70,5 +71,20 @@ class EreAlchemyRecipeHandlerTest extends BootstrapTest {
         List<IngredientSpec> specs = handler.getIngredients(recipe);
         assertNotNull(specs);
         assertEquals(5, specs.size());
+    }
+
+    @Test
+    void executionMaterialsDeclareSelectedAspectsAsReusableCatalysts() {
+        EreAlchemyMaterials materials = EreAlchemyMaterials.create(
+                Ingredient.of(Items.COPPER_INGOT),
+                List.of(Ingredient.of(Items.DIAMOND), Ingredient.of(Items.GOLD_INGOT)),
+                List.of(Ingredient.of(Items.CLAY_BALL), Ingredient.of(Items.REDSTONE)));
+
+        assertEquals(5, materials.allSpecs().size());
+        assertTrue(materials.supplementalSpecs().isEmpty());
+        assertEquals(DemandRole.CATALYST, materials.allSpecs().get(1).role());
+        assertEquals(DemandRole.CONSUMED, materials.allSpecs().get(2).role());
+        assertEquals(DemandRole.CATALYST, materials.allSpecs().get(3).role());
+        assertEquals(DemandRole.CONSUMED, materials.allSpecs().get(4).role());
     }
 }
