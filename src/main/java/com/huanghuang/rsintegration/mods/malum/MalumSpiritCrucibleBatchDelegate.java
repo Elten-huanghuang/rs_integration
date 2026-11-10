@@ -1057,7 +1057,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
 
     @Override
     public void onBatchFinished(@NotNull ServerPlayer player) {
-        clearSpiritSlots();
+        clearSpiritSlots(player);
         if (!hasReusableCatalystInput()) {
             releaseCatalystSlot(player);
         }
@@ -1218,12 +1218,13 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         if (!catalystStack.isEmpty()) setSlot(catalystHandler, 0, catalystStack);
     }
 
-    private void clearSpiritSlots() {
+    private void clearSpiritSlots(@Nullable ServerPlayer returnPlayer) {
         if (invSpirits != null) {
             for (int i = 0; i < invSpirits.getSlots(); i++) {
                 ItemStack s = invSpirits.getStackInSlot(i);
-                if (!s.isEmpty()) {
-                    if (!usingSharedLedger) returnCrucibleItem(s);
+                // 增产可能使预载批次提前达标，共享账本下也要返还尚未消耗的精魂。
+                // 无法交付时保留槽位实物，避免离线清理直接丢失材料。
+                if (!s.isEmpty() && tryReturnCrucibleItem(s.copy(), returnPlayer)) {
                     setSlot(invSpirits, i, ItemStack.EMPTY);
                 }
             }
