@@ -843,8 +843,8 @@ public final class RSIntegrationConfig {
                         "允许使用点餐终端查看未吃过的食物，并通过 RS Integration 自动下单。")
                 .define("enableFoodOrder", true);
         FOOD_ORDER_MAX_LIST_ENTRIES = c
-                .comment("列表条目上限",
-                        "一次最多下发给客户端的食物数量，避免大列表造成卡顿。")
+                .comment("列表单包条目上限",
+                        "每个同步包最多携带的食物数量；完整目录分包发送，不限制可搜索食物总数。")
                 .defineInRange("maxListEntries", 800, 10, 5000);
         FOOD_ORDER_MAX_RECIPES_PER_FOOD = c
                 .comment("每种食物尝试的配方数",
@@ -868,7 +868,7 @@ public final class RSIntegrationConfig {
                 .define("skipEaten", true);
         FOOD_ORDER_LIST_BUDGET_MICROS = c
                 .comment("列表判定预算",
-                        "单次构建列表允许消耗的微秒数，超出后返回部分结果，剩余条目下次刷新再算。")
+                        "每 tick 判定食物状态的微秒预算，超出后自动在后续 tick 继续；完整目录始终可搜索。")
                 .defineInRange("listBudgetMicros", 10000, 2000, 50000);
         FOOD_ORDER_SESSION_TIMEOUT_TICKS = c
                 .comment("下单会话超时",

@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.feature.foodorder.network;
 
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.feature.foodorder.FoodOrderClient;
 import com.huanghuang.rsintegration.feature.foodorder.FoodOrderEntry;
 import com.huanghuang.rsintegration.feature.foodorder.FoodOrderKind;
@@ -23,6 +24,7 @@ import java.util.function.Supplier;
 public final class FoodOrderListPacket {
 
     private static final int MAX_ENTRIES = 5000;
+    public static final int MAX_TOTAL_ENTRIES = 1_000_000;
     private static final int MAX_TEXT = 32767;
 
     private final long epoch;
@@ -32,11 +34,27 @@ public final class FoodOrderListPacket {
     private final int totalOrderable;
     private final boolean indexing;
     private final boolean partial;
+    private final int offset;
+    private final int totalEntries;
 
     public FoodOrderListPacket(long epoch, List<FoodOrderEntry> entries,
                                Component sources, int totalUneaten,
                                int totalOrderable, boolean indexing,
                                boolean partial) {
+        this(epoch, entries, sources, totalUneaten, totalOrderable, indexing, partial,
+                0, entries == null ? 0 : entries.size());
+    }
+
+    private FoodOrderListPacket(long epoch, List<FoodOrderEntry> entries,
+                                Component sources, int totalUneaten,
+                                int totalOrderable, boolean indexing,
+                                boolean partial, int offset, int totalEntries) {
+        int size = entries == null ? 0 : entries.size();
+        if (size > MAX_ENTRIES || totalEntries < 0 || totalEntries > MAX_TOTAL_ENTRIES
+                || offset < 0 || offset > totalEntries || size > totalEntries - offset
+                || (size == 0 && totalEntries != 0)) {
+            throw new IllegalArgumentException("点餐列表分片范围无效");
+        }
         this.epoch = epoch;
         this.entries = entries == null ? List.of() : List.copyOf(entries);
         this.sources = sources == null ? Component.empty() : sources;
@@ -44,6 +62,8 @@ public final class FoodOrderListPacket {
         this.totalOrderable = Math.max(0, totalOrderable);
         this.indexing = indexing;
         this.partial = partial;
+        this.offset = offset;
+        this.totalEntries = totalEntries;
     }
 
     public static FoodOrderListPacket from(FoodOrderSnapshot snapshot) {
@@ -57,9 +77,24 @@ public final class FoodOrderListPacket {
         if (player == null || player.hasDisconnected()) {
             return;
         }
-        NetworkHandler.CHANNEL.send(
-                PacketDistributor.PLAYER.with(() -> player),
-                FoodOrderListPacket.from(snapshot));
+        for (FoodOrderListPacket packet : split(snapshot,
+                RSIntegrationConfig.FOOD_ORDER_MAX_LIST_ENTRIES.get())) {
+            NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), packet);
+        }
+    }
+
+    /** 旧列表上限现在只控制单包大小，不再丢弃目录尾部。 */
+    public static List<FoodOrderListPacket> split(FoodOrderSnapshot snapshot, int batchSize) {
+        int size = snapshot.entries().size();
+        int limit = Math.max(1, Math.min(batchSize, MAX_ENTRIES));
+        List<FoodOrderListPacket> packets = new ArrayList<>();
+        for (int offset = 0; offset < size || (offset == 0 && size == 0); offset += limit) {
+            packets.add(new FoodOrderListPacket(snapshot.epoch(),
+                    snapshot.entries().subList(offset, Math.min(size, offset + limit)),
+                    snapshot.sources(), snapshot.totalUneaten(), snapshot.totalOrderable(),
+                    snapshot.indexing(), snapshot.partial(), offset, size));
+        }
+        return packets;
     }
 
     public static void encode(FoodOrderListPacket packet, FriendlyByteBuf buffer) {
@@ -79,11 +114,17 @@ public final class FoodOrderListPacket {
         buffer.writeVarInt(packet.totalOrderable);
         buffer.writeBoolean(packet.indexing);
         buffer.writeBoolean(packet.partial);
+        buffer.writeVarInt(packet.offset);
+        buffer.writeVarInt(packet.totalEntries);
     }
 
     public static FoodOrderListPacket decode(FriendlyByteBuf buffer) {
         long epoch = buffer.readVarLong();
-        int count = Math.min(buffer.readVarInt(), MAX_ENTRIES);
+        int count = buffer.readVarInt();
+        if (count < 0 || count > MAX_ENTRIES) {
+            // 必须拒绝无效长度，不能少读条目后把剩余内容误当成元数据。
+            throw new IllegalArgumentException("点餐列表分片条目数无效：" + count);
+        }
         List<FoodOrderEntry> entries = new ArrayList<>(count);
         for (int index = 0; index < count; index++) {
             var stack = buffer.readItem();
@@ -98,8 +139,10 @@ public final class FoodOrderListPacket {
         int totalOrderable = buffer.readVarInt();
         boolean indexing = buffer.readBoolean();
         boolean partial = buffer.readBoolean();
+        int offset = buffer.readVarInt();
+        int totalEntries = buffer.readVarInt();
         return new FoodOrderListPacket(epoch, entries, sources,
-                totalUneaten, totalOrderable, indexing, partial);
+                totalUneaten, totalOrderable, indexing, partial, offset, totalEntries);
     }
 
     public static void handle(FoodOrderListPacket packet,
@@ -156,5 +199,13 @@ public final class FoodOrderListPacket {
 
     public boolean partial() {
         return partial;
+    }
+
+    public int offset() {
+        return offset;
+    }
+
+    public int totalEntries() {
+        return totalEntries;
     }
 }

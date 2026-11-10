@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.feature.foodorder.client;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.feature.foodorder.FoodOrderClient;
 import com.huanghuang.rsintegration.feature.foodorder.FoodOrderEntry;
+import com.huanghuang.rsintegration.feature.foodorder.FoodOrderSnapshot;
 import com.huanghuang.rsintegration.feature.foodorder.network.FoodOrderListPacket;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
@@ -12,6 +13,7 @@ import net.minecraft.client.gui.screens.inventory.tooltip.ClientTooltipComponent
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.util.FormattedCharSequence;
+import net.minecraft.world.item.Item;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.fml.loading.FMLPaths;
@@ -39,7 +41,8 @@ public final class FoodOrderScreen extends Screen {
 
     private final List<FoodOrderEntry> entries = new ArrayList<>();
     private final List<FoodOrderEntry> shown = new ArrayList<>();
-    private final Map<FoodOrderEntry, FoodOrderSearchIndex> searchIndex = new IdentityHashMap<>();
+    private final Map<Item, FoodOrderSearchIndex> searchIndex = new IdentityHashMap<>();
+    private final FoodOrderListAccumulator listAccumulator = new FoodOrderListAccumulator();
     private final FoodOrderFavorites favorites = new FoodOrderFavorites();
 
     private EditBox searchBox;
@@ -150,27 +153,37 @@ public final class FoodOrderScreen extends Screen {
     }
 
     public void setData(FoodOrderListPacket packet) {
-        entries.clear();
-        entries.addAll(packet.entries());
-        searchIndex.clear();
-        for (FoodOrderEntry entry : entries) {
-            var key = ForgeRegistries.ITEMS.getKey(entry.stack().getItem());
-            searchIndex.put(entry, new FoodOrderSearchIndex(
-                    entry.stack().getHoverName().getString(), key == null ? "" : key.toString()));
+        FoodOrderSnapshot snapshot = listAccumulator.accept(packet);
+        if (snapshot == null) {
+            return;
         }
-        sources = packet.sources();
-        totalUneaten = packet.totalUneaten();
-        totalOrderable = packet.totalOrderable();
-        indexing = packet.indexing();
-        partial = packet.partial();
-        epoch = packet.epoch();
+        entries.clear();
+        entries.addAll(snapshot.entries());
+        for (FoodOrderEntry entry : entries) {
+            Item item = entry.stack().getItem();
+            // 状态更新只替换条目，复用名称和拼音索引，避免大目录每次更新都重新转写。
+            searchIndex.computeIfAbsent(item, ignored -> {
+                var key = ForgeRegistries.ITEMS.getKey(item);
+                return new FoodOrderSearchIndex(entry.stack().getHoverName().getString(),
+                        key == null ? "" : key.toString());
+            });
+        }
+        sources = snapshot.sources();
+        totalUneaten = snapshot.totalUneaten();
+        totalOrderable = snapshot.totalOrderable();
+        indexing = snapshot.indexing();
+        partial = snapshot.partial();
+        epoch = snapshot.epoch();
         receivedAt = System.currentTimeMillis();
         loading = false;
-        selected = -1;
-        rebuild();
+        rebuild(true);
     }
 
     private void rebuild() {
+        rebuild(false);
+    }
+
+    private void rebuild(boolean preservePosition) {
         List<String> terms = FoodOrderSearchIndex.queryTerms(searchBox == null ? "" : searchBox.getValue());
         FoodOrderEntry previousSelection = selected >= 0 && selected < shown.size()
                 ? shown.get(selected) : null;
@@ -182,7 +195,7 @@ public final class FoodOrderScreen extends Screen {
             if (viewMode == FoodOrderViewMode.FAVORITES && !isFavorite(entry)) {
                 continue;
             }
-            if (!terms.isEmpty() && !searchIndex.get(entry).matches(terms)) {
+            if (!terms.isEmpty() && !searchIndex.get(entry.stack().getItem()).matches(terms)) {
                 continue;
             }
             shown.add(entry);
@@ -203,8 +216,16 @@ public final class FoodOrderScreen extends Screen {
             shown.sort(favoritesFirst);
         }
         // 筛选后按条目保留选择，不能让原行号指向另一道菜。
-        selected = previousSelection == null ? -1 : shown.indexOf(previousSelection);
-        scrollRows = 0;
+        selected = -1;
+        if (previousSelection != null) {
+            for (int index = 0; index < shown.size(); index++) {
+                if (shown.get(index).stack().getItem() == previousSelection.stack().getItem()) {
+                    selected = index;
+                    break;
+                }
+            }
+        }
+        scrollRows = preservePosition ? Math.min(scrollRows, maxScroll()) : 0;
         lastClicked = -1;
         lastClickAt = 0L;
         detailEntry = null;

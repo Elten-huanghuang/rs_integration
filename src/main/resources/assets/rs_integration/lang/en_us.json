@@ -1615,7 +1615,7 @@
   "rsi.food_order.timeout": "Loading timed out, press refresh",
   "rsi.food_order.empty": "No matching food",
   "rsi.food_order.detail_hint": "Select a food on the left",
-  "rsi.food_order.partial": "Only part of the list is shown, refresh to continue",
+  "rsi.food_order.partial": "Full catalog loaded; food availability is updating automatically",
   "rsi.food_order.indexing": "Building recipe index, please wait",
   "rsi.food_order.sources": "Materials: %s · API %s",
   "rsi.food_order.source.inventory": "inventory",

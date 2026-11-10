@@ -1615,7 +1615,7 @@
   "rsi.food_order.timeout": "列表加载超时，请点刷新",
   "rsi.food_order.empty": "没有符合条件的食物",
   "rsi.food_order.detail_hint": "选择左侧食物查看详情",
-  "rsi.food_order.partial": "列表只显示了一部分，请刷新补齐",
+  "rsi.food_order.partial": "完整目录已载入，食物状态正在自动更新",
   "rsi.food_order.indexing": "配方索引构建中，请稍候",
   "rsi.food_order.sources": "材料来源：%s · API %s",
   "rsi.food_order.source.inventory": "背包",
