@@ -38,14 +38,23 @@ libs/
 # Local agent tooling state
 .agent/
 .agents/
+# 本地开发约束文件，保留在工作区而不提交
+/AGENTS.md
+# 本机依赖版本与离线打包快捷入口
+/build-release.bat
 
-# 文档目录：仅更新公告、API 文档和 Goety 兼容说明允许提交
+# 文档目录：保留更新公告、API 文档、配置示例和 Goety 兼容说明
 /docs/*
 !/docs/announcements/
 !/docs/announcements/**
 !/docs/api/
 !/docs/api/**
+!/docs/config/
+!/docs/config/**
 !/docs/GOETY_COMPATIBILITY.md
+
+# 本地分析报告不入库，即使以后调整上面的文档白名单也继续忽略
+/docs/report/
 
 # 公告 TXT 版本仅保留在本地
 /docs/announcements/*.txt
