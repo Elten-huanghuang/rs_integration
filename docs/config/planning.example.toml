@@ -1,0 +1,38 @@
+# 将需要调整的键合并到当前世界的 serverconfig/rs_integration/server.toml。
+# 这是配置示例，不会自动覆盖已有世界配置。以下值与程序默认值相同。
+[autoCrafting]
+# 成功计划允许的配方步骤数；需要万步计划时可设为 16384。
+# 范围沿用配方图协议：256～65536，并同时受下面的图节点上限约束。
+craftingMaxSteps = 4096
+craftingMaxGraphNodes = 16384
+
+# 每台机器每次投料的可选加工次数上限，不限制整单数量。
+# 0 跟随机器原生容量；正数用于手动限制单批。材料变体边界和数量范围仍会缩小批次。
+craftingExecutionWindow = 0
+
+# 主求解预算。超过预算返回未知/超限，不应被解释为缺料。
+craftingPureSearchMaxStates = 65536
+craftingPureSearchMaxMemoizedFailures = 8192
+craftingPurePlanningTimeoutMs = 1500
+
+# 已打开的图预览：订阅网络变化，只更新材料数量和缺口，保留路线。
+craftingPreviewLiveInventory = true
+# 背包对账、连接/权限检查、无原生通知后端的轮询间隔（tick）。
+# 原生网络变化在 tick 末合并处理，不受这个间隔延迟。
+craftingPreviewInventoryPollTicks = 20
+# 尚未打开或已经关闭的预览在服务端保留的时间（tick），不限制正在查看的窗口。
+craftingPreviewInventoryPendingTicks = 1200
+
+# 关闭上述增量功能，或旧入口没有材料分配图时，发布前因库存变化自动重算的次数。
+# 0 为关闭自动重算；耗尽次数后显示最近结果与提示，执行时仍严格复验。
+craftingPreviewInventoryRefreshes = 1
+
+# 下列三项只影响辅助估算与失败说明，不限制成功配方链的深度。
+# 辅助估算仍有递归，深度和探测数允许范围为 1～512。
+craftingPureAuxiliaryMaxDepth = 512
+craftingPureSeedProbeMaxNodes = 64
+# 超时后补充诊断的操作数，范围 1～2147483647。
+craftingPureDiagnosticMaxOperations = 32768
+
+# 不存在“达到 32 个节点才聚合”的开关或阈值。
+# 生产者唯一、材料精确、无循环且可证明安全时，按总需求聚合；其他情况使用通用搜索。

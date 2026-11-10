@@ -65,7 +65,7 @@ class PureRecipePlannerPropertyTest {
     }
 
     @Test
-    void veryDeepAcyclicChainStopsBeforeOverflowingTheJavaStack() {
+    void veryDeepAcyclicChainCompletesWithoutUsingTheJavaStack() {
         int length = 1_200;
         List<MaterialRef> materials = new ArrayList<>();
         Map<MaterialRef, List<RecipeNode>> recipes = new LinkedHashMap<>();
@@ -81,8 +81,8 @@ class PureRecipePlannerPropertyTest {
                 List.of(new IngredientRef(List.of(materials.get(length - 1)), 1)),
                 4_096, 100_000, 8_192);
 
-        assertEquals(PureRecipePlanner.Status.SEARCH_LIMIT, result.status());
-        assertTrue(result.steps().isEmpty());
+        assertEquals(PureRecipePlanner.Status.SUCCESS, result.status());
+        assertEquals(length - 1, result.steps().size());
     }
 
     private static GeneratedCase generate(Random random, int caseIndex) {

@@ -123,6 +123,8 @@ public final class RSIntegrationConfig {
     public static final int DEFAULT_CRAFTING_RESOLVE_TIMEOUT_MS = 2_000;
     public static final int DEFAULT_CRAFTING_MAX_ENSURE_CALLS = 10_000;
     public static final int DEFAULT_CRAFTING_VANILLA_OPERATIONS_PER_TICK = 8;
+    /** 限制单台机器一次实际展开的操作数，与订单总量、机器数量无关。 */
+    public static final int DEFAULT_CRAFTING_EXECUTION_WINDOW = 0;
     public static final int DEFAULT_CRAFTING_GLOBAL_VANILLA_OPERATIONS_PER_TICK = 24;
     public static final int DEFAULT_CRAFTING_STABLE_BATCH_RETRY_SECONDS = 5;
     public static final int DEFAULT_CRAFTING_SERVER_TICK_BUDGET_MS = 8;
@@ -395,6 +397,13 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue CRAFTING_PURE_SEARCH_MAX_MEMOIZED_FAILURES;
     public static ForgeConfigSpec.IntValue CRAFTING_PURE_DEMAND_MAX_NODES;
     public static ForgeConfigSpec.IntValue CRAFTING_PURE_PLANNING_TIMEOUT_MS;
+    public static ForgeConfigSpec.IntValue CRAFTING_PURE_AUXILIARY_MAX_DEPTH;
+    public static ForgeConfigSpec.IntValue CRAFTING_PURE_SEED_PROBE_MAX_NODES;
+    public static ForgeConfigSpec.IntValue CRAFTING_PURE_DIAGNOSTIC_MAX_OPERATIONS;
+    public static ForgeConfigSpec.IntValue CRAFTING_PREVIEW_INVENTORY_REFRESHES;
+    public static ForgeConfigSpec.BooleanValue CRAFTING_PREVIEW_LIVE_INVENTORY;
+    public static ForgeConfigSpec.IntValue CRAFTING_PREVIEW_INVENTORY_POLL_TICKS;
+    public static ForgeConfigSpec.IntValue CRAFTING_PREVIEW_INVENTORY_PENDING_TICKS;
     public static ForgeConfigSpec.IntValue CRAFTING_TYPED_PREVIEW_TIMEOUT_MS;
     public static ForgeConfigSpec.IntValue CRAFTING_TYPED_PREVIEW_QUEUE_CAPACITY;
     public static ForgeConfigSpec.IntValue CRAFTING_TYPED_PREVIEW_ADMISSIONS_PER_TICK;
@@ -407,6 +416,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue CRAFTING_RESOLVE_TIMEOUT_MS;
     public static ForgeConfigSpec.IntValue CRAFTING_MAX_ENSURE_CALLS;
     public static ForgeConfigSpec.IntValue CRAFTING_VANILLA_OPERATIONS_PER_TICK;
+    public static ForgeConfigSpec.IntValue CRAFTING_EXECUTION_WINDOW;
     public static ForgeConfigSpec.IntValue CRAFTING_GLOBAL_VANILLA_OPERATIONS_PER_TICK;
     public static ForgeConfigSpec.IntValue CRAFTING_STABLE_BATCH_RETRY_SECONDS;
     public static ForgeConfigSpec.IntValue CRAFTING_SERVER_TICK_BUDGET_MS;
@@ -1210,8 +1220,10 @@ public final class RSIntegrationConfig {
                 .defineInRange("craftingMaxDepth", 16, 4, 32);
         CRAFTING_MAX_STEPS = s
                 .comment("单次计划步骤上限",
-                        "限制单个计划的总步骤，避免过大任务耗尽资源；上限与合成进度网络协议一致。")
-                .defineInRange("craftingMaxSteps", 4096, 256, 4096);
+                        "限制单个计划的总步骤；可配置到配方图协议允许的节点上限。",
+                        "超过 4096 步的计划会截取进度明细，但总进度仍显示完整数量；大图同时受 craftingMaxGraphNodes 限制。")
+                .defineInRange("craftingMaxSteps", 4096,
+                        MIN_CRAFTING_MAX_GRAPH_NODES, MAX_CRAFTING_MAX_GRAPH_NODES);
         CRAFTING_MAX_GRAPH_NODES = s
                 .comment("单次计划配方图节点上限",
                         "限制网络响应中的配方图节点数；大型压缩/递归整合包可提高，"
@@ -1261,6 +1273,41 @@ public final class RSIntegrationConfig {
                         DEFAULT_CRAFTING_PURE_PLANNING_TIMEOUT_MS,
                         CraftingPlanningConfig.MIN_PURE_TIMEOUT_MS,
                         CraftingPlanningConfig.MAX_PURE_TIMEOUT_MS);
+        CRAFTING_PURE_AUXILIARY_MAX_DEPTH = s
+                .comment("配方排序估算和失败诊断的辅助展开深度",
+                        "不限制主求解器的配方链长度。降低可减少辅助开销，但排序和缺料说明可能不完整；",
+                        "辅助过程仍使用递归，因此最高保持原有栈保护范围。")
+                .defineInRange("craftingPureAuxiliaryMaxDepth", PurePlannerLimits.DEFAULT_AUXILIARY_MAX_DEPTH,
+                        1, PurePlannerLimits.MAX_RECURSIVE_AUXILIARY_DEPTH);
+        CRAFTING_PURE_SEED_PROBE_MAX_NODES = s
+                .comment("候选配方的局部原料可达性探测节点预算",
+                        "仅用于候选排序和筛选；预算耗尽视为未知，交给主求解器继续验证。")
+                .defineInRange("craftingPureSeedProbeMaxNodes", PurePlannerLimits.DEFAULT_SEED_PROBE_MAX_NODES,
+                        1, PurePlannerLimits.MAX_RECURSIVE_AUXILIARY_DEPTH);
+        CRAFTING_PURE_DIAGNOSTIC_MAX_OPERATIONS = s
+                .comment("主求解超时后补充缺料说明的操作预算",
+                        "仅限制诊断展开工作量，不会把超时改成缺料，也不限制成功计划规模。")
+                .defineInRange("craftingPureDiagnosticMaxOperations", PurePlannerLimits.DEFAULT_DIAGNOSTIC_MAX_OPERATIONS,
+                        1, Integer.MAX_VALUE);
+        CRAFTING_PREVIEW_INVENTORY_REFRESHES = s
+                .comment("同一次预览因相关库存变化而自动重算的次数",
+                        "所需材料被取走，或缺料期间补入原料/中间产物时，读取新库存重算；无关物品进出不触发。",
+                        "达到次数后仍显示最近一次完整结果并提示库存变化，不反复取消；确认合成时始终严格复验材料。",
+                        "0 表示只显示本次检查结果；默认 1 次，重算仍受现有规划超时和队列预算限制。")
+                .defineInRange("craftingPreviewInventoryRefreshes", 1, 0, Integer.MAX_VALUE);
+        CRAFTING_PREVIEW_LIVE_INVENTORY = s
+                .comment("打开合成预览时订阅相关库存，增量更新材料提示，保持当前路线。",
+                        "有材料分配图的预览不再因库存变化在发布前重复规划；无图旧入口仍使用原刷新配置。",
+                        "增量提示不预留材料，执行前仍严格检查和提取；改变路线需要重新规划。")
+                .define("craftingPreviewLiveInventory", true);
+        CRAFTING_PREVIEW_INVENTORY_POLL_TICKS = s
+                .comment("预览订阅的连接/权限检查、背包对账及不支持通知的后端轮询间隔（tick）。",
+                        "原生网络数量通知在 tick 末合并发送，不受此间隔延迟。默认 20 tick（正常 TPS 下 1 秒）。")
+                .defineInRange("craftingPreviewInventoryPollTicks", 20, 1, Integer.MAX_VALUE);
+        CRAFTING_PREVIEW_INVENTORY_PENDING_TICKS = s
+                .comment("尚未打开或已关闭的预览保留时间（tick）；过期释放服务端展示数据。",
+                        "默认 1200 tick（正常 TPS 下 60 秒），不限制正在查看的预览。")
+                .defineInRange("craftingPreviewInventoryPendingTicks", 1200, 1, Integer.MAX_VALUE);
         CRAFTING_TYPED_PREVIEW_TIMEOUT_MS = s
                 .comment("类型化预览执行预算（毫秒）",
                         "服务端线程解析预览的硬性时间预算；超时终止预览，不当作缺料。")
@@ -1325,6 +1372,10 @@ public final class RSIntegrationConfig {
                         "限制单个计划的递归材料解析次数；与解析超时共同防止失控递归。")
                 .defineInRange("craftingMaxEnsureCalls",
                         DEFAULT_CRAFTING_MAX_ENSURE_CALLS, 1000, 100000);
+        CRAFTING_EXECUTION_WINDOW = s
+                .comment("每台机器单次投料的可选操作数上限。0 = 按机器原生容量、材料变体和数量范围决定。",
+                        "订单材料按总量预留，此项不是订单上限；仅在需要额外限制某次投料工作量时设为正数。")
+                .defineInRange("craftingExecutionWindow", DEFAULT_CRAFTING_EXECUTION_WINDOW, 0, Integer.MAX_VALUE);
         CRAFTING_VANILLA_OPERATIONS_PER_TICK = s
                 .comment("单条合成链每 tick 原版工作预算",
                         "稳定批量配方按一次批事务计费；动态或无法安全批量的配方继续按逐次操作计费。")
@@ -1755,6 +1806,11 @@ public final class RSIntegrationConfig {
     /** 按键码在 RegisterKeyMappingsEvent 前读取，未加载时使用定义中的默认键。 */
     public static int keyCode(ForgeConfigSpec spec, ForgeConfigSpec.IntValue value) {
         return spec.isLoaded() ? value.get() : value.getDefault();
+    }
+
+    /** 世界配置尚未载入时使用配置定义的默认值，避免在纯规划测试和启动阶段访问未加载配置。 */
+    public static int serverInt(ForgeConfigSpec.IntValue value) {
+        return SERVER_SPEC.isLoaded() ? value.get() : value.getDefault();
     }
 
     /**

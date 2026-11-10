@@ -92,7 +92,7 @@ public final class SelfAmplifyingRecipePolicy {
                 sawProducer = true;
                 if (producers.stream().anyMatch(producer ->
                         producer.inputs().stream().noneMatch(ingredient ->
-                                ingredient.alternatives().contains(target.output())))) {
+                                isSelfInput(ingredient, target.output())))) {
                     reverseOnly = false;
                     break;
                 }
@@ -277,6 +277,7 @@ public final class SelfAmplifyingRecipePolicy {
         return true;
     }
 
+    /** 只有整个消耗槽位都要求该资源才成立；标签中包含它只是一个可选分支。 */
     public static boolean isSelfInput(IngredientRef input, MaterialRef output) {
         return input != null && output != null && input.role() != DemandRole.CATALYST
                 && referencesOutput(input, output);

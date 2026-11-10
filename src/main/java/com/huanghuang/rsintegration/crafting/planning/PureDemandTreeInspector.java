@@ -441,7 +441,7 @@ public final class PureDemandTreeInspector {
                     sawProducer = true;
                     if (producers.stream().anyMatch(producer ->
                             producer.inputs().stream().noneMatch(ingredient ->
-                                    ingredient.alternatives().contains(wanted)))) {
+                                    SelfAmplifyingRecipePolicy.isSelfInput(ingredient, wanted)))) {
                         reverseOnly = false;
                         break;
                     }

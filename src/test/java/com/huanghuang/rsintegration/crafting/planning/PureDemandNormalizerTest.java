@@ -13,6 +13,15 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class PureDemandNormalizerTest {
     @Test
+    void preservesInventoryOnlyDemandsWhenMerging() {
+        MaterialRef material = new MaterialRef(new ResourceLocation("test", "inventory_only"), "");
+        var stored = new IngredientRef(List.of(material), 1, NbtMatchMode.EXACT, DemandRole.CONSUMED, false);
+        var recursive = new IngredientRef(List.of(material), 1);
+        var merged = PureDemandNormalizer.mergeEquivalent(List.of(stored, stored, recursive));
+        assertEquals(List.of(stored.withCount(2), recursive), merged);
+    }
+
+    @Test
     void preservesModeWhenMergingEquivalentDemands() {
         MaterialRef material = new MaterialRef(new ResourceLocation("test", "material"), "");
 

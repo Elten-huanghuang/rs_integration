@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.planning;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.NbtMatchMode;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -21,12 +22,12 @@ final class PureDemandNormalizer {
         Map<DemandKey, AccumulatedDemand> merged = new LinkedHashMap<>();
         for (IngredientRef demand : demands) {
             DemandKey key = new DemandKey(Set.copyOf(demand.alternatives()),
-                    demand.nbtMatchMode(), demand.role());
+                    demand.nbtMatchMode(), demand.role(), demand.recursive());
             AccumulatedDemand accumulated = merged.get(key);
             if (accumulated == null) {
                 merged.put(key, new AccumulatedDemand(
                         List.copyOf(new LinkedHashSet<>(demand.alternatives())), demand.count(),
-                        demand.nbtMatchMode(), demand.role()));
+                        demand.nbtMatchMode(), demand.role(), demand.recursive()));
             } else {
                 accumulated.add(demand.count());
             }
@@ -35,28 +36,28 @@ final class PureDemandNormalizer {
         List<IngredientRef> normalized = new ArrayList<>(merged.size());
         for (AccumulatedDemand demand : merged.values()) {
             normalized.add(new IngredientRef(demand.alternatives, demand.count,
-                    demand.nbtMatchMode, demand.role));
+                    demand.nbtMatchMode, demand.role, demand.recursive));
         }
         return List.copyOf(normalized);
     }
 
     private record DemandKey(Set<MaterialRef> alternatives,
-                             ImmutableRecipeGraph.NbtMatchMode nbtMatchMode,
-                             DemandRole role) {}
+                             NbtMatchMode nbtMatchMode, DemandRole role, boolean recursive) {}
 
     private static final class AccumulatedDemand {
         private final List<MaterialRef> alternatives;
-        private final ImmutableRecipeGraph.NbtMatchMode nbtMatchMode;
+        private final NbtMatchMode nbtMatchMode;
         private final DemandRole role;
+        private final boolean recursive;
         private long count;
 
         private AccumulatedDemand(List<MaterialRef> alternatives, long count,
-                                  ImmutableRecipeGraph.NbtMatchMode nbtMatchMode,
-                                  DemandRole role) {
+                                  NbtMatchMode nbtMatchMode, DemandRole role, boolean recursive) {
             this.alternatives = alternatives;
             this.count = count;
             this.nbtMatchMode = nbtMatchMode;
             this.role = role;
+            this.recursive = recursive;
         }
 
         private void add(long additional) {

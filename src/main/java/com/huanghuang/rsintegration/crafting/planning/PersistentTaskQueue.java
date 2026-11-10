@@ -55,6 +55,10 @@ final class PersistentTaskQueue<T> implements Iterable<T> {
         return size == 0;
     }
 
+    int size() {
+        return size;
+    }
+
     @Override
     public Iterator<T> iterator() {
         return new Iterator<>() {

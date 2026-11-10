@@ -1,6 +1,10 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
 import java.lang.reflect.Method;
+import java.math.BigInteger;
+
+import com.huanghuang.rsintegration.config.PurePlannerLimits;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 
 import com.huanghuang.rsintegration.crafting.MaterialVariantPreferences;
 import com.huanghuang.rsintegration.crafting.SelfAmplifyingRecipePolicy;
@@ -31,14 +35,8 @@ import java.util.function.LongSupplier;
 
 /** Pure bounded backtracking search over immutable recipe and inventory values. */
 public final class PureRecipePlanner {
-    private static final int MIN_SEARCH_STATES = 256;
-    private static final int MAX_SEARCH_STATES = 65_536;
-    private static final int DEFAULT_MAX_MEMOIZED_FAILURES = 8_192;
-    private static final int MAX_SEARCH_CALL_DEPTH = 512;
     private static final int MAX_REPORTED_MISSING = 64;
-    private static final int MAX_DIAGNOSTIC_OPERATIONS = 32_768;
     private static final int REACHABILITY_PRECHECK_MIN_CANDIDATES = 5;
-    private static final int MAX_LOCAL_SEED_PROBE_NODES = 64;
     private static final int MAX_MATCHING_ITEM_INDEX_UNITS = 8_192;
 
     private PureRecipePlanner() {}
@@ -46,10 +44,9 @@ public final class PureRecipePlanner {
     public static Result resolve(ImmutableRecipeGraph graph,
                                  Map<MaterialRef, ? extends Number> available,
                                  List<IngredientRef> roots, int maxSteps) {
-        int searchBudget = (int) Math.max(MIN_SEARCH_STATES, Math.min(MAX_SEARCH_STATES,
-                (long) Math.max(1, maxSteps) * 32L));
-        return resolve(graph, available, roots, maxSteps, searchBudget,
-                DEFAULT_MAX_MEMOIZED_FAILURES);
+        return resolve(graph, available, roots, maxSteps,
+                RSIntegrationConfig.serverInt(RSIntegrationConfig.CRAFTING_PURE_SEARCH_MAX_STATES),
+                RSIntegrationConfig.serverInt(RSIntegrationConfig.CRAFTING_PURE_SEARCH_MAX_MEMOIZED_FAILURES));
     }
 
     /**
@@ -88,7 +85,7 @@ public final class PureRecipePlanner {
                           Map<MaterialRef, ? extends Number> available,
                           List<IngredientRef> roots, int maxSteps, int maxSearchStates) {
         return resolve(graph, available, roots, maxSteps, maxSearchStates,
-                DEFAULT_MAX_MEMOIZED_FAILURES);
+                RSIntegrationConfig.serverInt(RSIntegrationConfig.CRAFTING_PURE_SEARCH_MAX_MEMOIZED_FAILURES));
     }
 
     static Result resolve(ImmutableRecipeGraph graph,
@@ -161,7 +158,7 @@ public final class PureRecipePlanner {
                 graph, preciseAvailable, normalizedRoots);
         Search search = new Search(graph, preciseAvailable, maxSteps, maxSearchStates,
                 maxMemoizedFailures, deadlineNanos, nanoTime, activeRootOutputs, forcedRecipes,
-                preferences);
+                preferences, PurePlannerLimits.load());
         List<Task> rootTasks = new ArrayList<>(normalizedRoots.size());
         for (int index = 0; index < normalizedRoots.size(); index++) {
             rootTasks.add(new DemandTask(normalizedRoots.get(index), -1, index));
@@ -169,6 +166,15 @@ public final class PureRecipePlanner {
         PersistentTaskQueue<Task> pending = PersistentTaskQueue.from(rootTasks);
         Status status;
         try {
+            DeterministicRecipePlanner.Plan aggregated = DeterministicRecipePlanner.tryPlan(
+                    graph, search.initialStock, normalizedRoots, activeRootOutputs, forcedRecipes,
+                    preferences, maxSteps, maxSearchStates, search::checkAggregationBudget, search.skippedSegments);
+            if (aggregated != null) {
+                return new Result(Feasibility.FEASIBLE, aggregated.steps(), List.of(),
+                        aggregated.remaining(), aggregateMagicCosts(graph, aggregated.steps()),
+                        Status.SUCCESS, aggregated.expandedStates(), 0, 0, FailureReason.NONE,
+                        new MaterialFlow(normalizedRoots, aggregated.flow()));
+            }
             status = search.solve(pending) ? Status.SUCCESS
                     : search.stepLimitReached ? Status.STEP_LIMIT : Status.UNRESOLVABLE;
         } catch (SearchLimitException ignored) {
@@ -190,8 +196,8 @@ public final class PureRecipePlanner {
                     graph, preciseAvailable, maxSteps, activeRootOutputs,
                     status == Status.UNRESOLVABLE
                             ? search::checkBudget
-                            : new DiagnosticBudget(MAX_DIAGNOSTIC_OPERATIONS),
-                    forcedRecipes, preferences);
+                            : new DiagnosticBudget(search.limits.diagnosticMaxOperations()),
+                    forcedRecipes, preferences, search.limits);
             try {
                 PartialTrace partial = partialBuilder.build(normalizedRoots);
                 if (!partial.missing().isEmpty()
@@ -402,12 +408,16 @@ public final class PureRecipePlanner {
             for (MaterialRef alternative : input.alternatives()) {
                 if (!ancestors.contains(alternative)) {
                     hasOutsideAlternative = true;
-                } else {
-                    if (touched == null) touched = new ArrayList<>();
-                    touched.add(new AncestorInput(alternative, input.count()));
                 }
             }
             if (!hasOutsideAlternative) consumesOnlyAncestor = true;
+            // 标签候选是 OR；只有整个槽位必然消耗同一祖先时，才能用该数量证明零增益环。
+            // 即使多个候选都在祖先集合里，也不能把槽位总量分别算给每一种候选。
+            MaterialRef first = input.alternatives().get(0);
+            if (ancestors.contains(first) && SelfAmplifyingRecipePolicy.isSelfInput(input, first)) {
+                if (touched == null) touched = new ArrayList<>();
+                touched.add(new AncestorInput(first, input.count()));
+            }
         }
         return new CandidateCycleRelation(
                 consumesOnlyAncestor, touched == null ? List.of() : touched);
@@ -449,12 +459,16 @@ public final class PureRecipePlanner {
     private record FailureKey(PersistentTaskQueue<Task> pending, Map<MaterialRef, Long> stockChanges,
                               Set<MaterialRef> resolving, int stepCount) {}
 
+    private enum DemandPhase { MATCHING_STOCK, SINGLE_STOCK, COMBINED_STOCK, PRODUCTION }
+
     private static final class Search {
         private final ImmutableRecipeGraph graph;
         private final Map<MaterialRef, Long> initialStock;
         private final Map<MaterialRef, Long> stock = new HashMap<>();
         // 初始库存对一次搜索固定；失败键只需记录变化，零表示已耗尽的初始材料。
         private final Map<MaterialRef, Long> stockChanges = new HashMap<>();
+        private final Set<MaterialRef> skippedSegments = new HashSet<>();
+        private int aggregationWork;
         private final int maxSteps;
         private final int maxSearchStates;
         private final int maxMemoizedFailures;
@@ -462,6 +476,7 @@ public final class PureRecipePlanner {
         private final LongSupplier nanoTime;
         private final Map<ResourceLocation, ResourceLocation> forcedRecipes;
         private final PlanningPreferences preferences;
+        private final PurePlannerLimits limits;
         private final MaterialVariantPreferences.Snapshot variantPreferences;
         private final Map<ResourceLocation, List<MaterialRef>> stockByItem = new HashMap<>();
         // 只缓存静态物品分类；库存数量和新产生的 NBT 变体仍实时读取。
@@ -498,15 +513,18 @@ public final class PureRecipePlanner {
         private FailureReason deepestFailureReason = FailureReason.MISSING_INPUTS;
         private boolean sawMissingInputFailure;
         private boolean stepLimitReached;
-        private int callDepth;
+        private PersistentTaskQueue<Task> indexedPending = PersistentTaskQueue.empty();
+        private final Map<MaterialRef, BigInteger> pendingDemands = new HashMap<>();
+        private int pendingRecipeCount;
 
         private Search(ImmutableRecipeGraph graph, Map<MaterialRef, Long> available,
                        int maxSteps, int maxSearchStates, int maxMemoizedFailures,
                        long deadlineNanos, LongSupplier nanoTime,
                        Set<MaterialRef> activeRootOutputs,
                        Map<ResourceLocation, ResourceLocation> forcedRecipes,
-                       PlanningPreferences preferences) {
+                       PlanningPreferences preferences, PurePlannerLimits limits) {
             this.graph = graph;
+            this.limits = limits;
             available.forEach((material, count) -> {
                 if (count != null && count > 0) {
                     stock.put(material, count);
@@ -528,168 +546,321 @@ public final class PureRecipePlanner {
 
         }
 
+        /** 每一帧只保存游标和本分支的撤销点，任务数量不再消耗 Java 调用栈。 */
         private boolean solve(PersistentTaskQueue<Task> pending) {
-            checkBudget();
-            if (++callDepth > MAX_SEARCH_CALL_DEPTH) {
-                callDepth--;
-                throw new SearchLimitException();
-            }
-            try {
-                return solveWithinDepth(pending);
-            } finally {
-                callDepth--;
+            ArrayDeque<SearchFrame> frames = new ArrayDeque<>();
+            while (true) {
+                checkBudget();
+                if (pending != null) {
+                    if (++expandedStates > maxSearchStates) throw new SearchLimitException();
+                    if (pending.isEmpty()) return true;
+                    SearchFrame frame = new SearchFrame(pending);
+                    if (frame.key != null && failedStates.contains(frame.key)) {
+                        memoHits++;
+                    } else {
+                        frames.push(frame);
+                    }
+                }
+                if (frames.isEmpty()) return false;
+                SearchFrame frame = frames.peek();
+                frame.rollback();
+                indexPending(frame.rest);
+                pending = frame.next();
+                if (pending == null) {
+                    if (frame.key != null && failedStates.size() < maxMemoizedFailures) {
+                        failedStates.add(frame.key);
+                    }
+                    frames.pop();
+                }
             }
         }
 
-        private boolean solveWithinDepth(PersistentTaskQueue<Task> pending) {
-            if (++expandedStates > maxSearchStates) throw new SearchLimitException();
-            if (pending.isEmpty()) return true;
+        private final class SearchFrame {
+            private final PersistentTaskQueue<Task> pending;
+            private final PersistentTaskQueue<Task> rest;
+            private final Task task;
+            private final FailureKey key;
+            private final int flowMark = flow.size();
+            private final int stepMark = steps.size();
+            private Runnable undo;
+            private DemandPhase phase = DemandPhase.MATCHING_STOCK;
+            private boolean completionStarted;
+            private boolean aggregationAttempted;
+            private int stockCursor;
+            private int wantedCursor;
+            private int candidateCursor;
+            private boolean cycleBlocked;
+            private boolean noRecipeBlocked;
+            private List<MaterialRef> stockAlternatives;
+            private List<MaterialRef> wantedAlternatives;
+            private List<RecipeNode> producers = List.of();
+            private MaterialRef wanted;
+            private long have;
+            private long needed;
 
-            FailureKey key = maxMemoizedFailures == 0 ? null
-                    : new FailureKey(pending, Map.copyOf(stockChanges),
-                            Set.copyOf(resolving), steps.size());
-            if (key != null && failedStates.contains(key)) {
-                memoHits++;
-                return false;
+            private SearchFrame(PersistentTaskQueue<Task> pending) {
+                this.pending = pending;
+                this.rest = pending.tail();
+                this.task = pending.head();
+                // 单一路径没有失败状态复用价值，避免每步复制逐渐增长的库存差量。
+                boolean branching = task instanceof DemandTask demand
+                        && (demand.ingredient().alternatives().size() > 1
+                        || candidates(demand.ingredient().alternatives().get(0),
+                                demand.ingredient().nbtMatchMode()).size() > 1);
+                key = maxMemoizedFailures == 0 || !branching ? null
+                        : new FailureKey(pending, Map.copyOf(stockChanges),
+                                Set.copyOf(resolving), steps.size());
             }
 
-            Task current = pending.head();
-            PersistentTaskQueue<Task> rest = pending.tail();
-            boolean solved = current instanceof DemandTask demand
-                    ? solveDemand(demand, rest, pending)
-                    : completeRecipe((CompleteRecipeTask) current, rest);
-            if (!solved && key != null && failedStates.size() < maxMemoizedFailures) {
-                failedStates.add(key);
-            }
-            return solved;
-        }
-
-        private boolean solveDemand(DemandTask demand,
-                                    PersistentTaskQueue<Task> rest,
-                                    PersistentTaskQueue<Task> pending) {
-            IngredientRef ingredient = demand.ingredient();
-            boolean catalyst = ingredient.role() == DemandRole.CATALYST;
-            boolean cycleBlocked = false;
-            boolean noRecipeBlocked = false;
-            List<MaterialRef> stockAlternatives = inventoryFirst(ingredient.alternatives());
-            if (catalyst) {
-                if (stockAcross(ingredient) >= ingredient.count()) {
-                    Map<MaterialRef, Long> borrowed = new LinkedHashMap<>();
-                    long remaining = ingredient.count();
-                    for (MaterialRef material : matchingStock(ingredient).toList()) {
-                        long take = Math.min(remaining, stock.getOrDefault(material, 0L));
-                        if (take > 0L) borrowed.put(material, take);
-                        remaining -= take;
-                        if (remaining == 0L) break;
-                    }
-                    if (solveAfterUse(demand, borrowed, rest)) return true;
-                    backtracks++;
-                }
-            } else {
-                if (ingredient.nbtMatchMode() != NbtMatchMode.EXACT
-                        || ingredient.alternatives().stream().anyMatch(material -> !material.nbt().isEmpty())) {
-                    Map<MaterialRef, Long> consumedVariants =
-                            consumeMatchingVariants(ingredient, rest);
-                    if (consumedVariants != null) {
-                        if (solveAfterUse(demand, consumedAmounts(consumedVariants), rest)) return true;
-                        consumedVariants.forEach(this::setStock);
-                        backtracks++;
-                    }
-                }
-                for (MaterialRef alternative : stockAlternatives) {
-                    long have = stock.getOrDefault(alternative, 0L);
-                    if (have < ingredient.count()) continue;
-                    setStock(alternative, have - ingredient.count());
-                    if (solveAfterUse(demand, Map.of(alternative, ingredient.count()), rest)) return true;
-                    setStock(alternative, have);
-                    backtracks++;
-                }
-            }
-
-            Map<MaterialRef, Long> combinedConsumption = catalyst ? null
-                    : consumeAcrossAlternatives(ingredient, rest);
-            if (combinedConsumption != null) {
-                if (solveAfterUse(demand, consumedAmounts(combinedConsumption), rest)) return true;
-                combinedConsumption.forEach(this::setStock);
+            private void rollback() {
+                if (undo == null) return;
+                undo.run();
+                undo = null;
+                flow.subList(flowMark, flow.size()).clear();
+                steps.subList(stepMark, steps.size()).clear();
                 backtracks++;
             }
 
-            if (!ingredient.recursive()) {
-                return false;
+            private PersistentTaskQueue<Task> use(DemandTask demand,
+                                                  Map<MaterialRef, Long> materials,
+                                                  Runnable restore) {
+                flow.add(new MaterialUse(demand.consumer(), demand.port(),
+                        demand.ingredient(), materials));
+                undo = restore;
+                return rest;
             }
 
-            for (MaterialRef wanted : productionFirst(ingredient.alternatives())) {
-                checkBudget();
-                if (preferences.isNoRecipe(wanted)) {
-                    noRecipeBlocked = true;
-                    continue;
+            private PersistentTaskQueue<Task> next() {
+                if (task instanceof CompleteRecipeTask completed) return complete(completed);
+                DemandTask demand = (DemandTask) task;
+                IngredientRef ingredient = demand.ingredient();
+                if (!aggregationAttempted) {
+                    aggregationAttempted = true;
+                    PersistentTaskQueue<Task> aggregated = aggregateSegment();
+                    if (aggregated != null) return aggregated;
                 }
-                if (resolving.contains(wanted)) {
-                    cycleBlocked = true;
-                    continue;
+                boolean catalyst = ingredient.role() == DemandRole.CATALYST;
+                if (phase == DemandPhase.MATCHING_STOCK) {
+                    phase = DemandPhase.SINGLE_STOCK;
+                    stockAlternatives = inventoryFirst(ingredient.alternatives());
+                    if (catalyst) {
+                        if (stockAcross(ingredient) >= ingredient.count()) {
+                            Map<MaterialRef, Long> borrowed = new LinkedHashMap<>();
+                            long remaining = ingredient.count();
+                            for (MaterialRef material : matchingStock(ingredient).toList()) {
+                                long take = Math.min(remaining, stock.getOrDefault(material, 0L));
+                                if (take > 0L) borrowed.put(material, take);
+                                remaining -= take;
+                                if (remaining == 0L) break;
+                            }
+                            return use(demand, borrowed, () -> {});
+                        }
+                    } else if (ingredient.nbtMatchMode() != NbtMatchMode.EXACT
+                            || ingredient.alternatives().stream().anyMatch(material -> !material.nbt().isEmpty())) {
+                        Map<MaterialRef, Long> previous = consumeMatchingVariants(ingredient, rest);
+                        if (previous != null) {
+                            return use(demand, consumedAmounts(previous), () -> previous.forEach(Search.this::setStock));
+                        }
+                    }
                 }
-                long have = stock.getOrDefault(wanted, 0L);
-                boolean broadFamily = ingredient.alternatives().size() > 1;
-                long present = catalyst ? stockAcross(ingredient)
-                        : broadFamily || ingredient.nbtMatchMode() != NbtMatchMode.EXACT
-                        ? unreservedStockAcross(ingredient, rest)
-                        : unreservedStock(rest, wanted);
-                long needed = Math.max(0L, ingredient.count() - present);
-                if (needed <= 0L) continue;
-                List<RecipeNode> rawCandidates = inventoryFirstCandidates(
-                        wanted, !broadFamily, ingredient.nbtMatchMode());
-                List<RecipeNode> candidates = preferNonCyclicCandidates(rawCandidates);
-                if (candidates.size() < rawCandidates.size()) cycleBlocked = true;
-                for (RecipeNode candidate : candidates) {
-                    if (steps.size() + scheduledRecipes(rest) >= maxSteps) {
-                        stepLimitReached = true;
+                if (phase == DemandPhase.SINGLE_STOCK) {
+                    while (!catalyst && stockCursor < stockAlternatives.size()) {
+                        MaterialRef alternative = stockAlternatives.get(stockCursor++);
+                        long before = stock.getOrDefault(alternative, 0L);
+                        if (before < ingredient.count()) continue;
+                        setStock(alternative, before - ingredient.count());
+                        return use(demand, Map.of(alternative, ingredient.count()),
+                                () -> setStock(alternative, before));
+                    }
+                    phase = DemandPhase.COMBINED_STOCK;
+                }
+                if (phase == DemandPhase.COMBINED_STOCK) {
+                    phase = DemandPhase.PRODUCTION;
+                    Map<MaterialRef, Long> previous = catalyst ? null : consumeAcrossAlternatives(ingredient, rest);
+                    if (previous != null) {
+                        return use(demand, consumedAmounts(previous), () -> previous.forEach(Search.this::setStock));
+                    }
+                }
+                if (!ingredient.recursive()) return null;
+                if (wantedAlternatives == null) wantedAlternatives = productionFirst(ingredient.alternatives());
+                while (true) {
+                    while (candidateCursor < producers.size()) {
+                        checkBudget();
+                        RecipeNode candidate = producers.get(candidateCursor++);
+                        if (steps.size() + pendingRecipeCount >= maxSteps) {
+                            stepLimitReached = true;
+                            continue;
+                        }
+                        long selfConsumed = selfConsumedPerBatch(candidate, candidate.output());
+                        long netGain = candidate.outputCount() - selfConsumed;
+                        long batches = batchesFor(needed, selfConsumed > 0 ? netGain : candidate.outputCount());
+                        if (batches <= 0L) continue;
+                        if (isNonProductiveBroadFamilyConversion(candidate, ingredient.alternatives(), batches)) continue;
+                        boolean broadFamily = ingredient.alternatives().size() > 1;
+                        if (broadFamily && !reachability().canReach(candidate)) continue;
+                        if (selfConsumed == 0 && isUnseededReverseConversion(candidate, wanted, batches)) {
+                            cycleBlocked = true;
+                            continue;
+                        }
+                        long scheduledBatches = batches;
+                        long consumeCount = catalyst ? 0L : ingredient.count();
+                        PersistentTaskQueue<Task> continuation = rest;
+                        if (selfConsumed > 0) {
+                            if (netGain <= 0) continue;
+                            scheduledBatches = Math.min(batches, have / selfConsumed);
+                            if (scheduledBatches <= 0) continue;
+                            consumeCount = 0;
+                            continuation = rest.prepend(demand);
+                        }
+                        if (selfConsumed == 0 && !catalyst
+                                && (broadFamily || !candidate.output().equals(wanted))) {
+                            consumeCount = 0;
+                            continuation = rest.prepend(demand);
+                        }
+                        PersistentTaskQueue<Task> branch = recipeBranch(candidate, scheduledBatches,
+                                consumeCount, continuation, wanted, demand);
+                        MaterialRef resolvingMaterial = wanted;
+                        resolving.add(resolvingMaterial);
+                        undo = () -> resolving.remove(resolvingMaterial);
+                        return branch;
+                    }
+                    if (wantedCursor >= wantedAlternatives.size()) break;
+                    checkBudget();
+                    wanted = wantedAlternatives.get(wantedCursor++);
+                    if (preferences.isNoRecipe(wanted)) {
+                        noRecipeBlocked = true;
                         continue;
                     }
-                    long selfConsumed = selfConsumedPerBatch(candidate, candidate.output());
-                    long netGain = candidate.outputCount() - selfConsumed;
-                    long batches = batchesFor(needed,
-                            selfConsumed > 0 ? netGain : candidate.outputCount());
-                    if (batches <= 0L) continue;
-                    if (isNonProductiveBroadFamilyConversion(
-                            candidate, ingredient.alternatives(), batches)) continue;
-                    // Broad tags are pruned by family gain before reachability. In large
-                    // modpacks, probing all log/chest variants first can traverse most of the
-                    // recipe graph even though their recipes are only neutral conversion rings.
-                    if (broadFamily && !reachability().canReach(candidate)) continue;
-                    if (selfConsumed == 0
-                            && isUnseededReverseConversion(candidate, wanted, batches)) {
+                    if (resolving.contains(wanted)) {
                         cycleBlocked = true;
                         continue;
                     }
-                    long scheduledBatches = batches;
-                    long consumeCount = catalyst ? 0L : ingredient.count();
-                    PersistentTaskQueue<Task> continuation = rest;
-                    if (selfConsumed > 0) {
-                        if (netGain <= 0) continue;
-                        scheduledBatches = Math.min(batches, have / selfConsumed);
-                        if (scheduledBatches <= 0) continue;
-                        consumeCount = 0;
-                        continuation = rest.prepend(demand);
-                    }
-                    // Production may have a different NBT identity than the demand.
-                    // Consume the combined existing and new variants through the matcher.
-                    if (selfConsumed == 0 && !catalyst
-                            && (broadFamily || !candidate.output().equals(wanted))) {
-                        consumeCount = 0;
-                        continuation = rest.prepend(demand);
-                    }
-                    PersistentTaskQueue<Task> branch = recipeBranch(candidate, scheduledBatches,
-                            consumeCount, continuation, wanted, demand);
-                    resolving.add(wanted);
-                    if (solve(branch)) return true;
-                    resolving.remove(wanted);
-                    backtracks++;
+                    have = stock.getOrDefault(wanted, 0L);
+                    boolean broadFamily = ingredient.alternatives().size() > 1;
+                    long present = catalyst ? stockAcross(ingredient)
+                            : broadFamily || ingredient.nbtMatchMode() != NbtMatchMode.EXACT
+                            ? unreservedStockAcross(ingredient, rest) : unreservedStock(rest, wanted);
+                    needed = Math.max(0L, ingredient.count() - present);
+                    if (needed <= 0L) continue;
+                    List<RecipeNode> raw = inventoryFirstCandidates(wanted, !broadFamily, ingredient.nbtMatchMode());
+                    producers = preferNonCyclicCandidates(raw);
+                    candidateCursor = 0;
+                    if (producers.size() < raw.size()) cycleBlocked = true;
                 }
+                recordFailure(ingredient, pending,
+                        cycleBlocked && !noRecipeBlocked && !sawMissingInputFailure
+                                ? FailureReason.CYCLE : FailureReason.MISSING_INPUTS);
+                return null;
             }
-            recordFailure(ingredient, pending,
-                    cycleBlocked && !noRecipeBlocked && !sawMissingInputFailure
-                            ? FailureReason.CYCLE : FailureReason.MISSING_INPUTS);
-            return false;
+
+            /** 复杂边界由原搜索选择；边界内的连续确定性需求仍共享一次聚合。 */
+            private PersistentTaskQueue<Task> aggregateSegment() {
+                if (!(task instanceof DemandTask first)
+                        || aggregationWork >= maxSearchStates
+                        || !DeterministicRecipePlanner.supported(first.ingredient())
+                        || skippedSegments.contains(first.ingredient().alternatives().get(0))
+                        || stockAcross(first.ingredient()) >= first.ingredient().count()) return null;
+                int remainingSteps = maxSteps - steps.size() - pendingRecipeCount;
+                int remainingStates = maxSearchStates - expandedStates;
+                if (remainingSteps <= 0 || remainingStates <= 0) return null;
+                List<DemandTask> demands = new ArrayList<>();
+                PersistentTaskQueue<Task> continuation = pending;
+                while (!continuation.isEmpty() && continuation.head() instanceof DemandTask demand
+                        && DeterministicRecipePlanner.supported(demand.ingredient())
+                        && !skippedSegments.contains(demand.ingredient().alternatives().get(0))) {
+                    checkBudget();
+                    demands.add(demand);
+                    continuation = continuation.tail();
+                }
+                DeterministicRecipePlanner.Plan segment = DeterministicRecipePlanner.tryPlan(
+                        graph, stock, demands.stream().map(DemandTask::ingredient).toList(), resolving,
+                        forcedRecipes, preferences, remainingSteps, remainingStates,
+                        Search.this::checkAggregationBudget, skippedSegments);
+                // 此次探测才发现后续根依赖复杂配方时，保留它之前的简单片段。
+                // skippedSegments 仅是加速边界，后续根仍由原搜索处理。
+                if (segment == null && !skippedSegments.contains(first.ingredient().alternatives().get(0))) {
+                    int prefix = 0;
+                    continuation = pending;
+                    while (prefix < demands.size()
+                            && !skippedSegments.contains(demands.get(prefix).ingredient().alternatives().get(0))) {
+                        prefix++;
+                        continuation = continuation.tail();
+                    }
+                    if (prefix > 0 && prefix < demands.size()) {
+                        demands = new ArrayList<>(demands.subList(0, prefix));
+                        segment = DeterministicRecipePlanner.tryPlan(graph, stock,
+                                demands.stream().map(DemandTask::ingredient).toList(), resolving,
+                                forcedRecipes, preferences, remainingSteps, maxSearchStates - expandedStates,
+                                Search.this::checkAggregationBudget, skippedSegments);
+                    }
+                }
+                if (segment == null) return null;
+                expandedStates += segment.expandedStates();
+                Map<MaterialRef, Long> previous = new HashMap<>();
+                Set<MaterialRef> changed = new HashSet<>(stock.keySet());
+                changed.addAll(segment.remaining().keySet());
+                for (MaterialRef material : changed) {
+                    long before = stock.getOrDefault(material, 0L);
+                    long after = segment.remaining().getOrDefault(material, 0L);
+                    if (before == after) continue;
+                    previous.put(material, before);
+                    setStock(material, after);
+                }
+                Map<Integer, Integer> nodes = new HashMap<>();
+                for (FlowEvent event : segment.flow()) {
+                    if (event instanceof Production production) {
+                        int node = nodes.computeIfAbsent(production.node(), ignored -> nextFlowNode++);
+                        flow.add(new Production(node, production.recipe(), production.batches(),
+                                production.output(), production.demandedOutput()));
+                    } else if (event instanceof MaterialUse use) {
+                        if (use.consumer() < 0) {
+                            DemandTask destination = demands.get(use.port());
+                            flow.add(new MaterialUse(destination.consumer(), destination.port(),
+                                    destination.ingredient(), use.materials()));
+                        } else {
+                            int node = nodes.computeIfAbsent(use.consumer(), ignored -> nextFlowNode++);
+                            flow.add(new MaterialUse(node, use.port(), use.demand(), use.materials()));
+                        }
+                    }
+                }
+                steps.addAll(segment.steps());
+                undo = () -> previous.forEach(Search.this::setStock);
+                return continuation;
+            }
+
+            private PersistentTaskQueue<Task> complete(CompleteRecipeTask completed) {
+                if (completionStarted) return null;
+                completionStarted = true;
+                long before = stock.getOrDefault(completed.output(), 0L);
+                long afterProduction;
+                try {
+                    afterProduction = Math.addExact(before,
+                            Math.multiplyExact(completed.outputCount(), completed.batches()));
+                } catch (ArithmeticException overflow) {
+                    return null;
+                }
+                if (afterProduction < completed.consumeCount()) return null;
+                resolving.remove(completed.resolvingMaterial());
+                setStock(completed.output(), afterProduction - completed.consumeCount());
+                RecipeNode source = graph.recipesById().get(completed.recipeId());
+                MaterialRef demanded = source != null && ("smithing".equals(source.modTypeId())
+                        || completed.output().constrainedNbt()) && !completed.output().nbt().isEmpty()
+                        ? completed.output() : null;
+                steps.add(new PlannedStep(completed.recipeId(), completed.batches(), demanded));
+                flow.add(new Production(completed.node(), completed.recipe(), completed.batches(),
+                        completed.output(), demanded));
+                undo = () -> {
+                    setStock(completed.output(), before);
+                    resolving.add(completed.resolvingMaterial());
+                };
+                if (completed.consumeCount() > 0L) {
+                    flow.add(new MaterialUse(completed.demand().consumer(), completed.demand().port(),
+                            completed.demand().ingredient(), Map.of(completed.output(), completed.consumeCount())));
+                } else if (completed.demand().ingredient().role() == DemandRole.CATALYST) {
+                    return rest.prepend(completed.demand());
+                }
+                return rest;
+            }
         }
 
         private Map<MaterialRef, Long> consumedAmounts(Map<MaterialRef, Long> previous) {
@@ -699,16 +870,6 @@ public final class PureRecipePlanner {
                 if (amount > 0L) consumed.put(material, amount);
             });
             return consumed;
-        }
-
-        private boolean solveAfterUse(DemandTask demand, Map<MaterialRef, Long> materials,
-                                      PersistentTaskQueue<Task> rest) {
-            int checkpoint = flow.size();
-            flow.add(new MaterialUse(demand.consumer(), demand.port(),
-                    demand.ingredient(), materials));
-            if (solve(rest)) return true;
-            flow.subList(checkpoint, flow.size()).clear();
-            return false;
         }
 
         private void recordFailure(IngredientRef ingredient,
@@ -836,54 +997,42 @@ public final class PureRecipePlanner {
             return total;
         }
 
-        private static long singletonDemand(
-                PersistentTaskQueue<Task> tasks, MaterialRef material) {
-            long demand = 0L;
-            for (Task task : tasks) {
-                if (!(task instanceof DemandTask needed)
-                        || needed.ingredient().alternatives().size() != 1
-                        || !needed.ingredient().alternatives().get(0).equals(material)) continue;
-                demand = saturatedAdd(demand, needed.ingredient().count());
-            }
-            return demand;
+        private long singletonDemand(PersistentTaskQueue<Task> tasks, MaterialRef material) {
+            indexPending(tasks);
+            BigInteger count = pendingDemands.get(material);
+            return count == null ? 0L : count.min(BigInteger.valueOf(Long.MAX_VALUE)).longValue();
         }
 
-        private boolean completeRecipe(
-                CompleteRecipeTask completed, PersistentTaskQueue<Task> rest) {
-            long before = stock.getOrDefault(completed.output(), 0L);
-            long afterProduction = before
-                    + (long) completed.outputCount() * completed.batches();
-            if (afterProduction < completed.consumeCount()
-                    || afterProduction < before) {
-                return false;
+        /** 共享队尾不变，只增删分支前缀；回退时同样更新，不能复用过期的预留量。 */
+        private void indexPending(PersistentTaskQueue<Task> target) {
+            PersistentTaskQueue<Task> previous = indexedPending;
+            PersistentTaskQueue<Task> next = target;
+            ArrayDeque<Task> added = new ArrayDeque<>();
+            while (previous != next && !(previous.isEmpty() && next.isEmpty())) {
+                if (previous.size() >= next.size() && !previous.isEmpty()) {
+                    indexTask(previous.head(), -1);
+                    previous = previous.tail();
+                } else {
+                    added.push(next.head());
+                    next = next.tail();
+                }
             }
-            resolving.remove(completed.resolvingMaterial());
-            setStock(completed.output(), afterProduction - completed.consumeCount());
-            RecipeNode source = graph.recipesById().get(completed.recipeId());
-            MaterialRef demanded = source != null && ("smithing".equals(source.modTypeId())
-                    || completed.output().constrainedNbt())
-                    && !completed.output().nbt().isEmpty() ? completed.output() : null;
-            steps.add(new PlannedStep(completed.recipeId(), completed.batches(), demanded));
-            int checkpoint = flow.size();
-            flow.add(new Production(completed.node(), completed.recipe(),
-                    completed.batches(), completed.output(), demanded));
-            boolean solved;
-            if (completed.consumeCount() > 0L) {
-                solved = solveAfterUse(completed.demand(),
-                        Map.of(completed.output(), completed.consumeCount()), rest);
-            } else if (completed.demand().ingredient().role() == DemandRole.CATALYST) {
-                // 催化剂的新产物仍须显式借给消费者，不能只留在虚拟库存中。
-                solved = solve(rest.prepend(completed.demand()));
-            } else {
-                solved = solve(rest);
+            while (!added.isEmpty()) indexTask(added.pop(), 1);
+            indexedPending = target;
+        }
+
+        private void indexTask(Task task, int sign) {
+            if (task instanceof CompleteRecipeTask) {
+                pendingRecipeCount += sign;
+            } else if (task instanceof DemandTask demand && demand.ingredient().alternatives().size() == 1) {
+                MaterialRef material = demand.ingredient().alternatives().get(0);
+                // 极大需求相加后再回退仍须精确，饱和加法在这里不可逆。
+                BigInteger delta = BigInteger.valueOf(demand.ingredient().count());
+                BigInteger value = pendingDemands.getOrDefault(material, BigInteger.ZERO)
+                        .add(sign > 0 ? delta : delta.negate());
+                if (value.signum() == 0) pendingDemands.remove(material);
+                else pendingDemands.put(material, value);
             }
-            if (solved) return true;
-            flow.subList(checkpoint, flow.size()).clear();
-            steps.remove(steps.size() - 1);
-            setStock(completed.output(), before);
-            resolving.add(completed.resolvingMaterial());
-            backtracks++;
-            return false;
         }
 
         private PersistentTaskQueue<Task> recipeBranch(
@@ -995,7 +1144,7 @@ public final class PureRecipePlanner {
                             || (useReachability
                             ? reachability().canReach(candidate)
                             : hasLocalSeedPath(candidate, new HashSet<>(),
-                            new int[] { MAX_LOCAL_SEED_PROBE_NODES })))
+                            new int[] { limits.seedProbeMaxNodes() })))
                     .collect(Collectors.toCollection(ArrayList::new));
             // Seeded reachability is only an ordering hint. A partially stocked direct
             // recipe must still be attempted so its concrete missing inputs can be
@@ -1093,7 +1242,7 @@ public final class PureRecipePlanner {
             if (cached != null) return cached;
             if (stockAcross(new IngredientRef(List.of(material), 1, NbtMatchMode.ANY,
                     DemandRole.CONSUMED)) > 0) return 0;
-            if (material.runtimeNbt() || visiting.size() >= MAX_SEARCH_CALL_DEPTH
+            if (material.runtimeNbt() || visiting.size() >= limits.auxiliaryMaxDepth()
                     || !visiting.add(material)
                     || !producerDepthVisiting.add(material)) {
                 return Integer.MAX_VALUE / 4;
@@ -1157,7 +1306,7 @@ public final class PureRecipePlanner {
                     for (IngredientRef backInput : back.inputs()) {
                         if (backInput.role() == DemandRole.CATALYST
                                 || backInput.count() <= 0
-                                || !backInput.alternatives().contains(candidate.output())) continue;
+                                || !SelfAmplifyingRecipePolicy.isSelfInput(backInput, candidate.output())) continue;
                         if (candidate.outputCount() < backInput.count()
                                 || candidate.outputCount() % backInput.count() != 0L) {
                             continue;
@@ -1264,7 +1413,7 @@ public final class PureRecipePlanner {
                     sawProducer = true;
                     if (producers.stream().anyMatch(producer ->
                             producer.inputs().stream().noneMatch(ingredient ->
-                                    ingredient.alternatives().contains(wanted)))) {
+                                    SelfAmplifyingRecipePolicy.isSelfInput(ingredient, wanted)))) {
                         reverseOnly = false;
                         break;
                     }
@@ -1429,6 +1578,13 @@ public final class PureRecipePlanner {
             }
         }
 
+        /** 所有聚合探测共用现有状态上限；用完交回搜索，保留原搜索的判定额度。 */
+        private void checkAggregationBudget() {
+            checkBudget();
+            if (aggregationWork >= maxSearchStates) throw new DeterministicRecipePlanner.ProbeLimitReached();
+            aggregationWork++;
+        }
+
         private void checkBudget() {
             PlanningThreadContext.throwIfCancelled();
             if (deadlineNanos != Long.MAX_VALUE
@@ -1439,8 +1595,7 @@ public final class PureRecipePlanner {
 
         private static long batchesFor(long needed, long outputCount) {
             if (outputCount <= 0 || needed <= 0L) return -1L;
-            return Math.max(1L, saturatedAdd(needed, outputCount - 1L)
-                    / outputCount);
+            return needed / outputCount + (needed % outputCount == 0L ? 0L : 1L);
         }
 
         private static long selfConsumedPerBatch(RecipeNode candidate, MaterialRef output) {
@@ -1451,14 +1606,6 @@ public final class PureRecipePlanner {
                 }
             }
             return consumed;
-        }
-
-        private static int scheduledRecipes(PersistentTaskQueue<Task> pending) {
-            int count = 0;
-            for (Task task : pending) {
-                if (task instanceof CompleteRecipeTask) count++;
-            }
-            return count;
         }
 
         private void setStock(MaterialRef material, long count) {
@@ -1498,6 +1645,7 @@ public final class PureRecipePlanner {
         private final Runnable budgetCheck;
         private final Map<ResourceLocation, ResourceLocation> forcedRecipes;
         private final PlanningPreferences preferences;
+        private final PurePlannerLimits limits;
         private final Map<MissingKey, IngredientRef> missing = new LinkedHashMap<>();
 
         private PartialPlanBuilder(ImmutableRecipeGraph graph,
@@ -1505,8 +1653,9 @@ public final class PureRecipePlanner {
                                    int maxSteps, Set<MaterialRef> activeRootOutputs,
                                    Runnable budgetCheck,
                                    Map<ResourceLocation, ResourceLocation> forcedRecipes,
-                                   PlanningPreferences preferences) {
+                                   PlanningPreferences preferences, PurePlannerLimits limits) {
             this.graph = graph;
+            this.limits = limits;
             available.forEach((material, count) -> {
                 if (material != null && count != null && count > 0) {
                     addStock(material, count);
@@ -1536,7 +1685,7 @@ public final class PureRecipePlanner {
             budgetCheck.run();
             long remaining = consumeAvailable(ingredient);
             if (remaining == 0L) return true;
-            if (steps.size() >= maxSteps || visiting.size() >= MAX_SEARCH_CALL_DEPTH) {
+            if (steps.size() >= maxSteps || visiting.size() >= limits.auxiliaryMaxDepth()) {
                 noteMissing(ingredient, remaining);
                 return false;
             }
@@ -1688,7 +1837,7 @@ public final class PureRecipePlanner {
                     for (IngredientRef backInput : back.inputs()) {
                         if (backInput.role() == DemandRole.CATALYST
                                 || backInput.count() <= 0
-                                || !backInput.alternatives().contains(candidate.output())) continue;
+                                || !SelfAmplifyingRecipePolicy.isSelfInput(backInput, candidate.output())) continue;
                         if (candidate.outputCount() < backInput.count()
                                 || candidate.outputCount() % backInput.count() != 0L) {
                             continue;

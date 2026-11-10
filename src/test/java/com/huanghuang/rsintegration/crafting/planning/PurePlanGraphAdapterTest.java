@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.ScaledIngredientSpec;
 import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
+import com.huanghuang.rsintegration.crafting.graph.CraftPlanValidator;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.graph.MaterialSource;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
@@ -39,6 +40,54 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PurePlanGraphAdapterTest extends BootstrapTest {
+    @Test
+    void realIngredientProjectionAggregatesAnyAndPreservesNbtAllocationsInExecutionGraph() {
+        long amount = 50_000_000L;
+        IngredientRef log = ImmutableRecipeGraphProjector.projectIngredient(spec(Items.OAK_LOG, 1));
+        IngredientRef planks = ImmutableRecipeGraphProjector.projectIngredient(spec(Items.OAK_PLANKS, 1));
+        assertEquals(NbtMatchMode.ANY, log.nbtMatchMode());
+        RecipeNode shared = recipe("any_planks", new ItemStack(Items.OAK_PLANKS), 1, log);
+        RecipeNode left = recipe("any_stick", new ItemStack(Items.STICK), 1, planks);
+        RecipeNode right = recipe("any_paper", new ItemStack(Items.PAPER), 1, planks);
+        ItemStack tagged = new ItemStack(Items.OAK_LOG);
+        tagged.getOrCreateTag().putString("origin", "pipeline");
+        MaterialKey key = MaterialKey.of(tagged);
+        var stock = Map.of(new StackKey(key.item(), key.tag()), amount, key(Items.OAK_LOG), amount);
+        var roots = List.of(ImmutableRecipeGraphProjector.projectIngredient(spec(Items.STICK, amount)),
+                ImmutableRecipeGraphProjector.projectIngredient(spec(Items.PAPER, amount)));
+        var result = plan(graph(shared, left, right), stock, roots);
+        assertEquals(3, result.steps().size());
+        assertEquals(amount * 2, result.steps().get(0).batches());
+        var replayed = PurePlanGraphAdapter.toInputGraph(result, stock,
+                List.of(spec(Items.STICK, amount), spec(Items.PAPER, amount)));
+        assertDoesNotThrow(() -> CraftPlanValidator.validate(replayed));
+        assertEquals(3, replayed.nodes().size());
+        assertEquals(amount * 2, replayed.nodes().get(0).inputs().get(0).quantity());
+    }
+
+    @Test
+    void aggregatedSharedProducerReplaysLongInputQuantitiesIntoExecutionGraph() {
+        long amount = 50_000_000L;
+        RecipeNode shared = recipe("bulk_planks", new ItemStack(Items.OAK_PLANKS), 1,
+                demand(Items.OAK_LOG, 64));
+        RecipeNode left = recipe("bulk_sticks", new ItemStack(Items.STICK), 1,
+                demand(Items.OAK_PLANKS, 1));
+        RecipeNode right = recipe("bulk_paper", new ItemStack(Items.PAPER), 1,
+                demand(Items.OAK_PLANKS, 1));
+        var stock = Map.of(key(Items.OAK_LOG), amount * 128L);
+        var result = plan(graph(shared, left, right), stock,
+                List.of(demand(Items.STICK, amount), demand(Items.PAPER, amount)));
+        assertEquals(3, result.steps().size());
+        assertEquals(amount * 2L, result.steps().get(0).batches());
+
+        var replayed = PurePlanGraphAdapter.toInputGraph(result, stock,
+                List.of(spec(Items.STICK, amount), spec(Items.PAPER, amount)));
+        assertDoesNotThrow(() -> CraftPlanValidator.validate(replayed));
+        assertEquals(3, replayed.nodes().size());
+        assertEquals(amount * 128L, replayed.nodes().get(0).inputs().get(0).quantity());
+        assertEquals(amount * 2L, replayed.nodes().get(0).outputs().get(0).quantity());
+    }
+
     @Test
     void replayKeepsThePreviewedFluidRecipeEvenWhenBucketsBecomeAvailable() {
         ItemStack fluid = InkFluidSupport.token(InkFluidTestFixtures.tokenItem(),
