@@ -36,6 +36,18 @@ for %%i in ("%APP_HOME%") do set APP_HOME=%%~fi
 @rem Add default JVM options here. You can also use JAVA_OPTS and GRADLE_OPTS to pass JVM options to this script.
 set DEFAULT_JVM_OPTS="-Xmx64m" "-Xms64m"
 
+@rem Prefer the local Java 17 JDK for this script only.
+@rem Require both java and javac so a JRE is not selected as a JDK.
+set "RSI_LOCAL_JDK="
+set "RSI_TOOLCHAIN_OPTION="
+for /d %%J in ("%APP_HOME%\.gradle\jdks\jdk-17*") do (
+    if exist "%%~fJ\bin\java.exe" if exist "%%~fJ\bin\javac.exe" set "RSI_LOCAL_JDK=%%~fJ"
+)
+if defined RSI_LOCAL_JDK (
+    set "JAVA_HOME=%RSI_LOCAL_JDK%"
+    set RSI_TOOLCHAIN_OPTION="-Porg.gradle.java.installations.paths=%RSI_LOCAL_JDK%"
+)
+
 @rem Find java.exe
 if defined JAVA_HOME goto findJavaFromJavaHome
 
@@ -72,7 +84,7 @@ set CLASSPATH=%APP_HOME%\gradle\wrapper\gradle-wrapper.jar
 
 
 @rem Execute Gradle
-"%JAVA_EXE%" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %GRADLE_OPTS% "-Dorg.gradle.appname=%APP_BASE_NAME%" -classpath "%CLASSPATH%" org.gradle.wrapper.GradleWrapperMain %*
+"%JAVA_EXE%" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %GRADLE_OPTS% "-Dorg.gradle.appname=%APP_BASE_NAME%" -classpath "%CLASSPATH%" org.gradle.wrapper.GradleWrapperMain %RSI_TOOLCHAIN_OPTION% %*
 
 :end
 @rem End local scope for the variables with windows NT shell
