@@ -6,6 +6,8 @@ import com.huanghuang.rsintegration.client.gui.ScrollBarStyle;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import com.refinedmods.refinedstorage.blockentity.craftingmonitor.ICraftingMonitor;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.Optional;
@@ -19,14 +21,26 @@ class MonitorScrollingTest extends BootstrapTest {
         var wide = MonitorLayout.forViewport(616, 270);
         assertEquals(92, wide.cellWidth());
         assertTrue(wide.cellHeight() >= 3 * 10 + 4);
-        assertEquals(54, wide.railWidth());
-        int left = (616 - wide.width()) / 2;
+        assertEquals(96, wide.railWidth());
+        int left = wide.mainLeft(616);
         assertTrue(left >= wide.railWidth() + 4);
         assertTrue(left + wide.width() + 22 <= 616);
         var compact = MonitorLayout.forViewport(320, 240);
         assertEquals(0, compact.detailsWidth());
         assertEquals(254, compact.width());
         assertEquals(201, compact.height());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"320,240", "374,240", "539,270", "540,270", "599,270", "600,260", "616,270", "960,540"})
+    void taskRailAndSideButtonsFitAtBothSidesOfEveryLayoutBreakpoint(int width, int height) {
+        var layout = MonitorLayout.forViewport(width, height);
+        int mainLeft = layout.mainLeft(width);
+        int railLeft = mainLeft - layout.railWidth() - 4;
+        int right = mainLeft + layout.width() + 22;
+        assertTrue(railLeft >= 1, "左侧任务栏必须完整显示");
+        assertTrue(right < width, "右侧功能按钮必须完整显示");
+        assertTrue(Math.abs(railLeft - (width - right)) <= 1, "按三栏整体居中");
     }
     @Test void selectingCurrentTaskDoesNotTriggerNativeToggleOrSendAgain() {
         var monitor = mock(ICraftingMonitor.class);

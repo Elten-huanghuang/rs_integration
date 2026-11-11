@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot;
 import com.huanghuang.rsintegration.crafting.progress.CraftOutputProgress;
+import com.huanghuang.rsintegration.crafting.progress.CraftProgressTiming;
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressTracker;
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot.NodeProgress;
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot.NodeState;
@@ -258,6 +259,52 @@ class CraftPacketCodecTest extends BootstrapTest {
             buf.writeVarLong(quantities[0]);
             buf.writeVarLong(quantities[1]);
             assertThrows(DecoderException.class, () -> CraftProgressPacket.decode(buf));
+        }
+    }
+
+    @Test
+    void authoritativeTimingSurvivesFullAndDeltaUpdatesWithKnownOrUnknownOutputCounts() {
+        for (var output : List.of(CraftOutputProgress.UNKNOWN, new CraftOutputProgress(16, 64))) {
+            UUID id = UUID.randomUUID();
+            var timing = new CraftProgressTiming(123_000, 8_000);
+            var snapshot = new CraftProgressSnapshot(id, 1, CraftProgressSnapshot.Result.WAITING,
+                    CraftProgressSnapshot.Reason.MACHINE_BUSY, 0, 1, 0, null, List.of(), output, timing);
+            FriendlyByteBuf full = buffer();
+            new CraftProgressPacket(snapshot).encode(full);
+            var decoded = CraftProgressPacket.decode(full).snapshot();
+            assertEquals(output, decoded.outputProgress());
+            assertEquals(timing, decoded.timing());
+            assertEquals(0, full.readableBytes());
+            try {
+                CraftProgressTracker.onStarted(new CraftStartedPacket(id, 1, true));
+                FriendlyByteBuf delta = buffer();
+                new CraftProgressDeltaPacket(id, 0, snapshot, List.of()).encode(delta);
+                CraftProgressTracker.onDelta(CraftProgressDeltaPacket.decode(delta));
+                assertEquals(timing, CraftProgressTracker.get(id).timing());
+                assertEquals(output, CraftProgressTracker.get(id).outputProgress());
+                assertEquals(0, delta.readableBytes());
+            } finally {
+                CraftProgressTracker.clear();
+            }
+        }
+    }
+
+    @Test
+    void legacyQuantityTailHasUnknownTimingAndMalformedTimingIsRejected() {
+        FriendlyByteBuf legacy = basePayload(0, 0);
+        legacy.writeVarInt(0);
+        legacy.writeVarLong(1L);
+        legacy.writeVarLong(64L);
+        assertFalse(CraftProgressPacket.decode(legacy).snapshot().timing().known());
+        for (long[] values : new long[][]{{-1, 0}, {10, -1}, {10, 11}}) {
+            FriendlyByteBuf invalid = basePayload(0, 0);
+            invalid.writeVarInt(0);
+            invalid.writeVarLong(0L);
+            invalid.writeVarLong(0L);
+            invalid.writeVarInt(1);
+            invalid.writeVarLong(values[0]);
+            invalid.writeVarLong(values[1]);
+            assertThrows(DecoderException.class, () -> CraftProgressPacket.decode(invalid));
         }
     }
 }

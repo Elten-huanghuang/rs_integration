@@ -75,6 +75,7 @@ public final class CraftProgressPublisher {
                 && previous.runningNodes() == current.runningNodes()
                 && Objects.equals(previous.technicalDetail(), current.technicalDetail())
                 && Objects.equals(previous.outputProgress(), current.outputProgress())
+                && Objects.equals(previous.timing(), current.timing())
                 && Objects.equals(previous.nodes(), current.nodes());
     }
 }

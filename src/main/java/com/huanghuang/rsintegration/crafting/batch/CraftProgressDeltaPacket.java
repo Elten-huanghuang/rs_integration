@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot;
 import com.huanghuang.rsintegration.crafting.progress.CraftOutputProgress;
+import com.huanghuang.rsintegration.crafting.progress.CraftProgressTiming;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.util.PerformanceMonitor;
 import io.netty.handler.codec.DecoderException;
@@ -31,6 +32,7 @@ public final class CraftProgressDeltaPacket {
     private final String technicalDetail;
     private final List<CraftProgressSnapshot.NodeProgress> changedNodes;
     private final CraftOutputProgress outputProgress;
+    private final CraftProgressTiming timing;
 
     public CraftProgressDeltaPacket(UUID craftId, int baseSequence, CraftProgressSnapshot snapshot,
                                     List<CraftProgressSnapshot.NodeProgress> changedNodes) {
@@ -45,6 +47,7 @@ public final class CraftProgressDeltaPacket {
         this.technicalDetail = snapshot.technicalDetail();
         this.changedNodes = List.copyOf(changedNodes);
         this.outputProgress = snapshot.outputProgress();
+        this.timing = snapshot.timing();
     }
 
     public void encode(FriendlyByteBuf buf) {
@@ -75,7 +78,7 @@ public final class CraftProgressDeltaPacket {
             buf.writeUtf(node.technicalDetail(), MAX_DETAIL);
             buf.writeBoolean(node.draining());
         }
-        CraftProgressPacket.writeOutputProgress(buf, outputProgress);
+        CraftProgressPacket.writeProgressTail(buf, outputProgress, timing);
         PerformanceMonitor.recordProgressPacketBytes(buf.writerIndex() - startIndex);
     }
 
@@ -108,8 +111,9 @@ public final class CraftProgressDeltaPacket {
             nodes.add(new CraftProgressSnapshot.NodeProgress(nodeId, state, recipe, mod, output,
                     completedOps, totalOps, runningOps, machine, nodeReason, nodeDetail, draining));
         }
+        var tail = CraftProgressPacket.readProgressTail(buf);
         var snapshot = new CraftProgressSnapshot(id, sequence, result, reason, completed, total,
-                running, detail, nodes, CraftProgressPacket.readOutputProgress(buf));
+                running, detail, nodes, tail.output(), tail.timing());
         return new CraftProgressDeltaPacket(id, base, snapshot, nodes);
     }
 
@@ -136,4 +140,5 @@ public final class CraftProgressDeltaPacket {
     public String technicalDetail() { return technicalDetail; }
     public List<CraftProgressSnapshot.NodeProgress> changedNodes() { return changedNodes; }
     public CraftOutputProgress outputProgress() { return outputProgress; }
+    public CraftProgressTiming timing() { return timing; }
 }

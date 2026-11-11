@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.client.gui.CraftingUiStyle;
 import com.huanghuang.rsintegration.client.gui.ListScrollState;
 import com.huanghuang.rsintegration.client.gui.ListScrollBar;
 import com.huanghuang.rsintegration.client.gui.ScrollBarStyle;
+import com.huanghuang.rsintegration.crafting.quantity.CompactQuantityFormat;
 import com.huanghuang.rsintegration.mixin.refinedstorage.MonitorTaskAccessor;
 import com.refinedmods.refinedstorage.api.network.grid.IGridTab;
 import com.refinedmods.refinedstorage.api.render.IElementDrawers;
@@ -12,6 +13,8 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.narration.NarrationElementOutput;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.ItemStack;
+import net.minecraftforge.fluids.FluidStack;
 
 import java.util.List;
 import java.util.Objects;
@@ -56,6 +59,30 @@ public final class MonitorTaskList extends AbstractWidget {
     public static UUID id(IGridTab task) {
         return task instanceof RsiMonitorTask rsi ? rsi.craftId() : ((MonitorTaskAccessor) task).rsi$id();
     }
+
+    static Component title(IGridTab task) {
+        if (task instanceof RsiMonitorTask rsi) return rsi.title();
+        var requested = ((MonitorTaskAccessor) task).rsi$requested();
+        ItemStack item = requested.getItem();
+        if (item != null && !item.isEmpty()) return item.getHoverName();
+        FluidStack fluid = requested.getFluid();
+        return fluid != null && !fluid.isEmpty() ? fluid.getDisplayName() : Component.empty();
+    }
+
+    static Component progress(IGridTab task) {
+        if (task instanceof RsiMonitorTask rsi) {
+            var snapshot = rsi.snapshot();
+            var output = snapshot.outputProgress();
+            return Component.translatable(output.known() ? "rsi.monitor.task_output" : "rsi.monitor.task_nodes",
+                    CompactQuantityFormat.format(output.known() ? output.completed() : snapshot.completedNodes()),
+                    CompactQuantityFormat.format(output.known() ? output.total() : snapshot.totalNodes()));
+        }
+        var nativeTask = (MonitorTaskAccessor) task;
+        FluidStack fluid = nativeTask.rsi$requested().getFluid();
+        String unit = fluid != null && !fluid.isEmpty() ? " mB" : "";
+        return Component.literal("×" + CompactQuantityFormat.format(nativeTask.rsi$quantity()) + unit
+                + " · " + Math.max(0, Math.min(100, nativeTask.rsi$completionPercentage())) + "%");
+    }
     @Override public boolean mouseDragged(double x, double y, int button, double dx, double dy) {
         return bar.mouseDragged(x, y, button, dx, dy);
     }
@@ -77,7 +104,30 @@ public final class MonitorTaskList extends AbstractWidget {
                 graphics.fill(getX() + 2, top, getX() + 4, top + ROW_HEIGHT - 1, CraftingUiStyle.HIGHLIGHT);
                 graphics.fill(getX() + 2, top, getX() + 2 + contentWidth, top + 1, CraftingUiStyle.HIGHLIGHT);
             }
-            if (index < tasks.size()) tasks.get(index).drawIcon(graphics, getX() + (contentWidth - 16) / 2 + 2, top + 5, drawers.getItemDrawer(), drawers.getFluidDrawer());
+            if (index < tasks.size()) {
+                IGridTab task = tasks.get(index);
+                if (task instanceof RsiMonitorTask rsi) {
+                    int color = switch (rsi.diagnostics().kind()) {
+                        case ATTENTION -> CraftingUiStyle.DANGER;
+                        case RUNNING -> CraftingUiStyle.ACCENT;
+                        case SUCCEEDED -> CraftingUiStyle.SUCCESS;
+                        case CANCELLED -> CraftingUiStyle.MUTED;
+                        default -> CraftingUiStyle.WARNING;
+                    };
+                    graphics.fill(getX() + 2 + contentWidth - 2, top + 2, getX() + 2 + contentWidth, top + ROW_HEIGHT - 3, color);
+                }
+                boolean showText = contentWidth >= 67;
+                int iconX = showText ? getX() + 5 : getX() + (contentWidth - 16) / 2 + 2;
+                task.drawIcon(graphics, iconX, top + 5, drawers.getItemDrawer(), drawers.getFluidDrawer());
+                if (showText) {
+                    int textX = getX() + 24;
+                    int textWidth = contentWidth - 24;
+                    graphics.drawString(font, CraftingUiStyle.fit(font, title(task).getString(), textWidth),
+                            textX, top + 3, CraftingUiStyle.TEXT, false);
+                    graphics.drawString(font, CraftingUiStyle.fit(font, progress(task).getString(), textWidth),
+                            textX, top + 14, CraftingUiStyle.MUTED, false);
+                }
+            }
         }
         int hovered = indexAt(mouseX, mouseY);
         if (hovered >= 0) tasks.get(hovered).drawTooltip(font, graphics, mouseX, mouseY);

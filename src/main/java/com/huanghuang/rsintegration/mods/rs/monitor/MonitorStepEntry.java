@@ -18,7 +18,7 @@ import java.util.Locale;
 
 /** 仅消费已经同步的数据。RS 数量是材料量，RSI 节点数量是加工次数，两者不混用。 */
 public record MonitorStepEntry(String key, int elementIndex, ItemStack item, FluidStack fluid,
-                               Component title, Component state, Component counts, List<Component> tooltip,
+                               Component title, Component state, Component counts, Component machine, List<Component> tooltip,
                                String searchText, int priority, boolean active, double completedFraction) {
     public static List<MonitorStepEntry> forRsi(CraftProgressSnapshot snapshot) {
         var entries = new ArrayList<MonitorStepEntry>();
@@ -37,6 +37,19 @@ public record MonitorStepEntry(String key, int elementIndex, ItemStack item, Flu
             tooltip.add(state);
             tooltip.add(counts);
             tooltip.add(Component.translatable("rsi.monitor.pending_operations", pending));
+            Component type = Component.translatableWithFallback("rsi.batch.mod." + node.modTypeId(),
+                    node.modTypeId().replace('_', ' '));
+            Component machine;
+            if (node.machineLabel().isBlank()) {
+                machine = "generic".equals(node.modTypeId()) ? type
+                        : Component.translatable("rsi.monitor.machine_unassigned", type);
+            } else {
+                String position = node.machineLabel().substring(node.machineLabel().indexOf('@') + 1).strip();
+                boolean candidate = node.state() == CraftProgressSnapshot.NodeState.READY
+                        || node.state() == CraftProgressSnapshot.NodeState.BLOCKED;
+                machine = Component.translatable(candidate ? "rsi.monitor.machine_candidate" : "rsi.monitor.step_machine", type, position);
+            }
+            tooltip.add(machine);
             if (!node.machineLabel().isBlank()) tooltip.add(Component.literal(node.machineLabel()));
             tooltip.add(Component.literal(node.recipeId()));
             if (!node.technicalDetail().isBlank()) tooltip.add(Component.literal(node.technicalDetail()));
@@ -44,11 +57,9 @@ public record MonitorStepEntry(String key, int elementIndex, ItemStack item, Flu
                 case SUCCEEDED, CANCELLED -> false;
                 default -> true;
             };
-            int rank = node.state() == CraftProgressSnapshot.NodeState.FAILED ? 0
-                    : node.runningOperations() > 0 ? 1
-                    : node.reason() != CraftProgressSnapshot.Reason.NONE ? 2 : active ? 3 : 4;
+            int rank = MonitorDiagnostics.priority(node);
             entries.add(new MonitorStepEntry("node:" + node.nodeId(), index, item, FluidStack.EMPTY,
-                    title, state, counts, List.copyOf(tooltip), title.getString() + " " + node.recipeId()
+                    title, state, counts, machine, List.copyOf(tooltip), title.getString() + " " + node.recipeId()
                     + " " + node.modTypeId() + " " + node.machineLabel() + " " + state.getString(), rank, active,
                     node.totalOperations() > 0 ? (double) node.completedOperations() / node.totalOperations() : -1));
         }
@@ -86,7 +97,7 @@ public record MonitorStepEntry(String key, int elementIndex, ItemStack item, Flu
                 if (!active) counts = Component.translatable("rsi.monitor.native_stored_count", Math.max(0, amount.rsi$stored()) + unit);
             }
             entries.add(new MonitorStepEntry(resource + ":" + original.baseElementHashCode(), index,
-                    item, fluid, title, state, counts, List.copyOf(tooltip), title.getString() + " " + resource,
+                    item, fluid, title, state, counts, Component.empty(), List.copyOf(tooltip), title.getString() + " " + resource,
                     rank, active, -1));
         }
         return List.copyOf(entries);

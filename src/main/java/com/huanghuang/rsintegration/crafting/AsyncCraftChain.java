@@ -46,6 +46,8 @@ import com.huanghuang.rsintegration.crafting.external.ExternalIntegrationRuntime
 import com.huanghuang.rsintegration.crafting.batch.CraftProgressPacket;
 import com.huanghuang.rsintegration.crafting.batch.CraftProgressDeltaPacket;
 import com.huanghuang.rsintegration.crafting.batch.CraftProgressPublisher;
+import com.huanghuang.rsintegration.crafting.progress.CraftExecutionClock;
+import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot.Reason;
 import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.crafting.batch.CraftStartedPacket;
 import com.huanghuang.rsintegration.crafting.batch.PreparationMessageScope;
@@ -306,6 +308,9 @@ public final class AsyncCraftChain {
     private final Set<NodeId> graphMachineWaits = new HashSet<>();
     /** 只跟踪本节点实际等待的已租用机器，不响应无关机器的释放。 */
     private final Map<NodeId, List<MachineLeaseRegistry.MachineKey>> graphWaitingMachines = new HashMap<>();
+    /** 监控证据与调度重试状态分离，避免展示逻辑影响租约和超时。 */
+    private final Map<NodeId, NodeDiagnostic> graphMonitorDiagnostics = new HashMap<>();
+    private record NodeDiagnostic(Reason reason, String detail, String machineLabel) {}
     @Nullable
     private final MaterialBroker graphMaterials;
     private long graphRefreshedAvailabilityRevision = -1L;
@@ -337,6 +342,7 @@ public final class AsyncCraftChain {
     private int vanillaBatchDeferredTicks;
     private final Map<NodeId, GraphVanillaJob> graphVanillaJobs = new LinkedHashMap<>();
     private final CraftProgressPublisher progressPublisher;
+    private final CraftExecutionClock executionClock = new CraftExecutionClock();
     private long confirmedPreviewRequestId;
     private int progressSequence;
     @Nullable
@@ -787,6 +793,7 @@ public final class AsyncCraftChain {
                         && observation.completedWork() > flatObservedCompletedWork) {
                     flatObservedCompletedWork = observation.completedWork();
                     waitTicks = 0;
+                    executionClock.markProgress();
                 }
                 if (currentDelegate instanceof ParallelCraftGroup group && group.isDraining()) {
                     drainingTicks++;
@@ -799,11 +806,13 @@ public final class AsyncCraftChain {
                     if (productionSequence > flatObservedProductionSequence) {
                         flatObservedProductionSequence = productionSequence;
                         waitTicks = 0;
+                        executionClock.markProgress();
                     }
                     int completed = group.getCompletedOperations();
                     if (completed > flatObservedCompletedOperations) {
                         flatObservedCompletedOperations = completed;
                         waitTicks = 0;
+                        executionClock.markProgress();
                     }
                     List<ItemStack> settled = group.drainSettledResults();
                     if (!settled.isEmpty()) {
@@ -866,6 +875,7 @@ public final class AsyncCraftChain {
                 if (capturedCount > flatObservedCapturedCount) {
                     flatObservedCapturedCount = capturedCount;
                     waitTicks = 0;
+                    executionClock.markProgress();
                 }
                 // 捕获会取消原生掉落实体，只有整批产物到齐才能代替机器完成信号。
                 boolean capturedWorldOutput = capturedOutput
@@ -989,6 +999,7 @@ public final class AsyncCraftChain {
                     }
                     currentDelegate = null;
                     waitTicks = 0;
+                    executionClock.markProgress();
                     flatObservedCompletedOperations = 0;
                     flatObservedProductionSequence = 0;
                     flatObservedCapturedCount = 0;
@@ -1387,6 +1398,7 @@ public final class AsyncCraftChain {
         }
 
         job.remainingExecutions -= executions;
+        if (executions > 0) executionClock.markProgress();
         if (job.remainingExecutions > 0) {
             waitingForVanillaBudget = true;
             graphProgressWatchdog.markProgress();
@@ -1785,17 +1797,22 @@ public final class AsyncCraftChain {
     private record PreparationResult(PreparationState state,
                                      @Nullable PreparedGraphNode prepared,
                                      String detail,
-                                     @Nullable Component userMessage) {
+                                     @Nullable Component userMessage,
+                                     Reason reason) {
         static PreparationResult ready(PreparedGraphNode prepared) {
-            return new PreparationResult(PreparationState.READY, prepared, "", null);
+            return new PreparationResult(PreparationState.READY, prepared, "", null, Reason.NONE);
         }
 
         static PreparationResult retry(String detail) {
-            return new PreparationResult(PreparationState.RETRY, null, detail, null);
+            return retry(detail, Reason.UNKNOWN);
+        }
+
+        static PreparationResult retry(String detail, Reason reason) {
+            return new PreparationResult(PreparationState.RETRY, null, detail, null, reason);
         }
 
         static PreparationResult waiting(String detail, @Nullable Component userMessage) {
-            return new PreparationResult(PreparationState.RETRY, null, detail, userMessage);
+            return new PreparationResult(PreparationState.RETRY, null, detail, userMessage, Reason.UNKNOWN);
         }
 
         static PreparationResult fatal(String detail) {
@@ -1803,7 +1820,11 @@ public final class AsyncCraftChain {
         }
 
         static PreparationResult fatal(String detail, @Nullable Component userMessage) {
-            return new PreparationResult(PreparationState.FATAL, null, detail, userMessage);
+            return fatal(detail, userMessage, Reason.CONTRACT_INCOMPATIBLE);
+        }
+
+        static PreparationResult fatal(String detail, @Nullable Component userMessage, Reason reason) {
+            return new PreparationResult(PreparationState.FATAL, null, detail, userMessage, reason);
         }
     }
 
@@ -1811,18 +1832,23 @@ public final class AsyncCraftChain {
 
     private record GraphDispatchResult(DispatchState state,
                                        @Nullable ConcurrentNodeExecutor.Worker worker,
-                                       String detail) {
+                                       String detail,
+                                       Reason reason) {
         static GraphDispatchResult started(ConcurrentNodeExecutor.Worker worker) {
             return new GraphDispatchResult(DispatchState.STARTED,
-                    Objects.requireNonNull(worker, "worker"), "");
+                    Objects.requireNonNull(worker, "worker"), "", Reason.NONE);
         }
 
         static GraphDispatchResult retry(String detail) {
-            return new GraphDispatchResult(DispatchState.RETRY, null, detail == null ? "" : detail);
+            return retry(detail, Reason.UNKNOWN);
+        }
+
+        static GraphDispatchResult retry(String detail, Reason reason) {
+            return new GraphDispatchResult(DispatchState.RETRY, null, detail == null ? "" : detail, reason);
         }
 
         static GraphDispatchResult fatal(String detail) {
-            return new GraphDispatchResult(DispatchState.FATAL, null, detail == null ? "" : detail);
+            return new GraphDispatchResult(DispatchState.FATAL, null, detail == null ? "" : detail, Reason.START_REJECTED);
         }
     }
 
@@ -1869,7 +1895,7 @@ public final class AsyncCraftChain {
             NodeAdmissionCoordinator.Admission admission = graphAdmissions.tryAdmitClaimed(candidate);
             if (admission == null) {
                 return graphRetry(nodeId, "material admission unavailable",
-                        candidate.materialRequests());
+                        candidate.materialRequests(), Reason.WAITING_MATERIALS);
             }
             // 图模式下上游产物通常保存在 MaterialBroker 的 producer 资产里，
             // 不会自动进入 virtualInventory；必须用本节点的预留取出大地之心。
@@ -1893,6 +1919,8 @@ public final class AsyncCraftChain {
                 return ConcurrentNodeExecutor.StartResult.failed();
             }
             clearGraphRetry(nodeId);
+            graphMonitorDiagnostics.remove(nodeId);
+            executionClock.markProgress();
             graphAdmissions.commit(admission);
             graphAdmissions.settleMaterial(admission);
             // 污染是异步等待玩家背包里的物品被转化，不能立即标记完成；
@@ -1908,10 +1936,11 @@ public final class AsyncCraftChain {
         }
 
         PreparationResult preparation = prepareGraphNode(nodeId, step, online);
+        rememberGraphDiagnostic(nodeId, preparation.reason(), preparation.detail());
         if (preparation.state() == PreparationState.RETRY) {
             machineWaitNotifier.notifyWait(online, preparation.userMessage());
             return graphRetry(nodeId, preparation.detail(),
-                    graphRequests.getOrDefault(nodeId, List.of()));
+                    graphRequests.getOrDefault(nodeId, List.of()), preparation.reason());
         }
         if (preparation.state() == PreparationState.FATAL || preparation.prepared() == null) {
             graphFailureDetails.put(nodeId, preparation.detail());
@@ -1927,23 +1956,24 @@ public final class AsyncCraftChain {
         if (!ensureRetryMaterials(nodeId, online)) {
             releasePreparationQuietly(prepared.delegate());
             return graphRetry(nodeId, "retry materials unavailable",
-                    graphRequests.getOrDefault(nodeId, List.of()));
+                    graphRequests.getOrDefault(nodeId, List.of()), Reason.WAITING_MATERIALS);
         }
         NodeAdmissionCoordinator.Candidate candidate = new NodeAdmissionCoordinator.Candidate(
                 nodeId, graphRequests.getOrDefault(nodeId, List.of()));
         NodeAdmissionCoordinator.Admission admission = graphAdmissions.tryAdmitClaimed(candidate);
         if (admission == null) {
             releasePreparationQuietly(prepared.delegate());
-            return graphRetry(nodeId, "material admission unavailable", candidate.materialRequests());
+            return graphRetry(nodeId, "material admission unavailable", candidate.materialRequests(), Reason.WAITING_MATERIALS);
         }
 
         GraphDispatchResult dispatch = dispatchPreparedGraphNode(
                 nodeId, prepared, online, admission);
         if (dispatch.state() == DispatchState.RETRY) {
             graphAdmissions.releaseMaterial(admission);
-            return graphRetry(nodeId, dispatch.detail(), candidate.materialRequests());
+            return graphRetry(nodeId, dispatch.detail(), candidate.materialRequests(), dispatch.reason());
         }
         if (dispatch.state() == DispatchState.FATAL || dispatch.worker() == null) {
+            rememberGraphDiagnostic(nodeId, dispatch.reason(), dispatch.detail());
             graphFailureDetails.put(nodeId, dispatch.detail());
             graphFailureCodes.put(nodeId, CraftFailureCode.START_REJECTED);
             RSIntegrationMod.LOGGER.warn(ctx.format("Graph node {} dispatch failed: {}"),
@@ -1952,11 +1982,14 @@ public final class AsyncCraftChain {
             return ConcurrentNodeExecutor.StartResult.failed();
         }
         clearGraphRetry(nodeId);
+        graphMonitorDiagnostics.remove(nodeId);
+        executionClock.markProgress();
         return ConcurrentNodeExecutor.StartResult.started(dispatch.worker());
     }
 
     private ConcurrentNodeExecutor.StartResult graphRetry(
-            NodeId nodeId, String detail, List<MaterialBroker.Request> requests) {
+            NodeId nodeId, String detail, List<MaterialBroker.Request> requests, Reason reason) {
+        rememberGraphDiagnostic(nodeId, reason, detail);
         if (isMachineWait(detail) != graphMachineWaits.contains(nodeId)) {
             graphRetrySinceTick.remove(nodeId);
             graphRetryAttempts.remove(nodeId);
@@ -2035,6 +2068,12 @@ public final class AsyncCraftChain {
         graphRetrySinceTick.remove(nodeId);
         graphMachineWaits.remove(nodeId);
         graphWaitingMachines.remove(nodeId);
+    }
+
+    private void rememberGraphDiagnostic(NodeId nodeId, Reason reason, String detail) {
+        var existing = graphMonitorDiagnostics.get(nodeId);
+        graphMonitorDiagnostics.put(nodeId, new NodeDiagnostic(reason, detail,
+                existing == null ? "" : existing.machineLabel()));
     }
 
     /**
@@ -2125,6 +2164,9 @@ public final class AsyncCraftChain {
             return IronFurnaceMachinePriority.compare(a, b);
         });
         machines = applyMachineSelection(machines, step.recipeId());
+        String label = machines.isEmpty() ? "" : machines.get(0).dim() + "@" + machines.get(0).pos().toShortString()
+                + (machines.size() > 1 ? " (+" + (machines.size() - 1) + ")" : "");
+        graphMonitorDiagnostics.put(nodeId, new NodeDiagnostic(Reason.NONE, "", label));
         graphWaitingMachines.put(nodeId, leasedMachineKeys(machines, step.modType().id()));
         IBatchDelegate delegate = createStepDelegate(step);
         if (delegate == null) {
@@ -2174,13 +2216,21 @@ public final class AsyncCraftChain {
                     AltarBindingRegistry.diagnoseMachines(online, step.modType(),
                             step.recipeId(), recipeForDiagnostics(step.recipeId())));
             return PreparationResult.fatal("No bound machine matches " + step.recipeId()
-                    + " (type=" + step.modType().id() + ")");
+                    + " (type=" + step.modType().id() + ")", null, Reason.NO_BOUND_MACHINE);
         }
         List<BoundMachine> available = LoadBalancer.filterAvailable(machines, server, delegate);
         available = MachineDispatchPlanner.filterUnleased(
                 available, machineLeases, step.modType().id());
         if (available.isEmpty()) {
-            return PreparationResult.retry(MACHINE_BUSY_DETAIL);
+            boolean loaded = machines.stream().anyMatch(machine -> {
+                var level = server.getLevel(ResourceKey.create(Registries.DIMENSION, machine.dim()));
+                return level != null && level.isLoaded(machine.pos());
+            });
+            // 租约占用可以确认是排队；忙碌/缺方块的混合结果保留“待确认”。
+            Reason reason = !loaded ? Reason.CHUNK_UNLOADED
+                    : graphWaitingMachines.getOrDefault(nodeId, List.of()).size() == machines.size()
+                    ? Reason.MACHINE_BUSY : Reason.UNKNOWN;
+            return PreparationResult.retry(MACHINE_BUSY_DETAIL, reason);
         }
         List<BoundMachine> eligible = new ArrayList<>();
         releasePreparationQuietly(delegate);
@@ -2508,10 +2558,10 @@ public final class AsyncCraftChain {
             }
             GraphNodeMaterials reserved = reserveCountedOperationMaterials(
                     group, online, nodeLedger, admission.materialToken());
-            if (reserved == null) return GraphDispatchResult.retry("exact graph materials are temporarily unavailable");
+            if (reserved == null) return GraphDispatchResult.retry("exact graph materials are temporarily unavailable", Reason.WAITING_MATERIALS);
             group.setReusableReservationTokens(reserved.reusableTokens());
             if (!group.validateExecutionContext(online)) return GraphDispatchResult.fatal("execution context changed before commit");
-            if (!commitLedger(nodeLedger, online)) return GraphDispatchResult.retry("node ledger commit did not complete");
+            if (!commitLedger(nodeLedger, online)) return GraphDispatchResult.retry("node ledger commit did not complete", Reason.MATERIAL_EXTRACTION_FAILED);
             CraftNodeRuntime runtime = new CraftNodeRuntime(nodeId, prepared.step().recipeId().toString(),
                     group, nodeLedger, admission, null);
             ProductionAttemptState attempt = attachGraphAttempt(runtime, nodeId, prepared.step());
@@ -2603,11 +2653,11 @@ public final class AsyncCraftChain {
                 new OperationId(craftId, nodeId, nextGraphOperationSequence(nodeId)),
                 craftOperationBudget, machineScope, null);
         if (operationSession == null) {
-            return GraphDispatchResult.retry("operation budget or machine is temporarily unavailable");
+            return GraphDispatchResult.retry("operation budget or machine is temporarily unavailable", Reason.RESOURCE_CONFLICT);
         }
         if (!operationSession.commit(() -> nodeLedger.commitToEndpoint(storageEndpoint, online))) {
             operationSession.close();
-            return GraphDispatchResult.retry("node ledger commit did not complete");
+            return GraphDispatchResult.retry("node ledger commit did not complete", Reason.MATERIAL_EXTRACTION_FAILED);
         }
 
         CraftNodeRuntime runtime = new CraftNodeRuntime(nodeId,
@@ -2668,8 +2718,9 @@ public final class AsyncCraftChain {
     private void publishIncrementalGraphOutputs(NodeId nodeId, ConcurrentNodeExecutor.Worker worker) {
         if (!(worker instanceof CraftNodeRuntime runtime) || graphMaterials == null) return;
         List<NodeOutputAccumulator.Publication> publications = runtime.drainIncrementalOutputs();
-        if (runtime.consumeProgressSignal() || !publications.isEmpty()
-                || runtime.isWaitingForLeasedMachine()) {
+        boolean advanced = runtime.consumeProgressSignal() || !publications.isEmpty();
+        if (advanced) executionClock.markProgress();
+        if (advanced || runtime.isWaitingForLeasedMachine()) {
             graphProgressWatchdog.markProgress();
         }
         for (NodeOutputAccumulator.Publication publication : publications) {
@@ -3248,12 +3299,15 @@ public final class AsyncCraftChain {
         CraftProgressSnapshot.Result progressResult = progressResult(terminal);
         CraftProgressSnapshot.Reason progressReason = progressReason(progressResult);
         int sequence = terminal ? CraftProgressSnapshot.TERMINAL_SEQUENCE : ++progressSequence;
+        var nodes = buildNodeProgress();
+        var output = outputProgress();
         return new CraftProgressSnapshot(craftId, sequence, progressResult, progressReason,
                 completed, total, running, abortReason.isEmpty() ? null : abortReason,
-                buildNodeProgress(), outputProgress());
+                nodes, output, executionClock.sample(nodes, output, terminal));
     }
 
     private void recordPublishedOutput(OutputPortId port, ItemStack stack) {
+        if (!stack.isEmpty()) executionClock.markProgress();
         publishedOutputQuantities.merge(port, (long) stack.getCount(), SaturatingLongMath::add);
     }
 
@@ -3413,14 +3467,20 @@ public final class AsyncCraftChain {
         CraftFailureCode nodeFailureCode = runtime != null
                 ? runtime.failureCode()
                 : graphFailureCodes.getOrDefault(nodeId, CraftFailureCode.NONE);
+        var diagnostic = graphMonitorDiagnostics.get(nodeId);
+        boolean diagnosticAvailable = runtime == null && diagnostic != null
+                && schedulerState != DagScheduler.NodeState.SUCCEEDED && schedulerState != DagScheduler.NodeState.CANCELLED;
+        boolean diagnosticReasonAvailable = diagnosticAvailable && (nodeFailureCode == CraftFailureCode.NONE
+                || detail.equals(diagnostic.detail()));
+        if (diagnosticAvailable && detail.isBlank()) detail = diagnostic.detail();
         return new CraftProgressSnapshot.NodeProgress(nodeId.value(),
                 progressNodeState(schedulerState),
                 node != null ? node.recipeId().toString() : "",
                 node != null ? node.modTypeId() : "",
                 displayOutput(node),
                 completedOps, totalOps, runningOps,
-                runtime != null ? runtime.machineLabel() : "",
-                nodeFailureCode.progressReason(), detail,
+                runtime != null ? runtime.machineLabel() : diagnosticAvailable ? diagnostic.machineLabel() : "",
+                diagnosticReasonAvailable && diagnostic.reason() != Reason.NONE ? diagnostic.reason() : nodeFailureCode.progressReason(), detail,
                 runtime != null && runtime.isDraining());
     }
 
@@ -3726,6 +3786,7 @@ public final class AsyncCraftChain {
             }
         }
         stepRemaining = slice.remainingExecutions();
+        if (!slice.steps().isEmpty()) executionClock.markProgress();
         return slice.nextStepIndex();
     }
 

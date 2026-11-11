@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting;
 import com.huanghuang.rsintegration.machine.client.MachinePreferenceClient;
 import com.huanghuang.rsintegration.machine.client.MachineTabHandler;
 import com.huanghuang.rsintegration.network.binding.BindingInfo;
+import com.huanghuang.rsintegration.network.binding.MachineEndpointId;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
@@ -11,10 +12,13 @@ import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.mockito.ArgumentCaptor;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.List;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -95,6 +99,32 @@ class MachineManagementScreenTest extends BootstrapTest {
         client.set(screen, minecraft);
         screen.onClose();
         verify(minecraft).setScreen(parent);
+    }
+
+    @ParameterizedTest
+    @EnumSource(MachineManagementScreen.View.class)
+    void pencilOpensRenameWithoutOpeningOrUnbindingMachine(MachineManagementScreen.View view)
+            throws Exception {
+        MachineManagementScreen screen = layout(960, 520, view);
+        Minecraft minecraft = mock(Minecraft.class);
+        Field client = Screen.class.getDeclaredField("minecraft");
+        client.setAccessible(true);
+        client.set(screen, minecraft);
+        BindingInfo machine = machine(1).withBookIds(UUID.randomUUID(), MachineEndpointId.create());
+        entries(screen).add(machine);
+
+        try (var handler = mockStatic(MachineTabHandler.class)) {
+            int x = number(screen, "gridX") + number(screen, "tileWidth") - 15;
+            int y = number(screen, "gridY") + 53;
+            assertTrue(screen.mouseClicked(x, y, 0));
+            ArgumentCaptor<Screen> opened = ArgumentCaptor.forClass(Screen.class);
+            verify(minecraft).setScreen(opened.capture());
+            assertTrue(opened.getValue() instanceof MachineRenameScreen);
+            client.set(opened.getValue(), minecraft);
+            opened.getValue().onClose();
+            verify(minecraft).setScreen(screen);
+            handler.verifyNoInteractions();
+        }
     }
 
     private static MachineManagementScreen layout(int width, int height, MachineManagementScreen.View view)

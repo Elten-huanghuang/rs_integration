@@ -19,6 +19,11 @@ public final class MachineDisplayNameResolver {
     private MachineDisplayNameResolver() {}
 
     public static Component displayName(BindingInfo info) {
+        if (!info.customName().isEmpty()) return Component.literal(info.customName());
+        return defaultDisplayName(info);
+    }
+
+    public static Component defaultDisplayName(BindingInfo info) {
         return BindingEventHandler.resolveBlockName(
                 info.blockKey(), info.blockRegKey(), info.displayStack());
     }

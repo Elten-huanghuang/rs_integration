@@ -83,7 +83,7 @@ public final class CraftProgressTracker {
         for (CraftProgressSnapshot.NodeProgress node : delta.changedNodes()) nodes.put(node.nodeId(), node);
         return onProgress(new CraftProgressSnapshot(delta.craftId(), delta.sequence(), delta.result(),
                 delta.reason(), delta.completedNodes(), delta.totalNodes(), delta.runningNodes(),
-                delta.technicalDetail(), List.copyOf(nodes.values()), delta.outputProgress()));
+                delta.technicalDetail(), List.copyOf(nodes.values()), delta.outputProgress(), delta.timing()));
     }
 
     private static void requestFullStatus(UUID craftId) {

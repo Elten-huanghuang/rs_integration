@@ -159,4 +159,5 @@ public final class NetworkPacketIds {
     public static final int RS_OPEN_MONITOR_FOR_CRAFT = 172;
     public static final int RS_MONITOR_NAVIGATION_RESULT = 173;
     public static final int RS_NETWORK_MONITOR_SELECT = 174;
+    public static final int MACHINE_RENAME = 175;
 }

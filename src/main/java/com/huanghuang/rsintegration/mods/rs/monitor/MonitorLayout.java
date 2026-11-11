@@ -4,10 +4,17 @@ package com.huanghuang.rsintegration.mods.rs.monitor;
 public record MonitorLayout(int materialWidth, int cellWidth, int cellHeight, int detailsWidth, int railWidth) {
     public static MonitorLayout forViewport(int width, int height) {
         boolean wide = width >= 600 && height >= 260;
-        return new MonitorLayout(wide ? 310 : 254, wide ? 92 : 73, wide ? 35 : 29,
-                wide || width >= 540 ? 166 : 0, width >= 374 ? 54 : 30);
+        int materialWidth = wide ? 310 : 254;
+        int detailsWidth = wide || width >= 540 ? 166 : 0;
+        int railWidth = width >= 374 ? Math.min(96, width - materialWidth - detailsWidth - 28) : 30;
+        return new MonitorLayout(materialWidth, wide ? 92 : 73, wide ? 35 : 29, detailsWidth, railWidth);
     }
     public int width() { return materialWidth + detailsWidth; }
+    /** 任务栏、主面板和右侧按钮一起居中，防止加宽左栏后越界。 */
+    public int mainLeft(int viewportWidth) {
+        int leftExtension = railWidth + 4;
+        return leftExtension + (viewportWidth - leftExtension - width() - 22) / 2;
+    }
     public int gridHeight() { return (cellHeight + 1) * 5 - 1; }
     public int height() { return gridHeight() + 52; }
     public int footerY() { return height() - 27; }

@@ -123,7 +123,7 @@ public final class MachineBindingService {
                     || !expectedBlockKey.equals(entry.blockKey())) continue;
             BindingStorage.BindingEntry replacement = new BindingStorage.BindingEntry(
                     entry.dim(), entry.pos(), replacementBlockKey,
-                    entry.blockRegKey(), entry.displayStack());
+                    entry.blockRegKey(), entry.displayStack(), entry.customName());
             return data.put(bookId, MachineEndpointId.create(), replacement);
         }
         return false;
@@ -138,6 +138,17 @@ public final class MachineBindingService {
 
     static boolean hasAnyBinding(ItemStack stack) {
         return !getBindings(stack).isEmpty();
+    }
+
+    /** 改名只能作用于玩家当前携带的绑定，不能凭客户端提供的 UUID 修改其它终端。 */
+    public static boolean rename(ServerPlayer player, UUID bookId,
+                                 MachineEndpointId endpointId, String name) {
+        for (PlayerEndpoint endpoint : collectPlayerEndpoints(player)) {
+            if (endpoint.bookId().equals(bookId) && endpoint.endpointId().equals(endpointId)) {
+                return MachineBindingSavedData.get(player.server).rename(bookId, endpointId, name);
+            }
+        }
+        return false;
     }
 
     /**

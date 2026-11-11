@@ -34,6 +34,11 @@ class NativeMonitorContractTest extends BootstrapTest {
         assertTrue(screen.fields.stream().anyMatch(f -> f.name.equals("tasks") && f.desc.equals("Ljava/util/List;")));
         var task = read("com/refinedmods/refinedstorage/screen/CraftingMonitorScreen$Task");
         assertTrue(task.fields.stream().anyMatch(f -> f.name.equals("id") && f.desc.equals("Ljava/util/UUID;")));
+        assertTrue(task.fields.stream().anyMatch(f -> f.name.equals("requested")
+                && f.desc.equals("Lcom/refinedmods/refinedstorage/api/autocrafting/task/ICraftingRequestInfo;")));
+        for (String field : List.of("qty", "completionPercentage")) {
+            assertTrue(task.fields.stream().anyMatch(f -> f.name.equals(field) && f.desc.equals("I")), field);
+        }
         var tabs = read("com/refinedmods/refinedstorage/screen/widget/TabListWidget");
         assertMethod(tabs, "init", "(I)V");
         assertMethod(tabs, "update", "()V");

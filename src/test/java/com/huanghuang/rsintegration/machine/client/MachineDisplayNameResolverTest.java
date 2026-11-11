@@ -20,6 +20,19 @@ class MachineDisplayNameResolverTest extends BootstrapTest {
     private static final String TYPE_ID = "test_auto_machine_name";
 
     @Test
+    void customNameTakesPriorityAndRemainsLiteralText() {
+        BindingInfo binding = new BindingInfo(
+                "minecraft:air", ResourceLocation.tryParse("minecraft:overworld"),
+                BlockPos.ZERO, "block.minecraft.stone", "block.minecraft.stone",
+                "minecraft:stone", new ItemStack(Items.STONE), null, null,
+                "block.minecraft.dirt");
+
+        assertEquals("block.minecraft.dirt", MachineDisplayNameResolver.displayText(binding));
+        assertEquals(new ItemStack(Items.STONE).getHoverName().getString(),
+                MachineDisplayNameResolver.defaultDisplayName(binding).getString());
+    }
+
+    @Test
     void resolvesBoundMachineNameFromRecipeBinding() {
         ModType type = ModType.byId(TYPE_ID);
         if (type == ModType.GENERIC) {

@@ -38,14 +38,15 @@ public final class MachineBindingInfoFactory {
                         entry.blockKey(), entry.blockRegKey(),
                         entry.displayStack()),
                 entry.blockRegKey(), entry.displayStack(),
-                endpoint.bookId(), endpoint.endpointId());
+                endpoint.bookId(), endpoint.endpointId(), entry.customName());
     }
 
     public static BindingStorage.BindingEntry toEntry(BindingInfo info) {
         return new BindingStorage.BindingEntry(
                 info.dim(), info.pos().immutable(), info.blockKey(),
                 info.blockRegKey(),
-                info.displayStack() == null ? null : info.displayStack().copy());
+                info.displayStack() == null ? null : info.displayStack().copy(),
+                info.customName());
     }
 
     private static String resolveDisplayName(

@@ -40,7 +40,7 @@ class MonitorStepEntryTest extends BootstrapTest {
                 node(2, NodeState.BLOCKED, Reason.NO_BOUND_MACHINE, 0, 10, 0),
                 node(3, NodeState.RUNNING, Reason.NONE, 2, 10, 1),
                 node(4, NodeState.FAILED, Reason.OUTPUT_MISSING, 0, 10, 0))));
-        assertEquals(List.of("node:4", "node:3", "node:2"),
+        assertEquals(List.of("node:2", "node:4", "node:3"),
                 MonitorStepEntry.filter(entries, "", true).stream().map(MonitorStepEntry::key).toList());
         assertEquals(4, MonitorStepEntry.filter(entries, " FURNACE ", false).size());
         assertEquals("node:2", MonitorStepEntry.filter(entries, "TEST:STEP_2", true).get(0).key());
@@ -71,6 +71,16 @@ class MonitorStepEntryTest extends BootstrapTest {
         var entries = MonitorStepEntry.forNative(List.of(nativeElement(0, 0, 0, 0, 123)));
         assertTrue(MonitorStepEntry.filter(entries, "", true).isEmpty());
         assertEquals(1, MonitorStepEntry.filter(entries, "minecraft:diamond", false).size());
+    }
+
+    @Test void machineLineDistinguishesAssignedAndCandidateLocationsAndRetainsDimensionInDetails() {
+        var running = MonitorStepEntry.forRsi(snapshot(List.of(node(1, NodeState.RUNNING, Reason.NONE, 0, 10, 1)))).get(0);
+        var queued = MonitorStepEntry.forRsi(snapshot(List.of(node(2, NodeState.READY, Reason.MACHINE_BUSY, 0, 10, 0)))).get(0);
+        assertEquals("rsi.monitor.step_machine", ((TranslatableContents) running.machine().getContents()).getKey());
+        assertEquals("rsi.monitor.machine_candidate", ((TranslatableContents) queued.machine().getContents()).getKey());
+        assertTrue(running.tooltip().stream().anyMatch(line -> line.getString().equals("furnace @ 1,2,3")));
+        assertArrayEquals(new Object[]{Component.translatableWithFallback("rsi.batch.mod.vanilla_furnace", "vanilla furnace"), "1,2,3"},
+                ((TranslatableContents) running.machine().getContents()).getArgs());
     }
 
     private static ICraftingMonitorElement nativeElement(int processing, int crafting, int scheduled, int missing, int stored) {

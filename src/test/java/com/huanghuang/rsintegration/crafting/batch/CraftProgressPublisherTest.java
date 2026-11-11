@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot;
 import com.huanghuang.rsintegration.crafting.progress.CraftOutputProgress;
+import com.huanghuang.rsintegration.crafting.progress.CraftProgressTiming;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -59,5 +60,17 @@ class CraftProgressPublisherTest {
     private static CraftProgressSnapshot snapshot(UUID id, int sequence, int completed) {
         return new CraftProgressSnapshot(id, sequence, CraftProgressSnapshot.Result.RUNNING,
                 CraftProgressSnapshot.Reason.NONE, completed, 2, 0, null, List.of());
+    }
+
+    @Test
+    void timeContinuesToPublishWhileAQueueHasNoOtherStateChanges() {
+        UUID id = UUID.randomUUID();
+        var first = new CraftProgressSnapshot(id, 1, CraftProgressSnapshot.Result.WAITING,
+                CraftProgressSnapshot.Reason.MACHINE_BUSY, 0, 1, 0, null, List.of(),
+                CraftOutputProgress.UNKNOWN, new CraftProgressTiming(1_000, 1_000));
+        var second = new CraftProgressSnapshot(id, 2, first.result(), first.reason(), 0, 1, 0,
+                null, List.of(), CraftOutputProgress.UNKNOWN, new CraftProgressTiming(2_000, 2_000));
+        assertFalse(CraftProgressPublisher.samePayload(first, second));
+        assertTrue(CraftProgressPublisher.changedNodes(first, second).isEmpty());
     }
 }

@@ -41,11 +41,10 @@ import java.util.UUID;
  */
 public final class FoodOrderListService {
 
-    private static final long CACHE_TICKS = 20L;
     private static final long REQUEST_COOLDOWN_TICKS = 10L;
     private static final long UPDATE_INTERVAL_TICKS = 10L;
 
-    private static final Map<UUID, CachedSnapshot> CACHE = new HashMap<>();
+    private static final Map<UUID, FoodOrderSnapshot> CACHE = new HashMap<>();
     private static final Map<UUID, Long> LAST_REQUEST = new HashMap<>();
     private static final Map<UUID, BuildState> BUILDS = new HashMap<>();
     private static final Map<UUID, Long> LAST_SENT = new HashMap<>();
@@ -123,17 +122,13 @@ public final class FoodOrderListService {
         }
     }
 
-    /** 最近一次构建结果；过期返回 null。 */
+    /**
+     * 最近一次构建结果，保留至刷新或玩家状态失效。
+     * 下单只从中选取候选配方，实际材料和机器由 Consumer API 重新预检；
+     * 不能因浏览菜单超过一秒就丢弃列表，再把尚未完成的重建误判为无菜可点。
+     */
     public static FoodOrderSnapshot cached(ServerPlayer player) {
-        CachedSnapshot cached = CACHE.get(player.getUUID());
-        if (cached == null) {
-            return null;
-        }
-        long now = player.serverLevel().getGameTime();
-        if (now - cached.builtAt() > CACHE_TICKS) {
-            return null;
-        }
-        return cached.snapshot();
+        return CACHE.get(player.getUUID());
     }
 
     public static FoodOrderSnapshot snapshot(ServerPlayer player, boolean rebuild) {
@@ -154,8 +149,7 @@ public final class FoodOrderListService {
                     List.of(), Component.translatable("rsi.food_order.error.failed"),
                     0, 0, false, false);
         }
-        CACHE.put(player.getUUID(), new CachedSnapshot(
-                player.serverLevel().getGameTime(), snapshot));
+        CACHE.put(player.getUUID(), snapshot);
         if (snapshot.indexing() || snapshot.partial()) {
             // 放到队尾，下一 tick 接着算；多人刷新时仍然轮流推进。
             PENDING.putIfAbsent(player.getUUID(), player.serverLevel().getGameTime());
@@ -341,7 +335,6 @@ public final class FoodOrderListService {
                 apiVersion);
     }
 
-    private record CachedSnapshot(long builtAt, FoodOrderSnapshot snapshot) {}
     private record Evaluation(FoodOrderKind kind, List<IngredientSpec> specs) {}
 
     private static final class BuildState {

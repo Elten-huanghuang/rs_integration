@@ -18,10 +18,11 @@ public enum MonitorGridStyle {
     public static MonitorGridStyle node(CraftProgressSnapshot.NodeProgress node) {
         if (node.draining()) return STOPPING;
         if (node.state() == CraftProgressSnapshot.NodeState.FAILED) return BLOCKED;
+        if (MonitorDiagnostics.priority(node) == 0) return BLOCKED;
         if (node.runningOperations() > 0 || node.state() == CraftProgressSnapshot.NodeState.RUNNING) return RUNNING;
         if (node.state() == CraftProgressSnapshot.NodeState.SUCCEEDED) return COMPLETED;
         if (node.state() == CraftProgressSnapshot.NodeState.CANCELLED) return STORED;
-        return node.reason() != CraftProgressSnapshot.Reason.NONE ? BLOCKED : SCHEDULED;
+        return SCHEDULED;
     }
 
     public static MonitorGridStyle nativeElement(ICraftingMonitorElement element) {

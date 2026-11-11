@@ -105,6 +105,7 @@ final class GraphPreparationFixture implements AutoCloseable {
                 withSettings().stubOnly().defaultAnswer(call -> {
                     return switch (call.getMethod().getName()) {
                         case "getLevel", "overworld" -> level;
+                        case "getRecipeManager" -> recipes;
                         default -> RETURNS_DEFAULTS.answer(call);
                     };
                 }));

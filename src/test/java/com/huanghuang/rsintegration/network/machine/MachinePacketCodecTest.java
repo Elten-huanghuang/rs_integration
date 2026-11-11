@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.network.machine;
 import com.huanghuang.rsintegration.network.binding.MachineEndpointId;
 import com.huanghuang.rsintegration.network.binding.BindingInfo;
 import com.huanghuang.rsintegration.network.binding.MachineFavoriteKey;
+import com.huanghuang.rsintegration.network.binding.MachineRenamePacket;
 import com.huanghuang.rsintegration.network.machine.bd.BeyondDimensionsBindingSyncPacket;
 import io.netty.buffer.Unpooled;
 import net.minecraft.core.BlockPos;
@@ -30,7 +31,7 @@ class MachinePacketCodecTest {
                 "example:machine",
                 null,
                 bookId,
-                endpointId);
+                endpointId, "北侧机器");
         RSBindingSyncPacket original =
                 new RSBindingSyncPacket(List.of(binding), 42L, 1, 3);
         FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
@@ -43,6 +44,7 @@ class MachinePacketCodecTest {
         assertEquals(3, decoded.totalChunks());
         assertEquals(bookId, decoded.bindings().get(0).bindingBookId());
         assertEquals(endpointId, decoded.bindings().get(0).endpointId());
+        assertEquals("北侧机器", decoded.bindings().get(0).customName());
     }
 
     @Test
@@ -57,6 +59,23 @@ class MachinePacketCodecTest {
 
         assertEquals(packet.dim(), decoded.dim());
         assertEquals(packet.pos(), decoded.pos());
+    }
+
+    @Test
+    void renameRequestRoundTripsTheExactBindingAndResetName() {
+        UUID bookId = UUID.randomUUID();
+        MachineEndpointId endpointId = MachineEndpointId.create();
+        for (String name : List.of("一楼熔炉", "")) {
+            MachineRenamePacket packet = new MachineRenamePacket(bookId, endpointId, name);
+            FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+            try {
+                MachineRenamePacket.encode(packet, buffer);
+                assertEquals(packet, MachineRenamePacket.decode(buffer));
+                assertEquals(0, buffer.readableBytes());
+            } finally {
+                buffer.release();
+            }
+        }
     }
 
     @Test

@@ -4,6 +4,7 @@ import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot;
 import com.huanghuang.rsintegration.crafting.progress.CraftOutputProgress;
+import com.huanghuang.rsintegration.crafting.progress.CraftProgressTiming;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.util.PerformanceMonitor;
 import io.netty.handler.codec.DecoderException;
@@ -69,7 +70,7 @@ public final class CraftProgressPacket {
             buf.writeUtf(node.technicalDetail(), MAX_TECHNICAL_DETAIL_LENGTH);
             buf.writeBoolean(node.draining());
         }
-        writeOutputProgress(buf, snapshot.outputProgress());
+        writeProgressTail(buf, snapshot.outputProgress(), snapshot.timing());
         PerformanceMonitor.recordProgressPacketBytes(buf.writerIndex() - startIndex);
     }
 
@@ -104,9 +105,43 @@ public final class CraftProgressPacket {
                     recipeId, modTypeId, displayOutput, completedOperations, totalOperations,
                     runningOperations, machineLabel, nodeReason, nodeDetail, draining));
         }
+        var tail = readProgressTail(buf);
         return new CraftProgressPacket(new CraftProgressSnapshot(craftId, sequence, result, reason,
-                completed, total, running, detail, List.copyOf(nodes), readOutputProgress(buf)));
+                completed, total, running, detail, List.copyOf(nodes), tail.output(), tail.timing()));
     }
+
+    /** 保留旧的可选数量尾部；未知产量的 0/0 占位只在附带计时时有效。 */
+    static void writeProgressTail(FriendlyByteBuf buf, CraftOutputProgress output, CraftProgressTiming timing) {
+        if (!timing.known()) {
+            writeOutputProgress(buf, output);
+            return;
+        }
+        buf.writeVarLong(output.known() ? output.completed() : 0L);
+        buf.writeVarLong(output.known() ? output.total() : 0L);
+        buf.writeVarInt(1);
+        buf.writeVarLong(timing.elapsedMillis());
+        buf.writeVarLong(timing.sinceProgressMillis());
+    }
+
+    static ProgressTail readProgressTail(FriendlyByteBuf buf) {
+        if (!buf.isReadable()) return new ProgressTail(CraftOutputProgress.UNKNOWN, CraftProgressTiming.UNKNOWN);
+        long completed = buf.readVarLong();
+        long total = buf.readVarLong();
+        boolean timingOnly = completed == 0L && total == 0L && buf.isReadable();
+        if (!timingOnly && (completed < 0L || total <= 0L || completed > total)) {
+            throw new DecoderException("output quantity counts out of bounds");
+        }
+        CraftOutputProgress output = timingOnly ? CraftOutputProgress.UNKNOWN : new CraftOutputProgress(completed, total);
+        if (!buf.isReadable()) return new ProgressTail(output, CraftProgressTiming.UNKNOWN);
+        if (buf.readVarInt() != 1) throw new DecoderException("unsupported progress timing version");
+        long elapsed = buf.readVarLong();
+        long idle = buf.readVarLong();
+        if (elapsed < 0L || idle < 0L || idle > elapsed) throw new DecoderException("craft timing out of bounds");
+        if (buf.isReadable()) throw new DecoderException("unexpected progress timing data");
+        return new ProgressTail(output, new CraftProgressTiming(elapsed, idle));
+    }
+
+    record ProgressTail(CraftOutputProgress output, CraftProgressTiming timing) {}
 
     /** 可选尾部字段；没有数量字段的旧进度包仍按原有步骤/操作进度处理。 */
     static void writeOutputProgress(FriendlyByteBuf buf, CraftOutputProgress progress) {

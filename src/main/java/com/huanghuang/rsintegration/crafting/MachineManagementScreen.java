@@ -27,7 +27,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 
-/** 平铺的绑定机器中心：信息卡片、收藏/解绑，以及右键框选自动化黑名单。 */
+/** 平铺的绑定机器中心：信息卡片、改名、收藏/解绑，以及右键框选自动化黑名单。 */
 public final class MachineManagementScreen extends Screen {
     public enum View {
         GUI_ONLY,
@@ -157,6 +157,7 @@ public final class MachineManagementScreen extends Screen {
         for (BindingInfo info : machines) {
             String name = displayName(info);
             String searchable = name + " " + info.displayName() + " "
+                    + MachineDisplayNameResolver.defaultDisplayName(info).getString() + " "
                     + info.blockKey() + " " + info.dim() + " " + info.pos().toShortString();
             if (matches(query, searchable, name)) filtered.add(info);
         }
@@ -305,8 +306,10 @@ public final class MachineManagementScreen extends Screen {
         String coords = info.pos().getX() + ", " + info.pos().getY()
                 + ", " + info.pos().getZ();
         graphics.drawString(font,
-                CraftingUiStyle.fit(font, coords, tileWidth - 42),
+                CraftingUiStyle.fit(font, coords, tileWidth - 60),
                 x + 32, y + 49, MUTED, false);
+        if (canRename(info)) renderRenameIcon(graphics, x + tileWidth - 23, y + 45,
+                inside(mouseX, mouseY, x + tileWidth - 23, y + 45, 16, 16));
 
         if (view == View.GUI_ONLY) {
             graphics.drawString(font, MachinePreferenceClient.isFavorite(info) ? "*" : "-",
@@ -318,14 +321,32 @@ public final class MachineManagementScreen extends Screen {
         }
     }
 
+    private void renderRenameIcon(GuiGraphics graphics, int x, int y, boolean hovered) {
+        if (hovered) CraftingUiStyle.surface(graphics, x, y, 16, 16,
+                CraftingUiStyle.HIGHLIGHT, CraftingUiStyle.ACCENT);
+        for (int step = 0; step < 6; step++) {
+            graphics.fill(x + 4 + step, y + 10 - step,
+                    x + 6 + step, y + 12 - step, CraftingUiStyle.ACCENT);
+        }
+        graphics.fill(x + 3, y + 12, x + 5, y + 13, TEXT);
+    }
+
     private void renderHoveredTooltip(GuiGraphics graphics, int mouseX, int mouseY) {
         BindingInfo hovered = hoveredMachine(mouseX, mouseY);
         if (hovered == null) return;
         List<Component> lines = new ArrayList<>();
         lines.add(displayComponent(hovered));
+        if (!hovered.customName().isEmpty()) {
+            lines.add(MachineDisplayNameResolver.defaultDisplayName(hovered)
+                    .copy().withStyle(ChatFormatting.GRAY));
+        }
         lines.add(Component.literal(hovered.dim() + " " + hovered.pos().toShortString())
                 .withStyle(ChatFormatting.DARK_GRAY));
         boolean blocked = MachinePreferenceClient.isBlocked(hovered);
+        if (canRename(hovered)) {
+            lines.add(Component.translatable("rsi.control_center.hint.rename")
+                    .withStyle(ChatFormatting.GRAY));
+        }
         if (MachineEntryPolicy.isSelectable(hovered)) {
             lines.add(Component.translatable("rsi.control_center.hint.open")
                     .withStyle(ChatFormatting.GRAY));
@@ -369,6 +390,11 @@ public final class MachineManagementScreen extends Screen {
         BindingInfo info = hoveredMachine(mouseX, mouseY);
         if (info != null) {
             TileBounds bounds = hoveredTileBounds(mouseX, mouseY);
+            if (canRename(info) && bounds != null && inside(mouseX, mouseY,
+                    bounds.x() + tileWidth - 23, bounds.y() + 45, 16, 16) && button == 0) {
+                minecraft.setScreen(new MachineRenameScreen(this, info));
+                return true;
+            }
             if (view == View.ALL_BOUND && bounds != null && inside(mouseX, mouseY,
                     bounds.x() + tileWidth - 13, bounds.y() + 1, 12, 12)) {
                 if (button == 0) {
@@ -554,6 +580,10 @@ public final class MachineManagementScreen extends Screen {
 
     private Component displayComponent(BindingInfo info) {
         return MachineDisplayNameResolver.displayName(info);
+    }
+
+    private static boolean canRename(BindingInfo info) {
+        return info.bindingBookId() != null && info.endpointId() != null;
     }
 
     private String displayName(BindingInfo info) {

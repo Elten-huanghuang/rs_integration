@@ -61,6 +61,7 @@ import com.huanghuang.rsintegration.network.binding.AltarBinding;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.network.binding.BeyondDimensionsBindingHook;
 import com.huanghuang.rsintegration.network.binding.ExplicitMachineBindingPacket;
+import com.huanghuang.rsintegration.network.binding.MachineRenamePacket;
 import com.huanghuang.rsintegration.network.binding.NearbyBindingRequestPacket;
 import com.huanghuang.rsintegration.network.gui.RemoteGuiAuth;
 import com.huanghuang.rsintegration.feature.autoeat.network.AutoEatNetworkHandler;
@@ -842,6 +843,7 @@ public final class RSIntegrationMod {
         // Binding tooltip handler
         NearbyBindingRequestPacket.register();
         ExplicitMachineBindingPacket.register();
+        MachineRenamePacket.register();
         if (ModList.get().isLoaded("beyonddimensions")) {
             BeyondDimensionsMachineNetworkHandler.register();
         }

@@ -138,6 +138,12 @@ public abstract class CraftingMonitorScreenMixin extends BaseScreen<CraftingMoni
         return merged;
     }
 
+    @ModifyVariable(method = "onPostInit", at = @At("HEAD"), argsOnly = true, ordinal = 0, require = 1)
+    private int rsi$centerMonitorWithTaskList(int x) {
+        leftPos = rsi$layout.mainLeft(width);
+        return leftPos;
+    }
+
     @Inject(method = "onPostInit", at = @At("TAIL"), require = 1)
     private void rsi$addPlans(int x, int y, CallbackInfo ci) {
         // 调整窗口或 GUI 比例会再次初始化，不能清掉已经记录的原终端。

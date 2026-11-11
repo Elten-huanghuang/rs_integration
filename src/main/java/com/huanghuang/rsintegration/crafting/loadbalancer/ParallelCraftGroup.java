@@ -453,7 +453,11 @@ public final class ParallelCraftGroup implements IBatchDelegate {
 
     @Override
     public boolean validateExecutionContext(ServerPlayer player) {
-        return workers.stream().allMatch(worker -> worker.delegate.validateExecutionContext(player));
+        // 已结算的 worker 已释放机器和槽位，不能再用旧占用状态校验其产物。
+        // 每份产物在 settleCompletedOperation 中、清理机器前单独完成校验。
+        return workers.stream()
+                .filter(worker -> !worker.hasStartedOperation || worker.running())
+                .allMatch(worker -> worker.delegate.validateExecutionContext(player));
     }
 
     public void setCountedOperationMaterials(CountedOperationMaterials materials) {
@@ -1188,6 +1192,18 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     }
 
     private boolean settleCompletedOperation(WorkerSlot worker) {
+        // 此时仍持有本次操作的机器与捕获范围，先验证再收取和释放。
+        if (!worker.delegate.validateExecutionContext(player)) {
+            // 已捕获的实物仍需保留消费证明，避免关闭捕获时丢失产物或重复退款。
+            preserveCapturedProgress(worker, drainCapture(worker));
+            operations.abandonBatch(worker.id);
+            worker.clearOperations();
+            closeOperationResources(worker);
+            worker.needsFailureCleanup = true;
+            beginDraining("execution context changed before worker output collection at "
+                    + worker.machine.pos());
+            return false;
+        }
         List<Integer> operationIds = worker.operationIds;
         ItemStack expectedWorldOutput = worker.delegate.getExpectedOutput();
         List<ItemStack> actual;

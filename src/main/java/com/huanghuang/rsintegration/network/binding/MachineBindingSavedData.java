@@ -136,6 +136,10 @@ public final class MachineBindingSavedData extends SavedData {
             LocationKey location = new LocationKey(entry.dim(), entry.pos());
             BindingStorage.BindingEntry normalized = entry.compactDisplayStack();
             Endpoint previous = book.endpoints.get(location);
+            // 重新绑定或刷新机器类型时保留玩家设置的名称；清空名称走专用改名入口。
+            if (previous != null && normalized.customName().isEmpty()) {
+                normalized = normalized.withCustomName(previous.entry.customName());
+            }
             long sequence = previous == null ? ++nextSequence : previous.sequence;
             MachineEndpointId stableId = previous == null ? endpointId : previous.endpointId;
             if (previous != null && previous.endpointId.equals(stableId)
@@ -166,6 +170,27 @@ public final class MachineBindingSavedData extends SavedData {
         if (size(bookId) == 0) removeBook(bookId, book);
         setDirty();
         return true;
+    }
+
+    /** 仅更新指定端点的名称，保持机器身份、登记顺序和配方路由信息不变。 */
+    public boolean rename(UUID bookId, MachineEndpointId endpointId, String name) {
+        BookData book = books.get(bookId);
+        if (book == null) return false;
+        String normalized = BindingStorage.normalizeCustomName(name);
+        synchronized (book) {
+            for (Map.Entry<LocationKey, Endpoint> entry : book.endpoints.entrySet()) {
+                Endpoint previous = entry.getValue();
+                if (!previous.endpointId.equals(endpointId)) continue;
+                if (previous.entry.customName().equals(normalized)) return false;
+                entry.setValue(new Endpoint(previous.endpointId,
+                        previous.entry.withCustomName(normalized),
+                        previous.sequence, ++nextRevision));
+                book.invalidate();
+                setDirty();
+                return true;
+            }
+        }
+        return false;
     }
 
     public int removeEverywhere(ResourceLocation dim, BlockPos pos) {

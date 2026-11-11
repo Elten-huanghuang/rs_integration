@@ -126,8 +126,9 @@ public final class FoodOrderService {
         }
         List<FoodOrderEntry> selected = selectEntries(snapshot, target, all, recipeId, api);
         if (selected.isEmpty()) {
-            sendFailure(player, all ? "rsi.food_order.error.nothing"
-                    : "rsi.food_order.error.notarget", "");
+            // 列表尚在分批计算时，没有候选不代表没有可下单的食物。
+            sendFailure(player, snapshot.partial() ? "rsi.food_order.loading"
+                    : all ? "rsi.food_order.error.nothing" : "rsi.food_order.error.notarget", "");
             return;
         }
 

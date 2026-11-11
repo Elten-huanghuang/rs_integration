@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.network.binding;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -20,22 +21,47 @@ import java.util.UUID;
 public final class BindingStorage {
 
     public static final String KEY_BINDINGS = "aec_bindings";
+    public static final int MAX_CUSTOM_NAME_LENGTH = 64;
 
     private BindingStorage() {}
 
+    /** 自定义名称只接受单行纯文本；空名称表示恢复机器原名。 */
+    public static String normalizeCustomName(@Nullable String name) {
+        if (name == null) return "";
+        String normalized = SharedConstants.filterText(name).strip();
+        int end = Math.min(normalized.length(), MAX_CUSTOM_NAME_LENGTH);
+        if (end < normalized.length() && end > 0
+                && Character.isHighSurrogate(normalized.charAt(end - 1))) end--;
+        return normalized.substring(0, end).strip();
+    }
+
     public record BindingEntry(ResourceLocation dim, BlockPos pos, String blockKey,
                                 @Nullable String blockRegKey,
-                                @Nullable ItemStack displayStack) {
+                                @Nullable ItemStack displayStack,
+                                String customName) {
+        public BindingEntry {
+            customName = normalizeCustomName(customName);
+        }
+
+        public BindingEntry(ResourceLocation dim, BlockPos pos, String blockKey,
+                            @Nullable String blockRegKey, @Nullable ItemStack displayStack) {
+            this(dim, pos, blockKey, blockRegKey, displayStack, "");
+        }
+
         public BindingEntry copy() {
             return new BindingEntry(dim, pos, blockKey, blockRegKey,
-                    displayStack == null ? null : displayStack.copy());
+                    displayStack == null ? null : displayStack.copy(), customName);
+        }
+
+        public BindingEntry withCustomName(String name) {
+            return new BindingEntry(dim, pos, blockKey, blockRegKey, displayStack, name);
         }
 
         /** 普通方块图标可由 blockRegKey 重建，无需把完整 ItemStack NBT 存进索引和同步包。 */
         public BindingEntry compactDisplayStack() {
             if (displayStack == null || displayStack.isEmpty()) {
                 return displayStack == null ? this : new BindingEntry(
-                        dim, pos, blockKey, blockRegKey, null);
+                        dim, pos, blockKey, blockRegKey, null, customName);
             }
             CompoundTag displayTag = displayStack.getTag();
             if (blockRegKey == null || (displayTag != null && !displayTag.isEmpty())
@@ -47,7 +73,7 @@ public final class BindingStorage {
             if (block == null || block == Blocks.AIR || !displayStack.is(block.asItem())) {
                 return this;
             }
-            return new BindingEntry(dim, pos, blockKey, blockRegKey, null);
+            return new BindingEntry(dim, pos, blockKey, blockRegKey, null, customName);
         }
 
         public CompoundTag toTag() {
@@ -57,6 +83,7 @@ public final class BindingStorage {
             tag.putInt("y", pos.getY());
             tag.putInt("z", pos.getZ());
             tag.putString("block", blockKey);
+            if (!customName.isEmpty()) tag.putString("customName", customName);
             if (blockRegKey != null) tag.putString("reg", blockRegKey);
             if (displayStack != null && !displayStack.isEmpty()) {
                 tag.put("disp", displayStack.save(new CompoundTag()));
@@ -88,7 +115,8 @@ public final class BindingStorage {
             if (tag.contains("disp", Tag.TAG_COMPOUND)) {
                 dispStack = ItemStack.of(tag.getCompound("disp"));
             }
-            return new BindingEntry(dim, pos, blockKey, regKey, dispStack);
+            return new BindingEntry(dim, pos, blockKey, regKey, dispStack,
+                    tag.getString("customName"));
         }
     }
 

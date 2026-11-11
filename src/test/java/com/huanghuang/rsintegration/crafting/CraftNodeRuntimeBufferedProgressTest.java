@@ -30,6 +30,7 @@ import com.huanghuang.rsintegration.crafting.graph.OutputProbability;
 import com.huanghuang.rsintegration.crafting.graph.OperationBudget;
 import com.huanghuang.rsintegration.crafting.graph.OperationId;
 import com.huanghuang.rsintegration.crafting.loadbalancer.ParallelCraftGroup;
+import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot.Reason;
 import com.huanghuang.rsintegration.mixin.minecraft.ItemEntityAccessor;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry.BoundMachine;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
@@ -65,6 +66,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -84,6 +86,78 @@ import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.anyInt;
 
 class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
+    @Test
+    void completedWorkerMayReleaseItsMachineContextBeforeGraphPublishesOutput() {
+        AtomicBoolean contextValid = new AtomicBoolean(true);
+        AtomicInteger cleanups = new AtomicInteger();
+        ModType type = ModType.register("test_completed_context_release",
+                new String[0], new String[0], new String[0], () -> new BufferedDelegate() {
+                    @Override public boolean validateExecutionContext(ServerPlayer current) {
+                        return contextValid.get();
+                    }
+
+                    @Override public void onBatchFinished(ServerPlayer current) {
+                        cleanups.incrementAndGet();
+                        contextValid.set(false);
+                    }
+                });
+        BoundMachine machine = new BoundMachine(Level.OVERWORLD.location(), BlockPos.ZERO, type, "test");
+        ParallelCraftGroup group = new ParallelCraftGroup(List.of(machine), type,
+                new ResourceLocation("test", "completed_context_release"), player, 1);
+        startGroup(group);
+        CraftNodeRuntime runtime = runtime(group);
+        runtime.attachOutputs(new NodeOutputAccumulator(List.of(OutputDeclaration.item(
+                new OutputPortId(new NodeId(0), 0),
+                MaterialKey.of(new ItemStack(Items.DIAMOND)), 8, OutputKind.PRIMARY))));
+        produceOutput();
+
+        assertEquals(ConcurrentNodeExecutor.Observation.SUCCEEDED, runtime.observe());
+        assertFalse(contextValid.get());
+        assertEquals(1, cleanups.get());
+        assertEquals(1, group.getCompletedOperations());
+        assertEquals(8, runtime.drainIncrementalOutputs().stream()
+                .mapToInt(output -> output.stack().getCount()).sum());
+        assertTrue(runtime.drainIncrementalOutputs().isEmpty());
+        runtime.cleanupFailure();
+        assertEquals(1, cleanups.get());
+    }
+
+    @Test
+    void invalidWorkerContextIsRejectedBeforeOutputCollectionAndFinishCleanup() {
+        AtomicBoolean contextValid = new AtomicBoolean(true);
+        AtomicInteger collections = new AtomicInteger();
+        AtomicInteger cleanups = new AtomicInteger();
+        ModType type = ModType.register("test_invalid_context_before_settlement",
+                new String[0], new String[0], new String[0], () -> new BufferedDelegate() {
+                    @Override public boolean validateExecutionContext(ServerPlayer current) {
+                        return contextValid.get();
+                    }
+
+                    @Override public ItemStack collectResult(ServerPlayer current) {
+                        collections.incrementAndGet();
+                        return ItemStack.EMPTY;
+                    }
+
+                    @Override public void onBatchFinished(ServerPlayer current) {
+                        cleanups.incrementAndGet();
+                    }
+                });
+        BoundMachine machine = new BoundMachine(Level.OVERWORLD.location(), BlockPos.ZERO, type, "test");
+        ParallelCraftGroup group = new ParallelCraftGroup(List.of(machine), type,
+                new ResourceLocation("test", "invalid_context_before_settlement"), player, 1);
+        startGroup(group);
+        CraftNodeRuntime runtime = runtime(group);
+        contextValid.set(false);
+        produceOutput();
+
+        assertEquals(ConcurrentNodeExecutor.Observation.FAILED, runtime.observe());
+        assertEquals(0, collections.get());
+        assertEquals(0, cleanups.get());
+        assertEquals(0, group.getCompletedOperations());
+        assertEquals(8, runtime.drainSettledResults().stream().mapToInt(ItemStack::getCount).sum());
+        assertTrue(runtime.drainSettledResults().isEmpty());
+    }
+
     @Test
     void defaultWindowUsesNativeCapacityBeyond256() {
         assertEquals(0, RSIntegrationConfig.CRAFTING_EXECUTION_WINDOW.get());
@@ -801,23 +875,23 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
         AsyncCraftChain chain = new AsyncCraftChain(
                 UUID.randomUUID(), player.getServer(), null, List.of());
         String machineBusy = "所有已绑定机器都在忙碌、未加载或不可用";
-        assertEquals(ConcurrentNodeExecutor.StartStatus.RETRY, retry(chain, machineBusy));
+        assertEquals(ConcurrentNodeExecutor.StartStatus.RETRY, retry(chain, machineBusy, Reason.MACHINE_BUSY));
         tick.set(1000);
-        assertEquals(ConcurrentNodeExecutor.StartStatus.RETRY, retry(chain, machineBusy));
-        assertEquals(ConcurrentNodeExecutor.StartStatus.RETRY, retry(chain, "missing material"));
+        assertEquals(ConcurrentNodeExecutor.StartStatus.RETRY, retry(chain, machineBusy, Reason.MACHINE_BUSY));
+        assertEquals(ConcurrentNodeExecutor.StartStatus.RETRY, retry(chain, "missing material", Reason.WAITING_MATERIALS));
         tick.set(1600);
-        assertEquals(ConcurrentNodeExecutor.StartStatus.RETRY, retry(chain, "missing material"));
+        assertEquals(ConcurrentNodeExecutor.StartStatus.RETRY, retry(chain, "missing material", Reason.WAITING_MATERIALS));
         tick.set(1601);
-        assertEquals(ConcurrentNodeExecutor.StartStatus.FAILED, retry(chain, "missing material"));
+        assertEquals(ConcurrentNodeExecutor.StartStatus.FAILED, retry(chain, "missing material", Reason.WAITING_MATERIALS));
     }
 
     private static ConcurrentNodeExecutor.StartStatus retry(
-            AsyncCraftChain chain, String detail) throws Exception {
+            AsyncCraftChain chain, String detail, Reason reason) throws Exception {
         Method method = AsyncCraftChain.class.getDeclaredMethod(
-                "graphRetry", NodeId.class, String.class, List.class);
+                "graphRetry", NodeId.class, String.class, List.class, Reason.class);
         method.setAccessible(true);
         return ((ConcurrentNodeExecutor.StartResult) method.invoke(
-                chain, new NodeId(0), detail, List.of())).status();
+                chain, new NodeId(0), detail, List.of(), reason)).status();
     }
 
     private static int timeoutTicks() {

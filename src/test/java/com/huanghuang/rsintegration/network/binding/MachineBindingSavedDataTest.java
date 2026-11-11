@@ -18,6 +18,43 @@ class MachineBindingSavedDataTest {
             new ResourceLocation("minecraft", "overworld");
 
     @Test
+    void renamePersistsWithoutChangingMachineIdentityAndCanBeReset() {
+        MachineBindingSavedData data = new MachineBindingSavedData();
+        UUID bookId = UUID.randomUUID();
+        UUID otherBook = UUID.randomUUID();
+        MachineEndpointId endpointId = MachineEndpointId.create();
+        BlockPos pos = new BlockPos(8, 64, 9);
+        data.put(bookId, endpointId, entry(pos, "furnace"));
+        data.put(otherBook, MachineEndpointId.create(), entry(pos, "furnace"));
+        long revision = data.endpoints(bookId).get(0).revision();
+
+        assertTrue(data.rename(bookId, endpointId, "  一楼熔炉  "));
+        assertFalse(data.rename(bookId, MachineEndpointId.create(), "错误端点"));
+        assertFalse(data.rename(bookId, endpointId, "一楼熔炉"));
+        assertEquals("", data.bindings(otherBook).get(0).customName());
+        assertEquals("furnace", data.bindings(bookId).get(0).blockKey());
+        assertTrue(data.endpoints(bookId).get(0).revision() > revision);
+
+        MachineBindingSavedData loaded = MachineBindingSavedData.load(data.save(new CompoundTag()));
+        assertEquals("一楼熔炉", loaded.bindings(bookId).get(0).customName());
+        assertEquals(endpointId, loaded.endpointId(bookId, OVERWORLD, pos));
+        loaded.put(bookId, MachineEndpointId.create(), entry(pos, "updated_furnace"));
+        assertEquals("一楼熔炉", loaded.bindings(bookId).get(0).customName(),
+                "重新绑定不应覆盖自定义名称");
+        assertTrue(loaded.rename(bookId, endpointId, "  "));
+        assertEquals("", loaded.bindings(bookId).get(0).customName());
+        assertEquals(endpointId, loaded.endpointId(bookId, OVERWORLD, pos));
+    }
+
+    @Test
+    void customNamesFilterControlCharactersAndRespectTheLengthLimit() {
+        assertEquals("机器名称", BindingStorage.normalizeCustomName("  机器\n名称\u0000  "));
+        assertEquals("a".repeat(64), BindingStorage.normalizeCustomName("a".repeat(100)));
+        assertEquals("a".repeat(63), BindingStorage.normalizeCustomName("a".repeat(63) + "😀"));
+        assertEquals("", entry(BlockPos.ZERO, "old").customName());
+    }
+
+    @Test
     void updatesKeepStableEndpointIdentityAndOwnerIndex() {
         MachineBindingSavedData data = new MachineBindingSavedData();
         UUID bookId = UUID.randomUUID();

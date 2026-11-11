@@ -91,4 +91,22 @@ class MachineBindingInfoFactoryTest extends BootstrapTest {
         assertEquals(info.blockRegKey(), entry.blockRegKey());
         assertEquals(info.displayStack(), entry.displayStack());
     }
+
+    @Test
+    void customNameSurvivesEndpointAndCacheProjection() {
+        PlayerEndpoint endpoint = new PlayerEndpoint(
+                UUID.randomUUID(), ResourceLocation.tryParse("minecraft:stone"),
+                MachineEndpointId.create(),
+                new BindingStorage.BindingEntry(
+                        ResourceLocation.tryParse("minecraft:overworld"),
+                        BlockPos.ZERO, "block.minecraft.stone", "minecraft:stone",
+                        new ItemStack(Items.STONE), "一楼机器"), 1L);
+
+        BindingInfo info = MachineBindingInfoFactory.fromEndpoint(endpoint, null);
+
+        assertEquals("一楼机器", info.customName());
+        assertEquals("一楼机器", MachineBindingInfoFactory.toEntry(info).customName());
+        assertEquals("一楼机器", info.withBookIds(UUID.randomUUID(), endpoint.endpointId()).customName());
+        assertEquals("block.minecraft.stone", info.displayName());
+    }
 }

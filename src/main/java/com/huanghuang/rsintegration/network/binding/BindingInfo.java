@@ -24,8 +24,21 @@ public record BindingInfo(
     @Nullable String blockRegKey,  // Block registry key (e.g. "tacz:workbench_b"), nullable for legacy
     @Nullable ItemStack displayStack, // Full NBT-bearing ItemStack from getCloneItemStack (TACZ etc.)
     @Nullable UUID bindingBookId,
-    @Nullable MachineEndpointId endpointId
+    @Nullable MachineEndpointId endpointId,
+    String customName
 ) {
+    public BindingInfo {
+        customName = BindingStorage.normalizeCustomName(customName);
+    }
+
+    public BindingInfo(String itemKey, ResourceLocation dim, BlockPos pos,
+                       String blockKey, String displayName,
+                       @Nullable String blockRegKey, @Nullable ItemStack displayStack,
+                       @Nullable UUID bindingBookId, @Nullable MachineEndpointId endpointId) {
+        this(itemKey, dim, pos, blockKey, displayName, blockRegKey, displayStack,
+                bindingBookId, endpointId, "");
+    }
+
     public BindingInfo(String itemKey, ResourceLocation dim, BlockPos pos,
                        String blockKey, String displayName,
                        @Nullable String blockRegKey, @Nullable ItemStack displayStack) {
@@ -53,6 +66,7 @@ public record BindingInfo(
         boolean hasEndpoint = info.endpointId != null;
         buf.writeBoolean(hasEndpoint);
         if (hasEndpoint) info.endpointId.encode(buf);
+        buf.writeUtf(info.customName, BindingStorage.MAX_CUSTOM_NAME_LENGTH);
     }
 
     /** Deserialize from network buffer (called client-side). */
@@ -66,7 +80,8 @@ public record BindingInfo(
             buf.readBoolean() ? buf.readUtf(128) : null,
             buf.readBoolean() ? buf.readItem() : null,
             readUuid(buf),
-            buf.readBoolean() ? MachineEndpointId.decode(buf) : null
+            buf.readBoolean() ? MachineEndpointId.decode(buf) : null,
+            buf.readUtf(BindingStorage.MAX_CUSTOM_NAME_LENGTH)
         );
     }
 
@@ -74,7 +89,7 @@ public record BindingInfo(
     public BindingInfo withBookIds(UUID bookId, @Nullable MachineEndpointId endpointId) {
         return new BindingInfo(itemKey, dim, pos, blockKey, displayName,
                 blockRegKey, displayStack == null ? null : displayStack.copy(),
-                bookId, endpointId);
+                bookId, endpointId, customName);
     }
 
     private static void writeUuid(FriendlyByteBuf buf, @Nullable UUID id) {

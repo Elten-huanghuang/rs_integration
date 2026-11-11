@@ -21,6 +21,7 @@ public final class RsiMonitorTask extends CraftingMonitorScreen.Task {
     private final ItemStack target;
     private final CraftProgressSnapshot snapshot;
     private final CraftMaterialView materials;
+    private final MonitorDiagnostics diagnostics;
 
     public RsiMonitorTask(ItemStack target, CraftProgressSnapshot snapshot) {
         this(target, snapshot, CraftMaterialView.EMPTY);
@@ -33,11 +34,14 @@ public final class RsiMonitorTask extends CraftingMonitorScreen.Task {
         this.target = target.copy();
         this.snapshot = snapshot;
         this.materials = materials;
+        this.diagnostics = MonitorDiagnostics.from(snapshot);
     }
 
     public UUID craftId() { return snapshot.craftId(); }
+    public Component title() { return target.getHoverName(); }
     public CraftProgressSnapshot snapshot() { return snapshot; }
     public CraftMaterialView materials() { return materials; }
+    public MonitorDiagnostics diagnostics() { return diagnostics; }
 
     public int materialIndex(ItemStack output) {
         if (output.isEmpty()) return -1;
@@ -58,6 +62,7 @@ public final class RsiMonitorTask extends CraftingMonitorScreen.Task {
                 ? Component.translatable("rsi.monitor.produced", snapshot.outputProgress().completed(), snapshot.outputProgress().total())
                 : Component.translatable("rsi.monitor.nodes", snapshot.completedNodes(), snapshot.totalNodes());
         graphics.renderComponentTooltip(font, List.of(target.getHoverName(),
-                Component.translatable("rsi.monitor.source"), amount), x, y);
+                Component.translatable("rsi.monitor.source"), amount,
+                diagnostics.category(), diagnostics.label(), MonitorDiagnostics.timingLabel(snapshot)), x, y);
     }
 }
