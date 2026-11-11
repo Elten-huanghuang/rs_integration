@@ -310,9 +310,12 @@ Grid search caches live under the game directory at `rs_integration/cache/grid_s
 
 ## Building
 
+Building requires JDK 17. Configure `JAVA_HOME` or the Gradle Java toolchain,
+then run the tests and create the verified release JAR:
+
 ```powershell
 .\gradlew.bat test --no-daemon
-.\gradlew.bat build --no-daemon
+.\gradlew.bat jarJar verifyReleaseJar --no-daemon
 ```
 
 Release JARs are written to `build/libs/` and checked by `verifyReleaseJar`.

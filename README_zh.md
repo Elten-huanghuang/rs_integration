@@ -302,9 +302,11 @@ long souls = session.amount(BdMagicApi.SOUL_KEY);
 
 ## 构建
 
+构建需要 JDK 17。配置 `JAVA_HOME` 或 Gradle Java 工具链后，运行测试并生成经过校验的发布 JAR：
+
 ```powershell
 .\gradlew.bat test --no-daemon
-.\gradlew.bat build --no-daemon
+.\gradlew.bat jarJar verifyReleaseJar --no-daemon
 ```
 
 发布 JAR 位于 `build/libs/`，并由 `verifyReleaseJar` 任务检查。

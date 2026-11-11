@@ -10,18 +10,36 @@ craftingMaxGraphNodes = 16384
 # 0 跟随机器原生容量；正数用于手动限制单批。材料变体边界和数量范围仍会缩小批次。
 craftingExecutionWindow = 0
 
+# 已核实的被动观测机器（目前为原版酿造台）：加工中每 5 tick 完整校验一次。
+# 每 tick 仍读取原生倒计时，完成/停止时立即检查；1 恢复逐 tick 完整校验。
+craftingPassiveObservationTicks = 5
+
 # 主求解预算。超过预算返回未知/超限，不应被解释为缺料。
 craftingPureSearchMaxStates = 65536
 craftingPureSearchMaxMemoizedFailures = 8192
 craftingPurePlanningTimeoutMs = 1500
+
+# 后台预览保留搜索现场分片续算；每个并行通道每 50ms 最多活跃 5ms。
+# 时间片在检查点执行，单次第三方调用不能被硬中断。范围 1～50ms。
+craftingPlanningSliceMs = 5
+# 后台预览总超时（包含暂停等待），0 表示关闭墙钟超时，仍受搜索状态/内存上限限制。
+# 上面的 craftingPurePlanningTimeoutMs 继续约束非分片调用，不再提前截断后台预览。
+craftingPlanningBackgroundTimeoutMs = 0
 
 # 已打开的图预览：订阅网络变化，只更新材料数量和缺口，保留路线。
 craftingPreviewLiveInventory = true
 # 背包对账、连接/权限检查、无原生通知后端的轮询间隔（tick）。
 # 原生网络变化在 tick 末合并处理，不受这个间隔延迟。
 craftingPreviewInventoryPollTicks = 20
-# 尚未打开或已经关闭的预览在服务端保留的时间（tick），不限制正在查看的窗口。
+# 尚未打开或已经关闭的库存订阅保留时间（tick），不限制正在查看的窗口。
+# 订阅清理后，若任务计划仍在服务端，可从原计划恢复订阅并重新对账，无须重新搜索。
 craftingPreviewInventoryPendingTicks = 1200
+
+# 沿用现有计划缓存预算，分别约束预览去重缓存、已发布任务执行凭据及库存订阅。
+# 执行凭据不随短期去重 TTL 自动失效；超出容量时淘汰旧任务。
+# 打开中的库存订阅不因其他任务完成而淘汰。订阅节点预算还计入材料行数。
+craftingPlanCacheMaxEntries = 64
+craftingPlanCacheMaxNodes = 131072
 
 # 关闭上述增量功能，或旧入口没有材料分配图时，发布前因库存变化自动重算的次数。
 # 0 为关闭自动重算；耗尽次数后显示最近结果与提示，执行时仍严格复验。
