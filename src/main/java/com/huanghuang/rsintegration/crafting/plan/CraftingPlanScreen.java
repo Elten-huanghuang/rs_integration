@@ -2663,10 +2663,12 @@ public final class CraftingPlanScreen extends Screen {
 
         ResourceLocation preferenceKey = CraftingResolver
                 .preferenceKey(node.key.stack(1));
+        boolean isTarget = node.depth == 0;
         pendingCandidateSwitch = new PendingCandidateSwitch(
                 node.key, selectedPath.snapshotBranch(node.key), recipeId, preferenceKey,
                 persistPreference);
-        if (recipeId == null) {
+        if (recipeId == null || isTarget) {
+            // 根配方由请求 recipeId 表达，不能再作为中间材料约束带到确认包。
             selectedPath.clearBranch(node.key);
         } else {
             int idx = node.step == null ? 0
@@ -2676,7 +2678,6 @@ public final class CraftingPlanScreen extends Screen {
 
         Map<String, String> forced = exportForcedSelections();
         ResourceLocation rootRid = ResourceLocation.tryParse(plan.recipeId());
-        boolean isTarget = node.depth == 0;
         if (isTarget && recipeId != null) {
             rootRid = recipeId;
             if (preferenceKey != null) forced.remove(preferenceKey.toString());

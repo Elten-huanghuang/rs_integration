@@ -997,8 +997,15 @@ public final class GenericCraftPacket {
         boolean explicitPreview = confirmedPreviewRequestId > 0L;
         PlanCache.Entry entry = explicitPreview ? cache.peekForRequest(exactKey, confirmedPreviewRequestId)
                 : cache.peekForExecution(exactKey);
-        if (explicitPreview && (entry == null || !matchesExecutionLease(
-                entry, player, recipeId, forcedRecipes, repeatCount, targetOutput, modType))) {
+        String mismatch = explicitPreview ? executionLeaseMismatch(
+                entry, player, recipeId, forcedRecipes, repeatCount, targetOutput, modType) : null;
+        if (mismatch != null) {
+            RSIntegrationMod.debug(
+                    "[RSI-Generic] Rejected confirmed preview: recipeId={} request={} reason={} "
+                            + "repeat={} forced={} terminal={} targetNbt={}",
+                    recipeId, confirmedPreviewRequestId, mismatch, repeatCount, forcedRecipes,
+                    modType == null ? "generic" : modType.id(),
+                    targetOutput == null ? null : targetOutput.getTag());
             return new ExecutionPlanLookup(null, true);
         }
         boolean semanticLease = false;
@@ -1065,30 +1072,39 @@ public final class GenericCraftPacket {
             PlanCache.Entry entry, ServerPlayer player, ResourceLocation recipeId,
             Map<String, String> forcedRecipes, int repeatCount,
             @Nullable ItemStack targetOutput, @Nullable ModType modType) {
-        if (entry == null || entry.plan() == null || entry.snapshot() == null) return false;
-        if (!entry.snapshot().playerId().equals(player.getUUID())
-                || !entry.snapshot().recipeId().equals(recipeId)) return false;
+        return executionLeaseMismatch(entry, player, recipeId, forcedRecipes,
+                repeatCount, targetOutput, modType) == null;
+    }
+
+    @Nullable
+    private static String executionLeaseMismatch(
+            PlanCache.Entry entry, ServerPlayer player, ResourceLocation recipeId,
+            Map<String, String> forcedRecipes, int repeatCount,
+            @Nullable ItemStack targetOutput, @Nullable ModType modType) {
+        if (entry == null) return "preview-missing-or-key-mismatch";
+        if (entry.plan() == null || entry.snapshot() == null) return "incomplete-preview";
+        if (!entry.snapshot().playerId().equals(player.getUUID())) return "player-mismatch";
+        if (!entry.snapshot().recipeId().equals(recipeId)) return "snapshot-recipe-mismatch";
         CraftForcedRecipeOverrides.Resolution forcedResolution =
                 CraftForcedRecipeOverrides.resolve(player, forcedRecipes);
-        if (!forcedResolution.valid()) return false;
+        if (!forcedResolution.valid()) return "invalid-forced-recipes";
         Map<ResourceLocation, ResourceLocation> forcedOverrides =
                 forcedResolution.overrides() == null ? Map.of() : forcedResolution.overrides();
-        if (!entry.snapshot().forcedRecipes().equals(forcedOverrides)) return false;
+        if (!entry.snapshot().forcedRecipes().equals(forcedOverrides)) return "forced-recipes-mismatch";
         PlanResponse plan = entry.plan();
-        if (!recipeId.toString().equals(plan.recipeId())
-                || plan.repeatCount() != repeatCount) return false;
+        if (!recipeId.toString().equals(plan.recipeId())) return "plan-recipe-mismatch";
+        if (plan.repeatCount() != repeatCount) return "repeat-mismatch";
         String expectedType = modType == null ? "generic" : modType.id();
         if (plan.executionModTypeId() != null
-                && !expectedType.equals(plan.executionModTypeId())) return false;
+                && !expectedType.equals(plan.executionModTypeId())) return "terminal-type-mismatch";
         ItemStack plannedOutput = plan.clickedOutput();
         if (plannedOutput == null || plannedOutput.isEmpty()) {
-            if (targetOutput == null || targetOutput.isEmpty()) return true;
+            if (targetOutput == null || targetOutput.isEmpty()) return null;
             // 首次预览可省略点击产物；确认界面会用计划结果补全它。
             plannedOutput = plan.targetResult();
         }
-        return plannedOutput != null && !plannedOutput.isEmpty()
-                && targetOutput != null && !targetOutput.isEmpty()
-                && ItemStack.isSameItemSameTags(plannedOutput, targetOutput);
+        return CraftConfirmationTarget.matches(plannedOutput, targetOutput)
+                ? null : "target-item-or-shared-nbt-mismatch";
     }
 
     private static boolean tryExecuteCachedCraftingPlan(
@@ -1108,6 +1124,8 @@ public final class GenericCraftPacket {
                     "[RSI-Generic] Refusing preview without material flow recipe={}", recipeId);
             return true;
         }
+        // 回传物品只用于确认身份；显示同步字段不能覆盖服务端计划的产物 NBT 或能力。
+        targetOutput = CraftConfirmationTarget.executionTarget(cached.plan()).copy();
         ItemStack recipeOutput = resolveCachedRecipeOutput(
                 recipe, player.serverLevel().registryAccess(), targetOutput);
         if (recipeOutput.isEmpty()) {

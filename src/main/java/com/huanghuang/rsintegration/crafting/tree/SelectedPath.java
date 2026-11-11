@@ -47,8 +47,11 @@ public final class SelectedPath {
         this.tree = model;
         Set<IngredientKey> currentKeys = new LinkedHashSet<>();
         collectTreeKeys(model.root, currentKeys);
-        branchSelections.keySet().retainAll(currentKeys);
-        explicitSelections.retainAll(currentKeys);
+        // 展示物品的 NBT 可能随新路线变化，但显式约束已参与本次服务端规划，确认仍须携带。
+        branchSelections.keySet().removeIf(key ->
+                !currentKeys.contains(key) && !explicitSelections.contains(key));
+        // 绑定的是服务端返回的新预览；之前的路线草稿已经完成确认。
+        dirty = false;
         recalculatePending();
     }
 
