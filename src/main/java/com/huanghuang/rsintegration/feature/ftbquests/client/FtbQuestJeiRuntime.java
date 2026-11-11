@@ -14,30 +14,21 @@ import java.util.List;
 /** Adds player-specific quest recipes after FTB Quests finishes its client sync. */
 public final class FtbQuestJeiRuntime {
 
-    private static final int REFRESH_DEBOUNCE_TICKS = 20;
-    private static final int MAX_REFRESH_DELAY_TICKS = 100;
-
     private static final List<QuestSubmissionSnapshot> REGISTERED = new ArrayList<>();
     private static IJeiRuntime runtime;
-    private static boolean waiting;
-    private static int ticksUntilRefresh;
-    private static int ticksWaiting;
+    private static QuestRecipeRefreshState refreshState = new QuestRecipeRefreshState();
 
     private FtbQuestJeiRuntime() {}
 
     public static void onRuntimeAvailable(IJeiRuntime jeiRuntime) {
         runtime = jeiRuntime;
-        waiting = true;
-        ticksUntilRefresh = 0;
-        ticksWaiting = 0;
+        refreshState = new QuestRecipeRefreshState();
         refreshIfReady();
     }
 
     public static void onRuntimeUnavailable() {
         runtime = null;
-        waiting = false;
-        ticksUntilRefresh = 0;
-        ticksWaiting = 0;
+        refreshState = new QuestRecipeRefreshState();
         REGISTERED.clear();
     }
 
@@ -45,29 +36,23 @@ public final class FtbQuestJeiRuntime {
     public static void onClientTick(TickEvent.ClientTickEvent event) {
         if (event.phase != TickEvent.Phase.END) return;
         if (runtime == null) return;
-        if (waiting && (++ticksWaiting >= MAX_REFRESH_DELAY_TICKS
-                || --ticksUntilRefresh <= 0)) {
-            refreshIfReady();
-        }
+        refreshIfReady();
     }
 
     public static void requestRefresh() {
         if (runtime == null) return;
-        if (!waiting) ticksWaiting = 0;
-        waiting = true;
-        ticksUntilRefresh = REFRESH_DEBOUNCE_TICKS;
+        refreshState.requestRefresh();
     }
 
     private static void refreshIfReady() {
-        if (runtime == null || !ClientQuestFile.exists()) return;
-        var file = ClientQuestFile.INSTANCE;
+        if (runtime == null) return;
+        var file = ClientQuestFile.exists() ? ClientQuestFile.INSTANCE : null;
         var data = file != null ? file.selfTeamData : null;
-        if (file == null || data == null) return;
+        if (!refreshState.tick(file, data, file != null && file.isLoading())) return;
 
         List<QuestSubmissionSnapshot> snapshots = FtbQuestSubmissionScanner.scan(file, data, true);
         if (sameJeiContent(snapshots, REGISTERED)) {
-            waiting = false;
-            ticksWaiting = 0;
+            refreshState.refreshed();
             return;
         }
 
@@ -79,8 +64,7 @@ public final class FtbQuestJeiRuntime {
         manager.unhideRecipes(FtbQuestSubmissionRecipe.TYPE, snapshots);
         REGISTERED.clear();
         REGISTERED.addAll(snapshots);
-        waiting = false;
-        ticksWaiting = 0;
+        refreshState.refreshed();
         RSIntegrationMod.LOGGER.info("[RSI-JEI] Refreshed FTB Quest submission entries: {}",
                 snapshots.size());
     }

@@ -32,9 +32,9 @@ final class QuestSubmissionEscrow implements AutoCloseable {
 
     boolean reserve(long taskId, Ingredient ingredient, int count) {
         int mark = ledger.reservationMark();
-        ItemStack stack = endpoint == null ? ItemStack.EMPTY
-                : ledger.reserveFromEndpoint(ingredient, count, endpoint, player);
-        if (stack.isEmpty()) stack = ledger.reserveFromInventory(ingredient, count, player);
+        // 与规划阶段相同，合并网络和背包的材料，避免两边各有一部分时提交失败。
+        ItemStack stack = endpoint == null ? ledger.reserveFromInventory(ingredient, count, player)
+                : ledger.reserve(ingredient, count, endpoint, player, null, null);
         if (stack.isEmpty()) return false;
         entries.add(new Entry(taskId, stack.copy(), ledger.tokenSince(mark)));
         return true;

@@ -4,6 +4,7 @@ import java.util.Map;
 import java.util.Set;
 
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.ExecutionEquivalence;
 import com.huanghuang.rsintegration.crafting.CraftingPlanningTimeoutException;
@@ -35,7 +36,11 @@ public final class FtbQuestSubmissionService {
     public static void preview(ServerPlayer player, long questId, int repeatCount) {
         QuestSubmissionSnapshot snapshot = FtbQuestSubmissionScanner.findServer(player, questId);
         if (snapshot == null || !snapshot.eligible()) {
-            player.sendSystemMessage(Component.translatable("rsi.ftb_quest.error.not_eligible"));
+            RSIntegrationMod.LOGGER.warn("[RSI-FTBQuests] Preview rejected player={} quest={} reason={}",
+                    player.getGameProfile().getName(), Long.toHexString(questId),
+                    snapshot == null ? "quest-or-team-unavailable" : snapshot.eligibility());
+            sendPreviewFailure(player, questId, repeatCount, snapshot,
+                    Component.translatable("rsi.ftb_quest.error.not_eligible"));
             return;
         }
         CraftStorageEndpoint endpoint = StorageRestockSupport.resolve(player).orElse(null);
@@ -46,7 +51,8 @@ public final class FtbQuestSubmissionService {
         try {
             questPlan = FtbQuestSubmissionPlanner.plan(player, snapshot, endpoint, network);
         } catch (CraftingPlanningTimeoutException timeout) {
-            sendPlanningTimeout(player, repeatCount);
+            sendPreviewFailure(player, questId, repeatCount, snapshot,
+                    Component.translatable("rsi.plan.failure.planning_timeout"));
             return;
         }
         List<PlanStep> steps = questPlan.graphView().nodes().stream()
@@ -62,6 +68,10 @@ public final class FtbQuestSubmissionService {
                 List.of(), Math.max(1, Math.min(repeatCount, 1024)), null, null, null, 0L,
                 false, false, false, null, Set.of(), Map.of(),
                 null, questPlan.graphView());
+        RSIntegrationMod.LOGGER.info(
+                "[RSI-FTBQuests] Preview ready player={} quest={} feasible={} steps={} missing={}",
+                player.getGameProfile().getName(), Long.toHexString(questId),
+                questPlan.feasible(), steps.size(), questPlan.missing().size());
         PlanResponsePublisher.send(player, plan, 0L);
     }
 
@@ -159,13 +169,10 @@ public final class FtbQuestSubmissionService {
         return steps;
     }
 
-    /** Return a terminal response so the client cannot remain in a pending preview state. */
-    private static void sendPlanningTimeout(ServerPlayer player, int repeatCount) {
-        PlanResponse failure = new PlanResponse(false, "", ItemStack.EMPTY,
-                List.of(), Map.of(), List.of(), "", null, null,
-                0, 0, 0,
-                List.of(Component.translatable("rsi.plan.failure.planning_timeout")),
-                Math.max(1, Math.min(repeatCount, 1024)));
-        PlanResponsePublisher.send(player, failure, 0L);
+    /** 所有预览分支都必须返回结果，不能只发聊天消息后结束请求。 */
+    static void sendPreviewFailure(ServerPlayer player, long questId, int repeatCount,
+                                   QuestSubmissionSnapshot snapshot, Component message) {
+        PlanResponsePublisher.send(player,
+                QuestSubmissionPreviewResponse.failure(questId, repeatCount, snapshot, message), 0L);
     }
 }
