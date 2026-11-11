@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
+import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.crafting.batch.CountedOperationMaterials;
@@ -727,6 +728,72 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
         assertEquals(CraftFailureCode.TIMEOUT, runtime.failureCode());
         runtime.cleanupFailure();
         assertEquals(0, leases.size());
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {1, 129})
+    void virtualGraphWorkerStartsAndCompletesWithoutPhysicalMachineLeases(int operations) {
+        AtomicInteger starts = new AtomicInteger();
+        MachineLeaseRegistry machines = new MachineLeaseRegistry();
+        CaptureLeaseRegistry captures = new CaptureLeaseRegistry();
+        int expectedStarts = (operations + 63) / 64;
+        OperationBudget globalBudget = new OperationBudget(1, expectedStarts);
+        OperationBudget craftBudget = new OperationBudget(1, expectedStarts);
+        ModType type = ModType.registerVirtual("test_virtual_operation_resources",
+                new String[0], () -> new BufferedDelegate() {
+                    @Override
+                    public BatchConcurrencyCapabilities concurrencyCapabilities() {
+                        return BatchConcurrencyCapabilities.virtualTransaction();
+                    }
+
+                    @Override
+                    public boolean startOperation(OperationStartContext context) {
+                        starts.incrementAndGet();
+                        assertEquals(1, craftBudget.active());
+                        assertEquals(1, globalBudget.active());
+                        assertEquals(0, machines.size());
+                        return true;
+                    }
+
+                    @Override
+                    public boolean isCraftComplete(ServerLevel level) { return true; }
+
+                    @Override
+                    public ItemStack getExpectedOutput() { return ItemStack.EMPTY; }
+
+                    @Override
+                    public AABB getOutputCaptureRegion() { return null; }
+
+                    @Override
+                    public List<ItemStack> collectAllResults(ServerPlayer player) {
+                        return List.of(new ItemStack(Items.DIAMOND, getExpectedProduction().count()));
+                    }
+                });
+        BoundMachine machine = new BoundMachine(Level.OVERWORLD.location(), BlockPos.ZERO, type, "test");
+        ParallelCraftGroup group = new ParallelCraftGroup(List.of(machine), type,
+                new ResourceLocation("malum", "void_favor/malignant_lead"), player, operations);
+        group.setOperationKernel(new OperationExecutionKernel(new OperationResourceCoordinator(
+                machines, captures, globalBudget)), UUID.randomUUID(), new NodeId(5), craftBudget);
+        startGroup(group);
+
+        IBatchDelegate.CraftObservation observation = null;
+        for (int i = 0; i < expectedStarts + 1; i++) {
+            tick.incrementAndGet();
+            observation = group.observeCraft(level);
+            if (observation.phase() == IBatchDelegate.CraftPhase.DONE) break;
+        }
+        assertNotNull(observation);
+        assertEquals(IBatchDelegate.CraftPhase.DONE, observation.phase());
+        assertEquals(operations, group.getCompletedOperations());
+        assertEquals(expectedStarts, starts.get());
+        assertEquals(expectedStarts, craftBudget.starts());
+        assertEquals(expectedStarts, globalBudget.starts());
+        assertEquals(0, craftBudget.active());
+        assertEquals(0, globalBudget.active());
+        assertEquals(0, machines.size());
+        assertEquals(0, captures.size());
+        assertEquals(operations * 8,
+                group.collectAllResults(player).stream().mapToInt(ItemStack::getCount).sum());
     }
 
     @Test

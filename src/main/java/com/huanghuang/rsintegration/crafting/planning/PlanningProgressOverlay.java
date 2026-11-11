@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 
@@ -10,6 +11,18 @@ import java.util.Locale;
 @OnlyIn(Dist.CLIENT)
 public final class PlanningProgressOverlay {
     private PlanningProgressOverlay() {}
+
+    public static boolean isVisible() {
+        return RSIntegrationConfig.enabled(
+                RSIntegrationConfig.CLIENT_SPEC, RSIntegrationConfig.PLANNING_HUD_VISIBLE);
+    }
+
+    /** 只切换客户端提示，不修改计划、计算请求或机器订单。 */
+    public static void toggleVisible() {
+        if (!RSIntegrationConfig.CLIENT_SPEC.isLoaded()) return;
+        RSIntegrationConfig.PLANNING_HUD_VISIBLE.set(!isVisible());
+        RSIntegrationConfig.saveClientConfig();
+    }
 
     public static boolean cancelCurrent() {
         var current = PlanningProgressTracker.current();

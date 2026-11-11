@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.planning;
 import com.huanghuang.rsintegration.crafting.plan.PlanBackgroundClient;
 import com.huanghuang.rsintegration.crafting.MachineManagementScreen;
 import com.huanghuang.rsintegration.crafting.progress.ExecutionMonitorClient;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.client.gui.CraftingUiStyle;
 import com.huanghuang.rsintegration.client.gui.CraftingUiStyle.ActionButton;
@@ -30,6 +31,8 @@ public final class PlanningTasksScreen extends Screen {
     private List<Row> rows = List.of();
     private Component monitorNotice;
     private Button executionMonitorButton;
+    private Button visibilityButton;
+    private int paginationCenterX;
     private int page;
     private int rowsPerPage;
     private int panelX, panelY, panelWidth, panelHeight;
@@ -123,21 +126,40 @@ public final class PlanningTasksScreen extends Screen {
                     init();
                     }));
         }
+        int footerButtonWidth = Math.min(94, Math.max(1, (contentWidth - 12) / 3));
+        visibilityButton = addRenderableWidget(new ActionButton(left, panelY + panelHeight - 30,
+                footerButtonWidth, 22, Component.empty(), false, button -> {
+                    PlanningProgressOverlay.toggleVisible();
+                    updateVisibilityButton();
+                }));
+        visibilityButton.setTooltip(Tooltip.create(Component.translatable("rsi.planning.tasks.visibility_hint")));
+        updateVisibilityButton();
+        int paginationLeft = left + footerButtonWidth + 6;
+        int paginationRight = left + contentWidth - footerButtonWidth - 6;
+        paginationCenterX = (paginationLeft + paginationRight) / 2;
         if (rows.size() > rowsPerPage) {
-            Button back = addRenderableWidget(new ActionButton(left, panelY + panelHeight - 30, 26, 22,
+            Button back = addRenderableWidget(new ActionButton(paginationLeft, panelY + panelHeight - 30, 20, 22,
                     Component.literal("‹"), false, button -> { page--; init(); }));
             back.active = page > 0;
             back.setTooltip(Tooltip.create(Component.translatable("rsi.planning.tasks.previous")));
-            Button next = addRenderableWidget(new ActionButton(left + 86, panelY + panelHeight - 30, 26, 22,
+            Button next = addRenderableWidget(new ActionButton(paginationRight - 20, panelY + panelHeight - 30, 20, 22,
                     Component.literal("›"), false, button -> { page++; init(); }));
             next.active = (page + 1) * rowsPerPage < rows.size();
             next.setTooltip(Tooltip.create(Component.translatable("rsi.planning.tasks.next")));
         }
-        addRenderableWidget(new ActionButton(left + contentWidth - 94, panelY + panelHeight - 30, 94, 22,
+        addRenderableWidget(new ActionButton(left + contentWidth - footerButtonWidth,
+                panelY + panelHeight - 30, footerButtonWidth, 22,
                 Component.translatable(closePage == null ? "gui.back" : "rsi.monitor.back"), false, button -> onClose()));
     }
 
+    private void updateVisibilityButton() {
+        visibilityButton.active = RSIntegrationConfig.CLIENT_SPEC.isLoaded();
+        visibilityButton.setMessage(Component.translatable(PlanningProgressOverlay.isVisible()
+                ? "rsi.planning.tasks.hide" : "rsi.planning.tasks.show"));
+    }
+
     @Override public void tick() {
+        updateVisibilityButton();
         List<Row> next = readRows();
         // 图标的 ItemStack 复制不能触发每 tick 重建按钮和丢失键盘焦点。
         if (rows.size() != next.size()) { init(); return; }
@@ -177,11 +199,9 @@ public final class PlanningTasksScreen extends Screen {
         }
         if (rows.size() > rowsPerPage) {
             String pages = (page + 1) + " / " + ((rows.size() + rowsPerPage - 1) / rowsPerPage);
-            graphics.drawString(font, pages, panelX + 68 - font.width(pages) / 2,
+            graphics.drawString(font, pages, paginationCenterX - font.width(pages) / 2,
                     panelY + panelHeight - 23, CraftingUiStyle.MUTED, false);
-        } else graphics.drawString(font, CraftingUiStyle.fit(font,
-                        Component.translatable("rsi.planning.tasks.footer").getString(), panelWidth - 126),
-                panelX + 14, panelY + panelHeight - 23, CraftingUiStyle.MUTED, false);
+        }
         super.render(graphics, mouseX, mouseY, partialTick);
         // 托管在原生监控器中时，原版 Tooltip 会排入外层 Screen；这里直接绘制完整条目名称。
         for (var child : children()) if (child instanceof PlanRowButton button && button.isHovered()) {

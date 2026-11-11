@@ -24,6 +24,75 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class OperationResourceCoordinatorTest extends BootstrapTest {
 
     @Test
+    void virtualScopeNeedsNoMachineAndCanCancelBeforeStart() {
+        MachineLeaseRegistry machines = new MachineLeaseRegistry();
+        CaptureLeaseRegistry captures = new CaptureLeaseRegistry();
+        OperationBudget global = new OperationBudget(1, 1);
+        OperationBudget craft = new OperationBudget(1, 1);
+        OperationResourceCoordinator coordinator = new OperationResourceCoordinator(
+                machines, captures, global);
+        UUID craftId = UUID.randomUUID();
+
+        OperationResourceCoordinator.Scope first = coordinator.tryAcquire(
+                craftId, new NodeId(5), 0, craft, List.of(), null);
+        assertNotNull(first);
+        assertNull(first.machineLease());
+        assertTrue(first.machineLeases().isEmpty());
+        assertFalse(first.hasCaptureScope());
+        assertEquals(0, machines.size());
+        assertEquals(0, captures.size());
+        assertEquals(1, craft.active());
+        assertEquals(1, global.active());
+        first.close();
+        first.close();
+        assertEquals(0, craft.active());
+        assertEquals(0, global.active());
+        assertEquals(0, craft.starts());
+        assertEquals(0, global.starts());
+
+        OperationResourceCoordinator.Scope retry = coordinator.tryAcquire(
+                craftId, new NodeId(5), 0, craft, List.of(), null);
+        assertNotNull(retry);
+        retry.markStartAttempted();
+        retry.close();
+        assertEquals(0, craft.active());
+        assertEquals(0, global.active());
+        assertEquals(1, craft.starts());
+        assertEquals(1, global.starts());
+        assertNull(coordinator.tryAcquire(
+                craftId, new NodeId(5), 1, craft, List.of(), null));
+    }
+
+    @Test
+    void virtualScopesStillShareTheGlobalOperationBudget() {
+        MachineLeaseRegistry machines = new MachineLeaseRegistry();
+        OperationBudget global = new OperationBudget(1, 4);
+        OperationBudget firstCraft = new OperationBudget(1, 4);
+        OperationBudget secondCraft = new OperationBudget(1, 4);
+        OperationResourceCoordinator coordinator = new OperationResourceCoordinator(
+                machines, new CaptureLeaseRegistry(), global);
+        OperationResourceCoordinator.Scope first = coordinator.tryAcquire(
+                UUID.randomUUID(), new NodeId(0), 0, firstCraft, List.of(), null);
+        assertNotNull(first);
+        assertNull(coordinator.tryAcquire(
+                UUID.randomUUID(), new NodeId(0), 0, secondCraft, List.of(), null));
+        assertEquals(0, secondCraft.active());
+        assertEquals(0, secondCraft.starts());
+        assertEquals(1, global.active());
+        assertEquals(0, machines.size());
+
+        first.markStartAttempted();
+        first.close();
+        OperationResourceCoordinator.Scope second = coordinator.tryAcquire(
+                UUID.randomUUID(), new NodeId(0), 0, secondCraft, List.of(), null);
+        assertNotNull(second);
+        second.close();
+        assertEquals(0, global.active());
+        assertEquals(1, global.starts());
+        assertEquals(0, secondCraft.starts());
+    }
+
+    @Test
     void closingBeforeStartDoesNotConsumeLifetimeBudget() {
         MachineLeaseRegistry machines = new MachineLeaseRegistry();
         CaptureLeaseRegistry captures = new CaptureLeaseRegistry();

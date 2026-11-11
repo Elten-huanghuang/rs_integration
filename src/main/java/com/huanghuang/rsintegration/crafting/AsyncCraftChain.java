@@ -390,7 +390,7 @@ public final class AsyncCraftChain {
         private final ExtractionLedger executionLedger;
         private final OperationExecutionKernel.Session operation;
         private final List<ItemStack> inventory;
-        private final CraftingCatalystState catalystState = new CraftingCatalystState();
+        private final CraftingCatalystState catalystState;
         private int remainingExecutions;
 
         private GraphVanillaJob(
@@ -401,7 +401,8 @@ public final class AsyncCraftChain {
                 ExtractionLedger executionLedger,
                 OperationExecutionKernel.Session operation,
                 List<ItemStack> inventory,
-                int remainingExecutions
+                int remainingExecutions,
+                List<InputDemand> inputs
         ) {
             this.nodeId = nodeId;
             this.step = step;
@@ -411,6 +412,7 @@ public final class AsyncCraftChain {
             this.operation = operation;
             this.inventory = inventory;
             this.remainingExecutions = remainingExecutions;
+            this.catalystState = new CraftingCatalystState(inputs);
         }
     }
 
@@ -1356,7 +1358,7 @@ public final class AsyncCraftChain {
         }
         graphAdmissions.commit(admission);
         return new GraphVanillaJob(nodeId, step, admission, nodeLedger,
-                executionLedger, operation, operationInventory, executions);
+                executionLedger, operation, operationInventory, executions, graphNodes.get(nodeId).inputs());
     }
 
     private boolean runGraphVanillaSlice(

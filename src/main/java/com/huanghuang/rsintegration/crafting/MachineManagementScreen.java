@@ -1,6 +1,10 @@
 package com.huanghuang.rsintegration.crafting;
-import com.huanghuang.rsintegration.crafting.progress.CraftProgressScreen;
 
+import com.huanghuang.rsintegration.client.gui.CraftingUiStyle;
+import com.huanghuang.rsintegration.client.gui.CraftingUiStyle.ActionButton;
+import com.huanghuang.rsintegration.client.gui.ScrollBarStyle;
+import com.huanghuang.rsintegration.crafting.planning.PlanningTasksScreen;
+import com.huanghuang.rsintegration.crafting.progress.ExecutionMonitorClient;
 import com.huanghuang.rsintegration.util.PinyinUtil;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.client.InkFluidRenderer;
 import com.huanghuang.rsintegration.machine.client.MachineDisplayNameResolver;
@@ -10,10 +14,8 @@ import com.huanghuang.rsintegration.machine.client.MachineTabHandler;
 import com.huanghuang.rsintegration.machine.client.MachineTabRenderer;
 import com.huanghuang.rsintegration.machine.client.data.BindingCache;
 import com.huanghuang.rsintegration.network.binding.BindingInfo;
-import com.huanghuang.rsintegration.util.UIRenderer;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
@@ -32,28 +34,27 @@ public final class MachineManagementScreen extends Screen {
         ALL_BOUND
     }
 
-    private static final int TEXT = 0xFFF1F4F6;
-    private static final int MUTED = 0xFF9DA9B1;
-    private static final int SURFACE = 0xB8172026;
-    private static final int SURFACE_HOVER = 0xD0253139;
-    private static final int DIVIDER = 0x443F505A;
-    private static final int BLOCKED_TINT = 0x55E05252;
-    private static final int SELECTED_TINT = 0x554A82C8;
-    private static final int SELECTION_FILL = 0x443A72C4;
-    private static final int SELECTION_BORDER = 0xFF79A9EA;
+    private static final int TEXT = CraftingUiStyle.TEXT;
+    private static final int MUTED = CraftingUiStyle.MUTED;
+    private static final int SURFACE = 0xFFFFFFFF;
+    private static final int SURFACE_HOVER = CraftingUiStyle.HIGHLIGHT;
+    private static final int BLOCKED_TINT = 0xFFFFF0F1;
+    private static final int SELECTED_TINT = 0xFFE5E6F1;
+    private static final int SELECTION_FILL = 0x406F6C89;
+    private static final int SELECTION_BORDER = CraftingUiStyle.ACCENT;
     private static final int GRID_GAP = 8;
-    private static final int TILE_WIDTH = 108;
+    private static final int MIN_TILE_WIDTH = 132;
     private static final int TILE_HEIGHT = 68;
     private static final double DRAG_THRESHOLD = 3.0;
 
     private final List<BindingInfo> machines = new ArrayList<>();
     private final List<BindingInfo> filtered = new ArrayList<>();
     private final View view;
+    @Nullable
+    private final Screen parent;
     private String searchText = "";
     private int scrollRow;
     private EditBox searchBox;
-    private Button tasksButton;
-    private Button doneButton;
 
     private int panelX;
     private int panelY;
@@ -63,6 +64,8 @@ public final class MachineManagementScreen extends Screen {
     private int gridY;
     private int gridWidth;
     private int gridHeight;
+    private int tileWidth;
+    private int footerHeight;
     private boolean selectingBlacklist;
     private double selectionStartX;
     private double selectionStartY;
@@ -76,15 +79,22 @@ public final class MachineManagementScreen extends Screen {
                 ? "rsi.control_center.gui_machines"
                 : "rsi.control_center.all_machines"));
         this.view = view == null ? View.ALL_BOUND : view;
+        this.parent = parent;
     }
 
     @Override
     protected void init() {
+        clearWidgets();
+        clearSelection();
         updateLayout();
         refreshMachines();
-        searchBox = new EditBox(font, panelX + 12, panelY + 47,
-                Math.min(300, panelWidth - 24), 18,
+        searchBox = new EditBox(font, panelX + 18, panelY + 91,
+                Math.max(1, panelWidth - 36), 12,
                 Component.translatable("rsi.control_center.search"));
+        searchBox.setBordered(false);
+        searchBox.setTextColor(TEXT);
+        searchBox.setTextColorUneditable(MUTED);
+        searchBox.setHint(Component.translatable("rsi.control_center.search_hint"));
         searchBox.setMaxLength(96);
         searchBox.setValue(searchText);
         searchBox.setResponder(value -> {
@@ -93,30 +103,38 @@ public final class MachineManagementScreen extends Screen {
             refilter();
         });
         addRenderableWidget(searchBox);
-        tasksButton = addRenderableWidget(Button.builder(
-                        Component.translatable("rsi.control_center.tasks"),
-                        button -> minecraft.setScreen(new CraftProgressScreen()))
-                .bounds(panelX + panelWidth - 112, panelY + 7, 100, 20).build());
-        doneButton = addRenderableWidget(Button.builder(
-                        Component.translatable("gui.done"), button -> onClose())
-                .bounds(panelX + panelWidth - 74, panelY + panelHeight - 28, 62, 20).build());
+        int navigationWidth = (panelWidth - 36) / 3;
+        addRenderableWidget(new ActionButton(panelX + 12, panelY + 52, navigationWidth, 22,
+                Component.translatable("rsi.planning.tasks.open"), false,
+                button -> minecraft.setScreen(new PlanningTasksScreen(this))));
+        addRenderableWidget(new ActionButton(panelX + 18 + navigationWidth, panelY + 52, navigationWidth, 22,
+                Component.translatable("rsi.planning.tasks.executions"), false,
+                button -> ExecutionMonitorClient.open()));
+        addRenderableWidget(new ActionButton(panelX + 24 + navigationWidth * 2, panelY + 52, navigationWidth, 22,
+                Component.translatable("rsi.control_center.machines"), true, button -> {}));
+        addRenderableWidget(new ActionButton(panelX + panelWidth - 106,
+                panelY + panelHeight - footerHeight + (footerHeight - 22) / 2, 94, 22,
+                Component.translatable("gui.back"), false, button -> onClose()));
         MachineTabHandler.requestBindingSync();
     }
 
     @Override
     public void tick() {
+        if (searchBox != null) searchBox.tick();
         refreshMachines();
     }
 
     private void updateLayout() {
-        panelWidth = Math.min(860, Math.max(320, width - 24));
-        panelHeight = Math.min(520, Math.max(240, height - 24));
+        panelWidth = Math.max(1, Math.min(620, width - 24));
+        panelHeight = Math.max(1, Math.min(420, height - 24));
+        footerHeight = panelHeight < 228 ? 32 : 40;
         panelX = (width - panelWidth) / 2;
         panelY = (height - panelHeight) / 2;
         gridX = panelX + 12;
-        gridY = panelY + 76;
-        gridWidth = panelWidth - 24;
-        gridHeight = panelHeight - 112;
+        gridY = panelY + 112;
+        gridWidth = Math.max(1, panelWidth - 28 - ScrollBarStyle.COMPACT_WIDTH);
+        gridHeight = Math.max(0, panelHeight - 112 - footerHeight);
+        tileWidth = Math.max(1, (gridWidth - (columns() - 1) * GRID_GAP) / columns());
     }
 
     private void refreshMachines() {
@@ -164,11 +182,22 @@ public final class MachineManagementScreen extends Screen {
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         renderBackground(graphics);
-        UIRenderer.roundedGradient(graphics, panelX, panelY, panelWidth, panelHeight, 9f,
-                0xF21B252B, 0xF2121A1F);
-        graphics.fill(panelX, panelY + 42, panelX + panelWidth, panelY + 43, DIVIDER);
-        graphics.fill(panelX + 12, panelY + 68, panelX + panelWidth - 12, panelY + 69, DIVIDER);
-        graphics.drawString(font, title, panelX + 15, panelY + 12, TEXT, true);
+        CraftingUiStyle.panel(graphics, panelX, panelY, panelWidth, panelHeight);
+        renderMachineIcon(graphics, panelX + 14, panelY + 16);
+        graphics.drawString(font, title, panelX + 36, panelY + 13, TEXT, false);
+        Component hint = Component.translatable(view == View.GUI_ONLY
+                ? "rsi.control_center.hint.gui" : "rsi.control_center.hint.all");
+        long blocked = view == View.ALL_BOUND ? machines.stream().filter(MachinePreferenceClient::isBlocked).count() : 0;
+        String blockedSummary = blocked == 0 ? "" : Component.translatable("rsi.control_center.summary.blocked", blocked).getString();
+        int summaryWidth = blocked == 0 ? 0 : font.width(blockedSummary) + 12;
+        graphics.drawString(font, CraftingUiStyle.fit(font, hint.getString(), panelWidth - 50 - summaryWidth),
+                panelX + 36, panelY + 29, MUTED, false);
+        if (blocked > 0) graphics.drawString(font, blockedSummary,
+                panelX + panelWidth - 14 - font.width(blockedSummary), panelY + 29, CraftingUiStyle.DANGER, false);
+        CraftingUiStyle.surface(graphics, panelX + 12, panelY + 84, panelWidth - 24, 22,
+                SURFACE, searchBox.isFocused() ? CraftingUiStyle.ACCENT : CraftingUiStyle.BORDER);
+        int footerY = panelY + panelHeight - footerHeight;
+        graphics.fill(panelX + 12, footerY, panelX + panelWidth - 12, footerY + 1, CraftingUiStyle.BORDER);
         renderSummaryBadges(graphics);
         renderGrid(graphics, mouseX, mouseY);
         super.render(graphics, mouseX, mouseY, partialTick);
@@ -177,27 +206,21 @@ public final class MachineManagementScreen extends Screen {
     }
 
     private void renderSummaryBadges(GuiGraphics graphics) {
-        if (panelWidth < 400) return;
-        int right = panelX + panelWidth - 126;
-        if (view == View.ALL_BOUND) {
-            long blocked = machines.stream()
-                    .filter(MachinePreferenceClient::isBlocked)
-                    .count();
-            String blockedText = Component.translatable(
-                    "rsi.control_center.summary.blocked", blocked).getString();
-            int blockedWidth = font.width(blockedText) + 14;
-            right -= blockedWidth;
-            UIRenderer.pillBadge(graphics, font, right, panelY + 9, blockedWidth, 17,
-                    blocked > 0 ? 0x66552D31 : 0x55333D43,
-                    blocked > 0 ? 0xFFFFA5A5 : 0xFFB8C4CA, blockedText);
-            right -= 5;
+        String count = Component.translatable("rsi.control_center.summary.count",
+                filtered.size(), machines.size()).getString();
+        int titleEnd = panelX + 36 + font.width(title) + 8;
+        int countX = panelX + panelWidth - 14 - font.width(count);
+        if (countX >= titleEnd) graphics.drawString(font, count, countX, panelY + 13, MUTED, false);
+    }
+
+    private void renderMachineIcon(GuiGraphics graphics, int x, int y) {
+        CraftingUiStyle.surface(graphics, x, y, 14, 16, SURFACE, CraftingUiStyle.ACCENT);
+        for (int row = 0; row < 2; row++) {
+            for (int column = 0; column < 2; column++) {
+                graphics.fill(x + 3 + column * 5, y + 4 + row * 5,
+                        x + 6 + column * 5, y + 7 + row * 5, CraftingUiStyle.ACCENT);
+            }
         }
-        String count = filtered.size() + "/" + machines.size();
-        int badgeWidth = font.width(count) + 14;
-        int badgeX = right - badgeWidth;
-        if (badgeX < panelX + 15 + font.width(title.getString()) + 8) return;
-        UIRenderer.pillBadge(graphics, font, badgeX, panelY + 9, badgeWidth, 17,
-                0x663C5664, 0xFFD9E4EA, count);
     }
 
     private void renderFooterHint(GuiGraphics graphics) {
@@ -205,15 +228,16 @@ public final class MachineManagementScreen extends Screen {
                 ? "rsi.control_center.hint.gui_footer"
                 : "rsi.control_center.hint.selection";
         String hint = Component.translatable(key).getString();
-        int maxWidth = Math.max(1, panelWidth - 102);
-        graphics.drawString(font, font.plainSubstrByWidth(hint, maxWidth),
-                panelX + 12, panelY + panelHeight - 20, MUTED, false);
+        int maxWidth = Math.max(1, panelWidth - 130);
+        int y = panelY + panelHeight - footerHeight + (footerHeight - font.lineHeight) / 2;
+        graphics.drawString(font, CraftingUiStyle.fit(font, hint, maxWidth), panelX + 14, y, MUTED, false);
     }
 
     private void renderGrid(GuiGraphics graphics, int mouseX, int mouseY) {
         if (filtered.isEmpty()) {
-            graphics.drawCenteredString(font, Component.translatable("rsi.control_center.empty"),
-                    panelX + panelWidth / 2, panelY + panelHeight / 2, MUTED);
+            Component empty = Component.translatable("rsi.control_center.empty");
+            graphics.drawString(font, empty, panelX + (panelWidth - font.width(empty)) / 2,
+                    gridY + gridHeight / 2 - font.lineHeight / 2, MUTED, false);
             return;
         }
         int columns = columns();
@@ -226,7 +250,7 @@ public final class MachineManagementScreen extends Screen {
             int slot = index - start;
             int column = slot % columns;
             int row = slot / columns;
-            int x = gridX + column * (TILE_WIDTH + GRID_GAP);
+            int x = gridX + column * (tileWidth + GRID_GAP);
             int y = gridY + row * (TILE_HEIGHT + GRID_GAP);
             BindingInfo info = filtered.get(index);
             boolean selected = selectingBlacklist
@@ -243,7 +267,7 @@ public final class MachineManagementScreen extends Screen {
             renderSelection(graphics, selectedCount, willBlock);
         }
         if (filtered.size() > columns * rows) {
-            renderScrollbar(graphics, panelX + panelWidth - 7, gridY, gridHeight,
+            renderScrollbar(graphics, panelX + panelWidth - 12 - ScrollBarStyle.COMPACT_WIDTH, gridY, gridHeight,
                     columns, rows);
         }
     }
@@ -252,50 +276,45 @@ public final class MachineManagementScreen extends Screen {
                             int x, int y, int mouseX, int mouseY, boolean selected) {
         boolean blocked = MachinePreferenceClient.isBlocked(info);
         boolean hovered = !selectingBlacklist
-                && inside(mouseX, mouseY, x, y, TILE_WIDTH, TILE_HEIGHT);
-        UIRenderer.rounded(graphics, x, y, TILE_WIDTH, TILE_HEIGHT, 6f,
-                blocked ? 0xC0441F25 : hovered ? SURFACE_HOVER : SURFACE);
-        if (blocked && view == View.ALL_BOUND) {
-            graphics.fill(x + 1, y + 1,
-                    x + TILE_WIDTH - 1, y + TILE_HEIGHT - 1, BLOCKED_TINT);
-        }
-        if (selected) {
-            graphics.fill(x + 1, y + 1,
-                    x + TILE_WIDTH - 1, y + TILE_HEIGHT - 1, SELECTED_TINT);
-        }
+                && inside(mouseX, mouseY, x, y, tileWidth, TILE_HEIGHT);
+        int accent = blocked ? CraftingUiStyle.DANGER : CraftingUiStyle.ACCENT;
+        int background = selected ? SELECTED_TINT : blocked ? BLOCKED_TINT : hovered ? SURFACE_HOVER : SURFACE;
+        CraftingUiStyle.surface(graphics, x, y, tileWidth, TILE_HEIGHT, background,
+                selected || hovered ? CraftingUiStyle.ACCENT : CraftingUiStyle.BORDER);
+        graphics.fill(x, y + 5, x + 2, y + TILE_HEIGHT - 5, accent);
+        graphics.fill(x + 8, y + 8, x + 34, y + 34, CraftingUiStyle.CANVAS);
 
         ItemStack icon = MachineTabRenderer.resolveIcon(info);
-        int iconX = x + 6;
-        int iconY = y + 7;
+        int iconX = x + 13;
+        int iconY = y + 13;
         if (!icon.isEmpty()) InkFluidRenderer.render(graphics, icon, iconX, iconY);
 
-        int textX = x + 27;
-        int nameWidth = Math.max(1, x + TILE_WIDTH - 17 - textX);
-        String name = font.plainSubstrByWidth(displayName(info), nameWidth);
-        graphics.drawString(font, name, textX, y + 7, TEXT, false);
-        graphics.drawString(font,
-                font.plainSubstrByWidth(dimensionLabel(info), TILE_WIDTH - 12),
-                x + 6, y + 27, MUTED, false);
+        int textX = x + 42;
+        int nameWidth = Math.max(1, tileWidth - 60);
+        String name = CraftingUiStyle.fit(font, displayName(info), nameWidth);
+        graphics.drawString(font, name, textX, y + 8, TEXT, false);
+        boolean showBlocked = blocked && view == View.ALL_BOUND;
+        String status = showBlocked
+                ? Component.translatable("rsi.control_center.flag.blocked_short").getString()
+                : dimensionLabel(info);
+        graphics.drawString(font, CraftingUiStyle.fit(font, status, tileWidth - 50),
+                textX, y + 24, showBlocked ? CraftingUiStyle.DANGER : MUTED, false);
 
-        graphics.drawString(font, "XYZ", x + 6, y + 42, 0xFF71808A, false);
+        graphics.fill(x + 8, y + 40, x + tileWidth - 8, y + 41, CraftingUiStyle.GRID_LINE);
+        graphics.drawString(font, "XYZ", x + 8, y + 49, CraftingUiStyle.ACCENT, false);
         String coords = info.pos().getX() + ", " + info.pos().getY()
                 + ", " + info.pos().getZ();
         graphics.drawString(font,
-                font.plainSubstrByWidth(coords, TILE_WIDTH - 32),
-                x + 28, y + 42, 0xFFD7E1E6, false);
+                CraftingUiStyle.fit(font, coords, tileWidth - 42),
+                x + 32, y + 49, MUTED, false);
 
         if (view == View.GUI_ONLY) {
             graphics.drawString(font, MachinePreferenceClient.isFavorite(info) ? "*" : "-",
-                    x + TILE_WIDTH - 11, y + 3,
-                    MachinePreferenceClient.isFavorite(info) ? 0xFF68A9E8 : 0xFF71808A, false);
+                    x + tileWidth - 11, y + 3,
+                    MachinePreferenceClient.isFavorite(info) ? CraftingUiStyle.WARNING : CraftingUiStyle.HINT, false);
         } else {
             graphics.drawString(font, "x",
-                    x + TILE_WIDTH - 10, y + 3, 0xFFE07A7A, false);
-        }
-        if (blocked && view == View.ALL_BOUND) {
-            String mark = Component.translatable("rsi.control_center.flag.blocked_short").getString();
-            graphics.drawString(font, mark, x + 6, y + TILE_HEIGHT - 15,
-                    0xFFFF8B8B, false);
+                    x + tileWidth - 10, y + 3, hovered ? CraftingUiStyle.DANGER : MUTED, false);
         }
     }
 
@@ -330,11 +349,9 @@ public final class MachineManagementScreen extends Screen {
                                  int columns, int rows) {
         int totalRows = Math.max(1, (filtered.size() + columns - 1) / columns);
         int visible = Math.min(rows, totalRows);
-        int thumbHeight = Math.max(14, height * visible / totalRows);
         int maxScroll = Math.max(1, totalRows - visible);
-        int thumbY = y + (height - thumbHeight) * Math.min(scrollRow, maxScroll) / maxScroll;
-        graphics.fill(x, y, x + 2, y + height, 0x55384750);
-        graphics.fill(x, thumbY, x + 2, thumbY + thumbHeight, 0xFF718893);
+        ScrollBarStyle.render(graphics, x, y, ScrollBarStyle.COMPACT_WIDTH, height,
+                scrollRow, maxScroll, false);
     }
 
     @Override
@@ -353,7 +370,7 @@ public final class MachineManagementScreen extends Screen {
         if (info != null) {
             TileBounds bounds = hoveredTileBounds(mouseX, mouseY);
             if (view == View.ALL_BOUND && bounds != null && inside(mouseX, mouseY,
-                    bounds.x() + TILE_WIDTH - 13, bounds.y() + 1, 12, 12)) {
+                    bounds.x() + tileWidth - 13, bounds.y() + 1, 12, 12)) {
                 if (button == 0) {
                     MachineTabHandler.onUnbind(info);
                     machines.remove(info);
@@ -362,7 +379,7 @@ public final class MachineManagementScreen extends Screen {
                 return true;
             }
             if (view == View.GUI_ONLY && bounds != null && inside(mouseX, mouseY,
-                    bounds.x() + TILE_WIDTH - 13, bounds.y() + 1, 13, 13)) {
+                    bounds.x() + tileWidth - 13, bounds.y() + 1, 13, 13)) {
                 if (button == 0) {
                     MachinePreferenceClient.requestFavoriteToggle(info);
                     refreshMachines();
@@ -428,7 +445,7 @@ public final class MachineManagementScreen extends Screen {
     }
 
     private int columns() {
-        return Math.max(1, (gridWidth + GRID_GAP) / (TILE_WIDTH + GRID_GAP));
+        return Math.max(1, (gridWidth + GRID_GAP) / (MIN_TILE_WIDTH + GRID_GAP));
     }
 
     private int visibleRows() {
@@ -449,9 +466,9 @@ public final class MachineManagementScreen extends Screen {
         int end = Math.min(filtered.size(), start + columns * rows);
         for (int index = start; index < end; index++) {
             int slot = index - start;
-            int x = gridX + (slot % columns) * (TILE_WIDTH + GRID_GAP);
+            int x = gridX + (slot % columns) * (tileWidth + GRID_GAP);
             int y = gridY + (slot / columns) * (TILE_HEIGHT + GRID_GAP);
-            if (inside(mouseX, mouseY, x, y, TILE_WIDTH, TILE_HEIGHT)) {
+            if (inside(mouseX, mouseY, x, y, tileWidth, TILE_HEIGHT)) {
                 return new TileBounds(x, y, filtered.get(index));
             }
         }
@@ -468,7 +485,7 @@ public final class MachineManagementScreen extends Screen {
         double top = Math.min(selectionStartY, selectionCurrentY);
         double right = Math.max(selectionStartX, selectionCurrentX);
         double bottom = Math.max(selectionStartY, selectionCurrentY);
-        return left < x + TILE_WIDTH && right > x
+        return left < x + tileWidth && right > x
                 && top < y + TILE_HEIGHT && bottom > y;
     }
 
@@ -480,7 +497,7 @@ public final class MachineManagementScreen extends Screen {
         List<BindingInfo> selected = new ArrayList<>();
         for (int index = start; index < end; index++) {
             int slot = index - start;
-            int x = gridX + (slot % columns) * (TILE_WIDTH + GRID_GAP);
+            int x = gridX + (slot % columns) * (tileWidth + GRID_GAP);
             int y = gridY + (slot / columns) * (TILE_HEIGHT + GRID_GAP);
             if (tileIntersectsSelection(x, y)) selected.add(filtered.get(index));
         }
@@ -504,10 +521,11 @@ public final class MachineManagementScreen extends Screen {
                             : "rsi.control_center.selection.allow",
                     selectedCount).getString();
             int badgeWidth = font.width(count) + 10;
-            int badgeX = Math.min(right + 4, panelX + panelWidth - badgeWidth - 8);
+            int badgeX = Math.max(gridX, Math.min(right + 4, panelX + panelWidth - badgeWidth - 8));
             int badgeY = Math.max(gridY + 2, y - 15);
-            UIRenderer.pillBadge(graphics, font, badgeX, badgeY, badgeWidth, 14,
-                    0xCC315E91, 0xFFF1F7FF, count);
+            CraftingUiStyle.surface(graphics, badgeX, badgeY, badgeWidth, 14,
+                    CraftingUiStyle.HIGHLIGHT, CraftingUiStyle.ACCENT);
+            graphics.drawString(font, count, badgeX + 5, badgeY + 3, TEXT, false);
         }
     }
 
@@ -550,7 +568,7 @@ public final class MachineManagementScreen extends Screen {
     @Override
     public void onClose() {
         clearSelection();
-        if (minecraft != null) minecraft.setScreen(null);
+        if (minecraft != null) minecraft.setScreen(parent);
     }
 
     @Override

@@ -38,8 +38,10 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.CraftingBookCategory;
+import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.RecipeManager;
+import net.minecraft.world.item.crafting.ShapedRecipe;
 import net.minecraft.world.item.crafting.ShapelessRecipe;
 import net.minecraftforge.common.crafting.StrictNBTIngredient;
 import net.minecraftforge.eventbus.api.IEventBus;
@@ -100,6 +102,95 @@ class GraphCatalystReturnTest extends BootstrapTest {
         assertTrue(fixture.publish());
         assertEquals(84, fixture.takeReturn().getTag().getInt("Souls"));
         assertEquals(64, fixture.broker.available(fixture.primarySource(), fixture.primaryKey));
+    }
+
+    @Test
+    void mergedShapedInputsTrackTheCenterCatalystAcross22Crafts() throws Exception {
+        assertShapedCatalystReturn(false);
+    }
+
+    @Test
+    void emptyShapedSlotsDoNotShiftTheGraphCatalystReturn() throws Exception {
+        assertShapedCatalystReturn(true);
+    }
+
+    private static void assertShapedCatalystReturn(boolean sparse) throws Exception {
+        Fixture fixture = new Fixture(86, false, false);
+        int catalystSlot = sparse ? 7 : 4;
+        NonNullList<Ingredient> ingredients = NonNullList.withSize(9, Ingredient.EMPTY);
+        List<IngredientSpec> specs = new ArrayList<>();
+        for (int slot = 0; slot < 9; slot++) {
+            if (slot == catalystSlot) {
+                ingredients.set(slot, Ingredient.of(Items.TOTEM_OF_UNDYING));
+                specs.add(new IngredientSpec(ingredients.get(slot), 1, DemandRole.CATALYST));
+            } else if (!sparse || slot == 1 || slot == 5) {
+                ingredients.set(slot, Ingredient.of(slot % 2 == 0 ? Items.LAPIS_LAZULI : Items.REDSTONE));
+                specs.add(new IngredientSpec(ingredients.get(slot), 1));
+            } else specs.add(IngredientSpec.EMPTY);
+        }
+        fixture.specs = List.copyOf(specs);
+        fixture.recipe = new ShapedRecipe(RECIPE, "", CraftingBookCategory.MISC,
+                3, 3, ingredients, new ItemStack(Items.EMERALD, 4)) {
+            @Override
+            public NonNullList<ItemStack> getRemainingItems(CraftingContainer container) {
+                NonNullList<ItemStack> remainders = NonNullList.withSize(9, ItemStack.EMPTY);
+                ItemStack totem = container.getItem(catalystSlot).copy();
+                totem.getOrCreateTag().putInt("Souls", totem.getTag().getInt("Souls") - 1);
+                remainders.set(catalystSlot, totem);
+                return remainders;
+            }
+        };
+        RecipeManager manager = fixture.level.getRecipeManager();
+        doReturn(Optional.of(fixture.recipe)).when(manager).byKey(RECIPE);
+        List<InputDemand> inputs = new ArrayList<>();
+        List<MaterialAllocation> allocations = new ArrayList<>();
+        Inventory physical = new Inventory(fixture.player);
+        int inventorySlot = 0;
+        InputPortId catalystPort = null;
+        for (IngredientSpec spec : StepExecutor.coalesceSpecsForGraph(specs)) {
+            InputPortId port = new InputPortId(NODE, inputs.size());
+            ItemStack supplied = spec.role() == DemandRole.CATALYST
+                    ? charged(86) : spec.ingredient().getItems()[0].copy();
+            long quantity = spec.role() == DemandRole.CATALYST ? spec.count() : spec.count() * 22L;
+            MaterialKey material = MaterialKey.of(supplied);
+            inputs.add(new InputDemand(port, StrictNBTIngredient.of(supplied), quantity,
+                    spec.role(), supplied));
+            allocations.add(new MaterialAllocation(new AllocationId(allocations.size()), port,
+                    new MaterialSource.InitialPool(material), material, quantity));
+            physical.items.set(inventorySlot++, supplied.copyWithCount((int) quantity));
+            if (spec.role() == DemandRole.CATALYST) catalystPort = port;
+        }
+        assertNotNull(catalystPort);
+        assertNotEquals(catalystSlot, catalystPort.index());
+        CraftNode node = new CraftNode(NODE, RECIPE, "generic", new ResourceLocation("minecraft", "crafting"),
+                22, List.of(), List.of(), false, null, null, inputs,
+                List.of(OutputDeclaration.item(new OutputPortId(NODE, 0), fixture.primaryKey, 88, OutputKind.PRIMARY),
+                        OutputDeclaration.item(RETURN, fixture.catalystKey, 1, OutputKind.CATALYST_RETURN,
+                                1, 1, OutputProbability.guaranteed(), false, catalystPort)));
+        CraftPlanGraph graph = new CraftPlanGraph(1, List.of(node), allocations,
+                List.of(new RootDemand(Ingredient.of(Items.EMERALD), 88, 0, new ItemStack(Items.EMERALD),
+                        List.of(new RootAllocation(fixture.primarySource(), fixture.primaryKey, 88)))),
+                List.of(), List.of(NODE));
+        AsyncCraftChain chain = fixture.newChain(graph);
+        MaterialBroker broker = field(chain, "graphMaterials", MaterialBroker.class);
+        DagScheduler scheduler = field(chain, "graphScheduler", DagScheduler.class);
+        NodeAdmissionCoordinator admissions = field(chain, "graphAdmissions", NodeAdmissionCoordinator.class);
+        when(fixture.player.getInventory()).thenReturn(physical);
+        try (var utils = mockStatic(CraftPacketUtils.class, CALLS_REAL_METHODS)) {
+            utils.when(() -> CraftPacketUtils.extractCraftingIngredientSpecs(fixture.recipe))
+                    .thenAnswer(call -> fixture.specs);
+            Object job = beginJob(chain, fixture, NODE, 22, broker, scheduler, admissions, graph);
+            assertTrue(runJobSlice(chain, fixture.player, job, 8));
+            assertTrue(runJobSlice(chain, fixture.player, job, 14));
+        }
+        assertEquals(DagScheduler.NodeState.SUCCEEDED, scheduler.state(NODE));
+        List<ItemStack> results = broker.drainAvailableProducerAssets();
+        assertEquals(88, count(results, Items.EMERALD));
+        assertEquals(1, count(results, Items.TOTEM_OF_UNDYING));
+        assertEquals(64, results.stream().filter(stack -> stack.is(Items.TOTEM_OF_UNDYING))
+                .findFirst().orElseThrow().getTag().getInt("Souls"));
+        assertTrue(physical.items.stream().allMatch(ItemStack::isEmpty));
+        assertTrue(broker.drainAvailableProducerAssets().isEmpty());
     }
 
     @Test
@@ -197,8 +288,14 @@ class GraphCatalystReturnTest extends BootstrapTest {
     private static Object beginJob(AsyncCraftChain chain, Fixture fixture, NodeId node, int executions,
                                    MaterialBroker broker, DagScheduler scheduler,
                                    NodeAdmissionCoordinator admissions) throws Exception {
+        return beginJob(chain, fixture, node, executions, broker, scheduler, admissions, fixture.twoNodeGraph());
+    }
+
+    private static Object beginJob(AsyncCraftChain chain, Fixture fixture, NodeId node, int executions,
+                                   MaterialBroker broker, DagScheduler scheduler,
+                                   NodeAdmissionCoordinator admissions, CraftPlanGraph graph) throws Exception {
         scheduler.claim(node);
-        List<MaterialBroker.Request> requests = fixture.twoNodeGraph().allocations().stream()
+        List<MaterialBroker.Request> requests = graph.allocations().stream()
                 .filter(allocation -> allocation.consumer().nodeId().equals(node))
                 .map(allocation -> new MaterialBroker.Request(allocation.source(), allocation.material(), allocation.quantity()))
                 .toList();
@@ -361,7 +458,7 @@ class GraphCatalystReturnTest extends BootstrapTest {
         final ServerLevel level = mock(ServerLevel.class);
         final ServerPlayer player = mock(ServerPlayer.class);
         final MinecraftServer server = mock(MinecraftServer.class);
-        final ShapelessRecipe recipe;
+        CraftingRecipe recipe;
         List<IngredientSpec> specs;
 
         Fixture(int souls, boolean requireReturn, boolean replaceSpent) throws Exception {

@@ -313,7 +313,7 @@ final class FlatCraftExecutor {
             ExternalItemProgressBridge.enqueueCrafted(online, result);
         }
         List<ItemStack> remainders = CraftPacketUtils.getRecipeRemaindersBySpec(recipe, consumed);
-        if (context.catalystState() != null) context.catalystState().record(specs, remainders);
+        if (context.catalystState() != null) context.catalystState().record(specs, consumed, remainders);
         for (ItemStack remainder : remainders) {
             int remainderExecutions = CraftPacketUtils.remainderExecutions(remainder, specs, 1);
             addToInventory(workingInventory, remainder.copyWithCount(

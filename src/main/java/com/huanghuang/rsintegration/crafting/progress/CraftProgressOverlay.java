@@ -42,8 +42,7 @@ public final class CraftProgressOverlay {
     public static void onRenderOverlay(RenderGuiEvent.Post event) {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.player == null || minecraft.screen != null || minecraft.options.hideGui) return;
-        boolean planningVisible = RSIntegrationConfig.CLIENT_SPEC.isLoaded()
-                ? RSIntegrationConfig.PLANNING_HUD_VISIBLE.get() : RSIntegrationConfig.PLANNING_HUD_VISIBLE.getDefault();
+        boolean planningVisible = PlanningProgressOverlay.isVisible();
         var planning = planningVisible ? PlanningProgressTracker.current() : null;
         int plans = planningVisible ? PlanningTasksScreen.taskCount() : 0;
         var execution = CraftProgressTracker.isVisible() ? CraftProgressTracker.first() : null;

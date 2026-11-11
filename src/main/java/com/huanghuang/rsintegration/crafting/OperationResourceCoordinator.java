@@ -101,7 +101,9 @@ public final class OperationResourceCoordinator {
         CaptureSession captureSession = null;
         CaptureLeaseRegistry.Lease captureLease = null;
         try {
-            machineLeases = machines.tryAcquireAll(machineScope, operationId);
+            // 虚拟配方没有实体机器，但仍须持有操作预算和可选的产物捕获资源。
+            machineLeases = machineScope.isEmpty()
+                    ? List.of() : machines.tryAcquireAll(machineScope, operationId);
             if (machineLeases == null) {
                 permit.cancelBeforeStart();
                 return null;

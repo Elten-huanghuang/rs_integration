@@ -486,6 +486,14 @@ test {
 
 compileJava {
     options.encoding = 'UTF-8'
+    // Mixin AP 会为全部 Mixin 汇总生成 refmap；仅编译局部源文件会丢失或覆盖映射。
+    // 保留整任务的 UP-TO-DATE 检查，只关闭 Java 源文件级别的增量编译。
+    options.incremental = false
+    // 临时目录不会自动成为任务输出，缺失这些文件时必须重新运行注解处理器。
+    outputs.file(layout.buildDirectory.file('tmp/compileJava/compileJava-refmap.json'))
+            .withPropertyName('mixinRefmap')
+    outputs.file(layout.buildDirectory.file('tmp/compileJava/compileJava-mappings.tsrg'))
+            .withPropertyName('mixinMappings')
 }
 
 compileTestJava {
