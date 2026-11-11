@@ -1,11 +1,9 @@
 package com.huanghuang.rsintegration.crafting;
 
-import net.minecraft.SharedConstants;
-import net.minecraft.server.Bootstrap;
+import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -13,12 +11,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class SelfAmplifyingRecipePolicyTest {
-    @BeforeAll
-    static void bootstrapMinecraft() {
-        SharedConstants.tryDetectVersion();
-        Bootstrap.bootStrap();
-    }
+class SelfAmplifyingRecipePolicyTest extends BootstrapTest {
 
     @Test
     void executionIngredientExcludesNeutralSelfOutput() {

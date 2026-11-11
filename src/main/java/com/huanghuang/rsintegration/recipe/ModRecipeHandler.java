@@ -301,6 +301,15 @@ public interface ModRecipeHandler {
     }
 
     /**
+     * 主产物直接继承哪个输入槽的 NBT；输入无 NBT 时保留配方声明的 NBT。
+     * 只为遵循此规则的配方声明，其他动态 NBT 不能据此推断为确定身份。
+     */
+    @Nullable
+    default Integer getPrimaryOutputNbtSourceInput(@Nonnull Recipe<?> recipe) {
+        return null;
+    }
+
+    /**
      * Whether this recipe exposes a complete value-only input/output contract.
      * Such recipes may be projected once during catalog construction and
      * planned off-thread; machine interaction still remains on the server thread.

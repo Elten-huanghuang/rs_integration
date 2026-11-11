@@ -13,6 +13,7 @@ import com.huanghuang.rsintegration.crafting.graph.CraftNodeMergePolicy;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.crafting.graph.OutputKind;
 import com.huanghuang.rsintegration.crafting.graph.OutputProbability;
+import com.huanghuang.rsintegration.crafting.graph.SelfAmplifyingTerminalGraphComposer;
 import com.huanghuang.rsintegration.crafting.graph.TerminalGraphComposer;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
@@ -83,12 +84,21 @@ public final class CraftTerminalSteps {
         boolean preparationOnly = ModIds.ID_SUMMONING_RITUALS.equals(terminalStep.modType().id());
         List<TerminalGraphComposer.TerminalOutput> terminalOutputs = preparationOnly
                 ? List.of() : terminalOutputs(terminalStep, output, level);
-        CraftPlanGraph completeGraph = preparationOnly
+        SelfAmplifyingTerminalGraphComposer.Composition feedback = preparationOnly ? null
+                : SelfAmplifyingTerminalGraphComposer.tryCompose(inputGraph, terminalStep, terminalOutputs,
+                        primaryOutputNbtSourceInput(terminalStep, level));
+        CraftPlanGraph completeGraph = feedback != null ? feedback.graph() : preparationOnly
                 ? TerminalGraphComposer.composePreparation(inputGraph, terminalStep)
                 : TerminalGraphComposer.compose(inputGraph, terminalStep, terminalOutputs);
         List<ResolutionStep> expectedFlat = new ArrayList<>(
                 ExecutionEquivalence.projectFlatSteps(inputGraph));
-        expectedFlat.add(preparationOnly ? terminalStep : expectedTerminalStep(terminalStep, terminalOutputs));
+        if (feedback != null) {
+            for (ResolutionStep stage : feedback.stages()) {
+                expectedFlat.add(expectedTerminalStep(stage, feedback.outputs()));
+            }
+        } else {
+            expectedFlat.add(preparationOnly ? terminalStep : expectedTerminalStep(terminalStep, terminalOutputs));
+        }
         ExecutionEquivalence.Report equivalence =
                 ExecutionEquivalence.compare(completeGraph, expectedFlat);
         if (!equivalence.equivalent()) {
@@ -97,6 +107,13 @@ public final class CraftTerminalSteps {
         }
         return CraftPlanGraphCompactor.compact(completeGraph,
                 CraftNodeMergePolicy.forLevel(level));
+    }
+
+    @Nullable
+    private static Integer primaryOutputNbtSourceInput(ResolutionStep terminal, Level level) {
+        Recipe<?> recipe = level.getRecipeManager().byKey(terminal.recipeId()).orElse(null);
+        ModRecipeHandler handler = recipe == null ? null : ModRecipeHandlers.claimFor(recipe).winner();
+        return handler == null ? null : handler.getPrimaryOutputNbtSourceInput(recipe);
     }
 
     static ResolutionStep expectedTerminalStep(

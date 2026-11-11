@@ -66,6 +66,13 @@ public final class MalumRecipeHandler extends AbstractRecipeHandler {
         return false;
     }
 
+    @Nullable
+    @Override
+    public Integer getPrimaryOutputNbtSourceInput(Recipe<?> recipe) {
+        // 注魔祭坛复制中央输入的 NBT；继承开关不会改变产出数量。
+        return hasRuntimeDependentPrimaryNbt(recipe) ? 0 : null;
+    }
+
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
         // NOTE: must NOT call RecipeIndex.tryGetResultItem here — for Malum recipes

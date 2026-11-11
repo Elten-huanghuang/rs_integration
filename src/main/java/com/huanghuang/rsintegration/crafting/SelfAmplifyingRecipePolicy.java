@@ -244,13 +244,18 @@ public final class SelfAmplifyingRecipePolicy {
 
     private static boolean isConsumedSelfInput(IngredientSpec spec, ItemStack output) {
         return !spec.isEmpty() && spec.role() != DemandRole.CATALYST
-                && CraftingResolver.consumesOutput(spec.ingredient(), output);
+                && isSelfInput(spec.ingredient(), output);
     }
 
     private static boolean isConsumedSelfInput(
             ScaledIngredientSpec spec, ItemStack output) {
         return !spec.isEmpty() && spec.role() != DemandRole.CATALYST
-                && CraftingResolver.consumesOutput(spec.ingredient(), output);
+                && isSelfInput(spec.ingredient(), output);
+    }
+
+    /** 与规划端共用精确材料谓词，不能把标签中的同类候选误当成复制种子。 */
+    public static boolean isSelfInput(Ingredient ingredient, ItemStack output) {
+        return CraftingResolver.consumesOutput(ingredient, output);
     }
 
     private static long selfConsumed(List<IngredientRef> inputs, MaterialRef output) {
