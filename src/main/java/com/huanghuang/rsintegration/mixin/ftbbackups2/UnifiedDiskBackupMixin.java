@@ -16,7 +16,10 @@ import java.nio.file.Path;
 @Pseudo
 @Mixin(targets = "net.creeperhost.ftbbackups.BackupHandler", remap = false)
 public abstract class UnifiedDiskBackupMixin {
-    @WrapOperation(method = "lambda$createBackup$*", at = {
+    // Mixin 的 * 是匹配数量量词，不能用于匹配 lambda 方法名后缀。
+    @WrapOperation(method = "lambda$createBackup$1(Ljava/util/concurrent/CompletableFuture;"
+            + "Lnet/minecraft/server/MinecraftServer;Ljava/lang/String;"
+            + "Lnet/creeperhost/ftbbackups/config/Format;)V", at = {
             @At(value = "INVOKE", target = "Lnet/creeperhost/ftbbackups/utils/FileUtils;zip("
                     + "Ljava/nio/file/Path;Ljava/nio/file/Path;Ljava/lang/Iterable;)V"),
             @At(value = "INVOKE", target = "Lnet/creeperhost/ftbbackups/utils/FileUtils;copy("
