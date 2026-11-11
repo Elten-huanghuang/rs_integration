@@ -15,8 +15,10 @@ import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.network.chat.Style;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.client.ClientCommandHandler;
 import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 import net.minecraftforge.client.event.RegisterClientCommandsEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -35,7 +37,8 @@ public final class PlanBackgroundClient {
     static final long CACHE_TTL_MS = 10L * 60_000L;
     private static final int MAX_PENDING_REQUESTS = 32;
     private static final int MAX_CACHED_PLANS = 8;
-    private static final String OPEN_COMMAND = "rsi_plan open";
+    private static final String COMMAND = "rsi_plan";
+    private static final String OPEN_COMMAND = COMMAND + " open";
     private static final Map<Long, Long> DETACHED_REQUESTS = new LinkedHashMap<>();
     private static final Map<Long, CachedPlan> CACHED_PLANS = new LinkedHashMap<>();
 
@@ -126,12 +129,31 @@ public final class PlanBackgroundClient {
 
     @SubscribeEvent
     public static void registerClientCommand(RegisterClientCommandsEvent event) {
-        event.getDispatcher().register(Commands.literal("rsi_plan")
+        event.getDispatcher().register(Commands.literal(COMMAND)
                 .then(Commands.literal("tasks").executes(context -> { PlanningTasksScreen.open(); return 1; }))
                 .then(Commands.literal("cancel").executes(context -> PlanningProgressOverlay.cancelCurrent() ? 1 : 0))
                 .then(Commands.literal("open")
                         .then(Commands.argument("request", LongArgumentType.longArg(1L))
                                 .executes(PlanBackgroundClient::open))));
+    }
+
+    static String localCommand(Style style) {
+        ClickEvent click = style == null ? null : style.getClickEvent();
+        if (click == null || click.getAction() != ClickEvent.Action.RUN_COMMAND) return null;
+        String prefix = "/" + COMMAND;
+        String command = click.getValue();
+        return command.equals(prefix) || command.startsWith(prefix + " ") ? command.substring(1) : null;
+    }
+
+    /** 聊天链接默认走服务端发送路径，必须在本地执行客户端计划命令。 */
+    public static boolean handleClick(Style style) {
+        String command = localCommand(style);
+        if (command == null) return false;
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.player == null || !ClientCommandHandler.runCommand(command)) {
+            minecraft.gui.getChat().addMessage(Component.translatable("rsi.plan.background.expired"));
+        }
+        return true;
     }
 
     @SubscribeEvent

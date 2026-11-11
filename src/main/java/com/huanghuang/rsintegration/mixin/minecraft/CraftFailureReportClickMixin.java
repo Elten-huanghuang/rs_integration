@@ -1,7 +1,6 @@
 package com.huanghuang.rsintegration.mixin.minecraft;
 
-import java.lang.reflect.Method;
-
+import com.huanghuang.rsintegration.crafting.plan.PlanBackgroundClient;
 import com.huanghuang.rsintegration.crafting.progress.CraftFailureClientCommands;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Style;
@@ -14,6 +13,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 public abstract class CraftFailureReportClickMixin {
     @Inject(method = "handleComponentClicked", at = @At("HEAD"), cancellable = true, require = 1)
     private void rsIntegration$openLocalFailureReport(Style style, CallbackInfoReturnable<Boolean> callback) {
-        if (!Screen.hasShiftDown() && CraftFailureClientCommands.handleClick(style)) callback.setReturnValue(true);
+        if (!Screen.hasShiftDown() && (CraftFailureClientCommands.handleClick(style)
+                || PlanBackgroundClient.handleClick(style))) callback.setReturnValue(true);
     }
 }
