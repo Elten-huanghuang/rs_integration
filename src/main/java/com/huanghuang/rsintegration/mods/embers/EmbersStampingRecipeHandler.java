@@ -80,9 +80,12 @@ public final class EmbersStampingRecipeHandler implements ModRecipeHandler {
         return false;
     }
     @Override public boolean supportsBackgroundPlanning(Recipe<?> recipe) {
-        return recipe instanceof StampingRecipe nativeRecipe
+        // 原生标签输出由 Misc.getTaggedItem 按 Embers 的标签偏好确定；
+        // getOutput 与展示都调用 getResultItem，并非运行时随机选择标签成员。
+        // 目录采集时只冻结实际选定的产物，不能把整个标签当成多个可产物。
+        return recipe instanceof StampingRecipe
                 && recipe.getClass() == StampingRecipe.class
-                && nativeRecipe.output.left().isPresent()
+                && !getResultItem(recipe, RegistryAccess.EMPTY).isEmpty()
                 && ModRecipeHandler.super.supportsBackgroundPlanning(recipe);
     }
     @Override public boolean supportsIntermediateProjection(Recipe<?> recipe) {

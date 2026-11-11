@@ -13,18 +13,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class TypedPreviewAdmissionQueueTest {
 
     @Test
-    void keepsOnlyLatestRequestForEachPlayer() {
+    void keepsIndependentRequestsForOnePlayer() {
         TypedPreviewAdmissionQueue queue = new TypedPreviewAdmissionQueue(2);
         UUID player = UUID.randomUUID();
         List<String> ran = new ArrayList<>();
 
         assertEquals(TypedPreviewAdmissionQueue.OfferResult.QUEUED,
                 queue.offer(request(player, 1, 0, () -> ran.add("old"))));
-        assertEquals(TypedPreviewAdmissionQueue.OfferResult.REPLACED,
+        assertEquals(TypedPreviewAdmissionQueue.OfferResult.QUEUED,
                 queue.offer(request(player, 2, 1, () -> ran.add("new"))));
 
         assertEquals(1, queue.run(1, 2, 10, ignored -> true));
-        assertEquals(List.of("new"), ran);
+        assertEquals(List.of("old"), ran);
+        assertEquals(1, queue.run(1, 2, 10, ignored -> true));
+        assertEquals(List.of("old", "new"), ran);
     }
 
     @Test
@@ -57,7 +59,7 @@ class TypedPreviewAdmissionQueueTest {
     }
 
     @Test
-    void capacityCountsPlayersRatherThanReplacements() {
+    void capacityCountsRequestsAndAllowsSameRequestReplacement() {
         TypedPreviewAdmissionQueue queue = new TypedPreviewAdmissionQueue(1);
         UUID first = UUID.randomUUID();
         UUID second = UUID.randomUUID();
@@ -65,6 +67,8 @@ class TypedPreviewAdmissionQueueTest {
         assertEquals(TypedPreviewAdmissionQueue.OfferResult.QUEUED,
                 queue.offer(request(first, 1, 0, () -> {})));
         assertEquals(TypedPreviewAdmissionQueue.OfferResult.REPLACED,
+                queue.offer(request(first, 1, 0, () -> {})));
+        assertEquals(TypedPreviewAdmissionQueue.OfferResult.FULL,
                 queue.offer(request(first, 2, 0, () -> {})));
         assertEquals(TypedPreviewAdmissionQueue.OfferResult.FULL,
                 queue.offer(request(second, 1, 0, () -> {})));

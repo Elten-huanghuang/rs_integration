@@ -18,6 +18,33 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class AsyncPlanningCoordinatorTest extends BootstrapTest {
     @Test
+    void cancelOneCalculationWhileAnotherForTheSamePlayerCompletes() throws Exception {
+        try (var coordinator = new AsyncPlanningCoordinator(1, 4)) {
+            UUID player = UUID.randomUUID();
+            CountDownLatch started = new CountDownLatch(1);
+            CountDownLatch secondCompleted = new CountDownLatch(1);
+            CountDownLatch cancelled = new CountDownLatch(1);
+            AtomicInteger rollbacks = new AtomicInteger();
+            coordinator.submit(snapshot(player, 1), ignored -> {
+                started.countDown();
+                while (true) PlanningThreadContext.throwIfCancelled();
+            }, Runnable::run, ignored -> true, result -> {}, failure -> {
+                rollbacks.incrementAndGet(); cancelled.countDown();
+            });
+            assertTrue(started.await(2, TimeUnit.SECONDS));
+            coordinator.submit(snapshot(player, 2), ignored -> "second", Runnable::run,
+                    ignored -> true, result -> secondCompleted.countDown(), failure -> rollbacks.incrementAndGet());
+            assertTrue(secondCompleted.await(2, TimeUnit.SECONDS));
+            assertEquals(1, coordinator.activeCount());
+            coordinator.cancel(player, 1);
+            coordinator.cancel(player, 1);
+            assertTrue(cancelled.await(2, TimeUnit.SECONDS));
+            assertEquals(1, rollbacks.get());
+            assertEquals(0, coordinator.activeCount());
+        }
+    }
+
+    @Test
     void staleResultRollsBackInsteadOfCommitting() throws Exception {
         try (AsyncPlanningCoordinator coordinator = new AsyncPlanningCoordinator(1)) {
             CountDownLatch completed = new CountDownLatch(1);
@@ -35,7 +62,7 @@ class AsyncPlanningCoordinatorTest extends BootstrapTest {
     }
 
     @Test
-    void newerRequestCancelsOlderRequest() throws Exception {
+    void separateRequestsForOnePlayerBothComplete() throws Exception {
         try (AsyncPlanningCoordinator coordinator = new AsyncPlanningCoordinator(1)) {
             UUID player = UUID.randomUUID();
             CountDownLatch allowFirst = new CountDownLatch(1);
@@ -47,7 +74,7 @@ class AsyncPlanningCoordinatorTest extends BootstrapTest {
                     Thread.currentThread().interrupt();
                 }
                 return "old";
-            }, Runnable::run, ignored -> true, ignored -> commits.incrementAndGet(), ignored -> {
+            }, Runnable::run, ignored -> true, ignored -> { commits.incrementAndGet(); completed.countDown(); }, ignored -> {
                 rollbacks.incrementAndGet(); completed.countDown();
             });
             coordinator.submit(snapshot(player, 2), ignored -> "new", Runnable::run,
@@ -55,8 +82,8 @@ class AsyncPlanningCoordinatorTest extends BootstrapTest {
                     ignored -> { rollbacks.incrementAndGet(); completed.countDown(); });
             allowFirst.countDown();
             assertTrue(completed.await(2, TimeUnit.SECONDS));
-            assertEquals(1, commits.get());
-            assertEquals(1, rollbacks.get());
+            assertEquals(2, commits.get());
+            assertEquals(0, rollbacks.get());
         }
     }
 
@@ -83,7 +110,7 @@ class AsyncPlanningCoordinatorTest extends BootstrapTest {
                         committed.countDown();
                     }, failure -> committed.countDown());
             assertTrue(started.await(2, TimeUnit.SECONDS));
-            coordinator.submitShared(key, snapshot(player, 2), ignored -> {
+            coordinator.submitShared(key, snapshot(player, 1), ignored -> {
                 computations.incrementAndGet();
                 return "unexpected";
             }, Runnable::run, ignored -> true,
@@ -94,7 +121,7 @@ class AsyncPlanningCoordinatorTest extends BootstrapTest {
             release.countDown();
             assertTrue(committed.await(2, TimeUnit.SECONDS));
             assertEquals(1, computations.get());
-            assertEquals(2, callbackSnapshot.get().requestGeneration());
+            assertEquals(1, callbackSnapshot.get().requestGeneration());
         }
     }
 
@@ -195,7 +222,7 @@ class AsyncPlanningCoordinatorTest extends BootstrapTest {
             }, Runnable::run, ignored -> true,
                     ignored -> { commits.incrementAndGet(); completed.countDown(); },
                     ignored -> { rollbacks.incrementAndGet(); completed.countDown(); });
-            coordinator.submit(snapshot(queuedPlayer, 2), ignored -> {
+            coordinator.submit(snapshot(queuedPlayer, 1), ignored -> {
                 newComputations.incrementAndGet();
                 return "new";
             }, Runnable::run, ignored -> true,

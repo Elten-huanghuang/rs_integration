@@ -280,7 +280,7 @@ public final class RecipeIndex {
                       Map<Item, List<ReusableCatalystRoute>> catalystRoutes,
                       Set<ResourceLocation> catalystOutputs, Set<ResourceLocation> catalystRecipes,
                       Map<IronSpellBooksRecipeCatalog.SpellScrollKey, List<Entry>> scrolls,
-                      Set<ResourceLocation> outputIds) {}
+                      Map<ResourceLocation, Set<ResourceLocation>> producersByOutput) {}
 
     record BuildResult(Map<Item, List<Entry>> index,
                        Map<Item, List<ReusableCatalystRoute>> catalystRoutes,
@@ -296,10 +296,20 @@ public final class RecipeIndex {
         Map<IronSpellBooksRecipeCatalog.SpellScrollKey, List<Entry>> scrolls = new HashMap<>();
         input.scrolls.forEach((key, entries) -> scrolls.put(key, List.copyOf(entries)));
         ImmutableRecipeGraph graph = new ImmutableRecipeGraph(input.projected);
-        Set<ResourceLocation> projectedIds = graph.recipesByOutput().keySet().stream()
-                .map(ImmutableRecipeGraph.MaterialRef::itemId).collect(Collectors.toSet());
-        Set<ResourceLocation> incompatible = new HashSet<>(input.outputIds);
-        incompatible.removeAll(projectedIds);
+        // 覆盖率按“产物 + 生产配方”比较。一个物品存在普通配方，不能证明
+        // 它的机器配方也已进入纯图；副产物同样必须单独核对。
+        Map<ResourceLocation, Set<ResourceLocation>> projectedProducers = new HashMap<>();
+        graph.recipesByOutput().forEach((output, nodes) -> {
+            Set<ResourceLocation> ids = projectedProducers.computeIfAbsent(
+                    output.itemId(), ignored -> new HashSet<>());
+            nodes.forEach(node -> ids.add(node.recipeId()));
+        });
+        Set<ResourceLocation> incompatible = new HashSet<>();
+        input.producersByOutput.forEach((output, producers) -> {
+            if (!projectedProducers.getOrDefault(output, Set.of()).containsAll(producers)) {
+                incompatible.add(output);
+            }
+        });
         var prepared = ImmutableRecipeGraphProjector.prepareCompiled(graph);
         return new BuildResult(frozen, freezeCatalystRoutes(input.catalystRoutes),
                 Set.copyOf(input.catalystOutputs), Set.copyOf(input.catalystRecipes),
@@ -364,7 +374,7 @@ public final class RecipeIndex {
         final Set<ResourceLocation> catalystOutputs = new LinkedHashSet<>();
         final Set<ResourceLocation> catalystRecipes = new LinkedHashSet<>();
         final Map<IronSpellBooksRecipeCatalog.SpellScrollKey, List<Entry>> scrolls = new HashMap<>();
-        final Set<ResourceLocation> outputIds = new HashSet<>();
+        final Map<ResourceLocation, Set<ResourceLocation>> producersByOutput = new HashMap<>();
         final Map<String, UnknownRecipeTypeStats> unknownRecipeTypes = new HashMap<>();
         final BuildTiming timing = new BuildTiming();
         BuildPhase phase = BuildPhase.RECIPES;
@@ -477,8 +487,13 @@ public final class RecipeIndex {
                             phase = BuildPhase.COMPLETE;
                             continue;
                         }
-                        ResourceLocation id = ForgeRegistries.ITEMS.getKey(outputItems.next());
-                        if (id != null) outputIds.add(id);
+                        Item output = outputItems.next();
+                        ResourceLocation id = ForgeRegistries.ITEMS.getKey(output);
+                        if (id != null) {
+                            Set<ResourceLocation> producers = new HashSet<>();
+                            for (Entry entry : index.get(output)) producers.add(entry.recipe().getId());
+                            producersByOutput.put(id, Set.copyOf(producers));
+                        }
                     }
                     case COMPLETE -> { }
                 }
@@ -494,7 +509,7 @@ public final class RecipeIndex {
         BuildInput input() {
             if (phase != BuildPhase.COMPLETE) throw new IllegalStateException("Recipe capture incomplete");
             return new BuildInput(index, projected, catalystRoutes, catalystOutputs,
-                    catalystRecipes, scrolls, outputIds);
+                    catalystRecipes, scrolls, producersByOutput);
         }
     }
 
@@ -715,7 +730,7 @@ public final class RecipeIndex {
         return readyGeneration(level).result.catalystRecipes;
     }
 
-    /** Outputs that have indexed producers but no producer representable in the pure graph. */
+    /** 存在未投影生产配方的产物，包含仅部分配方进入纯图的情况。 */
     public static Set<ResourceLocation> pureIncompatibleOutputIds(Level level) {
         return readyGeneration(level).result.incompatibleOutputs;
     }

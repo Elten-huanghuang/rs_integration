@@ -23,6 +23,207 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class PlannerCapacityTest extends BootstrapTest {
     @Test
+    void tenThousandRecipeChainWithTagBoundaryDoesNotFallBackAtEveryAncestor() {
+        Map<MaterialRef, List<RecipeNode>> recipes = new LinkedHashMap<>();
+        MaterialRef raw = material("tagged_chain_raw");
+        MaterialRef previous = material("tagged_chain_0");
+        recipes.put(previous, List.of(recipe("tagged_chain_0", previous, 1L,
+                new IngredientRef(List.of(raw, material("missing_raw")), 1L, NbtMatchMode.ANY))));
+        for (int index = 1; index < 10_000; index++) {
+            MaterialRef output = material("tagged_chain_" + index);
+            recipes.put(output, List.of(recipe("tagged_chain_" + index, output, 1L, any(previous, 1L))));
+            previous = output;
+        }
+        Scenario scenario = new Scenario(new ImmutableRecipeGraph(recipes), Map.of(raw, 50_000_000L),
+                List.of(any(previous, 50_000_000L)));
+        var result = plan(scenario, 10_000);
+        assertEquals(10_000, result.steps().size());
+        assertTrue(result.steps().stream().allMatch(step -> step.batches() == 50_000_000L));
+        assertEquals(0, result.backtracks());
+        assertFlow(scenario, result);
+    }
+
+    @Test
+    void multipleComplexBoundariesCanShareAProducedIntermediate() {
+        MaterialRef raw = material("raw");
+        MaterialRef shared = material("shared");
+        MaterialRef boundaryA = material("boundary_a");
+        MaterialRef boundaryB = material("boundary_b");
+        MaterialRef target = material("target");
+        var graph = new ImmutableRecipeGraph(Map.of(
+                shared, List.of(recipe("shared", shared, 2L, need(raw, 1L))),
+                boundaryA, List.of(recipe("boundary_a", boundaryA, 1L,
+                        new IngredientRef(List.of(shared, material("absent_a")), 1L, NbtMatchMode.ANY))),
+                boundaryB, List.of(recipe("boundary_b", boundaryB, 1L,
+                        new IngredientRef(List.of(shared, material("absent_b")), 1L, NbtMatchMode.ANY))),
+                target, List.of(recipe("target", target, 1L, need(boundaryA, 1L), need(boundaryB, 1L)))));
+        Scenario scenario = new Scenario(graph, Map.of(raw, 1L), List.of(need(target, 1L)));
+        var result = plan(scenario, 4);
+        assertEquals(4, result.steps().size());
+        assertFlow(scenario, result);
+    }
+
+    @Test
+    void boundaryDependencyAcrossScheduledRootsFallsBackWithoutPoisoningSearch() {
+        MaterialRef raw = material("raw");
+        MaterialRef intermediate = material("intermediate");
+        MaterialRef boundary = material("boundary");
+        MaterialRef target = material("target");
+        var graph = new ImmutableRecipeGraph(Map.of(
+                intermediate, List.of(recipe("intermediate", intermediate, 1L, need(raw, 1L))),
+                boundary, List.of(recipe("boundary", boundary, 1L,
+                        new IngredientRef(List.of(intermediate, material("absent")), 1L, NbtMatchMode.ANY))),
+                target, List.of(recipe("target", target, 1L, need(boundary, 1L)))));
+        Scenario scenario = new Scenario(graph, Map.of(raw, 2L),
+                List.of(need(target, 1L), need(intermediate, 1L)));
+        var result = plan(scenario, 4);
+        assertEquals(4, result.steps().size());
+        assertFlow(scenario, result);
+    }
+
+    @Test
+    void stockedFirstRootCannotReuseInitialPreparationForADifferentSuffix() {
+        MaterialRef stored = material("stored");
+        MaterialRef raw = material("raw");
+        MaterialRef boundary = material("boundary");
+        MaterialRef target = material("target");
+        var graph = new ImmutableRecipeGraph(Map.of(
+                boundary, List.of(recipe("boundary", boundary, 1L,
+                        new IngredientRef(List.of(raw, material("absent")), 1L, NbtMatchMode.ANY))),
+                target, List.of(recipe("target", target, 1L, need(boundary, 1L)))));
+        Scenario scenario = new Scenario(graph, Map.of(stored, 1L, raw, 1L),
+                List.of(need(stored, 1L), need(target, 1L)));
+        assertFlow(scenario, plan(scenario, 2));
+    }
+
+    @Test
+    void sharedTagBoundaryIsProducedOnceForAllConsumersAtAnyQuantity() {
+        MaterialRef raw = material("boundary_raw");
+        MaterialRef shared = material("boundary_shared");
+        MaterialRef left = material("boundary_left");
+        MaterialRef right = material("boundary_right");
+        var graph = new ImmutableRecipeGraph(Map.of(
+                shared, List.of(recipe("boundary_shared", shared, 4L,
+                        new IngredientRef(List.of(raw, material("absent_variant")), 1L, NbtMatchMode.ANY))),
+                left, List.of(recipe("boundary_left", left, 1L, need(shared, 3L))),
+                right, List.of(recipe("boundary_right", right, 1L, need(shared, 3L)))));
+        int states = -1;
+        for (long amount : new long[] {1L, 50_000_000L}) {
+            long batches = (6L * amount + 3L) / 4L;
+            Scenario scenario = new Scenario(graph, Map.of(raw, batches),
+                    List.of(need(left, amount), need(right, amount)));
+            var result = plan(scenario, 3);
+            assertEquals(3, result.steps().size());
+            assertEquals(new PureRecipePlanner.PlannedStep(id("boundary_shared"), batches), result.steps().get(0));
+            if (states >= 0) assertEquals(states, result.expandedStates());
+            states = result.expandedStates();
+            assertFlow(scenario, result);
+        }
+    }
+
+    @Test
+    void compilationIsReusedWhileStockQuantitiesAndAncestorsAreReevaluated() {
+        Scenario scenario = chain(20, 1L, false);
+        var cache = new DeterministicRecipePlanner.CompilationCache(scenario.graph(), Map.of(),
+                PlanningPreferences.empty(), 10_000);
+        var missing = cache.prepare(Map.of(), scenario.roots(), Set.of(), 20, 10_000, () -> {});
+        assertNotNull(missing);
+        assertNull(missing.plan());
+        var supplied = cache.prepare(scenario.stock(), scenario.roots(), Set.of(), 20, 10_000, () -> {});
+        assertNotNull(supplied.plan());
+        assertEquals(20, supplied.plan().steps().size());
+        var scaled = cache.prepare(Map.of(material("raw"), 50_000_000L),
+                List.of(scenario.roots().get(0).withCount(50_000_000L)), Set.of(), 20, 10_000, () -> {});
+        assertTrue(scaled.plan().steps().stream().allMatch(step -> step.batches() == 50_000_000L));
+        var ancestorBlocked = cache.prepare(scenario.stock(), scenario.roots(), Set.of(material("chain_10")),
+                20, 10_000, () -> {});
+        assertNull(ancestorBlocked.plan());
+        assertTrue(ancestorBlocked.schedule().stream().anyMatch(entry ->
+                entry instanceof DeterministicRecipePlanner.Boundary boundary
+                        && boundary.ingredient().alternatives().contains(material("chain_10"))));
+        assertNotNull(cache.prepare(scenario.stock(), scenario.roots(), Set.of(), 20, 10_000, () -> {}).plan());
+        assertEquals(1, cache.compilationCount());
+    }
+
+    @Test
+    void zeroCacheCapacityStillPlansWithoutRetainingPrograms() {
+        Scenario scenario = chain(20, 1L, false);
+        var cache = new DeterministicRecipePlanner.CompilationCache(scenario.graph(), Map.of(),
+                PlanningPreferences.empty(), 0);
+        var first = cache.prepare(scenario.stock(), scenario.roots(), Set.of(), 20, 10_000, () -> {});
+        var second = cache.prepare(scenario.stock(), scenario.roots(), Set.of(), 20, 10_000, () -> {});
+        assertEquals(first.plan(), second.plan());
+        assertEquals(2, cache.compilationCount());
+    }
+
+    @Test
+    void boundarySupplyPreservesExactNbtAndDoesNotCreateSyntheticConsumption() {
+        MaterialRef raw = material("raw");
+        MaterialRef shared = material("shared");
+        MaterialRef tagged = new MaterialRef(shared.itemId(), "{variant:1}");
+        MaterialRef flexible = material("flexible");
+        MaterialRef exact = material("exact");
+        var graph = new ImmutableRecipeGraph(Map.of(
+                shared, List.of(recipe("a_shared", shared, 1L, need(raw, 1L)),
+                        recipe("b_shared", shared, 1L, need(material("absent"), 1L))),
+                flexible, List.of(recipe("flexible", flexible, 1L, any(shared, 1L))),
+                exact, List.of(recipe("exact", exact, 1L, need(shared, 1L)))));
+        for (var roots : List.of(List.of(need(flexible, 2L), need(exact, 1L)),
+                List.of(need(exact, 1L), need(flexible, 2L)))) {
+            Scenario scenario = new Scenario(graph, Map.of(raw, 1L, tagged, 2L), roots);
+            var result = plan(scenario, 3);
+            assertTrue(result.remaining().isEmpty());
+            assertFlow(scenario, result);
+        }
+    }
+
+    @Test
+    void boundaryChoiceCanBacktrackAfterCompiledConsumersHaveFinished() {
+        MaterialRef rare = material("rare");
+        MaterialRef common = material("common");
+        MaterialRef shared = material("shared");
+        MaterialRef left = material("left");
+        MaterialRef right = material("right");
+        var graph = new ImmutableRecipeGraph(Map.of(
+                shared, List.of(recipe("a_rare", shared, 2L, need(rare, 1L)),
+                        recipe("b_common", shared, 2L, need(common, 1L))),
+                left, List.of(recipe("left", left, 1L, need(shared, 1L))),
+                right, List.of(recipe("right", right, 1L, need(shared, 1L)))));
+        Scenario scenario = new Scenario(graph, Map.of(rare, 1L, common, 1L),
+                List.of(need(left, 1L), need(right, 1L),
+                        new IngredientRef(List.of(rare), 1L, NbtMatchMode.PARTIAL)));
+        var result = plan(scenario, 3);
+        assertEquals(id("b_common"), result.steps().get(0).recipeId());
+        assertEquals(3, result.steps().size());
+        assertFlow(scenario, result);
+    }
+
+    @Test
+    void boundaryCannotProduceAnUnseededAncestorButCanUseAStoredTagAlternative() {
+        MaterialRef blank = material("blank_rune");
+        MaterialRef scarlet = material("scarlet_rune");
+        MaterialRef lightning = material("lightning_rune");
+        var graph = new ImmutableRecipeGraph(Map.of(
+                blank, List.of(recipe("blank", blank, 1L,
+                        new IngredientRef(List.of(scarlet, lightning), 1L, NbtMatchMode.ANY))),
+                scarlet, List.of(recipe("scarlet", scarlet, 1L, need(blank, 1L)))));
+        var unseeded = PureRecipePlanner.resolve(graph, Map.of(), List.of(need(scarlet, 1L)), 10);
+        assertFalse(unseeded.feasible());
+        Scenario seeded = new Scenario(graph, Map.of(lightning, 1L), List.of(need(scarlet, 1L)));
+        assertFlow(seeded, plan(seeded, 2));
+    }
+
+    @Test
+    void cachedProgramDoesNotRememberInsufficientStepBudget() {
+        Scenario scenario = chain(20, 1L, false);
+        var cache = new DeterministicRecipePlanner.CompilationCache(scenario.graph(), Map.of(),
+                PlanningPreferences.empty(), 10_000);
+        assertNull(cache.prepare(scenario.stock(), scenario.roots(), Set.of(), 19, 10_000, () -> {}));
+        assertNotNull(cache.prepare(scenario.stock(), scenario.roots(), Set.of(), 20, 10_000, () -> {}).plan());
+        assertEquals(1, cache.compilationCount());
+    }
+
+    @Test
     void anyChainAggregatesFiftyMillionWithoutQuantityExpansion() {
         Map<MaterialRef, List<RecipeNode>> recipes = new LinkedHashMap<>();
         MaterialRef previous = material("raw");
@@ -132,7 +333,8 @@ class PlannerCapacityTest extends BootstrapTest {
                 any(material("consumer_0"), 1L), any(material("consumer_1"), 1L), any(choice, 1L))));
         Scenario scenario = new Scenario(new ImmutableRecipeGraph(recipes),
                 Map.of(material("raw"), 2L, choice, 1L), List.of(any(target, 1L)));
-        assertNull(aggregate(scenario, 4));
+        // 多生产者边界已有足量库存时，整段现在可以直接聚合。
+        assertNotNull(aggregate(scenario, 4));
         var result = plan(scenario, 4);
         assertEquals(1, result.steps().stream().filter(step -> step.recipeId().equals(id("shared"))).count());
         assertEquals(4, result.steps().size());

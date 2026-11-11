@@ -4,7 +4,19 @@ package com.huanghuang.rsintegration.config;
 public record CraftingPlanningConfig(int workers, int queueCapacity,
                                      int maxSearchStates, int maxMemoizedFailures,
                                      int maxDemandTreeNodes, int pureTimeoutMs,
-                                     int typedPreviewTimeoutMs) {
+                                     int typedPreviewTimeoutMs, int sliceMs, int backgroundTimeoutMs) {
+    /** Minecraft 的 20 TPS 周期；限制每个计算通道在此周期内的活跃时间。 */
+    public static final int PERIOD_MS = 1000 / 20;
+    public static final int DEFAULT_SLICE_MS = 5;
+    public static final int DEFAULT_BACKGROUND_TIMEOUT_MS = 0;
+
+    public CraftingPlanningConfig(int workers, int queueCapacity, int maxSearchStates,
+                                  int maxMemoizedFailures, int maxDemandTreeNodes,
+                                  int pureTimeoutMs, int typedPreviewTimeoutMs) {
+        this(workers, queueCapacity, maxSearchStates, maxMemoizedFailures,
+                maxDemandTreeNodes, pureTimeoutMs, typedPreviewTimeoutMs,
+                DEFAULT_SLICE_MS, DEFAULT_BACKGROUND_TIMEOUT_MS);
+    }
     public static final int MIN_WORKERS = 1;
     public static final int MAX_WORKERS = 8;
     public static final int DEFAULT_WORKERS = Math.max(MIN_WORKERS, Math.min(4,
@@ -29,6 +41,8 @@ public record CraftingPlanningConfig(int workers, int queueCapacity,
     public static final int DEFAULT_TYPED_PREVIEW_TIMEOUT_MS = 500;
 
     public CraftingPlanningConfig {
+        requireRange("sliceMs", sliceMs, 1, PERIOD_MS);
+        requireRange("backgroundTimeoutMs", backgroundTimeoutMs, 0, Integer.MAX_VALUE);
         requireRange("workers", workers, MIN_WORKERS, MAX_WORKERS);
         requireRange("queueCapacity", queueCapacity, MIN_QUEUE_CAPACITY, MAX_QUEUE_CAPACITY);
         requireRange("maxSearchStates", maxSearchStates, MIN_SEARCH_STATES, MAX_SEARCH_STATES);
@@ -58,7 +72,9 @@ public record CraftingPlanningConfig(int workers, int queueCapacity,
                 RSIntegrationConfig.CRAFTING_PURE_SEARCH_MAX_MEMOIZED_FAILURES.get(),
                 RSIntegrationConfig.CRAFTING_PURE_DEMAND_MAX_NODES.get(),
                 RSIntegrationConfig.CRAFTING_PURE_PLANNING_TIMEOUT_MS.get(),
-                RSIntegrationConfig.CRAFTING_TYPED_PREVIEW_TIMEOUT_MS.get());
+                RSIntegrationConfig.CRAFTING_TYPED_PREVIEW_TIMEOUT_MS.get(),
+                RSIntegrationConfig.CRAFTING_PLANNING_SLICE_MS.get(),
+                RSIntegrationConfig.CRAFTING_PLANNING_BACKGROUND_TIMEOUT_MS.get());
     }
 
     private static void requireRange(String name, int value, int minimum, int maximum) {

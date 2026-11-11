@@ -4,6 +4,7 @@ import com.carrot123.until_eternity.recipe.EndCraftingIngredient;
 import com.carrot123.until_eternity.recipe.EndCraftingRecipe;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.nbt.CompoundTag;
@@ -52,14 +53,12 @@ public final class EndCraftingRecipeHandler implements ModRecipeHandler {
 
     @Override
     public boolean supportsBackgroundPlanning(Recipe<?> recipe) {
-        EndCraftingRecipe endRecipe = (EndCraftingRecipe) recipe;
-        // 多选项 NBT 条件需要保留原模组的子集匹配，不能在图里降为精确匹配。
-        for (EndCraftingIngredient slot : endRecipe.endIngredients()) {
-            if (slot.requiredNbt() != null && slot.ingredient().getItems().length > 1) {
-                return false;
-            }
-        }
-        return ModRecipeHandler.super.supportsBackgroundPlanning(recipe);
+        if (!(recipe instanceof EndCraftingRecipe)) return false;
+        List<IngredientSpec> specs = getIngredients(recipe);
+        // 多选项的子集匹配已可按值冻结；逐槽确认语义完整，避免整条链无谓回退。
+        return specs != null && specs.stream().anyMatch(spec -> !spec.isEmpty())
+                && specs.stream().filter(spec -> !spec.isEmpty()).allMatch(
+                        spec -> ImmutableRecipeGraphProjector.projectIngredient(spec) != null);
     }
 
     private static Ingredient ingredientFor(EndCraftingIngredient slot) {

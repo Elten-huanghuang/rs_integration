@@ -172,6 +172,11 @@ public final class RSIntegrationConfig {
     public static final ForgeConfigSpec CLIENT_SPEC;
     private static ModConfig clientModConfig;
 
+    public static ForgeConfigSpec.BooleanValue PLANNING_HUD_VISIBLE;
+    public static ForgeConfigSpec.DoubleValue PLANNING_HUD_HORIZONTAL_POSITION;
+    public static ForgeConfigSpec.DoubleValue PLANNING_HUD_VERTICAL_POSITION;
+    private static ForgeConfigSpec.IntValue PLANNING_HUD_LAYOUT_VERSION;
+
     public static ForgeConfigSpec.BooleanValue TOOLTIP_CUSTOM_BACKGROUNDS;
     public static ForgeConfigSpec.BooleanValue TOOLTIP_OBSCURE_COMPAT;
     public static ForgeConfigSpec.BooleanValue TOOLTIP_MODERN_UI_COMPAT;
@@ -392,6 +397,8 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue CRAFTING_MAX_STEPS;
     public static ForgeConfigSpec.IntValue CRAFTING_MAX_GRAPH_NODES;
     public static ForgeConfigSpec.IntValue CRAFTING_PLANNING_WORKERS;
+    public static ForgeConfigSpec.IntValue CRAFTING_PLANNING_SLICE_MS;
+    public static ForgeConfigSpec.IntValue CRAFTING_PLANNING_BACKGROUND_TIMEOUT_MS;
     public static ForgeConfigSpec.IntValue CRAFTING_PLANNING_QUEUE_CAPACITY;
     public static ForgeConfigSpec.IntValue CRAFTING_PURE_SEARCH_MAX_STATES;
     public static ForgeConfigSpec.IntValue CRAFTING_PURE_SEARCH_MAX_MEMOIZED_FAILURES;
@@ -417,6 +424,8 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue CRAFTING_MAX_ENSURE_CALLS;
     public static ForgeConfigSpec.IntValue CRAFTING_VANILLA_OPERATIONS_PER_TICK;
     public static ForgeConfigSpec.IntValue CRAFTING_EXECUTION_WINDOW;
+    public static final int DEFAULT_PASSIVE_OBSERVATION_TICKS = 5;
+    public static ForgeConfigSpec.IntValue CRAFTING_PASSIVE_OBSERVATION_TICKS;
     public static ForgeConfigSpec.IntValue CRAFTING_GLOBAL_VANILLA_OPERATIONS_PER_TICK;
     public static ForgeConfigSpec.IntValue CRAFTING_STABLE_BATCH_RETRY_SECONDS;
     public static ForgeConfigSpec.IntValue CRAFTING_SERVER_TICK_BUDGET_MS;
@@ -1232,6 +1241,16 @@ public final class RSIntegrationConfig {
                         DEFAULT_CRAFTING_MAX_GRAPH_NODES,
                         MIN_CRAFTING_MAX_GRAPH_NODES,
                         MAX_CRAFTING_MAX_GRAPH_NODES);
+        CRAFTING_PLANNING_SLICE_MS = s
+                .comment("后台规划每个计算通道每 50ms 的协作时间片（毫秒）；检查点暂停并保留搜索现场。",
+                        "Cooperative planning time per worker per 50ms; paused jobs retain their search state.")
+                .defineInRange("craftingPlanningSliceMs", CraftingPlanningConfig.DEFAULT_SLICE_MS,
+                        1, CraftingPlanningConfig.PERIOD_MS);
+        CRAFTING_PLANNING_BACKGROUND_TIMEOUT_MS = s
+                .comment("后台规划总超时（毫秒，包含时间片等待）；0 表示持续计算到完成、取消或搜索状态上限。",
+                        "Background planning total timeout in milliseconds; 0 disables the wall-clock timeout.")
+                .defineInRange("craftingPlanningBackgroundTimeoutMs",
+                        CraftingPlanningConfig.DEFAULT_BACKGROUND_TIMEOUT_MS, 0, Integer.MAX_VALUE);
         CRAFTING_PLANNING_WORKERS = s
                 .comment("后台规划线程数",
                         "只执行不可变预览规划，世界、方块实体和 RS 修改仍在服务端线程；配置重载后生效。")
@@ -1267,8 +1286,8 @@ public final class RSIntegrationConfig {
                         CraftingPlanningConfig.MIN_DEMAND_TREE_NODES,
                         CraftingPlanningConfig.MAX_DEMAND_TREE_NODES);
         CRAFTING_PURE_PLANNING_TIMEOUT_MS = s
-                .comment("纯规划搜索预算（毫秒）",
-                        "普通搜索从库存准备完成后开始计时，不含排队和路由时间；最大可合成探测共享搜索预算，超时返回未知。")
+                .comment("非分片纯规划调用的搜索预算（毫秒）；超时返回未知。",
+                        "后台预览采用 craftingPlanningSliceMs 续算和 craftingPlanningBackgroundTimeoutMs 总超时。")
                 .defineInRange("craftingPurePlanningTimeoutMs",
                         DEFAULT_CRAFTING_PURE_PLANNING_TIMEOUT_MS,
                         CraftingPlanningConfig.MIN_PURE_TIMEOUT_MS,
@@ -1343,21 +1362,24 @@ public final class RSIntegrationConfig {
                         CraftingPreviewPolicy.MAX_RATE_LIMIT_MS);
         CRAFTING_PLAN_CACHE_TTL_MS = s
                 .comment("合成预览缓存有效期（毫秒）",
-                        "复用预览计划的最长时间；使用前只重新校验该计划实际需要的材料。")
+                        "相同预览请求去重的有效期；已发布任务的执行凭据另受缓存数量和节点预算约束。",
+                        "确认已有计划仍检查其实际材料及网络、机器状态。")
                 .defineInRange("craftingPlanCacheTtlMs",
                         DEFAULT_CRAFTING_PLAN_CACHE_TTL_MS,
                         CraftingPreviewPolicy.MIN_CACHE_TTL_MS,
                         CraftingPreviewPolicy.MAX_CACHE_TTL_MS);
         CRAFTING_PLAN_CACHE_MAX_ENTRIES = s
                 .comment("合成预览缓存数量上限",
-                        "内存中最多保留的可复用预览计划数量。")
+                        "分别限制可复用预览、已发布任务执行凭据及库存订阅的保留数量；",
+                        "当前打开的库存订阅不因其他任务完成而淘汰。")
                 .defineInRange("craftingPlanCacheMaxEntries",
                         DEFAULT_CRAFTING_PLAN_CACHE_MAX_ENTRIES,
                         CraftingPreviewPolicy.MIN_CACHE_MAX_ENTRIES,
                         CraftingPreviewPolicy.MAX_CACHE_MAX_ENTRIES);
         CRAFTING_PLAN_CACHE_MAX_NODES = s
                 .comment("合成预览缓存节点预算",
-                        "按计划图节点数限制缓存内存；小计划可保留更多条目，大计划会优先淘汰旧条目。")
+                        "分别限制预览缓存和任务执行凭据的图节点数；库存订阅还计入材料行数。",
+                        "小计划可保留更多条目，大计划会优先淘汰旧条目。")
                 .defineInRange("craftingPlanCacheMaxNodes",
                         DEFAULT_CRAFTING_PLAN_CACHE_MAX_NODES,
                         MIN_CRAFTING_PLAN_CACHE_MAX_NODES,
@@ -1372,6 +1394,11 @@ public final class RSIntegrationConfig {
                         "限制单个计划的递归材料解析次数；与解析超时共同防止失控递归。")
                 .defineInRange("craftingMaxEnsureCalls",
                         DEFAULT_CRAFTING_MAX_ENSURE_CALLS, 1000, 100000);
+        CRAFTING_PASSIVE_OBSERVATION_TICKS = s
+                .comment("已核实为被动观测的机器在持续加工时，两次完整材料检查的最大间隔（tick）。",
+                        "机器剩余加工时间归零时立即检查完成；1 恢复逐 tick 完整检查。",
+                        "Audited passive machine validation interval; completion wakes immediately.")
+                .defineInRange("craftingPassiveObservationTicks", DEFAULT_PASSIVE_OBSERVATION_TICKS, 1, 20);
         CRAFTING_EXECUTION_WINDOW = s
                 .comment("每台机器单次投料的可选操作数上限。0 = 按机器原生容量、材料变体和数量范围决定。",
                         "订单材料按总量预留，此项不是订单上限；仅在需要额外限制某次投料工作量时设为正数。")
@@ -1540,6 +1567,18 @@ public final class RSIntegrationConfig {
         //  CLIENT
 
         ForgeConfigSpec.Builder cl = new ForgeConfigSpec.Builder();
+        cl.comment("计算任务提示；默认屏幕右侧居中，打开界面时隐藏。")
+                .push("planningHud");
+        PLANNING_HUD_LAYOUT_VERSION = cl.comment("位置配置迁移版本，由模组自动维护。")
+                .defineInRange("layoutVersion", 0, 0, Integer.MAX_VALUE);
+        PLANNING_HUD_VISIBLE = cl.comment("显示计算状态和打开计划的快捷键提示。")
+                .define("visible", true);
+        PLANNING_HUD_HORIZONTAL_POSITION = cl.comment("提示在可用区域内的水平位置：0 左侧，1 右侧。")
+                .defineInRange("horizontalPosition", 1.0, 0.0, 1.0);
+        PLANNING_HUD_VERTICAL_POSITION = cl.comment("提示在可用区域内的垂直位置：0 顶部，1 底部。",
+                        "默认右侧居中；可按其他 HUD 的位置调整。")
+                .defineInRange("verticalPosition", 0.5, 0.0, 1.0);
+        cl.pop();
         cl.comment("物品提示框",
                         "仅影响本地客户端，重新加载配置后生效。兼容开关仅作用于启用了 RSI 自定义底板的物品。")
                 .push("tooltips");
@@ -1791,6 +1830,17 @@ public final class RSIntegrationConfig {
 
     public static void saveClientConfig() {
         if (clientModConfig != null) clientModConfig.save();
+    }
+
+    /** 只迁移旧的默认左上角；自定义位置和迁移后重新选择的左上角均保留。 */
+    public static void migratePlanningHudLayout(ModConfig config) {
+        if (config.getSpec() != CLIENT_SPEC || PLANNING_HUD_LAYOUT_VERSION.get() >= 1) return;
+        if (PLANNING_HUD_HORIZONTAL_POSITION.get() == 0.0 && PLANNING_HUD_VERTICAL_POSITION.get() == 0.0) {
+            PLANNING_HUD_HORIZONTAL_POSITION.set(1.0);
+            PLANNING_HUD_VERTICAL_POSITION.set(0.5);
+        }
+        PLANNING_HUD_LAYOUT_VERSION.set(1);
+        config.save();
     }
 
     /** 构造阶段配置尚未加载；开发环境直接取值会抛异常，正式环境则返回默认值。 */

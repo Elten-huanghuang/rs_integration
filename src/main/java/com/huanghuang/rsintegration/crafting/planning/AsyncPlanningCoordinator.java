@@ -5,15 +5,12 @@ import com.huanghuang.rsintegration.config.CraftingPlanningConfig;
 import java.util.concurrent.CompletionException;
 
 import java.util.UUID;
-import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -24,8 +21,8 @@ import java.util.function.Predicate;
 /** Owns cancellation and the background-to-server-thread handoff for preview planning. */
 public final class AsyncPlanningCoordinator implements AutoCloseable {
     private static final AtomicInteger THREAD_IDS = new AtomicInteger();
-    private final ThreadPoolExecutor workers;
-    private final ConcurrentHashMap<UUID, Request<?>> active = new ConcurrentHashMap<>();
+    private final CooperativePlanningExecutor workers;
+    private final ConcurrentHashMap<PlanningRequestKey, Request<?>> active = new ConcurrentHashMap<>();
 
     public AsyncPlanningCoordinator(int parallelism) {
         this(parallelism, runnable -> {
@@ -48,10 +45,22 @@ public final class AsyncPlanningCoordinator implements AutoCloseable {
     }
 
     AsyncPlanningCoordinator(int parallelism, int queueCapacity, ThreadFactory threadFactory) {
-        int workerCount = Math.max(1, parallelism);
-        workers = new ThreadPoolExecutor(workerCount, workerCount, 0L, TimeUnit.MILLISECONDS,
-                new ArrayBlockingQueue<>(Math.max(1, queueCapacity)), threadFactory,
-                new ThreadPoolExecutor.AbortPolicy());
+        this(parallelism, queueCapacity, CraftingPlanningConfig.DEFAULT_SLICE_MS,
+                CraftingPlanningConfig.DEFAULT_BACKGROUND_TIMEOUT_MS, threadFactory);
+    }
+
+    public AsyncPlanningCoordinator(int parallelism, int queueCapacity, int sliceMs, int timeoutMs) {
+        this(parallelism, queueCapacity, sliceMs, timeoutMs, runnable -> {
+            Thread thread = new Thread(runnable, "rsi-planner-" + THREAD_IDS.incrementAndGet());
+            thread.setDaemon(true);
+            return thread;
+        });
+    }
+
+    private AsyncPlanningCoordinator(int parallelism, int queueCapacity, int sliceMs,
+                                     int timeoutMs, ThreadFactory threadFactory) {
+        workers = new CooperativePlanningExecutor(Math.max(1, parallelism), Math.max(1, queueCapacity),
+                sliceMs, CraftingPlanningConfig.PERIOD_MS, timeoutMs, threadFactory);
     }
 
     /**
@@ -96,8 +105,9 @@ public final class AsyncPlanningCoordinator implements AutoCloseable {
                            Executor serverExecutor,
                            Predicate<PlanningSnapshot> revalidator,
                            BiConsumer<PlanningSnapshot, T> commit, Consumer<Throwable> rollback) {
+        PlanningRequestKey requestKey = requestKey(snapshot.playerId(), snapshot.requestGeneration());
         if (sharedKey != null) {
-            Request<?> existing = active.get(snapshot.playerId());
+            Request<?> existing = active.get(requestKey);
             if (existing != null && sharedKey.equals(existing.sharedKey())) {
                 @SuppressWarnings("unchecked") Request<T> same = (Request<T>) existing;
                 same.replaceHandlers(snapshot, revalidator, commit, rollback);
@@ -106,16 +116,16 @@ public final class AsyncPlanningCoordinator implements AutoCloseable {
         }
         Request<T> request = new Request<>(sharedKey, snapshot, serverExecutor, rollback, workers,
                 revalidator, commit);
-        Request<?> previous = active.put(snapshot.playerId(), request);
+        Request<?> previous = active.put(requestKey, request);
         if (previous != null) previous.cancel();
 
         try {
             Future<?> task = workers.submit(() -> execute(request, computation));
             request.attach(task);
-            PerformanceMonitor.recordPlanningSubmitted(workers.getActiveCount(), workers.getQueue().size());
+            PerformanceMonitor.recordPlanningSubmitted(workers.getActiveCount(), workers.queuedCount());
         } catch (RejectedExecutionException rejected) {
-            active.remove(snapshot.playerId(), request);
-            PerformanceMonitor.recordPlanningRejected(workers.getActiveCount(), workers.getQueue().size());
+            active.remove(requestKey, request);
+            PerformanceMonitor.recordPlanningRejected(workers.getActiveCount(), workers.queuedCount());
             request.reject(rejected);
         }
     }
@@ -132,11 +142,10 @@ public final class AsyncPlanningCoordinator implements AutoCloseable {
         } catch (Throwable thrown) {
             failure = thrown;
         } finally {
-            int queued = workers.getQueue().size();
-            int activeAfterCompletion = Math.max(0, workers.getActiveCount() - (queued == 0 ? 1 : 0));
-            int queuedAfterCompletion = Math.max(0, queued - 1);
+            int queued = workers.queuedCount();
+            int activeAfterCompletion = Math.max(0, workers.getActiveCount() - 1);
             PerformanceMonitor.recordPlanningExecution(System.nanoTime() - started,
-                    activeAfterCompletion, queuedAfterCompletion);
+                    activeAfterCompletion, queued);
         }
 
         T completedResult = result;
@@ -144,7 +153,7 @@ public final class AsyncPlanningCoordinator implements AutoCloseable {
         long handoffStarted = System.nanoTime();
         request.serverExecutor.execute(() -> {
             PlanningSnapshot snapshot = request.callbackSnapshot;
-            if (!active.remove(request.snapshot.playerId(), request)) return;
+            if (!active.remove(requestKey(request.snapshot.playerId(), request.snapshot.requestGeneration()), request)) return;
             if (!request.finish()) return;
             PerformanceMonitor.recordPlanningLatency(PerformanceMonitor.PlanningLatencyPhase.HANDOFF_WAIT,
                     System.nanoTime() - handoffStarted);
@@ -168,8 +177,18 @@ public final class AsyncPlanningCoordinator implements AutoCloseable {
     }
 
     public void cancel(UUID playerId) {
-        Request<?> request = active.remove(playerId);
+        active.forEach((key, request) -> {
+            if (request.snapshot.playerId().equals(playerId) && active.remove(key, request)) request.cancel();
+        });
+    }
+
+    public void cancel(UUID playerId, long generation) {
+        Request<?> request = active.remove(requestKey(playerId, generation));
         if (request != null) request.cancel();
+    }
+
+    private PlanningRequestKey requestKey(UUID playerId, long generation) {
+        return new PlanningRequestKey(playerId, generation);
     }
 
     public void cancelAll() {
@@ -212,14 +231,14 @@ public final class AsyncPlanningCoordinator implements AutoCloseable {
         private volatile PlanningSnapshot callbackSnapshot;
         private final Executor serverExecutor;
         private volatile Consumer<Throwable> rollback;
-        private final ThreadPoolExecutor workers;
+        private final CooperativePlanningExecutor workers;
         private volatile Predicate<PlanningSnapshot> revalidator;
         private volatile BiConsumer<PlanningSnapshot, T> commit;
         private final AtomicReference<State> state = new AtomicReference<>(State.ACTIVE);
         private volatile Future<?> task;
 
         private Request(Object sharedKey, PlanningSnapshot snapshot, Executor serverExecutor,
-                        Consumer<Throwable> rollback, ThreadPoolExecutor workers,
+                        Consumer<Throwable> rollback, CooperativePlanningExecutor workers,
                         Predicate<PlanningSnapshot> revalidator,
                         BiConsumer<PlanningSnapshot, T> commit) {
             this.sharedKey = sharedKey;
@@ -252,7 +271,7 @@ public final class AsyncPlanningCoordinator implements AutoCloseable {
 
         private void cancel() {
             if (!state.compareAndSet(State.ACTIVE, State.CANCEL_REQUESTED)) return;
-            PerformanceMonitor.recordPlanningCancelled(workers.getActiveCount(), workers.getQueue().size());
+            PerformanceMonitor.recordPlanningCancelled(workers.getActiveCount(), workers.queuedCount());
             Future<?> current = task;
             if (current != null) cancelTask(current);
             serverExecutor.execute(() -> {
@@ -264,7 +283,7 @@ public final class AsyncPlanningCoordinator implements AutoCloseable {
         private void cancelTask(Future<?> current) {
             current.cancel(true);
             if (current instanceof Runnable queued) workers.remove(queued);
-            PerformanceMonitor.recordPlanningExecutorState(workers.getActiveCount(), workers.getQueue().size());
+            PerformanceMonitor.recordPlanningExecutorState(workers.getActiveCount(), workers.queuedCount());
         }
 
         private void reject(RejectedExecutionException failure) {

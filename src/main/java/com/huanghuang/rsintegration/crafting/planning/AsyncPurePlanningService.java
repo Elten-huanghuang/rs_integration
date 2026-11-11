@@ -134,6 +134,19 @@ public final class AsyncPurePlanningService {
                     ? computeInScope(snapshot, repeatCount, maxSteps, maxSearchStates,
                             maxMemoizedFailures, session, routingGraph,
                             routing.projectedAvailabilityFor(snapshot)) : null;
+            if (plan != null && !plan.feasible()) {
+                var uncovered = PurePlanningCoverage.unprojectedDependency(routingGraph,
+                        snapshot.recipeId(), routing.incompatibleOutputs(),
+                        snapshot.forcedRecipes(), snapshot.preferences());
+                if (uncovered != null) {
+                    // 纯图只证明其自身路线失败，不能把目录中未投影的生产者
+                    // 当成不存在。交给原类型解析器验证，避免发布假缺料预览。
+                    inspection = new PureDemandTreeInspector.Result(
+                            PureDemandTreeInspector.Status.UNPROJECTED_DEPENDENCY,
+                            inspection.visitedNodes(), uncovered, inspection.catalystRouteAvailable());
+                    plan = null;
+                }
+            }
             return new RoutedPlan(snapshot, routing, inspection, plan, forcedRecipesProjected);
         });
     }
@@ -275,7 +288,7 @@ public final class AsyncPurePlanningService {
     static long deadlineAfterMillis(long startedNanos, int timeoutMs) {
         long budgetNanos = Math.max(1L, timeoutMs) * 1_000_000L;
         long deadline = startedNanos + budgetNanos;
-        return deadline < startedNanos ? Long.MAX_VALUE : deadline;
+        return CooperativePlanningExecutor.deadline(deadline < startedNanos ? Long.MAX_VALUE : deadline);
     }
 
     /** Keeps a background result inseparable from the immutable state that produced it. */

@@ -166,9 +166,11 @@ public final class PureRecipePlanner {
         PersistentTaskQueue<Task> pending = PersistentTaskQueue.from(rootTasks);
         Status status;
         try {
-            DeterministicRecipePlanner.Plan aggregated = DeterministicRecipePlanner.tryPlan(
-                    graph, search.initialStock, normalizedRoots, activeRootOutputs, forcedRecipes,
-                    preferences, maxSteps, maxSearchStates, search::checkAggregationBudget, search.skippedSegments);
+            search.initialPreparation = search.compilationCache.prepare(search.initialStock,
+                    normalizedRoots, activeRootOutputs, maxSteps, maxSearchStates, search::checkAggregationBudget);
+            search.initialTasks = pending;
+            DeterministicRecipePlanner.Plan aggregated = search.initialPreparation == null
+                    ? null : search.initialPreparation.plan();
             if (aggregated != null) {
                 return new Result(Feasibility.FEASIBLE, aggregated.steps(), List.of(),
                         aggregated.remaining(), aggregateMagicCosts(graph, aggregated.steps()),
@@ -424,13 +426,19 @@ public final class PureRecipePlanner {
     }
 
     private sealed interface Task permits DemandTask, CompleteRecipeTask {}
-    private record DemandTask(IngredientRef ingredient, int consumer, int port) implements Task {
-        // 轨迹位置不影响可行性，失败缓存仍按原有搜索语义共享。
-        @Override public boolean equals(Object other) {
-            return other instanceof DemandTask task && ingredient.equals(task.ingredient);
+    private record DemandTask(IngredientRef ingredient, int consumer, int port,
+                              boolean supplyOnly, boolean allowAggregation) implements Task {
+        private DemandTask(IngredientRef ingredient, int consumer, int port) {
+            this(ingredient, consumer, port, false, true);
         }
 
-        @Override public int hashCode() { return ingredient.hashCode(); }
+        // 轨迹位置不影响可行性，失败缓存仍按原有搜索语义共享。
+        @Override public boolean equals(Object other) {
+            return other instanceof DemandTask task && supplyOnly == task.supplyOnly
+                    && ingredient.equals(task.ingredient);
+        }
+
+        @Override public int hashCode() { return 31 * ingredient.hashCode() + Boolean.hashCode(supplyOnly); }
     }
     private record CompleteRecipeTask(MaterialRef output, long outputCount, long consumeCount,
                                       ResourceLocation recipeId, long batches,
@@ -441,11 +449,12 @@ public final class PureRecipePlanner {
                     && outputCount == task.outputCount && consumeCount == task.consumeCount
                     && batches == task.batches && output.equals(task.output)
                     && recipeId.equals(task.recipeId)
-                    && resolvingMaterial.equals(task.resolvingMaterial);
+                    && resolvingMaterial.equals(task.resolvingMaterial)
+                    && Objects.equals(demand, task.demand);
         }
 
         @Override public int hashCode() {
-            return Objects.hash(output, outputCount, consumeCount, recipeId, batches, resolvingMaterial);
+            return Objects.hash(output, outputCount, consumeCount, recipeId, batches, resolvingMaterial, demand);
         }
     }
     private record CandidateLookup(MaterialRef material, NbtMatchMode mode) {}
@@ -467,7 +476,9 @@ public final class PureRecipePlanner {
         private final Map<MaterialRef, Long> stock = new HashMap<>();
         // 初始库存对一次搜索固定；失败键只需记录变化，零表示已耗尽的初始材料。
         private final Map<MaterialRef, Long> stockChanges = new HashMap<>();
-        private final Set<MaterialRef> skippedSegments = new HashSet<>();
+        private final DeterministicRecipePlanner.CompilationCache compilationCache;
+        private DeterministicRecipePlanner.Prepared initialPreparation;
+        private PersistentTaskQueue<Task> initialTasks;
         private int aggregationWork;
         private final int maxSteps;
         private final int maxSearchStates;
@@ -542,6 +553,8 @@ public final class PureRecipePlanner {
             this.forcedRecipes = Map.copyOf(forcedRecipes);
             this.preferences = preferences == null
                     ? PlanningPreferences.empty() : preferences;
+            this.compilationCache = new DeterministicRecipePlanner.CompilationCache(
+                    graph, this.forcedRecipes, this.preferences, this.maxSearchStates);
             this.variantPreferences = MaterialVariantPreferences.snapshot();
 
         }
@@ -624,8 +637,10 @@ public final class PureRecipePlanner {
             private PersistentTaskQueue<Task> use(DemandTask demand,
                                                   Map<MaterialRef, Long> materials,
                                                   Runnable restore) {
-                flow.add(new MaterialUse(demand.consumer(), demand.port(),
-                        demand.ingredient(), materials));
+                if (!demand.supplyOnly()) {
+                    flow.add(new MaterialUse(demand.consumer(), demand.port(),
+                            demand.ingredient(), materials));
+                }
                 undo = restore;
                 return rest;
             }
@@ -639,7 +654,7 @@ public final class PureRecipePlanner {
                     PersistentTaskQueue<Task> aggregated = aggregateSegment();
                     if (aggregated != null) return aggregated;
                 }
-                boolean catalyst = ingredient.role() == DemandRole.CATALYST;
+                boolean catalyst = ingredient.role() == DemandRole.CATALYST || demand.supplyOnly();
                 if (phase == DemandPhase.MATCHING_STOCK) {
                     phase = DemandPhase.SINGLE_STOCK;
                     stockAlternatives = inventoryFirst(ingredient.alternatives());
@@ -756,9 +771,9 @@ public final class PureRecipePlanner {
             /** 复杂边界由原搜索选择；边界内的连续确定性需求仍共享一次聚合。 */
             private PersistentTaskQueue<Task> aggregateSegment() {
                 if (!(task instanceof DemandTask first)
+                        || !first.allowAggregation() || first.supplyOnly()
                         || aggregationWork >= maxSearchStates
                         || !DeterministicRecipePlanner.supported(first.ingredient())
-                        || skippedSegments.contains(first.ingredient().alternatives().get(0))
                         || stockAcross(first.ingredient()) >= first.ingredient().count()) return null;
                 int remainingSteps = maxSteps - steps.size() - pendingRecipeCount;
                 int remainingStates = maxSearchStates - expandedStates;
@@ -766,35 +781,20 @@ public final class PureRecipePlanner {
                 List<DemandTask> demands = new ArrayList<>();
                 PersistentTaskQueue<Task> continuation = pending;
                 while (!continuation.isEmpty() && continuation.head() instanceof DemandTask demand
-                        && DeterministicRecipePlanner.supported(demand.ingredient())
-                        && !skippedSegments.contains(demand.ingredient().alternatives().get(0))) {
+                        && demand.allowAggregation() && !demand.supplyOnly()
+                        && DeterministicRecipePlanner.supported(demand.ingredient())) {
                     checkBudget();
                     demands.add(demand);
                     continuation = continuation.tail();
                 }
-                DeterministicRecipePlanner.Plan segment = DeterministicRecipePlanner.tryPlan(
-                        graph, stock, demands.stream().map(DemandTask::ingredient).toList(), resolving,
-                        forcedRecipes, preferences, remainingSteps, remainingStates,
-                        Search.this::checkAggregationBudget, skippedSegments);
-                // 此次探测才发现后续根依赖复杂配方时，保留它之前的简单片段。
-                // skippedSegments 仅是加速边界，后续根仍由原搜索处理。
-                if (segment == null && !skippedSegments.contains(first.ingredient().alternatives().get(0))) {
-                    int prefix = 0;
-                    continuation = pending;
-                    while (prefix < demands.size()
-                            && !skippedSegments.contains(demands.get(prefix).ingredient().alternatives().get(0))) {
-                        prefix++;
-                        continuation = continuation.tail();
-                    }
-                    if (prefix > 0 && prefix < demands.size()) {
-                        demands = new ArrayList<>(demands.subList(0, prefix));
-                        segment = DeterministicRecipePlanner.tryPlan(graph, stock,
-                                demands.stream().map(DemandTask::ingredient).toList(), resolving,
-                                forcedRecipes, preferences, remainingSteps, maxSearchStates - expandedStates,
-                                Search.this::checkAggregationBudget, skippedSegments);
-                    }
-                }
-                if (segment == null) return null;
+                DeterministicRecipePlanner.Prepared prepared = pending == initialTasks ? initialPreparation : null;
+                initialPreparation = null;
+                if (prepared == null) prepared = compilationCache.prepare(stock,
+                        demands.stream().map(DemandTask::ingredient).toList(), resolving,
+                        remainingSteps, remainingStates, Search.this::checkAggregationBudget);
+                if (prepared == null) return null;
+                DeterministicRecipePlanner.Plan segment = prepared.plan();
+                if (segment == null) return scheduleSegment(prepared, demands, continuation);
                 expandedStates += segment.expandedStates();
                 Map<MaterialRef, Long> previous = new HashMap<>();
                 Set<MaterialRef> changed = new HashSet<>(stock.keySet());
@@ -828,6 +828,43 @@ public final class PureRecipePlanner {
                 return continuation;
             }
 
+            /**
+             * 普通节点按汇总批数展开一次；边界先补足总需求，再由实际端口扣料。
+             * 整段失败仍回到本帧的原搜索，各边界候选共享现有库存撤销与材料流回溯。
+             */
+            private PersistentTaskQueue<Task> scheduleSegment(DeterministicRecipePlanner.Prepared prepared,
+                    List<DemandTask> demands, PersistentTaskQueue<Task> continuation) {
+                List<Task> scheduled = new ArrayList<>();
+                Set<MaterialRef> produced = new HashSet<>();
+                for (DeterministicRecipePlanner.SegmentStep entry : prepared.schedule()) {
+                    checkBudget();
+                    if (entry instanceof DeterministicRecipePlanner.Boundary boundary) {
+                        scheduled.add(new DemandTask(boundary.ingredient(), -1, -1, true, false));
+                    } else if (entry instanceof DeterministicRecipePlanner.RecipeBatch batch) {
+                        RecipeNode recipe = batch.recipe();
+                        int node = nextFlowNode++;
+                        for (int port = 0; port < batch.inputs().size(); port++) {
+                            IngredientRef input = batch.inputs().get(port);
+                            scheduled.add(new DemandTask(input.withCount(
+                                    Math.multiplyExact(input.count(), batch.batches())), node, port, false, false));
+                        }
+                        scheduled.add(new CompleteRecipeTask(recipe.output(), recipe.outputCount(), 0L,
+                                recipe.recipeId(), batch.batches(), recipe.output(), node, recipe, null));
+                        produced.add(recipe.output());
+                    }
+                }
+                for (DemandTask demand : demands) {
+                    scheduled.add(new DemandTask(demand.ingredient(), demand.consumer(), demand.port(), false, false));
+                }
+                expandedStates += prepared.expandedStates();
+                resolving.addAll(produced);
+                undo = () -> resolving.removeAll(produced);
+                for (int index = scheduled.size() - 1; index >= 0; index--) {
+                    continuation = continuation.prepend(scheduled.get(index));
+                }
+                return continuation;
+            }
+
             private PersistentTaskQueue<Task> complete(CompleteRecipeTask completed) {
                 if (completionStarted) return null;
                 completionStarted = true;
@@ -856,7 +893,8 @@ public final class PureRecipePlanner {
                 if (completed.consumeCount() > 0L) {
                     flow.add(new MaterialUse(completed.demand().consumer(), completed.demand().port(),
                             completed.demand().ingredient(), Map.of(completed.output(), completed.consumeCount())));
-                } else if (completed.demand().ingredient().role() == DemandRole.CATALYST) {
+                } else if (completed.demand() != null && (completed.demand().supplyOnly()
+                        || completed.demand().ingredient().role() == DemandRole.CATALYST)) {
                     return rest.prepend(completed.demand());
                 }
                 return rest;
@@ -1024,7 +1062,8 @@ public final class PureRecipePlanner {
         private void indexTask(Task task, int sign) {
             if (task instanceof CompleteRecipeTask) {
                 pendingRecipeCount += sign;
-            } else if (task instanceof DemandTask demand && demand.ingredient().alternatives().size() == 1) {
+            } else if (task instanceof DemandTask demand && !demand.supplyOnly()
+                    && demand.ingredient().alternatives().size() == 1) {
                 MaterialRef material = demand.ingredient().alternatives().get(0);
                 // 极大需求相加后再回退仍须精确，饱和加法在这里不可逆。
                 BigInteger delta = BigInteger.valueOf(demand.ingredient().count());

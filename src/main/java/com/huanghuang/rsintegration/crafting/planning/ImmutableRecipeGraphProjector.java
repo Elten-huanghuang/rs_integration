@@ -31,7 +31,9 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import java.util.ArrayDeque;
 import java.util.function.Supplier;
+import java.util.function.Function;
 import net.minecraftforge.common.crafting.PartialNBTIngredient;
+import net.minecraftforge.common.crafting.CompoundIngredient;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -399,14 +401,34 @@ public final class ImmutableRecipeGraphProjector {
 
     private static ImmutableRecipeGraph restrictToDependenciesUncached(
             ImmutableRecipeGraph graph, ResourceLocation targetRecipeId) {
+        return restrictToDependenciesUncached(graph, targetRecipeId, null);
+    }
+
+    /**
+     * 在主线程按需采集当前输入，再沿这些输入寻找生产者。新增的催化剂及其依赖
+     * 必须从完整目录查找，不能在已经裁剪过的图上只替换输入。
+     * 回调仅接收相关配方，每个配方调用一次；结果不会进入共享目录缓存。
+     */
+    public static ImmutableRecipeGraph captureContextualDependencies(
+            ImmutableRecipeGraph graph, ResourceLocation targetRecipeId,
+            Function<RecipeNode, List<IngredientRef>> captureInputs) {
+        PlanningThreadContext.requireServerThread("contextual recipe dependencies");
+        return PlanningLookupCache.run(() -> restrictToDependenciesUncached(
+                graph, targetRecipeId, captureInputs));
+    }
+
+    private static ImmutableRecipeGraph restrictToDependenciesUncached(
+            ImmutableRecipeGraph graph, ResourceLocation targetRecipeId,
+            @Nullable Function<RecipeNode, List<IngredientRef>> captureInputs) {
         RecipeNode target = graph.recipesById().get(targetRecipeId);
         if (target == null) return graph;
 
+        Map<ResourceLocation, List<IngredientRef>> replacements = new HashMap<>();
         Set<ResourceLookup> neededResources = new LinkedHashSet<>();
         Set<ResourceLocation> visitedRecipes = new LinkedHashSet<>();
         ArrayDeque<ResourceLookup> pendingResources = new ArrayDeque<>();
         visitedRecipes.add(target.recipeId());
-        for (IngredientRef input : target.inputs()) {
+        for (IngredientRef input : captureInputs(target, captureInputs, replacements)) {
             for (MaterialRef alternative : input.alternatives()) {
                 ResourceLookup key = ResourceLookup.of(alternative);
                 if (neededResources.add(key)) pendingResources.addLast(key);
@@ -421,7 +443,7 @@ public final class ImmutableRecipeGraphProjector {
                 if (producer.output().kind() != resource.kind()
                         || !producer.output().resourceId().equals(resource.id())
                         || !visitedRecipes.add(producer.recipeId())) continue;
-                for (IngredientRef input : producer.inputs()) {
+                for (IngredientRef input : captureInputs(producer, captureInputs, replacements)) {
                     for (MaterialRef alternative : input.alternatives()) {
                         ResourceLookup key = ResourceLookup.of(alternative);
                         if (neededResources.add(key)) {
@@ -432,7 +454,7 @@ public final class ImmutableRecipeGraphProjector {
             }
         }
 
-        if (visitedRecipes.size() == graph.recipesById().size()) return graph;
+        if (visitedRecipes.size() == graph.recipesById().size() && replacements.isEmpty()) return graph;
 
         // 只检查命中配方的输出桶；同 ID 的 NBT/动态变体也必须完整保留。
         Set<MaterialRef> selectedOutputs = new LinkedHashSet<>();
@@ -441,7 +463,7 @@ public final class ImmutableRecipeGraphProjector {
             PlanningThreadContext.throwIfCancelled();
             selectedOutputs.addAll(PlanningLookupCache.recipeOutputs(graph, recipeId));
             RecipeNode canonical = graph.recipesById().get(recipeId);
-            if (canonical != null) selectedById.put(recipeId, canonical);
+            if (canonical != null) selectedById.put(recipeId, replaceInputs(canonical, replacements));
         }
         Map<MaterialRef, List<RecipeNode>> projected = new LinkedHashMap<>();
         for (MaterialRef output : selectedOutputs) {
@@ -449,13 +471,32 @@ public final class ImmutableRecipeGraphProjector {
             List<RecipeNode> selected = new ArrayList<>();
             for (RecipeNode recipe : graph.recipesByOutput().getOrDefault(output, List.of())) {
                 if (visitedRecipes.contains(recipe.recipeId())) {
-                    selected.add(recipe);
-                    selectedById.putIfAbsent(recipe.recipeId(), recipe);
+                    RecipeNode contextual = replaceInputs(recipe, replacements);
+                    selected.add(contextual);
+                    selectedById.putIfAbsent(recipe.recipeId(), contextual);
                 }
             }
             if (!selected.isEmpty()) projected.put(output, selected);
         }
         return new ImmutableRecipeGraph(projected, selectedById);
+    }
+
+    private static List<IngredientRef> captureInputs(
+            RecipeNode recipe, @Nullable Function<RecipeNode, List<IngredientRef>> capture,
+            Map<ResourceLocation, List<IngredientRef>> replacements) {
+        List<IngredientRef> inputs = capture == null ? null : capture.apply(recipe);
+        if (inputs == null || inputs.equals(recipe.inputs())) return recipe.inputs();
+        inputs = List.copyOf(inputs);
+        replacements.put(recipe.recipeId(), inputs);
+        return inputs;
+    }
+
+    private static RecipeNode replaceInputs(
+            RecipeNode recipe, Map<ResourceLocation, List<IngredientRef>> replacements) {
+        List<IngredientRef> inputs = replacements.get(recipe.recipeId());
+        return inputs == null ? recipe : new RecipeNode(recipe.recipeId(), recipe.output(),
+                recipe.outputCount(), inputs, recipe.modTypeId(), recipe.recipeTypeId(),
+                recipe.magicCosts(), recipe.hasFluidOutputs(), recipe.dynamicIdentityTargetable());
     }
 
     private static ImmutableRecipeGraph bindAvailabilityInScope(
@@ -890,6 +931,24 @@ public final class ImmutableRecipeGraphProjector {
         if (role != DemandRole.CONSUMED
                 && role != DemandRole.CONTAINER_RETURNING
                 && role != DemandRole.CATALYST) return null;
+        if (ingredient instanceof CompoundIngredient compound) {
+            // OR 材料必须逐个冻结子条件。直接展开 getItems 会把部分 NBT 当成
+            // 精确匹配，或因某个普通物品分支而丢掉其他分支的 NBT 约束。
+            Set<MaterialRef> alternatives = new LinkedHashSet<>();
+            NbtMatchMode sharedMode = null;
+            for (Ingredient child : compound.getChildren()) {
+                IngredientRef projected = projectIngredient(child, count, role);
+                if (projected == null) return null;
+                if (sharedMode != null && sharedMode != projected.nbtMatchMode()) {
+                    // 当前 IngredientRef 的匹配规则作用于所有候选，混合规则不能降级。
+                    return null;
+                }
+                sharedMode = projected.nbtMatchMode();
+                alternatives.addAll(projected.alternatives());
+            }
+            return alternatives.isEmpty() ? null
+                    : new IngredientRef(List.copyOf(alternatives), count, sharedMode, role);
+        }
         if (SlashBladeRecipeHandler.isSlashBladeIngredient(ingredient)) {
             CompoundTag requirement = SlashBladePlanning.requirement(ingredient);
             if (requirement == null) return null;

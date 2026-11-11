@@ -271,9 +271,8 @@ public final class PureDemandTreeInspector {
         }
 
         private boolean budgetExpired() {
-            if (deadlineNanos == Long.MAX_VALUE) return false;
-            if ((visitedNodes & 15) != 0) return System.nanoTime() >= deadlineNanos;
             PlanningThreadContext.throwIfCancelled();
+            if (deadlineNanos == Long.MAX_VALUE) return false;
             return System.nanoTime() >= deadlineNanos;
         }
 

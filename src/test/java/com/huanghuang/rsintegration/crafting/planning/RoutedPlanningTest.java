@@ -317,7 +317,7 @@ class RoutedPlanningTest extends BootstrapTest {
     }
 
     @Test
-    void sharedRoutedPreviewUpdatesGenerationWithoutSecondHandoff() throws Exception {
+    void separateRoutedRequestsKeepTheirOwnHandoffs() throws Exception {
         var callbacks = new LinkedBlockingQueue<Runnable>();
         var snapshot = snapshot(1, false, false);
         var latest = new PlanningSnapshot(snapshot.playerId(), 2, snapshot.recipeRevision(), TARGET,
@@ -338,6 +338,10 @@ class RoutedPlanningTest extends BootstrapTest {
                     result::set, failure::set);
             handoff.run();
             assertNull(failure.get());
+            assertEquals(1, result.get().snapshot().requestGeneration());
+            Runnable secondHandoff = callbacks.poll(5, TimeUnit.SECONDS);
+            assertNotNull(secondHandoff);
+            secondHandoff.run();
             assertEquals(2, result.get().snapshot().requestGeneration());
             assertTrue(callbacks.isEmpty());
         }
@@ -389,6 +393,53 @@ class RoutedPlanningTest extends BootstrapTest {
             assertEquals(PureDemandTreeInspector.Status.UNPROJECTED_DEPENDENCY,
                     result.get().inspection().status());
         }
+    }
+
+    @Test
+    void pureShortageDoesNotHideTypedAlternativeBehindAnExistingProducer() {
+        var snapshot = mixedProducerSnapshot(false);
+        var routed = compute(snapshot, routing(snapshot, Set.of(IRON.itemId()), 512), 1);
+        assertEquals(PureDemandTreeInspector.Status.UNPROJECTED_DEPENDENCY, routed.inspection().status());
+        assertNull(routed.plan(), "普通配方缺料并不证明未投影的机器配方也缺料");
+        assertEquals(IRON, routed.inspection().unresolved());
+    }
+
+    @Test
+    void successfulPureRouteDoesNotFallBackForUnusedTypedAlternatives() {
+        var snapshot = mixedProducerSnapshot(true);
+        var routed = compute(snapshot, routing(snapshot, Set.of(IRON.itemId()), 512), 1);
+        assertTrue(routed.plan().feasible());
+    }
+
+    @Test
+    void unrelatedUnprojectedOutputDoesNotForceTypedPlanning() {
+        var snapshot = mixedProducerSnapshot(false);
+        var routed = compute(snapshot, routing(snapshot, Set.of(id("unrelated")), 512), 1);
+        assertNotNull(routed.plan());
+        assertFalse(routed.plan().feasible());
+    }
+
+    @Test
+    void explicitProjectedRecipeDoesNotFallBackToAnUnselectedProducer() {
+        var base = mixedProducerSnapshot(false);
+        var snapshot = new PlanningSnapshot(base.playerId(), 1, 1, TARGET, base.availableItems(),
+                Map.of(IRON.itemId(), id("smelting")), base.recipeGraph(), "network", "binding", false);
+        var routed = compute(snapshot, routing(snapshot, Set.of(IRON.itemId()), 512), 1);
+        assertNotNull(routed.plan());
+        assertFalse(routed.plan().feasible());
+    }
+
+    private static PlanningSnapshot mixedProducerSnapshot(boolean stocked) {
+        var ore = new MaterialRef(new ResourceLocation("minecraft:iron_ore"), "");
+        var other = new MaterialRef(new ResourceLocation("minecraft:echo_shard"), "");
+        var target = new RecipeNode(TARGET, RESULT, 1, List.of(
+                new IngredientRef(List.of(other), 1), new IngredientRef(List.of(IRON), 2)));
+        var smelting = new RecipeNode(id("smelting"), IRON, 1, List.of(new IngredientRef(List.of(ore), 1)));
+        return new PlanningSnapshot(UUID.randomUUID(), 1, 1, TARGET,
+                stocked ? Map.of(new StackKey(Items.IRON_ORE, null), 2L,
+                        new StackKey(Items.ECHO_SHARD, null), 1L) : Map.of(), Map.of(),
+                new ImmutableRecipeGraph(Map.of(RESULT, List.of(target), IRON, List.of(smelting))),
+                "network", "binding", false);
     }
 
     private static AsyncPurePlanningService.RoutedPlan compute(PlanningSnapshot snapshot,

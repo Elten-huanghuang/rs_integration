@@ -20,7 +20,8 @@ public final class PlanningSession {
         this.startedNanos = startedNanos;
         long budget = Math.max(1L, timeoutMs) * 1_000_000L;
         long deadline = startedNanos + budget;
-        this.deadlineNanos = deadline < startedNanos ? Long.MAX_VALUE : deadline;
+        this.deadlineNanos = CooperativePlanningExecutor.deadline(
+                deadline < startedNanos ? Long.MAX_VALUE : deadline);
     }
 
     public long requestGeneration() { return requestGeneration; }
@@ -45,6 +46,7 @@ public final class PlanningSession {
     }
 
     public void checkCancelled() {
+        PlanningThreadContext.throwIfCancelled();
         if (cancelled()) throw new CancellationException("Planning session cancelled");
     }
 

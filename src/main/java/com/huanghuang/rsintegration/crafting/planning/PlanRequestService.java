@@ -3,7 +3,8 @@ package com.huanghuang.rsintegration.crafting.planning;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponseDraft;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import java.util.Objects;
+import com.huanghuang.rsintegration.config.CraftingPlanningConfig;
+import java.util.concurrent.atomic.AtomicLong;
 
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -13,7 +14,9 @@ import java.util.function.Predicate;
 
 /** Owns preview request generations, cancellation and background pure-plan dispatch. */
 public final class PlanRequestService implements AutoCloseable {
-    private final ConcurrentHashMap<UUID, Long> generations = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<PlanningRequestKey, Boolean> requests = new ConcurrentHashMap<>();
+    private final AtomicLong nextGeneration = new AtomicLong();
+    private final int capacity;
     private final AsyncPlanningCoordinator coordinator;
     private final AsyncPurePlanningService purePlanning;
     private final AsyncPlanResponseService responsePlanning;
@@ -48,7 +51,14 @@ public final class PlanRequestService implements AutoCloseable {
     public PlanRequestService(int parallelism, int queueCapacity,
                               int maxSearchStates, int maxMemoizedFailures,
                               int pureTimeoutMs) {
-        coordinator = new AsyncPlanningCoordinator(parallelism, queueCapacity);
+        this(parallelism, queueCapacity, maxSearchStates, maxMemoizedFailures, pureTimeoutMs,
+                CraftingPlanningConfig.DEFAULT_SLICE_MS, CraftingPlanningConfig.DEFAULT_BACKGROUND_TIMEOUT_MS);
+    }
+
+    public PlanRequestService(int parallelism, int queueCapacity, int maxSearchStates,
+                              int maxMemoizedFailures, int pureTimeoutMs, int sliceMs, int timeoutMs) {
+        coordinator = new AsyncPlanningCoordinator(parallelism, queueCapacity, sliceMs, timeoutMs);
+        capacity = Math.addExact(Math.max(1, parallelism), Math.max(1, queueCapacity));
         purePlanning = new AsyncPurePlanningService(coordinator);
         responsePlanning = new AsyncPlanResponseService(coordinator);
         maxCraftablePlanning = new AsyncMaxCraftablePlanningService(coordinator);
@@ -57,12 +67,27 @@ public final class PlanRequestService implements AutoCloseable {
         this.pureTimeoutMs = Math.max(1, pureTimeoutMs);
     }
 
-    public long begin(UUID playerId) {
-        return generations.merge(playerId, 1L, Long::sum);
+    public synchronized long begin(UUID playerId) {
+        if (requests.size() >= capacity) return 0L;
+        long generation = nextGeneration.incrementAndGet();
+        requests.put(new PlanningRequestKey(playerId, generation), Boolean.TRUE);
+        return generation;
+    }
+
+    /** 保留单调递增代数，使已取消请求的迟到回调不能重新成为当前请求。 */
+    public boolean cancel(UUID playerId, long generation) {
+        boolean removed = complete(playerId, generation);
+        // 终态发布可能先释放请求身份；仍须停止尚未退出的计算线程。
+        coordinator.cancel(playerId, generation);
+        return removed;
+    }
+
+    public boolean complete(UUID playerId, long generation) {
+        return requests.remove(new PlanningRequestKey(playerId, generation)) != null;
     }
 
     public boolean isCurrent(UUID playerId, long generation) {
-        return generation != 0L && Objects.equals(generations.get(playerId), generation);
+        return generation != 0L && requests.containsKey(new PlanningRequestKey(playerId, generation));
     }
 
     public void submit(PlanningSnapshot snapshot, Executor serverExecutor, int maxSteps,
@@ -114,17 +139,17 @@ public final class PlanRequestService implements AutoCloseable {
 
     public void forget(UUID playerId) {
         coordinator.cancel(playerId);
-        generations.remove(playerId);
+        requests.keySet().removeIf(key -> key.playerId().equals(playerId));
     }
 
     public void cancelAll() {
         coordinator.cancelAll();
-        generations.clear();
+        requests.clear();
     }
 
     @Override
     public void close() {
-        generations.clear();
+        requests.clear();
         coordinator.close();
     }
 }

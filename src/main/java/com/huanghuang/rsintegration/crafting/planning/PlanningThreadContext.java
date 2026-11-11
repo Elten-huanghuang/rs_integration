@@ -30,6 +30,7 @@ public final class PlanningThreadContext {
         if (Thread.currentThread().isInterrupted()) {
             throw new CancellationException("Pure recipe planning interrupted");
         }
+        CooperativePlanningExecutor.checkpoint();
     }
 
     public static void requireMainThread(String operation) {

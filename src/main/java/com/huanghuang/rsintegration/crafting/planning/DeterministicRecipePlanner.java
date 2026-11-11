@@ -23,7 +23,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * 对唯一生产者的确定性 DAG 聚合需求；不能证明安全时交回通用搜索。
+ * 对唯一生产者的确定性片段聚合需求；标签及多生产者边界由通用搜索补足。
  * 拓扑发现、需求传播和材料事件生成都不使用递归，也不按产物件数展开。
  */
 final class DeterministicRecipePlanner {
@@ -41,27 +41,160 @@ final class DeterministicRecipePlanner {
                         Map<ResourceLocation, ResourceLocation> forced,
                         PlanningPreferences preferences, int maxSteps, int maxStates,
                         Runnable checkBudget) {
-        return tryPlan(graph, stock, roots, activeOutputs, forced, preferences,
-                maxSteps, maxStates, checkBudget, new HashSet<>());
+        Prepared prepared = new CompilationCache(graph, forced, preferences, maxStates)
+                .prepare(stock, roots, activeOutputs, maxSteps, maxStates, checkBudget);
+        return prepared == null ? null : prepared.plan();
     }
 
-    /** 同一次搜索复用失败探测，避免复杂长链在每一层重复扫描相同前缀。 */
-    @Nullable
-    static Plan tryPlan(ImmutableRecipeGraph graph, Map<MaterialRef, Long> stock,
-                        List<IngredientRef> roots, Set<MaterialRef> activeOutputs,
-                        Map<ResourceLocation, ResourceLocation> forced,
-                        PlanningPreferences preferences, int maxSteps, int maxStates,
-                        Runnable checkBudget, Set<MaterialRef> skippedSegments) {
-        if (graph.recipesById().isEmpty() || roots.stream().anyMatch(input -> !supported(input))) {
-            return null;
+    sealed interface SegmentStep permits Boundary, RecipeBatch {}
+    /** 只补足库存，真正消费仍由后续配方端口记录，不能伪造一条材料流。 */
+    record Boundary(IngredientRef ingredient) implements SegmentStep {}
+    record RecipeBatch(RecipeNode recipe, List<IngredientRef> inputs, long batches) implements SegmentStep {}
+    record Prepared(@Nullable Plan plan, List<SegmentStep> schedule, int expandedStates) {}
+
+    private record Definition(MaterialRef material, @Nullable RecipeNode recipe,
+                              List<IngredientRef> inputs) {}
+    private record Program(Map<MaterialRef, Node> nodes, List<Node> ordered) {}
+
+    /**
+     * 仅属于一次求解，图、强制路线和偏好固定；库存、祖先及失败结果不进入结构缓存。
+     * 缓存的结构单元数受现有搜索状态上限约束，不另引入固定阈值，也不跨配方重载保留。
+     */
+    static final class CompilationCache {
+        private final ImmutableRecipeGraph graph;
+        private final Map<ResourceLocation, ResourceLocation> forced;
+        private final PlanningPreferences preferences;
+        private final int maxUnits;
+        private final Map<MaterialRef, Definition> definitions = new HashMap<>();
+        private final Map<List<MaterialRef>, Program> programs = new HashMap<>();
+        private final Set<MaterialRef> cyclicSegments = new HashSet<>();
+        private int retainedUnits;
+        private int compilationCount;
+
+        CompilationCache(ImmutableRecipeGraph graph, Map<ResourceLocation, ResourceLocation> forced,
+                         PlanningPreferences preferences, int maxUnits) {
+            this.graph = graph;
+            this.forced = Map.copyOf(forced);
+            this.preferences = preferences == null ? PlanningPreferences.empty() : preferences;
+            this.maxUnits = Math.max(0, maxUnits);
         }
-        if (roots.stream().anyMatch(input -> skippedSegments.contains(input.alternatives().get(0)))) return null;
-        try {
-            return new Builder(graph, stock, activeOutputs, forced, preferences,
-                    maxSteps, maxStates, checkBudget, skippedSegments).build(roots);
-        } catch (ArithmeticException | ProbeLimitReached overflow) {
-            // 溢出或探测额度耗尽均回退，不能提交半成品计划。
-            return null;
+
+        int compilationCount() { return compilationCount; }
+
+        @Nullable
+        Prepared prepare(Map<MaterialRef, Long> stock, List<IngredientRef> roots,
+                         Set<MaterialRef> activeOutputs, int maxSteps, int maxStates,
+                         Runnable checkBudget) {
+            if (graph.recipesById().isEmpty() || roots.isEmpty()
+                    || roots.stream().anyMatch(input -> !supported(input)
+                    || cyclicSegments.contains(input.alternatives().get(0)))) return null;
+            try {
+                Budget budget = new Budget(maxStates, checkBudget);
+                List<MaterialRef> key = roots.stream().map(input -> input.alternatives().get(0))
+                        .distinct().toList();
+                Program program = programs.get(key);
+                if (program == null) {
+                    program = compile(key, budget);
+                    if (program == null) return null;
+                    int units = Math.addExact(key.size(), program.nodes().size());
+                    for (Node node : program.ordered()) units = Math.addExact(units, node.children.size());
+                    if (retain(units)) programs.put(key, program);
+                }
+                return new Evaluation(program, stock, activeOutputs, maxSteps, budget).build(roots);
+            } catch (ArithmeticException | ProbeLimitReached overflow) {
+                // 溢出或探测预算耗尽均交回通用搜索，不能提交半成品计划。
+                return null;
+            }
+        }
+
+        private boolean retain(int units) {
+            if (units > maxUnits - retainedUnits) return false;
+            retainedUnits += units;
+            return true;
+        }
+
+        private Definition definition(MaterialRef material, Budget budget) {
+            Definition cached = definitions.get(material);
+            if (cached != null) return cached;
+            RecipeNode selected = null;
+            if (!preferences.isNoRecipe(material)) {
+                ResourceLocation forcedId = ForcedRecipeGraphProjector.forcedRecipeFor(material, forced);
+                // ANY 还可能匹配带 NBT 的生产者，必须检查整个物品族。
+                for (RecipeNode recipe : ImmutableRecipeGraphProjector.candidates(graph, material, NbtMatchMode.ANY)) {
+                    budget.tick();
+                    if (preferences.excludes(recipe.recipeId())
+                            || forcedId != null && !forcedId.equals(recipe.recipeId())) continue;
+                    if (selected != null || !recipe.output().equals(material)
+                            || recipe.dynamicIdentityTargetable() || recipe.hasFluidOutputs()
+                            || recipe.inputs().stream().anyMatch(input -> !supported(input))) {
+                        selected = null;
+                        break;
+                    }
+                    selected = recipe;
+                }
+            }
+            Definition result = new Definition(material, selected,
+                    selected == null ? List.of() : PureDemandNormalizer.mergeEquivalent(selected.inputs()));
+            if (retain(Math.addExact(1, result.inputs().size()))) definitions.put(material, result);
+            return result;
+        }
+
+        @Nullable
+        private Program compile(List<MaterialRef> roots, Budget budget) {
+            compilationCount++;
+            Map<MaterialRef, Node> nodes = new HashMap<>();
+            List<Node> ordered = new ArrayList<>();
+            for (MaterialRef root : roots) {
+                if (nodes.containsKey(root)) continue;
+                Node first = new Node(nodes.size(), definition(root, budget));
+                nodes.put(root, first);
+                ArrayDeque<Node> stack = new ArrayDeque<>();
+                stack.push(first);
+                while (!stack.isEmpty()) {
+                    budget.tick();
+                    Node current = stack.peek();
+                    if (current.cursor == current.inputs.size()) {
+                        current.complete = true;
+                        ordered.add(current);
+                        stack.pop();
+                        continue;
+                    }
+                    MaterialRef material = current.inputs.get(current.cursor++).alternatives().get(0);
+                    Node child = nodes.get(material);
+                    // 确定性环仍由原搜索处理；标签、多生产者在定义处已经截成边界。
+                    if ((child != null && !child.complete) || cyclicSegments.contains(material)) {
+                        for (Node ancestor : stack) {
+                            if (!cyclicSegments.contains(ancestor.material) && retain(1)) {
+                                cyclicSegments.add(ancestor.material);
+                            }
+                        }
+                        return null;
+                    }
+                    if (child == null) {
+                        child = new Node(nodes.size(), definition(material, budget));
+                        nodes.put(material, child);
+                        stack.push(child);
+                    }
+                    current.children.add(child);
+                }
+            }
+            return new Program(Map.copyOf(nodes), List.copyOf(ordered));
+        }
+    }
+
+    private static final class Budget {
+        private final int maxStates;
+        private final Runnable checkBudget;
+        private int work;
+
+        private Budget(int maxStates, Runnable checkBudget) {
+            this.maxStates = maxStates;
+            this.checkBudget = checkBudget;
+        }
+
+        private void tick() {
+            checkBudget.run();
+            if (++work > maxStates) throw new ProbeLimitReached();
         }
     }
 
@@ -76,50 +209,38 @@ final class DeterministicRecipePlanner {
     private static final class Node {
         private final int id;
         private final MaterialRef material;
-        private RecipeNode recipe;
-        private List<IngredientRef> inputs = List.of();
+        private final RecipeNode recipe;
+        private final List<IngredientRef> inputs;
         private final List<Node> children = new ArrayList<>();
         private int cursor;
         private boolean complete;
 
-        private Node(int id, MaterialRef material) {
+        private Node(int id, Definition definition) {
             this.id = id;
-            this.material = material;
+            this.material = definition.material();
+            this.recipe = definition.recipe();
+            this.inputs = definition.inputs();
         }
     }
 
-    private static final class Builder {
-        private final ImmutableRecipeGraph graph;
+    private static final class Evaluation {
+        private final Program program;
         private final Map<MaterialRef, Long> initial;
         private final Set<MaterialRef> activeOutputs;
-        private final Map<ResourceLocation, ResourceLocation> forced;
-        private final PlanningPreferences preferences;
         private final int maxSteps;
-        private final int maxStates;
-        private final Runnable checkBudget;
-        private final Map<MaterialRef, Node> nodes = new HashMap<>();
+        private final Budget budget;
         private final Map<MaterialRef, List<MaterialRef>> variants = new HashMap<>();
         private final Map<MaterialRef, Long> familyStock = new HashMap<>();
-        private final Set<MaterialRef> skippedSegments;
-        private final List<Node> ordered = new ArrayList<>();
-        private int work;
-        private boolean unsupported;
 
-        private Builder(ImmutableRecipeGraph graph, Map<MaterialRef, Long> initial,
-                        Set<MaterialRef> activeOutputs, Map<ResourceLocation, ResourceLocation> forced,
-                        PlanningPreferences preferences, int maxSteps, int maxStates, Runnable checkBudget,
-                        Set<MaterialRef> skippedSegments) {
-            this.graph = graph;
+        private Evaluation(Program program, Map<MaterialRef, Long> initial,
+                           Set<MaterialRef> activeOutputs, int maxSteps, Budget budget) {
+            this.program = program;
             this.initial = initial;
             this.activeOutputs = activeOutputs;
-            this.forced = forced;
-            this.preferences = preferences == null ? PlanningPreferences.empty() : preferences;
             this.maxSteps = Math.max(1, maxSteps);
-            this.maxStates = Math.max(1, maxStates);
-            this.checkBudget = checkBudget;
-            this.skippedSegments = skippedSegments;
+            this.budget = budget;
             initial.forEach((material, amount) -> {
-                checkBudget.run();
+                budget.checkBudget.run();
                 if (amount == null || amount <= 0L) return;
                 MaterialRef family = family(material);
                 variants.computeIfAbsent(family, ignored -> new ArrayList<>()).add(material);
@@ -131,76 +252,10 @@ final class DeterministicRecipePlanner {
                     .thenComparing(MaterialRef::nbt)));
         }
 
-        private boolean tick() {
-            checkBudget.run();
-            return ++work <= maxStates;
-        }
-
-        private Node node(MaterialRef material) {
-            Node node = new Node(nodes.size(), material);
-            nodes.put(material, node);
-            if (skippedSegments.contains(material)
-                    || variants.getOrDefault(material, List.of()).stream()
-                    .anyMatch(variant -> variant.runtimeNbt() || variant.constrainedNbt())) {
-                unsupported = true;
-                return node;
-            }
-            if (preferences.isNoRecipe(material) || activeOutputs.contains(material)) return node;
-            ResourceLocation forcedId = ForcedRecipeGraphProjector.forcedRecipeFor(material, forced);
-            // ANY 可能还有带标签或动态产出的生产者，不能只查无标签键后误认唯一生产者。
-            for (RecipeNode recipe : ImmutableRecipeGraphProjector.candidates(graph, material, NbtMatchMode.ANY)) {
-                if (preferences.excludes(recipe.recipeId())
-                        || forcedId != null && !forcedId.equals(recipe.recipeId())) continue;
-                if (node.recipe != null || !recipe.output().equals(material)
-                        || recipe.dynamicIdentityTargetable() || recipe.hasFluidOutputs()
-                        || recipe.inputs().stream().anyMatch(input -> !supported(input))) {
-                    unsupported = true;
-                    return node;
-                }
-                node.recipe = recipe;
-                node.inputs = PureDemandNormalizer.mergeEquivalent(recipe.inputs());
-            }
-            if (node.recipe == null && familyStock.getOrDefault(material, 0L) == 0L) {
-                unsupported = true;
-            }
-            return node;
-        }
-
         @Nullable
-        private Plan build(List<IngredientRef> roots) {
-            // 同一节点只展开一次；灰色节点表示环，不能套用 DAG 的批量公式。
-            for (IngredientRef root : roots) {
-                MaterialRef material = root.alternatives().get(0);
-                if (nodes.containsKey(material)) continue;
-                ArrayDeque<Node> stack = new ArrayDeque<>();
-                stack.push(node(material));
-                while (!stack.isEmpty()) {
-                    if (!tick()) return null;
-                    if (unsupported) {
-                        // 仅禁用通往复杂边界的祖先；边界另一侧的简单片段仍可聚合。
-                        for (Node ancestor : stack) skippedSegments.add(ancestor.material);
-                        return null;
-                    }
-                    Node current = stack.peek();
-                    if (current.cursor == current.inputs.size()) {
-                        current.complete = true;
-                        ordered.add(current);
-                        stack.pop();
-                        continue;
-                    }
-                    MaterialRef childMaterial = current.inputs.get(current.cursor++).alternatives().get(0);
-                    Node child = nodes.get(childMaterial);
-                    if (child != null && !child.complete) {
-                        for (Node ancestor : stack) skippedSegments.add(ancestor.material);
-                        return null;
-                    }
-                    if (child == null) {
-                        child = node(childMaterial);
-                        stack.push(child);
-                    }
-                    current.children.add(child);
-                }
-            }
+        private Prepared build(List<IngredientRef> roots) {
+            Map<MaterialRef, Node> nodes = program.nodes();
+            List<Node> ordered = program.ordered();
             long[] demand = new long[nodes.size()];
             long[] exactDemand = new long[nodes.size()];
             long[] batches = new long[nodes.size()];
@@ -212,19 +267,22 @@ final class DeterministicRecipePlanner {
                 }
             }
             int steps = 0;
+            boolean needsBoundary = false;
             // 先收齐所有消费者的需求，再展开其生产者，避免分支间重复取整和展开。
             for (int index = ordered.size() - 1; index >= 0; index--) {
-                if (!tick()) return null;
+                budget.tick();
                 Node node = ordered.get(index);
+                if (demand[node.id] > 0L && variants.getOrDefault(node.material, List.of()).stream()
+                        .anyMatch(variant -> variant.runtimeNbt() || variant.constrainedNbt())) return null;
                 long missing = Math.max(0L, Math.max(
                         demand[node.id] - familyStock.getOrDefault(node.material, 0L),
                         exactDemand[node.id] - initial.getOrDefault(node.material, 0L)));
                 if (missing == 0L) continue;
-                if (node.recipe == null || ++steps > maxSteps) {
-                    // 这里只禁用加速尝试，通用搜索仍保留全部候选和缺料说明。
-                    skippedSegments.addAll(nodes.keySet());
-                    return null;
+                if (node.recipe == null || activeOutputs.contains(node.material)) {
+                    needsBoundary = true;
+                    continue;
                 }
+                if (++steps > maxSteps) return null;
                 long output = node.recipe.outputCount();
                 long count = missing / output + (missing % output == 0L ? 0L : 1L);
                 batches[node.id] = count;
@@ -238,11 +296,32 @@ final class DeterministicRecipePlanner {
                 }
             }
             if (steps == 0) return null;
+            if (needsBoundary) {
+                List<SegmentStep> schedule = new ArrayList<>();
+                for (Node node : ordered) {
+                    budget.tick();
+                    long count = batches[node.id];
+                    if (count > 0L) {
+                        schedule.add(new RecipeBatch(node.recipe, node.inputs, count));
+                    } else if (node.recipe == null || activeOutputs.contains(node.material)) {
+                        if (exactDemand[node.id] > initial.getOrDefault(node.material, 0L)) {
+                            schedule.add(new Boundary(new IngredientRef(List.of(node.material),
+                                    exactDemand[node.id], NbtMatchMode.EXACT)));
+                        }
+                        if (demand[node.id] > familyStock.getOrDefault(node.material, 0L)
+                                && demand[node.id] > exactDemand[node.id]) {
+                            schedule.add(new Boundary(new IngredientRef(List.of(node.material),
+                                    demand[node.id], NbtMatchMode.ANY)));
+                        }
+                    }
+                }
+                return new Prepared(null, List.copyOf(schedule), budget.work);
+            }
             Map<MaterialRef, Long> remaining = new HashMap<>(initial);
             List<PlannedStep> plan = new ArrayList<>(steps);
             List<FlowEvent> flow = new ArrayList<>();
             for (Node node : ordered) {
-                if (!tick()) return null;
+                budget.tick();
                 long count = batches[node.id];
                 if (count == 0L) continue;
                 for (int port = 0; port < node.inputs.size(); port++) {
@@ -257,11 +336,11 @@ final class DeterministicRecipePlanner {
                 flow.add(new Production(node.id, node.recipe, count, node.material, null));
             }
             for (int port = 0; port < roots.size(); port++) {
-                if (!tick()) return null;
+                budget.tick();
                 IngredientRef root = roots.get(port);
                 flow.add(new MaterialUse(-1, port, root, consume(remaining, root, root.count())));
             }
-            return new Plan(plan, flow, remaining, work);
+            return new Prepared(new Plan(plan, flow, remaining, budget.work), List.of(), budget.work);
         }
 
         private Map<MaterialRef, Long> consume(Map<MaterialRef, Long> stock, IngredientRef input, long amount) {

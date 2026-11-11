@@ -8,7 +8,7 @@ import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 
-/** Fair server-thread admission queue that retains only the latest typed preview per player. */
+/** 有界的服务器线程准入队列，每个预览请求独立排队。 */
 public final class TypedPreviewAdmissionQueue {
     public record Request(UUID playerId, long generation, long queuedNanos,
                           Runnable task, Runnable expired, Consumer<Throwable> failed) {
@@ -27,8 +27,8 @@ public final class TypedPreviewAdmissionQueue {
     }
 
     private final int capacity;
-    private final ArrayDeque<UUID> order = new ArrayDeque<>();
-    private final Map<UUID, Request> latest = new HashMap<>();
+    private final ArrayDeque<PlanningRequestKey> order = new ArrayDeque<>();
+    private final Map<PlanningRequestKey, Request> latest = new HashMap<>();
     private Request admitted;
 
     public TypedPreviewAdmissionQueue(int capacity) {
@@ -37,13 +37,14 @@ public final class TypedPreviewAdmissionQueue {
     }
 
     public synchronized OfferResult offer(Request request) {
-        Request previous = latest.put(request.playerId(), request);
+        PlanningRequestKey key = new PlanningRequestKey(request.playerId(), request.generation());
+        Request previous = latest.put(key, request);
         if (previous != null) return OfferResult.REPLACED;
         if (latest.size() > capacity) {
-            latest.remove(request.playerId());
+            latest.remove(key);
             return OfferResult.FULL;
         }
-        order.offer(request.playerId());
+        order.offer(key);
         return OfferResult.QUEUED;
     }
 
@@ -89,7 +90,14 @@ public final class TypedPreviewAdmissionQueue {
     }
 
     public synchronized void remove(UUID playerId) {
-        latest.remove(playerId);
+        latest.keySet().removeIf(key -> key.playerId().equals(playerId));
+        order.removeIf(key -> key.playerId().equals(playerId));
+    }
+
+    public synchronized void remove(UUID playerId, long generation) {
+        PlanningRequestKey key = new PlanningRequestKey(playerId, generation);
+        latest.remove(key);
+        order.remove(key);
     }
 
     public synchronized void clear() {
@@ -100,8 +108,8 @@ public final class TypedPreviewAdmissionQueue {
 
     private synchronized Request poll() {
         while (!order.isEmpty()) {
-            UUID playerId = order.poll();
-            Request request = latest.remove(playerId);
+            PlanningRequestKey key = order.poll();
+            Request request = latest.remove(key);
             if (request != null) return request;
         }
         return null;

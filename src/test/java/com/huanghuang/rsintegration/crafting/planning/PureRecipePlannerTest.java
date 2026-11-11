@@ -1234,7 +1234,8 @@ class PureRecipePlannerTest extends BootstrapTest {
                 new PureRecipePlanner.PlannedStep(id("bundle_of_timber"), 81),
                 new PureRecipePlanner.PlannedStep(id("heap_of_timber"), 9),
                 new PureRecipePlanner.PlannedStep(id("ton_of_timber"), 1)), result.steps());
-        assertTrue(result.expandedStates() < 20);
+        // 编译边界也计入工作量，但不能预遍历每个原木变体的生产链。
+        assertTrue(result.expandedStates() < logs.size(), result.toString());
     }
 
     @Test
@@ -1607,12 +1608,12 @@ class PureRecipePlannerTest extends BootstrapTest {
         MaterialRef missing = material("partial_missing");
         RecipeNode producer = recipe("partial_producer", target, 1,
                 ingredient(missing, 1));
-        AtomicLong clock = new AtomicLong();
-
         PureRecipePlanner.Result result = PureRecipePlanner.resolve(
                 new ImmutableRecipeGraph(Map.of(target, List.of(producer))), Map.of(),
-                List.of(ingredient(target, 1)), 20, 100, 100, 12L,
-                clock::incrementAndGet);
+                List.of(ingredient(target, 1)), 20, 100, 100, 1L,
+                // 只让诊断阶段到期，不依赖求解内部调用时钟的次数。
+                () -> StackWalker.getInstance().walk(frames -> frames.anyMatch(frame ->
+                        frame.getClassName().endsWith("$PartialPlanBuilder"))) ? 2L : 0L);
 
         assertFalse(result.feasible());
         assertEquals(PureRecipePlanner.Status.UNRESOLVABLE, result.status());
