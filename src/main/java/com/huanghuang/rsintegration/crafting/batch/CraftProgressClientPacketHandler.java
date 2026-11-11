@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot;
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressTracker;
+import com.huanghuang.rsintegration.crafting.plan.PlanBackgroundClient;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import com.huanghuang.rsintegration.crafting.progress.CraftFailureClientCommands;
@@ -15,6 +16,7 @@ final class CraftProgressClientPacketHandler {
 
     static void onStarted(CraftStartedPacket packet) {
         CraftProgressTracker.onStarted(packet);
+        PlanBackgroundClient.accepted(packet.previewRequestId(), packet.craftId());
     }
 
     static void onProgress(CraftProgressSnapshot snapshot) {

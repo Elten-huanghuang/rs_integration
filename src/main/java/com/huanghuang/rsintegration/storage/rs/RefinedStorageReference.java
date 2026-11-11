@@ -11,11 +11,11 @@ import net.minecraft.world.level.Level;
 import java.util.Optional;
 
 /** Internal codec for persistent RS controller coordinates. */
-final class RefinedStorageReference {
+public final class RefinedStorageReference {
     private static final String VERSION_PREFIX = "v1|";
     private RefinedStorageReference() {}
 
-    static StorageReference fromNetwork(INetwork network) {
+    public static StorageReference fromNetwork(INetwork network) {
         if (network.getLevel() == null) throw new IllegalStateException("RS network has no level");
         ResourceLocation dimension = network.getLevel().dimension().location();
         BlockPos position = network.getPosition();

@@ -15,7 +15,7 @@ import java.util.Set;
 
 /** 固定路线的实时库存投影。只统计初始供料，生产者输出不冒充现货。 */
 public final class PreviewInventoryModel {
-    public enum Status { READY, MISSING, REPLAN, UNAVAILABLE }
+    public enum Status { READY, MISSING, REPLAN, UNAVAILABLE, EXPIRED }
 
     private final List<IngredientKey> keys;
     private final Map<IngredientKey, Integer> indices = new HashMap<>();

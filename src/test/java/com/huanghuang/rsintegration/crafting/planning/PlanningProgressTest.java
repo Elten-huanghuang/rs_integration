@@ -8,6 +8,8 @@ import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.UUID;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -21,6 +23,60 @@ class PlanningProgressTest {
     @AfterEach
     void clear() {
         PlanningProgressTracker.clear();
+        PlanningProgressServer.clear();
+    }
+
+    @Test
+    void cancelLookupIsScopedToPlayerAndRequestRatherThanLatestTask() {
+        var player = UUID.randomUUID();
+        PlanningProgressServer.begin(player, 10L, 1L, RECIPE);
+        PlanningProgressServer.begin(player, 11L, 2L, RECIPE);
+        assertEquals(1L, PlanningProgressServer.generationForRequest(player, 10L));
+        assertEquals(2L, PlanningProgressServer.generationForRequest(player, 11L));
+        assertEquals(0L, PlanningProgressServer.generationForRequest(UUID.randomUUID(), 10L));
+        assertEquals(0L, PlanningProgressServer.generationForRequest(player, 12L));
+    }
+
+    @Test
+    void switchingDisplayAndCancellingOneRequestLeavesAnotherAlive() {
+        PlanningProgressTracker.start(10L, RECIPE);
+        PlanningProgressTracker.start(11L, RECIPE);
+        assertEquals(2, PlanningProgressTracker.tasks().size());
+        PlanningProgressTracker.select(10L);
+        PlanningProgressTracker.update(snapshot(11L, 2L, PlanningProgressSnapshot.Phase.SEARCH));
+        assertEquals(10L, PlanningProgressTracker.current().requestId());
+        assertEquals(10L, PlanningProgressTracker.cancelCurrent());
+        assertFalse(PlanningProgressTracker.acceptsResponse(10L));
+        assertTrue(PlanningProgressTracker.acceptsResponse(11L));
+        PlanningProgressTracker.select(11L);
+        assertEquals(PlanningProgressSnapshot.Phase.SEARCH, PlanningProgressTracker.current().phase());
+        PlanningProgressTracker.responseReceived(11L);
+        assertEquals(1, PlanningProgressTracker.tasks().size());
+        assertEquals(PlanningProgressSnapshot.State.CANCELLED, PlanningProgressTracker.get(10L).state());
+        assertFalse(PlanningProgressTracker.acceptsResponse(10L));
+    }
+
+    @Test
+    void cancelledTaskRetainsTerminalStateAndRejectsLateProgressAndResults() {
+        PlanningProgressTracker.start(10L, RECIPE);
+        PlanningProgressTracker.start(11L, RECIPE);
+        assertEquals(10L, PlanningProgressTracker.cancel(10L));
+        PlanningProgressTracker.update(snapshot(10L, 1L, PlanningProgressSnapshot.Phase.SEARCH));
+
+        assertEquals(PlanningProgressSnapshot.State.CANCELLED, PlanningProgressTracker.get(10L).state());
+        assertFalse(PlanningProgressTracker.acceptsResponse(10L));
+        assertEquals(0L, PlanningProgressTracker.cancel(10L));
+        assertEquals(11L, PlanningProgressTracker.current().requestId());
+        assertTrue(PlanningProgressTracker.acceptsResponse(11L));
+        PlanningProgressTracker.responseReceived(10L);
+        assertFalse(PlanningProgressTracker.acceptsResponse(10L));
+    }
+
+    @Test
+    void longComputationOnlyTimesOutWhenHeartbeatStops() {
+        long now = 600_000L;
+        assertFalse(PlanningProgressTracker.heartbeatTimedOut(now - 1_000L, now));
+        assertTrue(PlanningProgressTracker.heartbeatTimedOut(now - 60_000L, now));
     }
 
     @Test

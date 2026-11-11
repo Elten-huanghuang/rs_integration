@@ -1,5 +1,8 @@
 package com.huanghuang.rsintegration.network;
 
+import com.refinedmods.refinedstorage.container.CraftingMonitorContainerMenu;
+import com.huanghuang.rsintegration.mods.rs.monitor.RsMonitorServer;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.util.PerformanceMonitor;
 import com.huanghuang.rsintegration.crafting.MaterialMatcher;
@@ -250,6 +253,9 @@ public final class RSIntegrationNetwork {
 
     private static INetwork getNetworkFromContainer(AbstractContainerMenu container) {
         if (container == null) return null;
+        if (container instanceof CraftingMonitorContainerMenu monitor) {
+            return RsMonitorServer.network(monitor);
+        }
         try {
             // Probe any RS grid container (GridContainerMenu, CraftingGridContainerMenu,
             // WirelessGridContainerMenu, etc.) by trying getGrid() reflectively across

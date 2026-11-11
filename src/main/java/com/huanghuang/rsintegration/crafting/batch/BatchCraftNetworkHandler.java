@@ -1,10 +1,19 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
+import com.huanghuang.rsintegration.mods.rs.monitor.RsMonitorMaterialsPacket;
+import com.huanghuang.rsintegration.mods.rs.monitor.RsOpenCraftingMonitorPacket;
+import com.huanghuang.rsintegration.mods.rs.monitor.RsReturnToCraftingTerminalPacket;
+import com.huanghuang.rsintegration.mods.rs.monitor.RsOpenMonitorForCraftPacket;
+import com.huanghuang.rsintegration.mods.rs.monitor.RsMonitorNavigationResultPacket;
+import com.huanghuang.rsintegration.mods.rs.monitor.RsNetworkMonitorSelectPacket;
+
 import com.huanghuang.rsintegration.feature.ftbquests.QuestSubmissionRequestPacket;
 import com.huanghuang.rsintegration.feature.ftbquests.QuestMissingBookmarkPacket;
 import com.huanghuang.rsintegration.feature.ftbquests.CheckmarkConfirmPacket;
 import com.huanghuang.rsintegration.feature.ftbquests.StorageQuestScanPacket;
 import com.huanghuang.rsintegration.util.ModIds;
+import com.huanghuang.rsintegration.mods.rs.monitor.RsMonitorScopePacket;
+import com.huanghuang.rsintegration.mods.rs.monitor.RsMonitorCancelPacket;
 import java.util.Optional;
 import net.minecraftforge.fml.ModList;
 import net.minecraftforge.network.NetworkDirection;
@@ -14,6 +23,7 @@ import com.huanghuang.rsintegration.crafting.plan.PlanResponsePagePacket;
 import com.huanghuang.rsintegration.crafting.plan.PlanInventoryWatchPacket;
 import com.huanghuang.rsintegration.crafting.plan.PlanInventoryUpdatePacket;
 import com.huanghuang.rsintegration.crafting.planning.PlanningProgressPacket;
+import com.huanghuang.rsintegration.crafting.planning.PlanningCancelPacket;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.huanghuang.rsintegration.network.packet.NetworkPacketIds;
 import net.minecraftforge.network.simple.SimpleChannel;
@@ -63,6 +73,9 @@ public final class BatchCraftNetworkHandler {
                 PlanningProgressPacket::encode, PlanningProgressPacket::decode,
                 PlanningProgressPacket::handle,
                 Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+        ch.registerMessage(NetworkPacketIds.PLANNING_CANCEL, PlanningCancelPacket.class,
+                PlanningCancelPacket::encode, PlanningCancelPacket::decode,
+                PlanningCancelPacket::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
         ch.registerMessage(NetworkPacketIds.CRAFT_PROGRESS_DELTA, CraftProgressDeltaPacket.class,
                 CraftProgressDeltaPacket::encode, CraftProgressDeltaPacket::decode,
                 CraftProgressDeltaPacket::handle,
@@ -100,6 +113,32 @@ public final class BatchCraftNetworkHandler {
                     Optional.of(NetworkDirection.PLAY_TO_SERVER));
             ch.registerMessage(NetworkPacketIds.FTB_QUEST_STORAGE_SCAN, StorageQuestScanPacket.class,
                     StorageQuestScanPacket::encode, StorageQuestScanPacket::decode, StorageQuestScanPacket::handle,
+                    Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        }
+        if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
+            ch.registerMessage(NetworkPacketIds.RS_NETWORK_MONITOR_SELECT, RsNetworkMonitorSelectPacket.class,
+                    RsNetworkMonitorSelectPacket::encode, RsNetworkMonitorSelectPacket::decode,
+                    RsNetworkMonitorSelectPacket::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
+            ch.registerMessage(NetworkPacketIds.RS_OPEN_CRAFTING_MONITOR, RsOpenCraftingMonitorPacket.class,
+                    RsOpenCraftingMonitorPacket::encode, RsOpenCraftingMonitorPacket::decode,
+                    RsOpenCraftingMonitorPacket::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
+            ch.registerMessage(NetworkPacketIds.RS_RETURN_TO_CRAFTING_TERMINAL, RsReturnToCraftingTerminalPacket.class,
+                    RsReturnToCraftingTerminalPacket::encode, RsReturnToCraftingTerminalPacket::decode,
+                    RsReturnToCraftingTerminalPacket::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
+            ch.registerMessage(NetworkPacketIds.RS_OPEN_MONITOR_FOR_CRAFT, RsOpenMonitorForCraftPacket.class,
+                    RsOpenMonitorForCraftPacket::encode, RsOpenMonitorForCraftPacket::decode,
+                    RsOpenMonitorForCraftPacket::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
+            ch.registerMessage(NetworkPacketIds.RS_MONITOR_NAVIGATION_RESULT, RsMonitorNavigationResultPacket.class,
+                    RsMonitorNavigationResultPacket::encode, RsMonitorNavigationResultPacket::decode,
+                    RsMonitorNavigationResultPacket::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+            ch.registerMessage(NetworkPacketIds.RS_MONITOR_MATERIALS, RsMonitorMaterialsPacket.class,
+                    RsMonitorMaterialsPacket::encode, RsMonitorMaterialsPacket::decode,
+                    RsMonitorMaterialsPacket::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+            ch.registerMessage(NetworkPacketIds.RS_MONITOR_SCOPE, RsMonitorScopePacket.class,
+                    RsMonitorScopePacket::encode, RsMonitorScopePacket::decode, RsMonitorScopePacket::handle,
+                    Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+            ch.registerMessage(NetworkPacketIds.RS_MONITOR_CANCEL, RsMonitorCancelPacket.class,
+                    RsMonitorCancelPacket::encode, RsMonitorCancelPacket::decode, RsMonitorCancelPacket::handle,
                     Optional.of(NetworkDirection.PLAY_TO_SERVER));
         }
         registered = true;

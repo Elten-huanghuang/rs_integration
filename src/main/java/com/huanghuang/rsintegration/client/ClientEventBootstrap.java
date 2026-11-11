@@ -7,7 +7,6 @@ import com.huanghuang.rsintegration.client.recipe.RecipeAvailabilityClient;
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressClientEvents;
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressKeybind;
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressOverlay;
-import com.huanghuang.rsintegration.crafting.planning.PlanningProgressOverlay;
 import com.huanghuang.rsintegration.client.storage.DiskTooltipBackground;
 import com.huanghuang.rsintegration.client.storage.EquipmentTooltipClient;
 import com.huanghuang.rsintegration.mods.aetherworks.client.AetherworksClientSetup;
@@ -39,7 +38,6 @@ public final class ClientEventBootstrap {
         CraftProgressKeybind.register();
 
         MinecraftForge.EVENT_BUS.register(CraftProgressOverlay.class);
-        MinecraftForge.EVENT_BUS.register(PlanningProgressOverlay.class);
         MinecraftForge.EVENT_BUS.register(CraftFailureClientCommands.class);
         MinecraftForge.EVENT_BUS.register(DiskTooltipBackground.class);
         MinecraftForge.EVENT_BUS.register(EquipmentTooltipClient.class);

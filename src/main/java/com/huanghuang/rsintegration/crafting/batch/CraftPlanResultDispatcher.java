@@ -44,6 +44,7 @@ final class CraftPlanResultDispatcher {
                 if (!gate.tryEnterTerminal(previewGeneration)) return;
                 RESULT_GATES.remove(key, gate);
                 PlanningProgressServer.succeed(player, previewGeneration);
+                CraftPlanningRuntime.planCache().retainForRequest(player.getUUID(), requestId, snapshot);
                 PlanResponsePublisher.send(player, plan, requestId);
             }
 

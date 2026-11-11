@@ -40,7 +40,18 @@ final class GenericCraftPacketCodec {
             MachineSelectionMode machineSelectionMode,
             Map<String, ItemStack> materialLocks,
             boolean partialPreparation,
-            PlanningPreferences planningPreferences) {}
+            PlanningPreferences planningPreferences,
+            long confirmedPreviewRequestId) {
+        WireData(ResourceLocation recipeId, boolean preview, Map<String, String> forcedRecipes,
+                 ResourceLocation dimension, BlockPos position, int repeatCount, boolean inferMode,
+                 ItemStack baseItem, ItemStack targetOutput, long requestId, OutputDestination outputDestination,
+                 StorageReference storageReference, boolean maximize, MachineSelectionMode machineSelectionMode,
+                 Map<String, ItemStack> materialLocks, boolean partialPreparation, PlanningPreferences planningPreferences) {
+            this(recipeId, preview, forcedRecipes, dimension, position, repeatCount, inferMode, baseItem,
+                    targetOutput, requestId, outputDestination, storageReference, maximize, machineSelectionMode,
+                    materialLocks, partialPreparation, planningPreferences, 0L);
+        }
+    }
 
     static void write(FriendlyByteBuf buf, WireData data) {
         buf.writeResourceLocation(data.recipeId());
@@ -81,6 +92,7 @@ final class GenericCraftPacketCodec {
         if (!data.planningPreferences().isEmpty()) {
             data.planningPreferences().write(buf);
         }
+        buf.writeVarLong(data.confirmedPreviewRequestId());
     }
 
     static WireData read(FriendlyByteBuf buf) {
@@ -159,6 +171,10 @@ final class GenericCraftPacketCodec {
         boolean partialPreparation = buf.isReadable() && buf.readBoolean();
         PlanningPreferences planningPreferences = buf.isReadable() && buf.readBoolean()
                 ? PlanningPreferences.read(buf) : PlanningPreferences.empty();
+        long confirmedPreviewRequestId = buf.isReadable() ? buf.readVarLong() : 0L;
+        if (confirmedPreviewRequestId < 0L || (confirmedPreviewRequestId > 0L && (preview || partialPreparation))) {
+            throw new DecoderException("invalid confirmed preview request");
+        }
         if (buf.isReadable()) {
             throw new DecoderException("trailing GenericCraftPacket data");
         }
@@ -166,6 +182,6 @@ final class GenericCraftPacketCodec {
                 inferMode, baseItem, targetOutput, requestId, outputDestination,
                 storageReference, maximize, machineSelectionMode,
                 MaterialLocks.immutableCopy(materialLocks), partialPreparation,
-                planningPreferences);
+                planningPreferences, confirmedPreviewRequestId);
     }
 }

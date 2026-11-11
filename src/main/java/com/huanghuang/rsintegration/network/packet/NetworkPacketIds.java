@@ -150,4 +150,13 @@ public final class NetworkPacketIds {
     public static final int EXPERIENCE_WAND_STATE = 163;
     public static final int PLAN_INVENTORY_WATCH = 164;
     public static final int PLAN_INVENTORY_UPDATE = 165;
+    public static final int PLANNING_CANCEL = 166;
+    public static final int RS_MONITOR_SCOPE = 167;
+    public static final int RS_MONITOR_CANCEL = 168;
+    public static final int RS_MONITOR_MATERIALS = 169;
+    public static final int RS_OPEN_CRAFTING_MONITOR = 170;
+    public static final int RS_RETURN_TO_CRAFTING_TERMINAL = 171;
+    public static final int RS_OPEN_MONITOR_FOR_CRAFT = 172;
+    public static final int RS_MONITOR_NAVIGATION_RESULT = 173;
+    public static final int RS_NETWORK_MONITOR_SELECT = 174;
 }

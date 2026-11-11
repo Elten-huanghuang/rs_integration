@@ -32,44 +32,32 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class CraftProgressOverlayTest extends BootstrapTest {
     @ParameterizedTest
     @CsvSource({"320,180,9", "854,480,9", "1920,1080,12", "320,180,16"})
-    void compactHudStaysInsideViewportWithoutReducingFontSize(int width, int height, int lineHeight) {
-        var layout = CraftProgressOverlay.layout(width, height, 1000, lineHeight, false);
-
-        assertTrue(layout.visible());
-        assertTrue(layout.width() <= 176);
-        assertTrue(layout.height() <= 76);
-        assertTrue(layout.x() >= 0 && layout.x() + layout.width() <= width);
-        assertTrue(layout.y() >= 0 && layout.y() + layout.height() <= height);
+    void combinedHudFitsAllRowsInsideTheViewport(int width, int height, int lineHeight) {
+        for (boolean planning : List.of(false, true)) for (boolean execution : List.of(false, true)) {
+            var layout = CraftProgressOverlay.combinedLayout(width, height, lineHeight, planning, execution, true);
+            assertTrue(layout.visible());
+            assertEquals(196, layout.width());
+            assertTrue(layout.x() >= 0 && layout.x() + layout.width() <= width);
+            assertTrue(layout.y() >= 0 && layout.y() + layout.height() <= height);
+            assertTrue(Math.abs(layout.y() - (height - layout.height()) / 2) <= 1);
+        }
     }
 
-    @Test
-    void abnormalReasonOnlyAddsOneLineAndShortTargetsCanUseLessWidth() {
-        var normal = CraftProgressOverlay.layout(320, 180, 70, 9, false);
-        var abnormal = CraftProgressOverlay.layout(320, 180, 70, 9, true);
-        var longName = CraftProgressOverlay.layout(320, 180, 1000, 9, true);
-
-        assertTrue(abnormal.visible());
-        assertTrue(abnormal.height() <= 80);
-        assertTrue(abnormal.height() > normal.height());
-        assertTrue(normal.width() < longName.width());
-        assertEquals(normal.width(), abnormal.width());
-    }
-
-    @ParameterizedTest
-    @CsvSource({"320,180", "427,240", "854,480"})
-    void shortTargetMovesRightWithoutKeepingAWideEmptyPanel(int width, int height) {
-        var layout = CraftProgressOverlay.layout(width, height, 64, 9, false);
-
-        assertTrue(layout.visible());
-        assertTrue(layout.width() <= 100);
-        assertEquals(4, width - layout.x() - layout.width());
-        assertTrue(layout.x() > width - 128);
+    @Test void mergedSectionsUseOneSharedFooterAndAddOnlyTheirOwnRows() {
+        var footer = CraftProgressOverlay.combinedLayout(427, 240, 9, false, false, false);
+        var plan = CraftProgressOverlay.combinedLayout(427, 240, 9, true, false, false);
+        var execution = CraftProgressOverlay.combinedLayout(427, 240, 9, false, true, false);
+        var both = CraftProgressOverlay.combinedLayout(427, 240, 9, true, true, false);
+        var detail = CraftProgressOverlay.combinedLayout(427, 240, 9, true, true, true);
+        assertEquals(plan.height() + execution.height() - footer.height(), both.height());
+        assertEquals(both.height() + 13, detail.height());
+        assertEquals(8, 427 - both.x() - both.width());
     }
 
     @ParameterizedTest
     @CsvSource({"100,180", "320,50", "0,0"})
     void unusablySmallViewportDoesNotDrawAnOverflowingPanel(int width, int height) {
-        assertFalse(CraftProgressOverlay.layout(width, height, 1000, 9, true).visible());
+        assertFalse(CraftProgressOverlay.combinedLayout(width, height, 9, true, true, true).visible());
     }
 
     @ParameterizedTest
@@ -93,20 +81,10 @@ class CraftProgressOverlayTest extends BootstrapTest {
     @Test
     void compactHintUsesTheActualKeyInsteadOfHardCodingP() {
         Component reboundKey = Component.literal("O");
-        Component hint = CraftProgressOverlay.hudHint(reboundKey);
+        Component hint = CraftProgressOverlay.hudHint(reboundKey, 4, 1);
 
-        assertEquals("rsi.progress.hud.hint", key(hint));
-        assertArrayEquals(new Object[]{reboundKey}, ((TranslatableContents) hint.getContents()).getArgs());
-    }
-
-    @Test
-    void keyHintFitsBesideTheProgressBarWithoutAddingASeparateTextRow() {
-        var normal = CraftProgressOverlay.layout(427, 240, 100, 9, false);
-        var abnormal = CraftProgressOverlay.layout(427, 240, 100, 9, true);
-
-        assertEquals(58, normal.height());
-        assertEquals(71, abnormal.height());
-        assertEquals(4, 427 - normal.x() - normal.width());
+        assertEquals("rsi.progress.hud.combined", key(hint));
+        assertArrayEquals(new Object[]{reboundKey, 4, 1}, ((TranslatableContents) hint.getContents()).getArgs());
     }
 
     @Test
@@ -178,8 +156,8 @@ class CraftProgressOverlayTest extends BootstrapTest {
                     "src/main/resources/assets/rs_integration/lang/" + language + ".json"))).getAsJsonObject();
             assertTrue(json.has("rsi.progress.hud.steps"), language);
             assertFalse(json.get("rsi.progress.hud.steps").getAsString().isBlank(), language);
-            assertTrue(json.has("rsi.progress.hud.hint"), language);
-            assertTrue(json.get("rsi.progress.hud.hint").getAsString().contains("%s"), language);
+            assertTrue(json.has("rsi.progress.hud.combined"), language);
+            assertTrue(json.get("rsi.progress.hud.combined").getAsString().contains("%s"), language);
         }
     }
 

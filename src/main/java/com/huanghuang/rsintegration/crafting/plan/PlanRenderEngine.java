@@ -22,6 +22,9 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 
 import java.util.Map;
+import java.util.ArrayList;
+import com.huanghuang.rsintegration.client.gui.CraftingUiStyle;
+import com.huanghuang.rsintegration.client.gui.MaterialCellStyle;
 
 import javax.annotation.Nullable;
 
@@ -57,17 +60,6 @@ public final class PlanRenderEngine {
     private static final int CARD_HEIGHT = 28;
     private static final int SLOT_SIZE   = 18;
     private static final int BOOKMARK_BUTTON_Z = 200;
-
-    // Material pill colors
-    private static final int C_PILL_GREEN_BG  = 0xCC1B5E20;
-    private static final int C_PILL_GREEN_FG  = 0xFFC8E6C9;
-    private static final int C_PILL_RED_BG    = 0xCCB71C1C;
-    private static final int C_PILL_RED_FG    = 0xFFFFCDD2;
-    private static final int C_PILL_ORANGE_BG = 0xCCE65100;
-    private static final int C_PILL_ORANGE_FG = 0xFFFFE0B2;
-    private static final int C_GREEN  = 0xFF4AE04A;
-    private static final int C_ORANGE = 0xFFFFAA33;
-    private static final int C_RED    = 0xFFFF4444;
 
     private final Font font;
     private final PlanAnimationController animation = new PlanAnimationController();
@@ -218,127 +210,69 @@ public final class PlanRenderEngine {
                                    int mouseX, int mouseY, int scrollOffset,
                                    MaterialTooltipSink tooltipSink,
                                    MaterialBookmarkSink bookmarkSink) {
-        UIRenderer.roundedGradient(gfx, left, top, contentW, areaHeight, 6f,
-                0xE6141E18, 0xE6101814);
-        gfx.fill(left + 1, top + 2, left + 4, top + areaHeight - 2, 0xFF44AA66);
-
-        int y = top + 4;
-        String hdr = Component.translatable("rsi.plan.materials").getString();
-        UIRenderer.textBackdrop(gfx, font, left + 10, y, hdr, 0xAA0A0A0A);
-        gfx.drawString(font, hdr, left + 10, y, 0xFFCCCCCC);
-        y += font.lineHeight + 4;
-
-        int maxPillW = 0;
-        String[][] countPairs = new String[materials.size()][];
-        int pi = 0;
-        for (var entry : materials.entrySet()) {
-            String availStr = formatCompact(entry.getValue().available());
-            String needStr = formatCompact(entry.getValue().needed());
-            countPairs[pi++] = new String[]{availStr, needStr};
-            int w = font.width(availStr) + font.width("/") + font.width(needStr) + 14;
-            if (w > maxPillW) maxPillW = w;
-        }
-        int cellW = SLOT_SIZE + maxPillW + 10;
-        int cols = Math.max(1, (contentW - 16) / cellW);
-        int rowStride = SLOT_SIZE + 8;
-
-        int gridTop = y;
-        int gridBottom = top + areaHeight;
-        int visibleGridH = gridBottom - gridTop;
-        int rows = (int) Math.ceil((double) materials.size() / cols);
-        int contentGridH = rows * rowStride;
-        int maxScroll = Math.max(0, contentGridH - visibleGridH);
+        CraftingUiStyle.surface(gfx, left, top, contentW, areaHeight, CraftingUiStyle.PANEL, CraftingUiStyle.BORDER);
+        gfx.drawString(font, Component.translatable("rsi.plan.materials"), left + 8, top + 4, CraftingUiStyle.TEXT, false);
+        int gridTop = top + 8 + font.lineHeight;
+        int gridBottom = top + areaHeight - 2;
+        int cols = Math.max(1, (contentW - 16) / 110);
+        int cellW = Math.max(1, (contentW - 16) / cols);
+        int rowStride = Math.max(34, font.lineHeight * 3 + 7);
+        int rows = (materials.size() + cols - 1) / cols;
+        int visibleGridH = Math.max(0, gridBottom - gridTop);
+        int maxScroll = Math.max(0, rows * rowStride - visibleGridH);
         scrollOffset = Math.max(0, Math.min(maxScroll, scrollOffset));
         if (maxScroll > 0) {
             String more = I18n.get("rsi.plan.materials_scroll");
-            int moreW = font.width(more);
-            if (moreW < contentW - 40) {
-                gfx.drawString(font, more, left + contentW - moreW - 8,
-                        top + 4, 0xFF88AA88, false);
-            }
+            gfx.drawString(font, more, left + contentW - font.width(more) - 8, top + 4, CraftingUiStyle.MUTED, false);
         }
-
-        int cx = left + 8;
-        int cy = gridTop - scrollOffset;
-        int col = 0;
-
-        gfx.enableScissor(left, gridTop, left + contentW, gridBottom);
+        var entries = materials.entrySet().stream().toList();
+        // 固定列宽，空白单元格也画到可见区域底部。
+        int firstRow = scrollOffset / rowStride;
+        int lastRow = (scrollOffset + visibleGridH + rowStride - 1) / rowStride;
+        gfx.enableScissor(left + 1, gridTop, left + contentW - 6, gridBottom);
         try {
-            pi = 0;
-            for (var entry : materials.entrySet()) {
-                // Skip rows fully scrolled out of the visible band.
-                if (cy + SLOT_SIZE < gridTop || cy > gridBottom) {
-                    pi++;
-                    col++;
-                    cx += cellW;
-                    if (col >= cols) { col = 0; cx = left + 8; cy += rowStride; }
-                    continue;
-                }
-
+            for (int row = firstRow; row < lastRow; row++) for (int col = 0; col < cols; col++) {
+                int cx = left + 8 + col * cellW;
+                int cy = gridTop + row * rowStride - scrollOffset;
+                int index = row * cols + col;
+                gfx.fill(cx, cy, cx + cellW, cy + rowStride, CraftingUiStyle.BORDER);
+                gfx.fill(cx + 1, cy + 1, cx + cellW - 1, cy + rowStride - 1, CraftingUiStyle.CANVAS);
+                if (index >= entries.size()) continue;
+                var entry = entries.get(index);
                 long needed = entry.getValue().needed();
                 long have = entry.getValue().available();
                 long missing = entry.getValue().missingCount();
-                int border = have >= needed ? C_GREEN : (missing == 0 || have > 0 ? C_ORANGE : C_RED);
-
+                long crafting = Math.max(0L, Math.max(0L, needed - have) - missing);
+                gfx.fill(cx + 1, cy + 1, cx + cellW - 1, cy + rowStride - 1,
+                        MaterialCellStyle.preview(have, needed, missing).color());
                 ItemStack stack = entry.getKey().stack(1);
-                UIRenderer.slotBg(gfx, cx, cy, SLOT_SIZE, border);
-                InkFluidRenderer.render(gfx, stack, cx + 1, cy + 1);
-                // The adjacent pill is the single source of truth for counts.
-                // Keep durability/cooldown decorations while suppressing the
-                // vanilla stack-count overlay to avoid a second number.
-                if (!InkFluidSupport.isToken(stack)) {
-                    gfx.renderItemDecorations(font, stack, cx + 1, cy + 1, "");
-                }
-
-                if (missing > 0) {
-                    int bookmarkX = cx + 9;
-                    int bookmarkY = cy;
-                    int bookmarkSize = 9;
-                    boolean bookmarkHovered = mouseY >= gridTop && mouseY <= gridBottom
-                            && mouseX >= bookmarkX && mouseX < bookmarkX + bookmarkSize
-                            && mouseY >= bookmarkY && mouseY < bookmarkY + bookmarkSize;
-                    drawBookmarkAddButton(gfx, bookmarkX, bookmarkY,
-                            bookmarkSize, bookmarkHovered);
-                    if (bookmarkSink != null) {
-                        int hitTop = Math.max(bookmarkY, gridTop);
-                        int hitBottom = Math.min(bookmarkY + bookmarkSize, gridBottom);
-                        if (hitBottom > hitTop) {
-                            bookmarkSink.addBookmarkButton(stack, bookmarkX, hitTop,
-                                    bookmarkSize, hitBottom - hitTop, missing);
-                        }
-                    }
-                }
-
-                if (tooltipSink != null
-                        && mouseY >= gridTop && mouseY <= gridBottom
-                        && mouseX >= cx - 1 && mouseX <= cx + SLOT_SIZE + 1
-                        && mouseY >= cy - 1 && mouseY <= cy + SLOT_SIZE + 1) {
+                int iconX = cx + cellW - 22;
+                InkFluidRenderer.render(gfx, stack, iconX, cy + 7);
+                if (!InkFluidSupport.isToken(stack)) gfx.renderItemDecorations(font, stack, iconX, cy + 7, "");
+                var labels = new ArrayList<Component>();
+                labels.add(Component.translatable("rsi.plan.material.available", formatCompact(have)));
+                if (crafting > 0) labels.add(Component.translatable("rsi.plan.material.crafting", formatCompact(crafting)));
+                if (missing > 0) labels.add(Component.translatable("rsi.plan.material.missing", formatCompact(missing)));
+                if (crafting == 0 && missing == 0) labels.add(Component.translatable("rsi.plan.material.needed", formatCompact(needed)));
+                gfx.pose().pushPose();
+                gfx.pose().translate(cx + 4, cy + 4, 0);
+                for (int line = 0; line < labels.size(); line++) gfx.drawString(font,
+                        CraftingUiStyle.fit(font, labels.get(line).getString(), cellW - 29),
+                        0, line * (font.lineHeight + 1), CraftingUiStyle.TEXT, false);
+                gfx.pose().popPose();
+                if (tooltipSink != null && mouseY >= gridTop && mouseY < gridBottom
+                        && mouseX >= cx && mouseX < cx + cellW && mouseY >= cy && mouseY < cy + rowStride) {
                     tooltipSink.setHoveredItem(stack, mouseX, mouseY, have, needed);
                 }
-
-                String[] pair = countPairs[pi++];
-                String pillText = pair[0] + "/" + pair[1];
-                int pillW = font.width(pillText) + 14;
-                int pillH = font.lineHeight + 4;
-                int pillX = cx + SLOT_SIZE + 4;
-                int pillY = cy + SLOT_SIZE / 2 - pillH / 2;
-
-                int pillBg, pillFg;
-                if (have >= needed) {
-                    pillBg = C_PILL_GREEN_BG; pillFg = C_PILL_GREEN_FG;
-                } else if (missing == 0 || have > 0) {
-                    pillBg = C_PILL_ORANGE_BG; pillFg = C_PILL_ORANGE_FG;
-                } else {
-                    pillBg = C_PILL_RED_BG; pillFg = C_PILL_RED_FG;
-                }
-                UIRenderer.pillBadge(gfx, font, pillX, pillY, pillW, pillH, pillBg, pillFg, pillText);
-
-                col++;
-                cx += cellW;
-                if (col >= cols) {
-                    col = 0;
-                    cx = left + 8;
-                    cy += rowStride;
+                if (missing > 0) {
+                    int bookmarkX = cx + cellW - 10;
+                    boolean hovered = mouseY >= gridTop && mouseY < gridBottom
+                            && mouseX >= bookmarkX && mouseX < bookmarkX + 9 && mouseY >= cy + 1 && mouseY < cy + 10;
+                    drawBookmarkAddButton(gfx, bookmarkX, cy + 1, 9, hovered);
+                    if (bookmarkSink != null) {
+                        int hitTop = Math.max(cy + 1, gridTop), hitBottom = Math.min(cy + 10, gridBottom);
+                        if (hitBottom > hitTop) bookmarkSink.addBookmarkButton(stack, bookmarkX, hitTop, 9, hitBottom - hitTop, missing);
+                    }
                 }
             }
         } finally {

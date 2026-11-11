@@ -30,6 +30,10 @@ final class PlanResponseClientPacketHandler {
     private PlanResponseClientPacketHandler() {}
 
     static void handle(PlanResponse plan, long requestId) {
+        if (!PlanningProgressTracker.acceptsResponse(requestId)) return;
+        if (requestId > 0L && !PlanningProgressTracker.isSelected(requestId)) {
+            PlanBackgroundClient.detach(requestId);
+        }
         RSIntegrationMod.LOGGER.debug(
                 "[RSI-PlanPkt] enqueueWork running on client thread: recipeId={}",
                 plan.recipeId());
@@ -46,10 +50,10 @@ final class PlanResponseClientPacketHandler {
             var mc = Minecraft.getInstance();
             // 页面内的候选切换必须把错误交回页面状态机，才能回滚这次草稿选择并
             // 重开原节点。旧实现只发聊天栏消息，pending 选择会永久残留。
-            if (mc.screen instanceof CraftingPlanScreen existing) {
+            CraftingPlanScreen existing = PlanScreenHost.currentPlan();
+            if (existing != null) {
                 if (existing.acceptResponse(requestId, plan)) return;
-                // 连续编辑会替换旧规划；旧请求的取消回包不再作为当前操作失败提示。
-                if (requestId > 0L && requestId < existing.activeRequestId()) return;
+                // 其他独立任务的失败仍需提示；已取消请求已在入口过滤。
             }
             if (mc.player != null) {
                 Component message = firstDiagnosticMessage(plan)
@@ -76,6 +80,7 @@ final class PlanResponseClientPacketHandler {
                 plan.executionBlocked(), plan.machineCandidates(), plan.stepIssues(),
                 plan.storageReference(), plan.storageNetworks(),
                 plan.outcome(), plan.diagnostics());
+        PlanBackgroundClient.remember(requestId, localized);
         openScreen(localized, requestId);
     }
 
@@ -168,15 +173,23 @@ final class PlanResponseClientPacketHandler {
             RSIntegrationMod.LOGGER.warn("[RSI-PlanPkt] openScreen ABORT: mc.player is null");
             return;
         }
-        if (mc.screen instanceof CraftingPlanScreen existing) {
+        CraftingPlanScreen existing = PlanScreenHost.currentPlan();
+        if (existing != null) {
             // 页面按待处理请求校验响应；根节点切换后，响应 ID 会不同于旧方案。
             RSIntegrationMod.LOGGER.debug("[RSI-PlanPkt] openScreen UPDATE: refreshing plan for {}",
                     plan.recipeId());
             if (existing.acceptResponse(requestId, plan)) return;
+            PlanBackgroundClient.detach(requestId);
             if (cacheBackgroundPlan(mc, plan, requestId)) return;
             return;
         }
         if (cacheBackgroundPlan(mc, plan, requestId)) return;
+        if (mc.screen instanceof PlanScreenHost) {
+            // 监控其他任务时收到后台结果，保留结果入口，不关闭原生容器。
+            PlanBackgroundClient.detach(requestId);
+            cacheBackgroundPlan(mc, plan, requestId);
+            return;
+        }
         try {
             mc.setScreen(new CraftingPlanScreen(plan, requestId));
             RSIntegrationMod.LOGGER.debug("[RSI-PlanPkt] CraftingPlanScreen opened successfully");

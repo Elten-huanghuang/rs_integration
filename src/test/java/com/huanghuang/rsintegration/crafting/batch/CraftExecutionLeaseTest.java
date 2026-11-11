@@ -12,7 +12,6 @@ import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.planning.PlanCache;
 import com.huanghuang.rsintegration.crafting.planning.PlanningSnapshot;
 import com.huanghuang.rsintegration.crafting.planning.PlanningStateValidator;
-import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
@@ -28,7 +27,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.MockedStatic;
 
-import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -141,7 +139,7 @@ class CraftExecutionLeaseTest extends BootstrapTest {
     @ParameterizedTest
     @CsvSource({"true, true", "true, false", "false, true", "false, false"})
     void leasedMachineConfirmationStillRevalidatesSupplyBeforeConsumingTheLease(
-            boolean stateValid, boolean exactKey) throws ReflectiveOperationException {
+            boolean stateValid, boolean exactKey) {
         ItemStack output = new ItemStack(Items.GLASS);
         CraftPlanGraph graph = new CraftPlanGraph(CraftPlanGraph.CURRENT_VERSION,
                 List.of(), List.of(), List.of(), List.of(), List.of());
@@ -167,13 +165,11 @@ class CraftExecutionLeaseTest extends BootstrapTest {
                     player, snapshot, plan, Level.OVERWORLD, BlockPos.ZERO, null))
                     .thenReturn(stateValid);
 
-            Method confirm = GenericCraftPacket.class.getDeclaredMethod(
-                    "findValidatedExecutionPlan", ServerPlayer.class, ResourceLocation.class,
-                    Map.class, int.class, ItemStack.class, ModType.class,
-                    ResourceLocation.class, BlockPos.class, StorageReference.class, Map.class);
-            confirm.setAccessible(true);
-            confirm.invoke(null, player, recipeId, Map.of(), 1, output, type,
-                    Level.OVERWORLD.location(), BlockPos.ZERO, null, Map.of());
+            var result = GenericCraftPacket.findValidatedExecutionPlan(
+                    player, recipeId, Map.of(), 1, output, type,
+                    Level.OVERWORLD.location(), BlockPos.ZERO, null, Map.of(), 0L);
+            assertEquals(!stateValid, result.rejected());
+            assertSame(stateValid ? displayed : null, result.entry());
 
             validator.verify(() -> PlanningStateValidator.revalidateForExecution(
                     player, snapshot, plan, Level.OVERWORLD, BlockPos.ZERO, null));

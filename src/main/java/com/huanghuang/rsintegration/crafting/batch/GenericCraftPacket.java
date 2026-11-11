@@ -309,6 +309,7 @@ public final class GenericCraftPacket {
     private final ItemStack targetOutput;
     /** Client-generated correlation id for preview responses; zero is legacy. */
     private long requestId;
+    private long confirmedPreviewRequestId;
     private OutputDestination outputDestination = OutputDestination.RS_NETWORK;
     /** Explicit backend-qualified target selected in the plan UI; null means server default. */
     @Nullable
@@ -490,7 +491,7 @@ public final class GenericCraftPacket {
                 recipeId, preview, forcedRecipes, dim, pos, repeatCount, inferMode,
                 baseItem, targetOutput, requestId, outputDestination, storageReference,
                 maximize, machineSelectionMode, materialLocks, partialPreparation,
-                planningPreferences);
+                planningPreferences, confirmedPreviewRequestId);
     }
 
     private static GenericCraftPacket fromWireData(GenericCraftPacketCodec.WireData data) {
@@ -504,7 +505,17 @@ public final class GenericCraftPacket {
         packet.materialLocks = data.materialLocks();
         packet.planningPreferences = data.planningPreferences();
         packet.partialPreparation = data.partialPreparation();
+        packet.confirmedPreviewRequestId = data.confirmedPreviewRequestId();
         return packet;
+    }
+
+    /** 确认哪一份已展示计划；缺失或过期时拒绝执行，不能悄悄搜索另一条路线。 */
+    public GenericCraftPacket withConfirmedPreview(long previewRequestId) {
+        if (previewRequestId < 0L || preview || partialPreparation) {
+            throw new IllegalArgumentException("invalid confirmed preview request");
+        }
+        confirmedPreviewRequestId = previewRequestId;
+        return this;
     }
 
     public GenericCraftPacket withMachineSelectionMode(MachineSelectionMode mode) {
@@ -627,6 +638,12 @@ public final class GenericCraftPacket {
         }
         final long previewGeneration = packet.preview
                 ? CraftPlanningRuntime.planRequests().begin(player.getUUID()) : 0L;
+        if (packet.preview && previewGeneration == 0L) {
+            context.enqueueWork(() -> PlanningProgressServer.failDirect(player, packet.requestId,
+                    packet.recipeId, Component.translatable("rsi.plan.failure.planner_busy")));
+            context.setPacketHandled(true);
+            return;
+        }
         if (packet.preview) {
             PlanningProgressServer.begin(player.getUUID(), packet.requestId,
                     previewGeneration, packet.recipeId);
@@ -767,7 +784,7 @@ public final class GenericCraftPacket {
                     packet.repeatCount, packet.inferMode, packet.baseItem, packet.targetOutput,
                     packet.outputDestination, packet.machineSelectionMode,
                     packet.storageReference, packet.materialLocks,
-                    false, preparationRequest, packet.planningPreferences);
+                    false, preparationRequest, packet.planningPreferences, packet.confirmedPreviewRequestId);
         } catch (CraftingPlanningTimeoutException timeout) {
             PerformanceMonitor.recordResolveTimeout();
             RSIntegrationMod.LOGGER.warn(
@@ -809,7 +826,12 @@ public final class GenericCraftPacket {
     }
 
     record BindingAwareGraph(ImmutableRecipeGraph graph,
-                             Set<ResourceLocation> blockedOutputIds) {}
+                             Set<ResourceLocation> blockedOutputIds,
+                             boolean requiresTypedPlanning) {
+        BindingAwareGraph(ImmutableRecipeGraph graph, Set<ResourceLocation> blockedOutputIds) {
+            this(graph, blockedOutputIds, false);
+        }
+    }
 
     static BindingAwareGraph filterRecipeGraph(
             ImmutableRecipeGraph graph, Predicate<ImmutableRecipeGraph.RecipeNode> allowed) {
@@ -921,59 +943,66 @@ public final class GenericCraftPacket {
 
     static BindingAwareGraph scopedBindingAwareGraph(
             ServerPlayer player, ImmutableRecipeGraph graph, ResourceLocation targetRecipeId) {
-        BindingAwareGraph filtered = bindingAwareGraph(player,
-                ImmutableRecipeGraphProjector.restrictToDependencies(graph, targetRecipeId));
-        if (!filtered.graph().recipesById().containsKey(targetRecipeId)) {
-            // 第三方机器终端可能无法参与依赖裁剪，但完整绑定图仍保留其节点。
-            // 纯规划器会从该终端重新限定依赖范围，因此这里无需整图参与搜索。
-            filtered = bindingAwareGraph(player, graph);
+        ImmutableRecipeGraph scoped = ImmutableRecipeGraphProjector.restrictToDependencies(graph, targetRecipeId);
+        if (scoped.recipesById().values().stream().noneMatch(GenericCraftPacket::hasContextualInputs)) {
+            return bindingAwareGraph(player, scoped);
         }
-        Map<ResourceLocation, List<ImmutableRecipeGraph.IngredientRef>> replacements =
-                new HashMap<>();
-        for (ImmutableRecipeGraph.RecipeNode node : filtered.graph().recipesById().values()) {
-            if (!ModIds.ID_EMBERS_STAMPER.equals(node.modTypeId())
-                    && !ModIds.ID_EMBERS_ALCHEMY.equals(node.modTypeId())) continue;
+        Set<ResourceLocation> unsupported = new HashSet<>();
+        ImmutableRecipeGraph contextual = ImmutableRecipeGraphProjector.captureContextualDependencies(
+                graph, targetRecipeId, node -> {
+            if (!hasContextualInputs(node)) return null;
             Recipe<?> recipe = CraftRecipeResolver.resolve(player.serverLevel(), node.recipeId());
-            if (recipe == null) continue;
+            if (recipe == null) return null;
             List<IngredientSpec> declared =
                     CraftPacketUtils.extractSingleOperationRecursiveIngredientSpecs(recipe);
-            if (declared == null || declared.isEmpty()) continue;
-            List<IngredientSpec> contextual = CraftPacketUtils.applyPlanningIngredientContext(
+            if (declared == null || declared.isEmpty()) return null;
+            List<IngredientSpec> current = CraftPacketUtils.applyPlanningIngredientContext(
                     recipe, player, declared);
-            if (contextual == null || contextual.equals(declared)) continue;
+            if (current == null || current.equals(declared)) return null;
             List<ImmutableRecipeGraph.IngredientRef> inputs = new ArrayList<>();
-            boolean projectable = true;
-            for (IngredientSpec spec : contextual) {
+            for (IngredientSpec spec : current) {
                 if (spec.isEmpty()) continue;
                 ImmutableRecipeGraph.IngredientRef input =
                         ImmutableRecipeGraphProjector.projectIngredient(spec);
                 if (input == null) {
-                    projectable = false;
-                    break;
+                    // 不能完整冻结当前需求时，禁止使用缺少催化剂/状态约束的旧节点。
+                    unsupported.add(node.recipeId());
+                    return null;
                 }
                 inputs.add(input);
             }
-            if (projectable) replacements.put(node.recipeId(), List.copyOf(inputs));
-        }
-        return replacements.isEmpty() ? filtered : new BindingAwareGraph(
-                ImmutableRecipeGraphProjector.withRecipeInputs(filtered.graph(), replacements),
-                filtered.blockedOutputIds());
+            return List.copyOf(inputs);
+        });
+        BindingAwareGraph filtered = bindingAwareGraph(player, contextual);
+        boolean requiresTyped = unsupported.stream().anyMatch(filtered.graph().recipesById()::containsKey);
+        return new BindingAwareGraph(filtered.graph(), filtered.blockedOutputIds(), requiresTyped);
     }
 
-    private record ExecutionPlanLookup(@Nullable PlanCache.Entry entry, boolean rejected) {}
+    private static boolean hasContextualInputs(ImmutableRecipeGraph.RecipeNode node) {
+        return ModIds.ID_EMBERS_STAMPER.equals(node.modTypeId())
+                || ModIds.ID_EMBERS_ALCHEMY.equals(node.modTypeId());
+    }
 
-    private static ExecutionPlanLookup findValidatedExecutionPlan(
+    record ExecutionPlanLookup(@Nullable PlanCache.Entry entry, boolean rejected) {}
+
+    static ExecutionPlanLookup findValidatedExecutionPlan(
             ServerPlayer player, ResourceLocation recipeId, Map<String, String> forcedRecipes,
             int repeatCount, @Nullable ItemStack targetOutput, @Nullable ModType modType,
             @Nullable ResourceLocation dimension, @Nullable BlockPos position,
             @Nullable StorageReference storageReference,
-            Map<String, ItemStack> materialLocks) {
+            Map<String, ItemStack> materialLocks, long confirmedPreviewRequestId) {
         PlanCache.Key exactKey = CraftPlanCacheKeys.key(player.getUUID(), recipeId,
                 forcedRecipes, repeatCount, targetOutput, modType, materialLocks);
         PlanCache cache = CraftPlanningRuntime.planCache();
-        PlanCache.Entry entry = cache.peekForExecution(exactKey);
+        boolean explicitPreview = confirmedPreviewRequestId > 0L;
+        PlanCache.Entry entry = explicitPreview ? cache.peekForRequest(exactKey, confirmedPreviewRequestId)
+                : cache.peekForExecution(exactKey);
+        if (explicitPreview && (entry == null || !matchesExecutionLease(
+                entry, player, recipeId, forcedRecipes, repeatCount, targetOutput, modType))) {
+            return new ExecutionPlanLookup(null, true);
+        }
         boolean semanticLease = false;
-        if (entry == null && materialLocks.isEmpty()) {
+        if (!explicitPreview && entry == null && materialLocks.isEmpty()) {
             PlanCache.Entry latest = cache.peekLatestForExecution(player.getUUID());
             if (latest != null && matchesExecutionLease(
                     latest, player, recipeId, forcedRecipes, repeatCount,
@@ -1012,7 +1041,9 @@ public final class GenericCraftPacket {
             // 保留失效租约直到重新预览，连续点击确认也不能悄悄重选路线。
             return new ExecutionPlanLookup(null, true);
         }
-        boolean consumed = semanticLease
+        boolean consumed = explicitPreview
+                ? cache.consumeForRequest(player.getUUID(), confirmedPreviewRequestId, entry)
+                : semanticLease
                 ? cache.consumeLatestForExecution(player.getUUID(), entry)
                 : cache.consumeForExecution(exactKey, entry);
         if (!consumed) {
@@ -1067,7 +1098,7 @@ public final class GenericCraftPacket {
             @Nullable ItemStack baseItem, @Nullable ItemStack targetOutput,
             OutputDestination outputDestination, MachineSelectionMode machineSelectionMode,
             @Nullable CraftStorageEndpoint storageEndpoint,
-            PlanCache.Entry cached, Map<String, ItemStack> materialLocks) {
+            PlanCache.Entry cached, Map<String, ItemStack> materialLocks, long confirmedPreviewRequestId) {
         ModType terminalType = modTypeForCachedExecution(recipe);
         if (cached.resolvedGraph() == null) {
             // 已展示的成功计划不能在确认后改走另一条未展示的递归路线。
@@ -1098,10 +1129,10 @@ public final class GenericCraftPacket {
             RSIntegrationMod.debug(
                     "[RSI-Generic] Executing revalidated preview input graph for {} nodes={}",
                     recipeId, completeGraph.nodes().size());
-            launchGraphAsyncChain(player, completeGraph, storageEndpoint,
+            CraftExecutionLauncher.launchGraph(player, completeGraph, storageEndpoint,
                     recipeId, forcedRecipes, dim, pos,
                     targetOutput, outputDestination, machineSelectionMode,
-                    materialLocks);
+                    materialLocks, confirmedPreviewRequestId);
             return true;
         } catch (IllegalArgumentException | ArithmeticException exception) {
             RSIntegrationMod.LOGGER.warn(
@@ -1231,9 +1262,19 @@ public final class GenericCraftPacket {
 
     private static void cancelTimedOutPlanning(UUID playerId, long generation) {
         PlanRequestService requests = CraftPlanningRuntime.planRequests();
-        if (requests.isCurrent(playerId, generation)) {
-            requests.forget(playerId);
-        }
+        requests.cancel(playerId, generation);
+    }
+
+    public static void cancelPlanning(ServerPlayer player, long requestId) {
+        long generation = PlanningProgressServer.generationForRequest(player.getUUID(), requestId);
+        if (generation == 0L || !CraftPlanningRuntime.planRequests().cancel(player.getUUID(), generation)) return;
+        CraftPlanningRuntime.typedPreviewRequests().remove(player.getUUID(), generation);
+        CraftRequestQueues.cancelPreview(player.getUUID(), generation);
+        PlanningProgressServer.cancelled(player, generation);
+    }
+
+    public static void finishPlanning(UUID playerId, long generation) {
+        CraftPlanningRuntime.planRequests().complete(playerId, generation);
     }
 
     private static void tickTypedPreviewRequests(MinecraftServer server) {
@@ -1419,7 +1460,7 @@ public final class GenericCraftPacket {
         tryResolve(player, recipeId, forcedRecipes, dim, pos, repeatCount, inferMode,
                 baseItem, targetOutput, outputDestination, machineSelectionMode,
                 storageReference, materialLocks, typedGraphOnly, partialPreparation,
-                PlanningPreferences.empty());
+                PlanningPreferences.empty(), 0L);
     }
 
     private static void tryResolve(ServerPlayer player, ResourceLocation recipeId,
@@ -1435,7 +1476,7 @@ public final class GenericCraftPacket {
                                    Map<String, ItemStack> materialLocks,
                                    boolean typedGraphOnly,
                                    boolean partialPreparation,
-                                   PlanningPreferences preferences) {
+                                   PlanningPreferences preferences, long confirmedPreviewRequestId) {
         PlanningPreferences safePreferences = preferences == null
                 ? PlanningPreferences.empty() : preferences;
         CraftForcedRecipeOverrides.Resolution forcedResolution =
@@ -1708,16 +1749,16 @@ public final class GenericCraftPacket {
 
         ExecutionPlanLookup cachedPreview = findValidatedExecutionPlan(
                 player, recipeId, forcedRecipes, repeatCount, targetOutput, modType,
-                effectiveDim, effectivePos, executionStorageReference, materialLocks);
+                effectiveDim, effectivePos, executionStorageReference, materialLocks, confirmedPreviewRequestId);
         if (cachedPreview.rejected()) {
-            player.sendSystemMessage(Component.translatable("rsi.plan.failure.planning_cancelled"));
+            player.sendSystemMessage(Component.translatable("rsi.plan.failure.confirmation_invalid"));
             return;
         }
         if (cachedPreview.entry() != null
                 && tryExecuteCachedCraftingPlan(player, recipe, recipeId, forcedRecipes,
                 dim, pos, repeatCount, inferMode, baseItem, targetOutput,
                 outputDestination, machineSelectionMode, storageEndpoint,
-                cachedPreview.entry(), materialLocks)) {
+                cachedPreview.entry(), materialLocks, confirmedPreviewRequestId)) {
             return;
         }
 
@@ -2834,7 +2875,8 @@ public final class GenericCraftPacket {
                                 planStorageReference, available),
                         PlanningStateValidator.bindingFingerprint(player, planDimKey, planLookupPos),
                         bindingGraph.blockedOutputIds(),
-                        !(recipe instanceof CraftingRecipe) && !backgroundProjectable,
+                        bindingGraph.requiresTypedPlanning()
+                                || !(recipe instanceof CraftingRecipe) && !backgroundProjectable,
                         safePreferences);
             } finally {
                 PerformanceMonitor.recordPlanningSnapshot(System.nanoTime() - snapshotStarted);

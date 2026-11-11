@@ -4,7 +4,7 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.UUID;
 
-/** Bounded server-thread queue that keeps only the newest preview per player. */
+/** 有界请求队列，只合并同一预览的重复入队，不覆盖同玩家的其他预览。 */
 final class DeferredCraftRequestQueue<T> {
     record Entry<T>(UUID playerId, boolean preview, long generation, T payload, long queuedAtNanos) {
         Entry(UUID playerId, boolean preview, long generation, T payload) {
@@ -23,7 +23,8 @@ final class DeferredCraftRequestQueue<T> {
     synchronized boolean offer(Entry<T> request) {
         if (request.preview()) {
             entries.removeIf(existing -> existing.preview()
-                    && existing.playerId().equals(request.playerId()));
+                    && existing.playerId().equals(request.playerId())
+                    && existing.generation() == request.generation());
         }
         if (entries.size() >= capacity) return false;
         entries.addLast(request);
@@ -53,6 +54,11 @@ final class DeferredCraftRequestQueue<T> {
 
     synchronized void clear() {
         entries.clear();
+    }
+
+    synchronized void cancelPreview(UUID playerId, long generation) {
+        entries.removeIf(request -> request.preview() && request.playerId().equals(playerId)
+                && request.generation() == generation);
     }
 
     synchronized int size() {

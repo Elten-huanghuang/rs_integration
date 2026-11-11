@@ -27,7 +27,7 @@ class DeferredCraftRequestQueueTest {
     }
 
     @Test
-    void newestPreviewReplacesOlderPreviewForSamePlayer() {
+    void separatePreviewsDoNotReplaceEachOther() {
         DeferredCraftRequestQueue<String> queue = new DeferredCraftRequestQueue<>(3);
         UUID player = UUID.randomUUID();
 
@@ -35,6 +35,7 @@ class DeferredCraftRequestQueueTest {
         assertTrue(queue.offer(new DeferredCraftRequestQueue.Entry<>(player, false, 0L, "execute")));
         assertTrue(queue.offer(new DeferredCraftRequestQueue.Entry<>(player, true, 2L, "new")));
 
+        assertEquals("old", queue.poll().payload());
         assertEquals("execute", queue.poll().payload());
         assertEquals("new", queue.poll().payload());
         assertNull(queue.poll());
@@ -48,7 +49,8 @@ class DeferredCraftRequestQueueTest {
         assertTrue(queue.offer(new DeferredCraftRequestQueue.Entry<>(first, true, 1L, "old")));
         assertTrue(queue.offer(new DeferredCraftRequestQueue.Entry<>(UUID.randomUUID(), false, 0L, "run")));
         assertFalse(queue.offer(new DeferredCraftRequestQueue.Entry<>(UUID.randomUUID(), false, 0L, "full")));
-        assertTrue(queue.offer(new DeferredCraftRequestQueue.Entry<>(first, true, 2L, "new")));
+        assertFalse(queue.offer(new DeferredCraftRequestQueue.Entry<>(first, true, 2L, "new task")));
+        assertTrue(queue.offer(new DeferredCraftRequestQueue.Entry<>(first, true, 1L, "new")));
         assertEquals(2, queue.size());
     }
 

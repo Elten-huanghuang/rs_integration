@@ -1,5 +1,9 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
+import com.huanghuang.rsintegration.crafting.planning.PlanningProgressOverlay;
+import com.huanghuang.rsintegration.crafting.planning.PlanningProgressTracker;
+import com.huanghuang.rsintegration.crafting.planning.PlanningTasksScreen;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.mojang.brigadier.arguments.LongArgumentType;
 import com.mojang.brigadier.context.CommandContext;
@@ -21,6 +25,7 @@ import net.minecraftforge.fml.common.Mod;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.UUID;
 
 /** 保留玩家关闭规划页后完成的后台结果，并提供聊天栏一键重新打开入口。 */
 @OnlyIn(Dist.CLIENT)
@@ -35,6 +40,36 @@ public final class PlanBackgroundClient {
     private static final Map<Long, CachedPlan> CACHED_PLANS = new LinkedHashMap<>();
 
     private PlanBackgroundClient() {}
+
+    public static synchronized void attach(long requestId) {
+        DETACHED_REQUESTS.remove(requestId);
+    }
+
+    public static synchronized void remember(long requestId, PlanResponse plan) {
+        if (requestId <= 0L || plan == null) return;
+        long now = System.currentTimeMillis();
+        prune(now);
+        CACHED_PLANS.put(requestId, new CachedPlan(plan, now));
+        while (CACHED_PLANS.size() > MAX_CACHED_PLANS) {
+            CACHED_PLANS.remove(CACHED_PLANS.keySet().iterator().next());
+        }
+    }
+
+    /** 同一编辑页的新版本替换旧条目；独立打开的其他计划不按配方名称去重。 */
+    public static synchronized void replaceRevision(long previousRequest, long nextRequest) {
+        if (previousRequest <= 0 || nextRequest <= 0 || previousRequest == nextRequest) return;
+        CACHED_PLANS.remove(previousRequest);
+        DETACHED_REQUESTS.remove(previousRequest);
+        PlanningProgressTracker.responseReceived(previousRequest);
+    }
+
+    public static synchronized Map<Long, PlanResponse> completedPlans() {
+        prune(System.currentTimeMillis());
+        Map<Long, PlanResponse> result = new LinkedHashMap<>();
+        CACHED_PLANS.entrySet().stream().sorted(Map.Entry.<Long, CachedPlan>comparingByKey().reversed())
+                .forEach(entry -> result.put(entry.getKey(), entry.getValue().plan()));
+        return result;
+    }
 
     /** 规划页关闭时调用；响应到达后不会突然切换界面，而是留给聊天栏入口。 */
     public static synchronized void detach(long requestId) {
@@ -92,6 +127,8 @@ public final class PlanBackgroundClient {
     @SubscribeEvent
     public static void registerClientCommand(RegisterClientCommandsEvent event) {
         event.getDispatcher().register(Commands.literal("rsi_plan")
+                .then(Commands.literal("tasks").executes(context -> { PlanningTasksScreen.open(); return 1; }))
+                .then(Commands.literal("cancel").executes(context -> PlanningProgressOverlay.cancelCurrent() ? 1 : 0))
                 .then(Commands.literal("open")
                         .then(Commands.argument("request", LongArgumentType.longArg(1L))
                                 .executes(PlanBackgroundClient::open))));
@@ -100,6 +137,7 @@ public final class PlanBackgroundClient {
     @SubscribeEvent
     public static void onClientLogout(ClientPlayerNetworkEvent.LoggingOut event) {
         clear();
+        PlanningProgressTracker.clear();
     }
 
     private static int open(CommandContext<CommandSourceStack> context) {
@@ -114,10 +152,43 @@ public final class PlanBackgroundClient {
                     Component.translatable("rsi.plan.background.expired"));
             return 0;
         }
+        return openRequest(requestId) ? 1 : 0;
+    }
+
+    public static boolean openRequest(long requestId) {
+        return openRequest(requestId, null);
+    }
+
+    public static boolean openRequest(long requestId, Runnable returnToParent) {
+        PlanResponse plan = completedPlans().get(requestId);
         Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft.player == null) return 0;
-        minecraft.setScreen(new CraftingPlanScreen(cached.plan(), requestId));
-        return 1;
+        if (plan == null || minecraft.player == null) return false;
+        minecraft.setScreen(new CraftingPlanScreen(plan, requestId, null, returnToParent));
+        return true;
+    }
+
+    /** 服务端已接收的计划不再显示为待确认；迟到回执也能清理缓存。 */
+    public static synchronized void accepted(long requestId, UUID craftId) {
+        if (requestId <= 0L) return;
+        CACHED_PLANS.remove(requestId);
+        DETACHED_REQUESTS.remove(requestId);
+        PlanningProgressTracker.responseReceived(requestId);
+        if (Minecraft.getInstance().screen instanceof PlanScreenHost host) {
+            host.rsi$planAccepted(requestId, craftId);
+        }
+    }
+
+    /** 移除尚未确认的计算结果；不会向服务器发送取消，也不会影响已提交的合成。 */
+    public static synchronized boolean dismiss(long requestId) {
+        if (requestId <= 0L || CACHED_PLANS.remove(requestId) == null) return false;
+        DETACHED_REQUESTS.remove(requestId);
+        PlanningProgressTracker.responseReceived(requestId);
+        return true;
+    }
+
+    public static synchronized boolean contains(long requestId) {
+        prune(System.currentTimeMillis());
+        return CACHED_PLANS.containsKey(requestId);
     }
 
     private static void prune(long now) {

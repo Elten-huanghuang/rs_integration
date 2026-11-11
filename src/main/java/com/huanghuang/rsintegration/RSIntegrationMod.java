@@ -146,6 +146,8 @@ import net.minecraft.client.gui.screens.MenuScreens;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.inventory.MenuType;
+import com.huanghuang.rsintegration.mods.rs.monitor.RsMonitorMenus;
+import com.huanghuang.rsintegration.mods.rs.monitor.RsMonitorNavigationClient;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.common.ForgeConfigSpec;
 import net.minecraftforge.common.MinecraftForge;
@@ -338,6 +340,7 @@ public final class RSIntegrationMod {
         RSIntegrationConfig.register();
         RSStorageConfig.register();
         MOD_BUS.addListener((ModConfigEvent.Loading e) -> {
+            RSIntegrationConfig.migratePlanningHudLayout(e.getConfig());
             if (e.getConfig().getSpec() == RSIntegrationConfig.COMMON_SPEC) {
                 migrateCommonConfig(e.getConfig());
                 refreshConfigCache();
@@ -373,6 +376,7 @@ public final class RSIntegrationMod {
             RSOptionalBootstrap.registerBlocks(MOD_BUS);
             RSOptionalBootstrap.registerItems(MOD_BUS);
             RSOptionalBootstrap.registerBindings();
+            RsMonitorMenus.register(MOD_BUS);
         }
         if (ModList.get().isLoaded("beyonddimensions")) {
             ModItems.registerOptionalBeyondDimensions(MOD_BUS,
@@ -1039,6 +1043,9 @@ public final class RSIntegrationMod {
     }
 
     private void onClientSetup(final FMLClientSetupEvent event) {
+        if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
+            event.enqueueWork(RsMonitorNavigationClient::registerScreen);
+        }
         if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)
                 || ModList.get().isLoaded("beyonddimensions")) {
             MenuScreens.register(

@@ -28,12 +28,25 @@ final class CraftExecutionLauncher {
             @Nullable ItemStack targetOutput, OutputDestination outputDestination,
             MachineSelectionMode machineSelectionMode,
             Map<String, ItemStack> materialLocks) {
+        launchGraph(player, graph, storageEndpoint, recipeId, forcedRecipes, dimension, position,
+                targetOutput, outputDestination, machineSelectionMode, materialLocks, 0L);
+    }
+
+    static void launchGraph(
+            ServerPlayer player, CraftPlanGraph graph,
+            @Nullable CraftStorageEndpoint storageEndpoint,
+            ResourceLocation recipeId, Map<String, String> forcedRecipes,
+            @Nullable ResourceLocation dimension, @Nullable BlockPos position,
+            @Nullable ItemStack targetOutput, OutputDestination outputDestination,
+            MachineSelectionMode machineSelectionMode,
+            Map<String, ItemStack> materialLocks, long confirmedPreviewRequestId) {
         AsyncCraftChain chain = new AsyncCraftChain(
                 player.getUUID(), player.getServer(), storageEndpoint, graph);
         RSIntegrationMod.LOGGER.info(
                 "[RSI-Craft] launch craftId={} graphNodes={} executor=graph terminalEmbedded=true",
                 chain.getCraftId(), graph.topologicalOrder().size());
         chain.setTargetOutput(targetOutput);
+        chain.setConfirmedPreviewRequestId(confirmedPreviewRequestId);
         chain.setSupplementalPlanningPreferences(forcedRecipes, materialLocks);
         chain.setOutputDestination(outputDestination);
         chain.setMachineSelection(

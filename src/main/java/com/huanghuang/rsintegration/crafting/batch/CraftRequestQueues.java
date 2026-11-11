@@ -63,4 +63,8 @@ final class CraftRequestQueues {
         WARM_UP.clear();
         EXECUTION.clear();
     }
+
+    static void cancelPreview(UUID playerId, long generation) {
+        WARM_UP.cancelPreview(playerId, generation);
+    }
 }

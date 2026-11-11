@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.progress;
 
 import com.huanghuang.rsintegration.crafting.MachineManagementScreen;
+import com.huanghuang.rsintegration.crafting.planning.PlanningTasksScreen;
 
 
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
@@ -80,7 +81,7 @@ public final class CraftProgressScreen extends Screen {
         contentX = panelX + sidebarWidth + 1;
         contentY = panelY + 43;
         contentWidth = panelWidth - sidebarWidth - 1;
-        footerHeight = contentWidth < 420 ? 64 : 39;
+        footerHeight = contentWidth < 420 ? 88 : 39;
         contentHeight = panelHeight - 43 - footerHeight;
     }
 
@@ -101,7 +102,7 @@ public final class CraftProgressScreen extends Screen {
     private void buildButtons() {
         clearWidgets();
         int footerY = panelY + panelHeight - footerHeight + 9;
-        int columns = footerHeight == 64 ? 2 : 4;
+        int columns = footerHeight == 88 ? 2 : 5;
         int buttonWidth = (contentWidth - 24 - (columns - 1) * 4) / columns;
         machinesButton = addRenderableWidget(Button.builder(
                         Component.translatable("rsi.control_center.machines"),
@@ -128,9 +129,13 @@ public final class CraftProgressScreen extends Screen {
                         Component.translatable("rsi.progress.cancel"), button -> confirmCancel())
                 .bounds(buttonX(2, columns, buttonWidth),
                         buttonY(2, columns, footerY), buttonWidth, 20).build());
-        addRenderableWidget(Button.builder(Component.translatable("gui.done"), button -> onClose())
+        addRenderableWidget(Button.builder(Component.translatable("rsi.planning.tasks.open"),
+                        button -> minecraft.setScreen(new PlanningTasksScreen(this)))
                 .bounds(buttonX(3, columns, buttonWidth),
                         buttonY(3, columns, footerY), buttonWidth, 20).build());
+        addRenderableWidget(Button.builder(Component.translatable("gui.done"), button -> onClose())
+                .bounds(buttonX(4, columns, buttonWidth),
+                        buttonY(4, columns, footerY), buttonWidth, 20).build());
         updateButtonState();
     }
 

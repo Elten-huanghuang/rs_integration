@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.planning;
 
 
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
+import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.resources.ResourceLocation;
@@ -20,15 +21,16 @@ import java.util.function.BiConsumer;
 /** Thread-safe request-level progress registry. Worker threads only mutate snapshots. */
 public final class PlanningProgressServer {
     private static final long PUBLISH_INTERVAL_NANOS = 100_000_000L;
+    private static final long HEARTBEAT_INTERVAL_NANOS = 1_000_000_000L;
     static final long FINALIZING_TIMEOUT_MS = 5_000L;
-    private static final Map<UUID, Active> ACTIVE = new ConcurrentHashMap<>();
+    private static final Map<PlanningRequestKey, Active> ACTIVE = new ConcurrentHashMap<>();
 
     private PlanningProgressServer() {}
 
     public static void begin(UUID playerId, long requestId, long generation,
                              ResourceLocation recipeId) {
         if (playerId == null || requestId <= 0L || generation <= 0L || recipeId == null) return;
-        ACTIVE.put(playerId, new Active(requestId, generation, recipeId));
+        ACTIVE.put(new PlanningRequestKey(playerId, generation), new Active(requestId, generation, recipeId));
     }
 
     public static void warmingUp(UUID playerId, long generation) {
@@ -61,7 +63,7 @@ public final class PlanningProgressServer {
     public static void fail(ServerPlayer player, long generation, Component detail) {
         if (player == null) return;
         finish(player, generation, failureState(detail),
-                currentPhase(player.getUUID()), detail);
+                currentPhase(player.getUUID(), generation), detail);
     }
 
     public static void failDirect(ServerPlayer player, long requestId, ResourceLocation recipeId,
@@ -80,9 +82,9 @@ public final class PlanningProgressServer {
     public static void tick(MinecraftServer server,
                             BiConsumer<UUID, Long> finalizingTimeoutHandler) {
         long now = System.nanoTime();
-        for (Map.Entry<UUID, Active> entry : ACTIVE.entrySet()) {
+        for (Map.Entry<PlanningRequestKey, Active> entry : ACTIVE.entrySet()) {
             Active active = entry.getValue();
-            ServerPlayer player = server.getPlayerList().getPlayer(entry.getKey());
+            ServerPlayer player = server.getPlayerList().getPlayer(entry.getKey().playerId());
             if (player == null || player.hasDisconnected() || player.isRemoved()) continue;
             if (active.finalizingTimedOut(now)) {
                 active.update(PlanningProgressSnapshot.State.TIMED_OUT,
@@ -91,11 +93,12 @@ public final class PlanningProgressServer {
                 send(player, active.snapshot());
                 ACTIVE.remove(entry.getKey(), active);
                 if (finalizingTimeoutHandler != null) {
-                    finalizingTimeoutHandler.accept(entry.getKey(), active.generation);
+                    finalizingTimeoutHandler.accept(entry.getKey().playerId(), active.generation);
                 }
                 continue;
             }
-            if (!active.dirty() || now - active.lastSentNanos < PUBLISH_INTERVAL_NANOS) continue;
+            if (now - active.lastSentNanos < PUBLISH_INTERVAL_NANOS
+                    || !active.dirty() && now - active.lastSentNanos < HEARTBEAT_INTERVAL_NANOS) continue;
             long sendingVersion = active.version();
             send(player, active.snapshot());
             active.markSent(now, sendingVersion);
@@ -103,7 +106,23 @@ public final class PlanningProgressServer {
     }
 
     public static void remove(UUID playerId) {
-        if (playerId != null) ACTIVE.remove(playerId);
+        if (playerId != null) ACTIVE.keySet().removeIf(key -> key.playerId().equals(playerId));
+    }
+
+    /** 请求号只对发送玩家生效；旧取消包不能取消新预览。 */
+    public static long generationForRequest(UUID playerId, long requestId) {
+        if (requestId <= 0L) return 0L;
+        for (var entry : ACTIVE.entrySet()) {
+            if (entry.getKey().playerId().equals(playerId) && entry.getValue().requestId == requestId) {
+                return entry.getValue().generation;
+            }
+        }
+        return 0L;
+    }
+
+    public static void cancelled(ServerPlayer player, long generation) {
+        finish(player, generation, PlanningProgressSnapshot.State.CANCELLED,
+                currentPhase(player.getUUID(), generation), Component.empty());
     }
 
     public static void clear() {
@@ -114,22 +133,24 @@ public final class PlanningProgressServer {
                                PlanningProgressSnapshot.State state,
                                PlanningProgressSnapshot.Phase phase, Component detail) {
         if (player == null) return;
-        Active active = ACTIVE.get(player.getUUID());
+        PlanningRequestKey key = new PlanningRequestKey(player.getUUID(), generation);
+        GenericCraftPacket.finishPlanning(player.getUUID(), generation);
+        Active active = ACTIVE.get(key);
         if (active == null || active.generation != generation) return;
         active.update(state, phase, detail);
         send(player, active.snapshot());
-        ACTIVE.remove(player.getUUID(), active);
+        ACTIVE.remove(key, active);
     }
 
     private static void update(UUID playerId, long generation,
                                PlanningProgressSnapshot.State state,
                                PlanningProgressSnapshot.Phase phase, Component detail) {
-        Active active = ACTIVE.get(playerId);
+        Active active = ACTIVE.get(new PlanningRequestKey(playerId, generation));
         if (active != null && active.generation == generation) active.update(state, phase, detail);
     }
 
-    private static PlanningProgressSnapshot.Phase currentPhase(UUID playerId) {
-        Active active = ACTIVE.get(playerId);
+    private static PlanningProgressSnapshot.Phase currentPhase(UUID playerId, long generation) {
+        Active active = ACTIVE.get(new PlanningRequestKey(playerId, generation));
         return active == null ? PlanningProgressSnapshot.Phase.ACCEPTING
                 : active.value.get().phase();
     }

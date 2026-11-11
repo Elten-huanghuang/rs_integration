@@ -79,6 +79,7 @@ final class CraftPureExecutionPlanner {
                     recipeId, unavailable.toString());
             return false;
         }
+        if (bindingGraph.requiresTypedPlanning()) return false;
         ImmutableRecipeGraph recipeGraph = bindingGraph.graph();
         if (!recipeGraph.recipesById().containsKey(recipeId)) return false;
 
@@ -119,6 +120,7 @@ final class CraftPureExecutionPlanner {
                     recipeId, unavailable.toString());
             return false;
         }
+        if (bindingGraph.requiresTypedPlanning()) return false;
         ImmutableRecipeGraph baseGraph = bindingGraph.graph();
         RecipeNode indexed = baseGraph.recipesById().get(recipeId);
         if (indexed != null && SelfAmplifyingRecipePolicy.isSelfAmplifying(indexed)) return false;

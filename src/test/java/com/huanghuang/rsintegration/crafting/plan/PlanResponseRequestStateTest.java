@@ -63,10 +63,30 @@ class PlanResponseRequestStateTest {
         state.beginPreview(11L, POPPY);
 
         assertTrue(state.accept(11L, POPPY));
-        // 页面没有待处理请求时，保留从配方浏览器重新预览同配方的行为。
-        assertTrue(state.accept(12L, POPPY));
+        // 同配方的新任务应单独保存，不能覆盖这个已完成的页面。
+        assertFalse(state.accept(12L, POPPY));
         state.beginPreview(13L, DANDELION);
         assertTrue(state.accept(13L, DANDELION));
+    }
+
+    @Test
+    void editingOnePageOnlySupersedesItsOwnPendingRequest() {
+        PlanResponseRequestState first = new PlanResponseRequestState(10L, POPPY);
+        PlanResponseRequestState second = new PlanResponseRequestState(11L, POPPY);
+        assertEquals(0L, first.beginPreview(12L, POPPY));
+        assertEquals(0L, second.beginPreview(13L, POPPY));
+        first.requestConfirmation();
+
+        assertEquals(12L, first.beginPreview(14L, DANDELION));
+        assertFalse(first.confirmationRequested());
+        assertFalse(first.accept(12L, POPPY));
+        assertTrue(second.pending());
+        assertTrue(second.accept(13L, POPPY));
+        assertTrue(first.failPreview(14L));
+        assertFalse(first.pending());
+        assertTrue(first.refreshRequired());
+        assertEquals(0L, first.beginPreview(15L, DANDELION));
+        assertTrue(first.accept(15L, DANDELION));
     }
 
     @Test
@@ -193,6 +213,8 @@ class PlanResponseRequestStateTest {
         assertTrue(state.accept(11L, POPPY));
         assertFalse(state.consumeConfirmation(false));
         assertFalse(state.confirmationRequested());
+        assertFalse(state.accept(12L, POPPY));
+        state.beginPreview(12L, POPPY);
         assertTrue(state.accept(12L, POPPY));
         assertFalse(state.consumeConfirmation(true));
     }

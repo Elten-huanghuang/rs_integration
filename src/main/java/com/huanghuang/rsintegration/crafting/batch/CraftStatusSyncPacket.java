@@ -13,7 +13,7 @@ import java.util.function.Supplier;
 /** S2C reconciliation boundary for craft status requests. */
 public final class CraftStatusSyncPacket {
 
-    private static final int MAX_CRAFTS = 4096;
+    public static final int MAX_CRAFTS = 4096;
     private static final byte FULL = 0;
     private static final byte NOT_FOUND = 1;
 

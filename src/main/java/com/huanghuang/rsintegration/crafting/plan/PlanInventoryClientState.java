@@ -50,7 +50,8 @@ final class PlanInventoryClientState {
                 entries.add(entry);
             }
         }
-        if (packet.full() && packet.status() != PreviewInventoryModel.Status.UNAVAILABLE && rows.size() != keys.size()) return fail();
+        if (packet.full() && packet.status() != PreviewInventoryModel.Status.UNAVAILABLE
+                && packet.status() != PreviewInventoryModel.Status.EXPIRED && rows.size() != keys.size()) return fail();
         List<IngredientKey> updates = new ArrayList<>();
         for (var entry : entries) {
             IngredientKey key = keys.get(entry.row());

@@ -10,6 +10,7 @@ import com.huanghuang.rsintegration.mods.apotheosis.network.ApothSpawnerExecuteP
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.planning.PlanningProgressSnapshot;
+import com.huanghuang.rsintegration.crafting.planning.PlanningProgressOverlay;
 import com.huanghuang.rsintegration.crafting.planning.PlanningProgressTracker;
 import com.huanghuang.rsintegration.crafting.planning.PlanningRequestIds;
 import com.huanghuang.rsintegration.crafting.planning.PlanningPreferences;
@@ -424,26 +425,36 @@ public final class CraftingPlanScreen extends Screen {
 
     @Override
     public void onClose() {
+        preserveLatestPreview();
         stopInventoryWatch();
         responseRequests.cancelConfirmation();
-        if (externalRequest != null) {
-            returnToParent.run();
-            return;
-        }
         if (responseRequests.pending()) {
             PlanBackgroundClient.detach(responseRequests.activeRequestId());
+        }
+        if (returnToParent != null) {
+            returnToParent.run();
+            return;
         }
         super.onClose();
     }
 
     @Override
     public void removed() {
+        preserveLatestPreview();
+        if (responseRequests.pending()) PlanBackgroundClient.detach(responseRequests.activeRequestId());
         stopInventoryWatch();
         responseRequests.cancelConfirmation();
         treeMouseGesture.cancel();
         dragging = false;
         draggingBar = null;
         super.removed();
+    }
+
+    private void preserveLatestPreview() {
+        if (minecraft == null || minecraft.player == null) return;
+        commitRepeatCountInput();
+        // 退出时不能丢失尚在防抖中的最终数量；发出一次后转后台保存结果。
+        if (responseRequests.refreshScheduled()) refreshPlan();
     }
 
     public boolean acceptResponse(long requestId, PlanResponse newPlan) {
@@ -723,12 +734,17 @@ public final class CraftingPlanScreen extends Screen {
             return Component.translatable("rsi.plan.confirm_waiting");
         }
         if (partialPreparation) return Component.translatable("rsi.plan.prepare.action");
-        if (inventoryState != null && inventoryState.status() != null
-                && inventoryState.status() != PreviewInventoryModel.Status.READY) {
-            return Component.translatable("rsi.plan.inventory.refresh_confirm");
-        }
+        PlanConfirmationAction action = inventoryConfirmationAction();
+        if (action.labelKey != null) return Component.translatable(action.labelKey);
         return Component.translatable(selectedPath.isDirty()
                 ? "rsi.plan.confirm_branches" : "rsi.plan.confirm");
+    }
+
+    private PlanConfirmationAction inventoryConfirmationAction() {
+        PlanConfirmationAction action = PlanConfirmationAction.forInventory(
+                inventoryState == null ? null : inventoryState.status());
+        return action == PlanConfirmationAction.CHECK_STOCK && !plan.success()
+                ? PlanConfirmationAction.COMPLETE_ROUTE : action;
     }
 
     private void updateConfirmButton() {
@@ -889,8 +905,7 @@ public final class CraftingPlanScreen extends Screen {
     private void onConfirm() {
         commitRepeatCountInput();
         if (responseRequests.confirmationRequested()) return;
-        if (!partialPreparation && inventoryState != null && inventoryState.status() != null
-                && inventoryState.status() != PreviewInventoryModel.Status.READY) {
+        if (!partialPreparation && inventoryConfirmationAction().replan) {
             responseRequests.scheduleRefresh();
         }
         // 点击确认时立即发出防抖中的最新预览，避免执行请求打断仍在运行的规划。
@@ -955,7 +970,10 @@ public final class CraftingPlanScreen extends Screen {
         if (preview) {
             planRefreshTick = -1;
             lastRefreshCount = repeatCount;
-            responseRequests.beginPreview(requestId, rid.toString());
+            long previousRequest = responseRequests.activeRequestId();
+            long supersededRequestId = responseRequests.beginPreview(requestId, rid.toString());
+            if (supersededRequestId > 0L) PlanningProgressOverlay.cancel(supersededRequestId);
+            PlanBackgroundClient.replaceRevision(previousRequest, requestId);
             updateConfirmButton();
         }
         if (externalRequest != null) {
@@ -968,7 +986,7 @@ public final class CraftingPlanScreen extends Screen {
             // PlanResponsePacket. Starting the ordinary planning HUD here would
             // leave it waiting forever because GenericCraftPacket never handles
             // synthetic quest target IDs.
-            PlanningProgressTracker.clear();
+            PlanningProgressTracker.responseReceived(requestId);
             BatchCraftNetworkHandler.CHANNEL.sendToServer(
                     new QuestSubmissionRequestPacket(
                             QuestSubmissionTargetIds.questId(rid), true, repeatCount));
@@ -1006,6 +1024,12 @@ public final class CraftingPlanScreen extends Screen {
                 .withPlanningPreferences(CraftingPlanPreferences.load(PLAN_PREFS_PATH)
                         .toPlanningPreferences())
                 .withStorageReference(storageReference);
+        if (!preview && !partialPreparation && !selectedPath.isDirty()) {
+            packet.withConfirmedPreview(responseRequests.activeRequestId());
+            if (minecraft.screen instanceof PlanScreenHost host) {
+                host.rsi$planSubmitted(responseRequests.activeRequestId());
+            }
+        }
         if (preview) {
             PlanningProgressTracker.start(
                     requestId, rid);
@@ -1116,15 +1140,20 @@ public final class CraftingPlanScreen extends Screen {
         if (materialSearchBox != null && materialSearchBox.visible) materialSearchBox.tick();
         if (recipeCandidatePanel != null) recipeCandidatePanel.tick();
         ticksOpen++;
-        if (planRefreshTick >= 0 && ticksOpen >= planRefreshTick) {
+        if (planRefreshTick >= 0 && ticksOpen >= planRefreshTick
+                && (repeatCountBox == null || !repeatCountBox.isFocused())) {
             refreshPlan();
         }
-        PlanningProgressSnapshot progress = PlanningProgressTracker.current();
-        if (!responseRequests.refreshScheduled() && progress != null
-                && progress.terminal()
-                && progress.state() != PlanningProgressSnapshot.State.SUCCEEDED
-                && responseRequests.failPreview(progress.requestId())) {
+        long requestId = responseRequests.activeRequestId();
+        PlanningProgressSnapshot progress = PlanningProgressTracker.get(requestId);
+        boolean endedWithoutResult = progress == null
+                ? !PlanningProgressTracker.acceptsResponse(requestId)
+                : progress.terminal() && progress.state() != PlanningProgressSnapshot.State.SUCCEEDED;
+        if (!responseRequests.refreshScheduled() && endedWithoutResult
+                && responseRequests.failPreview(requestId)) {
             // 部分准入失败只回传进度终态，解除等待并让下次确认重新规划。
+            rollbackPendingCandidateSwitch();
+            reopenPendingCandidates();
             updateConfirmButton();
         }
     }
@@ -1169,6 +1198,7 @@ public final class CraftingPlanScreen extends Screen {
                     case MISSING -> "rsi.plan.inventory.missing";
                     case REPLAN -> "rsi.plan.inventory.replan";
                     case UNAVAILABLE -> "rsi.plan.inventory.unavailable";
+                    case EXPIRED -> "rsi.plan.inventory.expired";
                 };
                 statusColor = inventoryState.status() == PreviewInventoryModel.Status.READY
                         && !plan.executionBlocked() ? 0x55FF55 : 0xFFAA55;

@@ -1,10 +1,14 @@
 package com.huanghuang.rsintegration.crafting.progress;
 
-import com.huanghuang.rsintegration.util.UIRenderer;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.crafting.planning.PlanningHudLayout;
+import com.huanghuang.rsintegration.crafting.planning.PlanningProgressOverlay;
+import com.huanghuang.rsintegration.crafting.planning.PlanningProgressTracker;
+import com.huanghuang.rsintegration.crafting.planning.PlanningTasksScreen;
 import com.huanghuang.rsintegration.crafting.quantity.CompactQuantityFormat;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.client.InkFluidRenderer;
-import com.mojang.blaze3d.systems.RenderSystem;
+
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
@@ -12,8 +16,8 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
-import net.minecraftforge.client.event.RenderGuiOverlayEvent;
-import net.minecraftforge.client.gui.overlay.VanillaGuiOverlay;
+import net.minecraftforge.client.event.RenderGuiEvent;
+
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 
 import java.util.Locale;
@@ -22,15 +26,11 @@ import java.util.Locale;
 @OnlyIn(Dist.CLIENT)
 public final class CraftProgressOverlay {
 
-    private static final int MAX_PANEL_WIDTH = 176;
-    private static final int MIN_PANEL_WIDTH = 96;
     private static final int SCREEN_MARGIN = 8;
-    private static final int RIGHT_MARGIN = 4;
     private static final int CONTENT_PAD = 8;
     private static final int HEADER_HEIGHT = 16;
     private static final int ROW_GAP = 4;
     private static final int BAR_HEIGHT = 3;
-    private static final int MIN_BAR_WIDTH = 24;
 
     private static final int TEXT = 0xFFF1F4F6;
     private static final int MUTED = 0xFF9DA9B1;
@@ -39,114 +39,78 @@ public final class CraftProgressOverlay {
     private CraftProgressOverlay() {}
 
     @SubscribeEvent
-    public static void onRenderOverlay(RenderGuiOverlayEvent.Post event) {
-        if (event.getOverlay() != VanillaGuiOverlay.HOTBAR.type()) return;
-        if (!CraftProgressTracker.hasActive() || !CraftProgressTracker.isVisible()) return;
-
-        CraftProgressSnapshot snapshot = CraftProgressTracker.first();
-        if (snapshot == null) return;
+    public static void onRenderOverlay(RenderGuiEvent.Post event) {
         Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft.player == null || minecraft.screen != null) return;
-
-        GuiGraphics graphics = event.getGuiGraphics();
+        if (minecraft.player == null || minecraft.screen != null || minecraft.options.hideGui) return;
+        boolean planningVisible = RSIntegrationConfig.CLIENT_SPEC.isLoaded()
+                ? RSIntegrationConfig.PLANNING_HUD_VISIBLE.get() : RSIntegrationConfig.PLANNING_HUD_VISIBLE.getDefault();
+        var planning = planningVisible ? PlanningProgressTracker.current() : null;
+        int plans = planningVisible ? PlanningTasksScreen.taskCount() : 0;
+        var execution = CraftProgressTracker.isVisible() ? CraftProgressTracker.first() : null;
+        int running = (int) CraftProgressTracker.snapshots().stream().filter(task -> !task.isTerminal()).count();
+        if (planning == null && plans == 0 && execution == null) return;
         Font font = minecraft.font;
-        int screenWidth = minecraft.getWindow().getGuiScaledWidth();
-        int screenHeight = minecraft.getWindow().getGuiScaledHeight();
-        int accent = accent(snapshot.result());
-        int percent = hudProgressPercent(snapshot);
-        ItemStack target = CraftProgressTracker.target(snapshot.craftId());
-        String targetName = target.isEmpty()
-                ? Component.translatable("rsi.progress.target_unknown").getString()
-                : target.getHoverName().getString();
-        String statusText = title(snapshot.result()).getString();
-        String quantityText = hudQuantity(snapshot, target);
-        String progressText = hudProgress(snapshot).getString();
-        String detailText = hudDetail(snapshot).getString();
-        String hintText = hudHint(CraftProgressKeybind.translatedKeyMessage()).getString();
-        int quantityWidth = font.width(quantityText);
-        int headerWidth = font.width(targetName) + (target.isEmpty() ? 0 : 22)
-                + (quantityWidth == 0 ? 0 : quantityWidth + ROW_GAP);
-        int contentWidth = Math.max(headerWidth, Math.max(
-                font.width(statusText) + (progressText.isEmpty() ? 0 : font.width(progressText) + 6),
-                font.width(hintText) + MIN_BAR_WIDTH + ROW_GAP));
-        HudLayout layout = layout(screenWidth, screenHeight, contentWidth,
-                font.lineHeight, !detailText.isBlank());
+        boolean hasDetail = execution != null && !hudDetail(execution).getString().isBlank();
+        var layout = combinedLayout(minecraft.getWindow().getGuiScaledWidth(), minecraft.getWindow().getGuiScaledHeight(),
+                font.lineHeight, planning != null, execution != null, hasDetail);
         if (!layout.visible()) return;
-        int x = layout.x();
-        int y = layout.y();
-        int innerWidth = layout.width() - CONTENT_PAD * 2;
-
-        RenderSystem.enableBlend();
-        RenderSystem.defaultBlendFunc();
-        UIRenderer.roundedGradient(graphics, x, y, layout.width(), layout.height(), 5f,
-                0xE81B252B, 0xE8121A1F);
-        graphics.fill(x + 1, y + 6, x + 4, y + layout.height() - 6, accent);
-
-        int contentX = x + CONTENT_PAD;
-        int right = x + layout.width() - CONTENT_PAD;
+        GuiGraphics graphics = event.getGuiGraphics();
+        int x = layout.x(), y = layout.y(), right = x + layout.width() - CONTENT_PAD;
+        graphics.pose().pushPose();
+        graphics.pose().translate(0, 0, 500);
+        graphics.fill(x, y, x + layout.width(), y + layout.height(), 0xFF596277);
+        graphics.fill(x + 1, y + 1, x + layout.width() - 1, y + layout.height() - 1, 0xE5242937);
         int cy = y + CONTENT_PAD;
-        if (!target.isEmpty()) {
-            InkFluidRenderer.render(graphics, target, contentX, cy);
-        }
-        int textX = contentX + (target.isEmpty() ? 0 : 22);
-        int textY = cy + Math.max(0, (HEADER_HEIGHT - font.lineHeight) / 2);
-        // 名称过长时只截短名称，始终为目标数量保留空间。
-        int nameWidth = right - textX - (quantityWidth == 0 ? 0 : quantityWidth + ROW_GAP);
-        graphics.drawString(font, fitText(font, targetName, nameWidth), textX, textY, TEXT, true);
-        if (quantityWidth > 0) {
-            graphics.drawString(font, quantityText, right - quantityWidth, textY, TEXT, true);
-        }
-        cy += Math.max(HEADER_HEIGHT, font.lineHeight) + ROW_GAP;
-
-        // 目标数量与步骤/操作进度分开显示，避免混用数量口径。
-        int progressWidthLimit = Math.max(0,
-                innerWidth - Math.min(font.width(statusText), innerWidth / 2) - 6);
-        progressText = fitText(font, progressText, progressWidthLimit);
-        int progressWidth = font.width(progressText);
-        int statusWidth = innerWidth - (progressWidth == 0 ? 0 : progressWidth + 6);
-        graphics.drawString(font, fitText(font, statusText, statusWidth), contentX, cy, accent, false);
-        if (progressWidth > 0) {
-            graphics.drawString(font, progressText, right - progressWidth, cy, MUTED, false);
-        }
-        cy += font.lineHeight + ROW_GAP;
-
-        if (!detailText.isBlank()) {
-            graphics.drawString(font, fitText(font, detailText, innerWidth), contentX, cy, MUTED, false);
+        if (planning != null) {
+            int color = PlanningProgressOverlay.accent(planning.state());
+            String text = Component.translatable(PlanningProgressOverlay.titleKey(planning.state())).getString()
+                    + " · " + Component.translatable(PlanningProgressOverlay.phaseKey(planning.phase())).getString();
+            graphics.drawString(font, fitText(font, text, layout.width() - CONTENT_PAD * 2), x + CONTENT_PAD, cy, color, false);
             cy += font.lineHeight + ROW_GAP;
+            graphics.fill(x + CONTENT_PAD, cy, right, cy + 1, 0xFF596277);
+            cy += ROW_GAP + 1;
         }
-
-        // 按键提示与进度条共用底行，保留入口而不另加一整行。
-        hintText = fitText(font, hintText, innerWidth - MIN_BAR_WIDTH - ROW_GAP);
-        int hintWidth = font.width(hintText);
-        int barWidth = innerWidth - (hintWidth == 0 ? 0 : hintWidth + ROW_GAP);
-        int barY = cy + Math.max(0, (font.lineHeight - BAR_HEIGHT) / 2);
-        UIRenderer.rounded(graphics, contentX, barY, barWidth, BAR_HEIGHT,
-                BAR_HEIGHT / 2f, BAR_BACKGROUND);
-        int fillWidth = Math.round(barWidth * percent / 100f);
-        if (fillWidth > 0) {
-            UIRenderer.rounded(graphics, contentX, barY, fillWidth, BAR_HEIGHT,
-                    BAR_HEIGHT / 2f, accent);
+        if (execution != null) {
+            ItemStack target = CraftProgressTracker.target(execution.craftId());
+            String quantity = hudQuantity(execution, target);
+            if (!target.isEmpty()) InkFluidRenderer.render(graphics, target, x + CONTENT_PAD, cy);
+            String name = target.isEmpty() ? Component.translatable("rsi.progress.target_unknown").getString() : target.getHoverName().getString();
+            graphics.drawString(font, fitText(font, name, layout.width() - CONTENT_PAD * 2 - 22 - font.width(quantity) - ROW_GAP),
+                    x + CONTENT_PAD + 22, cy + 3, TEXT, false);
+            graphics.drawString(font, quantity, right - font.width(quantity), cy + 3, TEXT, false);
+            cy += Math.max(HEADER_HEIGHT, font.lineHeight) + ROW_GAP;
+            String status = title(execution.result()).getString();
+            String progress = hudProgress(execution).getString();
+            if (!progress.isBlank()) status += " · " + progress;
+            graphics.drawString(font, fitText(font, status, layout.width() - CONTENT_PAD * 2), x + CONTENT_PAD, cy, accent(execution.result()), false);
+            cy += font.lineHeight + ROW_GAP;
+            if (hasDetail) {
+                graphics.drawString(font, fitText(font, hudDetail(execution).getString(), layout.width() - CONTENT_PAD * 2),
+                        x + CONTENT_PAD, cy, MUTED, false);
+                cy += font.lineHeight + ROW_GAP;
+            }
+            graphics.fill(x + CONTENT_PAD, cy, right, cy + BAR_HEIGHT, BAR_BACKGROUND);
+            graphics.fill(x + CONTENT_PAD, cy,
+                    x + CONTENT_PAD + (right - x - CONTENT_PAD) * hudProgressPercent(execution) / 100, cy + BAR_HEIGHT, accent(execution.result()));
+            cy += BAR_HEIGHT + ROW_GAP;
         }
-        graphics.drawString(font, hintText, right - hintWidth, cy, MUTED, false);
-        RenderSystem.disableBlend();
+        // 唯一入口行，与计算和执行正文共同定位，禁止再独立叠加第二块 HUD。
+        Component hint = hudHint(CraftProgressKeybind.translatedKeyMessage(), plans, running);
+        graphics.drawString(font, fitText(font, hint.getString(), layout.width() - CONTENT_PAD * 2), x + CONTENT_PAD, cy, MUTED, false);
+        graphics.pose().popPose();
     }
 
-    static HudLayout layout(int screenWidth, int screenHeight, int contentWidth,
-                            int lineHeight, boolean hasDetail) {
-        int width = Math.min(Math.max(0, screenWidth - SCREEN_MARGIN - RIGHT_MARGIN),
-                Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, contentWidth + CONTENT_PAD * 2)));
-        int height = CONTENT_PAD * 2 + Math.max(HEADER_HEIGHT, lineHeight)
-                + ROW_GAP + lineHeight + ROW_GAP + Math.max(BAR_HEIGHT, lineHeight)
-                + (hasDetail ? lineHeight + ROW_GAP : 0);
-        int x = Math.max(0, screenWidth - RIGHT_MARGIN - width);
-        int y = Math.max(SCREEN_MARGIN,
-                Math.min((screenHeight - height) / 2, screenHeight - SCREEN_MARGIN - height));
-        boolean visible = width >= 96 && height <= screenHeight - SCREEN_MARGIN * 2;
-        return new HudLayout(x, y, width, height, visible);
+    static PlanningHudLayout combinedLayout(int screenWidth, int screenHeight, int lineHeight,
+                                             boolean planning, boolean execution, boolean detail) {
+        int contentHeight = CONTENT_PAD * 2 + lineHeight;
+        if (planning) contentHeight += lineHeight + ROW_GAP * 2 + 1;
+        if (execution) contentHeight += Math.max(HEADER_HEIGHT, lineHeight) + ROW_GAP + lineHeight + ROW_GAP
+                + BAR_HEIGHT + ROW_GAP + (detail ? lineHeight + ROW_GAP : 0);
+        boolean configured = RSIntegrationConfig.CLIENT_SPEC.isLoaded();
+        return PlanningHudLayout.place(screenWidth, screenHeight, 196, 132, contentHeight, SCREEN_MARGIN,
+                configured ? RSIntegrationConfig.PLANNING_HUD_HORIZONTAL_POSITION.get() : RSIntegrationConfig.PLANNING_HUD_HORIZONTAL_POSITION.getDefault(),
+                configured ? RSIntegrationConfig.PLANNING_HUD_VERTICAL_POSITION.get() : RSIntegrationConfig.PLANNING_HUD_VERTICAL_POSITION.getDefault());
     }
-
-    record HudLayout(int x, int y, int width, int height, boolean visible) {}
-
     private static String fitText(Font font, String text, int width) {
         if (width <= 0) return "";
         if (font.width(text) <= width) return text;
@@ -174,8 +138,8 @@ public final class CraftProgressOverlay {
         return Math.min(snapshot.result() == CraftProgressSnapshot.Result.SUCCEEDED ? 100 : 99, percent);
     }
 
-    static Component hudHint(Component key) {
-        return Component.translatable("rsi.progress.hud.hint", key);
+    static Component hudHint(Component key, int plans, int running) {
+        return Component.translatable("rsi.progress.hud.combined", key, plans, running);
     }
 
     static Component hudProgress(CraftProgressSnapshot snapshot) {

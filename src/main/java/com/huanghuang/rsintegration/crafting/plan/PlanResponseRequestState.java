@@ -16,13 +16,16 @@ final class PlanResponseRequestState {
         expectedRecipeId = recipeId;
     }
 
-    void beginPreview(long requestId, String recipeId) {
+    /** 返回本页面被替代的未完成请求，其他页面的任务不受影响。 */
+    long beginPreview(long requestId, String recipeId) {
+        long supersededRequestId = pending && activeRequestId != requestId ? activeRequestId : 0L;
         activeRequestId = requestId;
         expectedRecipeId = recipeId;
         pending = true;
         refreshScheduled = false;
         retryRequired = false;
         confirmationRequested = false;
+        return supersededRequestId;
     }
 
     void scheduleRefresh() {
@@ -71,10 +74,8 @@ final class PlanResponseRequestState {
     }
 
     boolean accept(long requestId, String recipeId) {
-        if (requestId == 0L ? activeRequestId != 0L : requestId < activeRequestId) {
-            return false;
-        }
-        if (pending && requestId != activeRequestId) return false;
+        // 配方相同也可能是独立任务；只有本页面发起的请求才能更新页面。
+        if (requestId != activeRequestId) return false;
         // 错误响应可能没有配方 ID，由页面显示错误并保留上一份方案。
         if (recipeId != null && !recipeId.isEmpty()
                 && !Objects.equals(recipeId, expectedRecipeId)) return false;

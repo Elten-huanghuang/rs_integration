@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.CraftPlanningRevision;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
+import com.huanghuang.rsintegration.crafting.batch.CraftPlanningRuntime;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
@@ -32,6 +33,7 @@ import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.network.PacketDistributor;
 
 import java.util.HashMap;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -40,10 +42,14 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 /** 服务端线程持有的预览订阅。网络事件只记脏项，tick 末统一更新提示，不调用求解器。 */
 public final class PreviewInventorySyncManager {
-    private static final Map<UUID, Session> SESSIONS = new HashMap<>();
+    private static final Map<SessionKey, Session> SESSIONS = new LinkedHashMap<>();
+    private static final Map<UUID, Long> LAST_WATCH_IDS = new HashMap<>();
+
+    private record SessionKey(UUID playerId, long requestId) {}
 
     private PreviewInventorySyncManager() {}
 
@@ -52,35 +58,96 @@ public final class PreviewInventorySyncManager {
         return RSIntegrationConfig.SERVER_SPEC.isLoaded() ? setting.get() : setting.getDefault();
     }
 
-    /** 只保存已实际发送的最新版；窗口确认打开后才挂原生监听器。 */
+    /** 按玩家和请求保留已发送的结果；仅当前打开的窗口挂原生监听器。 */
     public static void offer(ServerPlayer player, PlanResponse plan, long requestId) {
         if (!enabled() || plan.graph() == null || plan.recipeId().isEmpty()) return;
-        Session old = SESSIONS.get(player.getUUID());
-        if (old != null && requestId < old.requestId) return;
+        offer(player.getUUID(), plan, requestId, player.getServer().getTickCount());
+        prune(player.getServer().getTickCount(),
+                RSIntegrationConfig.serverInt(RSIntegrationConfig.CRAFTING_PREVIEW_INVENTORY_PENDING_TICKS),
+                RSIntegrationConfig.serverInt(RSIntegrationConfig.CRAFTING_PLAN_CACHE_MAX_ENTRIES),
+                RSIntegrationConfig.serverInt(RSIntegrationConfig.CRAFTING_PLAN_CACHE_MAX_NODES));
+    }
+
+    static Session offer(UUID playerId, PlanResponse plan, long requestId, int tick) {
+        SessionKey key = new SessionKey(playerId, requestId);
+        Session existing = SESSIONS.get(key);
+        if (existing != null) return existing;
         try {
-            Session next = new Session(plan, requestId, player.getServer().getTickCount());
-            if (old != null) old.close();
-            SESSIONS.put(player.getUUID(), next);
+            Session next = new Session(plan, requestId, tick);
+            SESSIONS.put(key, next);
+            return next;
         } catch (IllegalArgumentException unsupported) {
             // 旧/特殊图若无法给出完整初始材料表，继续使用原预览，不能猜测材料分配。
-            if (old != null) old.close();
-            SESSIONS.remove(player.getUUID());
             RSIntegrationMod.LOGGER.debug("[RSI-preview] Inventory projection unavailable", unsupported);
+            return null;
         }
     }
 
     public static void watch(ServerPlayer player, PlanInventoryWatchPacket packet) {
-        Session state = SESSIONS.get(player.getUUID());
-        if (state == null || packet.requestId() != state.requestId) {
-            if (packet.open() && enabled()) {
-                // 后台结果可能在打开前已过期；明确显示未知，不能继续把旧成功快照当作实时状态。
-                NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
-                        new PlanInventoryUpdatePacket(packet.requestId(), packet.watchId(), 1L, true,
-                                PreviewInventoryModel.Status.UNAVAILABLE, 0, 1, List.of()));
+        if (!enabled()) return;
+        watch(player.getUUID(), packet, player.getServer().getTickCount(),
+                update -> NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), update),
+                () -> CraftPlanningRuntime.publishedPlan(player.getUUID(), packet.requestId()));
+    }
+
+    static void watch(UUID playerId, PlanInventoryWatchPacket packet, int tick,
+                      Consumer<PlanInventoryUpdatePacket> sender) {
+        watch(playerId, packet, tick, sender, () -> null);
+    }
+
+    static void watch(UUID playerId, PlanInventoryWatchPacket packet, int tick,
+                      Consumer<PlanInventoryUpdatePacket> sender, Supplier<PlanResponse> retainedPlan) {
+        Session state = SESSIONS.get(new SessionKey(playerId, packet.requestId()));
+        if (packet.open()) {
+            if (packet.watchId() <= LAST_WATCH_IDS.getOrDefault(playerId, 0L)) return;
+            LAST_WATCH_IDS.put(playerId, packet.watchId());
+            for (var entry : SESSIONS.entrySet()) {
+                Session other = entry.getValue();
+                if (entry.getKey().playerId().equals(playerId) && other != state && other.watchId != 0L) {
+                    other.close();
+                    other.lastUsedTick = tick;
+                }
             }
-            return;
+            if (state == null) {
+                // 闲置订阅清理不等于计划失效；从服务端保留的结果恢复并重新对账，不调用求解器。
+                PlanResponse plan = retainedPlan.get();
+                if (plan != null && plan.graph() != null) state = offer(playerId, plan, packet.requestId(), tick);
+            }
+            if (state == null) {
+                sender.accept(new PlanInventoryUpdatePacket(packet.requestId(), packet.watchId(), 1L, true,
+                        PreviewInventoryModel.Status.EXPIRED, 0, 1, List.of()));
+                return;
+            }
         }
-        state.watch(packet, player.getServer().getTickCount());
+        if (state != null) state.watch(packet, tick);
+    }
+
+    /** 沿用预览保留期和缓存容量；打开中的订阅不因其他后台结果被淘汰。 */
+    static void prune(int tick, int pendingTicks, int maxEntries, long maxNodes) {
+        SESSIONS.entrySet().removeIf(entry -> {
+            Session state = entry.getValue();
+            if (state.watchId != 0L || tick - state.lastUsedTick < pendingTicks) return false;
+            state.close();
+            return true;
+        });
+        long weight = SESSIONS.values().stream().mapToLong(Session::weight).sum();
+        if (SESSIONS.size() <= maxEntries && weight <= maxNodes) return;
+        for (var entry : SESSIONS.entrySet().stream()
+                .filter(value -> value.getValue().watchId == 0L)
+                .sorted(Comparator.comparingInt(value -> value.getValue().lastUsedTick)).toList()) {
+            if (SESSIONS.size() <= maxEntries && weight <= maxNodes) break;
+            Session removed = SESSIONS.remove(entry.getKey());
+            if (removed != null) { weight -= removed.weight(); removed.close(); }
+        }
+    }
+
+    static void removePlayer(UUID playerId) {
+        SESSIONS.entrySet().removeIf(entry -> {
+            if (!entry.getKey().playerId().equals(playerId)) return false;
+            entry.getValue().close();
+            return true;
+        });
+        LAST_WATCH_IDS.remove(playerId);
     }
 
     @SubscribeEvent
@@ -89,9 +156,12 @@ public final class PreviewInventorySyncManager {
         int tick = event.getServer().getTickCount();
         int poll = RSIntegrationConfig.serverInt(RSIntegrationConfig.CRAFTING_PREVIEW_INVENTORY_POLL_TICKS);
         int pending = RSIntegrationConfig.serverInt(RSIntegrationConfig.CRAFTING_PREVIEW_INVENTORY_PENDING_TICKS);
+        prune(tick, pending,
+                RSIntegrationConfig.serverInt(RSIntegrationConfig.CRAFTING_PLAN_CACHE_MAX_ENTRIES),
+                RSIntegrationConfig.serverInt(RSIntegrationConfig.CRAFTING_PLAN_CACHE_MAX_NODES));
         for (var entry : List.copyOf(SESSIONS.entrySet())) {
             Session state = entry.getValue();
-            ServerPlayer player = event.getServer().getPlayerList().getPlayer(entry.getKey());
+            ServerPlayer player = event.getServer().getPlayerList().getPlayer(entry.getKey().playerId());
             if (player == null || !enabled() || (state.watchId == 0 && tick - state.lastUsedTick >= pending)) {
                 state.close();
                 SESSIONS.remove(entry.getKey(), state);
@@ -112,14 +182,14 @@ public final class PreviewInventorySyncManager {
 
     @SubscribeEvent
     public static void onLogout(PlayerEvent.PlayerLoggedOutEvent event) {
-        Session old = SESSIONS.remove(event.getEntity().getUUID());
-        if (old != null) old.close();
+        removePlayer(event.getEntity().getUUID());
     }
 
     @SubscribeEvent
     public static void onServerStopping(ServerStoppingEvent event) {
         SESSIONS.values().forEach(Session::close);
         SESSIONS.clear();
+        LAST_WATCH_IDS.clear();
     }
 
     static final class Session {
@@ -158,6 +228,8 @@ public final class PreviewInventorySyncManager {
             this.lastUsedTick = tick;
         }
 
+        long weight() { return Math.max(1L, (long) plan.graph().nodes().size() + model.keys().size()); }
+
         void watch(PlanInventoryWatchPacket packet, int tick) {
             if (packet.requestId() != requestId) return;
             if (!packet.open()) {
@@ -180,7 +252,7 @@ public final class PreviewInventorySyncManager {
         void tick(ServerPlayer player, int tick, int pollTicks, Consumer<PlanInventoryUpdatePacket> sender) {
             if (!CraftPlanningRevision.isCurrent(revision)) {
                 unavailable();
-                send(PreviewInventoryModel.Status.UNAVAILABLE, sender);
+                send(PreviewInventoryModel.Status.EXPIRED, sender);
                 return;
             }
             boolean poll = tick - lastPollTick >= pollTicks;

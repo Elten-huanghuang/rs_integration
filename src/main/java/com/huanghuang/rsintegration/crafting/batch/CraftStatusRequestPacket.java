@@ -85,10 +85,11 @@ public final class CraftStatusRequestPacket {
                 player.connection.connection, NetworkDirection.PLAY_TO_CLIENT);
     }
 
-    private static void sendStatus(ServerPlayer player, AsyncCraftChain chain) {
+    public static void sendStatus(ServerPlayer player, AsyncCraftChain chain) {
         BatchCraftNetworkHandler.CHANNEL.sendTo(
                 new CraftStartedPacket(chain.getCraftId(), chain.stepsCount(),
-                        chain.isGraphExecution(), chain.displayTarget(), chain.outputProgress()),
+                        chain.isGraphExecution(), chain.displayTarget(), chain.outputProgress(),
+                        chain.confirmedPreviewRequestId()),
                 player.connection.connection, NetworkDirection.PLAY_TO_CLIENT);
         BatchCraftNetworkHandler.CHANNEL.sendTo(
                 new CraftProgressPacket(chain.nextStatusSnapshot()),

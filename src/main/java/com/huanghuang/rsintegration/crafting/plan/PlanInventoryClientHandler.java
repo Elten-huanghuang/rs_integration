@@ -9,6 +9,7 @@ final class PlanInventoryClientHandler {
     private PlanInventoryClientHandler() {}
 
     static void handle(PlanInventoryUpdatePacket packet) {
-        if (Minecraft.getInstance().screen instanceof CraftingPlanScreen screen) screen.updateInventory(packet);
+        CraftingPlanScreen screen = PlanScreenHost.currentPlan();
+        if (screen != null) screen.updateInventory(packet);
     }
 }

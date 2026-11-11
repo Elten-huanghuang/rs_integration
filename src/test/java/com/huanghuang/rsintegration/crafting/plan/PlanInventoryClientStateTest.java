@@ -21,6 +21,46 @@ import static org.mockito.Mockito.mock;
 
 class PlanInventoryClientStateTest extends BootstrapTest {
     @Test
+    void temporaryDisconnectRetainsThePlanAndDoesNotRequestAnotherSearch() {
+        var original = source();
+        var state = new PlanInventoryClientState(10, 11, original);
+        assertTrue(state.accept(new PlanInventoryUpdatePacket(10, 11, 1, true,
+                PreviewInventoryModel.Status.UNAVAILABLE, 0, 1, List.of())));
+        assertSame(original.graph(), state.view().graph());
+        assertFalse(PlanConfirmationAction.forInventory(state.status()).replan);
+        assertEquals("rsi.plan.inventory.check_confirm", PlanConfirmationAction.forInventory(state.status()).labelKey);
+        assertTrue(state.accept(new PlanInventoryUpdatePacket(10, 11, 2, true,
+                PreviewInventoryModel.Status.READY, 0, 1, List.of(
+                new PlanInventoryUpdatePacket.Entry(0, 120, 0), new PlanInventoryUpdatePacket.Entry(1, 2, 0)))));
+        assertEquals(PlanConfirmationAction.CONFIRM, PlanConfirmationAction.forInventory(state.status()));
+    }
+
+    @Test
+    void actualExpiryRequestsNewPlanningWithoutClearingTheDisplayedTreeOrResyncLoop() {
+        var original = source();
+        var state = new PlanInventoryClientState(10, 11, original);
+        assertTrue(state.accept(new PlanInventoryUpdatePacket(10, 11, 1, true,
+                PreviewInventoryModel.Status.EXPIRED, 0, 1, List.of())));
+        assertFalse(state.needsResync());
+        assertSame(original.graph(), state.view().graph());
+        assertEquals(PlanConfirmationAction.REBUILD_EXPIRED, PlanConfirmationAction.forInventory(state.status()));
+        assertTrue(PlanConfirmationAction.forInventory(state.status()).replan);
+    }
+
+    @Test
+    void pipeShortageCanRecoverToConfirmationWithoutDiscardingTheRoute() {
+        var state = new PlanInventoryClientState(10, 11, source());
+        assertTrue(state.accept(packet(10, 11, 1, true, 0, 1,
+                new PlanInventoryUpdatePacket.Entry(0, 90, 10), new PlanInventoryUpdatePacket.Entry(1, 2, 0))));
+        assertEquals(PlanConfirmationAction.FIND_ALTERNATIVE, PlanConfirmationAction.forInventory(state.status()));
+        assertTrue(state.accept(new PlanInventoryUpdatePacket(10, 11, 2, false,
+                PreviewInventoryModel.Status.READY, 0, 1, List.of(new PlanInventoryUpdatePacket.Entry(0, 120, 0)))));
+        assertFalse(PlanConfirmationAction.forInventory(state.status()).replan);
+        assertEquals(PlanConfirmationAction.COMPLETE_ROUTE,
+                PlanConfirmationAction.forInventory(PreviewInventoryModel.Status.REPLAN));
+    }
+
+    @Test
     void jeiDemandContextAppliesOnlyChangedMaterials() {
         var source = source();
         var state = new PlanInventoryClientState(10, 11, source);

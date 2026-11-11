@@ -25,6 +25,82 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PlanCacheTest extends BootstrapTest {
     @Test
+    void publishedRequestsRetainIndependentRoutesBeyondDeduplicationTtl() {
+        PlanCache cache = new PlanCache(10);
+        PlanCache.Key first = key("first_task");
+        PlanCache.Key second = new PlanCache.Key(first.playerId(), new ResourceLocation("test", "second_task"),
+                Map.of(), 1, "");
+        PlanningSnapshot firstSnapshot = snapshot(first);
+        cache.put(first, plan(), firstSnapshot, 100);
+        cache.retainForRequest(first.playerId(), 10, firstSnapshot);
+        PlanCache.Entry firstEntry = cache.peekForRequest(first, 10);
+        PlanningSnapshot secondSnapshot = snapshot(second);
+        cache.put(second, plan(), secondSnapshot, 101);
+        cache.retainForRequest(second.playerId(), 20, secondSnapshot);
+
+        assertNull(cache.get(first, 120));
+        assertSame(firstEntry, cache.peekForRequest(first, 10));
+        assertTrue(cache.consumeForRequest(first.playerId(), 10, firstEntry));
+        assertFalse(cache.consumeForRequest(first.playerId(), 10, firstEntry));
+        assertNull(cache.peekForRequest(first, 10));
+        assertNotNull(cache.peekForRequest(second, 20));
+        assertSame(cache.peekLatestForExecution(second.playerId()), cache.peekForRequest(second, 20));
+    }
+
+    @Test
+    void sameRecipeRequestsKeepTheirOwnSnapshotAndRejectIdentityChanges() {
+        PlanCache cache = new PlanCache(100);
+        PlanCache.Key key = key("same_target");
+        PlanningSnapshot before = snapshot(key);
+        cache.put(key, plan(), before, 1);
+        cache.retainForRequest(key.playerId(), 10, before);
+        PlanningSnapshot after = new PlanningSnapshot(key.playerId(), 2, key.recipeRevision(), key.recipeId(),
+                Map.of(), Map.of(), new ImmutableRecipeGraph(Map.of()), "new_network", "", false);
+        cache.put(key, plan(), after, 2);
+        cache.retainForRequest(key.playerId(), 20, after);
+        assertSame(before, cache.peekForRequest(key, 10).snapshot());
+        assertSame(after, cache.peekForRequest(key, 20).snapshot());
+        assertNull(cache.peekForRequest(new PlanCache.Key(UUID.randomUUID(), key.recipeId(), Map.of(), 1, ""), 10));
+        assertNull(cache.peekForRequest(new PlanCache.Key(key.playerId(), key.recipeId(), Map.of(), 2, ""), 10));
+        assertNull(cache.peekForRequest(new PlanCache.Key(key.playerId(), key.recipeId(), Map.of(), 1, "",
+                Map.of("material", "changed")), 10));
+        assertNull(cache.peekForRequest(new PlanCache.Key(key.playerId(), key.recipeId(), Map.of(), 1, "",
+                Map.of(), PlanningPreferences.empty(), key.recipeRevision() + 1), 10));
+        cache.invalidateSnapshot(before);
+        assertNull(cache.peekForRequest(key, 10));
+        assertNotNull(cache.peekForRequest(key, 20));
+        cache.removePlayer(key.playerId());
+        assertNull(cache.peekForRequest(key, 20));
+    }
+
+    @Test
+    void publishedRequestsObeyExistingCountAndNodeBudgets() {
+        PlanCache cache = new PlanCache(100, 2, 3);
+        PlanCache.Key first = key("request_capacity_first");
+        PlanCache.Key second = key("request_capacity_second");
+        PlanCache.Key third = key("request_capacity_third");
+        PlanningSnapshot firstSnapshot = snapshot(first);
+        cache.put(first, plan(), firstSnapshot, 1);
+        cache.retainForRequest(first.playerId(), 10, firstSnapshot);
+        PlanningSnapshot secondSnapshot = snapshot(second);
+        cache.put(second, plan(), secondSnapshot, 2);
+        cache.retainForRequest(second.playerId(), 20, secondSnapshot);
+        PlanningSnapshot thirdSnapshot = snapshot(third);
+        cache.put(third, plan(), thirdSnapshot, 3);
+        cache.retainForRequest(third.playerId(), 30, thirdSnapshot);
+        assertNull(cache.peekForRequest(first, 10));
+        assertNotNull(cache.peekForRequest(second, 20));
+        assertNotNull(cache.peekForRequest(third, 30));
+        cache.put(third, planWithGraph(3), thirdSnapshot, 4);
+        cache.retainForRequest(third.playerId(), 40, thirdSnapshot);
+        assertNull(cache.peekForRequest(second, 20));
+        assertNull(cache.peekForRequest(third, 30));
+        assertNotNull(cache.peekForRequest(third, 40));
+        cache.clear();
+        assertNull(cache.peekForRequest(third, 40));
+    }
+
+    @Test
     void materialLocksPartitionPreviewCacheKeys() {
         UUID player = UUID.randomUUID();
         ResourceLocation recipe = new ResourceLocation("test", "planks");

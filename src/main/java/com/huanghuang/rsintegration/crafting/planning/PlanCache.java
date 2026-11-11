@@ -27,6 +27,8 @@ public final class PlanCache {
     /** Latest plan actually shown to each player, retained until confirmation or replacement. */
     private final ConcurrentHashMap<UUID, ExecutionLease> executionLeases =
             new ConcurrentHashMap<>();
+    /** 已发布预览按请求保存，后台完成另一个任务不能替换玩家正在确认的路线。 */
+    private final ConcurrentHashMap<PreviewKey, ExecutionLease> requestLeases = new ConcurrentHashMap<>();
 
     public PlanCache() {
         this(PlanCache::configuredTtlNanos, PlanCache::configuredMaxEntries,
@@ -121,6 +123,56 @@ public final class PlanCache {
         return lease == null ? null : lease.entry();
     }
 
+    /** 在发布响应时关联客户端请求；保留完整服务端图，不接受客户端上传的计划。 */
+    public void retainForRequest(UUID playerId, long requestId, PlanningSnapshot snapshot) {
+        if (requestId <= 0L || !playerId.equals(snapshot.playerId())) return;
+        ExecutionLease lease = executionLeases.get(playerId);
+        if (lease == null || !lease.entry().snapshot().equals(snapshot)) {
+            lease = entries.entrySet().stream()
+                    .filter(entry -> entry.getKey().playerId().equals(playerId)
+                            && entry.getValue().snapshot().equals(snapshot))
+                    .map(entry -> new ExecutionLease(entry.getKey().withoutPreferences(), entry.getValue()))
+                    .findFirst().orElse(null);
+        }
+        if (lease == null) return;
+        requestLeases.putIfAbsent(new PreviewKey(playerId, requestId), lease);
+        // 使用已有缓存条数和图节点预算，不为多任务凭据引入无界保留或新经验上限。
+        long weight = requestLeases.values().stream().mapToLong(value -> entryWeight(value.entry())).sum();
+        if (requestLeases.size() <= maxEntries.getAsInt() && weight <= maxNodes.getAsInt()) return;
+        for (var oldest : requestLeases.entrySet().stream()
+                .sorted(Comparator.comparingLong(entry -> entry.getValue().entry().createdNanos())).toList()) {
+            if (requestLeases.size() <= maxEntries.getAsInt() && weight <= maxNodes.getAsInt()) break;
+            if (requestLeases.remove(oldest.getKey(), oldest.getValue())) weight -= entryWeight(oldest.getValue().entry());
+        }
+    }
+
+    /** 仅用于恢复库存提示；不授予执行权限，也不消费任务凭据。 */
+    @Nullable
+    public PlanResponse publishedPlan(UUID playerId, long requestId) {
+        ExecutionLease lease = requestLeases.get(new PreviewKey(playerId, requestId));
+        return lease != null && CraftPlanningRevision.isCurrent(lease.key().recipeRevision())
+                ? lease.entry().plan() : null;
+    }
+
+    /** 仍需由调用方校验产物、路线、网络、机器及当前材料；此处仅检查请求与锁定选材身份。 */
+    public Entry peekForRequest(Key expected, long requestId) {
+        ExecutionLease lease = requestLeases.get(new PreviewKey(expected.playerId(), requestId));
+        if (lease == null || !lease.key().recipeId().equals(expected.recipeId())
+                || lease.key().repeatCount() != expected.repeatCount()
+                || lease.key().recipeRevision() != expected.recipeRevision()
+                || !lease.key().materialLocks().equals(expected.materialLocks())) return null;
+        return lease.entry();
+    }
+
+    public boolean consumeForRequest(UUID playerId, long requestId, Entry expected) {
+        PreviewKey key = new PreviewKey(playerId, requestId);
+        ExecutionLease lease = requestLeases.get(key);
+        if (lease == null || lease.entry() != expected || !requestLeases.remove(key, lease)) return false;
+        executionLeases.computeIfPresent(playerId,
+                (ignored, current) -> current.entry() == expected ? null : current);
+        return true;
+    }
+
     /** 仅消费调用方已经复验过的同一个缓存条目。 */
     public boolean consumeForExecution(Key key, Entry expectedEntry) {
         if (expectedEntry == null) return false;
@@ -156,16 +208,19 @@ public final class PlanCache {
     public void clear() {
         entries.clear();
         executionLeases.clear();
+        requestLeases.clear();
     }
 
     public void removePlayer(UUID playerId) {
         entries.keySet().removeIf(key -> key.playerId().equals(playerId));
         executionLeases.remove(playerId);
+        requestLeases.keySet().removeIf(key -> key.playerId().equals(playerId));
     }
 
     /** 重算同一预览前移除其结果和租约，避免立刻命中刚刚过期的库存快照。 */
     public void invalidateSnapshot(PlanningSnapshot snapshot) {
         entries.entrySet().removeIf(entry -> entry.getValue().snapshot().equals(snapshot));
+        requestLeases.entrySet().removeIf(entry -> entry.getValue().entry().snapshot().equals(snapshot));
         ExecutionLease lease = executionLeases.get(snapshot.playerId());
         if (lease != null && lease.entry().snapshot().equals(snapshot)) {
             executionLeases.remove(snapshot.playerId(), lease);
@@ -224,6 +279,8 @@ public final class PlanCache {
             return RSIntegrationConfig.DEFAULT_CRAFTING_PLAN_CACHE_MAX_NODES;
         }
     }
+
+    private record PreviewKey(UUID playerId, long requestId) {}
 
     public record Key(UUID playerId, ResourceLocation recipeId,
                       Map<String, String> forcedRecipes, int repeatCount,

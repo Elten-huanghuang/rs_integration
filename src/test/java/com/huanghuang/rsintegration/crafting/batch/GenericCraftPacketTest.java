@@ -34,6 +34,7 @@ import com.huanghuang.rsintegration.crafting.graph.UnresolvedDemand;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
 import com.huanghuang.rsintegration.crafting.planning.PureDemandTreeInspector;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
+import com.huanghuang.rsintegration.crafting.SelfAmplifyingRecipePolicy;
 import com.huanghuang.rsintegration.crafting.planning.PlanningSnapshot;
 import com.huanghuang.rsintegration.crafting.planning.PlanningPreferences;
 import com.huanghuang.rsintegration.crafting.plan.RecipeChoice;
@@ -53,6 +54,8 @@ import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.MinecraftServer;
+import net.minecraftforge.server.ServerLifecycleHooks;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -101,6 +104,8 @@ class GenericCraftPacketTest extends BootstrapTest {
 
     @Test
     void scopedAlchemyGraphIncludesWorldSpecificReusableAspectsWithoutChangingTheSharedIndex() {
+        MinecraftServer server = mock(MinecraftServer.class);
+        when(server.isSameThread()).thenReturn(true);
         ServerPlayer player = mock(ServerPlayer.class);
         ServerLevel level = mock(ServerLevel.class);
         when(player.serverLevel()).thenReturn(level);
@@ -116,11 +121,19 @@ class GenericCraftPacketTest extends BootstrapTest {
                 List.of(new ImmutableRecipeGraph.MaterialRef(
                         new ResourceLocation("minecraft", "clay_ball"), "")), 1)),
                 ModIds.ID_EMBERS_ALCHEMY, new ResourceLocation("embers", "alchemy"));
-        ImmutableRecipeGraph shared = new ImmutableRecipeGraph(Map.of(output, List.of(node)));
-        try (var recipes = mockStatic(CraftRecipeResolver.class);
+        var gold = new ImmutableRecipeGraph.MaterialRef(new ResourceLocation("minecraft", "gold_ingot"), "");
+        var iron = new ImmutableRecipeGraph.MaterialRef(new ResourceLocation("minecraft", "iron_ingot"), "");
+        var clay = new ImmutableRecipeGraph.MaterialRef(new ResourceLocation("minecraft", "clay_ball"), "");
+        var goldRecipe = new ImmutableRecipeGraph.RecipeNode(new ResourceLocation("test", "gold"), gold,
+                1, List.of(new ImmutableRecipeGraph.IngredientRef(List.of(iron), 1)));
+        ImmutableRecipeGraph shared = new ImmutableRecipeGraph(Map.of(
+                output, List.of(node), gold, List.of(goldRecipe)));
+        try (var lifecycle = mockStatic(ServerLifecycleHooks.class);
+             var recipes = mockStatic(CraftRecipeResolver.class);
              var bindings = mockStatic(CraftMachineBindingSupport.class);
              var policy = mockStatic(CraftExecutionPolicy.class);
              var materials = mockStatic(CraftPacketUtils.class)) {
+            lifecycle.when(ServerLifecycleHooks::getCurrentServer).thenReturn(server);
             recipes.when(() -> CraftRecipeResolver.resolve(level, recipeId)).thenReturn(recipe);
             bindings.when(() -> CraftMachineBindingSupport.isRecipeAvailableForPlanning(player, recipe))
                     .thenReturn(true);
@@ -141,7 +154,20 @@ class GenericCraftPacketTest extends BootstrapTest {
             assertEquals(2, scoped.recipesById().get(recipeId).inputs().size());
             assertEquals(DemandRole.CATALYST,
                     scoped.recipesById().get(recipeId).inputs().get(1).role());
+            assertTrue(scoped.recipesById().containsKey(goldRecipe.recipeId()),
+                    "世界相关催化剂补入后，其生产配方不能已经被依赖裁剪删除");
+            var planned = PureRecipePlanner.resolve(scoped, Map.of(clay, 20L, iron, 1L),
+                    SelfAmplifyingRecipePolicy.scaleTargetInputs(scoped.recipesById().get(recipeId), 20), 10);
+            assertTrue(planned.feasible());
+            assertEquals(1L, planned.steps().stream().filter(step -> step.recipeId().equals(goldRecipe.recipeId()))
+                    .findFirst().orElseThrow().batches(), "可复用象征只需生产一份");
             assertEquals(1, shared.recipesById().get(recipeId).inputs().size());
+
+            materials.when(() -> CraftPacketUtils.applyPlanningIngredientContext(recipe, player, List.of(input)))
+                    .thenReturn(List.of(input, new IngredientSpec(Ingredient.of(Items.IRON_PICKAXE),
+                            1, DemandRole.DURABILITY)));
+            assertTrue(GenericCraftPacket.scopedBindingAwareGraph(player, shared, recipeId)
+                    .requiresTypedPlanning(), "不能用缺少无法投影输入的旧节点发布假可行计划");
         }
     }
 
