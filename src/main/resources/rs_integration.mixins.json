@@ -69,6 +69,7 @@
     "refinedstorage.UnifiedDiskStorageCacheMixin",
     "refinedstorage.UnifiedDiskNetworkContributionMixin",
     "simplebackups.UnifiedDiskBackupMixin",
+    "ftbbackups2.UnifiedDiskBackupMixin",
     "refinedstorage.GridContainerSmithingMixin",
     "minecraft.AnvilMenuAccessor",
     "refinedstorage.BaseContainerSmithingQuickMoveMixin",

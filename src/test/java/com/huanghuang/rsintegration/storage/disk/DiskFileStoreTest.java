@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.storage.disk.core.ResourceTable;
 import com.huanghuang.rsintegration.storage.disk.core.UnifiedDiskCore;
 import com.huanghuang.rsintegration.storage.disk.persistence.DiskFileStore;
 import com.huanghuang.rsintegration.storage.disk.persistence.DiskFileStore.Snapshot;
+import com.huanghuang.rsintegration.magic.MagicResourceDiskStore;
 import com.huanghuang.rsintegration.magic.MagicResourceKind;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.world.item.ItemStack;
@@ -17,11 +18,13 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.FileTime;
 import java.time.Duration;
+import java.security.MessageDigest;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
@@ -132,6 +135,7 @@ class DiskFileStoreTest extends BootstrapTest {
         FrozenKey key = UnifiedDiskCoreTest.variant(1);
         FrozenKey water = FrozenKey.fluid(new FluidStack(Fluids.WATER, 1));
         core.insert(key, 7, true); core.insert(water, 34000, true);
+        core.insertMagic(MagicResourceKind.MANA, 23000, true);
         Snapshot first = Snapshot.freeze(core);
         var saved = files.save(first, null); acknowledge(core, first);
         core.insert(key, 1, true);
@@ -151,6 +155,7 @@ class DiskFileStoreTest extends BootstrapTest {
         assertEquals(world, backup.worldIdentity());
         assertEquals(8, backup.load(world, core.diskId).items.amount(key));
         assertEquals(34000, backup.load(world, core.diskId).fluids.amount(water));
+        assertEquals(23000, backup.load(world, core.diskId).magicAmount(MagicResourceKind.MANA));
         Path directory = restored.resolve(core.diskId.toString());
         Files.copy(directory.resolve("manifest.previous.bin"), directory.resolve("manifest.bin"),
                 StandardCopyOption.REPLACE_EXISTING);
@@ -186,6 +191,28 @@ class DiskFileStoreTest extends BootstrapTest {
         assertEquals(31, loaded.items.amount(third)); assertEquals(Integer.MAX_VALUE, loaded.items.amount(first));
         assertEquals(5790, loaded.fluids.amount(water));
         assertEquals(262144, next.manifest().limits().items());
+    }
+
+    @Test void incrementalBackupIncludesLegacySoulsAndAcceptsOlderDisksWithoutMagicFiles() throws Exception {
+        DiskFileStore files = new DiskFileStore(root);
+        UUID world = files.worldIdentity();
+        UnifiedDiskCore core = new UnifiedDiskCore(world, UUID.randomUUID(), null, UnifiedDiskCoreTest.core(8).limits);
+        files.save(Snapshot.freeze(core), null);
+        Path directory = root.resolve(core.diskId.toString());
+        Files.delete(directory.resolve(MagicResourceDiskStore.NAME));
+        Path souls = directory.resolve(MagicResourceDiskStore.LEGACY_SOULS_NAME);
+        byte[] body = ByteBuffer.allocate(Integer.BYTES).putInt(321).array();
+        byte[] encoded = ByteBuffer.allocate(44 + body.length).putInt(0x52534955).putInt(DiskFileStore.FORMAT)
+                .putInt(body.length).put(body).put(MessageDigest.getInstance("SHA-256").digest(body)).array();
+        Files.write(souls, encoded);
+        Files.setLastModifiedTime(souls, FileTime.fromMillis(1));
+        long lastBackup = System.currentTimeMillis() - 1000;
+        files.prepareBackup();
+        assertTrue(Files.getLastModifiedTime(souls).toMillis() > lastBackup);
+        assertEquals(321, files.load(world, core.diskId).magicAmount(MagicResourceKind.SOUL));
+        assertFalse(Files.exists(directory.resolve(MagicResourceDiskStore.NAME)));
+        Files.delete(souls);
+        assertDoesNotThrow(files::prepareBackup);
     }
 
     @Test void failedExpansionCommitKeepsOldCapacityAndInventoryIncludingEmptyDisk() throws Exception {

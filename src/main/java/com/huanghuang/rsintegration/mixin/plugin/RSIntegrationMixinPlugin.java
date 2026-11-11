@@ -119,7 +119,7 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
             return isClassPresent(targetClassName)
                     && (hasMethod(targetClassName, "m_6875_") || hasMethod(targetClassName, "stillValid"));
         }
-        if (mixinClassName.contains(".simplebackups.")) {
+        if (mixinClassName.contains(".simplebackups.") || mixinClassName.contains(".ftbbackups2.")) {
             return isClassPresent("com.refinedmods.refinedstorage.api.network.INetwork")
                     && isClassPresent(targetClassName);
         }

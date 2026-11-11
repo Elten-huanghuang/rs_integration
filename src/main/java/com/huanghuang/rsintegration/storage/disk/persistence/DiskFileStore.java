@@ -200,9 +200,29 @@ public final class DiskFileStore {
                     dependencies.add(page);
                 }
             }
+            prepareMagicBackup(directory, dependencies);
         }
         FileTime timestamp = FileTime.fromMillis(System.currentTimeMillis() + 1);
         for (Path file : dependencies) Files.setLastModifiedTime(file, timestamp);
+    }
+
+    private void prepareMagicBackup(Path directory, Set<Path> dependencies) throws IOException {
+        Path magic = directory.resolve(MagicResourceDiskStore.NAME);
+        if (Files.isRegularFile(magic)) {
+            try (DataInputStream input = input(readChecked(magic, MagicResourceDiskStore.MAX_BYTES))) {
+                MagicResourceDiskStore.read(input);
+            }
+            dependencies.add(magic);
+            return;
+        }
+        // 尚未迁移的旧盘仍从独立灵魂文件加载，增量备份也必须携带它。
+        Path souls = directory.resolve(MagicResourceDiskStore.LEGACY_SOULS_NAME);
+        if (Files.isRegularFile(souls)) {
+            try (DataInputStream input = input(readChecked(souls, MagicResourceDiskStore.LEGACY_SOULS_BYTES))) {
+                MagicResourceDiskStore.readLegacySouls(input);
+            }
+            dependencies.add(souls);
+        }
     }
 
     private Set<Path> referencedPages(Path directory, Manifest manifest) throws IOException {

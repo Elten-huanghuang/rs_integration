@@ -139,6 +139,8 @@
   "item.rs_integration.unified_storage_disk.failure.quarantine_preserved": "隔离条目的原始数据和数量已保留，仍计入磁盘容量与存储汇总。",
   "rsi.unified_disk.quarantine.notice": "[RSI] 万界归墟盘已隔离缺失或身份不兼容的资源（磁盘 %s），正常库存可继续使用。",
   "item.rs_integration.unified_storage_disk.failure.missing_file": "磁盘库存文件缺失，无法加载。",
+  "item.rs_integration.unified_storage_disk.failure.missing_file_named": "磁盘库存文件缺失：%s",
+  "item.rs_integration.unified_storage_disk.failure.restore_disk_backup": "请完整恢复同一备份中的 data/rs_integration/unified_disks；增量备份需先合并。",
   "item.rs_integration.unified_storage_disk.failure.read_failed": "磁盘数据读取或校验失败。",
   "item.rs_integration.unified_storage_disk.failure.wrong_world": "这张磁盘属于另一个世界存档。",
   "item.rs_integration.unified_storage_disk.failure.return_world": "请回到原存档使用；迁移时需一并复制磁盘数据。",

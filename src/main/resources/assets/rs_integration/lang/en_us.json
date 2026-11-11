@@ -139,6 +139,8 @@
   "item.rs_integration.unified_storage_disk.failure.quarantine_preserved": "Original data and quantities are preserved. Quarantined entries still count toward disk capacity and stored totals.",
   "rsi.unified_disk.quarantine.notice": "[RSI] Guixu disk %s has quarantined missing or identity-incompatible resources. Available contents remain usable.",
   "item.rs_integration.unified_storage_disk.failure.missing_file": "Disk inventory files are missing; loading failed.",
+  "item.rs_integration.unified_storage_disk.failure.missing_file_named": "Missing disk inventory file: %s",
+  "item.rs_integration.unified_storage_disk.failure.restore_disk_backup": "Restore all of data/rs_integration/unified_disks from the same backup; merge incremental backups first.",
   "item.rs_integration.unified_storage_disk.failure.read_failed": "Disk data could not be read or verified.",
   "item.rs_integration.unified_storage_disk.failure.wrong_world": "This disk belongs to a different world save.",
   "item.rs_integration.unified_storage_disk.failure.return_world": "Use the original save; include disk data when moving a world.",

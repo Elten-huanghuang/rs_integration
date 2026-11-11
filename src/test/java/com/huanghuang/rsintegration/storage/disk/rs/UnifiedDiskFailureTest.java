@@ -27,12 +27,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -140,6 +142,47 @@ class UnifiedDiskFailureTest extends BootstrapTest {
         assertNull(manager.entry(id).core);
         assertNotNull(manager.failure(id));
         assertNull(manager.summary(id));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"manifest", "item_key", "item_amount", "fluid_key", "fluid_amount"})
+    void incompleteRestoreNamesMissingFileAndPreservesRemainingInventory(String missingPart) throws Exception {
+        server = mock(MinecraftServer.class); when(server.isSameThread()).thenReturn(true);
+        when(server.getWorldPath(LevelResource.ROOT)).thenReturn(world);
+        ServerLevel level = mock(ServerLevel.class); when(level.getServer()).thenReturn(server);
+        UnifiedDiskManager manager = UnifiedDiskManager.get(level);
+        UUID id = manager.create(null).id();
+        manager.entry(id).core.insertItem(new ItemStack(Items.DIAMOND), 7, true);
+        manager.entry(id).core.insertFluid(new FluidStack(Fluids.WATER, 1), 34000, true);
+        UnifiedDiskManager.stop(server);
+        DiskFileStore files = new DiskFileStore(world.resolve("data/rs_integration/unified_disks"));
+        var manifest = files.manifest(id);
+        String name = switch (missingPart) {
+            case "item_key" -> manifest.items().get(0).keys().get(0);
+            case "item_amount" -> manifest.items().get(0).amounts();
+            case "fluid_key" -> manifest.fluids().get(0).keys().get(0);
+            case "fluid_amount" -> manifest.fluids().get(0).amounts();
+            default -> "manifest.bin";
+        };
+        Path directory = world.resolve("data/rs_integration/unified_disks").resolve(id.toString());
+        Path missing = directory.resolve(name);
+        Files.delete(missing);
+        List<Path> remaining;
+        try (var paths = Files.list(directory)) { remaining = paths.sorted().toList(); }
+        List<byte[]> original = new ArrayList<>();
+        for (Path path : remaining) original.add(Files.readAllBytes(path));
+
+        manager = UnifiedDiskManager.get(level);
+        assertNull(manager.entry(id).core);
+        UnifiedDiskFailure failure = manager.failure(id);
+        TranslatableContents reason = (TranslatableContents) failure.reason().getContents();
+        assertEquals("item.rs_integration.unified_storage_disk.failure.missing_file_named", reason.getKey());
+        assertEquals(name, reason.getArgs()[0]);
+        assertEquals("item.rs_integration.unified_storage_disk.failure.restore_disk_backup",
+                ((TranslatableContents) failure.action().getContents()).getKey());
+        UnifiedDiskManager.stop(server);
+        assertFalse(Files.exists(missing));
+        for (int i = 0; i < remaining.size(); i++) assertArrayEquals(original.get(i), Files.readAllBytes(remaining.get(i)));
     }
 
     @AfterEach void stop() { if (server != null) UnifiedDiskManager.stop(server); }

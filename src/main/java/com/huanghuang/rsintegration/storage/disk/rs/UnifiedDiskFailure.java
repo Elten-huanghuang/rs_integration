@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.storage.disk.core.UnifiedDiskCore;
 import net.minecraft.network.chat.Component;
 
 import java.nio.file.NoSuchFileException;
+import java.nio.file.Path;
 import java.util.stream.Stream;
 
 /** 故障或隔离警告与恢复建议共用于悬浮提示和聊天，翻译留给玩家客户端。 */
@@ -28,8 +29,13 @@ public record UnifiedDiskFailure(Component reason, Component action) {
                     ? "missing_item" : "missing_fluid"), missing.resource().toString()),
                     Component.translatable(PREFIX + "restore_mod", missing.resource().getNamespace()));
         }
-        return new UnifiedDiskFailure(Component.translatable(PREFIX + (error instanceof NoSuchFileException
-                ? "missing_file" : "read_failed")), Component.translatable(PREFIX + "contact_admin"));
+        if (error instanceof NoSuchFileException missing) {
+            Component reason = missing.getFile() == null ? Component.translatable(PREFIX + "missing_file")
+                    : Component.translatable(PREFIX + "missing_file_named", Path.of(missing.getFile()).getFileName().toString());
+            return new UnifiedDiskFailure(reason, Component.translatable(PREFIX + "restore_disk_backup"));
+        }
+        return new UnifiedDiskFailure(Component.translatable(PREFIX + "read_failed"),
+                Component.translatable(PREFIX + "contact_admin"));
     }
 
     public static UnifiedDiskFailure wrongWorld() {
