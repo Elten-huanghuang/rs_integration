@@ -142,6 +142,26 @@ public final class MaterialBroker {
         if (!matches) {
             throw new IllegalArgumentException("published stack does not match material key");
         }
+        return addLot(source, material, stack);
+    }
+
+    /**
+     * 催化剂返还口沿用规划时的逻辑身份，实物必须保留配方实际扣费后的 NBT。
+     * 仅供已经按输入槽核实真实返还物的执行器使用；普通产物仍走严格发布入口。
+     */
+    public long publishCatalystReturn(MaterialSource.ProducerOutput source,
+                                      MaterialKey material, ItemStack stack) {
+        requireOwnerThread();
+        Objects.requireNonNull(source, "source");
+        Objects.requireNonNull(material, "material");
+        Objects.requireNonNull(stack, "stack");
+        if (stack.isEmpty() || stack.getItem() != material.item()) {
+            throw new IllegalArgumentException("catalyst return must retain its item type");
+        }
+        return addLot(source, material, stack);
+    }
+
+    private long addLot(MaterialSource source, MaterialKey material, ItemStack stack) {
         long lotId = nextLotId++;
         AssetLot lot = new AssetLot(lotId, source, material, stack);
         lots.put(lotId, lot);

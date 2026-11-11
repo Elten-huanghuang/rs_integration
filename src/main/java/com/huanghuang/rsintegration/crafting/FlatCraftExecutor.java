@@ -70,7 +70,15 @@ final class FlatCraftExecutor {
     record Context(ServerLevel level, CraftLogContext logContext,
                    List<CraftingResolver.ResolutionStep> chainSteps,
                    @Nullable ItemStack targetOutput, Host host,
-                   Map<String, ItemStack> materialLocks) {
+                   Map<String, ItemStack> materialLocks,
+                   @Nullable CraftingCatalystState catalystState) {
+        Context(ServerLevel level, CraftLogContext logContext,
+                List<CraftingResolver.ResolutionStep> chainSteps,
+                @Nullable ItemStack targetOutput, Host host,
+                Map<String, ItemStack> materialLocks) {
+            this(level, logContext, chainSteps, targetOutput, host, materialLocks, null);
+        }
+
         Context(ServerLevel level, CraftLogContext logContext,
                 List<CraftingResolver.ResolutionStep> chainSteps,
                 @Nullable ItemStack targetOutput, Host host) {
@@ -304,7 +312,9 @@ final class FlatCraftExecutor {
             addToInventory(workingInventory, result);
             ExternalItemProgressBridge.enqueueCrafted(online, result);
         }
-        for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(recipe, consumed)) {
+        List<ItemStack> remainders = CraftPacketUtils.getRecipeRemaindersBySpec(recipe, consumed);
+        if (context.catalystState() != null) context.catalystState().record(specs, remainders);
+        for (ItemStack remainder : remainders) {
             int remainderExecutions = CraftPacketUtils.remainderExecutions(remainder, specs, 1);
             addToInventory(workingInventory, remainder.copyWithCount(
                     StepExecutor.mulCount(remainder.getCount(), remainderExecutions)));

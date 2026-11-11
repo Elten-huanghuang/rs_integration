@@ -70,6 +70,8 @@ import com.huanghuang.rsintegration.crafting.graph.GraphConcurrencyEligibility;
 import com.huanghuang.rsintegration.crafting.graph.OutputDeclaration;
 import com.huanghuang.rsintegration.crafting.graph.OutputKind;
 import com.huanghuang.rsintegration.crafting.graph.OutputPortId;
+import com.huanghuang.rsintegration.crafting.graph.RootAllocation;
+import com.huanghuang.rsintegration.crafting.graph.RootDemand;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
 import com.huanghuang.rsintegration.ModVersionDelegateRegistry;
@@ -307,6 +309,8 @@ public final class AsyncCraftChain {
     @Nullable
     private final NodeAdmissionCoordinator graphAdmissions;
     private final Map<NodeId, List<MaterialBroker.Request>> graphRequests = new HashMap<>();
+    private final Map<OutputPortId, Long> graphRequiredOutputs = new HashMap<>();
+    private final Map<OutputPortId, List<Ingredient>> graphRootOutputIngredients = new HashMap<>();
     private final GraphMaterialWakeIndex graphMaterialWakeIndex = new GraphMaterialWakeIndex();
     private final BitSet graphRefreshCandidates = new BitSet();
     private final Consumer<MaterialSource> graphMaterialIncrease = this::includeGraphMaterialConsumers;
@@ -382,6 +386,7 @@ public final class AsyncCraftChain {
         private final ExtractionLedger executionLedger;
         private final OperationExecutionKernel.Session operation;
         private final List<ItemStack> inventory;
+        private final CraftingCatalystState catalystState = new CraftingCatalystState();
         private int remainingExecutions;
 
         private GraphVanillaJob(
@@ -516,8 +521,20 @@ public final class AsyncCraftChain {
             if (allocation.source() instanceof MaterialSource.InitialPool source) {
                 initial.merge(new InitialLotKey(source, allocation.material()),
                         allocation.quantity(), SaturatingLongMath::add);
+            } else if (allocation.source() instanceof MaterialSource.ProducerOutput source) {
+                graphRequiredOutputs.merge(source.outputPort(), allocation.quantity(), SaturatingLongMath::add);
             }
         }
+        // 预先索引输出口需求，催化剂结算时只访问本端口，避免逐节点扫描整张图。
+        for (RootDemand root : plan.rootDemands()) {
+            for (RootAllocation allocation : root.allocations()) {
+                if (!(allocation.source() instanceof MaterialSource.ProducerOutput source)) continue;
+                graphRequiredOutputs.merge(source.outputPort(), allocation.quantity(), SaturatingLongMath::add);
+                graphRootOutputIngredients.computeIfAbsent(source.outputPort(), ignored -> new ArrayList<>())
+                        .add(root.ingredient());
+            }
+        }
+        graphRootOutputIngredients.replaceAll((port, ingredients) -> List.copyOf(ingredients));
         // 图内需求在构造后只读，避免每次就绪检查和预留都重新复制列表。
         graphRequests.replaceAll((nodeId, requests) -> List.copyOf(requests));
         for (int index = 0; index < plan.topologicalOrder().size(); index++) {
@@ -1375,14 +1392,16 @@ public final class AsyncCraftChain {
     private boolean executeGraphVanillaSlice(
             GraphVanillaJob job, int executions, ServerPlayer online) {
         CraftingResolver.ResolutionStep slice = job.step.withExecutions(executions);
-        OperationExecutionKernel.StartAction run = () -> executeVanillaStepsInline(
-                List.of(slice), online, job.inventory, job.executionLedger, false)
+        OperationExecutionKernel.StartAction run = () -> executeVanillaStepsInlineDetailed(
+                List.of(slice), online, job.inventory, job.executionLedger, false,
+                job.catalystState).status() == FlatCraftExecutor.Status.SUCCESS
                 && commitLedger(job.executionLedger, online);
         return job.operation.startAttempted() ? run.start() : job.operation.tryStart(run);
     }
 
     private boolean completeGraphVanillaJob(GraphVanillaJob job) {
-        boolean outputsComplete = publishDeclaredNodeOutputs(job.nodeId, job.inventory);
+        boolean outputsComplete = publishDeclaredNodeOutputs(
+                job.nodeId, job.inventory, job.catalystState);
         OperationExecutionKernel.CompletionResult completion = job.operation.complete(
                 () -> outputsComplete,
                 () -> settleGraphVanillaJob(job));
@@ -2772,6 +2791,11 @@ public final class AsyncCraftChain {
 
     /** Move exact runtime results into graph-owned lots after validating every declaration. */
     private boolean publishDeclaredNodeOutputs(NodeId nodeId, List<ItemStack> actualOutputs) {
+        return publishDeclaredNodeOutputs(nodeId, actualOutputs, null);
+    }
+
+    private boolean publishDeclaredNodeOutputs(NodeId nodeId, List<ItemStack> actualOutputs,
+                                               @Nullable CraftingCatalystState catalystState) {
         CraftNode node = graphNodes.get(nodeId);
         if (node == null || graphMaterials == null) return false;
 
@@ -2780,12 +2804,23 @@ public final class AsyncCraftChain {
         List<String> checks = new ArrayList<>();
         List<String> mismatches = new ArrayList<>();
         for (OutputDeclaration output : node.outputs()) {
-            List<ItemStack> fragments = removeMatchingFragments(
-                    remaining, output.material(), output.quantity());
+            boolean trackedReturn = catalystState != null && catalystState.tracks(output);
+            List<ItemStack> fragments = trackedReturn
+                    ? catalystState.removeReturned(output, remaining)
+                    : removeMatchingFragments(remaining, output.material(), output.quantity());
             long actualCount = fragments.stream().mapToLong(ItemStack::getCount).sum();
-            String check = describeOutputCheck(output, actualCount);
+            // 最后一次允许按原配方耗尽；仍有后续消费者时必须实际返还足量催化剂。
+            long required = trackedReturn
+                    ? Math.max(catalystState.returnedQuantity(output),
+                            graphRequiredOutputs.getOrDefault(output.id(), 0L))
+                    : output.quantity();
+            boolean rootsMatch = !trackedReturn || satisfiesCatalystRoots(output, fragments);
+            String check = describeOutputCheck(output, required, actualCount)
+                    + (rootsMatch ? "" : " root ingredient mismatch");
             checks.add(check);
-            if (actualCount != output.quantity()) mismatches.add(check);
+            if (actualCount != required || !rootsMatch) {
+                mismatches.add(check);
+            }
             matched.put(output, fragments);
         }
         if (!mismatches.isEmpty()) {
@@ -2806,9 +2841,11 @@ public final class AsyncCraftChain {
 
         for (Map.Entry<OutputDeclaration, List<ItemStack>> entry : matched.entrySet()) {
             OutputDeclaration output = entry.getKey();
-            MaterialSource source = new MaterialSource.ProducerOutput(output.id());
+            MaterialSource.ProducerOutput source = new MaterialSource.ProducerOutput(output.id());
             for (ItemStack fragment : entry.getValue()) {
-                graphMaterials.publishActual(source, output.material(), fragment);
+                if (catalystState != null && catalystState.tracks(output)) {
+                    graphMaterials.publishCatalystReturn(source, output.material(), fragment);
+                } else graphMaterials.publishActual(source, output.material(), fragment);
                 recordPublishedOutput(output.id(), fragment);
             }
         }
@@ -2816,6 +2853,11 @@ public final class AsyncCraftChain {
         for (ItemStack extra : remaining) addToVirtualInventory(extra);
         actualOutputs.clear();
         return true;
+    }
+
+    private boolean satisfiesCatalystRoots(OutputDeclaration output, List<ItemStack> fragments) {
+        return graphRootOutputIngredients.getOrDefault(output.id(), List.of()).stream()
+                .allMatch(ingredient -> fragments.stream().allMatch(stack -> IngredientMatcher.test(ingredient, stack)));
     }
 
     private static List<ItemStack> removeMatchingFragments(
@@ -3037,10 +3079,10 @@ public final class AsyncCraftChain {
         return true;
     }
 
-    private static String describeOutputCheck(OutputDeclaration output, long matchedCount) {
+    private static String describeOutputCheck(OutputDeclaration output, long required, long matchedCount) {
         return "{port=" + output.id() + ",kind=" + output.kind()
                 + ",material=" + describeMaterialForLogging(output.material())
-                + ",expected=" + output.quantity() + ",matched=" + matchedCount + "}";
+                + ",declared=" + output.quantity() + ",expected=" + required + ",matched=" + matchedCount + "}";
     }
 
     private static String describeOutputDeclarations(List<OutputDeclaration> outputs) {
@@ -3714,6 +3756,15 @@ public final class AsyncCraftChain {
             List<CraftingResolver.ResolutionStep> vanillaSteps,
             ServerPlayer online, List<ItemStack> workingInventory,
             ExtractionLedger executionLedger, boolean allowPhysicalFallback) {
+        return executeVanillaStepsInlineDetailed(vanillaSteps, online, workingInventory,
+                executionLedger, allowPhysicalFallback, null);
+    }
+
+    private FlatCraftExecutor.ExecutionResult executeVanillaStepsInlineDetailed(
+            List<CraftingResolver.ResolutionStep> vanillaSteps,
+            ServerPlayer online, List<ItemStack> workingInventory,
+            ExtractionLedger executionLedger, boolean allowPhysicalFallback,
+            @Nullable CraftingCatalystState catalystState) {
         ServerLevel overworld = server.overworld();
         if (overworld == null) {
             return FlatCraftExecutor.ExecutionResult.failure("overworld unavailable");
@@ -3752,7 +3803,7 @@ public final class AsyncCraftChain {
                             public void logLedgerState(ExtractionLedger ledger) {
                                 AsyncCraftChain.this.logLedgerState(ledger);
                             }
-                        }, supplementalMaterialLocks));
+                        }, supplementalMaterialLocks, catalystState));
     }
 
     //  multi-block step execution
