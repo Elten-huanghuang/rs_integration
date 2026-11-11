@@ -101,6 +101,23 @@ public final class MaterialBroker {
         return availabilityRevision;
     }
 
+    /** 只读统计，不把规划时登记的 InitialPool 当成已经从网络提取的实物。 */
+    public void visitMonitorMaterials(MonitorMaterialConsumer consumer) {
+        requireOwnerThread();
+        for (AssetLot lot : lots.values()) {
+            if (lot.source instanceof MaterialSource.InitialPool) {
+                consumer.accept(MaterialKey.of(lot.stack), 0L, saturatingAdd(lot.available, lot.reserved));
+            } else {
+                consumer.accept(MaterialKey.of(lot.stack), saturatingAdd(lot.available, lot.reserved), 0L);
+            }
+        }
+    }
+
+    @FunctionalInterface
+    public interface MonitorMaterialConsumer {
+        void accept(MaterialKey material, long available, long toExtract);
+    }
+
     /** 只消费可用量增加的来源通知，不修改材料数量、预留或缺料信息。 */
     public void drainIncreasedSources(Consumer<MaterialSource> consumer) {
         requireOwnerThread();

@@ -65,6 +65,8 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     private Recipe<?> recipe;
     private ItemStack pendingResult;
     private boolean craftDone;
+    @Nullable
+    private String startFailureDetail;
 
     // FURNACE path state
     private AbstractFurnaceBlockEntity furnaceBE;
@@ -176,6 +178,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         this.myPos = pos;
         this.pendingResult = ItemStack.EMPTY;
         this.craftDone = false;
+        this.startFailureDetail = null;
         this.furnaceBE = null;
         this.plannedFurnaceOperations = 1;
         this.activeFurnaceOperations = 1;
@@ -727,7 +730,22 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         return true;
     }
 
+    @Nullable
+    @Override
+    public String lastStartFailureDetail() {
+        return startFailureDetail;
+    }
+
     private boolean ensureFuel(ServerPlayer player, int operations) {
+        boolean ready = tryEnsureFuel(player, operations);
+        // 并行执行器会把此详情写入日志和失败报告，避免只留下 worker start failed。
+        startFailureDetail = ready ? null
+                : "熔炉燃料检查或补充失败（操作数=" + operations + "，配方=" + recipe.getId()
+                + "）；请检查燃料库存、燃料槽及存储网络访问。";
+        return ready;
+    }
+
+    private boolean tryEnsureFuel(ServerPlayer player, int operations) {
         int cookingTime = recipe instanceof AbstractCookingRecipe acr
                 ? BrickFurnaceCompat.effectiveCookTicks(furnaceBE, acr) : 200;
 
@@ -770,7 +788,12 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         var snapshot = endpoint.snapshot(player).snapshot().orElse(null);
         if (snapshot == null) return false;
         for (var entry : snapshot.items()) {
-            candidates.add(entry.stack());
+            // 展示栈只表示物品身份，数量固定为 1；真实库存来自 amount。
+            // 一次最多填满燃料槽，先用 long 限幅再转 int，避免大库存溢出。
+            ItemStack candidate = entry.stack();
+            candidate.setCount((int) Math.min(entry.amount(),
+                    Math.min(candidate.getMaxStackSize(), furnaceBE.getMaxStackSize())));
+            candidates.add(candidate);
         }
         VanillaFurnaceFuelPolicy.Selection selection = VanillaFurnaceFuelPolicy.select(
                 candidates, RSIntegrationConfig.VANILLA_FURNACE_FUEL_PRIORITY.get(),

@@ -12,11 +12,29 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class CountedOperationMaterialsTest extends BootstrapTest {
     private static final IngredientSpec INPUT = new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 3);
+
+    @Test void monitoringAnExtremeQuantityVisitsOneRangeWithoutMaterializingStacks() {
+        int operations = Integer.MAX_VALUE;
+        long quantity = (long) operations * Integer.MAX_VALUE;
+        var input = new IngredientSpec(Ingredient.of(Items.IRON_INGOT), Integer.MAX_VALUE);
+        var plan = new CountedOperationMaterials.Builder(operations, 1).add(input,
+                new Pool().add(Origin.INITIAL, new ItemStack(Items.IRON_INGOT), quantity)).build();
+        var calls = new AtomicInteger();
+        var sum = new AtomicLong();
+        plan.visitQuantities(Origin.INITIAL, 0, operations, false, (key, amount) -> {
+            calls.incrementAndGet();
+            sum.addAndGet(amount);
+        });
+        assertEquals(1, calls.get());
+        assertEquals(quantity, sum.get());
+    }
 
     @Test
     void fiftyMillionMixedOperationsKeepOnlyVariantSegments() {

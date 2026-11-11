@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.crafting.StackCopies;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.consumption.DurabilityMath;
 import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
+import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.common.crafting.StrictNBTIngredient;
 
@@ -15,6 +16,7 @@ import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.BiConsumer;
 
 /**
  * 订单材料按槽位、精确变体和来源保存连续数量段，不创建“次数 × 槽位”矩阵。
@@ -305,6 +307,25 @@ public final class CountedOperationMaterials {
             }
         }
         return StackCopies.excludingEmpty(result);
+    }
+
+    /** 监控按来源区间读 long 数量，不为大订单拆出成千上万个 int 物品栈。 */
+    public void visitQuantities(Origin origin, int first, int count, boolean reusable,
+                                BiConsumer<MaterialKey, Long> visitor) {
+        Objects.checkFromIndexSize(first, count, reusable ? workers : operations);
+        for (Slot slot : slots) {
+            if (slot.reusable != reusable) continue;
+            for (Run run : slot.runs) {
+                int start = Math.max(first, run.first), end = Math.min(first + count, run.end);
+                if (start >= end) continue;
+                long startItem = (long) (start - run.first) * run.template.getCount();
+                long endItem = (long) (end - run.first) * run.template.getCount();
+                for (SourceRange source : run.sources) if (source.origin == origin) {
+                    long quantity = Math.max(0L, Math.min(endItem, source.end) - Math.max(startItem, source.first));
+                    if (quantity > 0) visitor.accept(MaterialKey.of(run.template), quantity);
+                }
+            }
+        }
     }
 
     private static Run at(Slot slot, int index) {

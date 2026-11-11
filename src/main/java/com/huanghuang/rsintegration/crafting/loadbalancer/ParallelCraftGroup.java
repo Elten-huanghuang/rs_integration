@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting.loadbalancer;
 
+import com.huanghuang.rsintegration.crafting.progress.CraftMaterialView;
+
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.api.execution.CollectedOutput;
 import com.huanghuang.rsintegration.api.execution.CancelReason;
@@ -1375,6 +1377,47 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             recovery.addAll(countedMaterials.reusableMaterials(origin, worker.id));
         }
         return List.copyOf(recovery);
+    }
+
+    /** 监控读取实际已经扣出的材料，不运行适配器，不改变预留、退款或范围集合。 */
+    public boolean appendMonitorMaterials(CraftMaterialView.Builder view) {
+        if (countedMaterials == null) return false;
+        if (sharedLedger == null || !sharedLedger.isCommitted()) return true;
+        OperationRangeSet dispatched = new OperationRangeSet(operations.totalOperations());
+        for (var queued : safelyRecoverableVirtual.ranges()) dispatched.remove(queued.first(), queued.end());
+        for (Origin origin : Origin.values()) {
+            boolean recovered = switch (origin) {
+                case INITIAL -> bulkInitialRecovered;
+                case VIRTUAL -> queuedMaterialsRecovered;
+                case PRODUCER -> bulkProducerRecovered;
+            };
+            if (!recovered) {
+                for (var range : safelyRecoverableVirtual.ranges()) {
+                    appendMonitorRange(view, origin, range.first(), range.count(), false, false);
+                }
+                for (WorkerSlot worker : workers) if (!worker.reusableDispatched) {
+                    appendMonitorRange(view, origin, worker.id, 1, true, false);
+                }
+            }
+            if (!physicalFailureCleanupCompleted) {
+                for (var unresolved : unsettledOperations.ranges()) for (var range : dispatched.ranges()) {
+                    int first = Math.max(unresolved.first(), range.first()), end = Math.min(unresolved.end(), range.end());
+                    if (first < end) appendMonitorRange(view, origin, first, end - first, false, true);
+                }
+                for (WorkerSlot worker : workers) if (worker.reusableDispatched
+                        && (worker.id >= reusableReservationsSettled.length || !reusableReservationsSettled[worker.id])) {
+                    appendMonitorRange(view, origin, worker.id, 1, true, true);
+                }
+            }
+        }
+        return true;
+    }
+
+    private void appendMonitorRange(CraftMaterialView.Builder view, Origin origin, int first, int count,
+                                     boolean reusable, boolean processing) {
+        countedMaterials.visitQuantities(origin, first, count, reusable,
+                (material, quantity) -> view.add(material, processing ? 0 : quantity, processing ? quantity : 0,
+                        0, 0, 0, 0, false));
     }
 
     public boolean isDraining() {

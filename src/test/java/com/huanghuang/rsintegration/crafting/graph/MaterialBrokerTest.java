@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.graph;
 
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import com.huanghuang.rsintegration.crafting.progress.CraftMaterialView;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -20,6 +21,33 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MaterialBrokerTest extends BootstrapTest {
+
+    @Test void monitorSeparatesPlannedInitialPoolFromHeldProducerAssetsWithoutMutatingThem() {
+        var broker = new MaterialBroker();
+        var diamond = MaterialKey.of(new ItemStack(Items.DIAMOND));
+        var initial = new MaterialSource.InitialPool(diamond);
+        var producer = new MaterialSource.ProducerOutput(new OutputPortId(new NodeId(0), 0));
+        broker.publish(initial, diamond, 9_000_000_000L);
+        broker.publish(producer, diamond, 50);
+        var reserved = broker.reserve(new NodeId(1), List.of(new MaterialBroker.Request(producer, diamond, 20)));
+        assertMonitor(broker, 50, 9_000_000_000L);
+        assertEquals(30, broker.available(producer, diamond));
+        broker.commit(reserved);
+        assertMonitor(broker, 30, 9_000_000_000L);
+        broker.refund(reserved);
+        assertMonitor(broker, 50, 9_000_000_000L);
+        assertEquals(50, broker.available(producer, diamond));
+    }
+
+    private static void assertMonitor(MaterialBroker broker, long held, long toExtract) {
+        long revision = broker.availabilityRevision();
+        var view = new CraftMaterialView.Builder();
+        broker.visitMonitorMaterials((key, available, planned) -> view.add(key, available, 0, 0, 0, planned, 0, false));
+        assertEquals(1, view.build().rows().size());
+        assertEquals(held, view.build().rows().get(0).available());
+        assertEquals(toExtract, view.build().rows().get(0).toExtract());
+        assertEquals(revision, broker.availabilityRevision());
+    }
 
     @Test
     void increasedSourceNotificationsAreDeduplicatedAndDoNotChangeMaterialState() {

@@ -28,6 +28,7 @@
     "minecraft.EntityMixin",
     "minecraft.FurnaceMenuMixin",
     "minecraft.InventoryAccessor",
+    "minecraft.BrewingStandAccessor",
     "minecraft.ItemEntityAccessor",
     "placebo.PlaceboBlockEntityMenuMixin",
     "placebo.PlaceboContainerMenuMixin",

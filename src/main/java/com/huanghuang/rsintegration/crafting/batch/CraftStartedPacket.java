@@ -19,6 +19,7 @@ public final class CraftStartedPacket {
     private final boolean graphMode;
     private final ItemStack target;
     private final CraftOutputProgress outputProgress;
+    private final long previewRequestId;
 
     public CraftStartedPacket(UUID craftId, int totalNodes, boolean graphMode) {
         this(craftId, totalNodes, graphMode, ItemStack.EMPTY);
@@ -30,11 +31,18 @@ public final class CraftStartedPacket {
 
     public CraftStartedPacket(UUID craftId, int totalNodes, boolean graphMode, ItemStack target,
                               CraftOutputProgress outputProgress) {
+        this(craftId, totalNodes, graphMode, target, outputProgress, 0L);
+    }
+
+    public CraftStartedPacket(UUID craftId, int totalNodes, boolean graphMode, ItemStack target,
+                              CraftOutputProgress outputProgress, long previewRequestId) {
+        if (previewRequestId < 0L) throw new IllegalArgumentException("negative preview request");
         this.craftId = craftId;
         this.totalNodes = totalNodes;
         this.graphMode = graphMode;
         this.target = target == null ? ItemStack.EMPTY : target.copy();
         this.outputProgress = outputProgress == null ? CraftOutputProgress.UNKNOWN : outputProgress;
+        this.previewRequestId = previewRequestId;
     }
 
     public void encode(FriendlyByteBuf buf) {
@@ -42,12 +50,18 @@ public final class CraftStartedPacket {
         buf.writeVarInt(totalNodes);
         buf.writeBoolean(graphMode);
         InkFluidSupport.writePacket(buf, target);
+        buf.writeVarLong(previewRequestId);
+        // 产出数量是可选包尾，不能在其后追加其他字段。
         CraftProgressPacket.writeOutputProgress(buf, outputProgress);
     }
 
     public static CraftStartedPacket decode(FriendlyByteBuf buf) {
-        return new CraftStartedPacket(buf.readUUID(), buf.readVarInt(), buf.readBoolean(),
-                InkFluidSupport.readPacket(buf), CraftProgressPacket.readOutputProgress(buf));
+        UUID id = buf.readUUID();
+        int nodes = buf.readVarInt();
+        boolean graph = buf.readBoolean();
+        ItemStack target = InkFluidSupport.readPacket(buf);
+        long preview = buf.readVarLong();
+        return new CraftStartedPacket(id, nodes, graph, target, CraftProgressPacket.readOutputProgress(buf), preview);
     }
 
     public static void handle(CraftStartedPacket packet, Supplier<NetworkEvent.Context> ctx) {
@@ -61,4 +75,5 @@ public final class CraftStartedPacket {
     public boolean graphMode() { return graphMode; }
     public ItemStack target() { return target.copy(); }
     public CraftOutputProgress outputProgress() { return outputProgress; }
+    public long previewRequestId() { return previewRequestId; }
 }

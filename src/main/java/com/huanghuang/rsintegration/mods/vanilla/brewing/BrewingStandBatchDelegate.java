@@ -7,6 +7,8 @@ import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.PhysicalInputRecovery;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.mixin.minecraft.BrewingStandAccessor;
 import com.huanghuang.rsintegration.util.ChunkUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -30,6 +32,11 @@ public final class BrewingStandBatchDelegate extends AbstractBatchDelegate {
     private BrewingStandBlockEntity stand;
     private VanillaBrewingRecipeDefinition recipe;
     private boolean placed;
+    private CraftObservation lastObservation;
+    private long lastObservationTick;
+    private long nextObservationTick;
+    private int lastBrewTime = -1;
+    private long observedWork;
     private final List<ItemStack> placedInputs = new ArrayList<>();
 
     /** Each stand owns its three bottle slots and can run independently. */
@@ -45,6 +52,7 @@ public final class BrewingStandBatchDelegate extends AbstractBatchDelegate {
         this.level = CraftPacketUtils.resolveLevel(player.server, dim, player);
         this.recipe = VanillaBrewingCatalog.byId(recipeId);
         this.placed = false;
+        resetObservation();
         this.placedInputs.clear();
         if (level == null || recipe == null) return false;
         if (!level.hasChunkAt(pos)) return false;
@@ -115,6 +123,7 @@ public final class BrewingStandBatchDelegate extends AbstractBatchDelegate {
         placedInputs.add(fuel.copy());
         stand.setChanged();
         level.sendBlockUpdated(pos, level.getBlockState(pos), level.getBlockState(pos), 3);
+        resetObservation();
         placed = true;
         markCraftStarted();
         return true;
@@ -142,6 +151,27 @@ public final class BrewingStandBatchDelegate extends AbstractBatchDelegate {
         if (!(be instanceof BrewingStandBlockEntity current) || !placed) {
             return failObservation("brewing stand state is unavailable");
         }
+        int remaining = current instanceof BrewingStandAccessor access ? access.rsi$getBrewTime() : -1;
+        if (remaining >= 0 && lastBrewTime > remaining) observedWork += lastBrewTime - remaining;
+        lastBrewTime = remaining;
+        long tick = level.getGameTime();
+        // 原版在结束、断料或配方失效时把 brewTime 置零，因此立即唤醒完整检查。
+        // 未结束时只读取倒计时；既不推进机器，也不推迟完成刻的收集与下一批派发。
+        if (remaining > 0 && lastObservation != null && lastObservation.phase() == CraftPhase.WORKING
+                && tick >= lastObservationTick && tick < nextObservationTick) {
+            return lastObservation.withCompletedWork(observedWork);
+        }
+        lastObservationTick = tick;
+        int interval = RSIntegrationConfig.DEFAULT_PASSIVE_OBSERVATION_TICKS;
+        try { interval = RSIntegrationConfig.CRAFTING_PASSIVE_OBSERVATION_TICKS.get(); }
+        catch (IllegalStateException ignored) { }
+        nextObservationTick = tick + interval;
+        lastObservation = inspectBottles(current);
+        return lastObservation.phase() == CraftPhase.WORKING
+                ? lastObservation.withCompletedWork(observedWork) : lastObservation;
+    }
+
+    private CraftObservation inspectBottles(BrewingStandBlockEntity current) {
         boolean allOutput = true;
         for (int slot = 0; slot < 3; slot++) {
             ItemStack bottle = current.getItem(slot);
@@ -152,6 +182,17 @@ public final class BrewingStandBatchDelegate extends AbstractBatchDelegate {
         }
         if (allOutput) return doneObservation();
         return workingObservation();
+    }
+
+    private void resetObservation() {
+        lastObservation = null;
+        lastBrewTime = -1;
+        observedWork = 0L;
+    }
+
+    @Override protected void resetState() {
+        super.resetState();
+        resetObservation();
     }
 
     @Override

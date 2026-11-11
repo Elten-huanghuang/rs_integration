@@ -1,4 +1,6 @@
 package com.huanghuang.rsintegration.crafting;
+
+import com.huanghuang.rsintegration.crafting.progress.CraftMaterialView;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot;
@@ -44,6 +46,7 @@ import com.huanghuang.rsintegration.crafting.external.ExternalIntegrationRuntime
 import com.huanghuang.rsintegration.crafting.batch.CraftProgressPacket;
 import com.huanghuang.rsintegration.crafting.batch.CraftProgressDeltaPacket;
 import com.huanghuang.rsintegration.crafting.batch.CraftProgressPublisher;
+import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.crafting.batch.CraftStartedPacket;
 import com.huanghuang.rsintegration.crafting.batch.PreparationMessageScope;
 import net.minecraftforge.network.NetworkDirection;
@@ -334,6 +337,7 @@ public final class AsyncCraftChain {
     private int vanillaBatchDeferredTicks;
     private final Map<NodeId, GraphVanillaJob> graphVanillaJobs = new LinkedHashMap<>();
     private final CraftProgressPublisher progressPublisher;
+    private long confirmedPreviewRequestId;
     private int progressSequence;
     @Nullable
     private TerminationCoordinator.Report terminationReport;
@@ -3168,6 +3172,16 @@ public final class AsyncCraftChain {
     public UUID getCraftId() { return craftId; }
     /** @return the player's UUID (migration from stale ServerPlayer reference) */
     public UUID getPlayerId() { return playerId; }
+    public long confirmedPreviewRequestId() { return confirmedPreviewRequestId; }
+    public void setConfirmedPreviewRequestId(long requestId) {
+        if (requestId < 0L) throw new IllegalArgumentException("negative preview request");
+        confirmedPreviewRequestId = requestId;
+    }
+    /** 监控只读取网络身份，不向界面暴露库存端点或执行账本。 */
+    @Nullable public StorageReference monitorStorageReference() {
+        return storageEndpoint == null || storageEndpoint.session() == null
+                ? null : storageEndpoint.session().reference();
+    }
     public int currentStep() { return currentStepIdx; }
     public int stepsCount() { return steps.size(); }
     public boolean isGraphExecution() { return useGraphExecution; }
@@ -3181,6 +3195,45 @@ public final class AsyncCraftChain {
      */
     public CraftProgressSnapshot nextStatusSnapshot() {
         return buildProgressSnapshot(isDone());
+    }
+
+    /** 监控器沿用进度发布节奏，只为当前选中任务采样。 */
+    public int monitorMaterialRevision() { return progressSequence; }
+
+    public CraftMaterialView monitorMaterialView() {
+        var view = new CraftMaterialView.Builder();
+        view.held(virtualInventory);
+        for (GraphVanillaJob job : graphVanillaJobs.values()) view.held(job.inventory);
+        if (useGraphExecution && graph != null && graphMaterials != null) {
+            graphMaterials.visitMonitorMaterials((material, available, toExtract) ->
+                    view.add(material, available, 0, 0, 0, toExtract, 0, false));
+            for (CraftNode node : graph.nodes()) {
+                CraftNodeRuntime runtime = nodeRuntimes.get(node.id());
+                int running = runtime == null ? 0 : runtime.runningOperations();
+                for (OutputDeclaration output : node.outputs()) {
+                    boolean uncertain = output.dynamicIdentity() || !output.probability().isGuaranteed()
+                            || output.minimumQuantity() != output.maximumQuantity()
+                            || output.quantity() % node.executions() != 0;
+                    long produced = publishedOutputQuantities.getOrDefault(output.id(), 0L);
+                    long remaining = Math.max(0L, output.quantity() - produced);
+                    long crafting = uncertain ? 0 : Math.min(remaining,
+                            SaturatingLongMath.multiply(output.quantity() / node.executions(), running));
+                    long scheduled = uncertain ? 0 : remaining - crafting;
+                    view.add(output.material(), 0, 0, crafting, scheduled, 0, produced, uncertain);
+                }
+                if (runtime != null && runtime.delegate() instanceof ParallelCraftGroup group) {
+                    if (!group.appendMonitorMaterials(view)) view.incomplete();
+                } else if (running > 0 && !graphVanillaJobs.containsKey(node.id())) {
+                    // 尚未提供只读持料快照的适配器，不能将缺少的信息显示成确定的零。
+                    view.incomplete();
+                }
+            }
+        } else {
+            // 旧 flat 路径没有完整材料图；保留真实持料，明确标记明细不完整。
+            view.incomplete();
+            if (currentDelegate instanceof ParallelCraftGroup group) group.appendMonitorMaterials(view);
+        }
+        return view.build();
     }
 
     private CraftProgressSnapshot buildProgressSnapshot(boolean terminal) {
@@ -5057,7 +5110,8 @@ public final class AsyncCraftChain {
         int total = useGraphExecution && graph != null
                 ? graph.topologicalOrder().size() : steps.size();
         BatchCraftNetworkHandler.CHANNEL.sendTo(
-                new CraftStartedPacket(craftId, total, useGraphExecution, displayTarget(), outputProgress()),
+                new CraftStartedPacket(craftId, total, useGraphExecution, displayTarget(), outputProgress(),
+                        confirmedPreviewRequestId),
                 online.connection.connection,
                 NetworkDirection.PLAY_TO_CLIENT);
     }
