@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.config.CraftingUiColors;
 import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.client.gui.CraftingUiStyle;
+import com.huanghuang.rsintegration.client.gui.CraftingPanelBounds;
 import com.huanghuang.rsintegration.client.gui.CraftingUiStyle.ActionButton;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.client.InkFluidRenderer;
 import net.minecraft.client.Minecraft;
@@ -14,6 +15,7 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.renderer.Rect2i;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
 
@@ -24,7 +26,7 @@ import java.util.Comparator;
 import java.util.function.LongConsumer;
 
 /** 只管理计算和预览；打开列表、切换目标不修改机器订单。 */
-public final class PlanningTasksScreen extends Screen {
+public final class PlanningTasksScreen extends Screen implements CraftingPanelBounds {
     private final Screen previous;
     private final StorageReference network;
     private final LongConsumer openPlan;
@@ -37,9 +39,9 @@ public final class PlanningTasksScreen extends Screen {
     private int page;
     private int rowsPerPage;
     private int panelX, panelY, panelWidth, panelHeight;
-    private static final int ROW_HEIGHT = 48;
-    private static final int HEADER_HEIGHT = 86;
-    private static final int FOOTER_HEIGHT = 40;
+    private static final int ROW_HEIGHT = 40;
+    private static final int HEADER_HEIGHT = 74;
+    private static final int FOOTER_HEIGHT = 34;
 
     public PlanningTasksScreen(Screen previous) {
         this(previous, null, null, null);
@@ -91,8 +93,8 @@ public final class PlanningTasksScreen extends Screen {
     @Override protected void init() {
         clearWidgets();
         rows = readRows();
-        panelWidth = Math.max(1, Math.min(420, width - 24));
-        int maxHeight = Math.min(390, height - 24);
+        panelWidth = Math.max(1, Math.min(380, width - 24));
+        int maxHeight = Math.min(300, height - 24);
         rowsPerPage = Math.max(1, (maxHeight - HEADER_HEIGHT - FOOTER_HEIGHT) / ROW_HEIGHT);
         panelHeight = HEADER_HEIGHT + FOOTER_HEIGHT + Math.max(1, Math.min(rows.size(), rowsPerPage)) * ROW_HEIGHT;
         panelX = (width - panelWidth) / 2;
@@ -101,14 +103,14 @@ public final class PlanningTasksScreen extends Screen {
         int left = panelX + 12;
         int contentWidth = panelWidth - 24;
         int navigationWidth = (contentWidth - (closePage == null ? 12 : 6)) / (closePage == null ? 3 : 2);
-        addRenderableWidget(new ActionButton(left, panelY + 52, navigationWidth, 22,
+        addRenderableWidget(new ActionButton(left, panelY + 44, navigationWidth, 22,
                 Component.translatable("rsi.planning.tasks.open"), true, button -> {}));
-        executionMonitorButton = addRenderableWidget(new ActionButton(left + navigationWidth + 6, panelY + 52, navigationWidth, 22,
+        executionMonitorButton = addRenderableWidget(new ActionButton(left + navigationWidth + 6, panelY + 44, navigationWidth, 22,
                 Component.translatable("rsi.planning.tasks.executions"), false,
                 button -> openExecutionMonitor()));
         if (monitorNotice != null) executionMonitorButton.setTooltip(Tooltip.create(monitorNotice));
         if (closePage == null) addRenderableWidget(new ActionButton(left + (navigationWidth + 6) * 2,
-                panelY + 52, navigationWidth, 22, Component.translatable("rsi.control_center.machines"), false,
+                panelY + 44, navigationWidth, 22, Component.translatable("rsi.control_center.machines"), false,
                 button -> minecraft.setScreen(new MachineManagementScreen(this, MachineManagementScreen.View.ALL_BOUND))));
         int start = page * rowsPerPage;
         for (int i = start; i < Math.min(rows.size(), start + rowsPerPage); i++) {
@@ -157,6 +159,10 @@ public final class PlanningTasksScreen extends Screen {
         visibilityButton.active = RSIntegrationConfig.CLIENT_SPEC.isLoaded();
         visibilityButton.setMessage(Component.translatable(PlanningProgressOverlay.isVisible()
                 ? "rsi.planning.tasks.hide" : "rsi.planning.tasks.show"));
+    }
+
+    @Override public Rect2i panelBounds() {
+        return new Rect2i(panelX, panelY, panelWidth, panelHeight);
     }
 
     @Override public void tick() {
@@ -278,25 +284,25 @@ public final class PlanningTasksScreen extends Screen {
                     active && isHoveredOrFocused() ? CraftingUiColors.ROW_HOVER.argb() : CraftingUiColors.ROW.argb(),
                     active && isHoveredOrFocused() ? CraftingUiStyle.accent() : CraftingUiStyle.border());
             graphics.fill(getX(), getY() + 5, getX() + 2, getY() + getHeight() - 5, accent);
-            graphics.fill(getX() + 8, getY() + 8, getX() + 34, getY() + 34, CraftingUiStyle.canvas());
-            if (!row.icon().isEmpty()) InkFluidRenderer.render(graphics, row.icon(), getX() + 13, getY() + 13);
-            else CraftingUiStyle.planIcon(graphics, getX() + 14, getY() + 13, accent);
-            int textX = getX() + 44;
+            graphics.fill(getX() + 6, getY() + 6, getX() + 30, getY() + 30, CraftingUiStyle.canvas());
+            if (!row.icon().isEmpty()) InkFluidRenderer.render(graphics, row.icon(), getX() + 10, getY() + 10);
+            else CraftingUiStyle.planIcon(graphics, getX() + 11, getY() + 10, accent);
+            int textX = getX() + 38;
             int textWidth = Math.max(1, getWidth() - 66 - (row.cancellable() ? 28 : 0));
-            graphics.drawString(font, CraftingUiStyle.fit(font, row.name(), textWidth), textX, getY() + 8, CraftingUiStyle.text(), false);
+            graphics.drawString(font, CraftingUiStyle.fit(font, row.name(), textWidth), textX, getY() + 6, CraftingUiStyle.text(), false);
             Component description = Component.translatable(row.stateKey()).append(" · ").append(
                     row.completed() ? Component.translatable("rsi.planning.tasks.open_tree", row.repeatCount())
                             : Component.translatable(row.cancellable() ? "rsi.planning.tasks.background" : "rsi.planning.tasks.finished"));
             graphics.drawString(font, CraftingUiStyle.fit(font, description.getString(), textWidth),
-                    textX, getY() + 25, accent, false);
+                    textX, getY() + 21, accent, false);
             if (row.cancellable()) {
                 int actionX = getX() + getWidth() - 28;
                 graphics.fill(actionX - 1, getY() + 7, actionX, getY() + getHeight() - 7,
                         CraftingUiStyle.border());
                 int color = cancelHovered(mouseX, mouseY) ? CraftingUiStyle.danger() : CraftingUiStyle.muted();
-                graphics.drawString(font, "×", actionX + 8, getY() + 15, color, false);
+                graphics.drawString(font, "×", actionX + 8, getY() + 13, color, false);
             } else if (active) {
-                graphics.drawString(font, "›", getX() + getWidth() - 14, getY() + 17, accent, false);
+                graphics.drawString(font, "›", getX() + getWidth() - 14, getY() + 13, accent, false);
             }
         }
     }

@@ -159,11 +159,12 @@ public abstract class CraftingMonitorScreenMixin extends BaseScreen<CraftingMoni
         Button nativeCancelAll = cancelAllButton;
         removeWidget(nativeCancel);
         removeWidget(nativeCancelAll);
-        rsi$plansAction = addRenderableWidget(new ActionButton(x + 7, footerY, 76, 20,
+        int actionWidth = rsi$layout.footerButtonWidth();
+        rsi$plansAction = addRenderableWidget(new ActionButton(x + 7, footerY, actionWidth, 20,
                 Component.translatable("rsi.monitor.open_plans"), true, button -> rsi$showPlans()));
-        cancelButton = addRenderableWidget(new ActionButton(x + 87, footerY, 76, 20,
+        cancelButton = addRenderableWidget(new ActionButton(x + 11 + actionWidth, footerY, actionWidth, 20,
                 Component.translatable("rsi.monitor.cancel_selected"), false, button -> nativeCancel.onPress()));
-        cancelAllButton = addRenderableWidget(new ActionButton(x + 167, footerY, 80, 20,
+        cancelAllButton = addRenderableWidget(new ActionButton(x + 15 + 2 * actionWidth, footerY, actionWidth, 20,
                 Component.translatable("rsi.monitor.cancel_all_rs"), false, button -> nativeCancelAll.onPress()));
         if (rsi$page != null) rsi$page.init(Minecraft.getInstance(), rsi$screen().width, rsi$screen().height);
         cancelAllButton.setTooltip(Tooltip.create(Component.translatable("rsi.monitor.cancel_all_rs_hint")));
@@ -171,7 +172,7 @@ public abstract class CraftingMonitorScreenMixin extends BaseScreen<CraftingMoni
         String query = rsi$details == null ? "" : rsi$details.query();
         boolean activeOnly = rsi$details == null || rsi$details.onlyActive();
         int detailsX = rsi$layout.detailsWidth() > 0 ? x + rsi$layout.materialWidth() + 7 : x + 7;
-        int detailsWidth = rsi$layout.detailsWidth() > 0 ? MonitorDetailsPanel.DETAILS_WIDTH - 14 : imageWidth - 14;
+        int detailsWidth = rsi$layout.detailsWidth() > 0 ? rsi$layout.detailsWidth() - 14 : imageWidth - 14;
         rsi$details = new MonitorDetailsPanel(rsi$screen(), detailsX, y, detailsWidth, imageHeight,
                 widget -> addRenderableWidget(widget), index -> {
                     scrollbar.setOffset(index / 3);

@@ -6,6 +6,8 @@ import com.huanghuang.rsintegration.network.binding.BindingInfo;
 import com.huanghuang.rsintegration.network.binding.MachineEndpointId;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
@@ -21,13 +23,18 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 
 class MachineManagementScreenTest extends BootstrapTest {
     @ParameterizedTest
-    @CsvSource({"320,240", "480,270", "640,360", "960,520", "1920,1080"})
+    @CsvSource({"320,240", "427,240", "480,270", "640,360", "854,480", "960,520", "1920,1080"})
     void machineCardsFitBetweenSearchAndFooterAtDifferentGuiScales(int width, int height) throws Exception {
         MachineManagementScreen screen = layout(width, height, MachineManagementScreen.View.ALL_BOUND);
         int left = number(screen, "panelX"), top = number(screen, "panelY");
@@ -39,11 +46,37 @@ class MachineManagementScreenTest extends BootstrapTest {
 
         assertTrue(left >= 0 && top >= 0 && right <= width && bottom <= height);
         assertTrue(gridX >= left && gridX + gridWidth < right);
-        assertTrue(gridY >= top + 106, "卡片不得覆盖搜索框");
+        assertTrue(gridY >= top + 92, "卡片不得覆盖搜索框");
         assertTrue(gridX + (columns - 1) * (tileWidth + 8) + tileWidth <= gridX + gridWidth);
         assertTrue(gridY + (rows - 1) * 76 + 68 <= bottom - number(screen, "footerHeight"),
                 "卡片不得覆盖底部按钮");
         assertTrue(gridHeight >= 68 && columns > 0 && rows > 0);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"320,240", "427,240", "640,360", "854,480"})
+    void compactPanelLeavesSpaceForJeiAndContainsAllControls(int width, int height) throws Exception {
+        MachineManagementScreen screen = layout(width, height, MachineManagementScreen.View.ALL_BOUND);
+        Field font = Screen.class.getDeclaredField("font");
+        font.setAccessible(true);
+        Font mockFont = mock(Font.class);
+        when(mockFont.plainSubstrByWidth(anyString(), anyInt())).thenAnswer(call -> call.getArgument(0));
+        when(mockFont.plainSubstrByWidth(anyString(), anyInt(), anyBoolean())).thenAnswer(call -> call.getArgument(0));
+        font.set(screen, mockFont);
+        try (var handler = mockStatic(MachineTabHandler.class)) {
+            screen.init();
+        }
+        var panel = screen.panelBounds();
+        assertTrue(panel.getWidth() <= 480 && panel.getHeight() <= 300);
+        assertEquals((width - panel.getWidth()) / 2, panel.getX());
+        assertEquals((height - panel.getHeight()) / 2, panel.getY());
+        if (width >= 640) assertTrue(panel.getX() >= 80, "3x 视口左侧为 JEI 留出独立列");
+        for (var child : screen.children()) if (child instanceof AbstractWidget widget) {
+            assertTrue(widget.getX() >= panel.getX());
+            assertTrue(widget.getX() + widget.getWidth() <= panel.getX() + panel.getWidth());
+            assertTrue(widget.getY() >= panel.getY());
+            assertTrue(widget.getY() + widget.getHeight() <= panel.getY() + panel.getHeight());
+        }
     }
 
     @Test

@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.client.gui.CraftingUiStyle;
+import com.huanghuang.rsintegration.client.gui.CraftingPanelBounds;
 import com.huanghuang.rsintegration.config.CraftingUiColors;
 import com.huanghuang.rsintegration.client.gui.CraftingUiStyle.ActionButton;
 import com.huanghuang.rsintegration.client.gui.ScrollBarStyle;
@@ -19,6 +20,7 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.renderer.Rect2i;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
 
@@ -29,7 +31,7 @@ import java.util.List;
 import java.util.Optional;
 
 /** 平铺的绑定机器中心：信息卡片、改名、收藏/解绑，以及右键框选自动化黑名单。 */
-public final class MachineManagementScreen extends Screen {
+public final class MachineManagementScreen extends Screen implements CraftingPanelBounds {
     public enum View {
         GUI_ONLY,
         ALL_BOUND
@@ -41,6 +43,7 @@ public final class MachineManagementScreen extends Screen {
     private static final int GRID_GAP = 8;
     private static final int MIN_TILE_WIDTH = 132;
     private static final int TILE_HEIGHT = 68;
+    private static final int HEADER_HEIGHT = 96;
     private static final double DRAG_THRESHOLD = 3.0;
 
     private final List<BindingInfo> machines = new ArrayList<>();
@@ -84,7 +87,7 @@ public final class MachineManagementScreen extends Screen {
         clearSelection();
         updateLayout();
         refreshMachines();
-        searchBox = new EditBox(font, panelX + 18, panelY + 91,
+        searchBox = new EditBox(font, panelX + 18, panelY + 77,
                 Math.max(1, panelWidth - 36), 12,
                 Component.translatable("rsi.control_center.search"));
         searchBox.setBordered(false);
@@ -100,13 +103,13 @@ public final class MachineManagementScreen extends Screen {
         });
         addRenderableWidget(searchBox);
         int navigationWidth = (panelWidth - 36) / 3;
-        addRenderableWidget(new ActionButton(panelX + 12, panelY + 52, navigationWidth, 22,
+        addRenderableWidget(new ActionButton(panelX + 12, panelY + 44, navigationWidth, 22,
                 Component.translatable("rsi.planning.tasks.open"), false,
                 button -> minecraft.setScreen(new PlanningTasksScreen(this))));
-        addRenderableWidget(new ActionButton(panelX + 18 + navigationWidth, panelY + 52, navigationWidth, 22,
+        addRenderableWidget(new ActionButton(panelX + 18 + navigationWidth, panelY + 44, navigationWidth, 22,
                 Component.translatable("rsi.planning.tasks.executions"), false,
                 button -> ExecutionMonitorClient.open()));
-        addRenderableWidget(new ActionButton(panelX + 24 + navigationWidth * 2, panelY + 52, navigationWidth, 22,
+        addRenderableWidget(new ActionButton(panelX + 24 + navigationWidth * 2, panelY + 44, navigationWidth, 22,
                 Component.translatable("rsi.control_center.machines"), true, button -> {}));
         addRenderableWidget(new ActionButton(panelX + panelWidth - 106,
                 panelY + panelHeight - footerHeight + (footerHeight - 22) / 2, 94, 22,
@@ -121,16 +124,23 @@ public final class MachineManagementScreen extends Screen {
     }
 
     private void updateLayout() {
-        panelWidth = Math.max(1, Math.min(620, width - 24));
-        panelHeight = Math.max(1, Math.min(420, height - 24));
-        footerHeight = panelHeight < 228 ? 32 : 40;
+        panelWidth = Math.max(1, Math.min(480, width - 24));
+        int maxHeight = Math.min(340, height - 24);
+        footerHeight = 32;
+        // 按整行卡片收束高度，不把多余空白扩成近乎全屏的窗口。
+        int rows = Math.max(1, (maxHeight - HEADER_HEIGHT - footerHeight + GRID_GAP) / (TILE_HEIGHT + GRID_GAP));
+        panelHeight = HEADER_HEIGHT + footerHeight + rows * (TILE_HEIGHT + GRID_GAP) - GRID_GAP;
         panelX = (width - panelWidth) / 2;
         panelY = (height - panelHeight) / 2;
         gridX = panelX + 12;
-        gridY = panelY + 112;
+        gridY = panelY + HEADER_HEIGHT;
         gridWidth = Math.max(1, panelWidth - 28 - ScrollBarStyle.COMPACT_WIDTH);
-        gridHeight = Math.max(0, panelHeight - 112 - footerHeight);
+        gridHeight = Math.max(0, panelHeight - HEADER_HEIGHT - footerHeight);
         tileWidth = Math.max(1, (gridWidth - (columns() - 1) * GRID_GAP) / columns());
+    }
+
+    @Override public Rect2i panelBounds() {
+        return new Rect2i(panelX, panelY, panelWidth, panelHeight);
     }
 
     private void refreshMachines() {
@@ -193,7 +203,7 @@ public final class MachineManagementScreen extends Screen {
                 panelX + 36, panelY + 29, CraftingUiStyle.muted(), false);
         if (blocked > 0) graphics.drawString(font, blockedSummary,
                 panelX + panelWidth - 14 - font.width(blockedSummary), panelY + 29, CraftingUiStyle.danger(), false);
-        CraftingUiStyle.surface(graphics, panelX + 12, panelY + 84, panelWidth - 24, 22,
+        CraftingUiStyle.surface(graphics, panelX + 12, panelY + 70, panelWidth - 24, 22,
                 CraftingUiColors.ROW.argb(), searchBox.isFocused() ? CraftingUiStyle.accent() : CraftingUiStyle.border());
         int footerY = panelY + panelHeight - footerHeight;
         graphics.fill(panelX + 12, footerY, panelX + panelWidth - 12, footerY + 1, CraftingUiStyle.border());

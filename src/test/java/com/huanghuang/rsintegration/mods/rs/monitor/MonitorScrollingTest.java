@@ -18,21 +18,54 @@ import static org.mockito.Mockito.*;
 
 class MonitorScrollingTest extends BootstrapTest {
     @Test void wideLayoutHasRoomForFullSizeThreeLineTextAndBalancedTaskRail() {
-        var wide = MonitorLayout.forViewport(616, 270);
+        var wide = MonitorLayout.forViewport(960, 540);
         assertEquals(92, wide.cellWidth());
         assertTrue(wide.cellHeight() >= 3 * 10 + 4);
         assertEquals(96, wide.railWidth());
-        int left = wide.mainLeft(616);
+        int left = wide.mainLeft(960);
         assertTrue(left >= wide.railWidth() + 4);
-        assertTrue(left + wide.width() + 22 <= 616);
+        assertTrue(left + wide.width() + 22 <= 960);
         var compact = MonitorLayout.forViewport(320, 240);
         assertEquals(0, compact.detailsWidth());
-        assertEquals(254, compact.width());
+        assertEquals(184, compact.width());
         assertEquals(201, compact.height());
     }
 
     @ParameterizedTest
-    @CsvSource({"320,240", "374,240", "539,270", "540,270", "599,270", "600,260", "616,270", "960,540"})
+    @CsvSource({"427,240", "456,256", "540,270"})
+    void smallerThreeTimesViewportsFoldStepsToLeaveJeiUsable(int width, int height) {
+        var layout = MonitorLayout.forViewport(width, height);
+        assertEquals(0, layout.detailsWidth());
+        assertTrue(layout.railWidth() >= 30);
+        assertJeiSpace(layout, width);
+        assertTrue(layout.height() < height);
+        assertTrue(layout.gridRight() + ScrollBarStyle.CONTENT_GAP + ScrollBarStyle.WIDTH < layout.materialWidth());
+        assertTrue(15 + 3 * layout.footerButtonWidth() <= layout.materialWidth() - 7,
+                "三个操作按钮不能压到右侧详情栏");
+    }
+
+    @ParameterizedTest
+    @CsvSource({"616,270", "640,360"})
+    void threeTimesGuiScaleKeepsAllThreePanelsOpenAndLeavesRoomForJei(int width, int height) {
+        var layout = MonitorLayout.forViewport(width, height);
+        assertTrue(layout.detailsWidth() > 0, "3x 下仍完整展开步骤栏");
+        assertTrue(layout.railWidth() >= 30, "任务栏仍可选择并查看悬浮详情");
+        assertEquals(60, layout.cellWidth());
+        assertEquals(201, layout.height());
+        assertJeiSpace(layout, width);
+        assertTrue(layout.height() <= height - 40);
+    }
+
+    private static void assertJeiSpace(MonitorLayout layout, int width) {
+        int railLeft = layout.mainLeft(width) - layout.railWidth() - 4;
+        int rightGap = width - layout.mainLeft(width) - layout.width() - 22;
+        assertTrue(railLeft >= 90 && rightGap >= 90, "JEI 两侧至少能容纳四列物品及控件");
+    }
+
+    @ParameterizedTest
+    @CsvSource({"320,240", "374,240", "419,240", "420,240", "427,240", "539,270", "540,270", "575,270", "576,270",
+            "599,270", "600,260", "616,270", "640,360", "691,300", "692,300", "777,300", "778,300",
+            "799,300", "800,299", "800,300", "854,480", "960,540"})
     void taskRailAndSideButtonsFitAtBothSidesOfEveryLayoutBreakpoint(int width, int height) {
         var layout = MonitorLayout.forViewport(width, height);
         int mainLeft = layout.mainLeft(width);
@@ -41,6 +74,7 @@ class MonitorScrollingTest extends BootstrapTest {
         assertTrue(railLeft >= 1, "左侧任务栏必须完整显示");
         assertTrue(right < width, "右侧功能按钮必须完整显示");
         assertTrue(Math.abs(railLeft - (width - right)) <= 1, "按三栏整体居中");
+        if (width >= 420) assertJeiSpace(layout, width);
     }
     @Test void selectingCurrentTaskDoesNotTriggerNativeToggleOrSendAgain() {
         var monitor = mock(ICraftingMonitor.class);

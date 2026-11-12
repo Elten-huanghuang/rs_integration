@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.mods.jei;
 import com.huanghuang.rsintegration.machine.client.MachineFavoritesClient;
 import com.huanghuang.rsintegration.feature.autoeat.client.AutoEatClientEvents;
 import com.refinedmods.refinedstorage.screen.grid.GridScreen;
+import com.refinedmods.refinedstorage.screen.CraftingMonitorScreen;
 import mezz.jei.api.gui.handlers.IGuiContainerHandler;
 import mezz.jei.api.registration.IGuiHandlerRegistration;
 import net.minecraft.client.renderer.Rect2i;
@@ -14,6 +15,7 @@ public final class RSJeiOptionalHooks {
     private RSJeiOptionalHooks() {}
 
     public static void registerGridGuiHandler(IGuiHandlerRegistration registration) {
+        registration.addGuiScreenHandler(CraftingMonitorScreen.class, new MonitorJeiGuiHandler());
         registration.addGuiContainerHandler(GridScreen.class,
                 new IGuiContainerHandler<GridScreen>() {
                     @Override

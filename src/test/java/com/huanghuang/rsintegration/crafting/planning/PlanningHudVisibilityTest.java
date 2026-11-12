@@ -14,6 +14,8 @@ import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.lang.reflect.Field;
 
@@ -21,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
 
 class PlanningHudVisibilityTest extends BootstrapTest {
     @BeforeEach
@@ -64,12 +67,34 @@ class PlanningHudVisibilityTest extends BootstrapTest {
         assertEquals(Component.translatable("rsi.planning.tasks.hide"), button.getMessage());
     }
 
-    @Test
-    void paginatedFooterKeepsTheVisibilityAndNavigationButtonsApartAtMinimumSize() throws Exception {
+    @ParameterizedTest
+    @CsvSource({"320,240", "427,240", "640,360", "854,480"})
+    void compactPaginatedPanelContainsControlsWithoutOverlapping(int width, int height) throws Exception {
         for (long request = 1; request <= 8; request++) {
             PlanningProgressTracker.start(request, new ResourceLocation("minecraft", "iron_block"));
         }
-        PlanningTasksScreen screen = screen(320, 240);
+        PlanningTasksScreen screen = screen(width, height);
+        var panel = screen.panelBounds();
+        assertTrue(panel.getWidth() <= 380 && panel.getHeight() <= 300);
+        assertEquals((width - panel.getWidth()) / 2, panel.getX());
+        assertEquals((height - panel.getHeight()) / 2, panel.getY());
+        if (width >= 640) assertTrue(panel.getX() >= 130, "3x 视口左侧为 JEI 留出独立列");
+        var widgets = screen.children().stream().filter(AbstractWidget.class::isInstance)
+                .map(AbstractWidget.class::cast).toList();
+        for (int i = 0; i < widgets.size(); i++) {
+            AbstractWidget widget = widgets.get(i);
+            assertTrue(widget.getX() >= panel.getX());
+            assertTrue(widget.getX() + widget.getWidth() <= panel.getX() + panel.getWidth());
+            assertTrue(widget.getY() >= panel.getY());
+            assertTrue(widget.getY() + widget.getHeight() <= panel.getY() + panel.getHeight());
+            for (int j = 0; j < i; j++) {
+                AbstractWidget other = widgets.get(j);
+                assertTrue(widget.getX() + widget.getWidth() <= other.getX()
+                        || other.getX() + other.getWidth() <= widget.getX()
+                        || widget.getY() + widget.getHeight() <= other.getY()
+                        || other.getY() + other.getHeight() <= widget.getY(), "列表、导航和底部按钮不得重叠");
+            }
+        }
         var footer = screen.children().stream().filter(AbstractWidget.class::isInstance)
                 .map(AbstractWidget.class::cast).filter(widget -> widget.getHeight() == 22)
                 .sorted((left, right) -> Integer.compare(left.getX(), right.getX())).toList();
@@ -78,9 +103,34 @@ class PlanningHudVisibilityTest extends BootstrapTest {
         assertEquals(4, buttons.size());
         for (int i = 0; i < buttons.size(); i++) {
             AbstractWidget button = buttons.get(i);
-            assertTrue(button.getX() >= 0 && button.getX() + button.getWidth() <= 320);
-            assertTrue(button.getY() >= 0 && button.getY() + button.getHeight() <= 240);
+            assertTrue(button.getX() >= 0 && button.getX() + button.getWidth() <= width);
+            assertTrue(button.getY() >= 0 && button.getY() + button.getHeight() <= height);
             if (i > 0) assertTrue(buttons.get(i - 1).getX() + buttons.get(i - 1).getWidth() <= button.getX());
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"320,240", "640,360", "854,480"})
+    void compactRowsKeepLastPageAndCancelTargetAccessible(int width, int height) throws Exception {
+        for (long request = 1; request <= 8; request++) {
+            PlanningProgressTracker.start(request, new ResourceLocation("minecraft", "iron_block"));
+        }
+        PlanningTasksScreen screen = screen(width, height);
+        Button next;
+        int turns = 0;
+        while ((next = screen.children().stream().filter(Button.class::isInstance).map(Button.class::cast)
+                .filter(button -> button.getMessage().equals(Component.literal("›")))
+                .findFirst().orElseThrow()).active) {
+            assertTrue(++turns < 8, "分页必须能到达最后一页");
+            next.onPress();
+        }
+        assertTrue(turns > 0);
+        var rows = screen.children().stream().filter(Button.class::isInstance).map(Button.class::cast)
+                .filter(button -> button.getHeight() > 22).toList();
+        Button last = rows.get(rows.size() - 1);
+        try (var overlay = mockStatic(PlanningProgressOverlay.class)) {
+            assertTrue(last.mouseClicked(last.getX() + last.getWidth() - 16, last.getY() + 18, 0));
+            overlay.verify(() -> PlanningProgressOverlay.cancel(1L));
         }
     }
 

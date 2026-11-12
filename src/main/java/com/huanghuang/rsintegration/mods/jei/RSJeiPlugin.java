@@ -8,6 +8,8 @@ import com.huanghuang.rsintegration.feature.autoeat.client.AutoEatClientEvents;
 import com.huanghuang.rsintegration.client.recipe.RecipeAvailabilityClient;
 import com.huanghuang.rsintegration.client.recipe.FluidContainerRecipeCategory;
 import com.huanghuang.rsintegration.crafting.fluid.FluidContainerCatalog;
+import com.huanghuang.rsintegration.crafting.MachineManagementScreen;
+import com.huanghuang.rsintegration.crafting.planning.PlanningTasksScreen;
 import net.minecraft.client.Minecraft;
 import com.huanghuang.rsintegration.machine.client.BeyondDimensionsMachineHubClient;
 import com.huanghuang.rsintegration.feature.villager.tradelock.client.VillagerTradeLockClient;
@@ -279,6 +281,10 @@ public final class RSJeiPlugin implements IModPlugin {
     @Override
     @SuppressWarnings({"rawtypes", "unchecked"})
     public void registerGuiHandlers(IGuiHandlerRegistration registration) {
+        registration.addGuiScreenHandler(PlanningTasksScreen.class,
+                screen -> CraftingGuiProperties.of(screen, screen.panelBounds()));
+        registration.addGuiScreenHandler(MachineManagementScreen.class,
+                screen -> CraftingGuiProperties.of(screen, screen.panelBounds()));
         registerOptionalTetraGuiHandler(registration);
         if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
             registration.addGuiScreenHandler(

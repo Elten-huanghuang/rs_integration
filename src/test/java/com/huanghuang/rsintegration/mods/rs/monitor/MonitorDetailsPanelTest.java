@@ -31,7 +31,7 @@ import static org.mockito.Mockito.*;
 
 class MonitorDetailsPanelTest extends BootstrapTest {
     @ParameterizedTest
-    @CsvSource({"152,201", "152,231", "240,201"})
+    @CsvSource({"112,201", "132,201", "152,201", "152,231", "240,201"})
     void diagnosisFocusTracksTheCauseAndRestoresTheListWhenItResolves(int width, int height) throws Exception {
         var client = mock(Minecraft.class);
         var font = mock(Font.class);
@@ -99,7 +99,7 @@ class MonitorDetailsPanelTest extends BootstrapTest {
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {152, 240})
+    @ValueSource(ints = {112, 132, 152, 240})
     void compactSearchAndFilterFitSideBySideAndKeepTheirStateWhenHidden(int width) throws Exception {
         var client = mock(Minecraft.class);
         var font = mock(Font.class);
