@@ -1,14 +1,14 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
+import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.NbtMatchMode;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import com.sun.management.ThreadMXBean;
-import net.minecraft.SharedConstants;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.server.Bootstrap;
+import net.minecraft.world.item.Items;
 
 import java.io.PrintWriter;
 import java.lang.management.GarbageCollectorMXBean;
@@ -25,6 +25,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
+import java.util.Set;
+import java.util.UUID;
 import java.util.function.IntFunction;
 
 /** 统一基准源集中的规划诊断探针：图构建和预热不计入测量，直接调用当前生产实现。 */
@@ -37,13 +39,27 @@ public final class PlanningAuditProbe extends BootstrapTest {
 
     public static void main(String[] args) throws Exception {
         Locale.setDefault(Locale.ROOT);
-        SharedConstants.tryDetectVersion();
-        Bootstrap.bootStrap();
-        initializeForgeCapabilities();
+        bootstrapMinecraft();
         THREADS.setThreadAllocatedMemoryEnabled(true);
         Path output = Path.of(args[0]);
         try (PrintWriter csv = new PrintWriter(Files.newBufferedWriter(output, StandardCharsets.UTF_8))) {
             csv.println("scenario,size,samples,median_ms,min_ms,max_ms,allocated_mib_per_op,gc_count,gc_time_ms,status,states,backtracks,memo_hits,output_scans,index_builds");
+            for (int depth : new int[] {100, 10000}) {
+                ImmutableRecipeGraph stockedChain = catalog(depth, depth, 0);
+                MaterialRef ready = material("chain_" + depth);
+                measure(csv, "stocked_chain_compilation", depth, index -> {
+                    int[] checks = {0};
+                    var cache = new DeterministicRecipePlanner.CompilationCache(stockedChain,
+                            Map.of(), PlanningPreferences.empty(), 65536);
+                    sink = cache.prepare(Map.of(ready, 1L), List.of(input(ready)), Set.of(),
+                            depth, 65536, () -> checks[0]++);
+                    if (checks[0] >= 100) throw new AssertionError("stock boundary expanded: " + checks[0]);
+                    return new Observation("SKIPPED_ANCESTORS", checks[0], 0, 0, 0, 0);
+                });
+            }
+            for (int producers : new int[] {128, 2048}) {
+                measureReplan(csv, producers);
+            }
             // 使用多个等价目标，确保冷裁剪测量不会命中按目标缓存。
             for (int count : new int[] {1000, 50000, 100000}) {
                 ImmutableRecipeGraph graph = catalog(count, 16, WARMUP + SAMPLES);
@@ -122,6 +138,37 @@ public final class PlanningAuditProbe extends BootstrapTest {
         sink = result;
         return new Observation(result.status().name(), result.expandedStates(), result.backtracks(),
                 result.memoHits(), 0, 0);
+    }
+
+    private static void measureReplan(PrintWriter csv, int count) {
+        MaterialRef raw = new MaterialRef(new ResourceLocation("minecraft:iron_ore"), "");
+        MaterialRef output = new MaterialRef(new ResourceLocation("minecraft:iron_ingot"), "");
+        MaterialRef block = new MaterialRef(new ResourceLocation("minecraft:iron_block"), "");
+        List<RecipeNode> producers = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            producers.add(new RecipeNode(id("replan_producer_" + i), output, 1, List.of(input(raw))));
+        }
+        RecipeNode target = new RecipeNode(id("replan_target"), block, 1, List.of(input(output)));
+        var graph = new ImmutableRecipeGraph(Map.of(output, producers, block, List.of(target)));
+        var before = new PlanningSnapshot(UUID.randomUUID(), 1, 1, target.recipeId(), Map.of(),
+                Map.of(), graph, "network:empty", "binding", false);
+        var after = new PlanningSnapshot(before.playerId(), 2, 1, target.recipeId(),
+                Map.of(new StackKey(Items.IRON_ORE, null), 1L), Map.of(), graph,
+                "network:replenished", "binding", false);
+        var routing = AsyncPurePlanningService.RouteInputs.fromItems(after.availableItems(),
+                512, Set.of(), Set.of(), Set.of());
+        var reuse = routing.withPreviousRoute(new PlanningRouteHint(before, List.of(target, producers.get(0))));
+        for (boolean replay : new boolean[] {false, true}) {
+            measure(csv, replay ? "replan_previous_route" : "replan_full_candidates", count, index -> {
+                var result = AsyncPurePlanningService.computeRouted(after, replay ? reuse : routing,
+                        1, 256, 65536, 8192, 60000).plan();
+                if (result == null || !result.feasible() || result.materialFlow() == null
+                        || !result.remaining().isEmpty()) throw new AssertionError(result);
+                sink = result;
+                return new Observation(result.status().name(), result.expandedStates(),
+                        result.backtracks(), result.memoHits(), 0, 0);
+            });
+        }
     }
 
     private static Observation lookup(ImmutableRecipeGraph graph) {

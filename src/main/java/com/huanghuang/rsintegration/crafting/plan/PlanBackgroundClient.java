@@ -2,7 +2,10 @@ package com.huanghuang.rsintegration.crafting.plan;
 
 import com.huanghuang.rsintegration.crafting.planning.PlanningProgressOverlay;
 import com.huanghuang.rsintegration.crafting.planning.PlanningProgressTracker;
+import com.huanghuang.rsintegration.crafting.planning.PlanningProgressSnapshot;
 import com.huanghuang.rsintegration.crafting.planning.PlanningTasksScreen;
+import com.huanghuang.rsintegration.client.recipe.JeiNetworkItemCache;
+import com.huanghuang.rsintegration.storage.StorageReference;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.mojang.brigadier.arguments.LongArgumentType;
@@ -16,6 +19,8 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.Style;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.client.ClientCommandHandler;
@@ -27,7 +32,10 @@ import net.minecraftforge.fml.common.Mod;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
+
+import javax.annotation.Nullable;
 
 /** 保留玩家关闭规划页后完成的后台结果，并提供聊天栏一键重新打开入口。 */
 @OnlyIn(Dist.CLIENT)
@@ -41,6 +49,7 @@ public final class PlanBackgroundClient {
     private static final String OPEN_COMMAND = COMMAND + " open";
     private static final Map<Long, Long> DETACHED_REQUESTS = new LinkedHashMap<>();
     private static final Map<Long, CachedPlan> CACHED_PLANS = new LinkedHashMap<>();
+    private static final Map<Long, PreviewTarget> PREVIEW_TARGETS = new LinkedHashMap<>();
 
     private PlanBackgroundClient() {}
 
@@ -52,6 +61,7 @@ public final class PlanBackgroundClient {
         if (requestId <= 0L || plan == null) return;
         long now = System.currentTimeMillis();
         prune(now);
+        PREVIEW_TARGETS.remove(requestId);
         CACHED_PLANS.put(requestId, new CachedPlan(plan, now));
         while (CACHED_PLANS.size() > MAX_CACHED_PLANS) {
             CACHED_PLANS.remove(CACHED_PLANS.keySet().iterator().next());
@@ -62,6 +72,7 @@ public final class PlanBackgroundClient {
     public static synchronized void replaceRevision(long previousRequest, long nextRequest) {
         if (previousRequest <= 0 || nextRequest <= 0 || previousRequest == nextRequest) return;
         CACHED_PLANS.remove(previousRequest);
+        PREVIEW_TARGETS.remove(previousRequest);
         DETACHED_REQUESTS.remove(previousRequest);
         PlanningProgressTracker.responseReceived(previousRequest);
     }
@@ -72,6 +83,71 @@ public final class PlanBackgroundClient {
         CACHED_PLANS.entrySet().stream().sorted(Map.Entry.<Long, CachedPlan>comparingByKey().reversed())
                 .forEach(entry -> result.put(entry.getKey(), entry.getValue().plan()));
         return result;
+    }
+
+    /** 配方浏览器再次点击加号时，继续编辑已有计划，保留数量和路线选择。 */
+    public static boolean openExisting(ResourceLocation recipeId, @Nullable ItemStack baseItem,
+                                       @Nullable ItemStack clickedOutput) {
+        StorageReference network = JeiNetworkItemCache.INSTANCE.reference();
+        long requestId = findExisting(recipeId, baseItem, clickedOutput, network);
+        if (requestId > 0L) return openRequest(requestId);
+        requestId = findPending(recipeId, baseItem, clickedOutput, network);
+        if (requestId <= 0L) return false;
+        PlanningProgressTracker.select(requestId);
+        if (Minecraft.getInstance().screen instanceof PlanScreenHost host) host.rsi$openPlans();
+        else PlanningTasksScreen.open();
+        return true;
+    }
+
+    /** 只登记配方浏览器发起的请求，页面内重算和独立入口仍保持原有语义。 */
+    public static synchronized void startPreview(long requestId, ResourceLocation recipeId,
+                                                  @Nullable ItemStack baseItem, @Nullable ItemStack clickedOutput) {
+        PREVIEW_TARGETS.put(requestId, new PreviewTarget(recipeId, copyVariant(baseItem), copyVariant(clickedOutput),
+                JeiNetworkItemCache.INSTANCE.reference()));
+        while (PREVIEW_TARGETS.size() > MAX_PENDING_REQUESTS) {
+            PREVIEW_TARGETS.remove(PREVIEW_TARGETS.keySet().iterator().next());
+        }
+        PlanningProgressTracker.start(requestId, recipeId);
+    }
+
+    static synchronized long findPending(ResourceLocation recipeId, @Nullable ItemStack baseItem,
+                                           @Nullable ItemStack clickedOutput, @Nullable StorageReference network) {
+        PREVIEW_TARGETS.entrySet().removeIf(entry -> {
+            var progress = PlanningProgressTracker.get(entry.getKey());
+            return progress == null || progress.terminal()
+                    && progress.state() != PlanningProgressSnapshot.State.SUCCEEDED;
+        });
+        return PREVIEW_TARGETS.entrySet().stream().filter(entry -> {
+            PreviewTarget target = entry.getValue();
+            return recipeId.equals(target.recipeId())
+                    && (network == null || Objects.equals(network, target.network()))
+                    && sameVariant(baseItem, target.baseItem())
+                    && sameVariant(clickedOutput, target.clickedOutput());
+        }).mapToLong(Map.Entry::getKey).max().orElse(0L);
+    }
+
+    static long findExisting(ResourceLocation recipeId, @Nullable ItemStack baseItem,
+                             @Nullable ItemStack clickedOutput, @Nullable StorageReference network) {
+        for (var entry : completedPlans().entrySet()) {
+            PlanResponse plan = entry.getValue();
+            if (recipeId.toString().equals(plan.recipeId())
+                    && (network == null || Objects.equals(network, plan.storageReference()))
+                    && sameVariant(baseItem, plan.baseItem())
+                    && sameVariant(clickedOutput, plan.clickedOutput())) {
+                return entry.getKey();
+            }
+        }
+        return 0L;
+    }
+
+    private static boolean sameVariant(@Nullable ItemStack first, @Nullable ItemStack second) {
+        boolean firstEmpty = first == null || first.isEmpty();
+        boolean secondEmpty = second == null || second.isEmpty();
+        return firstEmpty || secondEmpty ? firstEmpty == secondEmpty : ItemStack.isSameItemSameTags(first, second);
+    }
+
+    private static ItemStack copyVariant(@Nullable ItemStack stack) {
+        return stack == null ? ItemStack.EMPTY : stack.copyWithCount(1);
     }
 
     /** 规划页关闭时调用；响应到达后不会突然切换界面，而是留给聊天栏入口。 */
@@ -109,6 +185,7 @@ public final class PlanBackgroundClient {
     public static synchronized void clear() {
         DETACHED_REQUESTS.clear();
         CACHED_PLANS.clear();
+        PREVIEW_TARGETS.clear();
     }
 
     static Component readyMessage(Component targetName, long requestId) {
@@ -221,4 +298,6 @@ public final class PlanBackgroundClient {
     }
 
     private record CachedPlan(PlanResponse plan, long cachedAt) {}
+    private record PreviewTarget(ResourceLocation recipeId, ItemStack baseItem,
+                                 ItemStack clickedOutput, @Nullable StorageReference network) {}
 }

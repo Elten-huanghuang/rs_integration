@@ -330,7 +330,7 @@ public final class PlanningStateValidator {
                 SaturatingLongMath::add);
     }
 
-    private static String networkIdentity(String fingerprint) {
+    static String networkIdentity(String fingerprint) {
         // 网络 id 本身可含维度命名空间和坐标分隔符，只有最后一段是库存摘要。
         int separator = fingerprint == null ? -1 : fingerprint.lastIndexOf(':');
         return separator < 0 ? String.valueOf(fingerprint) : fingerprint.substring(0, separator);

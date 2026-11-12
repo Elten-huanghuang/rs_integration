@@ -30,7 +30,7 @@ public abstract class BootstrapTest {
     private static boolean forgeCapabilitiesInitialized;
 
     @BeforeAll
-    static void bootstrapMinecraft() {
+    protected static void bootstrapMinecraft() {
         // Version metadata must be set before Bootstrap touches registries.
         SharedConstants.tryDetectVersion();
         try {

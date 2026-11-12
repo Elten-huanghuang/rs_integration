@@ -25,6 +25,27 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PlanCacheTest extends BootstrapTest {
     @Test
+    void replanHintsSurviveTtlButRespectBusinessIdentityAndDoNotConsumeLeases() {
+        PlanCache cache = new PlanCache(10);
+        PlanCache.Key key = key("replan");
+        PlanningSnapshot original = snapshot(key);
+        cache.put(key, plan(), original, 1);
+        cache.retainForRequest(key.playerId(), 10, original);
+        var published = cache.peekForRequest(key, 10);
+        assertNull(cache.get(key, 20));
+        assertSame(published, cache.findForReplan(key));
+        assertSame(published, cache.peekForRequest(key, 10));
+        assertNull(cache.findForReplan(new PlanCache.Key(key.playerId(), key.recipeId(), Map.of(), 2, "")));
+        assertNull(cache.findForReplan(new PlanCache.Key(key.playerId(), key.recipeId(), Map.of(), 1, "other")));
+        assertNull(cache.findForReplan(new PlanCache.Key(key.playerId(), key.recipeId(), Map.of(), 1, "",
+                Map.of("slot", "locked"))));
+        assertNull(cache.findForReplan(new PlanCache.Key(key.playerId(), key.recipeId(), Map.of(), 1, "",
+                Map.of(), new PlanningPreferences(Map.of(), Map.of(), Set.of(key.recipeId())))));
+        cache.invalidateSnapshot(original);
+        assertNull(cache.findForReplan(key));
+    }
+
+    @Test
     void publishedRequestsRetainIndependentRoutesBeyondDeduplicationTtl() {
         PlanCache cache = new PlanCache(10);
         PlanCache.Key first = key("first_task");

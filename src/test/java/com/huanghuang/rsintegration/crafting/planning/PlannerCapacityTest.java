@@ -23,6 +23,51 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class PlannerCapacityTest extends BootstrapTest {
     @Test
+    void partiallyStockedChainDoesNotRecompileEveryLayer() {
+        Scenario scenario = chain(1000, 1L, false);
+        Map<MaterialRef, Long> stock = new LinkedHashMap<>();
+        scenario.graph().recipesByOutput().keySet().forEach(material -> stock.put(material, 1L));
+        stock.put(material("raw"), 2L);
+        var roots = List.of(need(scenario.roots().get(0).alternatives().get(0), 1002L));
+        var cache = new DeterministicRecipePlanner.CompilationCache(scenario.graph(), Map.of(),
+                PlanningPreferences.empty(), 10000);
+        var prepared = cache.prepare(stock, roots, Set.of(), 1000, 10000, () -> {});
+        assertNotNull(prepared);
+        assertNotNull(prepared.plan());
+        assertEquals(2, cache.compilationCount());
+        assertEquals(1000, prepared.plan().steps().size());
+        assertTrue(prepared.plan().remaining().isEmpty());
+        assertFlow(new Scenario(scenario.graph(), stock, roots), plan(new Scenario(scenario.graph(), stock, roots), 1000));
+    }
+
+    @Test
+    void stockedIntermediateDoesNotCompileItsTenThousandRecipeAncestors() {
+        Scenario scenario = chain(10_000, 1L, false);
+        MaterialRef ready = scenario.roots().get(0).alternatives().get(0);
+        var cache = new DeterministicRecipePlanner.CompilationCache(scenario.graph(), Map.of(),
+                PlanningPreferences.empty(), 65_536);
+        int[] work = {0};
+        cache.prepare(Map.of(ready, 1L), scenario.roots(), Set.of(), 10_000, 65_536, () -> work[0]++);
+        assertTrue(work[0] < 100, "已有中间产物不应展开其整条生产链，实际探测次数=" + work[0]);
+    }
+
+    @Test
+    void depletedStockBoundaryExpandsAgainAndStillSharesConsumerDemand() {
+        Scenario scenario = chain(20, 1L, false);
+        MaterialRef ready = scenario.roots().get(0).alternatives().get(0);
+        var cache = new DeterministicRecipePlanner.CompilationCache(scenario.graph(), Map.of(),
+                PlanningPreferences.empty(), 10_000);
+        cache.prepare(Map.of(ready, 2L), scenario.roots(), Set.of(), 20, 10_000, () -> {});
+        var supplied = cache.prepare(Map.of(ready, 1L, material("raw"), 2L),
+                List.of(need(ready, 3L)), Set.of(), 20, 10_000, () -> {});
+        assertNotNull(supplied);
+        assertNotNull(supplied.plan());
+        assertEquals(20, supplied.plan().steps().size());
+        assertTrue(supplied.plan().steps().stream().allMatch(step -> step.batches() == 2L));
+        assertTrue(supplied.plan().remaining().isEmpty());
+    }
+
+    @Test
     void tenThousandRecipeChainWithTagBoundaryDoesNotFallBackAtEveryAncestor() {
         Map<MaterialRef, List<RecipeNode>> recipes = new LinkedHashMap<>();
         MaterialRef raw = material("tagged_chain_raw");
@@ -457,7 +502,11 @@ class PlannerCapacityTest extends BootstrapTest {
         MaterialRef shared = material("shared");
         Map<MaterialRef, List<RecipeNode>> cyclic = new LinkedHashMap<>(scenario.graph().recipesByOutput());
         cyclic.put(material("raw"), List.of(recipe("cycle", material("raw"), 1L, need(shared, 1L))));
-        assertNull(aggregate(new Scenario(new ImmutableRecipeGraph(cyclic), scenario.stock(), scenario.roots()), 10));
+        // 库存已满足 raw 时不必遍历其循环生产者；耗尽库存后仍须拒绝无种子循环。
+        Scenario stocked = new Scenario(new ImmutableRecipeGraph(cyclic), scenario.stock(), scenario.roots());
+        assertNotNull(aggregate(stocked, 10));
+        assertFlow(stocked, plan(stocked, 10));
+        assertNull(aggregate(new Scenario(new ImmutableRecipeGraph(cyclic), Map.of(), scenario.roots()), 10));
     }
 
     @Test

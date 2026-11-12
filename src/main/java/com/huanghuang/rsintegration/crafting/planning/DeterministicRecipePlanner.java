@@ -54,10 +54,10 @@ final class DeterministicRecipePlanner {
 
     private record Definition(MaterialRef material, @Nullable RecipeNode recipe,
                               List<IngredientRef> inputs) {}
-    private record Program(Map<MaterialRef, Node> nodes, List<Node> ordered) {}
+    private record Program(Map<MaterialRef, Node> nodes, List<Node> ordered, Set<MaterialRef> stockLeaves) {}
 
     /**
-     * 仅属于一次求解，图、强制路线和偏好固定；库存、祖先及失败结果不进入结构缓存。
+     * 仅属于一次求解，图、强制路线和偏好固定；库存切点可重新展开，不保留数量或失败结论。
      * 缓存的结构单元数受现有搜索状态上限约束，不另引入固定阈值，也不跨配方重载保留。
      */
     static final class CompilationCache {
@@ -93,18 +93,50 @@ final class DeterministicRecipePlanner {
                 List<MaterialRef> key = roots.stream().map(input -> input.alternatives().get(0))
                         .distinct().toList();
                 Program program = programs.get(key);
+                Set<MaterialRef> stockBoundaries = null;
                 if (program == null) {
-                    program = compile(key, budget);
-                    if (program == null) return null;
-                    int units = Math.addExact(key.size(), program.nodes().size());
-                    for (Node node : program.ordered()) units = Math.addExact(units, node.children.size());
-                    if (retain(units)) programs.put(key, program);
+                    stockBoundaries = new HashSet<>();
+                    for (var entry : stock.entrySet()) {
+                        checkBudget.run();
+                        if (entry.getValue() != null && entry.getValue() > 0L) {
+                            stockBoundaries.add(Evaluation.family(entry.getKey()));
+                        }
+                    }
                 }
-                return new Evaluation(program, stock, activeOutputs, maxSteps, budget).build(roots);
+                boolean changed = program == null;
+                while (true) {
+                    if (program == null) program = compile(key, budget, stockBoundaries);
+                    if (program == null) return null;
+                    Evaluation evaluation = new Evaluation(program, stock, activeOutputs, maxSteps, budget);
+                    Prepared result = evaluation.build(roots);
+                    if (evaluation.expandStockLeaves.isEmpty()) {
+                        if (changed) {
+                            Program previous = programs.remove(key);
+                            if (previous != null) retainedUnits -= programUnits(key, previous);
+                            if (retain(programUnits(key, program))) programs.put(key, program);
+                        }
+                        return result;
+                    }
+                    // 先按库存截住生产链；汇总所有消费者后仍有缺口，才展开对应叶子。
+                    // 这些叶子是可重新展开的边界，绝不缓存“库存不足”的结论。
+                    // 缺口下的确定性片段一次编译，避免长链每层都有少量库存时逐层重编译。
+                    // 已证明足量的其他库存叶子仍保留，后续评估继续核对共享需求。
+                    stockBoundaries = new HashSet<>(program.stockLeaves());
+                    stockBoundaries.removeAll(evaluation.expandStockLeaves);
+                    program = null;
+                    changed = true;
+                }
             } catch (ArithmeticException | ProbeLimitReached overflow) {
                 // 溢出或探测预算耗尽均交回通用搜索，不能提交半成品计划。
                 return null;
             }
+        }
+
+        private static int programUnits(List<MaterialRef> key, Program program) {
+            int units = Math.addExact(key.size(), program.nodes().size());
+            units = Math.addExact(units, program.stockLeaves().size());
+            for (Node node : program.ordered()) units = Math.addExact(units, node.children.size());
+            return units;
         }
 
         private boolean retain(int units) {
@@ -140,13 +172,14 @@ final class DeterministicRecipePlanner {
         }
 
         @Nullable
-        private Program compile(List<MaterialRef> roots, Budget budget) {
+        private Program compile(List<MaterialRef> roots, Budget budget, Set<MaterialRef> stockBoundaries) {
             compilationCount++;
             Map<MaterialRef, Node> nodes = new HashMap<>();
             List<Node> ordered = new ArrayList<>();
+            Set<MaterialRef> stockLeaves = new HashSet<>();
             for (MaterialRef root : roots) {
                 if (nodes.containsKey(root)) continue;
-                Node first = new Node(nodes.size(), definition(root, budget));
+                Node first = new Node(nodes.size(), definition(root, budget, stockBoundaries, stockLeaves));
                 nodes.put(root, first);
                 ArrayDeque<Node> stack = new ArrayDeque<>();
                 stack.push(first);
@@ -171,14 +204,23 @@ final class DeterministicRecipePlanner {
                         return null;
                     }
                     if (child == null) {
-                        child = new Node(nodes.size(), definition(material, budget));
+                        child = new Node(nodes.size(), definition(material, budget, stockBoundaries, stockLeaves));
                         nodes.put(material, child);
                         stack.push(child);
                     }
                     current.children.add(child);
                 }
             }
-            return new Program(Map.copyOf(nodes), List.copyOf(ordered));
+            return new Program(Map.copyOf(nodes), List.copyOf(ordered), Set.copyOf(stockLeaves));
+        }
+
+        private Definition definition(MaterialRef material, Budget budget,
+                                      Set<MaterialRef> stockBoundaries, Set<MaterialRef> stockLeaves) {
+            if (stockBoundaries.contains(material)) {
+                stockLeaves.add(material);
+                return new Definition(material, null, List.of());
+            }
+            return definition(material, budget);
         }
     }
 
@@ -231,6 +273,7 @@ final class DeterministicRecipePlanner {
         private final Budget budget;
         private final Map<MaterialRef, List<MaterialRef>> variants = new HashMap<>();
         private final Map<MaterialRef, Long> familyStock = new HashMap<>();
+        private final Set<MaterialRef> expandStockLeaves = new HashSet<>();
 
         private Evaluation(Program program, Map<MaterialRef, Long> initial,
                            Set<MaterialRef> activeOutputs, int maxSteps, Budget budget) {
@@ -278,6 +321,9 @@ final class DeterministicRecipePlanner {
                         demand[node.id] - familyStock.getOrDefault(node.material, 0L),
                         exactDemand[node.id] - initial.getOrDefault(node.material, 0L)));
                 if (missing == 0L) continue;
+                if (program.stockLeaves().contains(node.material) && !activeOutputs.contains(node.material)) {
+                    expandStockLeaves.add(node.material);
+                }
                 if (node.recipe == null || activeOutputs.contains(node.material)) {
                     needsBoundary = true;
                     continue;

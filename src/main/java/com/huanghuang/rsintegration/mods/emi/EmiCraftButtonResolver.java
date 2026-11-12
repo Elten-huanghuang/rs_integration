@@ -14,6 +14,7 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
 import com.huanghuang.rsintegration.crafting.plan.ClientPlanningPreferences;
+import com.huanghuang.rsintegration.crafting.plan.PlanBackgroundClient;
 import com.huanghuang.rsintegration.network.machine.bd.BeyondDimensionsOpenBoundMachineGuiPacket;
 import com.huanghuang.rsintegration.mods.goety.GoetyBindingRules;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.IronAlchemistJeiBridge;
@@ -43,7 +44,6 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraftforge.fml.ModList;
 import net.minecraftforge.registries.ForgeRegistries;
 import com.huanghuang.rsintegration.crafting.availability.RecipeAvailabilityKey;
-import com.huanghuang.rsintegration.crafting.planning.PlanningProgressTracker;
 import com.huanghuang.rsintegration.crafting.planning.PlanningRequestIds;
 import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisGemCuttingRecipe;
 import com.huanghuang.rsintegration.mods.arsnouveau.ArsRecipeClassifier;
@@ -392,12 +392,13 @@ final class EmiCraftButtonResolver {
                                                ItemStack targetOutput) {
         if ("generic".equals(filter)) {
             return () -> {
+                if (PlanBackgroundClient.openExisting(recipeId, null, null)) return;
                 long requestId = PlanningRequestIds.next();
                 GenericCraftPacket packet = ClientPlanningPreferences.apply(
                         new GenericCraftPacket(
                                 recipeId, true, Map.of(), null, null, 1, false,
                                 null, null, requestId));
-                PlanningProgressTracker.start(requestId, packet.recipeId());
+                PlanBackgroundClient.startPreview(requestId, packet.recipeId(), null, null);
                 BatchCraftNetworkHandler.CHANNEL.sendToServer(
                         packet);
             };
@@ -408,12 +409,13 @@ final class EmiCraftButtonResolver {
         ItemStack capturedBase = base.isEmpty() ? null : base.copy();
         ItemStack capturedOutput = targetOutput.isEmpty() ? null : targetOutput.copy();
         return () -> {
+            if (PlanBackgroundClient.openExisting(recipeId, capturedBase, capturedOutput)) return;
             long requestId = PlanningRequestIds.next();
             GenericCraftPacket packet = ClientPlanningPreferences.apply(
                     new GenericCraftPacket(
                             recipeId, true, Map.of(), dimension, machinePos, 1, false,
                             capturedBase, capturedOutput, requestId));
-            PlanningProgressTracker.start(requestId, packet.recipeId());
+            PlanBackgroundClient.startPreview(requestId, packet.recipeId(), capturedBase, capturedOutput);
             BatchCraftNetworkHandler.CHANNEL.sendToServer(
                     packet);
         };

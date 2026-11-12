@@ -90,8 +90,15 @@ final class CraftPlanResponseFinalizer {
                             recipeId, responseStepCount, responseGraphNodes,
                             responseFeasible, player.getGameProfile().getName());
                     sink.success(plan, planningSnapshot);
+                    long assemblyElapsed = System.nanoTime() - planStartNanos;
+                    if (assemblyElapsed >= 1_000_000_000L) {
+                        RSIntegrationMod.LOGGER.info(
+                                "[RSI-plan] Slow preview assembly request={} recipe={} wallMs={} steps={} graphNodes={} feasible={}",
+                                previewGeneration, recipeId, assemblyElapsed / 1_000_000L,
+                                responseStepCount, responseGraphNodes, responseFeasible);
+                    }
                     PerformanceMonitor.recordPlanBuild(
-                            System.nanoTime() - planStartNanos,
+                            assemblyElapsed,
                             plan.graph() != null
                                     ? plan.graph().nodes().size() : responseStepCount);
                     RSIntegrationMod.debug(

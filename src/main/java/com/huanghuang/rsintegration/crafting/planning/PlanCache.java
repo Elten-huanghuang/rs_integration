@@ -123,6 +123,17 @@ public final class PlanCache {
         return lease == null ? null : lease.entry();
     }
 
+    /** 从有界的已发布预览中寻找重算路线提示；不延长、授予或消费执行租约。 */
+    @Nullable
+    public Entry findForReplan(Key expected) {
+        Key identity = expected.withoutPreferences();
+        return requestLeases.values().stream()
+                .filter(lease -> lease.key().equals(identity)
+                        && lease.entry().snapshot().preferences().equals(expected.preferences()))
+                .map(ExecutionLease::entry)
+                .max(Comparator.comparingLong(Entry::createdNanos)).orElse(null);
+    }
+
     /** 在发布响应时关联客户端请求；保留完整服务端图，不接受客户端上传的计划。 */
     public void retainForRequest(UUID playerId, long requestId, PlanningSnapshot snapshot) {
         if (requestId <= 0L || !playerId.equals(snapshot.playerId())) return;

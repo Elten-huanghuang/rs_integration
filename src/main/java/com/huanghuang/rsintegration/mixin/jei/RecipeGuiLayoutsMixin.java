@@ -12,7 +12,6 @@ import com.huanghuang.rsintegration.recipe.viewer.RecipeMachineCategoryPolicy;
 import com.huanghuang.rsintegration.mods.jei.JeiRecipeButtonPlacement;
 import com.huanghuang.rsintegration.recipe.viewer.RecipeIdNormalizer;
 import com.huanghuang.rsintegration.mods.jei.LongTravailCrownRecipeIdResolver;
-import com.huanghuang.rsintegration.crafting.planning.PlanningProgressTracker;
 import com.huanghuang.rsintegration.crafting.planning.PlanningRequestIds;
 import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisGemCuttingCatalog;
 import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisGemCuttingRecipe;
@@ -57,6 +56,7 @@ import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
 import com.huanghuang.rsintegration.crafting.external.ExternalIntegrationRuntime;
 import com.huanghuang.rsintegration.crafting.external.ExternalMachineBindingIndex;
 import com.huanghuang.rsintegration.crafting.plan.ClientPlanningPreferences;
+import com.huanghuang.rsintegration.crafting.plan.PlanBackgroundClient;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.mods.ModCraftNetworkHandlers;
 import com.huanghuang.rsintegration.network.binding.BindingStorage;
@@ -1647,6 +1647,7 @@ public class RecipeGuiLayoutsMixin {
                                            @Nullable ItemStack targetOutput) {
         if (filter.equals("generic")) {
             return () -> {
+                if (PlanBackgroundClient.openExisting(recipeId, null, null)) return;
                 GenericCraftPacket pkt;
                 long requestId = PlanningRequestIds.next();
                 try {
@@ -1659,7 +1660,7 @@ public class RecipeGuiLayoutsMixin {
                 pkt = ClientPlanningPreferences.apply(pkt);
                 RSIntegrationMod.LOGGER.debug(
                         "[RSI-JEI] Sending GenericCraftPacket (generic): recipeId={}", pkt.recipeId());
-                rsi$showPlanRequestStarted(requestId, pkt.recipeId());
+                PlanBackgroundClient.startPreview(requestId, pkt.recipeId(), null, null);
                 BatchCraftNetworkHandler.CHANNEL.sendToServer(pkt);
             };
         }
@@ -1701,6 +1702,7 @@ public class RecipeGuiLayoutsMixin {
         final ItemStack finalCapturedBase = capturedBase;
         final ItemStack finalTargetOutput = targetOutput;
         return () -> {
+            if (PlanBackgroundClient.openExisting(recipeId, finalCapturedBase, finalTargetOutput)) return;
             GenericCraftPacket pkt;
             long requestId = PlanningRequestIds.next();
             try {
@@ -1716,15 +1718,9 @@ public class RecipeGuiLayoutsMixin {
                     pkt.recipeId(), dim, machinePos,
                     finalCapturedBase != null ? finalCapturedBase.getHoverName().getString() : "null",
                     finalTargetOutput != null ? finalTargetOutput.getHoverName().getString() : "null");
-            rsi$showPlanRequestStarted(requestId, pkt.recipeId());
+            PlanBackgroundClient.startPreview(requestId, pkt.recipeId(), finalCapturedBase, finalTargetOutput);
             BatchCraftNetworkHandler.CHANNEL.sendToServer(pkt);
         };
-    }
-
-    @Unique
-    private static void rsi$showPlanRequestStarted(long requestId, ResourceLocation recipeId) {
-        PlanningProgressTracker.start(
-                requestId, recipeId);
     }
 
     /**

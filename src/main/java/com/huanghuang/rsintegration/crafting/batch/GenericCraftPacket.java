@@ -137,6 +137,7 @@ import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
 import com.huanghuang.rsintegration.crafting.planning.AsyncPurePlanningService;
 import com.huanghuang.rsintegration.crafting.planning.AsyncPlanningCoordinator;
 import com.huanghuang.rsintegration.crafting.planning.PlanCache;
+import com.huanghuang.rsintegration.crafting.planning.PlanningRouteHint;
 import com.huanghuang.rsintegration.crafting.MaterialLocks;
 import com.huanghuang.rsintegration.crafting.planning.PlanRequestService;
 import com.huanghuang.rsintegration.crafting.planning.PlanningStateValidator;
@@ -2897,7 +2898,13 @@ public final class GenericCraftPacket {
                                 || !(recipe instanceof CraftingRecipe) && !backgroundProjectable,
                         safePreferences);
             } finally {
-                PerformanceMonitor.recordPlanningSnapshot(System.nanoTime() - snapshotStarted);
+                long elapsed = System.nanoTime() - snapshotStarted;
+                PerformanceMonitor.recordPlanningSnapshot(elapsed);
+                if (elapsed >= 1_000_000_000L) {
+                    RSIntegrationMod.LOGGER.info(
+                            "[RSI-plan] Slow snapshot request={} recipe={} wallMs={}",
+                            previewGeneration, recipeId, elapsed / 1_000_000L);
+                }
             }
         }
 
@@ -3005,6 +3012,10 @@ public final class GenericCraftPacket {
             var routing = AsyncPurePlanningService.RouteInputs.fromItems(
                     planningSnapshot.availableItems(), demandMaxNodes,
                     reusableCatalystOutputIds, reusableCatalystRecipeIds, pureIncompatibleOutputIds);
+            PlanCache.Entry previous = CraftPlanningRuntime.planCache().findForReplan(cacheKey);
+            if (previous != null && !machineInventoryAffectsPlan(previewModType, previous.plan())) {
+                routing = routing.withPreviousRoute(PlanningRouteHint.from(previous));
+            }
             CraftPlanningRuntime.planRequests().submitRouted(planningSnapshot, routing, repeatCount, player.getServer()::execute,
                     RSIntegrationConfig.CRAFTING_MAX_STEPS.get(), completed ->
                             tryBuildPlan(player, recipeId, forcedRecipes, dim, pos, repeatCount,
