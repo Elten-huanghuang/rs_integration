@@ -5,6 +5,7 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.inventory.tooltip.ClientTooltipComponent;
+import net.minecraft.client.gui.screens.inventory.tooltip.DefaultTooltipPositioner;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -40,10 +41,13 @@ public final class DiskTooltipBackground {
             texture("resonance_nebula"),
             0xFFB9F4FF, 0xFFE3C9FF,
             0xFF8BDFFF, 0xFFC39AFF, Artwork.NEBULA);
+    private static final Theme RESONANCE_DISK = new Theme(
+            RESONANCE.background(), RESONANCE.glowA(), RESONANCE.glowB(),
+            RESONANCE.borderA(), RESONANCE.borderB(), Artwork.RESONANCE);
     private static final Theme GUIXU = new Theme(
             texture("guixu_nebula"),
             0xFFFFF1BC, 0xFFFFDB87,
-            0xFFFFE59A, 0xFFDCAD48, Artwork.NEBULA);
+            0xFFFFE59A, 0xFFDCAD48, Artwork.GUIXU);
     private static final Theme EXPERIENCE = new Theme(
             texture("experience_enamel"),
             0xFFB8EF57, 0xFFEEF7B6,
@@ -77,6 +81,34 @@ public final class DiskTooltipBackground {
     }
 
     @SubscribeEvent(priority = EventPriority.LOWEST)
+    public static void onTooltipGatherComponents(RenderTooltipEvent.GatherComponents event) {
+        Theme theme = themeFor(event.getItemStack());
+        if (theme == null) return;
+        int frameSpace = switch (theme.artwork()) {
+            case RESONANCE -> ResonanceTooltipArt.HORIZONTAL_SPACE;
+            case GUIXU -> GuixuTooltipArt.HORIZONTAL_SPACE;
+            case FOOD -> OrderTerminalTooltipArt.HORIZONTAL_SPACE;
+            default -> 0;
+        };
+        if (frameSpace == 0) return;
+        int maxWidth = Math.max(1, event.getScreenWidth() - frameSpace);
+        if (event.getMaxWidth() > 0) maxWidth = Math.min(maxWidth, event.getMaxWidth());
+        event.setMaxWidth(maxWidth);
+    }
+
+    @SubscribeEvent(priority = EventPriority.LOWEST)
+    public static void onTooltipPre(RenderTooltipEvent.Pre event) {
+        Theme theme = themeFor(event.getItemStack());
+        if (theme != null && theme.artwork() == Artwork.RESONANCE) {
+            ResonanceTooltipArt.reserveFrameSpace(event);
+        } else if (theme != null && theme.artwork() == Artwork.GUIXU) {
+            GuixuTooltipArt.reserveFrameSpace(event);
+        } else if (theme != null && theme.artwork() == Artwork.FOOD) {
+            OrderTerminalTooltipArt.reserveFrameSpace(event);
+        }
+    }
+
+    @SubscribeEvent(priority = EventPriority.LOWEST)
     public static void onTooltipColor(RenderTooltipEvent.Color event) {
         Theme theme = themeFor(event.getItemStack());
         if (theme == null || event.getComponents().isEmpty()) return;
@@ -89,6 +121,23 @@ public final class DiskTooltipBackground {
         int top = event.getY() - 3;
         int right = event.getX() + width + 3;
         int bottom = event.getY() + height + 3;
+        if (theme.artwork() == Artwork.RESONANCE) {
+            // 为角饰与横饰补出留白，文字仍由原版按原来的组件坐标绘制。
+            left -= ResonanceTooltipArt.SIDE_SPACE;
+            right += ResonanceTooltipArt.SIDE_SPACE;
+            top -= ResonanceTooltipArt.HEADER_SPACE;
+            bottom += ResonanceTooltipArt.BOTTOM_SPACE;
+        } else if (theme.artwork() == Artwork.GUIXU) {
+            left -= GuixuTooltipArt.SIDE_SPACE;
+            right += GuixuTooltipArt.SIDE_SPACE;
+            top -= GuixuTooltipArt.HEADER_SPACE;
+            bottom += GuixuTooltipArt.BOTTOM_SPACE;
+        } else if (theme.artwork() == Artwork.FOOD) {
+            left -= OrderTerminalTooltipArt.LEFT_SPACE;
+            right += OrderTerminalTooltipArt.RIGHT_SPACE;
+            top -= OrderTerminalTooltipArt.HEADER_SPACE;
+            bottom += OrderTerminalTooltipArt.BOTTOM_SPACE;
+        }
 
         renderBackground(event.getGraphics(), left, top, right, bottom, theme,
                 System.currentTimeMillis() / 1000.0);
@@ -115,7 +164,8 @@ public final class DiskTooltipBackground {
                 RSIntegrationConfig.TOOLTIP_CUSTOM_BACKGROUNDS)) return null;
         if (id == null || !MOD_ID.equals(id.getNamespace())) return null;
         return switch (id.getPath()) {
-            case "resonance_storage_disk", "resonance_network_generator" -> RESONANCE;
+            case "resonance_storage_disk" -> RESONANCE_DISK;
+            case "resonance_network_generator" -> RESONANCE;
             case "unified_storage_disk" -> GUIXU;
             case "resonant_experience_wand" -> EXPERIENCE;
             case "order_terminal" -> FOOD;
@@ -136,6 +186,22 @@ public final class DiskTooltipBackground {
             width = Math.max(width, component.getWidth(font));
         }
         return width;
+    }
+
+    static void reserveFrameSpace(RenderTooltipEvent.Pre event, int leftMargin, int rightMargin,
+                                  int topMargin, int bottomMargin) {
+        // 只修正原版鼠标定位，自定义位置的配方预览仍遵循其自己的布局约束。
+        if (event.getTooltipPositioner() != DefaultTooltipPositioner.INSTANCE
+                || event.getComponents().isEmpty()) return;
+        int width = tooltipWidth(event.getFont(), event.getComponents());
+        int height = tooltipHeight(event.getComponents());
+        var position = event.getTooltipPositioner().positionTooltip(event.getScreenWidth(),
+                event.getScreenHeight(), event.getX(), event.getY(), width, height);
+        int maxX = event.getScreenWidth() - width - rightMargin;
+        int maxY = event.getScreenHeight() - height - bottomMargin;
+        // 原版定位器从输入原点的右侧 12、上方 12 像素开始。
+        if (maxX >= leftMargin) event.setX(Math.max(leftMargin, Math.min(maxX, position.x())) - 12);
+        if (maxY >= topMargin) event.setY(Math.max(topMargin, Math.min(maxY, position.y())) + 12);
     }
 
     static int tooltipHeight(List<ClientTooltipComponent> components) {
@@ -164,7 +230,8 @@ public final class DiskTooltipBackground {
             RenderSystem.enableBlend();
             RenderSystem.defaultBlendFunc();
             graphics.setColor(1.0F, 1.0F, 1.0F, 1.0F);
-            if (theme.artwork() == Artwork.NEBULA || theme.artwork() == Artwork.VOID) {
+            if (theme.artwork() == Artwork.NEBULA || theme.artwork() == Artwork.VOID
+                    || theme.artwork() == Artwork.RESONANCE || theme.artwork() == Artwork.GUIXU) {
                 drawNebula(graphics, left, top, width, height, theme, cycle);
                 drawStar(graphics, left, top, width, height,
                         phase, 0.23, 0.24, 0.23, theme.glowA());
@@ -179,18 +246,42 @@ public final class DiskTooltipBackground {
             }
 
             graphics.flush();
+            if (theme.artwork() == Artwork.RESONANCE) {
+                ResonanceTooltipArt.drawCrt(graphics, left, top, width, height, cycle);
+                graphics.flush();
+            }
             // 边框在底板与普通 tooltip 字体上方写入深度，贴边文字也不能盖住轮廓。
             pose.translate(0.0F, 0.0F, 8.0F);
             graphics.setColor(1.0F, 1.0F, 1.0F, 1.0F);
+            if (theme.artwork() == Artwork.GUIXU && GuixuTooltipArt.supportsFrame(width, height)) {
+                GuixuTooltipArt.drawFrame(graphics, left, top, width, height);
+                graphics.flush();
+                return;
+            }
+            if (theme.artwork() == Artwork.FOOD && OrderTerminalTooltipArt.supportsFrame(width, height)) {
+                OrderTerminalTooltipArt.drawFrame(graphics, left, top, width, height);
+                graphics.flush();
+                return;
+            }
             int border = blend(theme.borderA(), theme.borderB(),
                     (float) ((Math.sin(phase) + 1.0) * 0.5));
-            graphics.fill(left, top, right, top + 1, withAlpha(border, 255));
+            if (theme.artwork() == Artwork.RESONANCE && ResonanceTooltipArt.supportsFrame(width, height)) {
+                int middle = left + (width - ResonanceTooltipArt.middleWidth()) / 2;
+                graphics.fill(left, top, middle, top + 1, withAlpha(border, 255));
+                graphics.fill(middle + ResonanceTooltipArt.middleWidth(), top, right, top + 1, withAlpha(border, 255));
+            } else {
+                graphics.fill(left, top, right, top + 1, withAlpha(border, 255));
+            }
             graphics.fill(left, bottom - 1, right, bottom, withAlpha(border, 255));
             graphics.fillGradient(left, top + 1, left + 1, bottom - 1, 0,
                     withAlpha(theme.borderA(), 255), withAlpha(theme.borderB(), 255));
             graphics.fillGradient(right - 1, top + 1, right, bottom - 1, 0,
                     withAlpha(theme.borderA(), 255), withAlpha(theme.borderB(), 255));
             graphics.flush();
+            if (theme.artwork() == Artwork.RESONANCE) {
+                ResonanceTooltipArt.drawFrame(graphics, left, top, width, height);
+                graphics.flush();
+            }
         } finally {
             graphics.setColor(1.0F, 1.0F, 1.0F, 1.0F);
             RenderSystem.disableBlend();
@@ -204,14 +295,59 @@ public final class DiskTooltipBackground {
         double framePosition = time / LOOP_SECONDS * FRAME_COUNT;
         int frame = (int) framePosition;
         float blend = (float) (framePosition - frame);
-        double scale = Math.max(width / (double) FRAME_WIDTH,
+        boolean guixuFrame = theme.artwork() == Artwork.GUIXU && GuixuTooltipArt.supportsFrame(width, height);
+        int renderWidth = width + (guixuFrame ? 5 : 0);
+        double scale = Math.max(renderWidth / (double) FRAME_WIDTH,
                 height / (double) FRAME_HEIGHT) * 1.08;
-        int sampleWidth = Math.min(FRAME_WIDTH, Math.max(1, (int) Math.ceil(width / scale)));
+        int sampleWidth = Math.min(FRAME_WIDTH, Math.max(1, (int) Math.ceil(renderWidth / scale)));
         int sampleHeight = Math.min(FRAME_HEIGHT, Math.max(1, (int) Math.ceil(height / scale)));
         float u = (float) ((FRAME_WIDTH - sampleWidth)
                 * (0.5 + Math.sin(time * Math.PI * 2.0 / LOOP_SECONDS) * 0.32));
         float v = (float) ((FRAME_HEIGHT - sampleHeight)
                 * (0.5 + Math.cos(time * Math.PI * 2.0 / LOOP_SECONDS) * 0.32));
+        if (guixuFrame) {
+            // 按金框下缘的转折裁剪完整星云，所有片段共用同一采样，避免缩放接缝。
+            for (int y = 0; y < height;) {
+                int inset = GuixuTooltipArt.leftInset(y, height);
+                int outset = GuixuTooltipArt.rightOutset(y, height);
+                int end = y + 1;
+                while (end < height && GuixuTooltipArt.leftInset(end, height) == inset
+                        && GuixuTooltipArt.rightOutset(end, height) == outset) end++;
+                graphics.enableScissor(left + inset, top + y, left + width + outset, top + end);
+                try {
+                    RenderSystem.enableBlend();
+                    RenderSystem.defaultBlendFunc();
+                    drawNebulaLayers(graphics, left, top, renderWidth, height, theme, frame, blend,
+                            u, v, sampleWidth, sampleHeight);
+                } finally {
+                    graphics.disableScissor();
+                }
+                y = end;
+            }
+        } else {
+            drawNebulaLayers(graphics, left, top, width, height, theme, frame, blend,
+                    u, v, sampleWidth, sampleHeight);
+        }
+        int offset = theme.artwork() == Artwork.RESONANCE ? ResonanceTooltipArt.glitchOffset(time) : 0;
+        if (offset != 0 && width > 2 && height > 2) {
+            // 只重采样一条星云，模拟短暂横向失步；不会移动文字、外框或采到邻帧。
+            int bandHeight = Math.min(4, height - 2);
+            int bandY = Math.max(1, Math.min(height - bandHeight - 1,
+                    (int) (height * ResonanceTooltipArt.glitchFraction(time))));
+            int sourceHeight = Math.min(sampleHeight,
+                    Math.max(1, (int) Math.ceil(sampleHeight * bandHeight / (double) height)));
+            float bandU = Math.max(0, Math.min(FRAME_WIDTH - sampleWidth,
+                    u - offset * sampleWidth / (float) width));
+            float bandV = v + Math.min(sampleHeight - sourceHeight,
+                    sampleHeight * bandY / (float) height);
+            drawNebulaLayers(graphics, left, top + bandY, width, bandHeight, theme, frame, blend,
+                    bandU, bandV, sampleWidth, sourceHeight);
+        }
+    }
+
+    private static void drawNebulaLayers(GuiGraphics graphics, int left, int top, int width, int height,
+                                         Theme theme, int frame, float blend, float u, float v,
+                                         int sampleWidth, int sampleHeight) {
         for (int layer = 0; layer < 2; layer++) {
             int index = (frame + layer) % FRAME_COUNT;
             boolean cosmic = theme.artwork() == Artwork.VOID;
@@ -257,7 +393,7 @@ public final class DiskTooltipBackground {
         return red << 16 | green << 8 | blue;
     }
 
-    enum Artwork { NEBULA, EXPERIENCE, FOOD, MANA, SOURCE, DIMENSION, VOID }
+    enum Artwork { NEBULA, RESONANCE, GUIXU, EXPERIENCE, FOOD, MANA, SOURCE, DIMENSION, VOID }
 
     record Theme(ResourceLocation background, int glowA, int glowB,
                  int borderA, int borderB, Artwork artwork) {}
