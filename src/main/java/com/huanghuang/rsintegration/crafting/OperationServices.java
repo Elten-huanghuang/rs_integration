@@ -6,6 +6,9 @@ import com.huanghuang.rsintegration.crafting.graph.OperationBudget;
 
 /** Operation ownership services scoped to one logical server generation. */
 final class OperationServices {
+    private final GlobalMaterialCoordinator materials = new GlobalMaterialCoordinator();
+    GlobalMaterialCoordinator materials() { return materials; }
+
     private final MachineLeaseRegistry machines = new MachineLeaseRegistry();
     private final CaptureLeaseRegistry captures = new CaptureLeaseRegistry();
     private final OperationBudget globalBudget = new OperationBudget(
@@ -22,14 +25,14 @@ final class OperationServices {
 
     Audit audit(int activeCrafts) {
         return new Audit(activeCrafts, globalBudget.active(), machines.size(),
-                captures.size(), CraftOutputInterceptor.activeZoneCount());
+                captures.size(), CraftOutputInterceptor.activeZoneCount(), materials.size());
     }
 
     record Audit(int activeCrafts, int activeOperations, int machineLeases,
-                 int captureLeases, int captureZones) {
+                 int captureLeases, int captureZones, int materialAccounts) {
         boolean clean() {
             return activeCrafts == 0 && activeOperations == 0 && machineLeases == 0
-                    && captureLeases == 0 && captureZones == 0;
+                    && captureLeases == 0 && captureZones == 0 && materialAccounts == 0;
         }
     }
 }

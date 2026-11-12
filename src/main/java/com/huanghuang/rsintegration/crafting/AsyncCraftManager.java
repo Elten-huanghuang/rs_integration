@@ -53,6 +53,12 @@ public final class AsyncCraftManager {
             RSIntegrationMod.LOGGER.debug("[RSI-AsyncMgr] Chain removed via callback: craft={} player={} state={}",
                     craftId, playerId, chain.state());
         });
+        try {
+            chain.enableMaterialAccount(operationServices.materials());
+        } catch (RuntimeException | LinkageError failure) {
+            activeChains.remove(craftId);
+            throw failure;
+        }
         RSIntegrationMod.LOGGER.debug("[RSI-AsyncMgr] Chain submitted: craft={} player={} steps={}",
                 craftId, playerId, chain.stepsCount());
     }
@@ -163,9 +169,9 @@ public final class AsyncCraftManager {
         OperationServices.Audit audit = retired.audit(INSTANCE.activeChains.size());
         if (!audit.clean()) {
             RSIntegrationMod.LOGGER.error(
-                    "[RSI-AsyncMgr] Shutdown audit incomplete: crafts={} operations={} machines={} captures={} zones={} machineOwners={} captureOwners={}",
+                    "[RSI-AsyncMgr] Shutdown audit incomplete: crafts={} operations={} machines={} captures={} zones={} materials={} machineOwners={} captureOwners={}",
                     audit.activeCrafts(), audit.activeOperations(), audit.machineLeases(),
-                    audit.captureLeases(), audit.captureZones(), retired.machines().snapshot(),
+                    audit.captureLeases(), audit.captureZones(), audit.materialAccounts(), retired.machines().snapshot(),
                     retired.captures().snapshot());
         } else {
             RSIntegrationMod.LOGGER.info("[RSI-AsyncMgr] Shutdown audit complete: no active ownership remains");

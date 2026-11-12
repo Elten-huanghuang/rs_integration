@@ -967,6 +967,8 @@
   "rsi.async.abort.executor_error": "合成图执行器错误：%s",
   "rsi.async.abort.missing_material": "缺少材料：%s",
   "rsi.async.abort.drop_throttle": "存储网络已满且玩家离线，掉落物已被限流",
+  "rsi.async.abort.material_transfer_unknown": "材料转移结果不明，任务已停止，请检查服务端日志",
+  "rsi.async.abort.initial_material_timeout": "等待合成原料超时，请补充材料后重试",
   "rsi.async.abort.final_commit_failed": "最终提交失败",
   "rsi.async.abort.output_extracted": "合成产物已被外部抽取（应有 %s 个，实际收取 %s 个）",
   "rsi.async.abort.output_not_captured": "未捕获到预期的合成产物：%s",

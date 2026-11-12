@@ -187,6 +187,14 @@ public final class AsyncCraftChain {
     @Nullable
     private final CraftStorageEndpoint storageEndpoint;
     private final List<CraftingResolver.ResolutionStep> steps;
+    @Nullable private InitialMaterialPlan initialMaterialPlan;
+    @Nullable private RuntimeMaterialAccount materialAccount;
+    @Nullable private GlobalMaterialCoordinator materialCoordinator;
+    private boolean initialMaterialsReady;
+    private int nextMaterialAdmissionTick;
+    private int materialAdmissionStartedTick;
+    private boolean waitingForInitialMaterials;
+
     private final List<ItemStack> virtualInventory = new ArrayList<>();
     private final List<ItemStack> deliveredFinalOutputs = new ArrayList<>();
     private final List<ItemStack> recoveryFinalOutputs = new ArrayList<>();
@@ -422,6 +430,77 @@ public final class AsyncCraftChain {
         }
     }
 
+    void enableMaterialAccount(GlobalMaterialCoordinator coordinator) {
+        if (materialAccount != null) return;
+        closeMagicReservation();
+        materialCoordinator = coordinator;
+        materialAccount = coordinator.open(craftId, playerId, server, storageEndpoint);
+        ledger.setMaterialAccount(materialAccount);
+        materialAdmissionStartedTick = server.getTickCount();
+        nextMaterialAdmissionTick = materialAdmissionStartedTick;
+    }
+
+    @Nullable
+    private InitialMaterialPlan legacyInitialMaterialPlan(ServerPlayer player) {
+        List<InitialMaterialPlan.Step> plan = new ArrayList<>();
+        for (CraftingResolver.ResolutionStep step : steps) {
+            Recipe<?> recipe = recipeForStep(step);
+            ItemStack output = step.syntheticOutput();
+            List<IngredientSpec> inputs;
+            if (recipe != null) {
+                inputs = CraftPacketUtils.extractIngredientSpecs(recipe);
+                if (output == null || output.isEmpty()) {
+                    output = ModRecipeHandlers.tryGetResultItem(recipe, player.serverLevel().registryAccess());
+                }
+            } else if (step.syntheticInput() != null && !step.syntheticInput().isEmpty()) {
+                inputs = List.of(new IngredientSpec(Ingredient.of(step.syntheticInput()), 1));
+            } else {
+                throw new IllegalStateException("旧合成入口无法确定初始材料，请提供 CraftPlanGraph: " + step.recipeId());
+            }
+            if (inputs == null) throw new IllegalStateException("无法确定初始材料: " + step.recipeId());
+            plan.add(new InitialMaterialPlan.Step(
+                    MaterialLocks.narrowSpecs(step.recipeId(), inputs, supplementalMaterialLocks),
+                    output == null ? ItemStack.EMPTY : output, step.executions()));
+        }
+        return InitialMaterialPlan.fromSteps(plan, MaterialSources.listAllAvailableFresh(player, storageEndpoint));
+    }
+
+    private void releaseMaterialAccount() {
+        if (materialCoordinator != null) materialCoordinator.release(craftId);
+    }
+
+    private boolean acquireInitialMaterials() {
+        if (materialAccount == null) return true;
+        if (materialAccount.uncertain()) {
+            abort("材料转移结果不明，已停止自动重试：" + craftId,
+                    Component.translatable("rsi.async.abort.material_transfer_unknown"));
+            return false;
+        }
+        if (initialMaterialsReady) return true;
+        ServerPlayer player = resolvePlayer();
+        if (player == null) { abortOffline("Player disconnected"); return false; }
+        int tick = server.getTickCount();
+        if (tick < nextMaterialAdmissionTick) return false;
+        nextMaterialAdmissionTick = tick + 20;
+        if (initialMaterialPlan == null) initialMaterialPlan = legacyInitialMaterialPlan(player);
+        if (initialMaterialPlan != null
+                && materialAccount.ensure(initialMaterialPlan.materials(), initialMaterialPlan.reusable(), player)) {
+            initialMaterialsReady = true;
+            waitingForInitialMaterials = false;
+            if (storageEndpoint == null || CraftStorageEndpoints.isRefinedStorage(storageEndpoint)) {
+                magicResourceTaskReservation = MagicResourceTaskReservation.reserve(server, craftId, magicCostsForPlan());
+            }
+            return true;
+        }
+        waitingForInitialMaterials = true;
+        if (materialAccount.uncertain()) {
+            abort("材料转移结果不明：" + craftId, Component.translatable("rsi.async.abort.material_transfer_unknown"));
+        } else if ((long) tick - materialAdmissionStartedTick >= GRAPH_RETRY_ABORT_TICKS) {
+            abort("初始材料等待超时", Component.translatable("rsi.async.abort.initial_material_timeout"));
+        } else maybeSendProgress(player, false);
+        return false;
+    }
+
     public AsyncCraftChain(UUID playerId, MinecraftServer server,
                            @Nullable CraftStorageEndpoint storageEndpoint,
                            List<CraftingResolver.ResolutionStep> steps) {
@@ -451,6 +530,7 @@ public final class AsyncCraftChain {
         this.server = server;
         this.storageEndpoint = storageEndpoint;
         this.steps = new ArrayList<>(steps);
+        this.initialMaterialPlan = graph != null || steps.isEmpty() ? InitialMaterialPlan.from(graph) : null;
         if (graph != null) {
             CraftPlanValidator.validate(graph);
         }
@@ -731,6 +811,15 @@ public final class AsyncCraftChain {
 
     boolean tick(VanillaCraftingTickBudget.ChainAllowance vanillaAllowance,
                  BooleanSupplier dispatchAllowed) {
+        if (isDone()) return true;
+        try (RuntimeMaterialAccount.Scope ignored = RuntimeMaterialAccount.enter(materialAccount)) {
+            if (!acquireInitialMaterials()) return isDone();
+            return tickWithMaterials(vanillaAllowance, dispatchAllowed);
+        }
+    }
+
+    private boolean tickWithMaterials(VanillaCraftingTickBudget.ChainAllowance vanillaAllowance,
+                                      BooleanSupplier dispatchAllowed) {
         this.dispatchAllowed = Objects.requireNonNull(dispatchAllowed, "dispatchAllowed");
         waitingForVanillaBudget = false;
         if (state == State.ABORTED || state == State.COMPLETED) return true;
@@ -1716,6 +1805,15 @@ public final class AsyncCraftChain {
                     CraftFailureCode.PRODUCTION_TARGET_UNMET);
             return false;
         }
+        if (materialAccount != null) {
+            InitialMaterialPlan extension = InitialMaterialPlan.from(supplemental);
+            Map<MaterialKey, Long> required = new LinkedHashMap<>(extension.materials());
+            for (ItemStack stack : virtualInventory) {
+                required.computeIfPresent(MaterialKey.of(stack),
+                        (key, count) -> Math.max(0L, count - stack.getCount()));
+            }
+            if (!materialAccount.ensure(required, extension.reusable(), player)) return false;
+        }
         steps.addAll(currentStepIdx, additional);
         stepRemaining = 0;
         RSIntegrationMod.LOGGER.info(ctx.format(
@@ -2680,11 +2778,9 @@ public final class AsyncCraftChain {
     }
 
     /**
-     * Private-ledger delegates read their inputs from RS/player storage rather
-     * than from the graph checkout. Move producer outputs into RS before the
-     * delegate starts. Once externalized, settle the broker claim immediately:
-     * the delegate's private ledger now owns physical recovery, and returning
-     * the producer claim to the graph on failure would deliver it twice.
+     * 私有账本委托通过统一取料入口领取中间产物，因此先将图内产物交给任务账户。
+     * 未启用账户的旧入口仍交给外部存储。交接后立即结清 broker 领取记录，
+     * 由委托账本负责实物恢复，避免失败时 broker 再次退回同一份材料。
      */
     private void materializePrivateLedgerGraphInputs(
             NodeAdmissionCoordinator.Admission admission, ServerPlayer online) {
@@ -2692,6 +2788,10 @@ public final class AsyncCraftChain {
         MaterialBroker.Checkout checkout = graphMaterials.checkout(admission.materialToken());
         for (ItemStack producer : checkout.producerStacks()) {
             if (producer.isEmpty()) continue;
+            if (materialAccount != null) {
+                materialAccount.add(producer);
+                continue;
+            }
             ItemStack leftover = producer.copy();
             try {
                 leftover = insertIntoStorage(online, producer);
@@ -2704,11 +2804,7 @@ public final class AsyncCraftChain {
                 PlayerUtils.safeGiveToStorage(online, leftover, storageEndpoint);
             }
         }
-        // Private-ledger delegates resolve their inputs from MaterialSources.
-        // The producer stacks were just inserted into RS above, so invalidate
-        // the per-player snapshot before the delegate starts in this same tick.
-        // Without this, a freshly produced intermediate (for example a Goety
-        // ritual input) can be reported as missing until the player reconnects.
+        // 旧入口仍会写入外部存储；清除缓存，让同 tick 的委托能看到新产物。
         if (online != null) {
             MaterialSources.invalidateFor(online);
         }
@@ -3213,6 +3309,7 @@ public final class AsyncCraftChain {
      */
     boolean canAdvanceImmediately(boolean vanillaBudgetAvailable) {
         if (isDone() || useGraphExecution || waitingForMachineLease) return false;
+        if (waitingForInitialMaterials) return false;
         if (state == State.PENDING) return true;
         if (state != State.EXECUTING) return false;
         if (currentStepIdx >= steps.size()) return true;
@@ -3380,6 +3477,7 @@ public final class AsyncCraftChain {
         if (graphScheduler != null && graphScheduler.isStopping()) {
             return CraftProgressSnapshot.Result.STOPPING;
         }
+        if (waitingForInitialMaterials) return CraftProgressSnapshot.Result.WAITING;
         if (state == State.WAITING_MOD || state == State.WAITING_PLAYER_TRANSFORMATION
                 || waitingForMachineLease) {
             return CraftProgressSnapshot.Result.WAITING;
@@ -3405,6 +3503,7 @@ public final class AsyncCraftChain {
         if (result == CraftProgressSnapshot.Result.FAILED) {
             return CraftProgressSnapshot.Reason.UNKNOWN;
         }
+        if (waitingForInitialMaterials) return CraftProgressSnapshot.Reason.WAITING_MATERIALS;
         if ((state == State.WAITING_MOD && currentDelegate != null) || waitingForMachineLease) {
             return CraftProgressSnapshot.Reason.MACHINE_BUSY;
         }
@@ -4031,6 +4130,11 @@ public final class AsyncCraftChain {
     private void materializePrivateLedgerFlatInputs(ServerPlayer online) {
         try {
             for (int index = 0; index < virtualInventory.size(); index++) {
+                if (materialAccount != null) {
+                    materialAccount.add(virtualInventory.get(index));
+                    virtualInventory.set(index, ItemStack.EMPTY);
+                    continue;
+                }
                 ItemStack remainder = insertIntoStorage(online, virtualInventory.get(index));
                 // safeGiveToPlayer 会接管剩余物（包括持久恢复队列）；返回 false 也不能再次退款。
                 virtualInventory.set(index, ItemStack.EMPTY);
@@ -4709,6 +4813,7 @@ public final class AsyncCraftChain {
     }
 
     private void fireOnDone() {
+        releaseMaterialAccount();
         terminalListeners.fireOnce();
     }
 

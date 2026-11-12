@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 
 import java.lang.reflect.Method;
@@ -72,6 +73,124 @@ public final class ExtractionLedger implements AutoCloseable {
     private final List<Ingredient> preferredResonanceIngredients = new ArrayList<>();
     private final Set<Class<?>> unreadableBackpackTypes = ConcurrentHashMap.newKeySet();
     private State state = State.IDLE;
+    @Nullable private RuntimeMaterialAccount materialAccount;
+    private boolean externalMaterialAccess;
+    private boolean uncertainTransfers;
+
+    void setExternalMaterialAccess() { externalMaterialAccess = true; materialAccount = null; }
+    void setMaterialAccount(RuntimeMaterialAccount account) { materialAccount = account; }
+    boolean hasUncertainTransfers() { return uncertainTransfers; }
+    List<ItemStack> committedFragments() {
+        return entries.stream().flatMap(entry -> entry.extracted.stream()).map(ItemStack::copy).toList();
+    }
+
+    @Nullable
+    private RuntimeMaterialAccount account(ServerPlayer player) {
+        if (externalMaterialAccess) return null;
+        if (materialAccount == null) {
+            RuntimeMaterialAccount current = RuntimeMaterialAccount.current();
+            if (current != null && current.belongsTo(player)) materialAccount = current;
+        }
+        return materialAccount;
+    }
+
+    /** 少数直接取料的委托也必须优先领取任务持有物，返回 null 表示当前不在合成链内。 */
+    @Nullable
+    public static StorageOperationResult extractTaskMaterial(ServerPlayer player, CraftStorageEndpoint endpoint,
+                                                             Ingredient ingredient,
+                                                             @Nullable ItemStack exact, long amount,
+                                                             boolean simulate) {
+        RuntimeMaterialAccount account = RuntimeMaterialAccount.current();
+        if (account == null || !account.belongsTo(player) || !account.usesEndpoint(endpoint)) return null;
+        if (!account.usable()) return StorageOperationResult.extracted(
+                simulate ? StorageOperationMode.SIMULATE : StorageOperationMode.PERFORM, amount, List.of());
+        List<ItemStack> selected = new ArrayList<>();
+        long remaining = Math.max(0L, amount);
+        for (var entry : account.available(player).entrySet()) {
+            ItemStack stack = entry.getKey().toStack();
+            if (!IngredientMatcher.test(ingredient, stack)
+                    || exact != null && !MaterialMatcher.sameRuntimeFragment(exact, stack)) continue;
+            long count = Math.min(remaining, entry.getValue());
+            remaining -= count;
+            while (count > 0) {
+                int part = (int) Math.min(Integer.MAX_VALUE, count);
+                selected.add(stack.copyWithCount(part));
+                count -= part;
+            }
+            if (remaining == 0) break;
+        }
+        if (simulate) return StorageOperationResult.extracted(StorageOperationMode.SIMULATE, amount, selected);
+        ExtractionLedger node = new ExtractionLedger();
+        try {
+            for (ItemStack stack : selected) {
+                if (node.reserveAccount(Ingredient.of(stack), stack, stack.getCount(), player).isEmpty()) {
+                    node.rollback(player);
+                    return StorageOperationResult.extracted(StorageOperationMode.PERFORM, amount, List.of());
+                }
+            }
+            if (!node.commitToEndpoint(null, player)) {
+                node.rollback(player);
+                return StorageOperationResult.extracted(StorageOperationMode.PERFORM, amount, List.of());
+            }
+            List<ItemStack> taken = node.committedFragments();
+            node.settleAllCommitted();
+            return StorageOperationResult.extracted(StorageOperationMode.PERFORM, amount, taken);
+        } finally { node.close(); }
+    }
+
+    private ItemStack reserveAccount(Ingredient ingredient, @Nullable ItemStack exact,
+                                     int count, ServerPlayer player) {
+        if (count <= 0 || ingredient.isEmpty()) return ItemStack.EMPTY;
+        RuntimeMaterialAccount account = account(player);
+        if (account == null || !account.usable()) return ItemStack.EMPTY;
+        Map<MaterialKey, Long> selected = selectAccountMaterials(account.heldMaterials(), ingredient, exact, count);
+        if (selected == null) selected = selectAccountMaterials(account.available(player), ingredient, exact, count);
+        if (selected == null) return ItemStack.EMPTY;
+        if (!account.ensure(selected, preferredResonanceIngredients, player)) return ItemStack.EMPTY;
+        if (state == State.IDLE) transition(State.RESERVING);
+        ItemStack first = ItemStack.EMPTY;
+        for (var selectedEntry : selected.entrySet()) {
+            ItemStack stack = selectedEntry.getKey().toStack(Math.toIntExact(selectedEntry.getValue()));
+            StorageOperationResult receipt = account.take(stack, stack.getCount());
+            if (!receipt.complete()) throw new IllegalStateException("任务账户领取失败");
+            Entry entry = new Entry(Source.TASK_ACCOUNT, ingredient, stack, stack.copy(),
+                    null, null, null, true);
+            entry.accountHeld = true;
+            recordEntry(entry);
+            if (first.isEmpty()) first = stack.copyWithCount(count);
+        }
+        return first;
+    }
+
+    @Nullable
+    private static Map<MaterialKey, Long> selectAccountMaterials(
+            Map<CraftingResolver.StackKey, Long> available, Ingredient ingredient,
+            @Nullable ItemStack exact, int count) {
+        Map<MaterialKey, Long> selected = new LinkedHashMap<>();
+        int remaining = count;
+        for (var candidate : available.entrySet()) {
+            ItemStack stack = candidate.getKey().toStack();
+            if (!IngredientMatcher.test(ingredient, stack)
+                    || exact != null && !MaterialMatcher.sameRuntimeFragment(exact, stack)) continue;
+            int take = (int) Math.min(remaining, candidate.getValue());
+            if (take > 0) selected.put(MaterialKey.of(stack), (long) take);
+            remaining -= take;
+            if (remaining == 0) return selected;
+        }
+        return null;
+    }
+
+    private void releaseAccountReservation(Entry entry) {
+        if (entry.source == Source.TASK_ACCOUNT && entry.accountHeld) {
+            materialAccount.add(entry.preExtracted);
+            entry.accountHeld = false;
+        }
+    }
+
+    private void releaseUncommittedAccountReservations() {
+        if (state != State.COMMITTED) entries.forEach(this::releaseAccountReservation);
+    }
+
     @Nullable private UUID refundOwner;
     @Nullable private MinecraftServer refundServer;
     /** 仅退款使用提交时的身份；离线后仍由原端点检查写入权限。 */
@@ -145,6 +264,11 @@ public final class ExtractionLedger implements AutoCloseable {
                                                        @Nonnull ServerPlayer player) {
         requireState(State.IDLE, State.RESERVING);
         if (template.isEmpty()) return new BatchAvailability(0L, true, "empty ingredient");
+        if (account(player) != null) {
+            long amount = account(player).available(player).getOrDefault(
+                    CraftingResolver.StackKey.of(template, true), 0L);
+            return new BatchAvailability(amount, account(player).usable(), "task account");
+        }
         long available = countExactAvailableInInventoryLong(player, template);
         if (storageEndpoint != null) {
             StorageSnapshotResult snapshot = reservationSnapshotResult(storageEndpoint, player);
@@ -172,6 +296,15 @@ public final class ExtractionLedger implements AutoCloseable {
         requireState(State.IDLE, State.RESERVING);
         if (ingredient.isEmpty()) return new BatchMatch(true, List.of(), "empty ingredient");
 
+        if (account(player) != null) {
+            List<ItemStack> available = new ArrayList<>();
+            account(player).available(player).forEach((key, amount) -> {
+                if (IngredientMatcher.test(ingredient, key.toStack())) {
+                    available.add(key.toStack().copyWithCount((int) Math.min(Integer.MAX_VALUE, amount)));
+                }
+            });
+            return new BatchMatch(account(player).usable(), List.copyOf(available), "task account");
+        }
         Map<CraftingResolver.StackKey, ItemStack> matches = new LinkedHashMap<>();
         Map<CraftingResolver.StackKey, Long> counts = new LinkedHashMap<>();
         collectMatchingInventory(player.getInventory().items, ingredient, matches, counts);
@@ -369,6 +502,7 @@ public final class ExtractionLedger implements AutoCloseable {
             @Nullable CraftStorageEndpoint endpoint, @Nonnull ServerPlayer player,
             @Nullable ResourceKey<Level> altarDim, @Nullable BlockPos altarPos) {
         requireState(State.IDLE, State.RESERVING);
+        if (account(player) != null) return reserveAccount(Ingredient.of(template), template, count, player);
         if (count <= 0 || template.isEmpty()) return ItemStack.EMPTY;
         if (state == State.IDLE) transition(State.RESERVING);
 
@@ -407,6 +541,7 @@ public final class ExtractionLedger implements AutoCloseable {
                              @Nullable CraftStorageEndpoint endpoint, ServerPlayer player,
                              @Nullable ResourceKey<Level> altarDim, @Nullable BlockPos altarPos) {
         requireState(State.IDLE, State.RESERVING);
+        if (account(player) != null) return reserveAccount(ingredient, null, count, player);
         if (count <= 0 || ingredient.isEmpty()) return ItemStack.EMPTY;
         if (state == State.IDLE) transition(State.RESERVING);
 
@@ -495,6 +630,7 @@ public final class ExtractionLedger implements AutoCloseable {
             @Nonnull ItemStack template, int count,
             @Nullable CraftStorageEndpoint endpoint, @Nonnull ServerPlayer player) {
         requireState(State.IDLE, State.RESERVING);
+        if (account(player) != null) return reserveAccount(Ingredient.of(template), template, count, player);
         if (count <= 0 || template.isEmpty()) return ItemStack.EMPTY;
         if (state == State.IDLE) transition(State.RESERVING);
         CraftStorageEndpoint selected = endpoint != null ? endpoint : storageEndpoint;
@@ -558,6 +694,7 @@ public final class ExtractionLedger implements AutoCloseable {
     @Nonnull
     public ItemStack reserveFromInventory(@Nonnull Ingredient ingredient, int count, @Nonnull ServerPlayer player) {
         requireState(State.IDLE, State.RESERVING);
+        if (account(player) != null) return reserveAccount(ingredient, null, count, player);
         if (count <= 0 || ingredient.isEmpty()) return ItemStack.EMPTY;
         if (state == State.IDLE) transition(State.RESERVING);
 
@@ -575,6 +712,7 @@ public final class ExtractionLedger implements AutoCloseable {
                                          @Nonnull CraftStorageEndpoint endpoint,
                                          @Nonnull ServerPlayer player) {
         requireState(State.IDLE, State.RESERVING);
+        if (account(player) != null) return reserveAccount(ingredient, null, count, player);
         if (count <= 0 || ingredient.isEmpty()) return ItemStack.EMPTY;
         if (state == State.IDLE) transition(State.RESERVING);
         setStorageEndpoint(endpoint);
@@ -676,6 +814,14 @@ public final class ExtractionLedger implements AutoCloseable {
             @Nullable CraftStorageEndpoint endpoint) {
         requireState(State.IDLE, State.RESERVING);
         if (limit <= 0 || ingredient.isEmpty()) return 0;
+        if (account(player) != null) {
+            long available = account(player).available(player).entrySet().stream()
+                    .filter(entry -> IngredientMatcher.test(ingredient, entry.getKey().toStack()))
+                    .mapToLong(Map.Entry::getValue).reduce(0L, ExtractionLedger::saturatedAdd);
+            int count = (int) Math.min(limit, available);
+            return reserveAccount(ingredient, null, count, player).getCount();
+        }
+
 
         LinkedHashMap<CraftingResolver.StackKey, ItemStack> inventoryTemplates = new LinkedHashMap<>();
         LinkedHashMap<CraftingResolver.StackKey, Long> inventoryCounts = new LinkedHashMap<>();
@@ -797,6 +943,7 @@ public final class ExtractionLedger implements AutoCloseable {
         if (!preCheck(endpoint, player)) {
             LOGGER.warn(fmt("Ledger commit pre-check failed, rolling back"));
             resetSettlementMirror();
+            releaseUncommittedAccountReservations();
             transition(State.ROLLED_BACK);
             return false;
         }
@@ -807,6 +954,9 @@ public final class ExtractionLedger implements AutoCloseable {
         try {
             for (Entry entry : entries) {
                 StorageOperationResult result = extractOne(entry, endpoint, player);
+                if (result.transferredAmount().isEmpty()
+                        || result.kind() != StorageOperationResult.Kind.EXTRACT
+                        || result.mode() != StorageOperationMode.PERFORM) uncertainTransfers = true;
                 extracted.add(new ExtractRecord(entry.id, entry.source, result,
                         entry.altarDim, entry.altarPos, entry.sourceEndpoint));
                 if (result.kind() != StorageOperationResult.Kind.EXTRACT
@@ -818,12 +968,14 @@ public final class ExtractionLedger implements AutoCloseable {
                     break;
                 }
             }
-        } catch (Exception e) {
+        } catch (RuntimeException | LinkageError e) {
+            uncertainTransfers = true;
             LOGGER.warn("[RSI-Ledger] Commit exception during extraction", e);
             extractionFailed = true;
         }
         if (extractionFailed) {
             resetSettlementMirror();
+            releaseUncommittedAccountReservations();
             transition(State.ROLLED_BACK);
             rollbackExtractedPhases(extracted, player);
             return false;
@@ -846,6 +998,7 @@ public final class ExtractionLedger implements AutoCloseable {
                 return false;
             }
             entry.confirmExtracted(record.result.extractedStacks());
+            entry.accountHeld = false;
             StorageSettlementLedger.EntryId settlementId = settlementEntries.get(entry.id);
             if (settlementId != null) {
                 try {
@@ -903,6 +1056,7 @@ public final class ExtractionLedger implements AutoCloseable {
      * availability (correcting for any race with other systems).
      */
     private boolean preCheck(@Nullable CraftStorageEndpoint endpoint, ServerPlayer player) {
+        if (materialAccount != null) return materialAccount.usable();
         CraftStorageEndpoint selected = endpoint != null ? endpoint : storageEndpoint;
         if (selected != null) {
             // Group reservations by ingredient for accurate per-type checking.
@@ -968,7 +1122,7 @@ public final class ExtractionLedger implements AutoCloseable {
             for (ItemStack s : fragments) {
                 try {
                     rollbackFragment(rec, s, player);
-                } catch (RuntimeException failure) {
+                } catch (RuntimeException | LinkageError failure) {
                     logUncertainRefund(rec.entryId, s, failure.getClass().getSimpleName());
                 }
             }
@@ -977,6 +1131,11 @@ public final class ExtractionLedger implements AutoCloseable {
 
     private void rollbackFragment(ExtractRecord rec, ItemStack s, ServerPlayer player) {
         if (s.isEmpty()) return;
+        if (rec.source == Source.TASK_ACCOUNT) {
+            Entry entry = entriesById.get(rec.entryId);
+            if (entry != null) releaseAccountReservation(entry);
+            return;
+        }
         CraftStorageEndpoint destination = rec.sourceEndpoint != null
                 ? rec.sourceEndpoint : storageEndpoint;
         if (InkFluidSupport.isToken(s)) {
@@ -1010,16 +1169,18 @@ public final class ExtractionLedger implements AutoCloseable {
                 }
             }
             case PLAYER_INVENTORY -> PlayerUtils.safeGiveToStorage(player, s, destination);
+            case TASK_ACCOUNT -> throw new IllegalStateException("账户退款不应到达外部来源");
         }
     }
 
-    private static ItemStack refundRemainder(StorageOperationResult result, int entryId, ItemStack stack) {
+    private ItemStack refundRemainder(StorageOperationResult result, int entryId, ItemStack stack) {
         var remainder = result.remainder();
         if (remainder.isEmpty()) logUncertainRefund(entryId, stack, result.status().name());
         return remainder.orElse(ItemStack.EMPTY);
     }
 
-    private static void logUncertainRefund(int entryId, ItemStack stack, String reason) {
+    private void logUncertainRefund(int entryId, ItemStack stack, String reason) {
+        uncertainTransfers = true;
         // Unknown transfer amounts must not be retried: storage may have
         // accepted the item before reporting an exception.
         if (REFUND_LOGS.allow(reason)) {
@@ -1049,6 +1210,7 @@ public final class ExtractionLedger implements AutoCloseable {
     }
 
     private void releaseReservations(@Nullable ServerPlayer player) {
+        releaseUncommittedAccountReservations();
         // Pending reservations were never physically extracted — just clear the
         // tracking maps so future reservations see accurate counts.
         pendingNet.clear();
@@ -1091,6 +1253,7 @@ public final class ExtractionLedger implements AutoCloseable {
     public ResonanceReturnTarget resonanceReturnTarget(
             @Nonnull ItemStack reservedItem, @Nonnull Ingredient matcher) {
         if (reservedItem.isEmpty() || matcher.isEmpty()) return null;
+        if (materialAccount != null) return materialAccount.resonanceReturnTarget(reservedItem, matcher);
         for (Entry entry : entries) {
             if (entry.source != Source.RESONANCE_DISK
                     || entry.resonanceView == null
@@ -1202,6 +1365,7 @@ public final class ExtractionLedger implements AutoCloseable {
     }
 
     public void reset() {
+        releaseUncommittedAccountReservations();
         entries.clear();
         entriesById.clear();
         pendingNet.clear();
@@ -1236,6 +1400,7 @@ public final class ExtractionLedger implements AutoCloseable {
         if (state != State.IDLE || !entries.isEmpty()) {
             LOGGER.warn(fmt("Ledger auto-rollback via close() — {} entries abandoned"), entries.size());
         }
+        releaseUncommittedAccountReservations();
         entries.clear();
         entriesById.clear();
         pendingNet.clear();
@@ -1248,7 +1413,7 @@ public final class ExtractionLedger implements AutoCloseable {
         state = State.ROLLED_BACK;
     }
 
-    private enum Source { NETWORK, PLAYER_INVENTORY, ALTAR_BINDING, RESONANCE_DISK }
+    private enum Source { NETWORK, PLAYER_INVENTORY, ALTAR_BINDING, RESONANCE_DISK, TASK_ACCOUNT }
 
     public record BatchAvailability(long available, boolean snapshotReadable,
                                     String detail) {
@@ -1294,6 +1459,7 @@ public final class ExtractionLedger implements AutoCloseable {
         @Nullable final ResonanceReservationKey resonanceKey;
         final Map<CraftingResolver.StackKey, Long> pendingNetworkAllocation = new HashMap<>();
         List<ItemStack> extracted = List.of();
+        boolean accountHeld;
 
         Entry(Source source, Ingredient originalIngredient, ItemStack template, @Nullable ItemStack preExtracted,
               @Nullable ResourceKey<Level> altarDim, @Nullable BlockPos altarPos,
@@ -1345,6 +1511,10 @@ public final class ExtractionLedger implements AutoCloseable {
     private StorageOperationResult extractOne(Entry entry,
                                               @Nullable CraftStorageEndpoint endpoint,
                                               ServerPlayer player) {
+        if (entry.source == Source.TASK_ACCOUNT) {
+            return StorageOperationResult.extracted(StorageOperationMode.PERFORM, entry.count,
+                    List.of(entry.preExtracted));
+        }
         CraftStorageEndpoint sourceEndpoint = entry.sourceEndpoint != null
                 ? entry.sourceEndpoint : endpoint != null ? endpoint : storageEndpoint;
         if (entry.source == Source.NETWORK && sourceEndpoint != null) {
@@ -1352,7 +1522,7 @@ public final class ExtractionLedger implements AutoCloseable {
                     ? sourceEndpoint.extractExact(player, entry.template, entry.count, false)
                     : sourceEndpoint.extractMatching(
                             player, entry.originalIngredient, entry.count, false);
-            if (entry.exactIdentity
+            if (entry.exactIdentity && !externalMaterialAccess
                     && result.status() == StorageOperationStatus.NOT_FOUND) {
                 // 机器输入只要求“能放进机器”，显示输入的 NBT 可能在规划后漂移。
                 // 精确身份失败时先按配方原料匹配，仍失败再按物品类型兜底；机器
@@ -1400,7 +1570,7 @@ public final class ExtractionLedger implements AutoCloseable {
                         entry.altarDim, entry.altarPos,
                         entry.originalIngredient, entry.count);
             }
-            case NETWORK -> ItemStack.EMPTY;
+            case NETWORK, TASK_ACCOUNT -> ItemStack.EMPTY;
             case RESONANCE_DISK -> {
                 if (entry.resonanceView == null) yield ItemStack.EMPTY;
                 ItemStack extracted = entry.resonanceView.extractExactView(
@@ -1967,6 +2137,7 @@ public final class ExtractionLedger implements AutoCloseable {
                     e.id, e.source, itemName, e.count,
                     switch (e.source) {
                         case NETWORK -> "network";
+                        case TASK_ACCOUNT -> "task_account";
                         case PLAYER_INVENTORY -> "inventory";
                         case ALTAR_BINDING -> "altar_binding";
                         case RESONANCE_DISK -> "resonance_disk";
@@ -2008,7 +2179,7 @@ public final class ExtractionLedger implements AutoCloseable {
         for (ItemStack fragment : fragments) {
             try {
                 refundFragment(e, fragment.copy(), endpoint, player);
-            } catch (RuntimeException failure) {
+            } catch (RuntimeException | LinkageError failure) {
                 logUncertainRefund(e.id, fragment, failure.getClass().getSimpleName());
             }
         }
@@ -2016,6 +2187,10 @@ public final class ExtractionLedger implements AutoCloseable {
 
     private void refundFragment(Entry e, ItemStack refund, @Nullable CraftStorageEndpoint endpoint,
                                 @Nullable ServerPlayer player) {
+        if (e.source == Source.TASK_ACCOUNT) {
+            materialAccount.add(refund);
+            return;
+        }
         CraftStorageEndpoint destination = e.sourceEndpoint != null
                 ? e.sourceEndpoint : endpoint != null ? endpoint : storageEndpoint;
         if (InkFluidSupport.isToken(refund)) {
@@ -2058,6 +2233,7 @@ public final class ExtractionLedger implements AutoCloseable {
             }
             case PLAYER_INVENTORY -> refundLeftoverToPlayerOrStorage(
                     refund, player, destination);
+            case TASK_ACCOUNT -> throw new IllegalStateException("账户退款不应到达外部来源");
         }
     }
 
@@ -2318,6 +2494,7 @@ public final class ExtractionLedger implements AutoCloseable {
     }
 
     private void decrementPending(Entry entry) {
+        if (entry.source == Source.TASK_ACCOUNT) { releaseAccountReservation(entry); return; }
         if (entry.source == Source.RESONANCE_DISK && entry.resonanceKey != null) {
             pendingResonance.computeIfPresent(entry.resonanceKey, (ignored, reserved) -> {
                 long remaining = reserved - entry.count;

@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.crafting.endpoint;
 
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
+import com.huanghuang.rsintegration.crafting.ExtractionLedger;
+import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.storage.StorageNetworkLocation;
 import com.huanghuang.rsintegration.storage.StorageSession;
 import com.huanghuang.rsintegration.storage.StorageSnapshotResult;
@@ -46,25 +48,33 @@ public interface CraftStorageEndpoint {
     }
 
     default StorageSnapshotResult snapshot(@Nonnull ServerPlayer player) {
-        return session().snapshotItems(Objects.requireNonNull(player, "player"));
+        return MaterialSources.withTaskMaterials(player, this,
+                session().snapshotItems(Objects.requireNonNull(player, "player")), null);
     }
 
     default StorageSnapshotResult snapshot(@Nonnull ServerPlayer player,
                                            Set<Item> itemTypes) {
         return itemTypes == null ? snapshot(player)
-                : session().snapshotItems(Objects.requireNonNull(player, "player"), itemTypes);
+                : MaterialSources.withTaskMaterials(player, this,
+                session().snapshotItems(Objects.requireNonNull(player, "player"), itemTypes), itemTypes);
     }
 
     default StorageOperationResult extractExact(@Nonnull ServerPlayer player,
                                                 @Nonnull ItemStack template,
                                                 long amount, boolean simulate) {
         Objects.requireNonNull(template, "template");
+        StorageOperationResult task = ExtractionLedger.extractTaskMaterial(
+                player, this, Ingredient.of(template), template, amount, simulate);
+        if (task != null) return task;
         return session().extractExact(player, session().itemKey(template), amount, simulate);
     }
 
     default StorageOperationResult extractMatching(@Nonnull ServerPlayer player,
                                                    @Nonnull Ingredient ingredient,
                                                    long amount, boolean simulate) {
+        StorageOperationResult task = ExtractionLedger.extractTaskMaterial(
+                player, this, ingredient, null, amount, simulate);
+        if (task != null) return task;
         return session().extractMatching(player, ingredient, amount, simulate);
     }
 

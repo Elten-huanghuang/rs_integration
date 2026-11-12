@@ -40,12 +40,15 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.players.PlayerList;
+import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -90,6 +93,60 @@ class GraphLedgerRecoveryContractTest extends BootstrapTest {
         AFTER_RESERVATION,
         AFTER_COMMIT,
         PARTIAL_EXTRACTION
+    }
+
+    @Test
+    void privateDelegateKeepsProducerInputsInTaskAccountUntilFinalRefund() throws Exception {
+        Fixture fixture = new Fixture();
+        PlayerList players = mock(PlayerList.class);
+        when(fixture.player.server.getPlayerList()).thenReturn(players);
+        when(players.getPlayer(fixture.player.getUUID())).thenReturn(fixture.player);
+        when(fixture.player.getInventory()).thenReturn(new Inventory(fixture.player));
+        when(fixture.session.extractExact(eq(fixture.player), any(), anyLong(), eq(false)))
+                .thenAnswer(call -> fixture.extract(Ingredient.of(
+                        ((StorageItemKey) call.getArgument(1)).displayStack()), call.getArgument(2)));
+        GlobalMaterialCoordinator coordinator = new GlobalMaterialCoordinator();
+        fixture.chain.enableMaterialAccount(coordinator);
+        RuntimeMaterialAccount account = (RuntimeMaterialAccount) field(fixture.chain, "materialAccount");
+        assertTrue(account.ensure(Map.of(fixture.goldKey, 2L), List.of(), fixture.player));
+        assertTrue(fixture.stock.isEmpty());
+        ExtractionLedger privateLedger = new ExtractionLedger();
+        IBatchDelegate delegate = mock(IBatchDelegate.class);
+        when(delegate.startOperation(any())).thenAnswer(call -> {
+            assertTrue(fixture.stock.isEmpty(), "图内产物不能短暂进入公共库存供其他任务取走");
+            assertEquals(5, privateLedger.reserveFromEndpoint(IRON, 5, fixture.endpoint, fixture.player).getCount());
+            assertEquals(2, privateLedger.reserveFromEndpoint(GOLD, 2, fixture.endpoint, fixture.player).getCount());
+            assertTrue(privateLedger.commitToEndpoint(fixture.endpoint, fixture.player));
+            return false;
+        });
+        doAnswer(call -> {
+            privateLedger.refundCommittedToEndpoint(fixture.endpoint, fixture.player);
+            return null;
+        }).when(delegate).onBatchFailed(isNull(), anyString());
+        try (var ignored = RuntimeMaterialAccount.enter(account)) {
+            fixture.dispatchPrivate(delegate, new ExtractionLedger());
+            fixture.cleanupTwice();
+            assertTrue(fixture.stock.isEmpty(), "委托失败的退款也应先回任务账户");
+        }
+        coordinator.release(fixture.chain.getCraftId());
+        assertAmounts(List.of(tagged("first", 2), tagged("second", 3), gold(2)), fixture.stock);
+        assertAmounts(List.of(tagged("first", 1)), fixture.broker.drainAvailableProducerAssets());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void flatPrivateDelegateReceivesIntermediatesWithoutPublishingThemToNetwork() throws Exception {
+        Fixture fixture = new Fixture();
+        fixture.chain.enableMaterialAccount(new GlobalMaterialCoordinator());
+        RuntimeMaterialAccount account = (RuntimeMaterialAccount) field(fixture.chain, "materialAccount");
+        List<ItemStack> virtual = (List<ItemStack>) field(fixture.chain, "virtualInventory");
+        virtual.add(tagged("first", 2));
+        Method transfer = AsyncCraftChain.class.getDeclaredMethod("materializePrivateLedgerFlatInputs", ServerPlayer.class);
+        transfer.setAccessible(true);
+        transfer.invoke(fixture.chain, fixture.player);
+        assertTrue(virtual.isEmpty());
+        assertEquals(2L, account.count(MaterialKey.of(tagged("first", 1))));
+        assertAmounts(List.of(gold(2)), fixture.stock);
     }
 
     @ParameterizedTest

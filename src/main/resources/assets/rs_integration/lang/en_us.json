@@ -964,6 +964,8 @@
   "rsi.async.abort.executor_error": "Crafting graph executor error: %s",
   "rsi.async.abort.missing_material": "Missing material: %s",
   "rsi.async.abort.drop_throttle": "The storage network is full and the player is offline — item drops were throttled",
+  "rsi.async.abort.material_transfer_unknown": "Material transfer result is unknown. Craft stopped; check the server log.",
+  "rsi.async.abort.initial_material_timeout": "Timed out waiting for crafting materials. Restock and try again.",
   "rsi.async.abort.final_commit_failed": "Final commit failed",
   "rsi.async.abort.output_extracted": "Craft output was externally extracted (expected %s, collected %s)",
   "rsi.async.abort.output_not_captured": "Expected craft output was not captured: %s",

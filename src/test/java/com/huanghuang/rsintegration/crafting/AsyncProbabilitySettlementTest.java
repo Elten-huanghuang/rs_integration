@@ -115,6 +115,16 @@ class AsyncProbabilitySettlementTest extends BootstrapTest {
             assertEquals(0L, intermediate.outputs().get(0).guaranteedMinimum());
             assertTrue(intermediate.outputs().get(0).targetProducing());
             assertTrue(AsyncCraftChain.requiresAdaptiveProduction(graph));
+            AsyncCraftChain adaptive = new AsyncCraftChain(UUID.randomUUID(),
+                    mock(MinecraftServer.class), null, graph);
+            assertFalse(adaptive.isGraphExecution());
+            try {
+                InitialMaterialPlan admission = (InitialMaterialPlan) field(adaptive, "initialMaterialPlan");
+                assertEquals(InitialMaterialPlan.from(graph).materials(), admission.materials());
+                assertFalse(admission.materials().isEmpty(), "切换串行执行后仍须预取初始原料");
+            } catch (Exception failure) {
+                throw new AssertionError(failure);
+            }
         }
     }
 

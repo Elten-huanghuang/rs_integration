@@ -127,6 +127,9 @@ public final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint 
     @Override
     public StorageOperationResult extractExact(Player player, ItemStack template,
                                                long amount, boolean simulate) {
+        if (player instanceof ServerPlayer serverPlayer) {
+            return CraftStorageEndpoint.super.extractExact(serverPlayer, template, amount, simulate);
+        }
         try {
             ItemStack result = InkFluidSupport.isToken(template)
                     ? InkFluidSupport.extract(network, template, Math.toIntExact(amount), simulate)

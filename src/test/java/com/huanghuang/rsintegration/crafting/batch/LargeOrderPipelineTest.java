@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.AsyncCraftChain;
+import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
 import com.huanghuang.rsintegration.crafting.progress.CraftMaterialView;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
@@ -289,6 +290,89 @@ class LargeOrderPipelineTest extends BootstrapTest {
         }
     }
 
+    @Test
+    void twoChainsOnSameNetworkBothAcquireBeforeMachineAvailability() throws Exception {
+        try (Fixture fixture = new Fixture(1)) {
+            fixture.start();
+            fixture.store.stock.put(Items.IRON_INGOT, fixture.initialRaw * 2);
+            AsyncCraftChain second = new AsyncCraftChain(fixture.owner, fixture.server,
+                    () -> fixture.store, fixture.graph);
+            second.setTargetOutput(new ItemStack(Items.EMERALD));
+            AsyncCraftManager.getInstance().submit(second);
+            try {
+                fixture.tick.incrementAndGet();
+                fixture.chain.tick();
+                second.tick();
+                assertEquals(0L, fixture.store.amount(Items.IRON_INGOT),
+                        "两单都应取得完整原料；机器等待不能串行化整个网络的材料准入");
+                assertFalse(fixture.chain.isDone());
+                assertFalse(second.isDone());
+                for (int i = 0; i < 100 && (!fixture.chain.isDone() || !second.isDone()); i++) {
+                    fixture.tick.incrementAndGet();
+                    fixture.chain.tick();
+                    second.tick();
+                }
+                assertEquals(AsyncCraftChain.State.COMPLETED, fixture.chain.state());
+                assertEquals(AsyncCraftChain.State.COMPLETED, second.state());
+                assertEquals(2L, fixture.store.amount(Items.EMERALD));
+            } finally {
+                if (!second.isDone()) second.cancel("cleanup", Component.literal("cleanup"));
+            }
+        }
+    }
+
+    @Test
+    void competingChainWaitsBeforeStartingAndDoesNotDoubleRefund() throws Exception {
+        try (Fixture fixture = new Fixture(1)) {
+            fixture.start();
+            AsyncCraftChain second = new AsyncCraftChain(fixture.owner, fixture.server,
+                    () -> fixture.store, fixture.graph);
+            AsyncCraftManager.getInstance().submit(second);
+            fixture.tick.incrementAndGet();
+            fixture.chain.tick();
+            second.tick();
+            assertEquals(AsyncCraftChain.State.PENDING, second.state());
+            assertEquals(0L, fixture.store.amount(Items.IRON_INGOT));
+            second.cancel("cancel waiting task", Component.literal("cancel"));
+            assertEquals(0L, fixture.store.amount(Items.IRON_INGOT));
+            fixture.finish();
+            assertEquals(1L, fixture.store.amount(Items.EMERALD));
+        }
+    }
+
+    @Test
+    void waitingChainStartsAfterRestockWithoutResubmission() throws Exception {
+        try (Fixture fixture = new Fixture(1)) {
+            fixture.start();
+            fixture.store.stock.put(Items.IRON_INGOT, 0L);
+            fixture.tick.incrementAndGet();
+            fixture.chain.tick();
+            assertEquals(AsyncCraftChain.State.PENDING, fixture.chain.state());
+            assertEquals(0, fixture.starts);
+            fixture.store.stock.put(Items.IRON_INGOT, fixture.initialRaw);
+            fixture.tick.addAndGet(20);
+            fixture.finish();
+            assertEquals(AsyncCraftChain.State.COMPLETED, fixture.chain.state());
+            assertEquals(1L, fixture.store.amount(Items.EMERALD));
+            assertEquals(0L, fixture.store.amount(Items.IRON_INGOT));
+        }
+    }
+
+    @Test
+    void materialWaitTimeoutDoesNotStartMachineOrRefundUnacquiredStock() throws Exception {
+        try (Fixture fixture = new Fixture(1)) {
+            fixture.start();
+            fixture.store.stock.put(Items.IRON_INGOT, fixture.initialRaw - 1);
+            fixture.tick.incrementAndGet();
+            fixture.chain.tick();
+            fixture.tick.addAndGet(600);
+            fixture.chain.tick();
+            assertEquals(AsyncCraftChain.State.ABORTED, fixture.chain.state());
+            assertEquals(0, fixture.starts);
+            assertEquals(fixture.initialRaw - 1, fixture.store.amount(Items.IRON_INGOT));
+        }
+    }
+
     private static GenericCraftPacketCodec.WireData wire(int repeat) {
         return new GenericCraftPacketCodec.WireData(TARGET_RECIPE, true, Map.of(), null, null,
                 repeat, false, null, null, 1L, OutputDestination.RS_NETWORK, null, false,
@@ -313,6 +397,7 @@ class LargeOrderPipelineTest extends BootstrapTest {
         final MockedStatic<AltarBindingRegistry> bindings;
         final MockedStatic<ProtectionChecker> protection;
         AsyncCraftChain chain;
+        CraftPlanGraph graph;
         boolean failFirstStart;
         boolean rejectPartialInput;
         boolean throwOnPartialInput;
@@ -394,7 +479,7 @@ class LargeOrderPipelineTest extends BootstrapTest {
                 var input = PurePlanGraphAdapter.toInputGraph(routed.plan(), available,
                         List.of(new ScaledIngredientSpec(Ingredient.of(Items.DIAMOND),
                                 (long) repeats * INTERMEDIATES_PER_TARGET, InputConsumption.consumed())));
-                CraftPlanGraph graph = TerminalGraphComposer.compose(input,
+                graph = TerminalGraphComposer.compose(input,
                         new ResolutionStep(TARGET_RECIPE, type, TARGET_RECIPE, List.of(), List.of(), false, repeats),
                         List.of(TerminalGraphComposer.TerminalOutput.item(MaterialKey.of(new ItemStack(Items.EMERALD)),
                                 1, OutputKind.PRIMARY)));
@@ -406,6 +491,7 @@ class LargeOrderPipelineTest extends BootstrapTest {
                 chain.setTargetOutput(new ItemStack(Items.EMERALD));
                 assertTrue(chain.isGraphExecution());
                 assertEquals(AsyncCraftChain.State.PENDING, chain.state());
+                AsyncCraftManager.getInstance().submit(chain);
             }
         }
 

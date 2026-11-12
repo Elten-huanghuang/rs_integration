@@ -5,6 +5,8 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.util.LogSampler;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.storage.StorageSnapshotResult;
+import com.huanghuang.rsintegration.storage.StorageSnapshot;
+import com.huanghuang.rsintegration.storage.StoredItem;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Inventory;
@@ -27,6 +29,26 @@ public final class MaterialSources {
     private static final LogSampler OVERFLOW_LOGS = new LogSampler(60_000L);
 
     private MaterialSources() {}
+
+    /** 机器准备时的读取视图需要看到本任务已取走的工具和材料，不改变真实存储。 */
+    public static StorageSnapshotResult withTaskMaterials(ServerPlayer player,
+                                                          CraftStorageEndpoint endpoint,
+                                                          StorageSnapshotResult external,
+                                                          @Nullable Set<Item> itemTypes) {
+        RuntimeMaterialAccount account = RuntimeMaterialAccount.current();
+        if (account == null || !account.belongsTo(player) || !account.usesEndpoint(endpoint)
+                || !account.usable() || !external.successful()) return external;
+        Map<StackKey, Long> held = account.heldMaterials();
+        if (held.isEmpty()) return external;
+        StorageSnapshot snapshot = external.snapshot().orElseThrow();
+        List<StoredItem> items = new ArrayList<>(snapshot.items());
+        held.forEach((key, amount) -> {
+            if (itemTypes == null || itemTypes.contains(key.item())) {
+                items.add(new StoredItem(endpoint.session().itemKey(key.toStack()), amount));
+            }
+        });
+        return StorageSnapshotResult.success(new StorageSnapshot(snapshot.backendId(), items));
+    }
 
     public static long saturatedAdd(long left, long right) {
         if (right <= 0) return left;
@@ -127,6 +149,8 @@ public final class MaterialSources {
     /** Backend-neutral exact availability view shared by every planning caller. */
     public static Map<StackKey, Long> listAllAvailable(
             ServerPlayer player, @Nullable CraftStorageEndpoint endpoint) {
+        RuntimeMaterialAccount account = RuntimeMaterialAccount.current();
+        if (account != null && account.belongsTo(player) && account.usesEndpoint(endpoint)) return account.available(player);
         int currentTick = currentTick(player);
         String cacheKey = cacheKey(player, endpoint);
         rotateCache(currentTick);
@@ -149,6 +173,8 @@ public final class MaterialSources {
      */
     public static Map<StackKey, Long> listAllAvailableFresh(
             ServerPlayer player, @Nullable CraftStorageEndpoint endpoint) {
+        RuntimeMaterialAccount account = RuntimeMaterialAccount.current();
+        if (account != null && account.belongsTo(player) && account.usesEndpoint(endpoint)) return account.available(player);
         return Map.copyOf(loadAllAvailable(player, endpoint).counts());
     }
 
