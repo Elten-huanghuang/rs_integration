@@ -22,8 +22,8 @@ public final class GoetyRitualPolicy {
             return Boolean.TRUE.equals(value)
                     ? Execution.MANUAL_CONFIRMATION
                     : Execution.AUTOMATIC;
-        } catch (ReflectiveOperationException | RuntimeException exception) {
-            // Unknown ritual variants must never be started automatically.
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError exception) {
+            // 无法检查的方法签名也视为未知仪式，必须由玩家确认。
             return Execution.MANUAL_CONFIRMATION;
         }
     }

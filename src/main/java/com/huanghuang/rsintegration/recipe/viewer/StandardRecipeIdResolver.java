@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.recipe.viewer;
 
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.crafting.Recipe;
 import net.minecraftforge.fml.util.ObfuscationReflectionHelper;
 
 import javax.annotation.Nullable;
@@ -15,6 +16,16 @@ public final class StandardRecipeIdResolver {
     public static ResourceLocation resolve(Object recipe) {
         if (recipe == null) return null;
 
+        // 原生配方走接口调用，避免反射扫描到附属模组注入的失效方法签名。
+        if (recipe instanceof Recipe<?> nativeRecipe) {
+            try {
+                ResourceLocation id = nativeRecipe.getId();
+                if (id != null) return id;
+            } catch (RuntimeException | LinkageError ignored) {
+                // 仍允许兼容包装对象通过下面的反射路径提供 ID。
+            }
+        }
+
         ResourceLocation direct = invokeNamed(recipe, "getId");
         if (direct != null) return direct;
 
@@ -24,7 +35,7 @@ public final class StandardRecipeIdResolver {
         try {
             Method mapped = ObfuscationReflectionHelper.findMethod(recipe.getClass(), "m_6423_");
             return invoke(recipe, mapped);
-        } catch (RuntimeException ignored) {
+        } catch (RuntimeException | LinkageError ignored) {
             return null;
         }
     }
@@ -40,7 +51,7 @@ public final class StandardRecipeIdResolver {
         try {
             Object value = method.invoke(target);
             return value instanceof ResourceLocation id ? id : null;
-        } catch (ReflectiveOperationException | RuntimeException ignored) {
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError ignored) {
             return null;
         }
     }
@@ -51,7 +62,8 @@ public final class StandardRecipeIdResolver {
             Method method = type.getMethod(name);
             method.setAccessible(true);
             return method;
-        } catch (NoSuchMethodException ignored) {
+        } catch (NoSuchMethodException | RuntimeException | LinkageError ignored) {
+            // 子类存在缺失的可选类型时，继续尝试父类中可用的 ID 方法。
         }
 
         for (Class<?> current = type; current != null && current != Object.class;
@@ -60,7 +72,7 @@ public final class StandardRecipeIdResolver {
                 Method method = current.getDeclaredMethod(name);
                 method.setAccessible(true);
                 return method;
-            } catch (NoSuchMethodException | RuntimeException ignored) {
+            } catch (NoSuchMethodException | RuntimeException | LinkageError ignored) {
             }
         }
         return null;

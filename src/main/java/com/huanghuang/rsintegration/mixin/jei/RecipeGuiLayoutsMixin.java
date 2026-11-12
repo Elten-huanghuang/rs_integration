@@ -2032,7 +2032,7 @@ public class RecipeGuiLayoutsMixin {
         try {
             Object ritual = recipe.getClass().getMethod("getRitual").invoke(recipe);
             return GoetyRitualPolicy.classify(recipe, ritual);
-        } catch (ReflectiveOperationException | RuntimeException exception) {
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError exception) {
             // A recipe whose ritual cannot be inspected is unsafe to expose.
             RSIntegrationMod.LOGGER.warn(
                     "[RSI-JEI-Mixin] Goety ritual policy lookup failed: id={} class={}",
