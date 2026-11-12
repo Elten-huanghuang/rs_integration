@@ -13,6 +13,7 @@ import net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.common.util.FakePlayer;
 
@@ -98,7 +99,7 @@ public final class PlayerUtils {
 
     /**
      * 后端无关的安全交付：玩家背包优先，背包满或区块未加载时写入所选存储端点。
-     * 存储仍无法接收的剩余物进入持久恢复队列，绝不把“背包满”直接当成最终结果。
+     * 剩余物按正常堆叠大小掉落在玩家脚边；无法生成掉落物时才进入持久恢复队列。
      */
     public static boolean safeGiveToStorage(
             ServerPlayer player,
@@ -136,10 +137,29 @@ public final class PlayerUtils {
         }
 
         if (!leftover.isEmpty()) {
+            if (playerChunkLoaded && !player.hasDisconnected()) {
+                int maxStackSize = Math.max(1, leftover.getMaxStackSize());
+                while (!leftover.isEmpty()) {
+                    int count = Math.min(maxStackSize, leftover.getCount());
+                    ItemEntity drop = new ItemEntity(player.level(), player.getX(),
+                            player.getY() + 0.5, player.getZ(), leftover.copyWithCount(count));
+                    // 标记为玩家掉落，避免被附近机器的产物捕获区再次收走。
+                    drop.setThrower(player.getUUID());
+                    drop.setDefaultPickUpDelay();
+                    if (!player.level().addFreshEntity(drop)) break;
+                    leftover.shrink(count);
+                }
+            }
+            // 世界掉落尚未进入背包，仍按未直接交付记录。
+            if (leftover.isEmpty()) return false;
             MinecraftServer server = player.getServer();
             if (server == null) return false;
-            CraftItemRecovery.get(server).retain(
-                    player.getUUID(), leftover);
+            CraftItemRecovery recovery = CraftItemRecovery.get(server);
+            boolean alreadyPending = recovery.hasPending(player.getUUID());
+            recovery.retain(player.getUUID(), leftover);
+            if (!alreadyPending) {
+                safeSendMessage(player, Component.translatable("rsi.item_recovery.pending"));
+            }
             RSIntegrationMod.LOGGER.warn(
                     "[RSI] Item retained in recovery because player inventory and storage rejected it: {} x{} owner={}",
                     ItemStackUtils.registryId(leftover),

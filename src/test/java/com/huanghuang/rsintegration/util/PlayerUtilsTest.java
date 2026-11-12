@@ -20,6 +20,7 @@ import net.minecraft.server.network.ServerGamePacketListenerImpl;
 import net.minecraft.world.entity.player.Abilities;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ChestMenu;
 import net.minecraft.world.inventory.ContainerSynchronizer;
@@ -36,6 +37,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.MockedStatic;
+import org.mockito.MockedConstruction;
 
 import java.lang.reflect.Field;
 import java.util.ArrayList;
@@ -50,7 +52,9 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockConstruction;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -181,13 +185,107 @@ class PlayerUtilsTest extends BootstrapTest {
                 stack.is(Items.IRON_INGOT) && stack.getCount() == 3), eq(false));
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void fullInventoryWithoutStorageDropsOutputsInNormalSizedStacks(boolean unstackable) {
+        fillMainInventory();
+        Level level = loadedPlayerLevel();
+        when(level.addFreshEntity(any(ItemEntity.class))).thenReturn(true);
+        ItemStack source = new ItemStack(unstackable ? Items.IRON_SWORD : Items.IRON_INGOT,
+                unstackable ? 3 : 130);
+        source.getOrCreateTag().putString("delivery", "preserved");
+
+        try (MockedConstruction<ItemEntity> drops = mockDrops();
+             MockedStatic<CraftItemRecovery> recovery = mockStatic(CraftItemRecovery.class)) {
+            assertFalse(PlayerUtils.safeGiveToStorage(player, source, null));
+
+            assertEquals(3, drops.constructed().size());
+            assertEquals(unstackable ? List.of(1, 1, 1) : List.of(64, 64, 2),
+                    drops.constructed().stream().map(drop -> drop.getItem().getCount()).toList());
+            for (ItemEntity drop : drops.constructed()) {
+                assertTrue(ItemStack.isSameItemSameTags(source, drop.getItem()));
+                verify(drop).setThrower(player.getUUID());
+                verify(drop).setDefaultPickUpDelay();
+                verify(level).addFreshEntity(drop);
+            }
+            assertEquals(unstackable ? 3 : 130, source.getCount());
+            recovery.verifyNoInteractions();
+        }
+    }
+
     @Test
-    void fullInventoryWithoutStorageRetainsOutputInRecovery() {
+    void almostFullInventoryDropsOnlyTheRemainder() {
+        fillMainInventory();
+        inventory.setItem(10, new ItemStack(Items.IRON_INGOT, 60));
+        Level level = loadedPlayerLevel();
+        when(level.addFreshEntity(any(ItemEntity.class))).thenReturn(true);
+
+        try (MockedConstruction<ItemEntity> drops = mockDrops()) {
+            assertFalse(PlayerUtils.safeGiveToStorage(
+                    player, new ItemStack(Items.IRON_INGOT, 130), null));
+
+            assertEquals(64, inventory.getItem(10).getCount());
+            assertEquals(64, clientInventory.getItem(10).getCount());
+            assertEquals(List.of(64, 62), drops.constructed().stream()
+                    .map(drop -> drop.getItem().getCount()).toList());
+        }
+    }
+
+    @Test
+    void dropsOnlyTheRemainderRejectedByStorage() {
+        fillMainInventory();
+        Level level = loadedPlayerLevel();
+        when(level.addFreshEntity(any(ItemEntity.class))).thenReturn(true);
+        StorageSession session = mock(StorageSession.class);
+        when(session.insert(eq(player), any(ItemStack.class), eq(false)))
+                .thenAnswer(call -> StorageOperationResult.inserted(StorageOperationMode.PERFORM,
+                        call.getArgument(1), new ItemStack(Items.IRON_INGOT, 2)));
+        CraftStorageEndpoint endpoint = () -> session;
+
+        try (MockedConstruction<ItemEntity> drops = mockDrops()) {
+            assertFalse(PlayerUtils.safeGiveToStorage(
+                    player, new ItemStack(Items.IRON_INGOT, 5), endpoint));
+
+            assertEquals(1, drops.constructed().size());
+            assertEquals(2, drops.constructed().get(0).getItem().getCount());
+        }
+    }
+
+    @Test
+    void rejectedDropRetainsOnlyItemsThatHaveNotSpawnedAndNotifiesOnce() {
+        fillMainInventory();
+        Level level = loadedPlayerLevel();
+        when(level.addFreshEntity(any(ItemEntity.class))).thenReturn(true, false);
+        MinecraftServer server = mock(MinecraftServer.class);
+        when(player.getServer()).thenReturn(server);
+        CraftItemRecovery recovery = mock(CraftItemRecovery.class);
+        when(recovery.hasPending(player.getUUID())).thenReturn(false, true);
+
+        try (MockedConstruction<ItemEntity> drops = mockDrops();
+             MockedStatic<CraftItemRecovery> data = mockStatic(CraftItemRecovery.class)) {
+            data.when(() -> CraftItemRecovery.get(server)).thenReturn(recovery);
+
+            assertFalse(PlayerUtils.safeGiveToStorage(
+                    player, new ItemStack(Items.IRON_INGOT, 130), null));
+            assertEquals(2, drops.constructed().size());
+            verify(recovery).retain(eq(player.getUUID()), argThat(stack ->
+                    stack.is(Items.IRON_INGOT) && stack.getCount() == 66));
+
+            assertFalse(PlayerUtils.safeGiveToStorage(
+                    player, new ItemStack(Items.GOLD_INGOT, 3), null));
+            verify(recovery).retain(eq(player.getUUID()), argThat(stack ->
+                    stack.is(Items.GOLD_INGOT) && stack.getCount() == 3));
+            verify(player).sendSystemMessage(argThat(message ->
+                    message.getString().contains("rsi.item_recovery.pending")));
+        }
+    }
+
+    @Test
+    void unloadedPlayerChunkRetainsOutputWithoutSpawningDrops() {
         fillMainInventory();
         Level level = mock(Level.class);
         when(player.level()).thenReturn(level);
         when(player.blockPosition()).thenReturn(BlockPos.ZERO);
-        when(level.hasChunkAt(BlockPos.ZERO)).thenReturn(true);
         MinecraftServer server = mock(MinecraftServer.class);
         when(player.getServer()).thenReturn(server);
         CraftItemRecovery recovery = mock(CraftItemRecovery.class);
@@ -206,6 +304,7 @@ class PlayerUtilsTest extends BootstrapTest {
                 argThat(stack -> stack.is(Items.IRON_INGOT)
                         && stack.getCount() == 3)
         );
+        verify(level, never()).addFreshEntity(any());
     }
 
     @Test
@@ -350,6 +449,24 @@ class PlayerUtilsTest extends BootstrapTest {
         for (int slot = 0; slot < inventory.items.size(); slot++) {
             inventory.setItem(slot, new ItemStack(Items.COBBLESTONE, 64));
         }
+    }
+
+    private Level loadedPlayerLevel() {
+        Level level = mock(Level.class);
+        when(player.level()).thenReturn(level);
+        when(player.blockPosition()).thenReturn(BlockPos.ZERO);
+        when(level.hasChunkAt(BlockPos.ZERO)).thenReturn(true);
+        return level;
+    }
+
+    private MockedConstruction<ItemEntity> mockDrops() {
+        return mockConstruction(ItemEntity.class, (drop, context) -> {
+            assertEquals(player.level(), context.arguments().get(0));
+            assertEquals(player.getX(), context.arguments().get(1));
+            assertEquals(player.getY() + 0.5, context.arguments().get(2));
+            assertEquals(player.getZ(), context.arguments().get(3));
+            when(drop.getItem()).thenReturn((ItemStack) context.arguments().get(4));
+        });
     }
 
     private void assertInventoriesMatch() {
