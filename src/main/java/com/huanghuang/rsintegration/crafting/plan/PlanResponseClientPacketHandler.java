@@ -9,16 +9,22 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 @OnlyIn(Dist.CLIENT)
 final class PlanResponseClientPacketHandler {
@@ -26,6 +32,8 @@ final class PlanResponseClientPacketHandler {
     private static final long DUPLICATE_MESSAGE_WINDOW_MS = 3000L;
     private static String lastErrorMessage;
     private static long lastErrorMessageAt;
+    private static Map<String, ResourceLocation> descriptionItemIds = Map.of();
+    private static int descriptionItemRegistrySize = -1;
 
     private PlanResponseClientPacketHandler() {}
 
@@ -135,28 +143,24 @@ final class PlanResponseClientPacketHandler {
 
     @Nullable
     private static ResourceLocation itemIdForDescriptionId(String descriptionId) {
-        // Vanilla's default item/block translation keys are
-        // "item.<namespace>.<path>" and "block.<namespace>.<path>". Resolve
-        // that shape directly instead of scanning the complete item registry
-        // once for every missing material. The old O(missing * registeredItems)
-        // lookup could stall the render thread for seconds in large modpacks,
-        // making the JEI craft button appear unresponsive.
-        int prefixEnd = descriptionId.indexOf('.');
-        if (prefixEnd <= 0) return null;
-        String prefix = descriptionId.substring(0, prefixEnd);
-        if (!"item".equals(prefix) && !"block".equals(prefix)) return null;
-        int namespaceEnd = descriptionId.indexOf('.', prefixEnd + 1);
-        if (namespaceEnd <= prefixEnd + 1 || namespaceEnd >= descriptionId.length() - 1) {
-            return null;
+        // 名称键的前缀、命名空间、路径都可能与物品 ID 不同，统一按注册表解析。
+        // 缓存索引，避免每项缺料都扫描整个注册表或先翻译成文字而丢失身份。
+        int registrySize = ForgeRegistries.ITEMS.getKeys().size();
+        if (descriptionItemRegistrySize != registrySize) {
+            Map<String, ResourceLocation> indexed = new HashMap<>();
+            Set<String> ambiguous = new HashSet<>();
+            for (Item item : ForgeRegistries.ITEMS.getValues()) {
+                ResourceLocation id = ForgeRegistries.ITEMS.getKey(item);
+                if (id == null || item == Items.AIR) continue;
+                String key = item.getDescriptionId();
+                if (indexed.putIfAbsent(key, id) != null) ambiguous.add(key);
+            }
+            // 多个物品共用名称键时保留原诊断，不能任意绑定其中一个物品。
+            ambiguous.forEach(indexed::remove);
+            descriptionItemIds = Map.copyOf(indexed);
+            descriptionItemRegistrySize = registrySize;
         }
-        ResourceLocation id = ResourceLocation.tryParse(
-                descriptionId.substring(prefixEnd + 1, namespaceEnd) + ":"
-                        + descriptionId.substring(namespaceEnd + 1));
-        if (id == null) return null;
-        var item = ForgeRegistries.ITEMS.getValue(id);
-        if (item == null) return null;
-        ItemStack stack = new ItemStack(item);
-        return !stack.isEmpty() && descriptionId.equals(stack.getDescriptionId()) ? id : null;
+        return descriptionItemIds.get(descriptionId);
     }
 
     private static void openScreen(PlanResponse plan, long requestId) {

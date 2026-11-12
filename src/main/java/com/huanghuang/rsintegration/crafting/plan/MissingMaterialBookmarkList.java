@@ -48,8 +48,7 @@ public final class MissingMaterialBookmarkList {
         for (String raw : missing) {
             String label = raw == null ? "" : raw.trim();
             if (satisfied.getOrDefault(normalize(label), false)) continue;
-            Match match = resolve(label, candidates, usedCandidates,
-                    missing.size() == 1 && candidates.size() == 1);
+            Match match = resolve(label, candidates, usedCandidates);
             if (match == null) {
                 if (!label.isEmpty()) result.add(new TextEntry(label, ItemStack.EMPTY, 0));
                 continue;
@@ -87,7 +86,7 @@ public final class MissingMaterialBookmarkList {
     }
 
     private static Match resolve(String raw, List<ItemStack> candidates,
-                                 Set<Integer> usedCandidates, boolean singleFallback) {
+                                 Set<Integer> usedCandidates) {
         String normalized = normalize(raw);
         int hintStart = raw.indexOf(" \u00a7");
         String identity = hintStart >= 0 ? raw.substring(0, hintStart) : raw;
@@ -120,7 +119,6 @@ public final class MissingMaterialBookmarkList {
             }
         }
         if (containedMatch >= 0) return new Match(containedMatch, candidates.get(containedMatch));
-        if (singleFallback) return new Match(0, candidates.get(0));
         return null;
     }
 

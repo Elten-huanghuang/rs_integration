@@ -2,10 +2,17 @@ package com.huanghuang.rsintegration.crafting.plan;
 
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraftforge.registries.ForgeRegistry;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Method;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -15,6 +22,45 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MissingMaterialBookmarkListTest extends BootstrapTest {
+    private static final ResourceLocation BEZOAR_ID =
+            new ResourceLocation("rs_integration_test", "bezoar");
+    private static final ResourceLocation CAPSULE_ID =
+            new ResourceLocation("rs_integration_test", "detoxification_capsule");
+    private static final ResourceLocation CUSTOM_LABEL_ID =
+            new ResourceLocation("rs_integration_test", "nested/material");
+
+    @BeforeAll
+    static void registerCustomDescriptionItems() throws ReflectiveOperationException {
+        ForgeRegistry<Item> registry = (ForgeRegistry<Item>) ForgeRegistries.ITEMS;
+        boolean locked = registry.isLocked();
+        registry.unfreeze();
+        Method unfreeze = BuiltInRegistries.ITEM.getClass().getMethod("unfreeze");
+        unfreeze.setAccessible(true);
+        unfreeze.invoke(BuiltInRegistries.ITEM);
+        try {
+            registerItem(registry, BEZOAR_ID, "enchantment.confluence.bezoar");
+            registerItem(registry, CAPSULE_ID, "enchantment.confluence.detoxification_capsule");
+            registerItem(registry, CUSTOM_LABEL_ID, "display.another_namespace.material.label");
+            registerItem(registry, new ResourceLocation("rs_integration_test", "shared_name_first"),
+                    "enchantment.rs_integration_test.shared");
+            registerItem(registry, new ResourceLocation("rs_integration_test", "shared_name_second"),
+                    "enchantment.rs_integration_test.shared");
+        } finally {
+            BuiltInRegistries.ITEM.freeze();
+            if (locked) registry.freeze();
+        }
+    }
+
+    private static void registerItem(ForgeRegistry<Item> registry, ResourceLocation id,
+                                     String descriptionId) {
+        if (registry.containsKey(id)) return;
+        registry.register(id, new Item(new Item.Properties()) {
+            @Override
+            public String getDescriptionId() {
+                return descriptionId;
+            }
+        });
+    }
 
     @Test
     void collectsOnlyShortRawMaterialsInBillOrder() {
@@ -81,16 +127,82 @@ class MissingMaterialBookmarkListTest extends BootstrapTest {
     }
 
     @Test
-    void singleLocalizedMissingNameUsesTheOnlyStructuredShortage() {
+    void arbitraryDescriptionKeyPreservesItemIdentityAndFormattedHint() {
+        assertEquals(List.of(CUSTOM_LABEL_ID + " \u00a77NBT requirement"),
+                PlanResponseClientPacketHandler.localizeItemNames(List.of(
+                        "display.another_namespace.material.label \u00a77NBT requirement")));
+    }
+
+    @Test
+    void localizedMissingNameMatchesTheStructuredShortage() {
         PlanResponse plan = planWithMissing(
                 Map.of(IngredientKey.of(new ItemStack(Items.APPLE)),
                         new PlanResponse.Availability(1, 0)),
-                List.of("苹果"));
+                List.of(new ItemStack(Items.APPLE).getHoverName().getString()));
 
         var entry = MissingMaterialBookmarkList.textEntries(plan).get(0);
 
         assertTrue(entry.bookmarkable());
         assertEquals(Items.APPLE, entry.bookmark().getItem());
+    }
+
+    @Test
+    void unrelatedDiagnosticCannotBeReplacedByTheOnlyStructuredShortage() {
+        PlanResponse plan = planWithMissing(
+                Map.of(IngredientKey.of(new ItemStack(Items.APPLE)),
+                        new PlanResponse.Availability(4, 1)),
+                List.of("未知的缺料物品"));
+
+        var entries = MissingMaterialBookmarkList.textEntries(plan);
+
+        assertEquals(2, entries.size());
+        assertEquals("未知的缺料物品", entries.get(0).label());
+        assertFalse(entries.get(0).bookmarkable());
+        assertEquals(Items.APPLE, entries.get(1).bookmark().getItem());
+        assertEquals(3L, entries.get(1).missingCount());
+    }
+
+    @Test
+    void customDescriptionKeysKeepDistinctItemsAndTheirOwnShortageCounts() {
+        Item bezoar = ForgeRegistries.ITEMS.getValue(BEZOAR_ID);
+        Item capsule = ForgeRegistries.ITEMS.getValue(CAPSULE_ID);
+        List<String> localized = PlanResponseClientPacketHandler.localizeItemNames(List.of(
+                "enchantment.confluence.bezoar",
+                "enchantment.confluence.detoxification_capsule"));
+        assertEquals(List.of(BEZOAR_ID.toString(), CAPSULE_ID.toString()), localized);
+        PlanResponse plan = planWithMissing(
+                Map.of(IngredientKey.of(new ItemStack(capsule)),
+                        new PlanResponse.Availability(4, 1)), localized);
+
+        var entries = MissingMaterialBookmarkList.textEntries(plan);
+
+        assertEquals(2, entries.size());
+        assertEquals(List.of(bezoar, capsule),
+                entries.stream().map(entry -> entry.bookmark().getItem()).toList());
+        assertEquals(List.of(1L, 3L), entries.stream().map(
+                MissingMaterialBookmarkList.TextEntry::missingCount).toList());
+    }
+
+    @Test
+    void replenishedCustomDescriptionItemDoesNotRemainMissing() {
+        Item capsule = ForgeRegistries.ITEMS.getValue(CAPSULE_ID);
+        PlanResponse plan = planWithMissing(
+                Map.of(IngredientKey.of(new ItemStack(capsule)),
+                        new PlanResponse.Availability(1, 1)),
+                PlanResponseClientPacketHandler.localizeItemNames(
+                        List.of("enchantment.confluence.detoxification_capsule")));
+
+        assertTrue(MissingMaterialBookmarkList.textEntries(plan).isEmpty());
+    }
+
+    @Test
+    void ambiguousDescriptionKeyCannotBeBoundToAnArbitraryItem() {
+        List<String> localized = PlanResponseClientPacketHandler.localizeItemNames(
+                List.of("enchantment.rs_integration_test.shared"));
+
+        assertEquals(List.of("enchantment.rs_integration_test.shared"), localized);
+        assertFalse(MissingMaterialBookmarkList.textEntries(
+                planWithMissing(Map.of(), localized)).get(0).bookmarkable());
     }
 
     @Test
