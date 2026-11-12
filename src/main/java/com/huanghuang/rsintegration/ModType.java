@@ -363,10 +363,14 @@ public final class ModType {
         if (recipe instanceof LithumAltarRecipeWrapper) {
             return byId("distant_worlds_lithum_altar");
         }
-        ResourceLocation serializerId = BuiltInRegistries.RECIPE_SERIALIZER.getKey(recipe.getSerializer());
-        if (new ResourceLocation("mythicbotany", "infuser").equals(serializerId)) {
-            ModType infuser = findById("mythicbotany_mana_infuser");
-            if (infuser != null) return infuser;
+        try {
+            ResourceLocation serializerId = BuiltInRegistries.RECIPE_SERIALIZER.getKey(recipe.getSerializer());
+            if (new ResourceLocation("mythicbotany", "infuser").equals(serializerId)) {
+                ModType infuser = findById("mythicbotany_mana_infuser");
+                if (infuser != null) return infuser;
+            }
+        } catch (UnsupportedOperationException ignored) {
+            // 匠魂等模组的 JEI 展示配方不提供序列化器，继续按配方类分类。
         }
         // ApplyModifierRecipe is a smithing-table recipe, not a Hephaestus Forge ritual
         if (cn.endsWith("ApplyModifierRecipe")) return null;
