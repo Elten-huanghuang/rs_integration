@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.client.gui.CraftingUiStyle;
+import com.huanghuang.rsintegration.config.CraftingUiColors;
 import com.huanghuang.rsintegration.client.gui.CraftingUiStyle.ActionButton;
 import com.huanghuang.rsintegration.machine.client.MachineDisplayNameResolver;
 import com.huanghuang.rsintegration.network.binding.BindingInfo;
@@ -38,7 +39,7 @@ final class MachineRenameScreen extends Screen {
         nameBox = new EditBox(font, panelX + 18, panelY + 65,
                 Math.max(1, panelWidth - 36), 12, title);
         nameBox.setBordered(false);
-        nameBox.setTextColor(CraftingUiStyle.TEXT);
+        nameBox.setTextColor(CraftingUiStyle.text());
         nameBox.setMaxLength(BindingStorage.MAX_CUSTOM_NAME_LENGTH);
         nameBox.setHint(MachineDisplayNameResolver.defaultDisplayName(machine));
         nameBox.setValue(draft);
@@ -62,16 +63,17 @@ final class MachineRenameScreen extends Screen {
 
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+        nameBox.setTextColor(CraftingUiStyle.text());
         renderBackground(graphics);
         CraftingUiStyle.panel(graphics, panelX, panelY, panelWidth, 146);
-        graphics.drawString(font, title, panelX + 12, panelY + 14, CraftingUiStyle.TEXT, false);
+        graphics.drawString(font, title, panelX + 12, panelY + 14, CraftingUiStyle.text(), false);
         String original = MachineDisplayNameResolver.defaultDisplayName(machine).getString();
         graphics.drawString(font, CraftingUiStyle.fit(font, original, panelWidth - 24),
-                panelX + 12, panelY + 36, CraftingUiStyle.MUTED, false);
+                panelX + 12, panelY + 36, CraftingUiStyle.muted(), false);
         CraftingUiStyle.surface(graphics, panelX + 12, panelY + 58, panelWidth - 24, 24,
-                0xFFFFFFFF, nameBox.isFocused() ? CraftingUiStyle.ACCENT : CraftingUiStyle.BORDER);
+                CraftingUiColors.ROW.argb(), nameBox.isFocused() ? CraftingUiStyle.accent() : CraftingUiStyle.border());
         graphics.drawString(font, Component.translatable("rsi.control_center.rename.hint"),
-                panelX + 12, panelY + 91, CraftingUiStyle.MUTED, false);
+                panelX + 12, panelY + 91, CraftingUiStyle.muted(), false);
         super.render(graphics, mouseX, mouseY, partialTick);
     }
 

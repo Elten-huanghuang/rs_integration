@@ -270,6 +270,8 @@ long souls = session.amount(BdMagicApi.SOUL_KEY);
 - `saves/<世界>/serverconfig/rs_integration/server.toml`：服务端合成、机器和魔法资源行为。
 - `config/rs_integration/client.toml`：界面、JEI 和 Tetra 显示设置。
 
+客户端 `[craftingUi]` 可自定义计划列表、计划材料格、合成监控器和共用控件的颜色，默认保持原有配色。`panel`、`canvas`、`text` 等控制背景与文字，`materialStored`、`materialRunning`、`materialScheduled`、`materialBlocked`、`materialStopping`、`materialCompleted` 分别控制库存、合成中、待合成、阻塞、停止中和已完成的整格底色。颜色写成字符串，例如 `panel = "#D0CFD6"`；也支持 `#AARRGGBB`，其中 `AA` 是透明度（`FF` 不透明，`00` 全透明）。配置重新加载后生效，也可在游戏内客户端配置界面的“合成界面配色”分类修改并应用。完整默认值见 [配色示例](docs/config/crafting-ui.example.toml)。
+
 客户端 `[tooltips]` 中的 `customBackgrounds` 控制 RSI 特殊物品的主题底板，`obscureTooltipsCompat` 和 `modernUiCompat` 分别防止 Obscure Tooltips、Modern UI 圆角提示框接管这些物品。三个选项默认开启，配置重新加载后生效，也可在游戏内客户端配置界面编辑；关闭总开关后，两项兼容处理一起退出，不影响其他物品或原模组的字体设置。
 
 可配置规划深度/节点预算、优先配方与材料变体、保留物品、概率材料尝试上限、输入预载、DAG/机器并发和并行委托策略。服务端 `magicResources.pinnedBackend` 只会在没有生效空间管辖时决定后端，不会合并 RS 与 BD。

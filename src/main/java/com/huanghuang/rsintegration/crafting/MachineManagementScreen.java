@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.client.gui.CraftingUiStyle;
+import com.huanghuang.rsintegration.config.CraftingUiColors;
 import com.huanghuang.rsintegration.client.gui.CraftingUiStyle.ActionButton;
 import com.huanghuang.rsintegration.client.gui.ScrollBarStyle;
 import com.huanghuang.rsintegration.crafting.planning.PlanningTasksScreen;
@@ -34,14 +35,9 @@ public final class MachineManagementScreen extends Screen {
         ALL_BOUND
     }
 
-    private static final int TEXT = CraftingUiStyle.TEXT;
-    private static final int MUTED = CraftingUiStyle.MUTED;
-    private static final int SURFACE = 0xFFFFFFFF;
-    private static final int SURFACE_HOVER = CraftingUiStyle.HIGHLIGHT;
     private static final int BLOCKED_TINT = 0xFFFFF0F1;
     private static final int SELECTED_TINT = 0xFFE5E6F1;
     private static final int SELECTION_FILL = 0x406F6C89;
-    private static final int SELECTION_BORDER = CraftingUiStyle.ACCENT;
     private static final int GRID_GAP = 8;
     private static final int MIN_TILE_WIDTH = 132;
     private static final int TILE_HEIGHT = 68;
@@ -92,8 +88,8 @@ public final class MachineManagementScreen extends Screen {
                 Math.max(1, panelWidth - 36), 12,
                 Component.translatable("rsi.control_center.search"));
         searchBox.setBordered(false);
-        searchBox.setTextColor(TEXT);
-        searchBox.setTextColorUneditable(MUTED);
+        searchBox.setTextColor(CraftingUiStyle.text());
+        searchBox.setTextColorUneditable(CraftingUiStyle.muted());
         searchBox.setHint(Component.translatable("rsi.control_center.search_hint"));
         searchBox.setMaxLength(96);
         searchBox.setValue(searchText);
@@ -182,23 +178,25 @@ public final class MachineManagementScreen extends Screen {
 
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+        searchBox.setTextColor(CraftingUiStyle.text());
+        searchBox.setTextColorUneditable(CraftingUiStyle.muted());
         renderBackground(graphics);
         CraftingUiStyle.panel(graphics, panelX, panelY, panelWidth, panelHeight);
         renderMachineIcon(graphics, panelX + 14, panelY + 16);
-        graphics.drawString(font, title, panelX + 36, panelY + 13, TEXT, false);
+        graphics.drawString(font, title, panelX + 36, panelY + 13, CraftingUiStyle.text(), false);
         Component hint = Component.translatable(view == View.GUI_ONLY
                 ? "rsi.control_center.hint.gui" : "rsi.control_center.hint.all");
         long blocked = view == View.ALL_BOUND ? machines.stream().filter(MachinePreferenceClient::isBlocked).count() : 0;
         String blockedSummary = blocked == 0 ? "" : Component.translatable("rsi.control_center.summary.blocked", blocked).getString();
         int summaryWidth = blocked == 0 ? 0 : font.width(blockedSummary) + 12;
         graphics.drawString(font, CraftingUiStyle.fit(font, hint.getString(), panelWidth - 50 - summaryWidth),
-                panelX + 36, panelY + 29, MUTED, false);
+                panelX + 36, panelY + 29, CraftingUiStyle.muted(), false);
         if (blocked > 0) graphics.drawString(font, blockedSummary,
-                panelX + panelWidth - 14 - font.width(blockedSummary), panelY + 29, CraftingUiStyle.DANGER, false);
+                panelX + panelWidth - 14 - font.width(blockedSummary), panelY + 29, CraftingUiStyle.danger(), false);
         CraftingUiStyle.surface(graphics, panelX + 12, panelY + 84, panelWidth - 24, 22,
-                SURFACE, searchBox.isFocused() ? CraftingUiStyle.ACCENT : CraftingUiStyle.BORDER);
+                CraftingUiColors.ROW.argb(), searchBox.isFocused() ? CraftingUiStyle.accent() : CraftingUiStyle.border());
         int footerY = panelY + panelHeight - footerHeight;
-        graphics.fill(panelX + 12, footerY, panelX + panelWidth - 12, footerY + 1, CraftingUiStyle.BORDER);
+        graphics.fill(panelX + 12, footerY, panelX + panelWidth - 12, footerY + 1, CraftingUiStyle.border());
         renderSummaryBadges(graphics);
         renderGrid(graphics, mouseX, mouseY);
         super.render(graphics, mouseX, mouseY, partialTick);
@@ -211,15 +209,15 @@ public final class MachineManagementScreen extends Screen {
                 filtered.size(), machines.size()).getString();
         int titleEnd = panelX + 36 + font.width(title) + 8;
         int countX = panelX + panelWidth - 14 - font.width(count);
-        if (countX >= titleEnd) graphics.drawString(font, count, countX, panelY + 13, MUTED, false);
+        if (countX >= titleEnd) graphics.drawString(font, count, countX, panelY + 13, CraftingUiStyle.muted(), false);
     }
 
     private void renderMachineIcon(GuiGraphics graphics, int x, int y) {
-        CraftingUiStyle.surface(graphics, x, y, 14, 16, SURFACE, CraftingUiStyle.ACCENT);
+        CraftingUiStyle.surface(graphics, x, y, 14, 16, CraftingUiColors.ROW.argb(), CraftingUiStyle.accent());
         for (int row = 0; row < 2; row++) {
             for (int column = 0; column < 2; column++) {
                 graphics.fill(x + 3 + column * 5, y + 4 + row * 5,
-                        x + 6 + column * 5, y + 7 + row * 5, CraftingUiStyle.ACCENT);
+                        x + 6 + column * 5, y + 7 + row * 5, CraftingUiStyle.accent());
             }
         }
     }
@@ -231,14 +229,14 @@ public final class MachineManagementScreen extends Screen {
         String hint = Component.translatable(key).getString();
         int maxWidth = Math.max(1, panelWidth - 130);
         int y = panelY + panelHeight - footerHeight + (footerHeight - font.lineHeight) / 2;
-        graphics.drawString(font, CraftingUiStyle.fit(font, hint, maxWidth), panelX + 14, y, MUTED, false);
+        graphics.drawString(font, CraftingUiStyle.fit(font, hint, maxWidth), panelX + 14, y, CraftingUiStyle.muted(), false);
     }
 
     private void renderGrid(GuiGraphics graphics, int mouseX, int mouseY) {
         if (filtered.isEmpty()) {
             Component empty = Component.translatable("rsi.control_center.empty");
             graphics.drawString(font, empty, panelX + (panelWidth - font.width(empty)) / 2,
-                    gridY + gridHeight / 2 - font.lineHeight / 2, MUTED, false);
+                    gridY + gridHeight / 2 - font.lineHeight / 2, CraftingUiStyle.muted(), false);
             return;
         }
         int columns = columns();
@@ -278,12 +276,12 @@ public final class MachineManagementScreen extends Screen {
         boolean blocked = MachinePreferenceClient.isBlocked(info);
         boolean hovered = !selectingBlacklist
                 && inside(mouseX, mouseY, x, y, tileWidth, TILE_HEIGHT);
-        int accent = blocked ? CraftingUiStyle.DANGER : CraftingUiStyle.ACCENT;
-        int background = selected ? SELECTED_TINT : blocked ? BLOCKED_TINT : hovered ? SURFACE_HOVER : SURFACE;
+        int accent = blocked ? CraftingUiStyle.danger() : CraftingUiStyle.accent();
+        int background = selected ? SELECTED_TINT : blocked ? BLOCKED_TINT : hovered ? CraftingUiStyle.highlight() : CraftingUiColors.ROW.argb();
         CraftingUiStyle.surface(graphics, x, y, tileWidth, TILE_HEIGHT, background,
-                selected || hovered ? CraftingUiStyle.ACCENT : CraftingUiStyle.BORDER);
+                selected || hovered ? CraftingUiStyle.accent() : CraftingUiStyle.border());
         graphics.fill(x, y + 5, x + 2, y + TILE_HEIGHT - 5, accent);
-        graphics.fill(x + 8, y + 8, x + 34, y + 34, CraftingUiStyle.CANVAS);
+        graphics.fill(x + 8, y + 8, x + 34, y + 34, CraftingUiStyle.canvas());
 
         ItemStack icon = MachineTabRenderer.resolveIcon(info);
         int iconX = x + 13;
@@ -293,42 +291,42 @@ public final class MachineManagementScreen extends Screen {
         int textX = x + 42;
         int nameWidth = Math.max(1, tileWidth - 60);
         String name = CraftingUiStyle.fit(font, displayName(info), nameWidth);
-        graphics.drawString(font, name, textX, y + 8, TEXT, false);
+        graphics.drawString(font, name, textX, y + 8, CraftingUiStyle.text(), false);
         boolean showBlocked = blocked && view == View.ALL_BOUND;
         String status = showBlocked
                 ? Component.translatable("rsi.control_center.flag.blocked_short").getString()
                 : dimensionLabel(info);
         graphics.drawString(font, CraftingUiStyle.fit(font, status, tileWidth - 50),
-                textX, y + 24, showBlocked ? CraftingUiStyle.DANGER : MUTED, false);
+                textX, y + 24, showBlocked ? CraftingUiStyle.danger() : CraftingUiStyle.muted(), false);
 
-        graphics.fill(x + 8, y + 40, x + tileWidth - 8, y + 41, CraftingUiStyle.GRID_LINE);
-        graphics.drawString(font, "XYZ", x + 8, y + 49, CraftingUiStyle.ACCENT, false);
+        graphics.fill(x + 8, y + 40, x + tileWidth - 8, y + 41, CraftingUiStyle.gridLine());
+        graphics.drawString(font, "XYZ", x + 8, y + 49, CraftingUiStyle.accent(), false);
         String coords = info.pos().getX() + ", " + info.pos().getY()
                 + ", " + info.pos().getZ();
         graphics.drawString(font,
                 CraftingUiStyle.fit(font, coords, tileWidth - 60),
-                x + 32, y + 49, MUTED, false);
+                x + 32, y + 49, CraftingUiStyle.muted(), false);
         if (canRename(info)) renderRenameIcon(graphics, x + tileWidth - 23, y + 45,
                 inside(mouseX, mouseY, x + tileWidth - 23, y + 45, 16, 16));
 
         if (view == View.GUI_ONLY) {
             graphics.drawString(font, MachinePreferenceClient.isFavorite(info) ? "*" : "-",
                     x + tileWidth - 11, y + 3,
-                    MachinePreferenceClient.isFavorite(info) ? CraftingUiStyle.WARNING : CraftingUiStyle.HINT, false);
+                    MachinePreferenceClient.isFavorite(info) ? CraftingUiStyle.warning() : CraftingUiStyle.hint(), false);
         } else {
             graphics.drawString(font, "x",
-                    x + tileWidth - 10, y + 3, hovered ? CraftingUiStyle.DANGER : MUTED, false);
+                    x + tileWidth - 10, y + 3, hovered ? CraftingUiStyle.danger() : CraftingUiStyle.muted(), false);
         }
     }
 
     private void renderRenameIcon(GuiGraphics graphics, int x, int y, boolean hovered) {
         if (hovered) CraftingUiStyle.surface(graphics, x, y, 16, 16,
-                CraftingUiStyle.HIGHLIGHT, CraftingUiStyle.ACCENT);
+                CraftingUiStyle.highlight(), CraftingUiStyle.accent());
         for (int step = 0; step < 6; step++) {
             graphics.fill(x + 4 + step, y + 10 - step,
-                    x + 6 + step, y + 12 - step, CraftingUiStyle.ACCENT);
+                    x + 6 + step, y + 12 - step, CraftingUiStyle.accent());
         }
-        graphics.fill(x + 3, y + 12, x + 5, y + 13, TEXT);
+        graphics.fill(x + 3, y + 12, x + 5, y + 13, CraftingUiStyle.text());
     }
 
     private void renderHoveredTooltip(GuiGraphics graphics, int mouseX, int mouseY) {
@@ -539,7 +537,7 @@ public final class MachineManagementScreen extends Screen {
         int width = Math.max(1, right - x);
         int height = Math.max(1, bottom - y);
         graphics.fill(x, y, right, bottom, SELECTION_FILL);
-        graphics.renderOutline(x, y, width, height, SELECTION_BORDER);
+        graphics.renderOutline(x, y, width, height, CraftingUiStyle.accent());
         if (selectedCount > 0) {
             String count = Component.translatable(
                     willBlock
@@ -550,8 +548,8 @@ public final class MachineManagementScreen extends Screen {
             int badgeX = Math.max(gridX, Math.min(right + 4, panelX + panelWidth - badgeWidth - 8));
             int badgeY = Math.max(gridY + 2, y - 15);
             CraftingUiStyle.surface(graphics, badgeX, badgeY, badgeWidth, 14,
-                    CraftingUiStyle.HIGHLIGHT, CraftingUiStyle.ACCENT);
-            graphics.drawString(font, count, badgeX + 5, badgeY + 3, TEXT, false);
+                    CraftingUiStyle.highlight(), CraftingUiStyle.accent());
+            graphics.drawString(font, count, badgeX + 5, badgeY + 3, CraftingUiStyle.text(), false);
         }
     }
 

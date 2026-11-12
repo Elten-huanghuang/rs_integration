@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.rs.monitor;
 
 import com.huanghuang.rsintegration.client.gui.CraftingUiStyle;
+import com.huanghuang.rsintegration.config.CraftingUiColors;
 import com.huanghuang.rsintegration.client.gui.ListScrollState;
 import com.huanghuang.rsintegration.client.gui.ListScrollBar;
 import com.huanghuang.rsintegration.client.gui.ScrollBarStyle;
@@ -90,29 +91,29 @@ public final class MonitorTaskList extends AbstractWidget {
 
     @Override public void renderWidget(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         var font = Minecraft.getInstance().font;
-        CraftingUiStyle.raised(graphics, getX(), getY(), width, height, CraftingUiStyle.PANEL, CraftingUiStyle.BORDER);
-        graphics.drawString(font, CraftingUiStyle.fit(font, getMessage().getString(), width - 4), getX() + 3, getY() + 7, CraftingUiStyle.TEXT, false);
+        CraftingUiStyle.raised(graphics, getX(), getY(), width, height, CraftingUiStyle.panel(), CraftingUiStyle.border());
+        graphics.drawString(font, CraftingUiStyle.fit(font, getMessage().getString(), width - 4), getX() + 3, getY() + 7, CraftingUiStyle.text(), false);
         CraftingUiStyle.inset(graphics, getX() + 2, getY() + 20, contentWidth, ROW_HEIGHT * visibleRows);
         for (int row = 0; row < visibleRows; row++) {
             int index = scroll.offset() + row;
             int top = getY() + 20 + row * ROW_HEIGHT;
             boolean current = index < tasks.size() && Objects.equals(id(tasks.get(index)), selected);
             graphics.fill(getX() + 2, top, getX() + 2 + contentWidth, top + ROW_HEIGHT - 1,
-                    current ? 0xFFB8DCF2 : CraftingUiStyle.CANVAS);
-            graphics.fill(getX() + 2, top + ROW_HEIGHT - 1, getX() + 2 + contentWidth, top + ROW_HEIGHT, CraftingUiStyle.GRID_LINE);
+                    current ? CraftingUiColors.SELECTED_ROW.argb() : CraftingUiStyle.canvas());
+            graphics.fill(getX() + 2, top + ROW_HEIGHT - 1, getX() + 2 + contentWidth, top + ROW_HEIGHT, CraftingUiStyle.gridLine());
             if (current) {
-                graphics.fill(getX() + 2, top, getX() + 4, top + ROW_HEIGHT - 1, CraftingUiStyle.HIGHLIGHT);
-                graphics.fill(getX() + 2, top, getX() + 2 + contentWidth, top + 1, CraftingUiStyle.HIGHLIGHT);
+                graphics.fill(getX() + 2, top, getX() + 4, top + ROW_HEIGHT - 1, CraftingUiStyle.highlight());
+                graphics.fill(getX() + 2, top, getX() + 2 + contentWidth, top + 1, CraftingUiStyle.highlight());
             }
             if (index < tasks.size()) {
                 IGridTab task = tasks.get(index);
                 if (task instanceof RsiMonitorTask rsi) {
                     int color = switch (rsi.diagnostics().kind()) {
-                        case ATTENTION -> CraftingUiStyle.DANGER;
-                        case RUNNING -> CraftingUiStyle.ACCENT;
-                        case SUCCEEDED -> CraftingUiStyle.SUCCESS;
-                        case CANCELLED -> CraftingUiStyle.MUTED;
-                        default -> CraftingUiStyle.WARNING;
+                        case ATTENTION -> CraftingUiStyle.danger();
+                        case RUNNING -> CraftingUiStyle.accent();
+                        case SUCCEEDED -> CraftingUiStyle.success();
+                        case CANCELLED -> CraftingUiStyle.muted();
+                        default -> CraftingUiStyle.warning();
                     };
                     graphics.fill(getX() + 2 + contentWidth - 2, top + 2, getX() + 2 + contentWidth, top + ROW_HEIGHT - 3, color);
                 }
@@ -123,9 +124,9 @@ public final class MonitorTaskList extends AbstractWidget {
                     int textX = getX() + 24;
                     int textWidth = contentWidth - 24;
                     graphics.drawString(font, CraftingUiStyle.fit(font, title(task).getString(), textWidth),
-                            textX, top + 3, CraftingUiStyle.TEXT, false);
+                            textX, top + 3, CraftingUiStyle.text(), false);
                     graphics.drawString(font, CraftingUiStyle.fit(font, progress(task).getString(), textWidth),
-                            textX, top + 14, CraftingUiStyle.MUTED, false);
+                            textX, top + 14, CraftingUiStyle.muted(), false);
                 }
             }
         }

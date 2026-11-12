@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.client.gui;
 
+import com.huanghuang.rsintegration.config.CraftingUiColors;
 import net.minecraft.client.gui.GuiGraphics;
 
 /** 三栏共用的像素滚动条；短滑块的高度与 RS 原生滚动条一致。 */
@@ -21,15 +22,16 @@ public final class ScrollBarStyle {
     public static void render(GuiGraphics graphics, int x, int y, int width, int height,
                               int offset, int maximum, boolean hovered) {
         // 无溢出时仍保留顶部灰色滑块，不能只留下像分隔线一样的空轨道。
-        graphics.fill(x, y, x + width, y + height, CraftingUiStyle.HIGHLIGHT);
-        graphics.fill(x + 1, y + 1, x + width - 1, y + height - 1, CraftingUiStyle.CANVAS);
+        graphics.fill(x, y, x + width, y + height, CraftingUiStyle.highlight());
+        graphics.fill(x + 1, y + 1, x + width - 1, y + height - 1, CraftingUiStyle.canvas());
         boolean enabled = maximum > 0;
         int top = y + thumbTop(height, offset, maximum);
         int bottom = top + thumbHeight(height);
-        int face = !enabled ? 0xFFB3B5C4 : hovered ? 0xFFBBC0D5 : 0xFF9CA1BA;
+        int face = !enabled ? CraftingUiColors.SCROLLBAR_DISABLED.argb()
+                : hovered ? CraftingUiColors.SCROLLBAR_HOVER.argb() : CraftingUiColors.SCROLLBAR.argb();
         CraftingUiStyle.raised(graphics, x, top, width, bottom - top, face,
-                enabled ? CraftingUiStyle.BORDER : 0xFF858798);
-        int grip = enabled ? 0xFF5E6279 : 0xFF8D90A2;
+                enabled ? CraftingUiStyle.border() : CraftingUiColors.SCROLLBAR_DISABLED_BORDER.argb());
+        int grip = enabled ? CraftingUiColors.SCROLLBAR_GRIP.argb() : CraftingUiColors.SCROLLBAR_DISABLED_GRIP.argb();
         int middle = top + (bottom - top) / 2;
         graphics.fill(x + 3, middle - 2, x + width - 3, middle - 1, grip);
         graphics.fill(x + 3, middle + 1, x + width - 3, middle + 2, grip);

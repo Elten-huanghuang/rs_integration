@@ -106,7 +106,7 @@ public final class CraftProgressOverlay {
         if (execution) contentHeight += Math.max(HEADER_HEIGHT, lineHeight) + ROW_GAP + lineHeight + ROW_GAP
                 + BAR_HEIGHT + ROW_GAP + (detail ? lineHeight + ROW_GAP : 0);
         boolean configured = RSIntegrationConfig.CLIENT_SPEC.isLoaded();
-        return PlanningHudLayout.place(screenWidth, screenHeight, 196, 132, contentHeight, SCREEN_MARGIN,
+        return PlanningHudLayout.place(screenWidth, screenHeight, 172, 132, contentHeight, SCREEN_MARGIN,
                 configured ? RSIntegrationConfig.PLANNING_HUD_HORIZONTAL_POSITION.get() : RSIntegrationConfig.PLANNING_HUD_HORIZONTAL_POSITION.getDefault(),
                 configured ? RSIntegrationConfig.PLANNING_HUD_VERTICAL_POSITION.get() : RSIntegrationConfig.PLANNING_HUD_VERTICAL_POSITION.getDefault());
     }

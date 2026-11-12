@@ -1567,6 +1567,7 @@ public final class RSIntegrationConfig {
         //  CLIENT
 
         ForgeConfigSpec.Builder cl = new ForgeConfigSpec.Builder();
+        CraftingUiColors.define(cl);
         cl.comment("计算任务提示；默认屏幕右侧居中，打开界面时隐藏。")
                 .push("planningHud");
         PLANNING_HUD_LAYOUT_VERSION = cl.comment("位置配置迁移版本，由模组自动维护。")

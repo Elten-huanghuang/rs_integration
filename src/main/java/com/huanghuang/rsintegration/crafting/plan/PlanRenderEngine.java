@@ -210,8 +210,8 @@ public final class PlanRenderEngine {
                                    int mouseX, int mouseY, int scrollOffset,
                                    MaterialTooltipSink tooltipSink,
                                    MaterialBookmarkSink bookmarkSink) {
-        CraftingUiStyle.surface(gfx, left, top, contentW, areaHeight, CraftingUiStyle.PANEL, CraftingUiStyle.BORDER);
-        gfx.drawString(font, Component.translatable("rsi.plan.materials"), left + 8, top + 4, CraftingUiStyle.TEXT, false);
+        CraftingUiStyle.surface(gfx, left, top, contentW, areaHeight, CraftingUiStyle.panel(), CraftingUiStyle.border());
+        gfx.drawString(font, Component.translatable("rsi.plan.materials"), left + 8, top + 4, CraftingUiStyle.text(), false);
         int gridTop = top + 8 + font.lineHeight;
         int gridBottom = top + areaHeight - 2;
         int cols = Math.max(1, (contentW - 16) / 110);
@@ -223,7 +223,7 @@ public final class PlanRenderEngine {
         scrollOffset = Math.max(0, Math.min(maxScroll, scrollOffset));
         if (maxScroll > 0) {
             String more = I18n.get("rsi.plan.materials_scroll");
-            gfx.drawString(font, more, left + contentW - font.width(more) - 8, top + 4, CraftingUiStyle.MUTED, false);
+            gfx.drawString(font, more, left + contentW - font.width(more) - 8, top + 4, CraftingUiStyle.muted(), false);
         }
         var entries = materials.entrySet().stream().toList();
         // 固定列宽，空白单元格也画到可见区域底部。
@@ -235,8 +235,8 @@ public final class PlanRenderEngine {
                 int cx = left + 8 + col * cellW;
                 int cy = gridTop + row * rowStride - scrollOffset;
                 int index = row * cols + col;
-                gfx.fill(cx, cy, cx + cellW, cy + rowStride, CraftingUiStyle.BORDER);
-                gfx.fill(cx + 1, cy + 1, cx + cellW - 1, cy + rowStride - 1, CraftingUiStyle.CANVAS);
+                gfx.fill(cx, cy, cx + cellW, cy + rowStride, CraftingUiStyle.border());
+                gfx.fill(cx + 1, cy + 1, cx + cellW - 1, cy + rowStride - 1, CraftingUiStyle.canvas());
                 if (index >= entries.size()) continue;
                 var entry = entries.get(index);
                 long needed = entry.getValue().needed();
@@ -258,7 +258,7 @@ public final class PlanRenderEngine {
                 gfx.pose().translate(cx + 4, cy + 4, 0);
                 for (int line = 0; line < labels.size(); line++) gfx.drawString(font,
                         CraftingUiStyle.fit(font, labels.get(line).getString(), cellW - 29),
-                        0, line * (font.lineHeight + 1), CraftingUiStyle.TEXT, false);
+                        0, line * (font.lineHeight + 1), CraftingUiStyle.text(), false);
                 gfx.pose().popPose();
                 if (tooltipSink != null && mouseY >= gridTop && mouseY < gridBottom
                         && mouseX >= cx && mouseX < cx + cellW && mouseY >= cy && mouseY < cy + rowStride) {

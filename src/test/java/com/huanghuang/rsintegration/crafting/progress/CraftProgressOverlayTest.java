@@ -36,7 +36,7 @@ class CraftProgressOverlayTest extends BootstrapTest {
         for (boolean planning : List.of(false, true)) for (boolean execution : List.of(false, true)) {
             var layout = CraftProgressOverlay.combinedLayout(width, height, lineHeight, planning, execution, true);
             assertTrue(layout.visible());
-            assertEquals(196, layout.width());
+            assertEquals(172, layout.width());
             assertTrue(layout.x() >= 0 && layout.x() + layout.width() <= width);
             assertTrue(layout.y() >= 0 && layout.y() + layout.height() <= height);
             assertTrue(Math.abs(layout.y() - (height - layout.height()) / 2) <= 1);

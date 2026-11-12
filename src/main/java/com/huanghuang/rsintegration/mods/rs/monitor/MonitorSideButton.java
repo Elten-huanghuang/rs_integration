@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.rs.monitor;
 
 import com.huanghuang.rsintegration.client.gui.CraftingUiStyle;
+import com.huanghuang.rsintegration.config.CraftingUiColors;
 import com.refinedmods.refinedstorage.screen.BaseScreen;
 import com.refinedmods.refinedstorage.screen.widget.sidebutton.SideButton;
 import net.minecraft.client.gui.GuiGraphics;
@@ -12,7 +13,7 @@ abstract class MonitorSideButton extends SideButton {
     @Override public void renderWidget(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         isHovered = mouseX >= getX() && mouseX < getX() + width && mouseY >= getY() && mouseY < getY() + height;
         CraftingUiStyle.raised(graphics, getX(), getY(), width, height,
-                isHoveredOrFocused() ? 0xFFE4E2EB : CraftingUiStyle.PANEL, CraftingUiStyle.BORDER);
+                isHoveredOrFocused() ? CraftingUiColors.SIDE_BUTTON_HOVER.argb() : CraftingUiStyle.panel(), CraftingUiStyle.border());
         renderButtonIcon(graphics, getX() + 1, getY() + 1);
         if (isHovered) screen.renderTooltip(graphics, mouseX, mouseY, getSideButtonTooltip());
     }

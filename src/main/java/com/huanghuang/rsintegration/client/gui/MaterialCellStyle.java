@@ -1,13 +1,16 @@
 package com.huanghuang.rsintegration.client.gui;
 
-/** 预览与监控共用的低饱和整格底色；不依赖任何可选存储模组。 */
-public enum MaterialCellStyle {
-    STORED(0xFFA1A5BB), RUNNING(0xFF88B0AD), SCHEDULED(0xFFC3B887),
-    BLOCKED(0xFFC6929B), STOPPING(0xFFB3A0C4), COMPLETED(0xFFA4B89A);
+import com.huanghuang.rsintegration.config.CraftingUiColors;
 
-    private final int color;
-    MaterialCellStyle(int color) { this.color = color; }
-    public int color() { return color; }
+/** 预览与监控共用的整格底色；配置重载后同步更新，不依赖可选存储模组。 */
+public enum MaterialCellStyle {
+    STORED(CraftingUiColors.MATERIAL_STORED), RUNNING(CraftingUiColors.MATERIAL_RUNNING),
+    SCHEDULED(CraftingUiColors.MATERIAL_SCHEDULED), BLOCKED(CraftingUiColors.MATERIAL_BLOCKED),
+    STOPPING(CraftingUiColors.MATERIAL_STOPPING), COMPLETED(CraftingUiColors.MATERIAL_COMPLETED);
+
+    private final CraftingUiColors color;
+    MaterialCellStyle(CraftingUiColors color) { this.color = color; }
+    public int color() { return color.argb(); }
 
     public static MaterialCellStyle preview(long available, long needed, long missing) {
         // 即使部分有货，真实缺口也必须显示缺料；由后续配方覆盖的差额才是待合成。

@@ -6,14 +6,14 @@ import com.huanghuang.rsintegration.mixin.refinedstorage.MonitorAmountsAccessor;
 import com.huanghuang.rsintegration.mixin.refinedstorage.MonitorErrorAccessor;
 import com.refinedmods.refinedstorage.api.autocrafting.craftingmonitor.ICraftingMonitorElement;
 
-/** AE 式状态底色；颜色覆盖整格，文字与数量仍保留各自含义。 */
+/** 可配置的状态底色；颜色覆盖整格，文字与数量仍保留各自含义。 */
 public enum MonitorGridStyle {
     STORED(MaterialCellStyle.STORED), RUNNING(MaterialCellStyle.RUNNING), SCHEDULED(MaterialCellStyle.SCHEDULED),
     BLOCKED(MaterialCellStyle.BLOCKED), STOPPING(MaterialCellStyle.STOPPING), COMPLETED(MaterialCellStyle.COMPLETED);
 
-    private final int color;
-    MonitorGridStyle(MaterialCellStyle style) { this.color = style.color(); }
-    public int color() { return color; }
+    private final MaterialCellStyle style;
+    MonitorGridStyle(MaterialCellStyle style) { this.style = style; }
+    public int color() { return style.color(); }
 
     public static MonitorGridStyle node(CraftProgressSnapshot.NodeProgress node) {
         if (node.draining()) return STOPPING;

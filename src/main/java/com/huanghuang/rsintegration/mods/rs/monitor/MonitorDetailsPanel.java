@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.rs.monitor;
 
 import com.huanghuang.rsintegration.client.gui.CraftingUiStyle;
+import com.huanghuang.rsintegration.config.CraftingUiColors;
 import com.huanghuang.rsintegration.client.gui.ListScrollState;
 import com.huanghuang.rsintegration.client.gui.ListScrollBar;
 import com.huanghuang.rsintegration.client.gui.ScrollBarStyle;
@@ -69,11 +70,11 @@ public final class MonitorDetailsPanel {
         searchWidth = Math.min(SEARCH_WIDTH, width - FILTER_WIDTH - CONTROL_GAP);
         search = new EditBox(font, x + 3, y + 27, searchWidth - 6, 14, Component.translatable("rsi.monitor.search"));
         search.setHint(Component.translatable("rsi.monitor.search_hint").withStyle(style -> style
-                .withColor(CraftingUiStyle.HINT).withBold(false)));
+                .withColor(CraftingUiStyle.hint()).withBold(false)));
         search.setTooltip(Tooltip.create(Component.translatable("rsi.monitor.search")));
         search.setMaxLength(128);
         search.setBordered(false);
-        search.setTextColor(CraftingUiStyle.TEXT);
+        search.setTextColor(CraftingUiStyle.text());
         search.setValue(query);
         search.setResponder(value -> refilter(false));
         register.accept(search);
@@ -201,6 +202,9 @@ public final class MonitorDetailsPanel {
     public boolean mouseReleased(double x, double y, int button) { return scrollBar.mouseReleased(x, y, button); }
 
     public void render(GuiGraphics graphics, int mouseX, int mouseY, IElementDrawers drawers) {
+        search.setTextColor(CraftingUiStyle.text());
+        search.setHint(Component.translatable("rsi.monitor.search_hint").withStyle(style -> style
+                .withColor(CraftingUiStyle.hint()).withBold(false)));
         if (!visible) return;
         var font = Minecraft.getInstance().font;
         if (lastTask instanceof RsiMonitorTask rsi) {
@@ -208,40 +212,40 @@ public final class MonitorDetailsPanel {
             String category = CraftingUiStyle.fit(font, rsi.diagnostics().category().getString(), categoryWidth);
             int right = x + contentWidth - (detailedNodes < totalNodes ? 12 : 0);
             int color = switch (rsi.diagnostics().kind()) {
-                case ATTENTION -> CraftingUiStyle.DANGER;
-                case RUNNING -> CraftingUiStyle.ACCENT;
-                case SUCCEEDED -> CraftingUiStyle.SUCCESS;
-                case CANCELLED -> CraftingUiStyle.MUTED;
-                default -> CraftingUiStyle.WARNING;
+                case ATTENTION -> CraftingUiStyle.danger();
+                case RUNNING -> CraftingUiStyle.accent();
+                case SUCCEEDED -> CraftingUiStyle.success();
+                case CANCELLED -> CraftingUiStyle.muted();
+                default -> CraftingUiStyle.warning();
             };
             // 分类和原因同时可见，普通排队不会与需检查步骤使用同一种提示。
             graphics.drawString(font, CraftingUiStyle.fit(font, Component.translatable("rsi.monitor.diagnosis.heading").getString(),
-                    right - x - font.width(category) - 8), x, y + 8, CraftingUiStyle.TEXT, false);
+                    right - x - font.width(category) - 8), x, y + 8, CraftingUiStyle.text(), false);
             graphics.drawString(font, category, right - font.width(category), y + 8, color, false);
             graphics.drawString(font, CraftingUiStyle.fit(font, MonitorDiagnostics.timingLabel(rsi.snapshot()).getString(), width),
-                    x, y + 45, CraftingUiStyle.MUTED, false);
-        } else graphics.drawString(font, Component.translatable("rsi.monitor.steps"), x, y + 8, CraftingUiStyle.TEXT, false);
-        if (detailedNodes < totalNodes) graphics.drawString(font, "+", x + contentWidth - font.width("+"), y + 8, CraftingUiStyle.WARNING, false);
-        CraftingUiStyle.surface(graphics, x, y + controlsTop(), searchWidth, 21, 0xFFDFE1EA, CraftingUiStyle.BORDER);
+                    x, y + 45, CraftingUiStyle.muted(), false);
+        } else graphics.drawString(font, Component.translatable("rsi.monitor.steps"), x, y + 8, CraftingUiStyle.text(), false);
+        if (detailedNodes < totalNodes) graphics.drawString(font, "+", x + contentWidth - font.width("+"), y + 8, CraftingUiStyle.warning(), false);
+        CraftingUiStyle.surface(graphics, x, y + controlsTop(), searchWidth, 21, CraftingUiColors.INPUT.argb(), CraftingUiStyle.border());
         CraftingUiStyle.inset(graphics, x, y + listTop(), contentWidth, rowHeight() * visibleRows());
         for (int row = 0; row < visibleRows(); row++) {
             int rowY = y + listTop() + row * rowHeight();
-            graphics.fill(x, rowY + rowHeight() - 1, x + contentWidth, rowY + rowHeight(), CraftingUiStyle.GRID_LINE);
+            graphics.fill(x, rowY + rowHeight() - 1, x + contentWidth, rowY + rowHeight(), CraftingUiStyle.gridLine());
         }
         if (filtered.isEmpty()) {
             var text = Component.translatable(entries.isEmpty() ? "rsi.monitor.no_steps"
                     : search.getValue().isBlank() ? "rsi.monitor.no_active_steps" : "rsi.monitor.no_matches");
             int lineY = y + listTop() + 15;
             for (var line : font.split(text, contentWidth - 10)) {
-                graphics.drawString(font, line, x + (contentWidth - font.width(line)) / 2, lineY, CraftingUiStyle.MUTED, false);
+                graphics.drawString(font, line, x + (contentWidth - font.width(line)) / 2, lineY, CraftingUiStyle.muted(), false);
                 lineY += font.lineHeight + 3;
             }
         }
         for (int row = 0; row < visibleRows() && offset + row < filtered.size(); row++) {
             var entry = filtered.get(offset + row);
             int rowY = y + listTop() + row * rowHeight();
-            int accent = entry.priority() == 0 ? CraftingUiStyle.DANGER : entry.priority() == 1
-                    ? CraftingUiStyle.ACCENT : entry.active() ? CraftingUiStyle.WARNING : CraftingUiStyle.SUCCESS;
+            int accent = entry.priority() == 0 ? CraftingUiStyle.danger() : entry.priority() == 1
+                    ? CraftingUiStyle.accent() : entry.active() ? CraftingUiStyle.warning() : CraftingUiStyle.success();
             boolean hovered = mouseX >= x && mouseX < x + contentWidth && mouseY >= rowY && mouseY < rowY + rowHeight() - 1;
             MonitorGridStyle stateColor = entry.priority() == 0 ? MonitorGridStyle.BLOCKED
                     : entry.priority() == 1 ? MonitorGridStyle.RUNNING : entry.active() ? MonitorGridStyle.SCHEDULED : MonitorGridStyle.STORED;
@@ -250,19 +254,19 @@ public final class MonitorDetailsPanel {
                 stateColor = MonitorGridStyle.node(rsi.snapshot().nodes().get(entry.elementIndex()));
             }
             graphics.fill(x, rowY, x + contentWidth, rowY + rowHeight() - 1, stateColor.color());
-            if (hovered) graphics.fill(x, rowY, x + contentWidth, rowY + 1, CraftingUiStyle.HIGHLIGHT);
+            if (hovered) graphics.fill(x, rowY, x + contentWidth, rowY + 1, CraftingUiStyle.highlight());
             graphics.fill(x, rowY + 1, x + 2, rowY + rowHeight() - 3, accent);
             if (!entry.item().isEmpty()) InkFluidRenderer.render(graphics, entry.item(), x + contentWidth - 21, rowY + 5);
             else if (!entry.fluid().isEmpty()) drawers.getFluidDrawer().draw(graphics, x + contentWidth - 21, rowY + 5, entry.fluid());
             int textWidth = contentWidth - 33;
-            graphics.drawString(font, CraftingUiStyle.fit(font, entry.title().getString(), textWidth), x + 5, rowY + 2, CraftingUiStyle.TEXT, false);
-            graphics.drawString(font, CraftingUiStyle.fit(font, entry.state().getString(), textWidth), x + 5, rowY + 12, CraftingUiStyle.TEXT, false);
+            graphics.drawString(font, CraftingUiStyle.fit(font, entry.title().getString(), textWidth), x + 5, rowY + 2, CraftingUiStyle.text(), false);
+            graphics.drawString(font, CraftingUiStyle.fit(font, entry.state().getString(), textWidth), x + 5, rowY + 12, CraftingUiStyle.text(), false);
             if (lastTask instanceof RsiMonitorTask) graphics.drawString(font,
-                    CraftingUiStyle.fit(font, entry.machine().getString(), contentWidth - 10), x + 5, rowY + 22, CraftingUiStyle.MUTED, false);
+                    CraftingUiStyle.fit(font, entry.machine().getString(), contentWidth - 10), x + 5, rowY + 22, CraftingUiStyle.muted(), false);
             graphics.drawString(font, CraftingUiStyle.fit(font, entry.counts().getString(), contentWidth - 10),
-                    x + 5, rowY + rowHeight() - 12, CraftingUiStyle.MUTED, false);
+                    x + 5, rowY + rowHeight() - 12, CraftingUiStyle.muted(), false);
             if (entry.completedFraction() >= 0) {
-                graphics.fill(x + 2, rowY + rowHeight() - 2, x + contentWidth - 2, rowY + rowHeight() - 1, CraftingUiStyle.CANVAS);
+                graphics.fill(x + 2, rowY + rowHeight() - 2, x + contentWidth - 2, rowY + rowHeight() - 1, CraftingUiStyle.canvas());
                 graphics.fill(x + 2, rowY + rowHeight() - 2,
                         x + 2 + (int) ((contentWidth - 4) * entry.completedFraction()), rowY + rowHeight() - 1, accent);
             }

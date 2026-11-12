@@ -230,13 +230,13 @@ public abstract class CraftingMonitorScreenMixin extends BaseScreen<CraftingMoni
         ci.cancel();
         boolean online = craftingMonitor.isActiveOnClient();
         CraftingUiStyle.raised(graphics, x, y, rsi$screen().getXSize(), rsi$screen().getYSize(),
-                CraftingUiStyle.PANEL, CraftingUiStyle.BORDER);
+                CraftingUiStyle.panel(), CraftingUiStyle.border());
         if (rsi$detailsReplaceGrid()) {
             rsi$details.render(graphics, mouseX, mouseY, drawers);
             return;
         }
         CraftingUiStyle.inset(graphics, x + 7, y + 20, rsi$layout.gridRight() - 7, rsi$layout.gridHeight());
-        graphics.fill(x + 7, y + 20, x + rsi$layout.gridRight(), y + 20 + rsi$layout.gridHeight(), CraftingUiStyle.GRID_LINE);
+        graphics.fill(x + 7, y + 20, x + rsi$layout.gridRight(), y + 20 + rsi$layout.gridHeight(), CraftingUiStyle.gridLine());
         // 网格位置和滚动偏移严格沿用 RS；保留原生及第三方元素的深色文字和 tooltip。
         int offset = scrollbar.getOffset() * 3;
         var elements = rsi$screen().getElements();
@@ -244,7 +244,7 @@ public abstract class CraftingMonitorScreenMixin extends BaseScreen<CraftingMoni
             int cellX = x + 7 + index % 3 * (rsi$layout.cellWidth() + 1);
             int cellY = y + 20 + index / 3 * (rsi$layout.cellHeight() + 1);
             int color = offset + index < elements.size()
-                    ? MonitorGridStyle.nativeElement(elements.get(offset + index)).color() : CraftingUiStyle.CANVAS;
+                    ? MonitorGridStyle.nativeElement(elements.get(offset + index)).color() : CraftingUiStyle.canvas();
             graphics.fill(cellX, cellY, cellX + rsi$layout.cellWidth(), cellY + rsi$layout.cellHeight(), color);
         }
         int barX = x + rsi$layout.gridRight() + ScrollBarStyle.CONTENT_GAP;
@@ -255,7 +255,7 @@ public abstract class CraftingMonitorScreenMixin extends BaseScreen<CraftingMoni
                         && mouseY >= y + 20 && mouseY < y + 20 + rsi$layout.gridHeight());
         if (rsi$details != null && rsi$details.visible()) {
             graphics.fill(x + rsi$layout.materialWidth(), y + 7, x + rsi$layout.materialWidth() + 1,
-                    y + imageHeight - 7, CraftingUiStyle.BORDER);
+                    y + imageHeight - 7, CraftingUiStyle.border());
             rsi$details.render(graphics, mouseX, mouseY, drawers);
         }
     }
@@ -307,9 +307,9 @@ public abstract class CraftingMonitorScreenMixin extends BaseScreen<CraftingMoni
             rsi$details.tooltip(graphics, mouseX, mouseY);
             return;
         }
-        graphics.drawString(font, title, 7, 7, CraftingUiStyle.TEXT, false);
+        graphics.drawString(font, title, 7, 7, CraftingUiStyle.text(), false);
         Component count = Component.translatable("rsi.monitor.task_count", tasks.size());
-        graphics.drawString(font, count, rsi$layout.materialWidth() - 7 - font.width(count), 7, CraftingUiStyle.MUTED, false);
+        graphics.drawString(font, count, rsi$layout.materialWidth() - 7 - font.width(count), 7, CraftingUiStyle.muted(), false);
         var elements = rsi$screen().getElements();
         int offset = scrollbar.getOffset() * 3;
         List<Component> hovered = List.of();
@@ -333,7 +333,7 @@ public abstract class CraftingMonitorScreenMixin extends BaseScreen<CraftingMoni
             int lineY = 76;
             for (Component text : List.of(heading, detail)) {
                 for (var line : font.split(text, rsi$layout.materialWidth() - 40)) {
-                    graphics.drawString(font, line, center - font.width(line) / 2, lineY, CraftingUiStyle.TEXT, false);
+                    graphics.drawString(font, line, center - font.width(line) / 2, lineY, CraftingUiStyle.text(), false);
                     lineY += font.lineHeight + 3;
                 }
                 lineY += 7;

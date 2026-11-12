@@ -37,9 +37,9 @@ public final class MonitorGridRenderer {
         int textTop = y + (height - shown * lineHeight + 1) / 2;
         for (int line = 0; line < shown; line++) {
             graphics.drawString(font, CraftingUiStyle.fit(font, lines.get(line).getString(), width - 26),
-                    x + 3, textTop + line * lineHeight, CraftingUiStyle.TEXT, false);
+                    x + 3, textTop + line * lineHeight, CraftingUiStyle.text(), false);
         }
-        if (lines.size() > shown) graphics.drawString(font, "+", x + width - 8, y + height - 9, CraftingUiStyle.TEXT, false);
+        if (lines.size() > shown) graphics.drawString(font, "+", x + width - 8, y + height - 9, CraftingUiStyle.text(), false);
     }
 
     public static void drawNative(ICraftingMonitorElement original, GuiGraphics graphics, int x, int y,

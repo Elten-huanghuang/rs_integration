@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.crafting.plan.PlanBackgroundClient;
 import com.huanghuang.rsintegration.crafting.MachineManagementScreen;
 import com.huanghuang.rsintegration.crafting.progress.ExecutionMonitorClient;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.config.CraftingUiColors;
 import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.client.gui.CraftingUiStyle;
 import com.huanghuang.rsintegration.client.gui.CraftingUiStyle.ActionButton;
@@ -182,25 +183,25 @@ public final class PlanningTasksScreen extends Screen {
     @Override public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         renderBackground(graphics);
         CraftingUiStyle.panel(graphics, panelX, panelY, panelWidth, panelHeight);
-        CraftingUiStyle.planIcon(graphics, panelX + 14, panelY + 16, CraftingUiStyle.ACCENT);
-        graphics.drawString(font, title, panelX + 36, panelY + 13, CraftingUiStyle.TEXT, false);
+        CraftingUiStyle.planIcon(graphics, panelX + 14, panelY + 16, CraftingUiStyle.accent());
+        graphics.drawString(font, title, panelX + 36, panelY + 13, CraftingUiStyle.text(), false);
         Component hint = monitorNotice != null ? monitorNotice : Component.translatable(network == null
                 ? "rsi.planning.tasks.personal_hint" : "rsi.planning.tasks.network_hint");
         graphics.drawString(font, CraftingUiStyle.fit(font, hint.getString(), panelWidth - 50),
-                panelX + 36, panelY + 29, monitorNotice == null ? CraftingUiStyle.MUTED : CraftingUiStyle.DANGER, false);
+                panelX + 36, panelY + 29, monitorNotice == null ? CraftingUiStyle.muted() : CraftingUiStyle.danger(), false);
         Component count = Component.translatable("rsi.planning.tasks.count", rows.size());
         graphics.drawString(font, count, panelX + panelWidth - font.width(count) - 14,
-                panelY + 13, CraftingUiStyle.MUTED, false);
+                panelY + 13, CraftingUiStyle.muted(), false);
         graphics.fill(panelX + 12, panelY + panelHeight - FOOTER_HEIGHT,
-                panelX + panelWidth - 12, panelY + panelHeight - FOOTER_HEIGHT + 1, CraftingUiStyle.BORDER);
+                panelX + panelWidth - 12, panelY + panelHeight - FOOTER_HEIGHT + 1, CraftingUiStyle.border());
         if (rows.isEmpty()) {
-            centered(graphics, Component.translatable("rsi.planning.tasks.empty"), panelY + HEADER_HEIGHT + 6, CraftingUiStyle.TEXT);
-            centered(graphics, Component.translatable("rsi.planning.tasks.empty_hint"), panelY + HEADER_HEIGHT + 23, CraftingUiStyle.MUTED);
+            centered(graphics, Component.translatable("rsi.planning.tasks.empty"), panelY + HEADER_HEIGHT + 6, CraftingUiStyle.text());
+            centered(graphics, Component.translatable("rsi.planning.tasks.empty_hint"), panelY + HEADER_HEIGHT + 23, CraftingUiStyle.muted());
         }
         if (rows.size() > rowsPerPage) {
             String pages = (page + 1) + " / " + ((rows.size() + rowsPerPage - 1) / rowsPerPage);
             graphics.drawString(font, pages, paginationCenterX - font.width(pages) / 2,
-                    panelY + panelHeight - 23, CraftingUiStyle.MUTED, false);
+                    panelY + panelHeight - 23, CraftingUiStyle.muted(), false);
         }
         super.render(graphics, mouseX, mouseY, partialTick);
         // 托管在原生监控器中时，原版 Tooltip 会排入外层 Screen；这里直接绘制完整条目名称。
@@ -271,18 +272,18 @@ public final class PlanningTasksScreen extends Screen {
 
         @Override protected void renderWidget(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
             int accent = row.completed() && row.stateKey().equals("rsi.planning.tasks.ready")
-                    ? CraftingUiStyle.SUCCESS : row.completed() ? CraftingUiStyle.WARNING
-                    : row.cancellable() ? CraftingUiStyle.ACCENT : CraftingUiStyle.WARNING;
+                    ? CraftingUiStyle.success() : row.completed() ? CraftingUiStyle.warning()
+                    : row.cancellable() ? CraftingUiStyle.accent() : CraftingUiStyle.warning();
             CraftingUiStyle.surface(graphics, getX(), getY(), getWidth(), getHeight(),
-                    active && isHoveredOrFocused() ? 0xFFE6F3F8 : 0xFFFFFFFF,
-                    active && isHoveredOrFocused() ? CraftingUiStyle.ACCENT : CraftingUiStyle.BORDER);
+                    active && isHoveredOrFocused() ? CraftingUiColors.ROW_HOVER.argb() : CraftingUiColors.ROW.argb(),
+                    active && isHoveredOrFocused() ? CraftingUiStyle.accent() : CraftingUiStyle.border());
             graphics.fill(getX(), getY() + 5, getX() + 2, getY() + getHeight() - 5, accent);
-            graphics.fill(getX() + 8, getY() + 8, getX() + 34, getY() + 34, CraftingUiStyle.CANVAS);
+            graphics.fill(getX() + 8, getY() + 8, getX() + 34, getY() + 34, CraftingUiStyle.canvas());
             if (!row.icon().isEmpty()) InkFluidRenderer.render(graphics, row.icon(), getX() + 13, getY() + 13);
             else CraftingUiStyle.planIcon(graphics, getX() + 14, getY() + 13, accent);
             int textX = getX() + 44;
             int textWidth = Math.max(1, getWidth() - 66 - (row.cancellable() ? 28 : 0));
-            graphics.drawString(font, CraftingUiStyle.fit(font, row.name(), textWidth), textX, getY() + 8, CraftingUiStyle.TEXT, false);
+            graphics.drawString(font, CraftingUiStyle.fit(font, row.name(), textWidth), textX, getY() + 8, CraftingUiStyle.text(), false);
             Component description = Component.translatable(row.stateKey()).append(" · ").append(
                     row.completed() ? Component.translatable("rsi.planning.tasks.open_tree", row.repeatCount())
                             : Component.translatable(row.cancellable() ? "rsi.planning.tasks.background" : "rsi.planning.tasks.finished"));
@@ -291,8 +292,8 @@ public final class PlanningTasksScreen extends Screen {
             if (row.cancellable()) {
                 int actionX = getX() + getWidth() - 28;
                 graphics.fill(actionX - 1, getY() + 7, actionX, getY() + getHeight() - 7,
-                        CraftingUiStyle.BORDER);
-                int color = cancelHovered(mouseX, mouseY) ? CraftingUiStyle.DANGER : CraftingUiStyle.MUTED;
+                        CraftingUiStyle.border());
+                int color = cancelHovered(mouseX, mouseY) ? CraftingUiStyle.danger() : CraftingUiStyle.muted();
                 graphics.drawString(font, "×", actionX + 8, getY() + 15, color, false);
             } else if (active) {
                 graphics.drawString(font, "›", getX() + getWidth() - 14, getY() + 17, accent, false);
