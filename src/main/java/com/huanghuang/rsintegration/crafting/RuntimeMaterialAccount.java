@@ -61,6 +61,11 @@ final class RuntimeMaterialAccount {
     }
     boolean uncertain() { return uncertain; }
     boolean usable() { return !closed && !uncertain && !acquiring; }
+    void markTransferUncertain() {
+        if (uncertain) return;
+        uncertain = true;
+        RSIntegrationMod.LOGGER.error("[RSI-Materials] 任务 {} 流体交付结果不明，停止自动重试", craftId);
+    }
     long count(MaterialKey key) { return held.getOrDefault(key, 0L); }
 
     @Nullable

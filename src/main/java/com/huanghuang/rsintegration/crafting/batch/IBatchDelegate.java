@@ -393,6 +393,9 @@ public interface IBatchDelegate {
         return false;
     }
 
+    /** 流体不进入共享物品槽位布局，由当前任务账户交付给委托。 */
+    default boolean usesTaskFluidInputs() { return false; }
+
     /**
      * Merge graph-allocated and directly reserved supplemental materials into
      * the order expected by {@code startPreparedOperation}. Delegates exposing

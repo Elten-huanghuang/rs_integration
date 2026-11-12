@@ -623,6 +623,11 @@ public final class ParallelCraftGroup implements IBatchDelegate {
                 && requiresPrivateLedgerGraphDispatch(workers.get(0).delegate);
     }
 
+    @Override
+    public boolean usesTaskFluidInputs() {
+        return !workers.isEmpty() && workers.get(0).delegate.usesTaskFluidInputs();
+    }
+
     static boolean requiresPrivateLedgerGraphDispatch(@Nullable IBatchDelegate delegate) {
         return delegate != null && delegate.requiresPrivateLedgerGraphDispatch();
     }

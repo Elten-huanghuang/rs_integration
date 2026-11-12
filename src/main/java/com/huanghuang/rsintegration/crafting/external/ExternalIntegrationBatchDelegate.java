@@ -56,6 +56,7 @@ import com.huanghuang.rsintegration.api.recipe.RecipeIntegration;
 import com.huanghuang.rsintegration.api.recipe.RecipeView;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
+import com.huanghuang.rsintegration.crafting.TaskFluidAccess;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.MaterialMatcher;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
@@ -67,6 +68,7 @@ import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.crafting.graph.OutputProbability;
 import com.huanghuang.rsintegration.feature.unifiedgrid.UnifiedGridFluidRecovery;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.storage.StorageFluidKey;
 import com.huanghuang.rsintegration.storage.StorageFluidOperationResult;
 import com.huanghuang.rsintegration.storage.StorageFluidSnapshot;
@@ -186,6 +188,13 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     private final List<InsertedMaterial> insertedMaterials = new ArrayList<>();
     private final List<ItemStack> uninsertedMaterials = new ArrayList<>();
     private final List<ItemStack> pendingInputRefunds = new ArrayList<>();
+    @Nullable private TaskFluidAccess taskFluids;
+    private boolean fluidSourceCaptured;
+    private boolean fluidTransferUncertain;
+    private boolean fluidInputSnapshotCaptured;
+    private boolean rejectedBeforeInputDelivery;
+    private boolean customCleanupStarted;
+    private final List<ItemStack> taskFluidOutputs = new ArrayList<>();
 
     public ExternalIntegrationBatchDelegate() {
         this(() -> RSIIntegrationApi.get().orElse(null), true);
@@ -566,6 +575,18 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     }
 
     @Override
+    public boolean usesTaskFluidInputs() {
+        return recipeView != null && !recipeView.fluids().isEmpty();
+    }
+
+    @Override
+    public boolean startSingleOperation(ServerPlayer player, ExtractionLedger sharedLedger) {
+        // 纯流体配方的共享物品布局为空，仍需进入正常的准备和投料流程。
+        return recipeView != null && recipeView.materials().isEmpty()
+                && startPreparedOperation(player, List.of(), sharedLedger);
+    }
+
+    @Override
     public boolean startPreparedOperation(
             ServerPlayer player,
             List<ItemStack> materials,
@@ -574,6 +595,15 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         if (!validateExecutionContext(player)
                 || recipeView == null || descriptor == null) {
             return failPreparedStart("execution context is invalid");
+        }
+        captureFluidSource(player);
+        if (!recipeView.fluids().isEmpty()
+                && (fluidTransferUncertain || taskFluids != null && !taskFluids.usable())) {
+            rejectedBeforeInputDelivery = true;
+            uninsertedMaterials.clear();
+            materials.stream().filter(stack -> !stack.isEmpty())
+                    .forEach(stack -> uninsertedMaterials.add(stack.copy()));
+            return failPreparedStart("task fluid account is unavailable");
         }
         if (executionKind == RecipeExecutionKind.CUSTOM) {
             boolean started = startCustomOperation(
@@ -613,6 +643,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                                 port.direction() == InputOutputAccess.INPUT)
                         .toList()
         );
+        fluidInputSnapshotCaptured = true;
         snapshotFluidSlots(
                 fluidOutputBaseline,
                 descriptor.fluidPorts().stream()
@@ -790,9 +821,10 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             }
         }
         collectFluidOutputs(player);
-        return collected.values().stream()
-                .map(ItemStack::copy)
-                .toList();
+        List<ItemStack> result = new ArrayList<>(collected.values());
+        result.addAll(taskFluidOutputs);
+        taskFluidOutputs.clear();
+        return result.stream().map(ItemStack::copy).toList();
     }
 
     @Override
@@ -976,6 +1008,11 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
 
     @Override
     protected void clearMachineState(BlockEntity blockEntity, ServerPlayer player) {
+        returnCollectedTaskFluids();
+        if (rejectedBeforeInputDelivery) {
+            recordFailureRecoveredInputs(uninsertedMaterials);
+            return;
+        }
         if (executionKind == RecipeExecutionKind.CUSTOM) {
             clearCustomOperation(player);
             return;
@@ -1000,8 +1037,9 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             ItemStack extracted = extract(port, removable, player);
             if (!extracted.isEmpty()) recovered.add(extracted);
         }
-        if (player != null && descriptor != null) {
+        if (descriptor != null && fluidInputSnapshotCaptured && !fluidTransferUncertain) {
             for (var port : descriptor.fluidPorts()) {
+                if (fluidTransferUncertain) break;
                 if (port.direction() != InputOutputAccess.INPUT) continue;
                 FluidStack baseline = fluidInputBaseline.get(
                         new FluidSlotKey(port));
@@ -1021,11 +1059,24 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
 
     @Override
     protected void clearMissingMachineState(@Nullable ServerPlayer player) {
+        returnCollectedTaskFluids();
         if (executionKind == RecipeExecutionKind.CUSTOM) {
             clearCustomOperation(player);
             return;
         }
         recordFailureRecoveredInputs(uninsertedMaterials);
+    }
+
+    @Override
+    protected void clearUnavailableMachineState(@Nullable ServerPlayer player) {
+        clearMissingMachineState(player);
+    }
+
+    private void returnCollectedTaskFluids() {
+        if (taskFluids == null || taskFluidOutputs.isEmpty()) return;
+        List<FluidStack> recovered = taskFluidOutputs.stream().map(InkFluidSupport::fluid).toList();
+        taskFluidOutputs.clear();
+        taskFluids.refund(recovered);
     }
 
     @Override
@@ -1234,6 +1285,8 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                     executionPlan
             );
         } catch (RuntimeException | LinkageError failure) {
+            // start 可能已向机器交付，异常不等于明确拒收。
+            if (!customReservedFluids.isEmpty()) markFluidTransferUncertain();
             return ExecutionResult.rejected(new IntegrationDiagnostic(
                     IntegrationDiagnosticCode.EXECUTION_START_REJECTED,
                     IntegrationSeverity.ERROR,
@@ -1619,6 +1672,18 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             ServerPlayer player,
             CollectedOutput output
     ) {
+        if (taskFluids != null) {
+            // 实物交给执行图，再由下游领取或在任务结束时入库，不能先写入公共网络。
+            long remaining = output.amount();
+            while (remaining > 0L) {
+                int chunk = (int) Math.min(Integer.MAX_VALUE, remaining);
+                ItemStack token = InkFluidSupport.tokenFor(output.resource(), chunk);
+                if (token.isEmpty()) return "custom fluid output cannot be represented";
+                taskFluidOutputs.add(token);
+                remaining -= chunk;
+            }
+            return null;
+        }
         if (!hasStorageAccess()
                 || !storageEndpoint().session().supports(
                 StorageCapability.FLUID_STORAGE)) {
@@ -1931,9 +1996,10 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             return List.of();
         }
         resultsCollected = true;
-        return customCollectedItems.stream()
-                .map(ItemStack::copy)
-                .toList();
+        List<ItemStack> result = new ArrayList<>(customCollectedItems);
+        result.addAll(taskFluidOutputs);
+        taskFluidOutputs.clear();
+        return result.stream().map(ItemStack::copy).toList();
     }
 
     private void collectFluidOutputs(ServerPlayer player) {
@@ -1942,7 +2008,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                         == IntegrationResourceKey.ResourceKind.FLUID)) {
             return;
         }
-        if (!hasStorageAccess()) {
+        if (taskFluids == null && !hasStorageAccess()) {
             failReportedResource("selected storage has no fluid capability");
             return;
         }
@@ -1974,6 +2040,16 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                         remaining, available);
                 FluidStack candidate = current.copy();
                 candidate.setAmount(requested);
+                if (taskFluids != null) {
+                    FluidStack extracted = extractFluid(port, requested);
+                    if (extracted.isEmpty()) {
+                        failReportedResource("machine did not release the declared fluid output");
+                        return;
+                    }
+                    taskFluidOutputs.add(InkFluidSupport.token(extracted));
+                    remaining -= extracted.getAmount();
+                    continue;
+                }
                 StorageFluidOperationResult simulated =
                         storageEndpoint().session().insertFluid(
                                 player, candidate, true);
@@ -2173,12 +2249,16 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     }
 
     private void clearCustomOperation(@Nullable ServerPlayer player) {
+        if (customCleanupStarted) return;
+        customCleanupStarted = true;
+        returnCollectedTaskFluids();
         RunningOperation operation = runningOperation;
         runningOperation = null;
         if (operation == null) {
-            returnOrRetainCustomFluids(customReservedFluids, player);
+            if (fluidTransferUncertain) retainAllCustomFluids(player);
+            else returnOrRetainCustomFluids(customReservedFluids, player);
             customReservedFluids.clear();
-            if (customStartPending && customMaterials != null) {
+            if (!fluidTransferUncertain && customMaterials != null) {
                 List<ItemStack> reserved = new ArrayList<>();
                 for (ReservedMaterial material : customMaterials.materials()) {
                     if (material.resource().kind()
@@ -2191,6 +2271,8 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                 recordFailureRecoveredInputs(reserved);
                 customPendingRefundSafe = true;
                 customStartPending = false;
+            } else if (!fluidTransferUncertain) {
+                recordFailureRecoveredInputs(uninsertedMaterials);
             }
             persistCustomOperation(
                     ExternalOperationJournal.State.FAILED,
@@ -2302,7 +2384,6 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             @Nullable ServerPlayer player
     ) {
         if (customReservedFluids.isEmpty()) return;
-        Set<String> handled = new HashSet<>();
         for (MaterialDisposition disposition : dispositions) {
             ReservedMaterial material = disposition.material();
             if (material.resource().kind()
@@ -2311,18 +2392,38 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             }
             String entryId = material.entryId();
             List<FluidStack> reserved = customReservedFluids.get(entryId);
-            if (reserved == null || !handled.add(entryId)) continue;
+            if (reserved == null) continue;
+            long remaining = material.amount();
+            List<FluidStack> settled = new ArrayList<>();
+            List<FluidStack> unsettled = new ArrayList<>();
+            for (FluidStack fluid : reserved) {
+                int amount = (int) Math.min(remaining, fluid.getAmount());
+                if (amount > 0) {
+                    FluidStack part = fluid.copy();
+                    part.setAmount(amount);
+                    settled.add(part);
+                    remaining -= amount;
+                }
+                if (amount < fluid.getAmount()) {
+                    FluidStack rest = fluid.copy();
+                    rest.shrink(amount);
+                    unsettled.add(rest);
+                }
+            }
+            if (remaining != 0L) throw new IllegalStateException("流体结算超出预留量: " + entryId);
+            // 按回执数量移交所有权，同一 entry 可同时包含消费和回收片段。
+            if (unsettled.isEmpty()) customReservedFluids.remove(entryId);
+            else customReservedFluids.put(entryId, unsettled);
             switch (disposition.outcome()) {
                 case CONSUMED -> {
                     // 已由 custom operation 明确消费。
                 }
                 case RECOVERED ->
                         returnOrRetainCustomFluids(
-                                Map.of(entryId, reserved), player);
+                                Map.of(entryId, settled), player);
                 case UNCERTAIN -> retainCustomFluids(
-                        Map.of(entryId, reserved), player);
+                        Map.of(entryId, settled), player);
             }
-            customReservedFluids.remove(entryId);
         }
         if (!customReservedFluids.isEmpty()) {
             retainCustomFluids(
@@ -2335,6 +2436,10 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             Map<String, List<FluidStack>> fluids,
             @Nullable ServerPlayer player
     ) {
+        if (taskFluids != null) {
+            taskFluids.refund(fluids.values().stream().flatMap(List::stream).toList());
+            return;
+        }
         if (!hasStorageAccess() || player == null) {
             retainCustomFluids(fluids, player);
             return;
@@ -2365,6 +2470,11 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             Map<String, List<FluidStack>> fluids,
             @Nullable ServerPlayer player
     ) {
+        if (taskFluids != null) {
+            // 转移结果不明的预留不是已收回实物，不能作为退款复制回账户或恢复箱。
+            markFluidTransferUncertain();
+            return;
+        }
         MinecraftServer server = player != null
                 ? player.server
                 : level == null ? null : level.getServer();
@@ -2422,22 +2532,13 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
 
     private boolean insertFluidInputs(ServerPlayer player) {
         if (recipeView.fluids().isEmpty()) return true;
-        if (!hasStorageAccess()
-                || !storageEndpoint().session().supports(
-                StorageCapability.FLUID_STORAGE)) {
-            preparationFailure = Component.literal(
-                    "RSI Integration selected storage has no fluid capability");
-            return false;
+        StorageFluidSnapshot snapshot = fluidSnapshot(player);
+        if (snapshot == null) return false;
+        if (!fluidInputSnapshotCaptured && descriptor != null) {
+            snapshotFluidSlots(fluidInputBaseline, descriptor.fluidPorts().stream()
+                    .filter(port -> port.direction() == InputOutputAccess.INPUT).toList());
+            fluidInputSnapshotCaptured = true;
         }
-        var snapshotResult = storageEndpoint().session().snapshotFluids(player);
-        if (!snapshotResult.successful()) {
-            preparationFailure = Component.literal(
-                    "RSI Integration fluid snapshot failed: "
-                            + snapshotResult.status());
-            return false;
-        }
-        StorageFluidSnapshot snapshot =
-                snapshotResult.snapshotValue().orElseThrow();
         Map<StorageFluidKey, Long> reserved = new LinkedHashMap<>();
         for (FluidRequirement requirement : recipeView.fluids()) {
             StorageFluidKey key = ExternalFluidMatcher.find(
@@ -2451,8 +2552,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             ExternalFluidMatcher.reserve(
                     reserved, key, requirement.amount());
             StorageFluidOperationResult simulated =
-                    storageEndpoint().session().extractFluidExact(
-                            player, key, requirement.amount(), true);
+                    extractInputFluid(player, key, requirement.amount(), true);
             if (simulated.status() != StorageOperationStatus.SUCCESS
                     || simulated.transferredAmountExact()
                     .orElse(-1L) != requirement.amount()) {
@@ -2462,9 +2562,13 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                 return false;
             }
             StorageFluidOperationResult extracted =
-                    storageEndpoint().session().extractFluidExact(
-                            player, key, requirement.amount(), false);
-            if (extracted.status() != StorageOperationStatus.SUCCESS) {
+                    extractInputFluid(player, key, requirement.amount(), false);
+            if (!extracted.transferKnown()) {
+                markFluidTransferUncertain();
+                return false;
+            }
+            if (extracted.status() != StorageOperationStatus.SUCCESS
+                    || extracted.transferredAmountExact().orElse(-1L) != requirement.amount()) {
                 refundFluids(player, extracted.transferredFluids());
                 preparationFailure = Component.literal(
                         "RSI Integration fluid extraction failed: "
@@ -2472,7 +2576,9 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                 return false;
             }
             long remaining = requirement.amount();
-            for (FluidStack fluid : extracted.transferredFluids()) {
+            List<FluidStack> fragments = extracted.transferredFluids();
+            for (int index = 0; index < fragments.size(); index++) {
+                FluidStack fluid = fragments.get(index);
                 if (remaining <= 0L) break;
                 FluidStack toInsert = fluid.copy();
                 toInsert.setAmount((int) Math.min(
@@ -2481,11 +2587,17 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                 ));
                 long remainder = insertFluidIntoMachine(
                         requirement, toInsert);
+                if (fluidTransferUncertain) {
+                    // 只有还未尝试交付的后续分片可以退回，当前分片留待对账。
+                    refundFluids(player, fragments.subList(index + 1, fragments.size()));
+                    return false;
+                }
                 remaining -= toInsert.getAmount() - remainder;
                 if (remainder > 0L) {
                     FluidStack refund = toInsert.copy();
                     refund.setAmount((int) remainder);
                     refundFluids(player, List.of(refund));
+                    refundFluids(player, fragments.subList(index + 1, fragments.size()));
                     preparationFailure = Component.literal(
                             "RSI Integration fluid port rejected "
                                     + requirement.entryId());
@@ -2507,22 +2619,8 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             List<ReservedMaterial> reservedMaterials
     ) {
         if (recipeView.fluids().isEmpty()) return true;
-        if (!hasStorageAccess()
-                || !storageEndpoint().session().supports(
-                StorageCapability.FLUID_STORAGE)) {
-            preparationFailure = Component.literal(
-                    "RSI Integration custom execution requires fluid storage");
-            return false;
-        }
-        var snapshotResult = storageEndpoint().session().snapshotFluids(player);
-        if (!snapshotResult.successful()) {
-            preparationFailure = Component.literal(
-                    "RSI Integration custom fluid snapshot failed: "
-                            + snapshotResult.status());
-            return false;
-        }
-        StorageFluidSnapshot snapshot =
-                snapshotResult.snapshotValue().orElseThrow();
+        StorageFluidSnapshot snapshot = fluidSnapshot(player);
+        if (snapshot == null) return false;
         Map<StorageFluidKey, Long> selected = new LinkedHashMap<>();
         for (FluidRequirement requirement : recipeView.fluids()) {
             StorageFluidKey key = ExternalFluidMatcher.find(
@@ -2537,8 +2635,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             ExternalFluidMatcher.reserve(
                     selected, key, requirement.amount());
             StorageFluidOperationResult simulated =
-                    storageEndpoint().session().extractFluidExact(
-                            player, key, requirement.amount(), true);
+                    extractInputFluid(player, key, requirement.amount(), true);
             if (simulated.status() != StorageOperationStatus.SUCCESS
                     || simulated.transferredAmountExact().orElse(-1L)
                     != requirement.amount()) {
@@ -2549,8 +2646,12 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                 return false;
             }
             StorageFluidOperationResult extracted =
-                    storageEndpoint().session().extractFluidExact(
-                            player, key, requirement.amount(), false);
+                    extractInputFluid(player, key, requirement.amount(), false);
+            if (!extracted.transferKnown()) {
+                markFluidTransferUncertain();
+                refundCustomFluids(player);
+                return false;
+            }
             if (extracted.status() != StorageOperationStatus.SUCCESS
                     || extracted.transferredAmountExact().orElse(-1L)
                     != requirement.amount()
@@ -2612,8 +2713,18 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             );
             FluidStack offer = fluid.copy();
             offer.setAmount(chunk);
-            int accepted = handler.fill(offer, FluidAction.EXECUTE);
+            int accepted;
+            try {
+                accepted = handler.fill(offer, FluidAction.EXECUTE);
+            } catch (RuntimeException | LinkageError failure) {
+                markFluidTransferUncertain();
+                refundUnofferedFluid(fluid, remaining - chunk);
+                LOGGER.error("[RSI-API] fluid delivery result is unknown", failure);
+                return remaining;
+            }
             if (accepted < 0 || accepted > chunk) {
+                markFluidTransferUncertain();
+                refundUnofferedFluid(fluid, remaining - chunk);
                 return remaining;
             }
             remaining -= accepted;
@@ -2622,11 +2733,22 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         return remaining;
     }
 
+    private void refundUnofferedFluid(FluidStack fluid, long amount) {
+        if (taskFluids == null || amount <= 0L) return;
+        FluidStack unoffered = fluid.copy();
+        unoffered.setAmount(Math.toIntExact(amount));
+        taskFluids.refund(List.of(unoffered));
+    }
+
     private void refundFluids(
-            ServerPlayer player,
+            @Nullable ServerPlayer player,
             List<FluidStack> fluids
     ) {
-        if (!hasStorageAccess()) return;
+        if (taskFluids != null) {
+            taskFluids.refund(fluids);
+            return;
+        }
+        if (!hasStorageAccess() || player == null) return;
         for (FluidStack fluid : fluids) {
             if (fluid == null || fluid.isEmpty()) continue;
             StorageFluidOperationResult refund =
@@ -2641,6 +2763,41 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                     refund.remainder().getFluid()
             );
         }
+    }
+
+    private void captureFluidSource(ServerPlayer player) {
+        if (fluidSourceCaptured) return;
+        taskFluids = TaskFluidAccess.capture(player, storageEndpoint());
+        fluidSourceCaptured = true;
+    }
+
+    @Nullable
+    private StorageFluidSnapshot fluidSnapshot(ServerPlayer player) {
+        captureFluidSource(player);
+        if (fluidTransferUncertain) return null;
+        if (taskFluids != null) {
+            if (taskFluids.usable()) return taskFluids.snapshot();
+            preparationFailure = Component.literal("RSI Integration task fluid account is unavailable");
+            return null;
+        }
+        if (hasStorageAccess() && storageEndpoint().session().supports(StorageCapability.FLUID_STORAGE)) {
+            var snapshot = storageEndpoint().session().snapshotFluids(player);
+            if (snapshot.successful()) return snapshot.snapshotValue().orElseThrow();
+        }
+        preparationFailure = Component.literal("RSI Integration fluid storage is unavailable");
+        return null;
+    }
+
+    private StorageFluidOperationResult extractInputFluid(ServerPlayer player, StorageFluidKey key,
+                                                         long amount, boolean simulate) {
+        return taskFluids != null ? taskFluids.extract(key, amount, simulate)
+                : storageEndpoint().session().extractFluidExact(player, key, amount, simulate);
+    }
+
+    private void markFluidTransferUncertain() {
+        fluidTransferUncertain = true;
+        if (taskFluids != null) taskFluids.markUncertain();
+        preparationFailure = Component.literal("RSI Integration fluid transfer is unknown; automatic retry stopped");
     }
 
     private int takeMatchingInputCount(
@@ -3190,9 +3347,19 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             int amount
     ) {
         IFluidHandler handler = fluidHandler(port.side());
-        return handler == null
-                ? FluidStack.EMPTY
-                : handler.drain(amount, FluidAction.EXECUTE);
+        if (handler == null) return FluidStack.EMPTY;
+        try {
+            FluidStack drained = handler.drain(amount, FluidAction.EXECUTE);
+            if (drained == null || drained.getAmount() > amount) {
+                markFluidTransferUncertain();
+                return FluidStack.EMPTY;
+            }
+            return drained;
+        } catch (RuntimeException | LinkageError failure) {
+            markFluidTransferUncertain();
+            LOGGER.error("[RSI-API] fluid recovery result is unknown", failure);
+            return FluidStack.EMPTY;
+        }
     }
 
     private static FluidStack fluidStack(

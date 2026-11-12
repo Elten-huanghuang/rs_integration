@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 
 /**
  * Server-thread material arbiter for graph node assets.
@@ -286,6 +287,28 @@ public final class MaterialBroker {
             lot.settled += claim.quantity;
         }
         reservation.state = ReservationState.SETTLED;
+    }
+
+    /** 将已提交的指定实物移交给其他所有者；后续结算或退款不能再次处理它们。 */
+    public Checkout transferCommitted(ReservationToken token, Predicate<ItemStack> selector) {
+        requireOwnerThread();
+        Reservation reservation = require(token, ReservationState.COMMITTED);
+        List<Claim> selected = reservation.claims.stream()
+                .filter(claim -> claim.quantity > 0 && selector.test(lots.get(claim.lotId).stack.copy()))
+                .toList();
+        List<Fragment> transferred = new ArrayList<>();
+        for (Claim claim : selected) {
+            AssetLot lot = lots.get(claim.lotId);
+            transferred.add(new Fragment(lot.source, lot.material,
+                    lot.stack.copyWithCount(Math.toIntExact(claim.quantity))));
+        }
+        for (Claim claim : selected) {
+            AssetLot lot = lots.get(claim.lotId);
+            lot.committed -= claim.quantity;
+            lot.settled += claim.quantity;
+            reservation.claims.remove(claim);
+        }
+        return new Checkout(transferred);
     }
 
     public void refund(ReservationToken token) {

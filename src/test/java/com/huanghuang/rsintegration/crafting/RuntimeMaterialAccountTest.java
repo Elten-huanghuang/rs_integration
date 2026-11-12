@@ -16,6 +16,8 @@ import com.huanghuang.rsintegration.storage.StorageSnapshot;
 import com.huanghuang.rsintegration.storage.StorageSnapshotResult;
 import com.huanghuang.rsintegration.storage.StoredItem;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidTestFixtures;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.MinecraftServer;
@@ -25,6 +27,8 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.level.material.Fluids;
+import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import org.junit.jupiter.api.BeforeAll;
@@ -118,6 +122,30 @@ class RuntimeMaterialAccountTest extends BootstrapTest {
 
     private boolean acquire(RuntimeMaterialAccount account, MaterialKey material, long count) {
         return account.ensure(Map.of(material, count), List.of(), player);
+    }
+
+    @Test
+    void mixedItemAndFluidPartialAcquisitionRollsBackBothAndDoesNotHoldHalfAdmission() {
+        MaterialKey water = MaterialKey.of(InkFluidSupport.token(InkFluidTestFixtures.tokenItem(),
+                new FluidStack(Fluids.WATER, 1)));
+        stock.put(IRON, 2L);
+        stock.put(water, 1000L);
+        doAnswer(call -> {
+            stock.put(water, 600L);
+            return StorageOperationResult.extracted(StorageOperationMode.PERFORM, 1000,
+                    List.of(water.toStack(400)));
+        }).when(session).extractExact(eq(player), eq(StorageItemKey.fromItemStack(BACKEND, water.toStack(1))),
+                eq(1000L), eq(false));
+        Map<MaterialKey, Long> required = new LinkedHashMap<>();
+        required.put(IRON, 2L);
+        required.put(water, 1000L);
+        RuntimeMaterialAccount account = account();
+        assertFalse(account.ensure(required, List.of(), player));
+        assertEquals(2L, stock.get(IRON));
+        assertEquals(1000L, stock.get(water));
+        assertEquals(0, account.count(IRON));
+        assertEquals(0, account.count(water));
+        assertFalse(account.uncertain());
     }
 
     @Test

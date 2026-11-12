@@ -2696,6 +2696,9 @@ public final class AsyncCraftChain {
             nodeRuntimes.put(nodeId, runtime);
             runtime.markDispatched();
             ownershipTransferred = true;
+            if (group.usesTaskFluidInputs() && materialAccount != null) {
+                materializeTaskFluidGraphInputs(admission.materialToken());
+            }
             if (!group.startOperation(OperationStartContext.chainReserved(online, nodeLedger,
                     MaterialPlan.none(), List.of(), InputBufferPlan.none()))) {
                 runtime.markStartFailed("execution group rejected graph dispatch");
@@ -2725,6 +2728,12 @@ public final class AsyncCraftChain {
         return delegate != null
                 && (graphSpecs == null || graphSpecs.isEmpty())
                 && delegate.requiresPrivateLedgerGraphDispatch();
+    }
+
+    /** 净外部流体已经在账户中；这里只移交上游实物，并消除 broker 的重复退款权。 */
+    private void materializeTaskFluidGraphInputs(MaterialBroker.ReservationToken token) {
+        MaterialBroker.Checkout fluids = graphMaterials.transferCommitted(token, InkFluidSupport::isToken);
+        for (ItemStack producer : fluids.producerStacks()) materialAccount.add(producer);
     }
 
     /**
@@ -3124,8 +3133,14 @@ public final class AsyncCraftChain {
                     if (!takeExactMatching(virtualInventory, stack, stack.getCount())) return null;
                 }
             }
-            if (graphToken != null) releaseUnusedGraphMaterials(graphToken,
-                    planned.remaining(Origin.INITIAL), planned.remaining(Origin.PRODUCER));
+            if (graphToken != null) {
+                boolean accountFluids = materialAccount != null && group.usesTaskFluidInputs();
+                releaseUnusedGraphMaterials(graphToken,
+                        planned.remaining(Origin.INITIAL).stream()
+                                .filter(stack -> !accountFluids || !InkFluidSupport.isToken(stack)).toList(),
+                        planned.remaining(Origin.PRODUCER).stream()
+                                .filter(stack -> !accountFluids || !InkFluidSupport.isToken(stack)).toList());
+            }
             group.setCountedOperationMaterials(counted);
             prepared = true;
             return new GraphNodeMaterials(reusableTokens);
