@@ -9,23 +9,19 @@ import com.refinedmods.refinedstorage.container.CraftingMonitorContainerMenu;
 import com.refinedmods.refinedstorage.container.GridContainerMenu;
 import com.refinedmods.refinedstorage.api.network.grid.GridType;
 import com.refinedmods.refinedstorage.screen.grid.GridScreen;
-import com.huanghuang.rsintegration.RSIntegrationMod;
 import net.minecraft.core.GlobalPos;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.MenuScreens;
 import com.refinedmods.refinedstorage.screen.CraftingMonitorScreen;
 import net.minecraft.network.chat.Component;
-import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.common.Mod;
 
 import javax.annotation.Nullable;
 import java.util.UUID;
 
 /** 保留从有线 RS 合成终端进入原生监控器的返回位置。 */
-@Mod.EventBusSubscriber(modid = RSIntegrationMod.MOD_ID, value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public final class RsMonitorNavigationClient {
     private static GlobalPos pendingTerminal;
     private static long pendingAt;

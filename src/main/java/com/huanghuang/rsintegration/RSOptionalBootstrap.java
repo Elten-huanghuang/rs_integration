@@ -23,6 +23,7 @@ import com.huanghuang.rsintegration.client.input.RSIKeyBindings;
 import com.huanghuang.rsintegration.feature.voidupgrade.RSVoidUpgradeItem;
 import com.huanghuang.rsintegration.feature.voidupgrade.network.VoidUpgradeNetworkHandler;
 import com.huanghuang.rsintegration.mods.rs.RSGridSearchCache;
+import com.huanghuang.rsintegration.mods.rs.monitor.RsMonitorNavigationClient;
 import com.huanghuang.rsintegration.storage.disk.rs.UnifiedDiskFactory;
 import com.huanghuang.rsintegration.storage.disk.rs.UnifiedDiskRoot;
 import com.huanghuang.rsintegration.storage.disk.rs.UnifiedDiskItem;
@@ -78,6 +79,8 @@ public final class RSOptionalBootstrap {
     }
 
     public static void registerClientEventSubscribers() {
+        // 公开方法签名包含 RS 类型，必须在确认 RS 存在后手动注册。
+        MinecraftForge.EVENT_BUS.register(RsMonitorNavigationClient.class);
         MinecraftForge.EVENT_BUS.register(UnifiedDiskTooltipClient.class);
         MinecraftForge.EVENT_BUS.register(RSInfiniteDiskTooltip.class);
         MinecraftForge.EVENT_BUS.register(
