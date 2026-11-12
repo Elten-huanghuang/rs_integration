@@ -870,8 +870,9 @@ public final class RSIntegrationConfig {
                         "列表判定时每种食物最多检查多少个配方，越小越省时。")
                 .defineInRange("maxRecipesPerFood", 6, 1, 32);
         FOOD_ORDER_MAX_ORDERS_PER_BATCH = c
-                .comment("单次下单上限",
-                        "一次「全部下单」最多提交多少道菜，受 RS Integration 批量上限约束。")
+                .comment("每批下单数量",
+                        "「全部下单」按此数量分批预检和提交，前一批结束后自动继续；不限制总菜数。",
+                        "实际批次还受 Consumer API 的检查会话和并发上限约束。")
                 .defineInRange("maxOrdersPerBatch", 32, 1, 64);
         FOOD_ORDER_ORDER_COOLDOWN_TICKS = c
                 .comment("下单冷却",
@@ -891,7 +892,7 @@ public final class RSIntegrationConfig {
                 .defineInRange("listBudgetMicros", 10000, 2000, 50000);
         FOOD_ORDER_SESSION_TIMEOUT_TICKS = c
                 .comment("下单会话超时",
-                        "一次下单从开始到提交的最长 tick 数，超时后关闭检查会话。")
+                        "预检或提交无进展的超时 tick 数；等待已提交订单执行期间不计总队列时长。")
                 .defineInRange("sessionTimeoutTicks", 200, 20, 1200);
         c.pop();
 

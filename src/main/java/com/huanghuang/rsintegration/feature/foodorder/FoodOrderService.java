@@ -14,6 +14,7 @@ import com.huanghuang.rsintegration.api.consumer.ConsumerInspectionRequestId;
 import com.huanghuang.rsintegration.api.consumer.ConsumerInspectionTicket;
 import com.huanghuang.rsintegration.api.consumer.ConsumerInspectionTicketId;
 import com.huanghuang.rsintegration.api.consumer.ConsumerMachineSelector;
+import com.huanghuang.rsintegration.api.consumer.ConsumerOrderId;
 import com.huanghuang.rsintegration.api.consumer.ConsumerOrderReceipt;
 import com.huanghuang.rsintegration.api.consumer.ConsumerOrderRequest;
 import com.huanghuang.rsintegration.api.consumer.ConsumerOutputDestination;
@@ -28,15 +29,15 @@ import com.huanghuang.rsintegration.api.consumer.ConsumerStorageSelector;
 import com.huanghuang.rsintegration.api.consumer.RSICraftConsumerApi;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.feature.foodorder.network.FoodOrderResultPacket;
-import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.network.PacketDistributor;
 
 import javax.annotation.Nullable;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -47,9 +48,9 @@ import java.util.UUID;
 /**
  * 服务端下单状态机。
  *
- * <p>一次下单只做一次 {@code openInspection}，之后每 {@code orderIntervalTicks} 拉一页；
- * 收齐可提交的 plan 后，再按同样的间隔逐单提交。所有 Consumer API 调用都在服务端主线程，
- * 且每个玩家同一时间只允许一个任务，避免大列表一次性预检/提交造成尖峰。</p>
+ * <p>全部下单保留完整候选队列，分批预检并逐单提交；前一批执行结束后，再以新库存
+ * 继续下一批。批次大小与并发限制只影响推进速度，不截断食物总数。
+ * 所有 Consumer API 调用都在服务端主线程，每个玩家同一时间只允许一个点餐任务。</p>
  */
 public final class FoodOrderService {
 
@@ -124,7 +125,7 @@ public final class FoodOrderService {
             sendFailure(player, "rsi.food_order.error.indexing", "");
             return;
         }
-        List<FoodOrderEntry> selected = selectEntries(snapshot, target, all, recipeId, api);
+        List<FoodOrderEntry> selected = selectEntries(snapshot, target, all, recipeId);
         if (selected.isEmpty()) {
             // 列表尚在分批计算时，没有候选不代表没有可下单的食物。
             sendFailure(player, snapshot.partial() ? "rsi.food_order.loading"
@@ -174,7 +175,7 @@ public final class FoodOrderService {
                 JOBS.remove(job.playerId);
                 continue;
             }
-            if (now - job.startedAt > timeout + (long) job.keys.size() * interval) {
+            if (now - job.lastProgressAt > timeout + (long) job.plans.size() * interval) {
                 // 超时也要关闭检查会话，避免 plan 占着容量直到 TTL 过期。
                 finish(job, player, RSICraftConsumerApi.get().orElse(null));
                 sendFailure(player, "rsi.food_order.error.timeout", "");
@@ -198,7 +199,7 @@ public final class FoodOrderService {
                 } catch (Throwable throwable) {
                     RSIntegrationMod.LOGGER.warn(
                             "[RSI-FoodOrder] 创建检查会话异常，已取消本次任务", throwable);
-                    finish(job, player, null);
+                    finish(job, player, maybeApi.get());
                     sendFailure(player, "rsi.food_order.error.failed", "INTERNAL_ERROR");
                 }
                 continue;
@@ -244,12 +245,21 @@ public final class FoodOrderService {
     }
 
     private static void start(ServerPlayer player, Job job, RSICraftConsumerApi api) {
-        int pageSize = Math.min(job.keys.size(),
+        var limits = api.capabilities();
+        int batchSize = Math.max(1, Math.min(
+                RSIntegrationConfig.FOOD_ORDER_MAX_ORDERS_PER_BATCH.get(),
+                Math.min(limits.maxOrdersPerBatch(), Math.min(limits.maxRecipesPerSession(),
+                        limits.maxConcurrentOrdersPerPlayer()))));
+        List<ConsumerRecipeKey> batch = new ArrayList<>(batchSize);
+        while (!job.pending.isEmpty() && batch.size() < batchSize) {
+            batch.add(job.pending.removeFirst());
+        }
+        int pageSize = Math.min(batch.size(),
                 Math.max(1, Math.min(api.capabilities().maxPageSize(), 64)));
         ConsumerInspectionRequest request = new ConsumerInspectionRequest(
                 CONSUMER_ID,
                 new ConsumerInspectionRequestId(UUID.randomUUID()),
-                job.keys,
+                batch,
                 new ConsumerMachineSelector.AutomaticBound(),
                 new ConsumerStorageSelector.Default(),
                 outputDestination(player, api),
@@ -262,10 +272,34 @@ public final class FoodOrderService {
         }
         job.ticket = opened.value().ticketId();
         job.stage = Stage.POLL;
-        send(player, FoodOrderResultPacket.started(job.keys.size()));
+        if (!job.capacityWait) {
+            job.lastProgressAt = player.serverLevel().getGameTime();
+        }
+        if (!job.started) {
+            job.started = true;
+            send(player, FoodOrderResultPacket.started(job.keys.size()));
+        }
     }
 
     private static void step(ServerPlayer player, Job job, RSICraftConsumerApi api) {
+        if (job.stage == Stage.WAIT_ORDERS) {
+            if (!job.activeOrders.isEmpty()) {
+                ConsumerOrderId orderId = job.activeOrders.removeFirst();
+                var status = api.status(player, CONSUMER_ID, orderId);
+                if (!status.successful() || status.value() == null || !status.value().terminal()) {
+                    job.activeOrders.addLast(orderId);
+                }
+                if (status.successful()) {
+                    // 正常运行的机器可能耗时很长；仍能查询到订单就继续等待，不用总队列时长截断。
+                    job.lastProgressAt = player.serverLevel().getGameTime();
+                }
+            }
+            if (job.activeOrders.isEmpty()
+                    && player.serverLevel().getGameTime() >= job.retryAt) {
+                job.stage = Stage.START;
+            }
+            return;
+        }
         if (job.stage == Stage.POLL) {
             ConsumerResult<ConsumerInspectionPage> pageResult =
                     api.nextInspectionPage(player, job.ticket);
@@ -277,31 +311,58 @@ public final class FoodOrderService {
             if (page.state() == ConsumerInspectionPageState.COMPLETE) {
                 for (ConsumerCraftability craftability : page.results()) {
                     if (craftability.canSubmit() && craftability.planId() != null) {
-                        job.plans.add(craftability.planId());
+                        job.plans.addLast(new PlannedOrder(craftability.recipe(), craftability.planId()));
+                    } else {
+                        job.skipped++;
+                        job.lastProgressAt = player.serverLevel().getGameTime();
                     }
                 }
             }
             if (page.complete()) {
+                closeInspection(job, player, api);
                 job.stage = Stage.SUBMIT;
+            }
+            if (page.state() == ConsumerInspectionPageState.COMPLETE && !job.capacityWait) {
+                job.lastProgressAt = player.serverLevel().getGameTime();
             }
             return;
         }
 
         if (job.plans.isEmpty()) {
-            finish(job, player, api);
-            sendFailure(player, "rsi.food_order.error.notarget", "");
+            nextBatchOrFinish(job, player, api);
             return;
         }
 
         // 逐单提交：每 orderIntervalTicks 只提交一个 plan，避免整批在同一 tick 同时开链。
-        ConsumerPlanId planId = job.plans.remove(0);
+        PlannedOrder planned = job.plans.getFirst();
+        ConsumerPlanId planId = planned.planId();
         ConsumerOrderRequest order = new ConsumerOrderRequest(CONSUMER_ID,
                 new ConsumerExternalRequestId(UUID.randomUUID()), planId);
         ConsumerResult<ConsumerOrderReceipt> submitted = api.submit(player, order);
+        if (!submitted.successful() && submitted.diagnostics().stream()
+                .anyMatch(diagnostic -> diagnostic.code() == ConsumerDiagnosticCode.ORDER_LIMIT_REACHED)) {
+            // 并发满了不算失败，也不丢弃余下食物。释放旧计划，等有名额后用新库存重新预检。
+            var iterator = job.plans.descendingIterator();
+            while (iterator.hasNext()) {
+                PlannedOrder remaining = iterator.next();
+                job.pending.addFirst(remaining.recipe());
+                api.discardPlan(player, CONSUMER_ID, remaining.planId());
+            }
+            job.plans.clear();
+            job.capacityWait = true;
+            job.retryAt = player.serverLevel().getGameTime() + 20L;
+            waitForOrders(job, player);
+            return;
+        }
+        job.plans.removeFirst();
+        job.capacityWait = false;
+        job.lastProgressAt = player.serverLevel().getGameTime();
         job.submitted++;
         if (submitted.successful()) {
             job.success++;
+            job.activeOrders.addLast(submitted.value().orderId());
         } else {
+            api.discardPlan(player, CONSUMER_ID, planId);
             job.skipped++;
         }
         RSIntegrationMod.LOGGER.debug("[RSI-FoodOrder] 提交第 {}/{} 单：{}",
@@ -310,6 +371,14 @@ public final class FoodOrderService {
             return;
         }
 
+        nextBatchOrFinish(job, player, api);
+    }
+
+    private static void nextBatchOrFinish(Job job, ServerPlayer player, RSICraftConsumerApi api) {
+        if (!job.pending.isEmpty()) {
+            waitForOrders(job, player);
+            return;
+        }
         finish(job, player, api);
         int success = job.success;
         int skipped = job.skipped;
@@ -322,22 +391,20 @@ public final class FoodOrderService {
         }
     }
 
+    private static void waitForOrders(Job job, ServerPlayer player) {
+        job.stage = Stage.WAIT_ORDERS;
+        send(player, FoodOrderResultPacket.waiting(job.pending.size()));
+    }
+
     private static List<FoodOrderEntry> selectEntries(FoodOrderSnapshot snapshot,
                                                       ItemStack target,
                                                       boolean all,
-                                                      @Nullable ResourceLocation recipeId,
-                                                      RSICraftConsumerApi api) {
+                                                      @Nullable ResourceLocation recipeId) {
         if (all) {
-            int maxBatch = Math.min(
-                    Math.max(1, RSIntegrationConfig.FOOD_ORDER_MAX_ORDERS_PER_BATCH.get()),
-                    Math.max(1, api.capabilities().maxOrdersPerBatch()));
-            List<FoodOrderEntry> result = new ArrayList<>(maxBatch);
+            List<FoodOrderEntry> result = new ArrayList<>();
             for (FoodOrderEntry entry : snapshot.entries()) {
                 if (entry.orderable()) {
                     result.add(entry);
-                    if (result.size() >= maxBatch) {
-                        break;
-                    }
                 }
             }
             return result;
@@ -405,6 +472,21 @@ public final class FoodOrderService {
     private static void finish(Job job, ServerPlayer player,
                                @Nullable RSICraftConsumerApi api) {
         JOBS.remove(job.playerId);
+        if (api != null && !player.hasDisconnected()) {
+            for (PlannedOrder planned : job.plans) {
+                try {
+                    api.discardPlan(player, CONSUMER_ID, planned.planId());
+                } catch (RuntimeException | LinkageError failure) {
+                    RSIntegrationMod.LOGGER.debug("[RSI-FoodOrder] 释放未提交的计划失败，等待过期清理", failure);
+                }
+            }
+        }
+        job.plans.clear();
+        closeInspection(job, player, api);
+    }
+
+    private static void closeInspection(Job job, ServerPlayer player,
+                                         @Nullable RSICraftConsumerApi api) {
         if (api != null && job.ticket != null && !player.hasDisconnected()) {
             try {
                 api.closeInspection(player, job.ticket);
@@ -413,6 +495,7 @@ public final class FoodOrderService {
                         "[RSI-FoodOrder] 关闭检查会话失败，忽略", throwable);
             }
         }
+        job.ticket = null;
     }
 
     private static void sendFailure(ServerPlayer player, String key, String detail) {
@@ -423,24 +506,32 @@ public final class FoodOrderService {
     }
 
     private static void send(ServerPlayer player, FoodOrderResultPacket packet) {
-        NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), packet);
+        FoodOrderResultPacket.send(player, packet);
     }
 
     private enum Stage {
         START,
         POLL,
-        SUBMIT
+        SUBMIT,
+        WAIT_ORDERS
     }
+
+    private record PlannedOrder(ConsumerRecipeKey recipe, ConsumerPlanId planId) {}
 
     private static final class Job {
         private final UUID playerId;
         private final List<ConsumerRecipeKey> keys;
-        private final long startedAt;
+        private final Deque<ConsumerRecipeKey> pending;
         @Nullable
         private ConsumerInspectionTicketId ticket;
         private long lastStep;
+        private long lastProgressAt;
+        private long retryAt;
+        private boolean capacityWait;
+        private boolean started;
         private Stage stage = Stage.START;
-        private final List<ConsumerPlanId> plans = new ArrayList<>();
+        private final Deque<PlannedOrder> plans = new ArrayDeque<>();
+        private final Deque<ConsumerOrderId> activeOrders = new ArrayDeque<>();
         private int submitted;
         private int success;
         private int skipped;
@@ -448,7 +539,8 @@ public final class FoodOrderService {
         private Job(UUID playerId, List<ConsumerRecipeKey> keys, long startedAt) {
             this.playerId = playerId;
             this.keys = List.copyOf(keys);
-            this.startedAt = startedAt;
+            this.pending = new ArrayDeque<>(keys);
+            this.lastProgressAt = startedAt;
             this.lastStep = startedAt;
         }
     }

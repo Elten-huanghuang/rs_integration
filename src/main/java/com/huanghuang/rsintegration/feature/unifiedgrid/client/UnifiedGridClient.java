@@ -81,7 +81,7 @@ public final class UnifiedGridClient {
             if (carriedMagic != null && !carriedMagic.available()) carriedMagic = null;
             GridResourceKind itemKind = GridResourceKind.item();
             GridResourceKind fluidKind = GridResourceKind.fluid();
-            // AE2：右键排空容器；左键流体装填；魔法资源容器按同样的左右键语义充放。
+            // 右键排空容器，左键装填流体；魔法资源容器沿用相同的左右键充放规则。
             if (button == 1 && view.canEmptyCarried(carried)) {
                 view.request(fluidKind, 0, UnifiedGridActionPacket.Action.INSERT_FLUID, 0);
             } else if (button == 0 && row != null && row.kind() == fluidKind) {

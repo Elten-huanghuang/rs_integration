@@ -1,10 +1,13 @@
 package com.huanghuang.rsintegration.feature.foodorder.network;
 
 import com.huanghuang.rsintegration.feature.foodorder.FoodOrderClient;
+import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.network.NetworkEvent;
+import net.minecraftforge.network.PacketDistributor;
 
 import java.util.function.Supplier;
 
@@ -39,6 +42,15 @@ public final class FoodOrderResultPacket {
     public static FoodOrderResultPacket started(int count) {
         return new FoodOrderResultPacket(STARTED, count, 0,
                 "rsi.food_order.result.started", Integer.toString(count));
+    }
+
+    public static FoodOrderResultPacket waiting(int count) {
+        return new FoodOrderResultPacket(STARTED, count, 0,
+                "rsi.food_order.result.waiting", Integer.toString(count));
+    }
+
+    public static void send(ServerPlayer player, FoodOrderResultPacket packet) {
+        NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), packet);
     }
 
     public static FoodOrderResultPacket success(int count) {
