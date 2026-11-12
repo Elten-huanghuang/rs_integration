@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.api.RegistrationOptions;
 import com.huanghuang.rsintegration.api.ResourceMatchMode;
 import com.huanghuang.rsintegration.api.machine.ConcurrencyCapabilities;
+import com.huanghuang.rsintegration.api.machine.FluidPortAccess;
 import com.huanghuang.rsintegration.api.machine.InputOutputAccess;
 import com.huanghuang.rsintegration.api.machine.ItemPortAccess;
 import com.huanghuang.rsintegration.api.machine.MachineContext;
@@ -14,6 +15,7 @@ import com.huanghuang.rsintegration.api.machine.MachineExecutionMode;
 import com.huanghuang.rsintegration.api.machine.MachineBinding;
 import com.huanghuang.rsintegration.api.machine.MachineIntegration;
 import com.huanghuang.rsintegration.api.machine.MachineItemPort;
+import com.huanghuang.rsintegration.api.machine.MachineFluidPort;
 import com.huanghuang.rsintegration.api.machine.MachineState;
 import com.huanghuang.rsintegration.api.machine.MachineStateProvider;
 import com.huanghuang.rsintegration.api.machine.SupportScope;
@@ -82,6 +84,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraft.world.level.storage.DimensionDataStorage;
 import net.minecraftforge.fluids.FluidStack;
+import net.minecraftforge.fluids.capability.IFluidHandler;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.common.util.LazyOptional;
 import net.minecraftforge.items.IItemHandler;
@@ -103,6 +106,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -113,8 +117,107 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.withSettings;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
+    @Test
+    void selectedWaterTankNeverUsesUntypedDrainAndKeepsNbtOnPartialExtraction() throws Exception {
+        IFluidHandler handler = mock(IFluidHandler.class);
+        FluidStack expected = new FluidStack(Fluids.WATER, 1000);
+        CompoundTag identity = new CompoundTag();
+        identity.putString("grade", "pure");
+        expected.setTag(identity);
+        when(handler.getTanks()).thenReturn(2);
+        when(handler.getFluidInTank(0)).thenReturn(new FluidStack(Fluids.LAVA, 1000));
+        when(handler.getFluidInTank(1)).thenReturn(expected);
+        when(handler.drain(anyInt(), eq(IFluidHandler.FluidAction.EXECUTE)))
+                .thenReturn(new FluidStack(Fluids.LAVA, 500));
+        when(handler.drain(any(FluidStack.class), eq(IFluidHandler.FluidAction.EXECUTE))).thenAnswer(call -> {
+            FluidStack request = call.getArgument(0);
+            assertTrue(request.isFluidEqual(expected));
+            assertEquals(500, request.getAmount());
+            FluidStack drained = request.copy();
+            drained.setAmount(300);
+            return drained;
+        });
+        ExternalIntegrationBatchDelegate delegate = fluidDelegate(handler);
+        FluidStack extracted = extractFluid(delegate, expected, 500);
+        assertEquals(Fluids.WATER, extracted.getFluid());
+        assertEquals(identity, extracted.getTag());
+        assertEquals(300, extracted.getAmount());
+        verify(handler, never()).drain(anyInt(), any());
+        assertFalse((boolean) getField(delegate, "fluidTransferUncertain"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1, 2, 3, 4})
+    void invalidFluidExtractionReceiptsFreezeWithoutPublishingOrRefunding(int failure) throws Exception {
+        IFluidHandler handler = mock(IFluidHandler.class);
+        FluidStack expected = new FluidStack(Fluids.WATER, 1000);
+        when(handler.getTanks()).thenReturn(2);
+        when(handler.getFluidInTank(0)).thenReturn(new FluidStack(Fluids.LAVA, 1000));
+        when(handler.getFluidInTank(1)).thenReturn(expected);
+        if (failure == 4) {
+            when(handler.drain(any(FluidStack.class), any())).thenThrow(new IllegalStateException("抽取后异常"));
+        } else {
+            FluidStack receipt = switch (failure) {
+                case 0 -> null;
+                case 1 -> new FluidStack(Fluids.LAVA, 500);
+                case 2 -> new FluidStack(Fluids.WATER, 501);
+                default -> new FluidStack(Fluids.WATER, 500);
+            };
+            if (failure == 3) {
+                CompoundTag tag = new CompoundTag();
+                tag.putString("grade", "different");
+                receipt.setTag(tag);
+            }
+            when(handler.drain(any(FluidStack.class), any())).thenReturn(receipt);
+        }
+        ExternalIntegrationBatchDelegate delegate = fluidDelegate(handler);
+        assertTrue(extractFluid(delegate, expected, 500).isEmpty());
+        assertTrue((boolean) getField(delegate, "fluidTransferUncertain"));
+        verify(handler, never()).fill(any(), any());
+        verify(handler, never()).drain(anyInt(), any());
+    }
+
+    @Test
+    void sameIdentityInMultipleTanksDoesNotDrainProtectedBaselineFromAnotherTank() throws Exception {
+        IFluidHandler handler = mock(IFluidHandler.class);
+        FluidStack expected = new FluidStack(Fluids.WATER, 1000);
+        when(handler.getTanks()).thenReturn(2);
+        when(handler.getFluidInTank(0)).thenReturn(new FluidStack(Fluids.WATER, 800));
+        when(handler.getFluidInTank(1)).thenReturn(expected);
+        ExternalIntegrationBatchDelegate delegate = fluidDelegate(handler);
+        assertTrue(extractFluid(delegate, expected, 500).isEmpty());
+        verify(handler, never()).drain(any(FluidStack.class), any());
+        verify(handler, never()).drain(anyInt(), any());
+        assertFalse((boolean) getField(delegate, "fluidTransferUncertain"));
+    }
+
+    private static ExternalIntegrationBatchDelegate fluidDelegate(IFluidHandler handler) throws Exception {
+        ExternalIntegrationBatchDelegate delegate = new ExternalIntegrationBatchDelegate(new DefaultRSIIntegrationApi());
+        ServerLevel level = mock(ServerLevel.class);
+        BlockEntity machine = mock(BlockEntity.class);
+        when(level.hasChunkAt(BlockPos.ZERO)).thenReturn(true);
+        when(level.getBlockEntity(BlockPos.ZERO)).thenReturn(machine);
+        when(machine.getCapability(ForgeCapabilities.FLUID_HANDLER, Direction.NORTH))
+                .thenReturn(LazyOptional.of(() -> handler));
+        setField(delegate, "level", level);
+        setField(delegate, "machinePos", BlockPos.ZERO);
+        return delegate;
+    }
+
+    private static FluidStack extractFluid(ExternalIntegrationBatchDelegate delegate, FluidStack expected, int amount)
+            throws Exception {
+        MachineFluidPort port = new MachineFluidPort("water", 1, Direction.NORTH, InputOutputAccess.OUTPUT,
+                FluidPortAccess.FLUID_HANDLER, null, "fluids", 1000);
+        Method extract = ExternalIntegrationBatchDelegate.class.getDeclaredMethod("extractFluid",
+                MachineFluidPort.class, FluidStack.class, int.class);
+        extract.setAccessible(true);
+        return (FluidStack) extract.invoke(delegate, port, expected, amount);
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void randomZeroOutputWaitsForAnOperationSignalAndThenCompletes(boolean busySignal)

@@ -100,6 +100,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import javax.annotation.Nullable;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -143,6 +144,8 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     private ReservedMaterialView customMaterials;
     private final Map<String, List<FluidStack>> customReservedFluids =
             new LinkedHashMap<>();
+    private final Map<String, Long> customFluidSettlementOffsets = new LinkedHashMap<>();
+    private UUID customFluidTransferScope = UUID.randomUUID();
     private final Map<ResourceLocation, Long> customCollectedOutputTotals =
             new LinkedHashMap<>();
     private final Map<String, Long> customCollectedMaterialTotals =
@@ -518,6 +521,8 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         this.operationStartContext = null;
         this.customMaterials = null;
         this.customReservedFluids.clear();
+        this.customFluidSettlementOffsets.clear();
+        this.customFluidTransferScope = UUID.randomUUID();
         this.customOwnerId = null;
         this.customMachineContext = null;
         this.customStartPending = false;
@@ -1049,7 +1054,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                 int removable = Math.max(
                         0, current.getAmount() - protectedAmount);
                 if (removable <= 0) continue;
-                FluidStack extracted = extractFluid(port, removable);
+                FluidStack extracted = extractFluid(port, current, removable);
                 if (!extracted.isEmpty()) recoveredFluids.add(extracted);
             }
             refundFluids(player, recoveredFluids);
@@ -1168,6 +1173,8 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         this.ledger = sharedLedger;
         this.customOwnerId = player.getUUID();
         this.customReservedFluids.clear();
+        this.customFluidSettlementOffsets.clear();
+        this.customFluidTransferScope = UUID.randomUUID();
         this.customCancelReason = null;
         this.customSnapshot = null;
         this.lastCustomSnapshotSequence = -1L;
@@ -1288,6 +1295,8 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             // start 可能已向机器交付，异常不等于明确拒收。
             if (!customReservedFluids.isEmpty()) {
                 markFluidTransfersUncertain(customReservedFluids, "自定义操作启动结果不明");
+                // 整份预留已经交给人工核对，后续 cleanup 不得再次结算或自动退款。
+                customReservedFluids.clear();
             }
             return ExecutionResult.rejected(new IntegrationDiagnostic(
                     IntegrationDiagnosticCode.EXECUTION_START_REJECTED,
@@ -2043,7 +2052,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                 FluidStack candidate = current.copy();
                 candidate.setAmount(requested);
                 if (taskFluids != null) {
-                    FluidStack extracted = extractFluid(port, requested);
+                    FluidStack extracted = extractFluid(port, current, requested);
                     if (extracted.isEmpty()) {
                         failReportedResource("machine did not release the declared fluid output");
                         return;
@@ -2063,7 +2072,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                     return;
                 }
                 FluidStack extracted = extractFluid(
-                        port, requested);
+                        port, current, requested);
                 if (extracted.isEmpty()) {
                     failReportedResource(
                             "machine did not release the declared fluid output");
@@ -2426,6 +2435,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                 case UNCERTAIN -> retainCustomFluids(
                         Map.of(entryId, settled), player);
             }
+            customFluidSettlementOffsets.merge(entryId, material.amount(), Math::addExact);
         }
         if (!customReservedFluids.isEmpty()) {
             retainCustomFluids(
@@ -2801,7 +2811,13 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     private void markFluidTransfersUncertain(Map<String, List<FluidStack>> fluids, String reason) {
         fluidTransferUncertain = true;
         if (taskFluids != null) {
-            taskFluids.markUncertain(fluids.values().stream().flatMap(List::stream).toList(), reason);
+            for (Map.Entry<String, List<FluidStack>> entry : fluids.entrySet()) {
+                // 片段按预留中的偏移标识；同量的独立片段不能互相去重。
+                long offset = customFluidSettlementOffsets.getOrDefault(entry.getKey(), 0L);
+                UUID transferId = UUID.nameUUIDFromBytes((customFluidTransferScope + ":"
+                        + entry.getKey() + ":" + offset).getBytes(StandardCharsets.UTF_8));
+                taskFluids.markUncertain(transferId, entry.getValue(), reason);
+            }
         }
         preparationFailure = Component.literal("RSI Integration fluid transfer is unknown; automatic retry stopped");
     }
@@ -3359,21 +3375,43 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
 
     private FluidStack extractFluid(
             MachineFluidPort port,
+            FluidStack expected,
             int amount
     ) {
+        if (amount <= 0 || expected == null || expected.isEmpty()) return FluidStack.EMPTY;
         IFluidHandler handler = fluidHandler(port.side());
         if (handler == null) return FluidStack.EMPTY;
+        FluidStack request = expected.copy();
+        request.setAmount(amount);
+        boolean extractionStarted = false;
         try {
-            FluidStack drained = handler.drain(amount, FluidAction.EXECUTE);
-            if (drained == null || drained.getAmount() > amount) {
+            FluidStack selected = handler.getFluidInTank(port.tank());
+            if (selected == null || !selected.isFluidEqual(request) || selected.getAmount() < amount) {
+                return FluidStack.EMPTY;
+            }
+            // 标准能力不能指定物理罐。同身份多罐时不冒险抽走另一罐的基线存量。
+            for (int tank = 0; tank < handler.getTanks(); tank++) {
+                if (tank == port.tank()) continue;
+                FluidStack other = handler.getFluidInTank(tank);
+                if (other != null && !other.isEmpty() && other.isFluidEqual(request)) {
+                    preparationFailure = Component.literal("同一流体存在于多个罐，标准能力无法安全指定抽取罐");
+                    return FluidStack.EMPTY;
+                }
+            }
+            extractionStarted = true;
+            FluidStack drained = handler.drain(request.copy(), FluidAction.EXECUTE);
+            if (drained == null || drained.getAmount() > amount
+                    || !drained.isEmpty() && !drained.isFluidEqual(request)) {
                 markFluidTransferUncertain(FluidStack.EMPTY, amount,
-                        "机器流体输出回收结果不明");
+                        "机器流体输出回收返回了错误身份或数量，预期=" + request + "，回执=" + drained);
                 return FluidStack.EMPTY;
             }
             return drained;
         } catch (RuntimeException | LinkageError failure) {
-            markFluidTransferUncertain(FluidStack.EMPTY, amount,
-                    "机器流体输出回收异常");
+            if (extractionStarted) {
+                markFluidTransferUncertain(FluidStack.EMPTY, amount,
+                        "机器流体输出回收异常，预期=" + request);
+            }
             LOGGER.error("[RSI-API] fluid recovery result is unknown", failure);
             return FluidStack.EMPTY;
         }

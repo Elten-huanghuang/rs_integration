@@ -55,6 +55,30 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class RuntimeMaterialAccountTest extends BootstrapTest {
+    @Test
+    void frozenAccountStillRecordsIndependentTransfersAndDeduplicatesStableIds() {
+        when(server.overworld()).thenReturn(mock(ServerLevel.class));
+        MaterialTransferAuditLedger ledger = new MaterialTransferAuditLedger();
+        RuntimeMaterialAccount account = new RuntimeMaterialAccount(UUID.randomUUID(), player.getUUID(), server, endpoint);
+        UUID transferId = UUID.randomUUID();
+        UUID batchId = UUID.randomUUID();
+        try (var ledgers = mockStatic(MaterialTransferAuditLedger.class)) {
+            ledgers.when(() -> MaterialTransferAuditLedger.get(server)).thenReturn(ledger);
+            account.markTransferUncertain(new FluidStack(Fluids.WATER, 1), 1000L, "第一次转移");
+            account.markTransferUncertain(new FluidStack(Fluids.LAVA, 1), 500L, "另一笔转移");
+            account.markTransferUncertain(transferId, new FluidStack(Fluids.WATER, 1), 1000L, "独立同量转移");
+            account.markTransferUncertain(transferId, new FluidStack(Fluids.WATER, 1), 1000L, "重复通知");
+            List<FluidStack> batch = List.of(new FluidStack(Fluids.WATER, 300), new FluidStack(Fluids.LAVA, 200));
+            account.markTransfersUncertain(batchId, batch, "一批未知转移");
+            account.markTransfersUncertain(batchId, batch, "再次通知这一批");
+        }
+        assertTrue(account.uncertain());
+        assertFalse(account.usable());
+        assertEquals(5, ledger.pendingAttempts().size());
+        assertEquals(List.of(1000L, 500L, 1000L, 300L, 200L),
+                ledger.pendingAttempts().stream().map(MaterialTransferAuditLedger.Pending::amount).toList());
+    }
+
     private static final StorageBackendId BACKEND = new StorageBackendId("test");
     private static final MaterialKey IRON = MaterialKey.of(new ItemStack(Items.IRON_INGOT));
     private static final MaterialKey GOLD = MaterialKey.of(new ItemStack(Items.GOLD_INGOT));

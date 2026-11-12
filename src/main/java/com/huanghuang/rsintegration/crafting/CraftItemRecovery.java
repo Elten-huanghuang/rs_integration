@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.util.PlayerUtils;
+import com.huanghuang.rsintegration.crafting.MaterialTransferAuditLedger.Resolved;
+import com.huanghuang.rsintegration.crafting.MaterialTransferAuditLedger.RefundJournal;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.IntArrayTag;
 import net.minecraft.nbt.ListTag;
@@ -10,6 +12,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.saveddata.SavedData;
 
+import javax.annotation.Nullable;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.LinkedHashMap;
@@ -25,11 +28,13 @@ public final class CraftItemRecovery extends SavedData {
     private static final int MAX_CLAIM_STACKS = 64;
     private final Map<UUID, Deque<ItemStack>> pending = new LinkedHashMap<>();
     private final Set<UUID> processedRefundIds = new LinkedHashSet<>();
+    private RefundJournal refundJournal = new RefundJournal();
 
     public CraftItemRecovery() {
     }
 
     CraftItemRecovery(CompoundTag tag) {
+        refundJournal = new RefundJournal(tag);
         ListTag entries = tag.getList("pending", Tag.TAG_COMPOUND);
         for (Tag value : entries) {
             CompoundTag entry = (CompoundTag) value;
@@ -82,6 +87,19 @@ public final class CraftItemRecovery extends SavedData {
         return true;
     }
 
+    @Nullable public Resolved refundDecision(UUID attemptId) { return refundJournal.decision(attemptId); }
+    public List<Resolved> refundDecisions() { return refundJournal.decisions(); }
+
+    public boolean hasLegacyRefund(UUID attemptId) {
+        return refundJournal.hasLegacyRefund(attemptId, processedRefundIds);
+    }
+
+    public boolean lockRefundDecision(Resolved decision) {
+        if (!refundJournal.lock(decision, processedRefundIds)) return false;
+        setDirty();
+        return true;
+    }
+
     /** 登录或手动领取时最多处理 64 个堆叠，背包不足的部分继续保留。 */
     public int claim(ServerPlayer player) {
         Deque<ItemStack> queue = pending.get(player.getUUID());
@@ -124,6 +142,7 @@ public final class CraftItemRecovery extends SavedData {
 
     @Override
     public CompoundTag save(CompoundTag tag) {
+        refundJournal.save(tag);
         ListTag entries = new ListTag();
         for (Map.Entry<UUID, Deque<ItemStack>> owner : pending.entrySet()) {
             for (ItemStack stack : owner.getValue()) {

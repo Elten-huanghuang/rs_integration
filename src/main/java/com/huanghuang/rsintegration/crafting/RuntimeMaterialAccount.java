@@ -13,11 +13,14 @@ import com.huanghuang.rsintegration.storage.StorageFluidOperationResult;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraftforge.fluids.FluidStack;
 
 import javax.annotation.Nullable;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -75,15 +78,23 @@ final class RuntimeMaterialAccount {
     }
 
     void markTransferUncertain(FluidStack fluid, long amount, String reason) {
+        markTransferUncertain(UUID.randomUUID(), fluid, amount, reason);
+    }
+
+    void markTransferUncertain(UUID transferId, FluidStack fluid, long amount, String reason) {
         if (fluid == null || fluid.isEmpty()) {
-            markTransferUncertain(ResourceType.UNKNOWN, null, null, amount, reason);
+            markTransferUncertain(transferId, ResourceType.UNKNOWN, null, null, amount, reason);
         } else {
-            markTransferUncertain(ResourceType.FLUID, null, fluid, amount, reason);
+            markTransferUncertain(transferId, ResourceType.FLUID, null, fluid, amount, reason);
         }
     }
 
     void markTransfersUncertain(List<FluidStack> fluids, String reason) {
-        if (uncertain) return;
+        markTransfersUncertain(UUID.randomUUID(), fluids, reason);
+    }
+
+    /** transferId 标识同一次动作，重报时沿用相同的流体片段顺序。 */
+    void markTransfersUncertain(UUID transferId, List<FluidStack> fluids, String reason) {
         uncertain = true;
         Map<TaskFluidKey, Long> amounts = new LinkedHashMap<>();
         for (FluidStack fluid : fluids) {
@@ -91,16 +102,25 @@ final class RuntimeMaterialAccount {
                 amounts.merge(TaskFluidKey.of(fluid), (long) fluid.getAmount(), Math::addExact);
             }
         }
-        if (amounts.isEmpty()) recordUnknown(ResourceType.UNKNOWN, null, null, 0L, reason);
-        amounts.forEach((key, amount) -> recordUnknown(ResourceType.FLUID, null, key.toStack(1), amount, reason));
+        if (amounts.isEmpty()) recordUnknown(transferId, ResourceType.UNKNOWN, null, null, 0L, reason);
+        int part = 0;
+        for (Map.Entry<TaskFluidKey, Long> entry : amounts.entrySet()) {
+            UUID evidenceId = UUID.nameUUIDFromBytes((transferId + ":" + part++)
+                    .getBytes(StandardCharsets.US_ASCII));
+            recordUnknown(evidenceId, ResourceType.FLUID, null, entry.getKey().toStack(1), entry.getValue(), reason);
+        }
         RSIntegrationMod.LOGGER.error("[RSI-Materials] 任务 {} 流体转移结果不明，停止自动重试", craftId);
     }
 
     private void markTransferUncertain(ResourceType type, @Nullable ItemStack item,
                                        @Nullable FluidStack fluid, long amount, String reason) {
-        if (uncertain) return;
+        markTransferUncertain(UUID.randomUUID(), type, item, fluid, amount, reason);
+    }
+
+    private void markTransferUncertain(UUID transferId, ResourceType type, @Nullable ItemStack item,
+                                       @Nullable FluidStack fluid, long amount, String reason) {
         uncertain = true;
-        recordUnknown(type, item, fluid, amount, reason);
+        recordUnknown(transferId, type, item, fluid, amount, reason);
         RSIntegrationMod.LOGGER.error("[RSI-Materials] 任务 {} 材料转移结果不明，停止自动重试", craftId);
     }
     long count(MaterialKey key) {
@@ -222,17 +242,26 @@ final class RuntimeMaterialAccount {
 
     private void recordUnknown(ResourceType type, @Nullable ItemStack item,
                                @Nullable FluidStack fluid, long amount, String reason) {
+        recordUnknown(UUID.randomUUID(), type, item, fluid, amount, reason);
+    }
+
+    private void recordUnknown(UUID transferId, ResourceType type, @Nullable ItemStack item,
+                               @Nullable FluidStack fluid, long amount, String reason) {
         try {
             MaterialTransferAuditLedger ledger = MaterialTransferAuditLedger.get(server);
             long now = server.overworld().getGameTime();
+            ResourceLocation resourceId = null;
+            CompoundTag identity = null;
             if (type == ResourceType.ITEM && item != null && !item.isEmpty()) {
-                ledger.recordUnknownItem(craftId, playerId, item, amount, reason, now);
+                resourceId = BuiltInRegistries.ITEM.getKey(item.getItem());
+                identity = item.getTag();
             } else if (type == ResourceType.FLUID && fluid != null && !fluid.isEmpty()) {
-                ledger.recordUnknownFluid(craftId, playerId, fluid, amount, reason, now);
+                resourceId = TaskFluidKey.of(fluid).fluidId();
+                identity = fluid.getTag();
             } else {
-                ledger.recordUnknown(craftId, playerId, ResourceType.UNKNOWN, null,
-                        new CompoundTag(), amount, reason, now);
+                type = ResourceType.UNKNOWN;
             }
+            ledger.recordUnknown(transferId, craftId, playerId, type, resourceId, identity, amount, reason, now);
         } catch (RuntimeException | LinkageError failure) {
             RSIntegrationMod.LOGGER.error("[RSI-Materials] 任务 {} 未知转移记录无法持久化", craftId, failure);
         }

@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.feature.unifiedgrid;
 
 import com.huanghuang.rsintegration.mods.ironsspellbooks.FluidRefundItem;
+import com.huanghuang.rsintegration.crafting.MaterialTransferAuditLedger.RefundJournal;
+import com.huanghuang.rsintegration.crafting.MaterialTransferAuditLedger.Resolved;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.IntArrayTag;
 import net.minecraft.nbt.ListTag;
@@ -17,6 +19,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -29,6 +32,7 @@ public final class UnifiedGridFluidRecovery extends SavedData {
     private final Map<UUID, Map<String, Bucket>> pending = new LinkedHashMap<>();
     private final ListTag unowned = new ListTag();
     private final Set<UUID> processedRefundIds = new LinkedHashSet<>();
+    private RefundJournal refundJournal = new RefundJournal();
 
     private static final class Bucket {
         final Deque<CompoundTag> entries = new ArrayDeque<>();
@@ -49,6 +53,7 @@ public final class UnifiedGridFluidRecovery extends SavedData {
 
     UnifiedGridFluidRecovery() { }
     UnifiedGridFluidRecovery(CompoundTag tag) {
+        refundJournal = new RefundJournal(tag);
         for (Tag value : tag.getList("pending", Tag.TAG_COMPOUND)) {
             CompoundTag entry = ((CompoundTag) value).copy();
             if (!entry.hasUUID("owner")) {
@@ -126,6 +131,19 @@ public final class UnifiedGridFluidRecovery extends SavedData {
         return true;
     }
 
+    @Nullable public Resolved refundDecision(UUID attemptId) { return refundJournal.decision(attemptId); }
+    public List<Resolved> refundDecisions() { return refundJournal.decisions(); }
+
+    public boolean hasLegacyRefund(UUID attemptId) {
+        return refundJournal.hasLegacyRefund(attemptId, processedRefundIds);
+    }
+
+    public boolean lockRefundDecision(Resolved decision) {
+        if (!refundJournal.lock(decision, processedRefundIds)) return false;
+        setDirty();
+        return true;
+    }
+
     /** 登录或执行领取命令时最多发放 32 个物品；未发出的记录保留在世界存档。 */
     public int claim(ServerPlayer player) {
         Map<String, Bucket> byNetwork = pending.get(player.getUUID());
@@ -182,6 +200,7 @@ public final class UnifiedGridFluidRecovery extends SavedData {
     }
 
     @Override public CompoundTag save(CompoundTag tag) {
+        refundJournal.save(tag);
         ListTag serialized = unowned.copy();
         for (Map<String, Bucket> byNetwork : pending.values()) {
             for (Bucket bucket : byNetwork.values()) {

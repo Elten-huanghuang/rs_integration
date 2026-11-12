@@ -13,6 +13,7 @@ import net.minecraftforge.fluids.FluidStack;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 /** 直接读取和交付任务账户中的类型化流体余额，不从公共库存补取。 */
 public final class TaskFluidAccess {
@@ -75,6 +76,11 @@ public final class TaskFluidAccess {
     public void markUncertain(List<FluidStack> fluids, String reason) {
         if (!authorized) throw new IllegalStateException("任务流体账户身份不匹配");
         account.markTransfersUncertain(fluids, reason);
+    }
+
+    public void markUncertain(UUID transferId, List<FluidStack> fluids, String reason) {
+        if (!authorized) throw new IllegalStateException("任务流体账户身份不匹配");
+        account.markTransfersUncertain(transferId, fluids, reason);
     }
 
     public void markUncertain(long amount, String reason) {

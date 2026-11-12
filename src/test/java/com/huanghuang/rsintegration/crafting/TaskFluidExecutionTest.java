@@ -11,6 +11,8 @@ import com.huanghuang.rsintegration.api.execution.CancelReason;
 import com.huanghuang.rsintegration.api.execution.OperationCleanupResult;
 import com.huanghuang.rsintegration.api.execution.ReservedMaterialView;
 import com.huanghuang.rsintegration.api.execution.RunningOperation;
+import com.huanghuang.rsintegration.api.execution.RecipeExecutionIntegration;
+import com.huanghuang.rsintegration.api.execution.ExecutionPlan;
 import com.huanghuang.rsintegration.api.execution.ReservedMaterial;
 import com.huanghuang.rsintegration.api.machine.ConcurrencyCapabilities;
 import com.huanghuang.rsintegration.api.machine.FluidPortAccess;
@@ -71,6 +73,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -83,6 +86,7 @@ import static org.mockito.Mockito.*;
 class TaskFluidExecutionTest extends BootstrapTest {
     private static final ResourceLocation WATER_INPUT = id("water");
     private ServerPlayer player;
+    private MinecraftServer server;
     private StorageSession session;
     private CraftStorageEndpoint endpoint;
     private RuntimeMaterialAccount account;
@@ -104,8 +108,10 @@ class TaskFluidExecutionTest extends BootstrapTest {
         session = mock(StorageSession.class);
         when(session.reference()).thenReturn(new StorageReference(new StorageBackendId("test"), "network"));
         endpoint = () -> session;
-        account = new RuntimeMaterialAccount(UUID.randomUUID(), player.getUUID(), mock(MinecraftServer.class), endpoint);
+        server = mock(MinecraftServer.class);
+        account = new RuntimeMaterialAccount(UUID.randomUUID(), player.getUUID(), server, endpoint);
         level = mock(ServerLevel.class);
+        when(server.overworld()).thenReturn(level);
         machine = mock(BlockEntity.class);
         tank = spy(new FluidTank(Integer.MAX_VALUE));
         when(level.getBlockEntity(BlockPos.ZERO)).thenReturn(machine);
@@ -215,6 +221,75 @@ class TaskFluidExecutionTest extends BootstrapTest {
         invoke(delegate, "settleCustomFluidInputs", new Class<?>[]{List.class, ServerPlayer.class}, receipts, null);
         invoke(delegate, "settleCustomFluidInputs", new Class<?>[]{List.class, ServerPlayer.class}, receipts, null);
         assertEquals(400, held());
+        verifyNoInteractions(session);
+    }
+
+    @Test void unknownFragmentsOfSameEntryAreDistinctAndCleanupDoesNotRepeatThem() throws Exception {
+        account.add(InkFluidSupport.token(water(1000)));
+        ExternalIntegrationBatchDelegate delegate = delegate(1000);
+        try (var scope = RuntimeMaterialAccount.enter(account)) {
+            assertTrue((boolean) invoke(delegate, "reserveCustomFluids",
+                    new Class<?>[]{ServerPlayer.class, List.class}, player, new ArrayList<ReservedMaterial>()));
+        }
+        MaterialTransferAuditLedger ledger = new MaterialTransferAuditLedger();
+        try (var ledgers = mockStatic(MaterialTransferAuditLedger.class)) {
+            ledgers.when(() -> MaterialTransferAuditLedger.get(server)).thenReturn(ledger);
+            invoke(delegate, "settleCustomFluidInputs", new Class<?>[]{List.class, ServerPlayer.class}, List.of(
+                    disposition(400, MaterialOutcome.UNCERTAIN), disposition(200, MaterialOutcome.CONSUMED),
+                    disposition(400, MaterialOutcome.UNCERTAIN)), player);
+            invoke(delegate, "clearCustomOperation", new Class<?>[]{ServerPlayer.class}, player);
+        }
+        assertEquals(2, ledger.pendingAttempts().size());
+        assertTrue(ledger.pendingAttempts().stream().allMatch(entry -> entry.amount() == 400L));
+        assertEquals(0L, held());
+        verifyNoInteractions(session);
+    }
+
+    @Test void unknownEntriesAreAllRecordedEvenWhenFirstEntryFreezesAccount() throws Exception {
+        ExternalIntegrationBatchDelegate delegate = delegate(1000);
+        set(delegate, "taskFluids", capture());
+        Map<String, List<FluidStack>> fluids = new LinkedHashMap<>();
+        fluids.put(WATER_INPUT.toString(), List.of(water(1000)));
+        fluids.put("test:lava", List.of(new FluidStack(Fluids.LAVA, 500)));
+        set(delegate, "customReservedFluids", fluids);
+        MaterialTransferAuditLedger ledger = new MaterialTransferAuditLedger();
+        MaterialDisposition lava = new MaterialDisposition(new ReservedMaterial("test:lava",
+                IntegrationResourceKey.fluid(new FluidStack(Fluids.LAVA, 1)), 500, InputConsumption.consumed()),
+                MaterialOutcome.UNCERTAIN);
+        try (var ledgers = mockStatic(MaterialTransferAuditLedger.class)) {
+            ledgers.when(() -> MaterialTransferAuditLedger.get(server)).thenReturn(ledger);
+            invoke(delegate, "settleCustomFluidInputs", new Class<?>[]{List.class, ServerPlayer.class},
+                    List.of(disposition(1000, MaterialOutcome.UNCERTAIN), lava), player);
+        }
+        assertEquals(2, ledger.pendingAttempts().size());
+        assertEquals(List.of(1000L, 500L), ledger.pendingAttempts().stream()
+                .map(MaterialTransferAuditLedger.Pending::amount).toList());
+    }
+
+    @Test void startExceptionHandsReservationToAuditOnlyOnceAcrossCleanup() throws Exception {
+        account.add(InkFluidSupport.token(water(1000)));
+        ExternalIntegrationBatchDelegate delegate = delegate(1000);
+        try (var scope = RuntimeMaterialAccount.enter(account)) {
+            assertTrue((boolean) invoke(delegate, "reserveCustomFluids",
+                    new Class<?>[]{ServerPlayer.class, List.class}, player, new ArrayList<ReservedMaterial>()));
+        }
+        RecipeExecutionIntegration execution = mock(RecipeExecutionIntegration.class);
+        when(execution.start(any(), any())).thenThrow(new IllegalStateException("交付后异常"));
+        set(delegate, "executionIntegration", execution);
+        set(delegate, "executionPlan", mock(ExecutionPlan.class));
+        set(delegate, "operationStartContext", new OperationStartContext(player, new ExtractionLedger(),
+                OperationStartContext.MaterialOwnership.CHAIN_RESERVED, MaterialPlan.none(), List.of(),
+                InputBufferPlan.none(), null, UUID.randomUUID(), UUID.randomUUID(), 1));
+        MaterialTransferAuditLedger ledger = new MaterialTransferAuditLedger();
+        try (var ledgers = mockStatic(MaterialTransferAuditLedger.class)) {
+            ledgers.when(() -> MaterialTransferAuditLedger.get(server)).thenReturn(ledger);
+            invoke(delegate, "startCustomIntegration", new Class<?>[]{ServerPlayer.class}, player);
+            invoke(delegate, "clearCustomOperation", new Class<?>[]{ServerPlayer.class}, player);
+            invoke(delegate, "clearCustomOperation", new Class<?>[]{ServerPlayer.class}, player);
+        }
+        assertEquals(1, ledger.pendingAttempts().size());
+        assertEquals(1000L, ledger.pendingAttempts().get(0).amount());
+        assertEquals(0L, held());
         verifyNoInteractions(session);
     }
 

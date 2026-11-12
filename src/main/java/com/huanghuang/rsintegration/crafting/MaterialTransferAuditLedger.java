@@ -17,9 +17,12 @@ import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 /** 持久化记录无法确认去向的任务材料，并提供管理员人工结算入口。 */
@@ -41,6 +44,49 @@ public final class MaterialTransferAuditLedger extends SavedData {
 
     public record Resolved(Pending attempt, Resolution resolution, long refundAmount,
                            @Nullable UUID resolvedBy, long resolvedAt) {}
+
+    /** 与恢复队列保存在同一份 SavedData，领取后也保留首次退款决定。 */
+    public static final class RefundJournal {
+        private final Map<UUID, Resolved> decisions = new LinkedHashMap<>();
+
+        public RefundJournal() {}
+
+        public RefundJournal(CompoundTag tag) {
+            for (Tag value : tag.getList("refundDecisions", Tag.TAG_COMPOUND)) {
+                Resolved decision = readResolution((CompoundTag) value);
+                if (decision != null && decision.resolution() == Resolution.REFUND) {
+                    decisions.putIfAbsent(decision.attempt().attemptId(), decision);
+                }
+            }
+        }
+
+        @Nullable public Resolved decision(UUID attemptId) { return decisions.get(attemptId); }
+        public List<Resolved> decisions() { return List.copyOf(decisions.values()); }
+
+        /** 旧版只有去重 ID、无法还原原决定时，禁止猜测金额或改判已消费。 */
+        public boolean hasLegacyRefund(UUID attemptId, Set<UUID> processedIds) {
+            return !decisions.containsKey(attemptId) && processedIds.contains(partId(attemptId, 0));
+        }
+
+        public boolean lock(Resolved decision, Set<UUID> processedIds) {
+            UUID id = decision.attempt().attemptId();
+            Resolved previous = decisions.get(id);
+            if (previous != null) return previous.equals(decision);
+            if (decision.resolution() != Resolution.REFUND || hasLegacyRefund(id, processedIds)) return false;
+            decisions.put(id, decision);
+            return true;
+        }
+
+        public void save(CompoundTag tag) {
+            ListTag entries = new ListTag();
+            decisions.values().forEach(decision -> entries.add(writeResolution(decision)));
+            tag.put("refundDecisions", entries);
+        }
+
+        public static UUID partId(UUID attemptId, int partIndex) {
+            return UUID.nameUUIDFromBytes((attemptId + ":" + partIndex).getBytes(StandardCharsets.US_ASCII));
+        }
+    }
 
     private final Map<UUID, Pending> pending = new LinkedHashMap<>();
     private final Map<UUID, Resolved> resolved = new LinkedHashMap<>();
@@ -92,12 +138,30 @@ public final class MaterialTransferAuditLedger extends SavedData {
     public UUID recordUnknown(UUID taskId, UUID ownerId, ResourceType type,
                               @Nullable ResourceLocation resourceId, @Nullable CompoundTag identity,
                               long amount, String reason, long recordedAt) {
-        if (taskId == null || ownerId == null || type == null || amount < 0L) {
+        return recordUnknown(UUID.randomUUID(), taskId, ownerId, type, resourceId, identity,
+                amount, reason, recordedAt);
+    }
+
+    /** 同一转移动作沿用同一 ID，重复通知不新增记录，也不覆盖人工结论。 */
+    public UUID recordUnknown(UUID attemptId, UUID taskId, UUID ownerId, ResourceType type,
+                              @Nullable ResourceLocation resourceId, @Nullable CompoundTag identity,
+                              long amount, String reason, long recordedAt) {
+        if (attemptId == null || taskId == null || ownerId == null || type == null || amount < 0L) {
             throw new IllegalArgumentException("材料对账记录字段无效");
         }
-        UUID attemptId = UUID.randomUUID();
-        pending.put(attemptId, new Pending(attemptId, taskId, ownerId, type, resourceId,
-                identity, amount, reason == null ? "unknown" : reason, Math.max(0L, recordedAt)));
+        Pending next = new Pending(attemptId, taskId, ownerId, type, resourceId,
+                identity, amount, reason == null ? "unknown" : reason, Math.max(0L, recordedAt));
+        Pending previous = pending.get(attemptId);
+        if (previous == null && resolved.containsKey(attemptId)) previous = resolved.get(attemptId).attempt();
+        if (previous != null) {
+            if (!previous.taskId().equals(next.taskId()) || !previous.ownerId().equals(next.ownerId())
+                    || previous.type() != next.type() || !Objects.equals(previous.resourceId(), next.resourceId())
+                    || !previous.identity().equals(next.identity()) || previous.amount() != next.amount()) {
+                throw new IllegalArgumentException("同一转移 ID 的材料证据冲突: " + attemptId);
+            }
+            return attemptId;
+        }
+        pending.put(attemptId, next);
         setDirty();
         return attemptId;
     }
@@ -116,6 +180,17 @@ public final class MaterialTransferAuditLedger extends SavedData {
                            long refundAmount, @Nullable UUID resolvedBy, long resolvedAt) {
         Pending attempt = pending.get(attemptId);
         if (attempt == null || resolution == null) return false;
+        try {
+            Resolved receipt = recoveryDecision(server, attempt);
+            if (receipt != null) {
+                if (!receipt.attempt().equals(attempt)) return false;
+                refundIntents.put(attemptId, receipt);
+                setDirty();
+            }
+        } catch (RuntimeException | LinkageError failure) {
+            RSIntegrationMod.LOGGER.error("[RSI-Materials] 核对 {} 无法确认原退款决定，保留待核对状态", attemptId, failure);
+            return false;
+        }
         Resolved decision = refundIntents.get(attemptId);
         if (decision != null && (resolution != Resolution.REFUND
                 || decision.refundAmount() != refundAmount)) return false;
@@ -143,7 +218,7 @@ public final class MaterialTransferAuditLedger extends SavedData {
 
     private boolean tryQueueRefund(MinecraftServer server, Resolved decision) {
         try {
-            return queueRefund(server, decision.attempt(), decision.refundAmount());
+            return queueRefund(server, decision);
         } catch (RuntimeException | LinkageError failure) {
             RSIntegrationMod.LOGGER.error("[RSI-Materials] 核对退款 {} 入队失败，保留原结论等待重放",
                     decision.attempt().attemptId(), failure);
@@ -151,15 +226,39 @@ public final class MaterialTransferAuditLedger extends SavedData {
         }
     }
 
-    private boolean queueRefund(MinecraftServer server, Pending attempt, long refundAmount) {
+    @Nullable
+    private Resolved recoveryDecision(MinecraftServer server, Pending attempt) {
+        if (attempt.type() == ResourceType.ITEM) {
+            CraftItemRecovery recovery = CraftItemRecovery.get(server);
+            if (recovery.hasLegacyRefund(attempt.attemptId())) {
+                throw new IllegalStateException("旧版退款只有去重记录，需人工核对原退款数量");
+            }
+            return recovery.refundDecision(attempt.attemptId());
+        }
+        if (attempt.type() == ResourceType.FLUID) {
+            UnifiedGridFluidRecovery recovery = UnifiedGridFluidRecovery.get(server);
+            if (recovery.hasLegacyRefund(attempt.attemptId())) {
+                throw new IllegalStateException("旧版流体退款只有去重记录，需人工核对原退款数量");
+            }
+            return recovery.refundDecision(attempt.attemptId());
+        }
+        return null;
+    }
+
+    private boolean queueRefund(MinecraftServer server, Resolved decision) {
+        Pending attempt = decision.attempt();
+        long refundAmount = decision.refundAmount();
         if (refundAmount <= 0L || attempt.resourceId() == null
                 || attempt.type() == ResourceType.UNKNOWN) return false;
+        // 决定、分片进度和可领取余额在同一 SavedData 中保存，不能分别落盘。
+        if (attempt.type() == ResourceType.ITEM) {
+            if (!CraftItemRecovery.get(server).lockRefundDecision(decision)) return false;
+        } else if (!UnifiedGridFluidRecovery.get(server).lockRefundDecision(decision)) return false;
         long remaining = refundAmount;
         int partIndex = 0;
         while (remaining > 0L) {
             int amount = (int) Math.min(Integer.MAX_VALUE, remaining);
-            UUID refundPartId = UUID.nameUUIDFromBytes((attempt.attemptId() + ":" + partIndex++)
-                    .getBytes(StandardCharsets.US_ASCII));
+            UUID refundPartId = RefundJournal.partId(attempt.attemptId(), partIndex++);
             if (attempt.type() == ResourceType.ITEM) {
                 Item item = BuiltInRegistries.ITEM.get(attempt.resourceId());
                 if (item == null || item == Items.AIR) return false;
@@ -179,11 +278,30 @@ public final class MaterialTransferAuditLedger extends SavedData {
         return true;
     }
 
-    /** 队列和核对档案分别存盘；启动时以相同退款 ID 补齐尚未落盘的队列。 */
+    /** 先从恢复队列还原首次决定，再按稳定分片 ID 补齐余额；领取过的分片不会重发。 */
     public void replayRefunds(MinecraftServer server) {
-        for (Resolved entry : resolved.values()) {
+        List<Resolved> receipts = new ArrayList<>(CraftItemRecovery.get(server).refundDecisions());
+        receipts.addAll(UnifiedGridFluidRecovery.get(server).refundDecisions());
+        for (Resolved receipt : receipts) {
+            UUID id = receipt.attempt().attemptId();
+            Pending existing = pending.get(id);
+            if (existing == null && resolved.containsKey(id)) existing = resolved.get(id).attempt();
+            if (existing != null && !existing.equals(receipt.attempt())) {
+                RSIntegrationMod.LOGGER.error("[RSI-Materials] 退款 {} 的材料身份冲突，停止重放", id);
+                continue;
+            }
+            pending.put(id, receipt.attempt());
+            resolved.remove(id);
+            refundIntents.put(id, receipt);
+            setDirty();
+        }
+        for (Resolved entry : List.copyOf(resolved.values())) {
             if (entry.resolution() == Resolution.REFUND) {
-                tryQueueRefund(server, entry);
+                UUID id = entry.attempt().attemptId();
+                pending.put(id, entry.attempt());
+                refundIntents.put(id, entry);
+                resolved.remove(id);
+                setDirty();
             }
         }
         for (Resolved entry : List.copyOf(refundIntents.values())) {
