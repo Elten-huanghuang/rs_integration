@@ -76,10 +76,14 @@ public final class ExtractionLedger implements AutoCloseable {
     @Nullable private RuntimeMaterialAccount materialAccount;
     private boolean externalMaterialAccess;
     private boolean uncertainTransfers;
+    @Nullable private StorageOperationStatus commitFailureStatus;
+    private String commitFailureDetail = "";
 
     void setExternalMaterialAccess() { externalMaterialAccess = true; materialAccount = null; }
     void setMaterialAccount(RuntimeMaterialAccount account) { materialAccount = account; }
     boolean hasUncertainTransfers() { return uncertainTransfers; }
+    @Nullable StorageOperationStatus commitFailureStatus() { return commitFailureStatus; }
+    String commitFailureDetail() { return commitFailureDetail; }
     List<ItemStack> committedFragments() {
         return entries.stream().flatMap(entry -> entry.extracted.stream()).map(ItemStack::copy).toList();
     }
@@ -941,6 +945,7 @@ public final class ExtractionLedger implements AutoCloseable {
 
         // ── Phase 1: Pre-check ──────────────────────────────────
         if (!preCheck(endpoint, player)) {
+            commitFailureDetail = "材料提取前检查失败";
             LOGGER.warn(fmt("Ledger commit pre-check failed, rolling back"));
             resetSettlementMirror();
             releaseUncommittedAccountReservations();
@@ -962,14 +967,22 @@ public final class ExtractionLedger implements AutoCloseable {
                 if (result.kind() != StorageOperationResult.Kind.EXTRACT
                         || !result.complete() || result.mode() != StorageOperationMode.PERFORM
                         || result.transferredAmount().orElse(-1L) != entry.count) {
-                    LOGGER.warn(fmt("Ledger commit: extraction incomplete for entry {} (need {}, status {})"),
-                            entry.id, entry.count, result.status());
+                    commitFailureStatus = result.status();
+                    ResourceLocation itemId = BuiltInRegistries.ITEM.getKey(entry.template.getItem());
+                    commitFailureDetail = "材料提取失败：" + itemId + "，需要 " + entry.count
+                            + "，状态 " + result.status() + "，来源 " + entry.source
+                            + "，诊断 " + result.diagnosticCode();
+                    LOGGER.warn(fmt("Ledger commit: extraction incomplete for entry {} "
+                                    + "(item {}, source {}, need {}, status {}, diagnostic {})"),
+                            entry.id, itemId, entry.source, entry.count,
+                            result.status(), result.diagnosticCode());
                     extractionFailed = true;
                     break;
                 }
             }
         } catch (RuntimeException | LinkageError e) {
             uncertainTransfers = true;
+            commitFailureDetail = "材料提取异常：" + e.getClass().getSimpleName();
             LOGGER.warn("[RSI-Ledger] Commit exception during extraction", e);
             extractionFailed = true;
         }
@@ -1377,6 +1390,8 @@ public final class ExtractionLedger implements AutoCloseable {
         refundOwner = null;
         refundServer = null;
         refundActor = null;
+        commitFailureStatus = null;
+        commitFailureDetail = "";
         // A chain reuses its master ledger across vanilla steps. The settlement
         // mirror is a per-commit scope and must be reset with the legacy ledger;
         // otherwise the next step calls beginCommit() on COMMITTED state.

@@ -49,6 +49,7 @@ import com.huanghuang.rsintegration.crafting.batch.CraftProgressPublisher;
 import com.huanghuang.rsintegration.crafting.progress.CraftExecutionClock;
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot.Reason;
 import com.huanghuang.rsintegration.storage.StorageReference;
+import com.huanghuang.rsintegration.storage.StorageOperationStatus;
 import com.huanghuang.rsintegration.crafting.batch.CraftStartedPacket;
 import com.huanghuang.rsintegration.crafting.batch.PreparationMessageScope;
 import net.minecraftforge.network.NetworkDirection;
@@ -1370,7 +1371,7 @@ public final class AsyncCraftChain {
                     vanillaNode, graphRequests.getOrDefault(vanillaNode, List.of()));
             NodeAdmissionCoordinator.Admission admission = graphAdmissions.tryAdmitClaimed(candidate);
             if (admission == null) {
-                graphScheduler.releaseClaim(vanillaNode);
+                retryGraphVanillaNode(vanillaNode, "material admission unavailable", Reason.WAITING_MATERIALS);
                 break;
             }
 
@@ -1442,7 +1443,7 @@ public final class AsyncCraftChain {
                 nodeLedger.rollback(online);
                 operation.close();
                 executionLedger.close();
-                graphScheduler.releaseClaim(nodeId);
+                retryGraphVanillaNode(nodeId, "initial materials unavailable", Reason.WAITING_MATERIALS);
                 return null;
             }
             operationInventory.add(reserved);
@@ -1453,12 +1454,37 @@ public final class AsyncCraftChain {
             else nodeLedger.rollback(online);
             operation.close();
             executionLedger.close();
-            graphScheduler.releaseClaim(nodeId);
+            String detail = nodeLedger.commitFailureDetail();
+            if (detail.isEmpty()) detail = "材料提取未完成";
+            if (nodeLedger.commitFailureStatus() == StorageOperationStatus.INVALID_REQUEST
+                    || nodeLedger.hasUncertainTransfers()) {
+                // 无效请求和转移结果不确定时不自动重放，避免每 tick 重建账本。
+                rememberGraphDiagnostic(nodeId, Reason.MATERIAL_EXTRACTION_FAILED, detail);
+                graphFailureDetails.put(nodeId, detail);
+                graphFailureCodes.put(nodeId, CraftFailureCode.MATERIAL_EXTRACTION_FAILED);
+                clearGraphRetry(nodeId);
+                graphScheduler.fail(nodeId);
+            } else {
+                retryGraphVanillaNode(nodeId, detail, Reason.MATERIAL_EXTRACTION_FAILED);
+            }
             return null;
         }
         graphAdmissions.commit(admission);
+        clearGraphRetry(nodeId);
+        graphMonitorDiagnostics.remove(nodeId);
         return new GraphVanillaJob(nodeId, step, admission, nodeLedger,
                 executionLedger, operation, operationInventory, executions, graphNodes.get(nodeId).inputs());
+    }
+
+    /** 普通合成也使用统一退避与截止时间，暂时缺料时保留节点等待恢复。 */
+    private void retryGraphVanillaNode(NodeId nodeId, String detail, Reason reason) {
+        ConcurrentNodeExecutor.StartResult result = graphRetry(
+                nodeId, detail, graphRequests.getOrDefault(nodeId, List.of()), reason);
+        if (result.status() == ConcurrentNodeExecutor.StartStatus.FAILED) {
+            graphScheduler.fail(nodeId);
+        } else {
+            graphScheduler.releaseClaim(nodeId);
+        }
     }
 
     private boolean runGraphVanillaSlice(
@@ -1824,7 +1850,9 @@ public final class AsyncCraftChain {
 
     @Nullable
     private NodeId findReadyVanillaNode() {
-        return graphScheduler.claimFirstReady(this::isVanillaGraphNode);
+        int now = server.getTickCount();
+        return graphScheduler.claimFirstReady(nodeId -> isVanillaGraphNode(nodeId)
+                && now >= graphRetryUntilTick.getOrDefault(nodeId, now));
     }
 
     private boolean isVanillaGraphNode(NodeId nodeId) {

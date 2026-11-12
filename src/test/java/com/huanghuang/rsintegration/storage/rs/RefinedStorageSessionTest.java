@@ -233,6 +233,25 @@ class RefinedStorageSessionTest extends BootstrapTest {
         assertEquals(0, driver.reads);
     }
 
+    @Test
+    void exactExtractionPreservesLiveNbtWithoutRunningLoadHooks() {
+        ItemStack head = new ItemStack(Items.PLAYER_HEAD, 2);
+        head.getOrCreateTag().putString("SkullOwner", "RSIRegression");
+        driver.items.add(head);
+        StorageItemKey key = session.itemKey(head);
+        // 读取存档会把字符串 SkullOwner 转成复合标签；网络中的原物品仍保留字符串。
+        assertNotEquals(key, session.itemKey(ItemStack.of(key.backendPayload())));
+
+        StorageOperationResult simulated = session.extractExact(player, key, 1, true);
+        assertEquals(StorageOperationStatus.SUCCESS, simulated.status());
+        assertEquals(2, head.getCount());
+        StorageOperationResult result = session.extractExact(player, key, 1, false);
+        assertEquals(StorageOperationStatus.SUCCESS, result.status());
+        assertEquals("RSIRegression", result.extractedStacks().get(0).getTag().getString("SkullOwner"));
+        assertEquals(1, head.getCount());
+        assertEquals(0, driver.reads);
+    }
+
     private static ItemStack namedIron(String variant, int count) {
         ItemStack stack = new ItemStack(Items.IRON_INGOT, count);
         stack.getOrCreateTag().putString("variant", variant);

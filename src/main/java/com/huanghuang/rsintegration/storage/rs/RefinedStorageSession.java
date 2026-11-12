@@ -204,7 +204,9 @@ final class RefinedStorageSession implements StorageSession {
         StoragePermissionResult permission = checkPermissionInternal(player, StoragePermission.EXTRACT);
         if (!permission.allowedAccess()) return failedPermissionExtraction(
                 amount, permission, mode(simulate));
-        ItemStack template = ItemStack.of(key.backendPayload());
+        // 复用构键时保留的原物品副本。重新读取存档会触发加载钩子并改写 NBT，
+        // 导致请求身份与网络里的原物品不一致；执行器仍会校验模板和返回物品。
+        ItemStack template = key.displayStack();
         if (template.isEmpty()) return StorageOperationResult.failedExtraction(
                 mode(simulate), amount,
                 StorageOperationStatus.INVALID_REQUEST, List.of(), List.of());
