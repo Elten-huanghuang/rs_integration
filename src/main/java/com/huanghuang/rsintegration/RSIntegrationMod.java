@@ -34,6 +34,7 @@ import com.huanghuang.rsintegration.mods.farmingforblockheads.FarmingForBlockhea
 import com.huanghuang.rsintegration.mods.forbidden.FARSModule;
 import com.huanghuang.rsintegration.mods.goety.magic.GoetySoulBackends;
 import com.huanghuang.rsintegration.magic.MagicResourceTaskLedger;
+import com.huanghuang.rsintegration.crafting.MaterialTransferAuditLedger;
 import com.huanghuang.rsintegration.magic.MagicStorageBackendHealth;
 import com.huanghuang.rsintegration.magic.MagicStorageBackends;
 import com.huanghuang.rsintegration.magic.route.AuthorityPolicy;
@@ -946,6 +947,7 @@ public final class RSIntegrationMod {
         // 启动分片采集会话；完整配方扫描由后续 tick 逐步推进。
         MinecraftForge.EVENT_BUS.addListener((ServerStartedEvent e) -> {
             RSIIntegrationServices.resumeAfterStop();
+            MaterialTransferAuditLedger.get(e.getServer()).replayRefunds(e.getServer());
             ExternalOperationRecoveryService.serverStarted(
                     e.getServer());
             RecipeIndex.warmUp(e.getServer().overworld());

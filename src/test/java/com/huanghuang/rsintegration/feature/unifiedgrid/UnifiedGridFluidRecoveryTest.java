@@ -66,6 +66,22 @@ class UnifiedGridFluidRecoveryTest extends BootstrapTest {
     }
 
     @Test
+    void refundAttemptIdPreventsDuplicateFluidAfterReload() {
+        UUID owner = UUID.randomUUID();
+        UUID refundId = UUID.randomUUID();
+        CompoundTag fluid = water(750);
+        UnifiedGridFluidRecovery recovery = new UnifiedGridFluidRecovery();
+        assertTrue(recovery.retainRawOnce(owner, fluid, null, refundId));
+        assertFalse(recovery.retainRawOnce(owner, fluid, null, refundId));
+
+        UnifiedGridFluidRecovery loaded = new UnifiedGridFluidRecovery(recovery.save(new CompoundTag()));
+        assertFalse(loaded.retainRawOnce(owner, fluid, null, refundId));
+        ListTag entries = loaded.save(new CompoundTag()).getList("pending", Tag.TAG_COMPOUND);
+        assertEquals(1, entries.size());
+        assertEquals(750, entries.getCompound(0).getCompound("fluid").getInt("Amount"));
+    }
+
+    @Test
     void batchRefundsMergeWithoutLosingAmountOrTags() {
         UUID owner = UUID.randomUUID();
         UnifiedGridFluidRecovery recovery = new UnifiedGridFluidRecovery();

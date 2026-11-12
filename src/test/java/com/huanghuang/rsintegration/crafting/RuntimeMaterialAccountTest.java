@@ -7,8 +7,10 @@ import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.storage.StorageBackendId;
 import com.huanghuang.rsintegration.storage.StorageDiagnosticCode;
+import com.huanghuang.rsintegration.storage.StorageFluidOperationResult;
 import com.huanghuang.rsintegration.storage.StorageItemKey;
 import com.huanghuang.rsintegration.storage.StorageOperationMode;
+import com.huanghuang.rsintegration.storage.StorageOperationStatus;
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
 import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.storage.StorageSession;
@@ -16,12 +18,14 @@ import com.huanghuang.rsintegration.storage.StorageSnapshot;
 import com.huanghuang.rsintegration.storage.StorageSnapshotResult;
 import com.huanghuang.rsintegration.storage.StoredItem;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import com.huanghuang.rsintegration.feature.unifiedgrid.UnifiedGridFluidRecovery;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidTestFixtures;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.players.PlayerList;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
@@ -34,6 +38,7 @@ import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.AfterEach;
 import org.mockito.MockedStatic;
+import org.mockito.ArgumentCaptor;
 import net.minecraftforge.fml.ModList;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -290,6 +295,162 @@ class RuntimeMaterialAccountTest extends BootstrapTest {
         account.close();
         assertEquals(1, extractions.get());
         assertEquals(1L, stock.get(IRON));
+    }
+
+    @Test
+    void auditExcludesConfirmedRollbackAndConfirmedExtractionFragments() {
+        stock.put(IRON, 2L);
+        stock.put(GOLD, 2L);
+        when(server.overworld()).thenReturn(mock(ServerLevel.class));
+        StorageItemKey goldKey = session.itemKey(GOLD.toStack(1));
+        doAnswer(call -> {
+            stock.put(GOLD, 0L);
+            return StorageOperationResult.indeterminateExtraction(2, List.of(GOLD.toStack(1)),
+                    List.of(), StorageDiagnosticCode.BACKEND_EXCEPTION);
+        }).when(session).extractExact(eq(player), eq(goldKey), eq(2L), eq(false));
+        MaterialTransferAuditLedger audit = new MaterialTransferAuditLedger();
+        try (var ledgers = mockStatic(MaterialTransferAuditLedger.class)) {
+            ledgers.when(() -> MaterialTransferAuditLedger.get(server)).thenReturn(audit);
+            Map<MaterialKey, Long> required = new LinkedHashMap<>();
+            required.put(IRON, 2L);
+            required.put(GOLD, 2L);
+            assertFalse(account().ensure(required, List.of(), player));
+        }
+        assertEquals(2L, stock.get(IRON));
+        assertEquals(1L, stock.get(GOLD));
+        assertEquals(1, audit.pendingAttempts().size());
+        assertEquals("minecraft:gold_ingot", audit.pendingAttempts().get(0).resourceId().toString());
+        assertEquals(1L, audit.pendingAttempts().get(0).amount());
+    }
+
+    @Test
+    void simulatedExtractionCannotBeCountedAsConfirmedMaterial() {
+        stock.put(IRON, 2L);
+        when(server.overworld()).thenReturn(mock(ServerLevel.class));
+        doReturn(StorageOperationResult.extracted(StorageOperationMode.SIMULATE, 2,
+                List.of(IRON.toStack(2))))
+                .when(session).extractExact(any(), any(), anyLong(), eq(false));
+        MaterialTransferAuditLedger audit = new MaterialTransferAuditLedger();
+        try (var ledgers = mockStatic(MaterialTransferAuditLedger.class)) {
+            ledgers.when(() -> MaterialTransferAuditLedger.get(server)).thenReturn(audit);
+            RuntimeMaterialAccount account = account();
+            assertFalse(acquire(account, IRON, 2));
+            assertTrue(account.uncertain());
+            verify(session, never()).insert(any(), any(), anyBoolean());
+        }
+        assertEquals(2L, audit.pendingAttempts().get(0).amount());
+    }
+
+    @Test
+    void simulatedRollbackCannotBeCountedAsConfirmedRefund() {
+        stock.put(IRON, 2L);
+        when(server.overworld()).thenReturn(mock(ServerLevel.class));
+        doReturn(StorageOperationResult.extracted(StorageOperationMode.PERFORM, 2,
+                List.of(IRON.toStack(1))))
+                .when(session).extractExact(any(), any(), anyLong(), eq(false));
+        doAnswer(call -> StorageOperationResult.inserted(StorageOperationMode.SIMULATE,
+                call.getArgument(1), ItemStack.EMPTY))
+                .when(session).insert(any(), any(), eq(false));
+        MaterialTransferAuditLedger audit = new MaterialTransferAuditLedger();
+        try (var ledgers = mockStatic(MaterialTransferAuditLedger.class)) {
+            ledgers.when(() -> MaterialTransferAuditLedger.get(server)).thenReturn(audit);
+            RuntimeMaterialAccount account = account();
+            assertFalse(acquire(account, IRON, 2));
+            assertTrue(account.uncertain());
+        }
+        assertEquals(1, audit.pendingAttempts().size());
+        assertEquals(1L, audit.pendingAttempts().get(0).amount());
+    }
+
+    @Test
+    void closingAnAccountRefundsHeldFluidEvenAfterAccountIsClosedForDelivery() {
+        MaterialKey water = MaterialKey.of(InkFluidSupport.token(InkFluidTestFixtures.tokenItem(),
+                new FluidStack(Fluids.WATER, 1)));
+        stock.put(water, 1000L);
+        RuntimeMaterialAccount account = account();
+        assertTrue(acquire(account, water, 1000));
+        assertEquals(1000L, account.count(water));
+        account.close();
+        account.close();
+        assertEquals(1000L, stock.get(water));
+        assertEquals(0L, account.count(water));
+        assertFalse(account.uncertain());
+    }
+
+    @Test
+    void invalidFluidRefundReceiptsFreezeAndNeverGenerateAnAutomaticRefund() {
+        when(server.overworld()).thenReturn(mock(ServerLevel.class));
+        FluidStack input = new FluidStack(Fluids.WATER, 1000);
+        FluidStack wrongTag = new FluidStack(Fluids.WATER, 1000);
+        wrongTag.getOrCreateTag().putString("grade", "other");
+        List<StorageFluidOperationResult> invalid = List.of(
+                StorageFluidOperationResult.inserted(StorageOperationMode.SIMULATE, input, FluidStack.EMPTY),
+                StorageFluidOperationResult.extracted(StorageOperationMode.PERFORM, 1000, List.of(input)),
+                StorageFluidOperationResult.inserted(StorageOperationMode.PERFORM, input, wrongTag),
+                new StorageFluidOperationResult(StorageOperationResult.Kind.INSERT, StorageOperationMode.PERFORM,
+                        StorageOperationStatus.SUCCESS, 1000, 800, true, List.of(), List.of(),
+                        FluidStack.EMPTY, StorageDiagnosticCode.NONE));
+        MaterialTransferAuditLedger audit = new MaterialTransferAuditLedger();
+        UnifiedGridFluidRecovery recovery = mock(UnifiedGridFluidRecovery.class);
+        try (var ledgers = mockStatic(MaterialTransferAuditLedger.class);
+             var recoveries = mockStatic(UnifiedGridFluidRecovery.class)) {
+            ledgers.when(() -> MaterialTransferAuditLedger.get(server)).thenReturn(audit);
+            recoveries.when(() -> UnifiedGridFluidRecovery.get(server)).thenReturn(recovery);
+            for (StorageFluidOperationResult receipt : invalid) {
+                doReturn(receipt).when(session).insertFluid(eq(player), any(), eq(false));
+                RuntimeMaterialAccount account = account();
+                account.addFluid(input);
+                account.close();
+                account.close();
+                assertTrue(account.uncertain());
+            }
+            verifyNoInteractions(recovery);
+        }
+        assertEquals(invalid.size(), audit.pendingAttempts().size());
+        assertTrue(audit.pendingAttempts().stream().allMatch(attempt -> attempt.amount() == 1000L));
+    }
+
+    @Test
+    void confirmedPartialFluidRefundQueuesOnlyTheExactRemainder() {
+        FluidStack input = new FluidStack(Fluids.WATER, 1000);
+        input.getOrCreateTag().putString("grade", "pure");
+        FluidStack remainder = input.copy();
+        remainder.setAmount(300);
+        doReturn(StorageFluidOperationResult.inserted(StorageOperationMode.PERFORM, input, remainder))
+                .when(session).insertFluid(eq(player), any(), eq(false));
+        UnifiedGridFluidRecovery recovery = mock(UnifiedGridFluidRecovery.class);
+        try (var recoveries = mockStatic(UnifiedGridFluidRecovery.class)) {
+            recoveries.when(() -> UnifiedGridFluidRecovery.get(server)).thenReturn(recovery);
+            RuntimeMaterialAccount account = account();
+            account.addFluid(input);
+            account.close();
+            account.close();
+            assertFalse(account.uncertain());
+            ArgumentCaptor<CompoundTag> saved = ArgumentCaptor.forClass(CompoundTag.class);
+            verify(recovery).retainRaw(eq(player.getUUID()), saved.capture(), isNull());
+            assertEquals(300, saved.getValue().getInt("Amount"));
+            assertEquals(input.getTag(), saved.getValue().getCompound("Tag"));
+            verify(recovery).claim(player);
+        }
+    }
+
+    @Test
+    void simulatedItemRefundIsAuditedRatherThanTreatedAsDelivered() {
+        when(server.overworld()).thenReturn(mock(ServerLevel.class));
+        doAnswer(call ->
+                StorageOperationResult.inserted(StorageOperationMode.SIMULATE,
+                        call.getArgument(1), ItemStack.EMPTY))
+                .when(session).insert(eq(player), any(), eq(false));
+        MaterialTransferAuditLedger audit = new MaterialTransferAuditLedger();
+        try (var ledgers = mockStatic(MaterialTransferAuditLedger.class)) {
+            ledgers.when(() -> MaterialTransferAuditLedger.get(server)).thenReturn(audit);
+            RuntimeMaterialAccount account = account();
+            account.add(IRON.toStack(2));
+            account.close();
+            assertTrue(account.uncertain());
+        }
+        assertEquals(1, audit.pendingAttempts().size());
+        assertEquals(2L, audit.pendingAttempts().get(0).amount());
     }
 
     @Test

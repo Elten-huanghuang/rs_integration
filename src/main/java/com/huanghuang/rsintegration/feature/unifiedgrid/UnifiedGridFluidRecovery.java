@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.feature.unifiedgrid;
 
 import com.huanghuang.rsintegration.mods.ironsspellbooks.FluidRefundItem;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.IntArrayTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.server.MinecraftServer;
@@ -15,7 +16,9 @@ import java.util.Deque;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /** 玩家离线或背包满时暂存退款；只有领取物品时才读取该玩家的记录。 */
@@ -25,6 +28,7 @@ public final class UnifiedGridFluidRecovery extends SavedData {
     /** 按玩家和原网络索引，领取时无需扫描其他玩家的退款。 */
     private final Map<UUID, Map<String, Bucket>> pending = new LinkedHashMap<>();
     private final ListTag unowned = new ListTag();
+    private final Set<UUID> processedRefundIds = new LinkedHashSet<>();
 
     private static final class Bucket {
         final Deque<CompoundTag> entries = new ArrayDeque<>();
@@ -54,6 +58,13 @@ public final class UnifiedGridFluidRecovery extends SavedData {
             String networkId = entry.contains("network", Tag.TAG_STRING)
                     ? entry.getString("network") : null;
             queue(entry.getUUID("owner"), networkId).add(entry);
+        }
+        for (Tag value : tag.getList("processedRefundIds", Tag.TAG_INT_ARRAY)) {
+            int[] parts = ((IntArrayTag) value).getAsIntArray();
+            if (parts.length != 4) continue;
+            processedRefundIds.add(new UUID(
+                    ((long) parts[0] << 32) | (parts[1] & 0xffffffffL),
+                    ((long) parts[2] << 32) | (parts[3] & 0xffffffffL)));
         }
     }
 
@@ -103,6 +114,16 @@ public final class UnifiedGridFluidRecovery extends SavedData {
         }
         setDirty();
         return firstForNetwork;
+    }
+
+    /** 以稳定退款 ID 入队；重放同一核对命令不会重复生成退款凭证。 */
+    public boolean retainRawOnce(UUID player, CompoundTag fluid, @Nullable String networkId,
+                                 UUID refundId) {
+        if (refundId == null || processedRefundIds.contains(refundId)) return false;
+        retainRaw(player, fluid, networkId);
+        processedRefundIds.add(refundId);
+        setDirty();
+        return true;
     }
 
     /** 登录或执行领取命令时最多发放 32 个物品；未发出的记录保留在世界存档。 */
@@ -168,6 +189,15 @@ public final class UnifiedGridFluidRecovery extends SavedData {
             }
         }
         tag.put("pending", serialized);
+        ListTag refundIds = new ListTag();
+        for (UUID id : processedRefundIds) {
+            refundIds.add(new IntArrayTag(new int[]{
+                    (int) (id.getMostSignificantBits() >>> 32),
+                    (int) id.getMostSignificantBits(),
+                    (int) (id.getLeastSignificantBits() >>> 32),
+                    (int) id.getLeastSignificantBits()}));
+        }
+        tag.put("processedRefundIds", refundIds);
         return tag;
     }
 }

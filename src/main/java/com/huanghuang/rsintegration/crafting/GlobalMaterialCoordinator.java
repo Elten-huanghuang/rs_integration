@@ -27,5 +27,10 @@ final class GlobalMaterialCoordinator {
         if (!account.uncertain()) accounts.remove(craftId);
     }
 
+    void reconciled(UUID craftId) {
+        RuntimeMaterialAccount account = accounts.get(craftId);
+        if (account != null && account.closed() && account.uncertain()) accounts.remove(craftId);
+    }
+
     int size() { return accounts.size(); }
 }

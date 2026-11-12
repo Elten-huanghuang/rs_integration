@@ -71,6 +71,7 @@ public final class ExtractionLedger implements AutoCloseable {
     private final Map<CraftingResolver.StackKey, Long> pendingInv = new HashMap<>();
     private final Map<ResonanceReservationKey, Long> pendingResonance = new HashMap<>();
     private final List<Ingredient> preferredResonanceIngredients = new ArrayList<>();
+    private final List<UncertainMaterialTransfer> uncertainMaterialTransfers = new ArrayList<>();
     private final Set<Class<?>> unreadableBackpackTypes = ConcurrentHashMap.newKeySet();
     private State state = State.IDLE;
     @Nullable private RuntimeMaterialAccount materialAccount;
@@ -82,6 +83,9 @@ public final class ExtractionLedger implements AutoCloseable {
     void setExternalMaterialAccess() { externalMaterialAccess = true; materialAccount = null; }
     void setMaterialAccount(RuntimeMaterialAccount account) { materialAccount = account; }
     boolean hasUncertainTransfers() { return uncertainTransfers; }
+    List<UncertainMaterialTransfer> uncertainMaterialTransfers() {
+        return uncertainMaterialTransfers.stream().map(UncertainMaterialTransfer::copy).toList();
+    }
     @Nullable StorageOperationStatus commitFailureStatus() { return commitFailureStatus; }
     String commitFailureDetail() { return commitFailureDetail; }
     List<ItemStack> committedFragments() {
@@ -956,14 +960,24 @@ public final class ExtractionLedger implements AutoCloseable {
         // ── Phase 2: Batch extract ──────────────────────────────
         List<ExtractRecord> extracted = new ArrayList<>(entries.size());
         boolean extractionFailed = false;
+        Entry extractingEntry = null;
         try {
             for (Entry entry : entries) {
+                extractingEntry = entry;
                 StorageOperationResult result = extractOne(entry, endpoint, player);
-                if (result.transferredAmount().isEmpty()
+                boolean transferUnknown = result.transferredAmount().isEmpty()
                         || result.kind() != StorageOperationResult.Kind.EXTRACT
-                        || result.mode() != StorageOperationMode.PERFORM) uncertainTransfers = true;
+                        || result.mode() != StorageOperationMode.PERFORM;
+                if (transferUnknown) {
+                    uncertainTransfers = true;
+                    long confirmed = result.kind() == StorageOperationResult.Kind.EXTRACT
+                            && result.mode() == StorageOperationMode.PERFORM
+                            ? result.extractedStacks().stream().mapToLong(ItemStack::getCount).sum() : 0L;
+                    recordUncertainMaterial(entry.template, Math.max(0L, entry.count - confirmed));
+                }
                 extracted.add(new ExtractRecord(entry.id, entry.source, result,
                         entry.altarDim, entry.altarPos, entry.sourceEndpoint));
+                extractingEntry = null;
                 if (result.kind() != StorageOperationResult.Kind.EXTRACT
                         || !result.complete() || result.mode() != StorageOperationMode.PERFORM
                         || result.transferredAmount().orElse(-1L) != entry.count) {
@@ -982,6 +996,9 @@ public final class ExtractionLedger implements AutoCloseable {
             }
         } catch (RuntimeException | LinkageError e) {
             uncertainTransfers = true;
+            if (extractingEntry != null) {
+                recordUncertainMaterial(extractingEntry.template, extractingEntry.count);
+            }
             commitFailureDetail = "材料提取异常：" + e.getClass().getSimpleName();
             LOGGER.warn("[RSI-Ledger] Commit exception during extraction", e);
             extractionFailed = true;
@@ -1187,19 +1204,54 @@ public final class ExtractionLedger implements AutoCloseable {
     }
 
     private ItemStack refundRemainder(StorageOperationResult result, int entryId, ItemStack stack) {
+        if (result == null || result.kind() != StorageOperationResult.Kind.INSERT
+                || result.mode() != StorageOperationMode.PERFORM
+                || result.requestedAmount() != stack.getCount() || result.transferredAmount().isEmpty()) {
+            logUncertainRefund(entryId, stack, "退款回执无法确认实际转移");
+            return ItemStack.EMPTY;
+        }
         var remainder = result.remainder();
-        if (remainder.isEmpty()) logUncertainRefund(entryId, stack, result.status().name());
+        if (remainder.isEmpty()) {
+            logUncertainRefund(entryId, stack, result.status().name());
+        } else {
+            ItemStack left = remainder.orElseThrow();
+            long transferred = result.transferredAmount().orElseThrow();
+            if (transferred < 0L || transferred > stack.getCount()
+                    || transferred + left.getCount() != stack.getCount()
+                    || (!left.isEmpty() && !MaterialMatcher.equivalentRuntimeFragment(stack, left))) {
+                logUncertainRefund(entryId, stack, "退款回执身份或数量不符");
+                return ItemStack.EMPTY;
+            }
+        }
         return remainder.orElse(ItemStack.EMPTY);
     }
 
     private void logUncertainRefund(int entryId, ItemStack stack, String reason) {
         uncertainTransfers = true;
+        recordUncertainMaterial(stack, stack.getCount());
         // Unknown transfer amounts must not be retried: storage may have
         // accepted the item before reporting an exception.
         if (REFUND_LOGS.allow(reason)) {
             LOGGER.error("[RSI-Ledger] Refund outcome unknown; not retried: entry={} item={} count={} reason={}",
                     entryId, ItemStackUtils.registryId(stack),
                     stack.getCount(), reason);
+        }
+    }
+
+    private void recordUncertainMaterial(ItemStack stack, long amount) {
+        if (stack == null || stack.isEmpty() || amount <= 0L) return;
+        uncertainMaterialTransfers.add(new UncertainMaterialTransfer(stack, amount));
+    }
+
+    record UncertainMaterialTransfer(ItemStack stack, long amount) {
+        UncertainMaterialTransfer {
+            stack = stack == null ? ItemStack.EMPTY : stack.copy();
+        }
+
+        @Override public ItemStack stack() { return stack.copy(); }
+
+        private UncertainMaterialTransfer copy() {
+            return new UncertainMaterialTransfer(stack, amount);
         }
     }
 

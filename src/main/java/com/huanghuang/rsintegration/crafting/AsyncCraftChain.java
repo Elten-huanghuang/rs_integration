@@ -49,6 +49,8 @@ import com.huanghuang.rsintegration.crafting.batch.CraftProgressPublisher;
 import com.huanghuang.rsintegration.crafting.progress.CraftExecutionClock;
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot.Reason;
 import com.huanghuang.rsintegration.storage.StorageReference;
+import com.huanghuang.rsintegration.storage.StorageItemChangeListener;
+import com.huanghuang.rsintegration.storage.StorageItemSubscription;
 import com.huanghuang.rsintegration.storage.StorageOperationStatus;
 import com.huanghuang.rsintegration.crafting.batch.CraftStartedPacket;
 import com.huanghuang.rsintegration.crafting.batch.PreparationMessageScope;
@@ -121,6 +123,7 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
+import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
@@ -152,6 +155,8 @@ import java.util.function.BooleanSupplier;
  * null-guarded via {@link #resolvePlayer()}.</p>
  */
 public final class AsyncCraftChain {
+    private static final int MATERIAL_ADMISSION_POLL_TICKS = 20;
+    private static final int SUBSCRIBED_MATERIAL_FALLBACK_TICKS = 100;
     private static final LogSampler GRAPH_RETRY_LOGS = new LogSampler(2_000L);
     private static final int GRAPH_RETRY_MAX_DELAY_TICKS = 40;
     /**
@@ -193,8 +198,16 @@ public final class AsyncCraftChain {
     @Nullable private GlobalMaterialCoordinator materialCoordinator;
     private boolean initialMaterialsReady;
     private int nextMaterialAdmissionTick;
+    private int lastMaterialAdmissionTick = Integer.MIN_VALUE;
+    private int nextMaterialSubscriptionTick;
+    private int materialInventoryRevision = Integer.MIN_VALUE;
     private int materialAdmissionStartedTick;
     private boolean waitingForInitialMaterials;
+    private volatile boolean materialStorageChanged = true;
+    private volatile boolean materialAdmissionInProgress;
+    private volatile Set<MaterialKey> materialWakeKeys = Set.of();
+    private volatile Set<TaskFluidKey> fluidWakeKeys = Set.of();
+    @Nullable private StorageItemSubscription materialStorageSubscription;
 
     private final List<ItemStack> virtualInventory = new ArrayList<>();
     private final List<ItemStack> deliveredFinalOutputs = new ArrayList<>();
@@ -439,6 +452,7 @@ public final class AsyncCraftChain {
         ledger.setMaterialAccount(materialAccount);
         materialAdmissionStartedTick = server.getTickCount();
         nextMaterialAdmissionTick = materialAdmissionStartedTick;
+        bindMaterialStorageChanges();
     }
 
     @Nullable
@@ -467,7 +481,95 @@ public final class AsyncCraftChain {
     }
 
     private void releaseMaterialAccount() {
+        closeMaterialStorageSubscription();
         if (materialCoordinator != null) materialCoordinator.release(craftId);
+    }
+
+    private void bindMaterialStorageChanges() {
+        if (storageEndpoint == null) return;
+        try {
+            materialStorageSubscription = storageEndpoint.session().subscribeItemChanges(
+                    new StorageItemChangeListener() {
+                        @Override public void onChanged(ItemStack stack, long amount) {
+                            if (stack == null || stack.isEmpty()) return;
+                            MaterialKey key = MaterialKey.of(stack);
+                            if (materialWakeKeys.contains(key)) signalMaterialStorageChange();
+                        }
+
+                        @Override public void onFluidChanged(FluidStack stack, long amount) {
+                            if (stack != null && !stack.isEmpty()) {
+                                try {
+                                    if (fluidWakeKeys.contains(TaskFluidKey.of(stack))) {
+                                        signalMaterialStorageChange();
+                                    }
+                                } catch (RuntimeException ignored) {
+                                    // 无效或未注册流体的通知由兜底轮询处理。
+                                }
+                            }
+                        }
+
+                        @Override public void onInvalidated() {
+                            signalMaterialStorageChange();
+                        }
+                    }).orElse(null);
+        } catch (RuntimeException | LinkageError failure) {
+            materialStorageSubscription = null;
+            RSIntegrationMod.LOGGER.debug("[RSI-Materials] 任务 {} 无法订阅存储变化，使用轮询", craftId, failure);
+        }
+    }
+
+    private void ensureMaterialStorageSubscription(int tick) {
+        if (storageEndpoint == null) return;
+        if (materialStorageSubscription != null) {
+            try {
+                if (materialStorageSubscription.isValid()) return;
+            } catch (RuntimeException | LinkageError ignored) {
+                // 后端句柄失效后重新订阅。
+            }
+            signalMaterialStorageChange();
+        } else if (tick < nextMaterialSubscriptionTick) {
+            return;
+        }
+        nextMaterialSubscriptionTick = tick + MATERIAL_ADMISSION_POLL_TICKS;
+        closeMaterialStorageSubscription();
+        bindMaterialStorageChanges();
+    }
+
+    private void closeMaterialStorageSubscription() {
+        StorageItemSubscription subscription = materialStorageSubscription;
+        materialStorageSubscription = null;
+        if (subscription == null) return;
+        try {
+            subscription.close();
+        } catch (RuntimeException | LinkageError failure) {
+            RSIntegrationMod.LOGGER.debug("[RSI-Materials] 任务 {} 关闭存储订阅失败", craftId, failure);
+        }
+    }
+
+    private void signalMaterialStorageChange() {
+        if (!materialAdmissionInProgress) materialStorageChanged = true;
+    }
+
+    private void refreshMaterialWakeKeys() {
+        if (materialAccount == null || initialMaterialPlan == null) {
+            materialWakeKeys = Set.of();
+            fluidWakeKeys = Set.of();
+            return;
+        }
+        Set<MaterialKey> itemKeys = new HashSet<>();
+        Set<TaskFluidKey> fluidKeys = new HashSet<>();
+        initialMaterialPlan.materials().forEach((key, required) -> {
+            if (materialAccount.count(key) >= required) return;
+            ItemStack stack = key.toStack(1);
+            if (InkFluidSupport.isToken(stack)) {
+                FluidStack fluid = InkFluidSupport.fluid(stack);
+                if (!fluid.isEmpty()) fluidKeys.add(TaskFluidKey.of(fluid));
+            } else {
+                itemKeys.add(key);
+            }
+        });
+        materialWakeKeys = Set.copyOf(itemKeys);
+        fluidWakeKeys = Set.copyOf(fluidKeys);
     }
 
     private boolean acquireInitialMaterials() {
@@ -481,13 +583,38 @@ public final class AsyncCraftChain {
         ServerPlayer player = resolvePlayer();
         if (player == null) { abortOffline("Player disconnected"); return false; }
         int tick = server.getTickCount();
-        if (tick < nextMaterialAdmissionTick) return false;
-        nextMaterialAdmissionTick = tick + 20;
+        ensureMaterialStorageSubscription(tick);
+        int inventoryRevision = player.getInventory().getTimesChanged();
+        if (materialInventoryRevision != Integer.MIN_VALUE
+                && materialInventoryRevision != inventoryRevision) signalMaterialStorageChange();
+        materialInventoryRevision = inventoryRevision;
+        if (lastMaterialAdmissionTick == tick) return false;
+        if (tick < nextMaterialAdmissionTick && !materialStorageChanged) return false;
+        lastMaterialAdmissionTick = tick;
+        materialStorageChanged = false;
+        nextMaterialAdmissionTick = tick + (materialStorageSubscription == null
+                ? MATERIAL_ADMISSION_POLL_TICKS : SUBSCRIBED_MATERIAL_FALLBACK_TICKS);
         if (initialMaterialPlan == null) initialMaterialPlan = legacyInitialMaterialPlan(player);
-        if (initialMaterialPlan != null
-                && materialAccount.ensure(initialMaterialPlan.materials(), initialMaterialPlan.reusable(), player)) {
+        refreshMaterialWakeKeys();
+        boolean admitted = false;
+        if (initialMaterialPlan != null) {
+            materialAdmissionInProgress = true;
+            try {
+                admitted = materialAccount.ensure(
+                        initialMaterialPlan.materials(), initialMaterialPlan.reusable(), player);
+            } finally {
+                materialAdmissionInProgress = false;
+                // 本次提取和回滚产生的库存通知不能唤醒自己的下一次准入。
+                materialStorageChanged = false;
+                materialInventoryRevision = player.getInventory().getTimesChanged();
+            }
+        }
+        if (admitted) {
             initialMaterialsReady = true;
             waitingForInitialMaterials = false;
+            materialWakeKeys = Set.of();
+            fluidWakeKeys = Set.of();
+            closeMaterialStorageSubscription();
             if (storageEndpoint == null || CraftStorageEndpoints.isRefinedStorage(storageEndpoint)) {
                 magicResourceTaskReservation = MagicResourceTaskReservation.reserve(server, craftId, magicCostsForPlan());
             }

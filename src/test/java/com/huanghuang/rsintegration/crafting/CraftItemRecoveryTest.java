@@ -14,6 +14,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -32,6 +33,19 @@ class CraftItemRecoveryTest extends BootstrapTest {
                 new CraftItemRecovery(recovery.save(new CompoundTag()));
         assertEquals(1, loaded.pendingStacksForTests(owner).size());
         assertEquals(7, loaded.pendingStacksForTests(owner).get(0).getCount());
+    }
+
+    @Test
+    void refundAttemptIdPreventsDuplicateItemsAfterReload() {
+        UUID owner = UUID.randomUUID();
+        UUID refundId = UUID.randomUUID();
+        CraftItemRecovery recovery = new CraftItemRecovery();
+        assertTrue(recovery.retainOnce(owner, new ItemStack(Items.IRON_INGOT, 3), refundId));
+        assertFalse(recovery.retainOnce(owner, new ItemStack(Items.IRON_INGOT, 3), refundId));
+
+        CraftItemRecovery loaded = new CraftItemRecovery(recovery.save(new CompoundTag()));
+        assertFalse(loaded.retainOnce(owner, new ItemStack(Items.IRON_INGOT, 3), refundId));
+        assertEquals(3, loaded.pendingStacksForTests(owner).get(0).getCount());
     }
 
     @Test

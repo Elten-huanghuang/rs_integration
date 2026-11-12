@@ -1286,7 +1286,9 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             );
         } catch (RuntimeException | LinkageError failure) {
             // start 可能已向机器交付，异常不等于明确拒收。
-            if (!customReservedFluids.isEmpty()) markFluidTransferUncertain();
+            if (!customReservedFluids.isEmpty()) {
+                markFluidTransfersUncertain(customReservedFluids, "自定义操作启动结果不明");
+            }
             return ExecutionResult.rejected(new IntegrationDiagnostic(
                     IntegrationDiagnosticCode.EXECUTION_START_REJECTED,
                     IntegrationSeverity.ERROR,
@@ -2472,7 +2474,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     ) {
         if (taskFluids != null) {
             // 转移结果不明的预留不是已收回实物，不能作为退款复制回账户或恢复箱。
-            markFluidTransferUncertain();
+            markFluidTransfersUncertain(fluids, "自定义操作流体结算结果不明");
             return;
         }
         MinecraftServer server = player != null
@@ -2564,7 +2566,8 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             StorageFluidOperationResult extracted =
                     extractInputFluid(player, key, requirement.amount(), false);
             if (!extracted.transferKnown()) {
-                markFluidTransferUncertain();
+                markFluidTransferUncertain(key.toStack(1), requirement.amount(),
+                        "流体准入提取结果不明");
                 return false;
             }
             if (extracted.status() != StorageOperationStatus.SUCCESS
@@ -2648,7 +2651,8 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             StorageFluidOperationResult extracted =
                     extractInputFluid(player, key, requirement.amount(), false);
             if (!extracted.transferKnown()) {
-                markFluidTransferUncertain();
+                markFluidTransferUncertain(key.toStack(1), requirement.amount(),
+                        "自定义流体准入提取结果不明");
                 refundCustomFluids(player);
                 return false;
             }
@@ -2717,13 +2721,13 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             try {
                 accepted = handler.fill(offer, FluidAction.EXECUTE);
             } catch (RuntimeException | LinkageError failure) {
-                markFluidTransferUncertain();
+                markFluidTransferUncertain(offer, chunk, "机器流体输入结果不明");
                 refundUnofferedFluid(fluid, remaining - chunk);
                 LOGGER.error("[RSI-API] fluid delivery result is unknown", failure);
                 return remaining;
             }
             if (accepted < 0 || accepted > chunk) {
-                markFluidTransferUncertain();
+                markFluidTransferUncertain(offer, chunk, "机器流体输入返回了无效数量");
                 refundUnofferedFluid(fluid, remaining - chunk);
                 return remaining;
             }
@@ -2794,9 +2798,20 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                 : storageEndpoint().session().extractFluidExact(player, key, amount, simulate);
     }
 
-    private void markFluidTransferUncertain() {
+    private void markFluidTransfersUncertain(Map<String, List<FluidStack>> fluids, String reason) {
         fluidTransferUncertain = true;
-        if (taskFluids != null) taskFluids.markUncertain();
+        if (taskFluids != null) {
+            taskFluids.markUncertain(fluids.values().stream().flatMap(List::stream).toList(), reason);
+        }
+        preparationFailure = Component.literal("RSI Integration fluid transfer is unknown; automatic retry stopped");
+    }
+
+    private void markFluidTransferUncertain(FluidStack fluid, long amount, String reason) {
+        fluidTransferUncertain = true;
+        if (taskFluids != null) {
+            if (fluid == null || fluid.isEmpty()) taskFluids.markUncertain(amount, reason);
+            else taskFluids.markUncertain(fluid, amount, reason);
+        }
         preparationFailure = Component.literal("RSI Integration fluid transfer is unknown; automatic retry stopped");
     }
 
@@ -3351,12 +3366,14 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         try {
             FluidStack drained = handler.drain(amount, FluidAction.EXECUTE);
             if (drained == null || drained.getAmount() > amount) {
-                markFluidTransferUncertain();
+                markFluidTransferUncertain(FluidStack.EMPTY, amount,
+                        "机器流体输出回收结果不明");
                 return FluidStack.EMPTY;
             }
             return drained;
         } catch (RuntimeException | LinkageError failure) {
-            markFluidTransferUncertain();
+            markFluidTransferUncertain(FluidStack.EMPTY, amount,
+                    "机器流体输出回收异常");
             LOGGER.error("[RSI-API] fluid recovery result is unknown", failure);
             return FluidStack.EMPTY;
         }

@@ -24,6 +24,8 @@ import com.huanghuang.rsintegration.magic.MagicResourceDiagnostics;
 import com.huanghuang.rsintegration.magic.MagicResourceKind;
 import com.huanghuang.rsintegration.magic.MagicResourceRouteCounters;
 import com.huanghuang.rsintegration.magic.MagicResourceTaskLedger;
+import com.huanghuang.rsintegration.crafting.MaterialTransferAuditLedger;
+import com.huanghuang.rsintegration.feature.unifiedgrid.UnifiedGridFluidRecovery;
 import com.huanghuang.rsintegration.mods.goety.magic.SoulPlanPreview;
 import com.huanghuang.rsintegration.magic.route.BackendResolution;
 import com.huanghuang.rsintegration.magic.route.Channel;
@@ -31,6 +33,7 @@ import com.huanghuang.rsintegration.magic.route.MagicScope;
 import com.huanghuang.rsintegration.magic.route.MagicStorageBackendDescriptor;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.arguments.LongArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import net.minecraft.commands.CommandSourceStack;
@@ -106,6 +109,22 @@ public final class DebugCommand {
                                         .executes(DebugCommand::resolvePendingAudit)))
                         .then(Commands.literal("clear")
                                 .executes(DebugCommand::clearPendingAudits)))
+                .then(Commands.literal("materials")
+                        .then(Commands.literal("pending")
+                                .executes(DebugCommand::dumpPendingMaterialAudits))
+                        .then(Commands.literal("query")
+                                .then(Commands.argument("id", StringArgumentType.word())
+                                        .executes(DebugCommand::queryMaterialAudit)))
+                        .then(Commands.literal("resolve")
+                                .then(Commands.argument("id", StringArgumentType.word())
+                                        .then(Commands.argument("resolution", StringArgumentType.word())
+                                                .suggests((ctx, builder) -> builder
+                                                        .suggest("consumed")
+                                                        .suggest("refund")
+                                                        .buildFuture())
+                                                .executes(DebugCommand::resolveMaterialAudit)
+                                                .then(Commands.argument("amount", LongArgumentType.longArg(1))
+                                                        .executes(DebugCommand::resolveMaterialAudit))))))
                 .then(Commands.literal("bindings")
                         .executes(DebugCommand::dumpBindings)));
     }
@@ -244,6 +263,148 @@ public final class DebugCommand {
         ctx.getSource().sendSuccess(() ->
                 Component.literal("已清空 " + cleared + " 条待核对记录"), false);
         return cleared;
+    }
+
+    /** 列出需要人工核对的物品/流体转移。 */
+    private static int dumpPendingMaterialAudits(CommandContext<CommandSourceStack> ctx) {
+        MaterialTransferAuditLedger ledger = MaterialTransferAuditLedger.get(ctx.getSource().getServer());
+        List<MaterialTransferAuditLedger.Pending> pending = ledger.pendingAttempts();
+        if (pending.isEmpty()) {
+            ctx.getSource().sendSuccess(() -> Component.literal("材料转移待核对记录：无"), false);
+            return 0;
+        }
+        ctx.getSource().sendSuccess(() -> Component.literal("材料转移待核对记录 " + pending.size() + " 条："), false);
+        for (MaterialTransferAuditLedger.Pending attempt : pending) {
+            String resource = attempt.resourceId() == null
+                    ? "unknown" : attempt.type().name().toLowerCase(Locale.ROOT) + ":" + attempt.resourceId();
+            String tag = attempt.identity().isEmpty() ? "" : " nbt=" + attempt.identity();
+            String line = "  " + attempt.attemptId() + " task=" + attempt.taskId()
+                    + " owner=" + attempt.ownerId() + " resource=" + resource + tag
+                    + " amount=" + attempt.amount() + " reason=" + attempt.reason()
+                    + " tick=" + attempt.recordedAt();
+            ctx.getSource().sendSuccess(() -> Component.literal(line), false);
+        }
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "使用 /rsi_debug materials resolve <id> consumed 或 refund <数量> 记录人工结论。"), false);
+        return pending.size();
+    }
+
+    /** 查询转移证据、结算结果及尚未完成入队的退款数量。 */
+    private static int queryMaterialAudit(CommandContext<CommandSourceStack> ctx) {
+        UUID attemptId;
+        try {
+            attemptId = UUID.fromString(StringArgumentType.getString(ctx, "id"));
+        } catch (IllegalArgumentException invalid) {
+            ctx.getSource().sendFailure(Component.literal("无效的材料核对 ID。"));
+            return 0;
+        }
+        MaterialTransferAuditLedger ledger = MaterialTransferAuditLedger.get(ctx.getSource().getServer());
+        MaterialTransferAuditLedger.Pending pending = ledger.pendingAttempt(attemptId);
+        MaterialTransferAuditLedger.Resolved resolved = ledger.resolvedAttempt(attemptId);
+        if (pending == null && resolved == null) {
+            ctx.getSource().sendFailure(Component.literal("没有找到材料转移记录 " + attemptId));
+            return 0;
+        }
+        MaterialTransferAuditLedger.Pending attempt = pending != null ? pending : resolved.attempt();
+        MaterialTransferAuditLedger.Resolved intent = ledger.refundIntent(attemptId);
+        String state = pending != null ? (intent == null ? "待核对"
+                : "退款入队未完成，已锁定数量=" + intent.refundAmount()) : resolved.resolution().name()
+                + " refundAmount=" + resolved.refundAmount() + " resolver=" + resolved.resolvedBy()
+                + " resolvedAt=" + resolved.resolvedAt();
+        ctx.getSource().sendSuccess(() -> Component.literal("attempt=" + attemptId
+                + " task=" + attempt.taskId() + " owner=" + attempt.ownerId()
+                + " type=" + attempt.type() + " resource=" + attempt.resourceId()
+                + " nbt=" + attempt.identity() + " amount=" + attempt.amount()
+                + " recordedAt=" + attempt.recordedAt() + " reason=" + attempt.reason()
+                + " state=" + state), false);
+        return 1;
+    }
+
+    /** 按管理员选择结清未知转移，退款动作只会把凭证写入玩家恢复队列。 */
+    private static int resolveMaterialAudit(CommandContext<CommandSourceStack> ctx) {
+        String raw = StringArgumentType.getString(ctx, "id");
+        UUID id;
+        try {
+            id = UUID.fromString(raw);
+        } catch (IllegalArgumentException invalid) {
+            ctx.getSource().sendFailure(Component.literal("无效的材料核对 ID：" + raw));
+            return 0;
+        }
+        String rawResolution = StringArgumentType.getString(ctx, "resolution");
+        MaterialTransferAuditLedger.Resolution resolution = switch (rawResolution) {
+            case "consumed" -> MaterialTransferAuditLedger.Resolution.CONSUMED;
+            case "refund" -> MaterialTransferAuditLedger.Resolution.REFUND;
+            default -> null;
+        };
+        if (resolution == null) {
+            ctx.getSource().sendFailure(Component.literal("结算选项必须是 consumed 或 refund。"));
+            return 0;
+        }
+        MaterialTransferAuditLedger ledger = MaterialTransferAuditLedger.get(ctx.getSource().getServer());
+        MaterialTransferAuditLedger.Pending attempt = ledger.pendingAttempt(id);
+        if (attempt == null) {
+            ctx.getSource().sendFailure(Component.literal("没有找到待核对材料记录 " + id));
+            return 0;
+        }
+        if (resolution == MaterialTransferAuditLedger.Resolution.REFUND
+                && (attempt.type() == MaterialTransferAuditLedger.ResourceType.UNKNOWN
+                || attempt.resourceId() == null || attempt.amount() <= 0L)) {
+            ctx.getSource().sendFailure(Component.literal("该记录缺少可退款的确定资源身份或数量，只能按 consumed 结清。"));
+            return 0;
+        }
+        UUID resolver = ctx.getSource().getEntity() instanceof ServerPlayer player
+                ? player.getUUID() : null;
+        long refundAmount = 0L;
+        try {
+            refundAmount = LongArgumentType.getLong(ctx, "amount");
+        } catch (IllegalArgumentException ignored) {
+            if (resolution == MaterialTransferAuditLedger.Resolution.REFUND) {
+                ctx.getSource().sendFailure(Component.literal("退款必须指定核对后的实际数量：refund <数量>。"));
+                return 0;
+            }
+        }
+        if ((resolution == MaterialTransferAuditLedger.Resolution.REFUND
+                && (refundAmount <= 0L || refundAmount > attempt.amount()))
+                || (resolution == MaterialTransferAuditLedger.Resolution.CONSUMED && refundAmount != 0L)) {
+            ctx.getSource().sendFailure(Component.literal("退款数量必须在 1 到 " + attempt.amount()
+                    + " 之间；consumed 不接受退款数量。"));
+            return 0;
+        }
+        MaterialTransferAuditLedger.Resolved intent = ledger.refundIntent(id);
+        if (intent != null && (resolution != MaterialTransferAuditLedger.Resolution.REFUND
+                || refundAmount != intent.refundAmount())) {
+            ctx.getSource().sendFailure(Component.literal("该记录已经开始退款，只能按原数量重试：refund "
+                    + intent.refundAmount()));
+            return 0;
+        }
+        boolean resolved = ledger.resolve(ctx.getSource().getServer(), id, resolution, refundAmount, resolver,
+                ctx.getSource().getServer().overworld().getGameTime());
+        if (!resolved) {
+            ctx.getSource().sendFailure(Component.literal("材料核对结算失败，记录仍保留：" + id));
+            return 0;
+        }
+        if (!ledger.hasPendingForTask(attempt.taskId())) {
+            AsyncCraftManager.getInstance().materialAuditResolved(attempt.taskId());
+        }
+        String message;
+        if (resolution == MaterialTransferAuditLedger.Resolution.REFUND) {
+            ServerPlayer recipient = ctx.getSource().getServer().getPlayerList()
+                    .getPlayer(attempt.ownerId());
+            int claimed = 0;
+            if (recipient != null) {
+                claimed = attempt.type() == MaterialTransferAuditLedger.ResourceType.FLUID
+                        ? UnifiedGridFluidRecovery.get(ctx.getSource().getServer()).claim(recipient)
+                        : CraftItemRecovery.get(ctx.getSource().getServer()).claim(recipient);
+            }
+            message = recipient == null
+                    ? "已为离线玩家 " + attempt.ownerId() + " 排队退款凭证。"
+                    : "已处理玩家 " + attempt.ownerId() + " 的退款，发放凭证 " + claimed
+                            + " 个；背包无法接收的部分仍在退款队列中。";
+        } else {
+            message = "已按已消费结清材料记录 " + id;
+        }
+        ctx.getSource().sendSuccess(() -> Component.literal(message), false);
+        return 1;
     }
 
     /** 人类可读的记录时长。 */

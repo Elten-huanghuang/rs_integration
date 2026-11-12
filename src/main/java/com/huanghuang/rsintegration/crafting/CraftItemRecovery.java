@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.IntArrayTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.server.MinecraftServer;
@@ -12,8 +13,10 @@ import net.minecraft.world.level.saveddata.SavedData;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /** 玩家离线且没有可用存储端点时，按玩家身份暂存普通物品退款。 */
@@ -21,6 +24,7 @@ public final class CraftItemRecovery extends SavedData {
     private static final String DATA_NAME = "rs_integration_craft_item_recovery";
     private static final int MAX_CLAIM_STACKS = 64;
     private final Map<UUID, Deque<ItemStack>> pending = new LinkedHashMap<>();
+    private final Set<UUID> processedRefundIds = new LinkedHashSet<>();
 
     public CraftItemRecovery() {
     }
@@ -31,7 +35,17 @@ public final class CraftItemRecovery extends SavedData {
             CompoundTag entry = (CompoundTag) value;
             if (!entry.hasUUID("owner")) continue;
             ItemStack stack = ItemStack.of(entry.getCompound("stack"));
+            if (entry.contains("amount", Tag.TAG_INT) && !stack.isEmpty()) {
+                stack.setCount(entry.getInt("amount"));
+            }
             if (!stack.isEmpty()) retain(entry.getUUID("owner"), stack);
+        }
+        for (Tag value : tag.getList("processedRefundIds", Tag.TAG_INT_ARRAY)) {
+            int[] parts = ((IntArrayTag) value).getAsIntArray();
+            if (parts.length != 4) continue;
+            processedRefundIds.add(new UUID(
+                    ((long) parts[0] << 32) | (parts[1] & 0xffffffffL),
+                    ((long) parts[2] << 32) | (parts[3] & 0xffffffffL)));
         }
     }
 
@@ -56,6 +70,16 @@ public final class CraftItemRecovery extends SavedData {
         }
         if (!remainder.isEmpty()) queue.addLast(remainder.copy());
         setDirty();
+    }
+
+    /** 以稳定退款 ID 入队；重放同一核对命令不会重复生成凭证。 */
+    public boolean retainOnce(UUID owner, ItemStack stack, UUID refundId) {
+        if (owner == null || stack == null || stack.isEmpty()
+                || refundId == null || processedRefundIds.contains(refundId)) return false;
+        retain(owner, stack);
+        processedRefundIds.add(refundId);
+        setDirty();
+        return true;
     }
 
     /** 登录或手动领取时最多处理 64 个堆叠，背包不足的部分继续保留。 */
@@ -106,11 +130,22 @@ public final class CraftItemRecovery extends SavedData {
                 if (stack.isEmpty()) continue;
                 CompoundTag entry = new CompoundTag();
                 entry.putUUID("owner", owner.getKey());
-                entry.put("stack", stack.save(new CompoundTag()));
+                // 原版 Count 只保存 byte，大额恢复数量需要单独保存。
+                entry.put("stack", stack.copyWithCount(1).save(new CompoundTag()));
+                entry.putInt("amount", stack.getCount());
                 entries.add(entry);
             }
         }
         tag.put("pending", entries);
+        ListTag refundIds = new ListTag();
+        for (UUID id : processedRefundIds) {
+            refundIds.add(new IntArrayTag(new int[]{
+                    (int) (id.getMostSignificantBits() >>> 32),
+                    (int) id.getMostSignificantBits(),
+                    (int) (id.getLeastSignificantBits() >>> 32),
+                    (int) id.getLeastSignificantBits()}));
+        }
+        tag.put("processedRefundIds", refundIds);
         return tag;
     }
 }

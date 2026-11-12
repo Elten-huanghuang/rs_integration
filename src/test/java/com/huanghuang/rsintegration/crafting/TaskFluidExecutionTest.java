@@ -129,11 +129,13 @@ class TaskFluidExecutionTest extends BootstrapTest {
         TaskFluidAccess access = capture();
         StorageFluidKey key = StorageFluidKey.fromStack(access.snapshot().backendId(), tagged);
         long total = (long) Integer.MAX_VALUE + 500;
+        assertEquals(total, account.heldFluids().get(TaskFluidKey.of(tagged)));
         assertEquals(total, access.snapshot().countExact(key));
         assertEquals(total, access.extract(key, total, true).transferredAmount());
         assertEquals(0, access.extract(key, total + 1, false).transferredAmount());
         assertEquals(total, access.extract(key, total, false).transferredAmount());
         assertEquals(900, held());
+        assertEquals(900L, account.heldFluids().get(TaskFluidKey.of(water(900))));
         verifyNoInteractions(session);
     }
 

@@ -148,6 +148,10 @@ public final class AsyncCraftManager {
         activeChains.remove(chain.getCraftId());
     }
 
+    public void materialAuditResolved(UUID craftId) {
+        operationServices.materials().reconciled(craftId);
+    }
+
     /**
      * Abort all active chains during server shutdown.  Best-effort: logs
      * errors but never throws, so shutdown is not blocked.  The RS network

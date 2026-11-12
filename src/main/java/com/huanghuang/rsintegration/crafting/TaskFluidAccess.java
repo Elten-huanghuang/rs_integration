@@ -1,7 +1,6 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
-import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.storage.StorageBackendId;
 import com.huanghuang.rsintegration.storage.StorageFluidKey;
 import com.huanghuang.rsintegration.storage.StorageFluidOperationResult;
@@ -9,14 +8,13 @@ import com.huanghuang.rsintegration.storage.StorageFluidSnapshot;
 import com.huanghuang.rsintegration.storage.StorageOperationMode;
 import com.huanghuang.rsintegration.storage.StoredFluid;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.fluids.FluidStack;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
-/** 只转换现有任务账户中的流体凭证；不持有第二份余额，不从公共库存补取。 */
+/** 直接读取和交付任务账户中的类型化流体余额，不从公共库存补取。 */
 public final class TaskFluidAccess {
     private static final StorageBackendId ACCOUNT = new StorageBackendId("task_account");
     private final RuntimeMaterialAccount account;
@@ -39,8 +37,8 @@ public final class TaskFluidAccess {
 
     public StorageFluidSnapshot snapshot() {
         List<StoredFluid> fluids = new ArrayList<>();
-        if (usable()) account.heldMaterials().forEach((key, amount) -> {
-            FluidStack fluid = InkFluidSupport.fluid(key.toStack());
+        if (usable()) account.heldFluids().forEach((key, amount) -> {
+            FluidStack fluid = key.toStack(1);
             if (!fluid.isEmpty() && amount > 0L) {
                 fluids.add(new StoredFluid(StorageFluidKey.fromStack(ACCOUNT, fluid), amount));
             }
@@ -51,39 +49,38 @@ public final class TaskFluidAccess {
     /** 同一身份可按 int 分片，但必须整份需求满足才扣减。模拟和失败均不改余额。 */
     public StorageFluidOperationResult extract(StorageFluidKey key, long amount, boolean simulate) {
         var mode = simulate ? StorageOperationMode.SIMULATE : StorageOperationMode.PERFORM;
-        if (!usable() || amount <= 0L) return StorageFluidOperationResult.extracted(mode, amount, List.of());
-        List<ItemStack> tokens = new ArrayList<>();
-        long remaining = amount;
-        for (var entry : account.heldMaterials().entrySet()) {
-            ItemStack token = entry.getKey().toStack();
-            FluidStack fluid = InkFluidSupport.fluid(token);
-            if (fluid.isEmpty() || !StorageFluidKey.fromStack(ACCOUNT, fluid).equals(key)) continue;
-            long take = Math.min(remaining, entry.getValue());
-            remaining -= take;
-            while (take > 0L) {
-                int part = (int) Math.min(Integer.MAX_VALUE, take);
-                tokens.add(token.copyWithCount(part));
-                take -= part;
-            }
-            if (remaining == 0L) break;
+        if (!usable() || amount <= 0L || key == null || !ACCOUNT.equals(key.backendId())) {
+            return StorageFluidOperationResult.extracted(mode, Math.max(0L, amount), List.of());
         }
-        if (remaining > 0L) return StorageFluidOperationResult.extracted(mode, amount, List.of());
-        if (!simulate) for (ItemStack token : tokens) {
-            if (!account.take(token, token.getCount()).complete()) {
-                account.markTransferUncertain();
-                throw new IllegalStateException("任务流体账户扣减不完整");
-            }
-        }
-        return StorageFluidOperationResult.extracted(mode, amount, tokens.stream().map(InkFluidSupport::fluid).toList());
+        FluidStack requested = key.toStack(1);
+        if (requested.isEmpty()) return StorageFluidOperationResult.extracted(mode, amount, List.of());
+        List<FluidStack> extracted = account.takeFluid(requested, amount, simulate);
+        if (extracted.isEmpty()) return StorageFluidOperationResult.extracted(mode, amount, List.of());
+        return StorageFluidOperationResult.extracted(mode, amount, extracted);
     }
 
     /** 已确认未交付或已从机器取回的实物回到原账户，不能依赖退款时的线程作用域。 */
     public void refund(List<FluidStack> fluids) {
         if (!authorized) throw new IllegalStateException("任务流体账户身份不匹配");
         for (FluidStack fluid : fluids) {
-            if (fluid != null && !fluid.isEmpty()) account.add(InkFluidSupport.token(fluid));
+            if (fluid != null && !fluid.isEmpty()) account.addFluid(fluid);
         }
     }
 
-    public void markUncertain() { account.markTransferUncertain(); }
+    public void markUncertain(FluidStack fluid, long amount, String reason) {
+        if (!authorized) throw new IllegalStateException("任务流体账户身份不匹配");
+        account.markTransferUncertain(fluid, amount, reason);
+    }
+
+    public void markUncertain(List<FluidStack> fluids, String reason) {
+        if (!authorized) throw new IllegalStateException("任务流体账户身份不匹配");
+        account.markTransfersUncertain(fluids, reason);
+    }
+
+    public void markUncertain(long amount, String reason) {
+        if (!authorized) throw new IllegalStateException("任务流体账户身份不匹配");
+        account.markTransferUncertain(null, amount, reason);
+    }
+
+    public void markUncertain() { markUncertain(0L, "流体转移结果不明"); }
 }
