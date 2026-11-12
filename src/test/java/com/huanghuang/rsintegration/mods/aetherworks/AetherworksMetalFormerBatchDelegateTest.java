@@ -157,6 +157,8 @@ class AetherworksMetalFormerBatchDelegateTest extends BootstrapTest {
         set(delegate, "expected", new ItemStack(Items.EMERALD));
         doReturn(IBatchDelegate.PreparationResult.ready()).when(delegate).prepare(
                 player, recipeId, dimension, pos);
+        // 调度用例隔离原生机器状态；真实锻造炉校验由下方 Fixture 用例覆盖。
+        doReturn(true).when(delegate).validateExecutionContext(player);
         doReturn(true).when(delegate).startSingleOperation(player);
         return delegate;
     }

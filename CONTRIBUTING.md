@@ -6,6 +6,8 @@
 
 - Bug、设计问题和功能建议请先通过 Issue 描述，不需要直接提交代码。
 - 提交前运行与改动相关的测试；涉及发布资源时同时运行 `verifyReleaseJar`。
+- 首次运行完整兼容测试前，联网执行 `./gradlew prepareCompatibilityTestJars`，下载并校验固定版本的测试 JAR。
+  文件缓存在 `.gradle/compatibility-test-jars/`，之后可离线测试；这些 JAR 不进入正式编译或发布包。
 - 不要提交从其他项目复制的代码、资源或数据，除非你明确标注来源、许可证，并确认允许用于本项目。
 - Pull Request 应聚焦一个明确问题，避免把无关重构、格式化或用户改动混在一起。
 

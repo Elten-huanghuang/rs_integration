@@ -1,0 +1,72 @@
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
+
+// 固定发行版与官方 SHA-512；仅供字节码兼容测试，不进入编译或发布 classpath。
+def compatibilityDirectory = file('.gradle/compatibility-test-jars')
+def compatibilityArtifacts = [
+        [name: 'goety-2.5.52.4.jar',
+         url: 'https://cdn.modrinth.com/data/4ZVIxU8x/versions/kS1GO2fA/goety-2.5.52.4.jar',
+         sha512: '11189041740f1f97248e1e14a83ad160a4108d3a7da24d2e96b18fb4d4f2bfe8d298b171c3b299a858ad4af616ff0e9122e22ef21ad7a27c135ee978553f06e0'],
+        [name: 'goety-2.5.60.1.jar',
+         url: 'https://cdn.modrinth.com/data/4ZVIxU8x/versions/wv4xUyuG/goety-2.5.60.1.jar',
+         sha512: '096d46116fb70f9ad7477a4850ffc7f3d2689b3988b953eaedec8271d606dc840643f52e5965a3077adb2b4cac0233da12c3c157b17f74d5dff45bede1fcdd51'],
+        [name: 'EnchantingInfuser-v8.0.3-1.20.1-Forge.jar',
+         url: 'https://cdn.modrinth.com/data/ePv85y52/versions/UIJtaBTP/EnchantingInfuser-v8.0.3-1.20.1-Forge.jar',
+         sha512: '52cadf814f734fcdaec97834108d0cddbb7cbda2ed338fce7e8abf76804e782c34f10eb25cdc16f6dc9809d0883ed2db68bbe4554c226198b1e8986e495e1a80']
+]
+
+def sha512 = { File artifact ->
+    def digest = MessageDigest.getInstance('SHA-512')
+    artifact.withInputStream { input ->
+        byte[] buffer = new byte[65536]
+        int count
+        while ((count = input.read(buffer)) != -1) digest.update(buffer, 0, count)
+    }
+    digest.digest().encodeHex().toString()
+}
+
+tasks.register('prepareCompatibilityTestJars') {
+    group = 'verification'
+    description = '下载并校验字节码兼容测试所需的固定发行版 JAR。'
+    outputs.files(compatibilityArtifacts.collect { new File(compatibilityDirectory, it.name) })
+    // 缓存也重新校验摘要，避免损坏的依赖被误判为可用。
+    outputs.upToDateWhen { false }
+    doLast {
+        compatibilityDirectory.mkdirs()
+        compatibilityArtifacts.each { artifact ->
+            File target = new File(compatibilityDirectory, artifact.name)
+            if (target.isFile() && sha512(target) == artifact.sha512) {
+                logger.lifecycle("兼容测试依赖校验通过：${artifact.name}")
+                return
+            }
+            if (gradle.startParameter.offline) {
+                throw new GradleException("兼容测试依赖缺失或损坏：${target}；请联网运行 prepareCompatibilityTestJars。")
+            }
+            File temporary = new File(compatibilityDirectory, artifact.name + '.part')
+            try {
+                logger.lifecycle("下载兼容测试依赖：${artifact.name}")
+                def connection = new URI(artifact.url).toURL().openConnection()
+                connection.connectTimeout = 15000
+                connection.readTimeout = 60000
+                connection.setRequestProperty('User-Agent', 'RSIntegration-CompatibilityTests/1.0')
+                connection.inputStream.withCloseable { input ->
+                    temporary.withOutputStream { output -> output << input }
+                }
+                if (sha512(temporary) != artifact.sha512) {
+                    throw new GradleException("兼容测试依赖 SHA-512 不匹配：${artifact.name}")
+                }
+                Files.move(temporary.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                logger.lifecycle("兼容测试依赖校验通过：${artifact.name}")
+            } finally {
+                Files.deleteIfExists(temporary.toPath())
+            }
+        }
+    }
+}
+
+tasks.named('test') {
+    mustRunAfter tasks.named('prepareCompatibilityTestJars')
+    inputs.files(fileTree(compatibilityDirectory) { include '*.jar' })
+            .withPropertyName('nativeCompatibilityJars')
+}

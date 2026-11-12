@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.mixin.taxfreelevels;
 
 import com.google.gson.JsonParser;
 import com.huanghuang.rsintegration.mixin.plugin.RSIntegrationMixinPlugin;
+import com.huanghuang.rsintegration.testutil.CompatibilityTestJars;
 import org.junit.jupiter.api.Test;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.Opcodes;
@@ -20,6 +21,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 import java.util.zip.ZipFile;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -107,14 +109,15 @@ class TaxFreeLevelsCompatibilityTest {
 
     @Test
     void suppliedTetraAndInfuserJarsContainTheWrappedLevelCharge() throws Exception {
-        assertNativeLevelCharge("libs/tetra-1.20.1-6.9.0.jar",
+        assertNativeLevelCharge("tetra-1.20.1-6.9.0.jar",
                 "se/mickelus/tetra/blocks/workbench/WorkbenchTile.class");
-        assertNativeLevelCharge("libs/EnchantingInfuser-v8.0.3-1.20.1-Forge.jar",
+        assertNativeLevelCharge("EnchantingInfuser-v8.0.3-1.20.1-Forge.jar",
                 "fuzs/enchantinginfuser/world/inventory/InfuserMenu.class");
     }
 
     private static void assertNativeLevelCharge(String jar, String classFile) throws Exception {
-        try (ZipFile archive = new ZipFile(jar)) {
+        Path path = CompatibilityTestJars.requireMatching(".*" + Pattern.quote(jar));
+        try (ZipFile archive = new ZipFile(path.toFile())) {
             assertNotNull(archive.getEntry(classFile));
             try (InputStream input = archive.getInputStream(archive.getEntry(classFile))) {
                 ClassNode node = new ClassNode();

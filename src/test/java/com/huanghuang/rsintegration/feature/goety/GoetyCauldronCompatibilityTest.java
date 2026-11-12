@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.feature.goety;
 
+import com.huanghuang.rsintegration.testutil.CompatibilityTestJars;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.objectweb.asm.ClassReader;
@@ -10,8 +11,8 @@ import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.regex.Pattern;
 import java.util.zip.ZipFile;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -27,11 +28,8 @@ class GoetyCauldronCompatibilityTest {
     @ParameterizedTest
     @ValueSource(strings = {"2.5.36.1", "2.5.52.4", "2.5.60.1"})
     void nativeLadleAndSharedCandleHooksExistInSupportedVersions(String version) throws IOException {
-        Path jar;
-        try (var paths = Files.list(Path.of("libs"))) {
-            jar = paths.filter(path -> path.getFileName().toString().contains("goety-" + version))
-                    .findFirst().orElseThrow();
-        }
+        Path jar = CompatibilityTestJars.requireMatching(
+                ".*goety-" + Pattern.quote(version) + "(?:[-+_].*)?\\.jar");
         try (ZipFile archive = new ZipFile(jar.toFile())) {
             ClassNode cauldron = readClass(archive, CAULDRON);
             assertTrue(cauldron.fields.stream().anyMatch(field ->

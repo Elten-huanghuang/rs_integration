@@ -466,6 +466,8 @@ tasks.register('verifyNoForcedChunkLoads') {
 check.dependsOn tasks.named('verifyNoForcedChunkLoads')
 check.dependsOn tasks.named('apismokeClasses')
 
+apply from: 'gradle/compatibility-test-fixtures.gradle'
+
 test {
     useJUnitPlatform()
     if (providers.gradleProperty('sophisticatedCoreCompatibilityJar').isPresent()) {
