@@ -16,9 +16,9 @@
 
 RS Integration（RSI）为 Refined Storage 和 Beyond Dimensions 增加递归合成、机器远程访问、存储联动及可选魔法资源集成。它是附属模组，不替代两种存储网络。
 
-**当前版本：1.5.3 | Minecraft 1.20.1**
+**当前版本：1.6.0 | Minecraft 1.20.1**
 
-[1.5.3 更新公告](docs/announcements/RELEASE_NOTES_1.5.3.md)
+[1.6.0 更新公告](docs/announcements/RELEASE_NOTES_1.6.0.md)
 
 ## 目录
 
