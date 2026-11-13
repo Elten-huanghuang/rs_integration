@@ -9,6 +9,8 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.ScaledIngredientSpec;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import net.minecraft.core.RegistryAccess;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.NumericTag;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.SmithingTransformRecipe;
@@ -147,7 +149,8 @@ public final class SmithingRecipeHandler implements ModRecipeHandler {
             SmithingTransformRecipe recipe, List<IngredientSpec> specs,
             @Nullable ItemStack demandedOutput) {
         if (demandedOutput == null || demandedOutput.isEmpty()
-                || !demandedOutput.hasTag() || specs == null || specs.size() < 2) {
+                || !demandedOutput.hasTag() || isDefaultDamageOnly(demandedOutput)
+                || specs == null || specs.size() < 2) {
             return specs;
         }
         IngredientSpec original = specs.get(1);
@@ -160,6 +163,15 @@ public final class SmithingRecipeHandler implements ModRecipeHandler {
             return requireExactBase(recipe, specs, taggedBase);
         }
         return specs;
+    }
+
+    /** 原版静态锻造结果常带 Damage:0；它不应把运行时底材限定成全新状态。 */
+    private static boolean isDefaultDamageOnly(ItemStack stack) {
+        if (stack.getMaxDamage() <= 0) return false;
+        CompoundTag tag = stack.getTag();
+        return tag != null && tag.size() == 1
+                && tag.get("Damage") instanceof NumericTag damage
+                && damage.getAsDouble() == 0.0d;
     }
 
     private static ItemStack first(Ingredient ingredient) {
