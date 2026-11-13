@@ -5,7 +5,7 @@ import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
-import java.util.Map;
+import com.huanghuang.rsintegration.mods.youkaishomecoming.cuisine.CuisineRecipeMaterials;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
@@ -175,7 +175,7 @@ public final class YoukaisHomecomingRecipeHandler implements ModRecipeHandler {
             return null;
         }
         if (isCuisineRecipe(recipe)) {
-            List<Ingredient> all = collectCuisineIngredients(recipe);
+            List<Ingredient> all = CuisineRecipeMaterials.collect(recipe);
             if (!all.isEmpty()) {
                 List<IngredientSpec> specs = new ArrayList<>();
                 for (Ingredient ing : all) {
@@ -292,73 +292,4 @@ public final class YoukaisHomecomingRecipeHandler implements ModRecipeHandler {
                 "dev.xkmc.youkaishomecoming.content.pot.table.recipe");
     }
 
-    /** Collect ALL ingredients for a cuisine recipe, including base-model
-     *  items (rice, kelp) that are part of the TableItem tree.
-     *  TableItem.collectIngredients(List) is a default no-op, so we use
-     *  VariantTableItemBase.collectIngredients(List,List) instead. */
-    @SuppressWarnings("unchecked")
-    private static List<Ingredient> collectCuisineIngredients(Recipe<?> recipe) {
-        List<Ingredient> all = new ArrayList<>();
-
-        // 1. Base-model ingredients from VariantTableItemBase.MAP
-        try {
-            Method baseMethod = recipe.getClass().getMethod("base");
-            ResourceLocation baseId = (ResourceLocation) baseMethod.invoke(recipe);
-
-            try {
-                Class<?> vtbClass = Class.forName(
-                        "dev.xkmc.youkaishomecoming.content.pot.table.item.VariantTableItemBase");
-                Field mapField = vtbClass.getField("MAP");
-                Map<?, ?> map = (Map<?, ?>) mapField.get(null);
-                Object vtb = map.get(baseId);
-                if (vtb != null) {
-                    List<Ingredient> baseList = new ArrayList<>();
-                    List<Ingredient> extraList = new ArrayList<>();
-                    Method cm = vtbClass.getMethod(
-                            "collectIngredients", List.class, List.class);
-                    cm.invoke(vtb, baseList, extraList);
-                    for (Ingredient ing : baseList) {
-                        if (!ing.isEmpty()) all.add(ing);
-                    }
-                }
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-RecipeHandler] VTB collect failed", e);
-            }
-
-            // Fallback: IngredientTableItem.FIXED
-            if (all.isEmpty()) {
-                try {
-                    Class<?> itiClass = Class.forName(
-                            "dev.xkmc.youkaishomecoming.content.pot.table.item.IngredientTableItem");
-                    Field fixedField = itiClass.getField("FIXED");
-                    Map<?, ?> fixedMap = (Map<?, ?>) fixedField.get(null);
-                    Object fixed = fixedMap.get(baseId);
-                    if (fixed != null) {
-                        Method cm = itiClass.getMethod(
-                                "collectIngredients", List.class);
-                        cm.invoke(fixed, all);
-                    }
-                } catch (Exception e) {
-                    RSIntegrationMod.LOGGER.debug("[RSI-RecipeHandler] FIXED collect failed", e);
-                }
-            }
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-RecipeHandler] base lookup failed", e);
-        }
-
-        // 2. Recipe-specific ingredients
-        try {
-            Method gci = recipe.getClass().getMethod("getCustomIngredients");
-            List<Ingredient> custom = (List<Ingredient>) gci.invoke(recipe);
-            if (custom != null) {
-                for (Ingredient ing : custom) {
-                    if (!ing.isEmpty()) all.add(ing);
-                }
-            }
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-YHK] Cuisine custom ingredients reflection failed", e);
-        }
-
-        return all;
-    }
 }

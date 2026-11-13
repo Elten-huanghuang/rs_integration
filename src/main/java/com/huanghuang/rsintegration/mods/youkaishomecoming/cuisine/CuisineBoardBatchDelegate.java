@@ -1,7 +1,5 @@
 package com.huanghuang.rsintegration.mods.youkaishomecoming.cuisine;
 
-import java.lang.reflect.Field;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -15,7 +13,6 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
@@ -30,7 +27,6 @@ import javax.annotation.Nullable;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 /** Batch delegate for Youkais Homecoming Cuisine Board. */
 public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
@@ -55,10 +51,6 @@ public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
     private static volatile Method getModelMethod;
     private static volatile Method completeMethod;
     private static volatile Method doTransformMethod;
-    private static volatile Method getCustomIngredientsMethod;
-    private static volatile Method getResultMethod;
-    private static volatile Method recreateMethod;
-    private static volatile Method collectIngredientsMethod;
     private static volatile boolean reflectionProbed;
 
     @Override
@@ -88,26 +80,7 @@ public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
     @Nullable
     @Override
     public List<IngredientSpec> getRequiredMaterials() {
-        probeReflection();
-        // Use recreate() + collectIngredients() to get ALL required items
-        // including the base model ingredients (rice, kelp/nori, etc.) that
-        // getCustomIngredients() doesn't include -- it only returns the
-        // recipe-specific input list.
-        List<Ingredient> ingredients = collectAllIngredients(recipe);
-        if (ingredients.isEmpty()) {
-            ingredients = getCustomIngredients(recipe);
-            if (!ingredients.isEmpty()) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Cuisine] Using getCustomIngredients: {} items",
-                        ingredients.size());
-            }
-        }
-        if (ingredients.isEmpty()) {
-            ingredients = recipe.getIngredients();
-            if (!ingredients.isEmpty()) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Cuisine] Using recipe.getIngredients: {} items",
-                        ingredients.size());
-            }
-        }
+        List<Ingredient> ingredients = CuisineRecipeMaterials.collect(recipe);
         if (ingredients.isEmpty()) {
             RSIntegrationMod.LOGGER.warn("[RSI-Cuisine] No ingredients found for {}", recipe.getId());
             return null;
@@ -357,108 +330,6 @@ public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
         return new ArrayList<>();
     }
 
-    // -- recipe accessors --
-
-    @SuppressWarnings("unchecked")
-    private static List<Ingredient> getCustomIngredients(Recipe<?> recipe) {
-        if (getCustomIngredientsMethod != null) {
-            try {
-                return (List<Ingredient>) getCustomIngredientsMethod.invoke(recipe);
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-CuisineBoard] getCustomIngredients reflection failed", e);
-            }
-        }
-        return List.of();
-    }
-
-    private static ItemStack getRecipeResult(Recipe<?> recipe) {
-        if (getResultMethod != null) {
-            try {
-                return (ItemStack) getResultMethod.invoke(recipe);
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-CuisineBoard] getRecipeResult reflection failed", e);
-            }
-        }
-        return ItemStack.EMPTY;
-    }
-
-    // -- complete ingredient collection --
-    //
-    // TableItem.collectIngredients(List) is a default no-op (verified from
-    // 2.6.1 bytecode).  The correct API is VariantTableItemBase.collectIngredients
-    // (List, List) on the base model, which delegates to IngredientTableItem
-    // .collectIngredients(List) -- that override recurses through the tree and
-    // actually adds ingredients.  We union base-model ingredients with
-    // recipe-specific ingredients from getCustomIngredients().
-
-    @SuppressWarnings("unchecked")
-    private static List<Ingredient> collectAllIngredients(Recipe<?> recipe) {
-        List<Ingredient> all = new ArrayList<>();
-
-        // 1. Base-model ingredients from VariantTableItemBase.MAP (or IngredientTableItem.FIXED)
-        try {
-            Method baseMethod = recipe.getClass().getMethod("base");
-            ResourceLocation baseId = (ResourceLocation) baseMethod.invoke(recipe);
-
-            // Preferred path: VariantTableItemBase (covers most recipes)
-            if (YHKReflection.variantTableItemBaseClass != null) {
-                try {
-                    Field mapField = YHKReflection.variantTableItemBaseClass.getField("MAP");
-                    Map<?, ?> map = (Map<?, ?>) mapField.get(null);
-                    Object vtb = map.get(baseId);
-                    if (vtb != null) {
-                        List<Ingredient> baseList = new ArrayList<>();
-                        List<Ingredient> extraList = new ArrayList<>();
-                        Method cm = YHKReflection.variantTableItemBaseClass.getMethod(
-                                "collectIngredients", List.class, List.class);
-                        cm.invoke(vtb, baseList, extraList);
-                        for (Ingredient ing : baseList) {
-                            if (!ing.isEmpty()) all.add(ing);
-                        }
-                    }
-                } catch (Exception e) {
-                    RSIntegrationMod.LOGGER.debug("[RSI-Cuisine] VTB collect failed", e);
-                }
-            }
-
-            // Fallback: IngredientTableItem.FIXED (standalone fixed items)
-            if (all.isEmpty() && YHKReflection.ingredientTableItemClass != null) {
-                try {
-                    Field fixedField = YHKReflection.ingredientTableItemClass.getField("FIXED");
-                    Map<?, ?> fixedMap = (Map<?, ?>) fixedField.get(null);
-                    Object fixed = fixedMap.get(baseId);
-                    if (fixed != null) {
-                        Method cm = YHKReflection.ingredientTableItemClass.getMethod(
-                                "collectIngredients", List.class);
-                        cm.invoke(fixed, all);
-                    }
-                } catch (Exception e) {
-                    RSIntegrationMod.LOGGER.debug("[RSI-Cuisine] FIXED collect failed", e);
-                }
-            }
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Cuisine] base lookup failed", e);
-        }
-
-        // 2. Recipe-specific ingredients (custom per-recipe)
-        try {
-            Method gci = recipe.getClass().getMethod("getCustomIngredients");
-            List<Ingredient> custom = (List<Ingredient>) gci.invoke(recipe);
-            if (custom != null) {
-                for (Ingredient ing : custom) {
-                    if (!ing.isEmpty()) all.add(ing);
-                }
-            }
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-CuisineBoard] collectAllIngredients reflection failed", e);
-        }
-
-        if (!all.isEmpty()) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Cuisine] collectAllIngredients: {} items", all.size());
-        }
-        return all;
-    }
-
     // -- reflection --
 
     private static void probeReflection() {
@@ -490,14 +361,6 @@ public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
                 doTransformMethod = YHKReflection.tableItemClass.getMethod("doTransform");
             }
 
-            if (YHKReflection.cuisineRecipeClass != null) {
-                getCustomIngredientsMethod = YHKReflection.cuisineRecipeClass.getMethod("getCustomIngredients");
-                getCustomIngredientsMethod.setAccessible(true);
-                getResultMethod = YHKReflection.cuisineRecipeClass.getMethod("getResult");
-                getResultMethod.setAccessible(true);
-                recreateMethod = YHKReflection.cuisineRecipeClass.getMethod("recreate");
-                recreateMethod.setAccessible(true);
-            }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Cuisine] Reflection probe failed", e);
         }
