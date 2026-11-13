@@ -10,6 +10,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import org.lwjgl.glfw.GLFW;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -33,6 +34,7 @@ import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 class RecipeCandidatePanelPreviewTest extends BootstrapTest {
     private static final ResourceLocation CURRENT = id("current");
@@ -41,6 +43,34 @@ class RecipeCandidatePanelPreviewTest extends BootstrapTest {
 
     @TempDir
     Path tempDir;
+
+    @Test
+    void bindingStepControlsDoesNotBuildJeiPreviewsOrPersistStockOnlyDraft() {
+        Font font = mock(Font.class);
+        when(font.plainSubstrByWidth(anyString(), anyInt()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(font.plainSubstrByWidth(anyString(), anyInt(), anyBoolean()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        RecipePreviewRenderer preview = mock(RecipePreviewRenderer.class);
+        Path preferences = tempDir.resolve("lazy.json");
+        AtomicReference<PlanTreeNode> changed = new AtomicReference<>();
+        RecipeCandidatePanel panel = new RecipeCandidatePanel(font, preview,
+                (node, recipe) -> changed.set(node), (node, recipe) -> {}, node -> {}, node -> {},
+                preferences, () -> {}, () -> true);
+        ItemStack diamond = new ItemStack(Items.DIAMOND);
+        PlanStep step = new PlanStep(CURRENT, diamond, 1, List.of(),
+                List.of(FIRST_ALTERNATIVE), null, 0, true);
+        PlanTreeNode node = new PlanTreeNode(IngredientKey.of(diamond), diamond, 1, 1, step);
+
+        panel.bind(node, Set.of());
+        assertEquals(2, panel.visibleCandidates().size());
+        assertFalse(panel.stockOnlySelected());
+        panel.selectNoRecipe();
+        assertEquals(node, changed.get());
+        assertTrue(panel.stockOnlySelected());
+        assertTrue(CraftingPlanPreferences.load(preferences).recipeChoices().isEmpty());
+        verifyNoInteractions(preview);
+    }
 
     @Test
     void everyCandidateCardRendersItsJeiPreview() {
@@ -256,5 +286,54 @@ class RecipeCandidatePanelPreviewTest extends BootstrapTest {
 
     private static ResourceLocation id(String path) {
         return new ResourceLocation("test", path);
+    }
+
+    @Test
+    void embeddedStockOnlyAndResumeKeepTheInspectorAvailable() {
+        AtomicReference<ResourceLocation> selected = new AtomicReference<>();
+        RecipeCandidatePanel panel = embeddedPanel(selected);
+        panel.selectNoRecipe();
+        assertTrue(panel.isOpen());
+        assertTrue(panel.stockOnlySelected());
+        assertTrue(CraftingPlanPreferences.load(tempDir.resolve("embedded.json")).recipeChoices().isEmpty());
+        assertTrue(panel.draftPreferences().recipeChoices().containsValue(RecipeChoice.NoRecipe.INSTANCE));
+        panel.resumeCrafting();
+        assertTrue(panel.isOpen());
+        assertFalse(panel.stockOnlySelected());
+        assertTrue(panel.draftPreferences().recipeChoices().isEmpty());
+        assertEquals(CURRENT, selected.get());
+    }
+
+    @Test
+    void embeddedRecipeChoiceWaitsForServerAndKeepsCandidatesVisible() {
+        AtomicReference<ResourceLocation> selected = new AtomicReference<>();
+        RecipeCandidatePanel panel = embeddedPanel(selected);
+        panel.keyPressed(GLFW.GLFW_KEY_DOWN, 0, 0);
+        panel.keyPressed(GLFW.GLFW_KEY_ENTER, 0, 0);
+        assertEquals(FIRST_ALTERNATIVE, selected.get());
+        assertTrue(panel.isOpen());
+        assertEquals(2, panel.visibleCandidates().size());
+        assertTrue(CraftingPlanPreferences.load(tempDir.resolve("embedded.json")).recipeChoices().isEmpty());
+    }
+
+    private RecipeCandidatePanel embeddedPanel(AtomicReference<ResourceLocation> selected) {
+        Font font = mock(Font.class);
+        when(font.plainSubstrByWidth(anyString(), anyInt()))
+                .thenAnswer(call -> call.getArgument(0));
+        when(font.plainSubstrByWidth(anyString(), anyInt(), anyBoolean()))
+                .thenAnswer(call -> call.getArgument(0));
+        RecipePreviewRenderer preview = mock(RecipePreviewRenderer.class);
+        when(preview.candidateDetails(any(), any())).thenReturn(
+                new RecipePreviewRenderer.CandidateDetails("candidate", ""));
+        when(preview.categoryTitle(any())).thenReturn(Optional.of(Component.literal("machine")));
+        when(preview.previewBounds(any())).thenReturn(new RecipePreviewRenderer.PreviewBounds(80, 40));
+        RecipeCandidatePanel panel = new RecipeCandidatePanel(font, preview,
+                (node, recipe) -> selected.set(recipe), (node, recipe) -> selected.set(recipe),
+                node -> {}, node -> {}, tempDir.resolve("embedded.json"), () -> {}, () -> true);
+        ItemStack output = new ItemStack(Items.OAK_PLANKS);
+        PlanStep step = new PlanStep(CURRENT, output, 1, List.of(), List.of(FIRST_ALTERNATIVE), null, 1, true);
+        panel.open(new PlanTreeNode(IngredientKey.of(output), output, 1, 1, step), Set.of());
+        panel.layoutEmbedded(300, 100, 250, 200);
+        return panel;
     }
 }

@@ -140,9 +140,21 @@ public final class PureRecipePlanner {
                           LongSupplier nanoTime, Set<MaterialRef> activeRootOutputs,
                           Map<ResourceLocation, ResourceLocation> forcedRecipes,
                           PlanningPreferences preferences) {
+        return resolve(graph, available, roots, maxSteps, maxSearchStates, maxMemoizedFailures,
+                deadlineNanos, nanoTime, activeRootOutputs, forcedRecipes, preferences, true);
+    }
+
+    /** 路由试探失败后将进入类型解析，不必再生成会被丢弃的缺料展示树。 */
+    static Result resolve(ImmutableRecipeGraph graph,
+                          Map<MaterialRef, ? extends Number> available,
+                          List<IngredientRef> roots, int maxSteps, int maxSearchStates,
+                          int maxMemoizedFailures, long deadlineNanos,
+                          LongSupplier nanoTime, Set<MaterialRef> activeRootOutputs,
+                          Map<ResourceLocation, ResourceLocation> forcedRecipes,
+                          PlanningPreferences preferences, boolean buildPartialPreview) {
         return PlanningLookupCache.run(() -> resolveInScope(graph, available, roots,
                 maxSteps, maxSearchStates, maxMemoizedFailures, deadlineNanos, nanoTime,
-                activeRootOutputs, forcedRecipes, preferences));
+                activeRootOutputs, forcedRecipes, preferences, buildPartialPreview));
     }
 
     private static Result resolveInScope(ImmutableRecipeGraph graph,
@@ -151,7 +163,7 @@ public final class PureRecipePlanner {
                                         int maxMemoizedFailures, long deadlineNanos,
                                         LongSupplier nanoTime, Set<MaterialRef> activeRootOutputs,
                                         Map<ResourceLocation, ResourceLocation> forcedRecipes,
-                                        PlanningPreferences preferences) {
+                                        PlanningPreferences preferences, boolean buildPartialPreview) {
         List<IngredientRef> normalizedRoots = PureDemandNormalizer.mergeEquivalent(roots);
         Map<MaterialRef, Long> preciseAvailable = longAvailability(available);
         graph = ImmutableRecipeGraphProjector.bindSmithingStates(
@@ -193,7 +205,7 @@ public final class PureRecipePlanner {
             case UNRESOLVABLE -> search.bestFailureSteps;
             case STEP_LIMIT, SEARCH_LIMIT, TIME_LIMIT -> List.of();
         };
-        if ((status == Status.UNRESOLVABLE || status == Status.TIME_LIMIT) && !roots.isEmpty()) {
+        if (buildPartialPreview && (status == Status.UNRESOLVABLE || status == Status.TIME_LIMIT) && !roots.isEmpty()) {
             PartialPlanBuilder partialBuilder = new PartialPlanBuilder(
                     graph, preciseAvailable, maxSteps, activeRootOutputs,
                     status == Status.UNRESOLVABLE

@@ -500,6 +500,7 @@ public final class PlanTreeModel {
             // quantity. Keep one copy; amount carries the summed branch demand.
             existing.available = Math.max(existing.available, child.available);
             existing.needed = Math.max(existing.needed, child.needed);
+            existing.missingCount = Math.max(existing.missingCount, child.missingCount);
             existing.producerNodeIds.addAll(child.producerNodeIds);
             refreshMergedProduction(existing, index);
             existing.children.addAll(child.children);
@@ -852,6 +853,7 @@ public final class PlanTreeModel {
         if (a != null) {
             node.available = a.available();
             node.needed = a.needed();
+            node.missingCount = a.missingCount();
         }
         if (node.step != null) {
             node.hints = EmbersMachineHints.tooltipKeys(node.step.modType()).stream()

@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.tree;
 
+import com.huanghuang.rsintegration.config.PlanUiConfig;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
@@ -24,7 +25,7 @@ public final class PlanTreeLayout {
     public static final int ITEM_ICON_SIZE  = 16;
     public static final int RECIPE_ICON_SIZE = 18;
     public static final int NODE_ICON_GAP   = 5;
-    public static final int NODE_HEIGHT     = 30;
+    public static final int NODE_HEIGHT     = 36;
     public static final int SIBLING_GAP     = 18;
     public static final int LEVEL_GAP       = 76;
     /** Trailing space reserved on switchable nodes for the recipe-switch button (keeps it clear of the item icon). */
@@ -34,6 +35,8 @@ public final class PlanTreeLayout {
      *  (recipe icon sits to its left), used to anchor parent→child connectors. */
     public record Box(PlanTreeNode node, int x, int y, int w, int h, int itemCenterX) {
         public int centerX()   { return x + w / 2; }
+        /** 带名称的卡片从卡片中央连线，紧凑模式沿用物品图标中心。 */
+        public int connectorX() { return showsLabel(node) ? centerX() : itemCenterX; }
         public int bottom()    { return y + h; }
         public boolean contains(int px, int py) {
             return px >= x && px < x + w && py >= y && py < y + h;
@@ -45,8 +48,11 @@ public final class PlanTreeLayout {
     private final IdentityHashMap<PlanTreeNode, Box> boxByNode = new IdentityHashMap<>();
 
     private boolean dirty = true;
+    private long revision;
     private int totalWidth;
     private int totalHeight;
+    private int labelWidth = -1;
+    private boolean leafNames;
 
     public void markDirty() {
         dirty = true;
@@ -58,10 +64,13 @@ public final class PlanTreeLayout {
 
     /** Rebuild the layout only if invalidated since the last pass. */
     public void ensureLayout(PlanTreeNode root) {
+        if (labelWidth != PlanUiConfig.nodeLabelWidth() || leafNames != PlanUiConfig.showLeafNames()) dirty = true;
         if (dirty) rebuild(root);
     }
 
     public void rebuild(PlanTreeNode root) {
+        labelWidth = PlanUiConfig.nodeLabelWidth();
+        leafNames = PlanUiConfig.showLeafNames();
         boxes.clear();
         measureCache.clear();
         boxByNode.clear();
@@ -70,7 +79,11 @@ public final class PlanTreeLayout {
         layout(root, 0, 0, rootWidth);
         totalWidth = rootWidth;
         dirty = false;
+        revision++;
     }
+
+    /** 相机变化不递增，供缩略图复用静态投影。 */
+    public long revision() { return revision; }
 
     public List<Box> boxes() {
         return boxes;
@@ -110,9 +123,14 @@ public final class PlanTreeLayout {
 
     // ── measure / layout ─────────────────────────────────────────
 
+    public static boolean showsLabel(PlanTreeNode node) {
+        return PlanUiConfig.showNodeNames() && (node.depth == 0 || node.step != null || PlanUiConfig.showLeafNames());
+    }
+
     private int nodeWidth(PlanTreeNode node) {
         int contentWidth = ITEM_ICON_SIZE;
-        if (node.step != null) contentWidth += RECIPE_ICON_SIZE + NODE_ICON_GAP;
+        if (showsLabel(node)) contentWidth += labelWidth + NODE_PADDING;
+        if (node.step != null && !showsLabel(node)) contentWidth += RECIPE_ICON_SIZE + NODE_ICON_GAP;
         if (node.hasAlternatives()) contentWidth += SWITCH_BTN_SLOT;
         return NODE_PADDING * 2 + contentWidth;
     }
@@ -120,7 +138,7 @@ public final class PlanTreeLayout {
     /** Distance from a node's left edge to its item-icon center (recipe icon sits left of it). */
     private int itemCenterOffset(PlanTreeNode node) {
         int offset = NODE_PADDING;
-        if (node.step != null) offset += RECIPE_ICON_SIZE + NODE_ICON_GAP;
+        if (node.step != null && !showsLabel(node)) offset += RECIPE_ICON_SIZE + NODE_ICON_GAP;
         return offset + ITEM_ICON_SIZE / 2;
     }
 
@@ -156,10 +174,10 @@ public final class PlanTreeLayout {
         int nodeW = nodeWidth(node);
         int x = left + (subtreeWidth - nodeW) / 2;
         int itemCenterX = x + itemCenterOffset(node);
-        Box box = new Box(node, x, y, nodeW, NODE_HEIGHT, itemCenterX);
+        Box box = new Box(node, x, y, nodeW, showsLabel(node) ? NODE_HEIGHT : 22, itemCenterX);
         boxes.add(box);
         boxByNode.put(node, box);
-        totalHeight = Math.max(totalHeight, y + NODE_HEIGHT);
+        totalHeight = Math.max(totalHeight, box.bottom() + (showsLabel(node) ? 0 : 12));
 
         List<PlanTreeNode> visible = visibleChildren(node);
         if (visible.isEmpty()) return;

@@ -447,6 +447,28 @@ class RoutedPlanningTest extends BootstrapTest {
     }
 
     @Test
+    void routeProbeDoesNotBuildADiscardedPartialTreeAfterItsDeadline() {
+        var snapshot = mixedProducerSnapshot(false);
+        var target = snapshot.recipeGraph().recipesById().get(TARGET);
+        var probe = PureRecipePlanner.resolve(snapshot.recipeGraph(), Map.of(), target.inputs(),
+                30, 1000, 100, 1L, () -> 2L, Set.of(), Map.of(), PlanningPreferences.empty(), false);
+
+        assertEquals(PureRecipePlanner.Status.TIME_LIMIT, probe.status());
+        assertTrue(probe.steps().isEmpty());
+        assertNull(probe.materialFlow());
+        assertFalse(probe.feasible());
+    }
+
+    @Test
+    void coverageProbeBudgetCannotTurnAnUnknownTypedRouteIntoAFalseShortage() {
+        var snapshot = mixedProducerSnapshot(false);
+        var uncovered = PurePlanningCoverage.unprojectedDependency(snapshot.recipeGraph(), TARGET,
+                Set.of(IRON.itemId()), Map.of(), PlanningPreferences.empty(), System.nanoTime() - 1L);
+        assertNotNull(uncovered.uncovered(), "探测预算耗尽时必须保留类型解析兜底");
+        assertFalse(uncovered.complete(), "探测超时不能当成已确认的目录缺口而削减正常搜索预算");
+    }
+
+    @Test
     void explicitProjectedRecipeDoesNotFallBackToAnUnselectedProducer() {
         var base = mixedProducerSnapshot(false);
         var snapshot = new PlanningSnapshot(base.playerId(), 1, 1, TARGET, base.availableItems(),

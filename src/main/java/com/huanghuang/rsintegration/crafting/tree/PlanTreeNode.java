@@ -60,6 +60,8 @@ public final class PlanTreeNode {
     // ---- availability (from PlanResponse.materials) ----
     public long available;
     public long needed;
+    /** 服务端账单的净缺口；差额可能已安排补做，不能用需求减库存代替。 */
+    public long missingCount;
 
     // ---- step prerequisites (server-authoritative) ----
     public List<Component> warnings = List.of();

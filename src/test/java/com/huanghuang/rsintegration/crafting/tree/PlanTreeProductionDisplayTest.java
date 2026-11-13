@@ -121,5 +121,20 @@ class PlanTreeProductionDisplayTest extends BootstrapTest {
         assertEquals(7, produced.step.batches());
         assertEquals(7, produced.productionAmount);
         assertEquals(7, produced.displayAmount());
+        assertEquals(0, produced.missingCount, "已经安排补做的差额不能显示为缺料");
+    }
+
+    @Test
+    void leafUsesTheServerNetShortageInsteadOfGrossDemandMinusStock() {
+        ResourceLocation recipe = new ResourceLocation("test", "target");
+        ItemStack ingot = new ItemStack(Items.IRON_INGOT);
+        PlanStep terminal = new PlanStep(recipe, new ItemStack(Items.DIAMOND), 1, List.of(ingot));
+        PlanResponse plan = new PlanResponse(false, "", terminal.output(), List.of(terminal),
+                Map.of(IngredientKey.of(ingot), new PlanResponse.Availability(84, 77, 2)),
+                List.of(), recipe.toString());
+        PlanTreeNode leaf = PlanTreeModel.from(plan).findByKey(IngredientKey.of(ingot));
+        assertEquals(84, leaf.needed);
+        assertEquals(77, leaf.available);
+        assertEquals(2, leaf.missingCount);
     }
 }

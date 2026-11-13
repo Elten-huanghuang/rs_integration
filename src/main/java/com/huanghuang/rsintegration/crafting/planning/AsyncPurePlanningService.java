@@ -143,24 +143,32 @@ public final class AsyncPurePlanningService {
             long inspectionNanos = System.nanoTime() - inspectionStarted;
             PlanningThreadContext.throwIfCancelled();
             long searchStarted = System.nanoTime();
+            boolean canSearch = forcedRecipesProjected && inspection.backgroundCompatible()
+                    && !snapshot.mainThreadOnly();
+            var coverage = canSearch ? PurePlanningCoverage.unprojectedDependency(routingGraph,
+                    snapshot.recipeId(), routing.incompatibleOutputs(), snapshot.forcedRecipes(),
+                    snapshot.preferences(), Math.min(session.deadlineNanos(), System.nanoTime() + 100_000_000L))
+                    : new PurePlanningCoverage.Probe(null, true);
+            var uncovered = coverage.uncovered();
+            boolean knownCoverageGap = uncovered != null && coverage.complete();
+            // 存在类型配方缺口时，纯图只作短暂尝试。成功仍可复用；失败则尽快进入
+            // 类型解析，不能花完数十秒搜索后才发现纯图根本不能证明缺料。
+            long searchDeadline = knownCoverageGap ? Math.min(session.deadlineNanos(), System.nanoTime() + 250_000_000L)
+                    : session.deadlineNanos();
             PureRecipePlanner.Result plan = forcedRecipesProjected
                     && inspection.backgroundCompatible()
                     && !snapshot.mainThreadOnly()
-                    ? computeInScope(snapshot, repeatCount, maxSteps, maxSearchStates,
+                    ? computeInScope(snapshot, repeatCount, maxSteps,
+                            knownCoverageGap ? Math.min(maxSearchStates, 512) : maxSearchStates,
                             maxMemoizedFailures, session, routingGraph,
-                            routing.projectedAvailabilityFor(snapshot)) : null;
-            if (plan != null && !plan.feasible()) {
-                var uncovered = PurePlanningCoverage.unprojectedDependency(routingGraph,
-                        snapshot.recipeId(), routing.incompatibleOutputs(),
-                        snapshot.forcedRecipes(), snapshot.preferences());
-                if (uncovered != null) {
-                    // 纯图只证明其自身路线失败，不能把目录中未投影的生产者
-                    // 当成不存在。交给原类型解析器验证，避免发布假缺料预览。
-                    inspection = new PureDemandTreeInspector.Result(
-                            PureDemandTreeInspector.Status.UNPROJECTED_DEPENDENCY,
-                            inspection.visitedNodes(), uncovered, inspection.catalystRouteAvailable());
-                    plan = null;
-                }
+                            routing.projectedAvailabilityFor(snapshot), searchDeadline) : null;
+            if (plan != null && !plan.feasible() && uncovered != null) {
+                // 纯图只证明其自身路线失败，不能把目录中未投影的生产者
+                // 当成不存在。交给原类型解析器验证，避免发布假缺料预览。
+                inspection = new PureDemandTreeInspector.Result(
+                        PureDemandTreeInspector.Status.UNPROJECTED_DEPENDENCY,
+                        inspection.visitedNodes(), uncovered, inspection.catalystRouteAvailable());
+                plan = null;
             }
             RoutedPlan result = new RoutedPlan(snapshot, routing, inspection, plan, forcedRecipesProjected);
             logSlowRoute(result, started, replayNanos, projectionNanos, inspectionNanos,
@@ -190,7 +198,7 @@ public final class AsyncPurePlanningService {
                 Math.min(4096L, Math.max(64L, graph.recipesById().size() * 8L)));
         var plan = computeInScope(snapshot, repeatCount, maxSteps, replayStates,
                 Math.min(maxMemoizedFailures, replayStates), session, graph,
-                routing.projectedAvailabilityFor(snapshot));
+                routing.projectedAvailabilityFor(snapshot), session.deadlineNanos());
         PlanningThreadContext.throwIfCancelled();
         // 缺料结果不可从缩小后的候选图发布；只接受已重新生成权威材料流的成功解。
         return plan.feasible() && plan.materialFlow() != null
@@ -220,7 +228,7 @@ public final class AsyncPurePlanningService {
                                                             int maxMemoizedFailures,
                                                             PlanningSession session) {
         return computeInScope(snapshot, repeatCount, maxSteps, maxSearchStates,
-                maxMemoizedFailures, session, null, null);
+                maxMemoizedFailures, session, null, null, session.deadlineNanos());
     }
 
     private static PureRecipePlanner.Result computeInScope(PlanningSnapshot snapshot, int repeatCount,
@@ -228,7 +236,8 @@ public final class AsyncPurePlanningService {
                                                             int maxMemoizedFailures,
                                                             PlanningSession session,
                                                             ImmutableRecipeGraph projectedGraph,
-                                                            @Nullable Map<ImmutableRecipeGraph.MaterialRef, Long> projectedStock) {
+                                                            @Nullable Map<ImmutableRecipeGraph.MaterialRef, Long> projectedStock,
+                                                            long searchDeadlineNanos) {
         PlanningThreadContext.throwIfCancelled();
         setPhase(session, snapshot, PlanningSession.Phase.PREPARATION);
         Map<ImmutableRecipeGraph.MaterialRef, Long> stock =
@@ -258,11 +267,11 @@ public final class AsyncPurePlanningService {
         }
         setPhase(session, snapshot, PlanningSession.Phase.RECURSIVE_SEARCH);
         long searchStarted = System.nanoTime();
-        long deadlineNanos = session.deadlineNanos();
+        long deadlineNanos = Math.min(session.deadlineNanos(), searchDeadlineNanos);
         PureRecipePlanner.Result result = resolveInScope(
                 planningGraph, stock, target, repeatCount, maxSteps,
                 maxSearchStates, maxMemoizedFailures, deadlineNanos,
-                snapshot.forcedRecipes(), snapshot.preferences());
+                snapshot.forcedRecipes(), snapshot.preferences(), searchDeadlineNanos == session.deadlineNanos());
         long elapsedNanos = System.nanoTime() - searchStarted;
         PerformanceMonitor.recordPurePlanningSearch(
                 result, elapsedNanos);
@@ -297,6 +306,17 @@ public final class AsyncPurePlanningService {
                                                    int maxMemoizedFailures, long deadlineNanos,
                                                    Map<ResourceLocation, ResourceLocation> forcedRecipes,
                                                    PlanningPreferences preferences) {
+        return resolveInScope(graph, stock, target, repeatCount, maxSteps, maxSearchStates,
+                maxMemoizedFailures, deadlineNanos, forcedRecipes, preferences, true);
+    }
+
+    private static PureRecipePlanner.Result resolveInScope(ImmutableRecipeGraph graph,
+                                                   Map<ImmutableRecipeGraph.MaterialRef, Long> stock,
+                                                   RecipeNode target, int repeatCount,
+                                                   int maxSteps, int maxSearchStates,
+                                                   int maxMemoizedFailures, long deadlineNanos,
+                                                   Map<ResourceLocation, ResourceLocation> forcedRecipes,
+                                                   PlanningPreferences preferences, boolean buildPartialPreview) {
         boolean amplification = SelfAmplifyingRecipePolicy.isSelfAmplifying(target);
         long existingOutputCount = 0L;
         Map<ResourceLocation, ResourceLocation> selectedRecipes = forcedRecipes;
@@ -314,7 +334,7 @@ public final class AsyncPurePlanningService {
         PureRecipePlanner.Result result = PureRecipePlanner.resolve(
                 graph, stock, SelfAmplifyingRecipePolicy.planningRoots(target, repeatCount, existingOutputCount),
                 maxSteps, maxSearchStates, maxMemoizedFailures, deadlineNanos,
-                System::nanoTime, planningRootGuard(target), selectedRecipes, preferences);
+                System::nanoTime, planningRootGuard(target), selectedRecipes, preferences, buildPartialPreview);
         if (amplification) result = result.withAdditionalOutputTarget();
         if (result.feasible()
                 || !SelfAmplifyingRecipePolicy.isUnseededReverseTarget(target, graph, stock)) {
@@ -324,7 +344,7 @@ public final class AsyncPurePlanningService {
                 graph, stock,
                 SelfAmplifyingRecipePolicy.directProductionRoots(target, repeatCount),
                 maxSteps, maxSearchStates, maxMemoizedFailures, deadlineNanos,
-                System::nanoTime, Set.of(), forcedRecipes, preferences).withOutputTarget();
+                System::nanoTime, Set.of(), forcedRecipes, preferences, buildPartialPreview).withOutputTarget();
         return direct.feasible() || !direct.missing().isEmpty() ? direct : result;
     }
 

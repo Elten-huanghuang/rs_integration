@@ -126,6 +126,7 @@ class PlanResponseRequestStateTest {
         PlanResponseRequestState state = new PlanResponseRequestState(10L, POPPY);
 
         assertFalse(state.pending());
+        assertFalse(state.calculating(), "重算失败后必须恢复路线修改和重试入口");
         state.beginPreview(11L, POPPY);
         assertTrue(state.pending());
         assertTrue(state.accept(11L, POPPY));

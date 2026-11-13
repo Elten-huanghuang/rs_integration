@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import com.huanghuang.rsintegration.util.Diagnostics;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -31,19 +32,27 @@ class MaterialLocksTest extends BootstrapTest {
 
     @Test
     void legalSelectionNarrowsEveryEquivalentSlotToOneConcreteItem() {
-        Ingredient planks = Ingredient.of(Items.OAK_PLANKS, Items.BIRCH_PLANKS);
-        String key = MaterialLocks.key(RECIPE, planks);
-        ResolutionContext context = new ResolutionContext(null, Map.of(),
-                List.of(new ItemStack(Items.OAK_PLANKS, 3),
-                        new ItemStack(Items.BIRCH_PLANKS, 64)), null)
-                .withMaterialLocks(Map.of(key, new ItemStack(Items.OAK_PLANKS)));
+        boolean diagnosticsEnabled = Diagnostics.isEnabled();
+        // 纯测试没有 FML 模组实例，启用独立诊断器以避开模组日志入口。
+        Diagnostics.setEnabled(true);
+        try {
+            Ingredient planks = Ingredient.of(Items.OAK_PLANKS, Items.BIRCH_PLANKS);
+            String key = MaterialLocks.key(RECIPE, planks);
+            ResolutionContext context = new ResolutionContext(null, Map.of(),
+                    List.of(new ItemStack(Items.OAK_PLANKS, 3),
+                            new ItemStack(Items.BIRCH_PLANKS, 64)), null)
+                    .withMaterialLocks(Map.of(key, new ItemStack(Items.OAK_PLANKS)));
 
-        Ingredient firstSlot = context.lockedIngredient(RECIPE, planks);
-        Ingredient secondSlot = context.lockedIngredient(RECIPE, planks);
+            Ingredient firstSlot = context.lockedIngredient(RECIPE, planks);
+            Ingredient secondSlot = context.lockedIngredient(RECIPE, planks);
 
-        assertEquals(3, context.countMatching(firstSlot));
-        assertEquals(3, context.countMatching(secondSlot));
-        assertFalse(IngredientMatcher.test(firstSlot, new ItemStack(Items.BIRCH_PLANKS)));
+            assertEquals(3, context.countMatching(firstSlot));
+            assertEquals(3, context.countMatching(secondSlot));
+            assertFalse(IngredientMatcher.test(firstSlot, new ItemStack(Items.BIRCH_PLANKS)));
+        } finally {
+            Diagnostics.setEnabled(diagnosticsEnabled);
+            Diagnostics.clear();
+        }
     }
 
     @Test

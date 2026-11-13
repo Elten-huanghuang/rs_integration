@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.HashMap;
 import java.util.function.Function;
 
 /**
@@ -47,16 +48,18 @@ public final class JeiSubtreeBuilder {
 
     static void enrichCarousels(PlanTreeNode root, Map<String, ItemStack> materialLocks,
                                 Function<ResourceLocation, Recipe<?>> recipes) {
-        enrichRecursive(root, recipes, materialLocks == null ? Map.of() : materialLocks);
+        enrichRecursive(root, recipes, materialLocks == null ? Map.of() : materialLocks, new HashMap<>());
     }
 
     private static void enrichRecursive(PlanTreeNode node,
                                         Function<ResourceLocation, Recipe<?>> recipes,
-                                        Map<String, ItemStack> materialLocks) {
+                                        Map<String, ItemStack> materialLocks,
+                                        Map<ResourceLocation, List<Ingredient>> ingredientsByRecipe) {
         if (node.step != null && !node.children.isEmpty()) {
             Recipe<?> recipe = recipes.apply(node.step.recipeId());
             if (recipe != null) {
-                List<Ingredient> ingredients = selectableIngredients(recipe);
+                List<Ingredient> ingredients = ingredientsByRecipe.computeIfAbsent(node.step.recipeId(),
+                        ignored -> selectableIngredients(recipe));
                 boolean[] used = new boolean[ingredients.size()];
                 for (PlanTreeNode child : node.children) {
                     for (int i = 0; i < ingredients.size(); i++) {
@@ -91,7 +94,7 @@ public final class JeiSubtreeBuilder {
             }
         }
         for (PlanTreeNode child : node.children) {
-            enrichRecursive(child, recipes, materialLocks);
+            enrichRecursive(child, recipes, materialLocks, ingredientsByRecipe);
         }
     }
 

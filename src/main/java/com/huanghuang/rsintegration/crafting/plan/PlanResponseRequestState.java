@@ -45,6 +45,11 @@ final class PlanResponseRequestState {
         return pending || refreshRequired();
     }
 
+    /** 失败后允许修改路线和重试，确认执行仍须等待有效的新预览。 */
+    boolean calculating() {
+        return pending || refreshScheduled;
+    }
+
     boolean failPreview(long requestId) {
         if (!pending || requestId != activeRequestId) return false;
         pending = false;

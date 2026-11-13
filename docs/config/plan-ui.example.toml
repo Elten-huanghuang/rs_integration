@@ -1,0 +1,49 @@
+# 保存到游戏目录 config/rs_integration/plan_ui.toml。
+# 递归合成树的展示图主题；覆盖已有文件前请保留玩家自己的配色。
+# 颜色支持 #RRGGBB 和 #AARRGGBB。重新打开界面查看效果。
+
+[layout]
+panelWidth = 290
+listRowHeight = 28
+connectorWidth = 1
+showNodeNames = true
+showLeafNames = false
+nodeLabelWidth = 78
+minimapWidth = 160
+minimapHeight = 100
+
+[colors]
+background = "#FF111E17"
+panel = "#FF17251E"
+surface = "#FF1B2D22"
+hover = "#FF294332"
+selected = "#FF203D2B"
+border = "#FF314939"
+accent = "#FF8BE3AC"
+text = "#FFE5EEE8"
+muted = "#FFA2B8AC"
+disabled = "#FF6D8375"
+ready = "#FF86D6A2"
+warning = "#FFE9C875"
+error = "#FFEB9B92"
+errorSurface = "#FF412C2D"
+connector = "#FF84C99B"
+connectorPending = "#FF567661"
+root = "#FF1B2D22"
+step = "#FF1B2D22"
+leaf = "#FF1A2C21"
+reference = "#FF91BCD8"
+referenceOverlay = "#33102018"
+shadow = "#A0000000"
+textBackdrop = "#B0102018"
+hoverOverlay = "#30FFFFFF"
+frame = "#FF101B18"
+header = "#FF18251F"
+button = "#FF1A2722"
+nodeBorder = "#FF4C6B55"
+activeBorder = "#FF5B9C75"
+warningSurface = "#FF302B1E"
+warningBorder = "#FF74643E"
+primary = "#FF245E42"
+primaryBorder = "#FF8BE6B1"
+grid = "#FF25382B"

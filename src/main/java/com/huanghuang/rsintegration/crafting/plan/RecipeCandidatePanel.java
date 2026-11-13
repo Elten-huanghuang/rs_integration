@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.config.PlanUiConfig.Color;
 import com.huanghuang.rsintegration.crafting.plan.RecipeCandidatePickerModel.Bounds;
 import com.huanghuang.rsintegration.crafting.plan.RecipeCandidatePickerModel.Candidate;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
@@ -62,6 +63,7 @@ public final class RecipeCandidatePanel {
     private PlanTreeNode node;
     private RecipeCandidatePickerModel model;
     private Bounds bounds;
+    private boolean embedded;
     private Set<String> boundMachines = Set.of();
     private int rowsTop;
     private int lastMouseX = Integer.MIN_VALUE, lastMouseY = Integer.MIN_VALUE;
@@ -139,6 +141,16 @@ public final class RecipeCandidatePanel {
     }
 
     public void open(PlanTreeNode node, Set<String> machines) {
+        open(node, machines, true);
+    }
+
+    /** 步骤详情只绑定选择状态；打开配方子页时才读取 JEI 预览和尺寸。 */
+    public void bind(PlanTreeNode node, Set<String> machines) {
+        open(node, machines, false);
+        embedded = true;
+    }
+
+    private void open(PlanTreeNode node, Set<String> machines, boolean loadPreviews) {
         if (node == null) return;
         this.node = node;
         this.boundMachines = Set.copyOf(machines);
@@ -157,6 +169,10 @@ public final class RecipeCandidatePanel {
         for (Map.Entry<ResourceLocation, String> option : options.entrySet()) {
             ResourceLocation id = option.getKey();
             String mod = option.getValue();
+            if (!loadPreviews) {
+                candidates.add(new Candidate(id, mod, id.toString(), "", id.toString(), 1));
+                continue;
+            }
             var details = preview.candidateDetails(id, node.displayStack);
             Component title = preview.categoryTitle(id).orElse(null);
             String boundMachine = PlanRenderEngine.findBoundMachineLabel(mod, id);
@@ -174,7 +190,7 @@ public final class RecipeCandidatePanel {
                 defaultRecipeId = null;
             }
         }
-        if (node.step != null) {
+        if (loadPreviews && node.step != null) {
             widestPreview = Math.max(widestPreview,
                     constrainPreviewBounds(
                             preview.previewBounds(node.step.recipeId())).width());
@@ -230,8 +246,25 @@ public final class RecipeCandidatePanel {
     /** 在主视图绘制前确定侧栏位置，确保布局与输入捕获同步。 */
     public void layout(int screenWidth, int screenHeight, int contentTop, int contentBottom) {
         if (!isOpen()) return;
+        embedded = false;
         bounds = RecipeCandidatePickerModel.layout(
                 screenWidth, screenHeight, contentTop, contentBottom, preferredWidth);
+        layoutContents();
+    }
+
+    /** 作为步骤详情内的制作配方区，沿用候选卡片和键盘逻辑，不再绘制第二套页签。 */
+    public void layoutEmbedded(int x, int y, int width, int height) {
+        if (!isOpen()) return;
+        embedded = true;
+        bounds = new Bounds(x, y, Math.max(1, width), Math.max(1, height), 30, 1);
+        layoutContents();
+        noRecipeCardH = 0;
+        rowsTop = y + 24;
+        cardViewportTop = rowsTop;
+        search.setY(y + 7);
+    }
+
+    private void layoutContents() {
         int x = bounds.x(), w = bounds.width(), y = bounds.y();
         noRecipeCardX = bounds.x() + 5;
         noRecipeCardY = y + RecipeCandidatePickerModel.HEADER_HEIGHT;
@@ -266,6 +299,33 @@ public final class RecipeCandidatePanel {
         return noRecipeSelected;
     }
 
+    boolean scrolledToTop() { return cardScroll == 0; }
+
+    /** 嵌入侧栏中的改动只形成请求草稿，由屏幕收到成功预览后持久化。 */
+    CraftingPlanPreferences.Snapshot draftPreferences() {
+        CraftingPlanPreferences.Snapshot stored = CraftingPlanPreferences.load(preferencesPath);
+        Map<String, RecipeChoice> choices = new LinkedHashMap<>(stored.recipeChoices());
+        if (preferenceKey != null) {
+            RecipeChoice choice = RecipeChoice.parse(defaultRecipeId);
+            if (choice == null) choices.remove(preferenceKey);
+            else choices.put(preferenceKey, choice);
+        }
+        return new CraftingPlanPreferences.Snapshot(stored.outputDestination(), choices,
+                stored.ingredientChoices(), excludedRecipes);
+    }
+
+    void resumeCrafting() {
+        if (noRecipeSelected) selectNoRecipe();
+    }
+
+    /** 步骤卡片下只画当前配方，不加载其他候选，也不提供选择操作。 */
+    public ItemStack renderCurrentRecipe(GuiGraphics graphics, PlanTreeNode owner,
+                                         int x, int y, int width, int height, int mouseX, int mouseY) {
+        if (owner.step == null) return ItemStack.EMPTY;
+        return preview.renderRecipeInArea(graphics, font, owner.step.recipeId(),
+                x, y, width, height, mouseX, mouseY, owner.displayStack);
+    }
+
     public void render(GuiGraphics graphics, int mouseX, int mouseY) {
         if (!isOpen()) return;
         if (bounds == null) return;
@@ -280,12 +340,23 @@ public final class RecipeCandidatePanel {
         graphics.pose().pushPose();
         graphics.pose().translate(0, 0, 500);
         try {
+            if (embedded) {
+                graphics.fill(x + 6, y + 3, x + w - 6, y + 20,
+                        Color.SURFACE.value());
+                search.visible = search.active = true;
+                search.setTextColor(Color.TEXT.value());
+                search.render(graphics, mouseX, mouseY, 0);
+                renderCandidateCards(graphics, mouseX, mouseY);
+                renderForgetButton(graphics, mouseX, mouseY);
+                graphics.flush();
+                return;
+            }
             // 使用同一 GUI 批次绘制实心背景和两层边框，避免即时圆角被深度/剔除状态吃掉。
-            graphics.fill(x + 3, y + 3, x + w + 3, y + h + 3, 0x90000000);
-            graphics.fill(x, y, x + w, y + h, 0xFF70A888);
-            graphics.fill(x + 1, y + 1, x + w - 1, y + h - 1, 0xFF243D30);
-            graphics.fill(x + 2, y + 2, x + w - 2, y + h - 2, 0xFF101A15);
-            graphics.fill(x + 2, y + 2, x + w - 2, y + 20, 0xFF213A2B);
+            graphics.fill(x + 3, y + 3, x + w + 3, y + h + 3, Color.SHADOW.value());
+            graphics.fill(x, y, x + w, y + h, Color.ACCENT.value());
+            graphics.fill(x + 1, y + 1, x + w - 1, y + h - 1, Color.BORDER.value());
+            graphics.fill(x + 2, y + 2, x + w - 2, y + h - 2, Color.PANEL.value());
+            graphics.fill(x + 2, y + 2, x + w - 2, y + 20, Color.SURFACE.value());
             graphics.flush();
             String nodeTabLabel = Component.translatable(
                     "rsi.plan.recipe_picker.tab.node").getString();
@@ -295,17 +366,17 @@ public final class RecipeCandidatePanel {
                     activeTab == Tab.NODE, mouseX, mouseY);
             renderTab(graphics, diagnosticsTabLabel, diagnosticsTabX, nodeTabY, nodeTabW,
                     nodeTabH, activeTab == Tab.DIAGNOSTICS, mouseX, mouseY);
-            graphics.drawString(font, "×", x + w - 17, y + 6, 0xFFAAC8B4, false);
+            graphics.drawString(font, "×", x + w - 17, y + 6, Color.MUTED.value(), false);
             search.visible = activeTab == Tab.NODE;
             if (activeTab == Tab.NODE) {
-                graphics.fill(x + 6, y + 23, x + w - 6, y + 39, 0xFF50745E);
-                graphics.fill(x + 7, y + 24, x + w - 7, y + 38, 0xFF192C21);
+                graphics.fill(x + 6, y + 23, x + w - 6, y + 39, Color.BORDER.value());
+                graphics.fill(x + 7, y + 24, x + w - 7, y + 38, Color.SURFACE.value());
                 search.render(graphics, mouseX, mouseY, 0);
             } else {
-                graphics.fill(x + 6, y + 23, x + w - 6, y + 39, 0xFF2A4133);
-                graphics.fill(x + 7, y + 24, x + w - 7, y + 38, 0xFF16241B);
+                graphics.fill(x + 6, y + 23, x + w - 6, y + 39, Color.BORDER.value());
+                graphics.fill(x + 7, y + 24, x + w - 7, y + 38, Color.SURFACE.value());
                 graphics.drawString(font, ellipsize(diagnosticsTabLabel, w - 20),
-                        x + 10, y + 27, 0xFF9FC9B0, false);
+                        x + 10, y + 27, Color.MUTED.value(), false);
             }
             graphics.flush();
             if (activeTab == Tab.NODE) {
@@ -324,23 +395,36 @@ public final class RecipeCandidatePanel {
                 String hint = Component.translatable("rsi.plan.recipe_picker.hint").getString();
                 int hintX = forgetX + forgetW + 6;
                 graphics.drawString(font, ellipsize(hint, x + w - 8 - hintX),
-                        hintX, y + h - 11, 0xFF8CA898, false);
+                        hintX, y + h - 11, Color.MUTED.value(), false);
             }
             graphics.flush();
-            if (!hoveredCardItem.isEmpty() && contains(mouseX, mouseY)) {
-                if (InkFluidSupport.isToken(hoveredCardItem)) {
-                    graphics.renderComponentTooltip(font, List.of(hoveredCardItem.getHoverName(),
-                            Component.literal(hoveredCardItem.getCount() + " mB")), mouseX, mouseY);
-                } else graphics.renderTooltip(font, hoveredCardItem, mouseX, mouseY);
-            } else if (hoveredCardCandidate != null) {
-                graphics.renderComponentTooltip(font, List.of(Component.literal(hoveredCardCandidate.name()),
-                        Component.literal(hoveredCardCandidate.machine()), Component.literal(hoveredCardCandidate.recipeId().toString())),
-                        mouseX, mouseY);
-            }
+            renderHoveredTooltip(graphics, mouseX, mouseY);
         } finally {
             graphics.flush();
             graphics.pose().popPose();
         }
+    }
+
+    private void renderHoveredTooltip(GuiGraphics graphics, int mouseX, int mouseY) {
+        if (!hoveredCardItem.isEmpty() && contains(mouseX, mouseY)) {
+            if (InkFluidSupport.isToken(hoveredCardItem)) {
+                graphics.renderComponentTooltip(font, List.of(hoveredCardItem.getHoverName(),
+                        Component.literal(hoveredCardItem.getCount() + " mB")), mouseX, mouseY);
+            } else graphics.renderTooltip(font, hoveredCardItem, mouseX, mouseY);
+        } else if (hoveredCardCandidate != null) {
+            graphics.renderComponentTooltip(font, List.of(Component.literal(hoveredCardCandidate.name()),
+                    Component.literal(hoveredCardCandidate.machine()), Component.literal(hoveredCardCandidate.recipeId().toString())),
+                    mouseX, mouseY);
+        }
+    }
+
+    /** 嵌入模式的提示在外层解除裁剪后绘制，避免 JEI 槽位提示被侧栏边缘截断。 */
+    public void renderEmbeddedTooltip(GuiGraphics graphics, int mouseX, int mouseY) {
+        if (!embedded || !isOpen()) return;
+        graphics.pose().pushPose();
+        graphics.pose().translate(0, 0, 500);
+        try { renderHoveredTooltip(graphics, mouseX, mouseY); }
+        finally { graphics.flush(); graphics.pose().popPose(); }
     }
 
     private void renderForgetButton(GuiGraphics graphics, int mouseX, int mouseY) {
@@ -350,13 +434,13 @@ public final class RecipeCandidatePanel {
         boolean hover = canForget
                 && mouseX >= forgetX && mouseX < forgetX + forgetW
                 && mouseY >= forgetY && mouseY < forgetY + forgetH;
-        int border = !canForget ? 0xFF2B3B32
-                : hover ? 0xFF9AD9B0 : 0xFF50745E;
-        UIRenderer.rounded(graphics, forgetX, forgetY, forgetW, forgetH, 3f, border);
-        UIRenderer.rounded(graphics, forgetX + 1, forgetY + 1, forgetW - 2, forgetH - 2,
-                2f, canForget ? 0xFF1A3123 : 0xFF161D19);
+        int border = !canForget ? Color.BORDER.value()
+                : hover ? Color.ACCENT.value() : Color.BORDER.value();
+        PlanUiDraw.rounded(graphics, forgetX, forgetY, forgetW, forgetH, 3f, border);
+        PlanUiDraw.rounded(graphics, forgetX + 1, forgetY + 1, forgetW - 2, forgetH - 2,
+                2f, canForget ? Color.SELECTED.value() : Color.SURFACE.value());
         graphics.drawString(font, ellipsize(label, forgetW - 10), forgetX + 5, forgetY + 3,
-                canForget ? (hover ? 0xFFFFFFFF : 0xFFB9D7C3) : 0xFF596B60, false);
+                canForget ? (hover ? Color.TEXT.value() : Color.MUTED.value()) : Color.DISABLED.value(), false);
     }
 
     private void renderBookmarkAllButton(GuiGraphics graphics, int mouseX, int mouseY) {
@@ -370,30 +454,30 @@ public final class RecipeCandidatePanel {
         bookmarkAllY = forgetY;
         boolean hover = mouseX >= bookmarkAllX && mouseX < bookmarkAllX + bookmarkAllW
                 && mouseY >= bookmarkAllY && mouseY < bookmarkAllY + bookmarkAllH;
-        UIRenderer.rounded(graphics, bookmarkAllX, bookmarkAllY,
+        PlanUiDraw.rounded(graphics, bookmarkAllX, bookmarkAllY,
                 bookmarkAllW, bookmarkAllH, bookmarkAllH / 2f,
-                hover ? 0xCC338855 : 0xCC1B5E20);
+                hover ? Color.HOVER.value() : Color.SELECTED.value());
         graphics.drawString(font, label,
                 bookmarkAllX + (bookmarkAllW - font.width(label)) / 2,
                 bookmarkAllY + (bookmarkAllH - font.lineHeight) / 2,
-                hover ? 0xFFA8E6B5 : 0xFF78B889, false);
+                hover ? Color.ACCENT.value() : Color.READY.value(), false);
     }
 
     private void renderTab(GuiGraphics graphics, String label, int x, int y, int width,
                            int height, boolean active, int mouseX, int mouseY) {
         boolean hover = mouseX >= x && mouseX < x + width
                 && mouseY >= y && mouseY < y + height;
-        int border = active ? 0xFF66D48A : hover ? 0xFF4C765D : 0xFF314B3B;
-        UIRenderer.rounded(graphics, x, y, width, height, 3f, border);
-        UIRenderer.rounded(graphics, x + 1, y + 1, width - 2, height - 2, 2f,
-                active ? 0xFF2A5139 : hover ? 0xFF21382A : 0xFF15241B);
+        int border = active ? Color.ACCENT.value() : hover ? Color.HOVER.value() : Color.BORDER.value();
+        PlanUiDraw.rounded(graphics, x, y, width, height, 3f, border);
+        PlanUiDraw.rounded(graphics, x + 1, y + 1, width - 2, height - 2, 2f,
+                active ? Color.SELECTED.value() : hover ? Color.HOVER.value() : Color.SURFACE.value());
         String text = ellipsize(label, width - 8);
         graphics.drawString(font, text, x + (width - font.width(text)) / 2,
                 y + (height - font.lineHeight) / 2,
-                active ? 0xFFFFFFFF : 0xFFB9D7C3, false);
+                active ? Color.TEXT.value() : Color.MUTED.value(), false);
         if (active) {
             graphics.fill(x + 4, y + height - 2, x + width - 4, y + height,
-                    0xFF66D48A);
+                    Color.ACCENT.value());
         }
     }
 
@@ -402,18 +486,18 @@ public final class RecipeCandidatePanel {
                 node.depth, model.total())) return;
         boolean hover = mouseX >= noRecipeCardX && mouseX < noRecipeCardX + noRecipeCardW
                 && mouseY >= noRecipeCardY && mouseY < noRecipeCardY + noRecipeCardH;
-        int border = noRecipeSelected ? 0xFFFF6677
-                : hover ? 0xFFB85B68 : 0xFF66313A;
-        UIRenderer.rounded(graphics, noRecipeCardX, noRecipeCardY,
+        int border = noRecipeSelected ? Color.ERROR.value()
+                : hover ? Color.ERROR.value() : Color.ERROR_SURFACE.value();
+        PlanUiDraw.rounded(graphics, noRecipeCardX, noRecipeCardY,
                 noRecipeCardW, noRecipeCardH, 3f, border);
-        UIRenderer.rounded(graphics, noRecipeCardX + 1, noRecipeCardY + 1,
+        PlanUiDraw.rounded(graphics, noRecipeCardX + 1, noRecipeCardY + 1,
                 noRecipeCardW - 2, noRecipeCardH - 2, 2f,
-                noRecipeSelected ? 0xFF3B1C22 : 0xFF211417);
+                noRecipeSelected ? Color.ERROR_SURFACE.value() : Color.ERROR_SURFACE.value());
         graphics.fill(noRecipeCardX + 6, noRecipeCardY + 7,
                 noRecipeCardX + 16, noRecipeCardY + 17,
-                noRecipeSelected ? 0xFFFF6677 : 0xFF6E3B43);
+                noRecipeSelected ? Color.ERROR.value() : Color.ERROR_SURFACE.value());
         graphics.drawString(font, "×", noRecipeCardX + 8, noRecipeCardY + 8,
-                0xFF3B1C22, false);
+                Color.ERROR_SURFACE.value(), false);
         String current = Component.translatable(
                 "rsi.plan.recipe_picker.current").getString();
         int currentW = noRecipeSelected ? font.width(current) : 0;
@@ -421,14 +505,14 @@ public final class RecipeCandidatePanel {
         graphics.drawString(font, ellipsize(Component.translatable(
                         "rsi.plan.recipe_picker.stock_only").getString(), labelW),
                 noRecipeCardX + 22, noRecipeCardY + 8,
-                noRecipeSelected ? 0xFFFFB8C0 : 0xFFE8C0C5, false);
+                noRecipeSelected ? Color.ERROR.value() : Color.ERROR.value(), false);
         if (noRecipeSelected) {
             graphics.drawString(font, current,
                     noRecipeCardX + noRecipeCardW - currentW - 7,
-                    noRecipeCardY + 8, 0xFFFFB8C0, false);
+                    noRecipeCardY + 8, Color.ERROR.value(), false);
         }
         graphics.fill(noRecipeCardX, rowsTop - 3,
-                noRecipeCardX + noRecipeCardW, rowsTop - 2, 0xFF2A4133);
+                noRecipeCardX + noRecipeCardW, rowsTop - 2, Color.BORDER.value());
     }
 
     /** 诊断页展示整份计划的缺料清单与仪式/前置条件全文。 */
@@ -464,8 +548,8 @@ public final class RecipeCandidatePanel {
                     / (trackHeight + diagnosticsMaxScroll)));
             int thumbY = top + (int) ((long) (trackHeight - thumbHeight)
                     * diagnosticsScroll / diagnosticsMaxScroll);
-            graphics.fill(trackX, top, trackX + 2, bottom, 0xFF233D2D);
-            graphics.fill(trackX, thumbY, trackX + 2, thumbY + thumbHeight, 0xFF66AE80);
+            graphics.fill(trackX, top, trackX + 2, bottom, Color.SURFACE.value());
+            graphics.fill(trackX, thumbY, trackX + 2, thumbY + thumbHeight, Color.ACCENT.value());
         }
     }
 
@@ -475,27 +559,27 @@ public final class RecipeCandidatePanel {
         List<DiagnosticLine> lines = new ArrayList<>();
         lines.add(new DiagnosticLine(Component.translatable(
                 "rsi.plan.missing_summary", planMissing.size()).getString(),
-                0xFF9FC9B0, 0));
+                Color.MUTED.value(), 0));
         if (planMissing.isEmpty()) {
-            lines.add(new DiagnosticLine("-", 0xFF6F8377, 8));
+            lines.add(new DiagnosticLine("-", Color.DISABLED.value(), 8));
         } else {
             for (MissingMaterialBookmarkList.TextEntry entry : planMissing) {
                 String count = "×" + entry.missingCount();
                 int labelWidth = width - 8 - font.width(count) - 6;
                 lines.add(new DiagnosticLine(ellipsize(entry.label(), labelWidth)
-                        + "  " + count, 0xFFFFC46B, 8));
+                        + "  " + count, Color.WARNING.value(), 8));
             }
         }
         lines.add(new DiagnosticLine("", 0, 0));
         lines.add(new DiagnosticLine(Component.translatable(
                 "rsi.plan.warning_summary", planWarnings.size()).getString(),
-                0xFF9FC9B0, 0));
+                Color.MUTED.value(), 0));
         if (planWarnings.isEmpty()) {
-            lines.add(new DiagnosticLine("-", 0xFF6F8377, 8));
+            lines.add(new DiagnosticLine("-", Color.DISABLED.value(), 8));
         } else {
             for (Component warning : planWarnings) {
                 appendWrapped(lines, ChatFormatting.stripFormatting(warning.getString()),
-                        width, 0xFFFF9A86, 8);
+                        width, Color.ERROR.value(), 8);
             }
         }
         return lines;
@@ -562,7 +646,7 @@ public final class RecipeCandidatePanel {
         List<Candidate> filtered = model.filtered();
         if (filtered.isEmpty()) {
             graphics.drawString(font, Component.translatable("rsi.plan.recipe_picker.empty"),
-                    x + 10, cardViewportTop + 8, 0xFF9EB4A7, false);
+                    x + 10, cardViewportTop + 8, Color.MUTED.value(), false);
             cardMaxScroll = 0;
             cardScroll = 0;
             return;
@@ -612,21 +696,15 @@ public final class RecipeCandidatePanel {
                 boolean excluded = RecipeCandidateRules.canExclude(
                         node.depth, filtered.size())
                         && excludedRecipes.contains(candidate.recipeId().toString());
-                int cardBorder = excluded ? 0xFFB23A48
-                        : isDefault ? 0xFFE7BA55
-                        : hover ? 0xFF5B8A6B : 0xFF385341;
-                int cardFill = selected ? 0xFF1C3B2A
-                        : excluded ? 0xFF28171A
-                        : hover ? 0xFF20382A : 0xFF141F19;
-                if (selected && !excluded) {
-                    graphics.flush();
-                    UIRenderer.roundedRainbowBorder(
-                            graphics, cardX, cardY, cardW, cardH, 5f, 1.5f);
-                } else {
-                    UIRenderer.rounded(
-                            graphics, cardX, cardY, cardW, cardH, 5f, cardBorder);
-                }
-                UIRenderer.rounded(graphics, cardX + 1, cardY + 1,
+                int cardBorder = excluded ? Color.ERROR.value()
+                        : isDefault ? Color.WARNING.value()
+                        : hover ? Color.HOVER.value() : Color.BORDER.value();
+                int cardFill = selected ? Color.SELECTED.value()
+                        : excluded ? Color.ERROR_SURFACE.value()
+                        : hover ? Color.HOVER.value() : Color.PANEL.value();
+                PlanUiDraw.rounded(graphics, cardX, cardY, cardW, cardH, 5f,
+                        selected && !excluded ? Color.ACCENT.value() : cardBorder);
+                PlanUiDraw.rounded(graphics, cardX + 1, cardY + 1,
                         cardW - 2, cardH - 2, 4f, cardFill);
                 graphics.flush();
                 preview.drawCategoryIcon(graphics, candidate.recipeId(),
@@ -655,13 +733,13 @@ public final class RecipeCandidatePanel {
                 int machineWidth = Math.max(1, cardW - 33 - badgeW);
                 graphics.drawString(font, ellipsize(machine, machineWidth),
                         cardX + 25, cardY + 5,
-                        bound ? 0xFFAACDB7 : 0xFFE5B36C, false);
+                        bound ? Color.MUTED.value() : Color.WARNING.value(), false);
                 graphics.drawString(font, ellipsize(candidate.name(), cardW - 16),
-                        cardX + 8, cardY + 18, 0xFFE5F2E9, false);
+                        cardX + 8, cardY + 18, Color.TEXT.value(), false);
                 if (!badge.isEmpty()) {
                     graphics.drawString(font, badge,
                             cardX + cardW - badgeW - 7, cardY + 5,
-                            excluded ? 0xFFFF8A95 : 0xFF9CF0B5, false);
+                            excluded ? Color.ERROR.value() : Color.ACCENT.value(), false);
                 }
 
                 int previewX = cardX + 8;
@@ -694,8 +772,8 @@ public final class RecipeCandidatePanel {
             int thumbY = cardViewportTop
                     + (int) ((long) (trackH - thumbH) * cardScroll / cardMaxScroll);
             graphics.fill(trackX, cardViewportTop, trackX + 2,
-                    cardViewportBottom, 0xFF233D2D);
-            graphics.fill(trackX, thumbY, trackX + 2, thumbY + thumbH, 0xFF66AE80);
+                    cardViewportBottom, Color.SURFACE.value());
+            graphics.fill(trackX, thumbY, trackX + 2, thumbY + thumbH, Color.ACCENT.value());
         }
     }
 
@@ -713,13 +791,13 @@ public final class RecipeCandidatePanel {
                 excludedRecipes = new LinkedHashSet<>(excludedRecipes);
                 if (excluded) excludedRecipes.add(recipeId);
                 else excludedRecipes.remove(recipeId);
-                CraftingPlanPreferences.setExcluded(preferencesPath, recipeId, excluded);
+                if (!embedded) CraftingPlanPreferences.setExcluded(preferencesPath, recipeId, excluded);
                 onExclusionChanged.accept(node);
             }
             return true;
         }
         if (button != 0) return true;
-        if (y >= nodeTabY && y < nodeTabY + nodeTabH) {
+        if (!embedded && y >= nodeTabY && y < nodeTabY + nodeTabH) {
             if (x >= nodeTabX && x < nodeTabX + nodeTabW) {
                 activeTab = Tab.NODE;
                 return true;
@@ -730,7 +808,7 @@ public final class RecipeCandidatePanel {
                 return true;
             }
         }
-        if (x >= bounds.x() + bounds.width() - 16 && y < bounds.y() + 22) { close(); return true; }
+        if (!embedded && x >= bounds.x() + bounds.width() - 16 && y < bounds.y() + 22) { close(); return true; }
         if (activeTab == Tab.NODE
                 && (defaultRecipeId != null || noRecipeSelected)
                 && forgetW > 0 && x >= forgetX && x < forgetX + forgetW
@@ -745,12 +823,12 @@ public final class RecipeCandidatePanel {
             return true;
         }
         if (activeTab != Tab.NODE) return true;
-        if (x >= noRecipeCardX && x < noRecipeCardX + noRecipeCardW
+        if (!embedded && x >= noRecipeCardX && x < noRecipeCardX + noRecipeCardW
                 && y >= noRecipeCardY && y < noRecipeCardY + noRecipeCardH) {
             selectNoRecipe();
             return true;
         }
-        if (y >= bounds.y() + 23 && y < bounds.y() + 39) {
+        if (y >= search.getY() - 2 && y < search.getY() + search.getHeight()) {
             search.setFocused(true);
             search.mouseClicked(x, y, button);
             return true;
@@ -843,7 +921,7 @@ public final class RecipeCandidatePanel {
         excludedRecipes.remove(candidate.recipeId().toString());
         defaultRecipeId = candidate.recipeId().toString();
         noRecipeSelected = false;
-        close();
+        if (!embedded) close();
         // 即使卡片显示的配方等于旧计划，也必须提交一次显式选择：失败预览
         // 可能已把 SelectedPath 改成另一配方，静默跳过会留下错误 forced map。
         onSelect.accept(owner, candidate.recipeId());
@@ -854,12 +932,12 @@ public final class RecipeCandidatePanel {
         boolean cancel = noRecipeSelected;
         noRecipeSelected = !cancel;
         defaultRecipeId = cancel ? null : RecipeChoice.NoRecipe.INSTANCE.serialize();
-        CraftingPlanPreferences.saveRecipeChoice(preferencesPath, preferenceKey,
+        if (!embedded) CraftingPlanPreferences.saveRecipeChoice(preferencesPath, preferenceKey,
                 cancel ? null : RecipeChoice.NoRecipe.INSTANCE);
         PlanTreeNode owner = node;
         ResourceLocation fallbackRecipe = owner.step == null
                 ? null : owner.step.recipeId();
-        close();
+        if (!embedded) close();
         if (cancel && fallbackRecipe != null) {
             onCancelStockOnly.accept(owner, fallbackRecipe);
         } else {
@@ -871,9 +949,9 @@ public final class RecipeCandidatePanel {
         PlanTreeNode owner = node;
         defaultRecipeId = null;
         noRecipeSelected = false;
-        CraftingPlanPreferences.saveRecipeChoice(
+        if (!embedded) CraftingPlanPreferences.saveRecipeChoice(
                 preferencesPath, preferenceKey, (RecipeChoice) null);
-        close();
+        if (!embedded) close();
         onForgetPreference.accept(owner);
     }
 }

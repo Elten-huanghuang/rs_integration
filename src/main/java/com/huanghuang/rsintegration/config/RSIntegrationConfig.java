@@ -1894,5 +1894,7 @@ public final class RSIntegrationConfig {
         clientModConfig = new ModConfig(ModConfig.Type.CLIENT, CLIENT_SPEC, container,
                 "rs_integration/client.toml");
         container.addConfig(clientModConfig);
+        container.addConfig(new ModConfig(ModConfig.Type.CLIENT, PlanUiConfig.SPEC, container,
+                "rs_integration/plan_ui.toml"));
     }
 }

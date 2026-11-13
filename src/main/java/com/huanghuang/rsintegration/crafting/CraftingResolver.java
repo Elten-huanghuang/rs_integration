@@ -925,7 +925,7 @@ public final class CraftingResolver {
                     + describeFirstItem(ingredient) + " missing="
                     + Math.max(0L, count - stocked.supplied()));
             if (recordBestEffortUnresolved(
-                    ctx, consumer, ingredient, count, "no-recipe")) {
+                    ctx, consumer, ingredient, Math.max(0L, count - stocked.supplied()), "no-recipe")) {
                 return true;
             }
             recordFailureMissing(ctx, ingredient, missingCheckpoint);

@@ -20,14 +20,15 @@ import net.minecraftforge.fml.ModList;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.ClientSyncedConfig;
+import com.huanghuang.rsintegration.config.PlanUiConfig;
+import com.huanghuang.rsintegration.config.PlanUiConfig.Color;
+import com.huanghuang.rsintegration.crafting.plan.PlanWorkspaceLayout.Rect;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
 import com.huanghuang.rsintegration.crafting.batch.PrepareIntermediateMaterialsPacket;
 import com.huanghuang.rsintegration.crafting.OutputDestination;
 import com.huanghuang.rsintegration.crafting.MachineSelectionMode;
-import com.huanghuang.rsintegration.crafting.MaterialLocks;
-import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.storage.StorageNetworkDescriptor;
 import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
@@ -38,14 +39,11 @@ import com.huanghuang.rsintegration.crafting.tree.PlanTreeNode;
 import com.huanghuang.rsintegration.crafting.tree.PlanTreeRenderer;
 import com.huanghuang.rsintegration.crafting.tree.RecipePreviewRenderer;
 import com.huanghuang.rsintegration.crafting.tree.SelectedPath;
-import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.client.input.GuiNavStack;
 import com.huanghuang.rsintegration.machine.client.BindingBackendResolver;
 import com.huanghuang.rsintegration.feature.sidepanel.client.SidePanelJeiBridge;
 import com.huanghuang.rsintegration.network.machine.OpenBoundMachineGuiPacket;
 import com.huanghuang.rsintegration.network.machine.bd.BeyondDimensionsOpenBoundMachineGuiPacket;
-import com.huanghuang.rsintegration.util.UIRenderer;
-import com.huanghuang.rsintegration.util.ModIds;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
@@ -56,10 +54,8 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.resources.language.I18n;
 import org.lwjgl.glfw.GLFW;
 import net.minecraft.ChatFormatting;
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Recipe;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
@@ -87,6 +83,7 @@ public final class CraftingPlanScreen extends Screen {
             for (PlanTreeNode node : inventoryNodes.getOrDefault(key, List.of())) {
                 node.available = value.available();
                 node.needed = value.needed();
+                node.missingCount = value.missingCount();
             }
             Integer index = inventoryStripIndices.get(key);
             if (index != null) {
@@ -96,6 +93,8 @@ public final class CraftingPlanScreen extends Screen {
             }
         }
         JeiCraftingPlanContext.INSTANCE.updateMaterials(plan, inventoryState.changed());
+        if (detailsPanel != null) detailsPanel.updateInventory(plan, displayWarnings(plan));
+        if (materialTable != null) materialTable.update(plan);
         updateConfirmButton();
     }
 
@@ -117,89 +116,14 @@ public final class CraftingPlanScreen extends Screen {
 
     private static final Path PLAN_PREFS_PATH =
             ClientPlanningPreferences.preferencesPath();
-    private static final int SLOT_SIZE = 18;
-    private static final int CARD_PAD = 8;
-    private static final int ARROW_W = 18;
     private static final int STEPS_TOP_MIN = 40;
-    /** Material grid keeps one compact row; the rest is reachable by scrolling. */
-    private static final int MATERIAL_MAX_ROWS = 1;
-    /**
-     * In tree view the missing-material panel is a secondary diagnostic.  Keep it bounded so a
-     * large shortage list cannot consume the whole tree viewport (or draw past its background).
-     */
-    private static final int TREE_MISSING_MAX_HEIGHT = 96;
     private int stepsTop = STEPS_TOP_MIN; // dynamic — grows when title wraps
-    private static final int INDENT = 28;
-    private static final int CONNECTOR_GAP = 18;
 
-    // ── Color palette ────────────────────────────────────────────
-    private static final int C_GREEN       = 0xFF4AE04A;
-    private static final int C_RED         = 0xFFFF4444;
-    private static final int C_ORANGE      = 0xFFFFAA33;
-    private static final int C_BG          = 0xCC0D0D0D;
-    private static final int C_MODTAG_BG   = 0xCC338855;
-    private static final int C_MODTAG_TEXT = 0xFFCCFFDD;
-    private static final int C_ARROW       = 0xFF44CC88;
-    private static final int C_ARROW_DIM   = 0xFF334433;
-    private static final int C_NAME_TEXT   = 0xFFBBCCBB;
-    private static final int C_BATCH_TEXT  = 0xFF99AA99;
-    // Status-driven accent bars
-    private static final int C_ACCENT_READY   = 0xFF388E3C;
-    private static final int C_ACCENT_MISSING = 0xFFD32F2F;
-    private static final int C_ACCENT_NEUTRAL = 0xFF44AA66;
-    // Text backdrop
-    private static final int C_TEXT_BACKDROP  = 0xAA0A0A0A;
-    // Slot hover brightening
-    private static final int C_SLOT_HOVER = 0x80FFFFFF;
     private PlanResponse plan;
     private int currentRepeat = 1;
     private final PlanResponseRequestState responseRequests;
-    private int scrollOffset;
-    private int maxScroll;
-    private boolean dragging;
-    private int missingAreaTop;
-    private int missingAreaHeight;
-    private int missingFullHeight;
-    private int missingMaxScroll;
-    private int missingScroll;
-    private boolean missingExpanded;
-    private int missingHeaderHeight;
-    private int missingToggleX, missingToggleY, missingToggleW, missingToggleH;
-    private int missingContentTop;
-    private String missingSummaryText = "";
-    private boolean missingSummaryHasMissing;
-    private final ScrollbarUI missingBar = new ScrollbarUI();
-    private int machineSelectorY;
-    private int machineModeX, machineModeY, machineModeW, machineModeH;
-    private int machineCandidateX, machineCandidateY, machineCandidateW, machineCandidateH;
-    private boolean machineDropdownOpen;
     private int selectedMachineIndex = -1;
     private MachineSelectionMode machineSelectionMode = MachineSelectionMode.AUTO;
-    private final List<MachineCandidateHit> machineCandidateHits = new ArrayList<>();
-    private record MachineCandidateHit(int x, int y, int w, int h, int index) {}
-    private int materialAreaTop;
-    private int materialAreaHeight;
-    private boolean contentLayoutMissingExpanded;
-    // Material grid vertical scroll (pixels); max set by the render engine each frame.
-    private int materialScroll;
-    private int materialMaxScroll;
-    // Draggable scrollbars (geometry rebuilt each frame); draggingBar tracks an active thumb drag.
-    private final ScrollbarUI cardBar = new ScrollbarUI();
-    private final ScrollbarUI materialBar = new ScrollbarUI();
-    @Nullable
-    private ScrollbarUI draggingBar;
-    private int scrollbarGrabDy;
-    private int repeatRowY;
-    // repeat button hitboxes — set during render
-    private static final int REPEAT_BUTTON_COUNT = 8;
-    private static final int REPEAT_BUTTON_W = 22;
-    private static final int REPEAT_BUTTON_H = 14;
-    private static final int REPEAT_BUTTON_GAP = 3;
-    private static final int REPEAT_INPUT_W = 57;
-    private final int[] repeatBtnX = new int[REPEAT_BUTTON_COUNT];
-    private final int[] repeatBtnY = new int[REPEAT_BUTTON_COUNT];
-    private final int[] repeatBtnW = new int[REPEAT_BUTTON_COUNT];
-    private final int[] repeatBtnH = new int[REPEAT_BUTTON_COUNT];
     private int countPillX, countPillY, countPillW, countPillH;
     @Nullable
     private EditBox repeatCountBox;
@@ -207,13 +131,12 @@ public final class CraftingPlanScreen extends Screen {
     private int planRefreshTick = -1;
     private int lastRefreshCount = 1;
     private int ticksOpen;
+    private long previewStartedAt;
+    @Nullable private Component previewFeedback;
+    private Color previewFeedbackColor = Color.MUTED;
     private int mouseX, mouseY;
 
-    private PlanRenderEngine renderEngine;
-
     // ── Recipe-tree view (v3.4) ──────────────────────────────────
-    private enum ViewMode { CARD, TREE }
-    private ViewMode viewMode = ViewMode.CARD;
     private PlanTreeModel treeModel;
     private final SelectedPath selectedPath = new SelectedPath();
     private final PlanTreeLayout treeLayout = new PlanTreeLayout();
@@ -226,20 +149,14 @@ public final class CraftingPlanScreen extends Screen {
     private final PlanTreeMouseGesture<PlanTreeNode> treeMouseGesture = new PlanTreeMouseGesture<>();
     // Tree viewport rect (screen space), set each render for hit-testing / centering.
     private int treeViewLeft, treeViewTop, treeViewRight, treeViewBottom;
-    // Total-demand strip: raw-material totals + leftovers, drawn in the tree camera
-    // layer anchored above the root node (design doc §4.1). Logical (pre-zoom) units.
-    private static final int STRIP_ROW_H = 20;
-    private static final int STRIP_GAP = 8;
-    private static final int STRIP_PAGE_SIZE = 8;
-    private static final int STRIP_PAGE_BUTTON_W = 12;
-    private static final int STRIP_PAGE_BUTTON_GAP = 3;
+    // 固定在树画布顶部的需求/余产物摘要，使用屏幕像素。
+    private int stripPageSize = 8;
+    private int stripMaxEntryWidth = 68;
+    private int treeContentTop;
     private final List<CostHit> costHits = new ArrayList<>();
     private record CostHit(int x, int y, int w, int h, IngredientKey key) {}
     private record StripEntry(ItemStack display, IngredientKey key, long count, long available,
                               boolean enough) {}
-    private enum StripRow { TOTAL, LEFTOVER }
-    private final List<StripPageHit> stripPageHits = new ArrayList<>();
-    private record StripPageHit(int x, int y, int w, int h, StripRow row, int delta) {}
     private List<StripEntry> cachedTotalStrip = List.of();
     private List<StripEntry> cachedLeftoverStrip = List.of();
     private int totalStripPage;
@@ -248,15 +165,6 @@ public final class CraftingPlanScreen extends Screen {
     private record BookmarkHit(int x, int y, int w, int h, ItemStack stack, long missingCount) {}
     @Nullable
     private BookmarkHit hoveredBookmark;
-    // Card-view fold toggle hitboxes (rebuilt each frame, read during mouseClicked).
-    // One per rendered step card (expanded chevron OR collapsed row), so every step
-    // stays clickable — not just the last one drawn.
-    private final List<FoldHit> foldHits = new ArrayList<>();
-    private record FoldHit(int x, int y, int w, int h, String stepId, int depth) {}
-    // Card-view [Expand All] / [Collapse All] button hitbox.
-    private int foldAllHitX, foldAllHitY, foldAllHitW, foldAllHitH;
-    private boolean foldAllHovered;
-    // Tree-view [Expand All] / [Collapse All] toolbar button hitbox (top-right of the viewport).
     private OutputDestination outputDestination;
     @Nullable
     private StorageReference storageReference;
@@ -267,33 +175,32 @@ public final class CraftingPlanScreen extends Screen {
     private boolean partialPreparation;
     @Nullable
     private Button confirmButton;
-    private int treeFoldAllHitX, treeFoldAllHitY, treeFoldAllHitW, treeFoldAllHitH;
     // 候选配方与主视图共用服务器分支选择，右侧面板只负责展示和导航。
     private PlanTreeNode dropdownNode;
     private RecipeCandidatePanel recipeCandidatePanel;
+    private PlanDetailsPanel detailsPanel;
+    private PlanWorkspaceLayout workspace;
+    private PlanWorkspaceChrome chrome;
+    private PlanMaterialTable materialTable;
+    private final PlanTreeMiniMap miniMap = new PlanTreeMiniMap();
+    private EditBox workspaceSearch;
+    private PlanTreeSearchPanel treeSearch;
+    private Rect workspaceSearchBounds;
+    private Button cancelButton;
+    private boolean materialView, quantityMenuOpen, embersDetailsOpen;
+    private int embersScroll;
     @Nullable
     private PendingCandidateSwitch pendingCandidateSwitch;
-    private int contentLayoutWidth = -1;
-    private ViewMode contentLayoutMode;
+    @Nullable
+    private PendingMaterialChoice pendingMaterialChoice;
     private final Map<String, ItemStack> materialLocks = new LinkedHashMap<>();
     /** 从偏好文件载入的软材料选择，只用于回显，不进入本次会话的硬锁。 */
     private final Map<String, ItemStack> preferredMaterials = new LinkedHashMap<>();
     /** NoRecipe 会把步骤变成叶子；保留最近步骤作为当场撤回的候选上下文。 */
     private final Map<IngredientKey, PlanStep> candidateStepHistory = new LinkedHashMap<>();
-    @Nullable
-    private PlanTreeNode materialDropdownNode;
-    private int materialDropdownScroll;
-    @Nullable
-    private EditBox materialSearchBox;
-    private int materialPanelX, materialPanelY, materialPanelW, materialPanelH;
-    private int materialForgetX, materialForgetY, materialForgetW, materialForgetH;
-    private final List<MaterialDropHit> materialDropHits = new ArrayList<>();
-    private record MaterialDropHit(int x, int y, int w, int h, ItemStack option) {}
     private record PendingCandidateSwitch(IngredientKey key,
                                           SelectedPath.BranchSnapshot previous,
-                                          @Nullable ResourceLocation requestedRecipe,
-                                          @Nullable ResourceLocation preferenceKey,
-                                          boolean persistPreference) {}
+                                          CraftingPlanPreferences.Snapshot preferences) {}
 
     // Hover intent: the full JEI recipe preview only pops after the mouse rests on the same
     // target for HOVER_INTENT_MS, so a quick pass across nodes/candidates doesn't spam previews.
@@ -301,54 +208,6 @@ public final class CraftingPlanScreen extends Screen {
     @Nullable
     private ResourceLocation hoverPreviewId;
     private long hoverPreviewStart;
-
-
-    /**
-     * Screen-space vertical scrollbar: 3px track with a proportional thumb. Geometry is rebuilt
-     * each frame from the current scroll/maxScroll; the thumb is grab-draggable (see mouse handlers).
-     */
-    private static final class ScrollbarUI {
-        int trackX, trackTop, trackH, thumbY, thumbH, maxScroll;
-        boolean active;
-
-        void update(int trackX, int trackTop, int trackH, int scroll, int maxScroll) {
-            this.trackX = trackX;
-            this.trackTop = trackTop;
-            this.trackH = trackH;
-            this.maxScroll = maxScroll;
-            this.active = maxScroll > 0 && trackH > 0;
-            if (!active) return;
-            int contentH = trackH + maxScroll;
-            this.thumbH = Math.max(12, (int) ((long) trackH * trackH / contentH));
-            this.thumbY = trackTop + (int) ((long) (trackH - thumbH) * scroll / maxScroll);
-        }
-
-        void draw(GuiGraphics gfx, double mouseX, double mouseY) {
-            if (!active) return;
-            gfx.fill(trackX, trackTop, trackX + 3, trackTop + trackH, 0x40FFFFFF);
-            int color = overThumb(mouseX, mouseY) ? 0xFF88DDAA : 0xAA66CC88;
-            gfx.fill(trackX, thumbY, trackX + 3, thumbY + thumbH, color);
-        }
-
-        // Hit regions are widened ±2px beyond the 3px track so the thin bar stays easy to grab.
-        boolean overThumb(double mx, double my) {
-            return active && mx >= trackX - 2 && mx <= trackX + 5
-                    && my >= thumbY && my <= thumbY + thumbH;
-        }
-
-        boolean overTrack(double mx, double my) {
-            return active && mx >= trackX - 2 && mx <= trackX + 5
-                    && my >= trackTop && my <= trackTop + trackH;
-        }
-
-        /** Scroll offset that places the thumb's top at {@code thumbTopY} (clamped to range). */
-        int scrollForThumbTop(int thumbTopY) {
-            int span = trackH - thumbH;
-            if (span <= 0) return 0;
-            int s = (int) Math.round((double) (thumbTopY - trackTop) * maxScroll / span);
-            return Math.max(0, Math.min(maxScroll, s));
-        }
-    }
 
     private int embersPedestalY;
     private int embersPedestalH;
@@ -358,14 +217,6 @@ public final class CraftingPlanScreen extends Screen {
     private int embersModeY;           // mode toggle row Y
     private int embersModeCalcX, embersModeCalcY, embersModeCalcW, embersModeCalcH;
     private int embersModeInferX, embersModeInferY, embersModeInferW, embersModeInferH;
-
-    // Card-view step folding (§3.17). Keyed by recipeId string; default: root unfolded, rest folded.
-    private final Map<String, Boolean> collapsedSteps = new LinkedHashMap<>();
-
-    private final List<ORHitbox> orHitboxes = new ArrayList<>();
-    private final Set<String> orRendered = new HashSet<>();
-
-    private record ORHitbox(int x, int y, int w, int h, String selectionKey) {}
 
     // Deferred tooltip — set during draw, rendered after all scissors disabled
     private ItemStack hoveredItemForTooltip = ItemStack.EMPTY;
@@ -399,9 +250,7 @@ public final class CraftingPlanScreen extends Screen {
                 : OutputDestination.PLAYER_INVENTORY;
         this.storageReference = plan.storageReference();
         this.storageNetworks = plan.storageNetworks();
-        // 规划结果默认展示递归树；卡片视图仍可通过右上角按钮切换。
-        this.viewMode = ViewMode.TREE;
-        this.renderEngine = new PlanRenderEngine(Minecraft.getInstance().font);
+        // 规划统一展示递归树，选材、配方预览与材料账单放入同一侧栏。
         this.treeRenderer = new PlanTreeRenderer(Minecraft.getInstance().font);
         this.treeRenderer.setIconRenderer(recipePreview::drawCategoryIcon);
         loadStoredMaterialChoices();
@@ -445,8 +294,6 @@ public final class CraftingPlanScreen extends Screen {
         stopInventoryWatch();
         responseRequests.cancelConfirmation();
         treeMouseGesture.cancel();
-        dragging = false;
-        draggingBar = null;
         super.removed();
     }
 
@@ -476,7 +323,7 @@ public final class CraftingPlanScreen extends Screen {
                 }
             }
             rollbackPendingCandidateSwitch();
-            reopenPendingCandidates();
+            reopenPendingCandidates(displayWarnings(newPlan));
             updateConfirmButton();
             return true;
         }
@@ -484,7 +331,7 @@ public final class CraftingPlanScreen extends Screen {
         // 形成 锭→块→锭 的闭环；若直接替换计划树，原节点会消失，玩家就无法
         // 从候选面板切回上一条配方。
         if (externalRequest == null && PlanPreviewDecision.keepCurrentPlan(
-                plan, newPlan, pendingCandidateSwitch != null)) {
+                plan, newPlan, pendingCandidateSwitch != null || pendingMaterialChoice != null)) {
             responseRequests.cancelConfirmation();
             if (minecraft != null && minecraft.player != null) {
                 List<Component> warnings = displayWarnings(newPlan);
@@ -493,11 +340,13 @@ public final class CraftingPlanScreen extends Screen {
                         : warnings.get(0), false);
             }
             rollbackPendingCandidateSwitch();
-            reopenPendingCandidates();
+            reopenPendingCandidates(displayWarnings(newPlan));
             updateConfirmButton();
             return true;
         }
         updatePlan(newPlan);
+        previewFeedback = workspaceText("recalculated");
+        previewFeedbackColor = Color.READY;
         boolean executable = (newPlan.success() && !newPlan.executionBlocked())
                 || (partialPreparation && newPlan.outcome() == PlanOutcome.MISSING_INPUTS);
         if (responseRequests.consumeConfirmation(executable)) {
@@ -529,19 +378,15 @@ public final class CraftingPlanScreen extends Screen {
                 machineSelectionMode = MachineSelectionMode.AUTO;
             }
         }
-        machineDropdownOpen = false;
-        this.renderEngine = new PlanRenderEngine(Minecraft.getInstance().font);
         this.dropdownNode = null;
-        this.materialScroll = 0;
+        commitPendingCandidateSwitch();
         loadStoredMaterialChoices();
         rebuildMaterialStripCache();
         rebuildTreeModel(false);
-        this.orHitboxes.clear();
-        closeMaterialDropdown();
         this.clearWidgets();
         this.init();
-        commitPendingCandidateSwitch();
-        reopenPendingCandidates();
+        pendingCandidateSwitch = null;
+        pendingMaterialChoice = null;
     }
 
     private int findMachineCandidate(String dimension, int x, int y, int z) {
@@ -584,6 +429,7 @@ public final class CraftingPlanScreen extends Screen {
         }
         PlanTreeModel.applyCollapsedNodes(treeModel.root, collapsed);
         JeiSubtreeBuilder.enrichCarousels(treeModel.root, materialDisplayLocks());
+        if (treeSearch != null) treeSearch.update(treeModel.root);
         recipePreview.clear();
 
         selectedPath.bindTree(treeModel);
@@ -616,8 +462,6 @@ public final class CraftingPlanScreen extends Screen {
     protected void init() {
         super.init();
         treeMouseGesture.cancel();
-        dragging = false;
-        draggingBar = null;
         Font font = minecraft.font;
         if (recipeCandidatePanel == null) {
             recipeCandidatePanel = new RecipeCandidatePanel(font, recipePreview,
@@ -626,23 +470,47 @@ public final class CraftingPlanScreen extends Screen {
                     this::bookmarkAllMissingMaterials,
                     () -> !MissingMaterialBookmarkList.bookmarkableItems(plan).isEmpty());
         }
-        closeRecipeCandidates();
+        if (detailsPanel == null) {
+            detailsPanel = new PlanDetailsPanel(font, recipeCandidatePanel, this::candidateNodeFor,
+                    this::selectMaterial, this::navigateToNode,
+                    (stack, count) -> bookmarkMissingMaterial(new BookmarkHit(0, 0, 0, 0, stack, count)),
+                    this::bookmarkAllMissingMaterials, responseRequests::calculating,
+                    this::refreshPlan, this::openRecipeInJei, new PlanDetailsPanel.MachineControl() {
+                        @Override public MachineSelectionMode mode() { return machineSelectionMode; }
+                        @Override public int selectedIndex() { return selectedMachineIndex; }
+                        @Override public void selectMode(MachineSelectionMode mode) {
+                            machineSelectionMode = mode;
+                            if (mode != MachineSelectionMode.AUTO && selectedMachineIndex < 0) {
+                                selectedMachineIndex = plan.machineCandidates().stream()
+                                        .filter(candidate -> candidate.state() == MachineCandidateView.State.READY)
+                                        .findFirst().map(candidate -> plan.machineCandidates().indexOf(candidate)).orElse(-1);
+                            }
+                            cancelQueuedConfirmation();
+                        }
+                        @Override public void selectCandidate(int index) {
+                            selectedMachineIndex = index;
+                            if (machineSelectionMode == MachineSelectionMode.AUTO) machineSelectionMode = MachineSelectionMode.PREFERRED;
+                            cancelQueuedConfirmation();
+                        }
+                        @Override public void openTarget() { onOpenMachine(); }
+                    });
+        }
+        detailsPanel.update(plan, treeModel.root, displayWarnings(plan));
+        detailsPanel.setShowAllMaterials(() -> { materialView = true; embersDetailsOpen = false; });
+        dropdownNode = detailsPanel.isOpen() ? detailsPanel.selectedNode() : null;
         addWidget(recipeCandidatePanel.searchBox());
+        addWidget(detailsPanel.searchBox());
         int contentW = width - 40;
-
-        // Start card-entry animation (target card + intermediate steps)
-        renderEngine.animation().start(1 + plan.steps().size());
 
         // Embers alchemy pedestal layout height
         boolean hasEmbers = plan.embersCode() != null
                 && plan.embersAspectNames() != null
                 && plan.embersInputNames() != null;
         boolean canInfer = plan.embersCanInfer();
-        boolean codeFromCache = plan.embersCodeFromCache();
-        if (hasEmbers) {
+        if (hasEmbers && plan.embersCode().length > 0) {
             int pedestalCount = plan.embersCode().length;
-            int cardsPerRow = Math.min(pedestalCount, 8);
-            embersCardsH = font.lineHeight + 10 + 52 * ((pedestalCount + cardsPerRow - 1) / cardsPerRow) + 8;
+            int cardsPerRow = Math.max(1, Math.min(pedestalCount, (contentW - 16) / 68));
+            embersCardsH = font.lineHeight + 18 + 48 * ((pedestalCount + cardsPerRow - 1) / cardsPerRow);
         } else {
             embersCardsH = 0;
         }
@@ -652,81 +520,35 @@ public final class CraftingPlanScreen extends Screen {
         // Default mode: Calculate if code is known (from cache or computed), Infer otherwise
         embersInferMode = !hasEmbers;
 
-        contentLayoutWidth = -1;
-        layoutContentSections(font, contentW);
-        layoutBottomStack();
         createRepeatCountInput(font);
-        createMaterialSearchInput(font);
 
-        int btnW = 80;
-        int btnY = height - 24;
-
-        boolean questSubmission = QuestSubmissionTargetIds.isQuestSubmission(
-                ResourceLocation.tryParse(plan.recipeId()));
-        if (!questSubmission && externalRequest == null) {
-            outputSegmentW = 132;
-            outputSelectorH = 20;
-            outputSelectorX = width / 2 - outputSegmentW / 2;
-            outputSelectorY = btnY - 27;
-            preparationModeW = 124;
-            preparationModeH = 20;
-            preparationModeX = width / 2 - preparationModeW / 2;
-            preparationModeY = outputSelectorY - 24;
-        } else {
-            outputSelectorH = 0;
-            preparationModeH = 0;
-        }
-
-        // "Open Machine" button — only when a bound machine position is known
-        // AND the execution machine actually supports remote GUI.
-        boolean hasMachineGui = plan.executionModTypeId() != null
-                && plan.executionMachineSupportsGui();
-        if (plan.executionDim() != null && !plan.executionDim().isEmpty() && hasMachineGui) {
-            int openBtnW = 90;
-            addRenderableWidget(Button.builder(
-                            Component.translatable("rsi.plan.open_machine"),
-                            btn -> onOpenMachine())
-                    .pos(width / 2 - btnW - openBtnW - 20, btnY)
-                    .size(openBtnW, 20)
-                    .build());
-        }
-
-        confirmButton = Button.builder(
-                        executionActionLabel(),
-                        btn -> onConfirm())
-                .pos(width / 2 - btnW - 10, btnY)
-                .size(selectedPath.isDirty() ? btnW + 20 : btnW, 20)
-                .build();
-        confirmButton.setTooltip(Tooltip.create(
+        chrome = new PlanWorkspaceChrome(font);
+        materialTable = new PlanMaterialTable(font, this::centerOnKey,
+                (stack, count) -> bookmarkMissingMaterial(new BookmarkHit(0, 0, 0, 0, stack, count)),
+                this::bookmarkAllMissingMaterials);
+        materialTable.update(plan);
+        String oldSearch = workspaceSearch == null ? "" : workspaceSearch.getValue();
+        workspaceSearch = new EditBox(font, 0, 0, 100, 14, workspaceText("search"));
+        workspaceSearch.setBordered(false);
+        workspaceSearch.setHint(workspaceText("search"));
+        workspaceSearch.setMaxLength(100);
+        treeSearch = new PlanTreeSearchPanel(font, node -> navigateToNode(node, true));
+        treeSearch.update(treeModel.root);
+        workspaceSearch.setResponder(value -> {
+            materialTable.search(value);
+            treeSearch.search(value);
+            if (materialView || embersDetailsOpen || !workspaceSearch.isFocused()) treeSearch.close();
+        });
+        workspaceSearch.setValue(oldSearch);
+        addWidget(workspaceSearch);
+        confirmButton = addRenderableWidget(new PlanUiButton(0, 0, 150, 24,
+                executionActionLabel(), button -> onConfirm()).primary());
+        if (externalRequest == null) confirmButton.setTooltip(Tooltip.create(
                 Component.translatable("rsi.plan.machine_clear_notice")));
-        if (externalRequest != null) confirmButton.setTooltip(null);
+        cancelButton = addRenderableWidget(new PlanUiButton(0, 0, 72, 24,
+                Component.translatable("rsi.plan.cancel"), button -> onClose()));
         updateConfirmButton();
-        addRenderableWidget(confirmButton);
-
-        addRenderableWidget(Button.builder(
-                        Component.translatable("rsi.plan.cancel"),
-                        btn -> onClose())
-                .pos(width / 2 + 10, btnY)
-                .size(btnW, 20)
-                .build());
-
-        // View-mode toggle (top-right). Flips card ↔ tree and recenters the tree camera.
-        addRenderableWidget(Button.builder(viewToggleLabel(), btn -> {
-                    viewMode = (viewMode == ViewMode.CARD) ? ViewMode.TREE : ViewMode.CARD;
-                    treeCameraInit = false;
-                    closeRecipeCandidates();
-                    closeMaterialDropdown();
-                    btn.setMessage(viewToggleLabel());
-                })
-                .pos(width - 78, 6)
-                .size(68, 18)
-                .build());
-
-    }
-
-    private Component viewToggleLabel() {
-        return Component.translatable(
-                viewMode == ViewMode.TREE ? "rsi.plan.view_tree" : "rsi.plan.view_card");
+        layoutWorkspace();
     }
 
     private Component executionActionLabel() {
@@ -760,40 +582,13 @@ public final class CraftingPlanScreen extends Screen {
         updateConfirmButton();
     }
 
-    private record RepeatRowLayout(int rowX, int rowW, int startX, int cardY, int buttonY,
-                                   int inputX, int inputY, int inputH,
-                                   int summaryX, int summaryY, int summaryW, int summaryH) {}
-
-    private RepeatRowLayout repeatRowLayout(Font font) {
-        int groupW = 4 * REPEAT_BUTTON_W + 3 * REPEAT_BUTTON_GAP;
-        int innerGap = 12;
-        int contentW = groupW + innerGap + REPEAT_INPUT_W + innerGap + groupW;
-        int rowW = contentW + 28;
-        int rowX = width / 2 - rowW / 2;
-        int cardY = repeatRowY + font.lineHeight + 4;
-        int cardH = 22;
-        int buttonY = cardY + (cardH - REPEAT_BUTTON_H) / 2;
-        int inputH = font.lineHeight + 6;
-        int startX = rowX + 14;
-        int inputX = startX + groupW + innerGap;
-        int inputY = cardY + (cardH - inputH) / 2;
-        int summaryLimit = Math.max(0, rowX - 28);
-        int naturalSummaryW = missingSummaryText.isEmpty()
-                ? 0 : font.width(missingSummaryText) + 12;
-        int summaryW = Math.min(Math.min(naturalSummaryW, 180), summaryLimit);
-        return new RepeatRowLayout(rowX, rowW, startX, cardY, buttonY,
-                inputX, inputY, inputH,
-                20, cardY + 2, summaryW, cardH - 4);
-    }
-
     private void createRepeatCountInput(Font font) {
         if (externalRequest != null) return;
-        RepeatRowLayout layout = repeatRowLayout(font);
-        repeatCountBox = new EditBox(font, layout.inputX(), layout.inputY(),
-                REPEAT_INPUT_W, layout.inputH(), Component.translatable("rsi.plan.repeat_count"));
+        repeatCountBox = new EditBox(font, 0, 0,
+                40, 14, Component.translatable("rsi.plan.repeat_count"));
         repeatCountBox.setBordered(false);
-        repeatCountBox.setTextColor(0xFFC8E6C9);
-        repeatCountBox.setTextColorUneditable(0xFF8CB795);
+        repeatCountBox.setTextColor(Color.MUTED.value());
+        repeatCountBox.setTextColorUneditable(Color.MUTED.value());
         repeatCountBox.setMaxLength(Integer.toString(repeatCountLimit()).length());
         repeatCountBox.setFilter(value -> value.isEmpty()
                 || value.chars().allMatch(Character::isDigit));
@@ -802,18 +597,6 @@ public final class CraftingPlanScreen extends Screen {
         updatingRepeatCountBox = false;
         repeatCountBox.setResponder(this::onRepeatCountEdited);
         addWidget(repeatCountBox);
-    }
-
-    private void createMaterialSearchInput(Font font) {
-        materialSearchBox = new EditBox(font, 0, 0, 100, 16,
-                Component.translatable("rsi.plan.material.search"));
-        materialSearchBox.setHint(Component.translatable("rsi.plan.material.search"));
-        materialSearchBox.setMaxLength(80);
-        materialSearchBox.setBordered(false);
-        materialSearchBox.setResponder(ignored -> materialDropdownScroll = 0);
-        materialSearchBox.visible = false;
-        materialSearchBox.active = false;
-        addWidget(materialSearchBox);
     }
 
     private void onRepeatCountEdited(String value) {
@@ -968,6 +751,8 @@ public final class CraftingPlanScreen extends Screen {
         long requestId = preview && QuestSubmissionTargetIds.isQuestSubmission(rid)
                 ? 0L : PlanningRequestIds.next();
         if (preview) {
+            previewStartedAt = System.currentTimeMillis();
+            previewFeedback = null;
             planRefreshTick = -1;
             lastRefreshCount = repeatCount;
             long previousRequest = responseRequests.activeRequestId();
@@ -978,7 +763,7 @@ public final class CraftingPlanScreen extends Screen {
         }
         if (externalRequest != null) {
             externalRequest.request(preview, requestId, forced, Map.copyOf(materialLocks),
-                    CraftingPlanPreferences.load(PLAN_PREFS_PATH).toPlanningPreferences());
+                    requestPreferences());
             return;
         }
         if (preview && QuestSubmissionTargetIds.isQuestSubmission(rid)) {
@@ -1021,8 +806,7 @@ public final class CraftingPlanScreen extends Screen {
                         requestTarget, requestId,
                         outputDestination).withMachineSelectionMode(machineSelectionMode)
                 .withMaterialLocks(materialLocks)
-                .withPlanningPreferences(CraftingPlanPreferences.load(PLAN_PREFS_PATH)
-                        .toPlanningPreferences())
+                .withPlanningPreferences(requestPreferences())
                 .withStorageReference(storageReference);
         if (!preview && !partialPreparation && !selectedPath.isDirty()) {
             packet.withConfirmedPreview(responseRequests.activeRequestId());
@@ -1045,6 +829,13 @@ public final class CraftingPlanScreen extends Screen {
         }
     }
 
+    private PlanningPreferences requestPreferences() {
+        CraftingPlanPreferences.Snapshot stored = pendingCandidateSwitch == null
+                ? CraftingPlanPreferences.load(PLAN_PREFS_PATH) : pendingCandidateSwitch.preferences();
+        return (pendingMaterialChoice == null ? stored : pendingMaterialChoice.preview(stored))
+                .toPlanningPreferences();
+    }
+
     /** Open the active recipe browser for a specific recipe id. */
     private void openRecipeInJei(ResourceLocation recipeId) {
         if (minecraft.level == null) return;
@@ -1052,16 +843,6 @@ public final class CraftingPlanScreen extends Screen {
         if (vanillaRecipe == null) return;
         SidePanelJeiBridge.showJeiForItem(false,
                 vanillaRecipe.getResultItem(minecraft.level.registryAccess()));
-    }
-
-    private void registerBookmarkHit(ItemStack stack, int x, int y, int width, int height,
-                                     long missingCount) {
-        BookmarkHit hit = new BookmarkHit(x, y, width, height,
-                stack.copyWithCount(1), Math.max(1L, missingCount));
-        bookmarkHits.add(hit);
-        if (mouseX >= x && mouseX < x + width && mouseY >= y && mouseY < y + height) {
-            hoveredBookmark = hit;
-        }
     }
 
     private void bookmarkMissingMaterial(BookmarkHit hit) {
@@ -1102,10 +883,13 @@ public final class CraftingPlanScreen extends Screen {
     }
 
     private void onOpenMachine() {
-        ResourceLocation dim = ResourceLocation.tryParse(plan.executionDim());
+        MachineCandidateView selected = machineSelectionMode == MachineSelectionMode.AUTO ? null : selectedMachineCandidate();
+        String dimension = selected == null ? plan.executionDim() : selected.dimension();
+        ResourceLocation dim = dimension == null ? null : ResourceLocation.tryParse(dimension);
         if (dim == null) return;
-        BlockPos pos = new BlockPos(
-                plan.executionPosX(), plan.executionPosY(), plan.executionPosZ());
+        BlockPos pos = selected == null ? new BlockPos(
+                plan.executionPosX(), plan.executionPosY(), plan.executionPosZ())
+                : new BlockPos(selected.x(), selected.y(), selected.z());
         ResourceLocation recipeId = ResourceLocation.tryParse(plan.recipeId());
         GuiNavStack.pushCurrent();
         if (BindingBackendResolver.isBeyondDimensionsBinding(dim, pos)) {
@@ -1126,6 +910,7 @@ public final class CraftingPlanScreen extends Screen {
     }
 
     private void refreshPlan() {
+        if (responseRequests.pending() && !responseRequests.refreshScheduled()) return;
         String recipeId = pendingCandidateSwitch == null
                 ? plan.recipeId() : responseRequests.expectedRecipeId();
         ResourceLocation id = ResourceLocation.tryParse(recipeId);
@@ -1137,8 +922,8 @@ public final class CraftingPlanScreen extends Screen {
         super.tick();
         watchInventory();
         if (repeatCountBox != null) repeatCountBox.tick();
-        if (materialSearchBox != null && materialSearchBox.visible) materialSearchBox.tick();
-        if (recipeCandidatePanel != null) recipeCandidatePanel.tick();
+        if (workspaceSearch != null) workspaceSearch.tick();
+        if (detailsPanel != null) detailsPanel.tick();
         ticksOpen++;
         if (planRefreshTick >= 0 && ticksOpen >= planRefreshTick
                 && (repeatCountBox == null || !repeatCountBox.isFocused())) {
@@ -1153,7 +938,7 @@ public final class CraftingPlanScreen extends Screen {
                 && responseRequests.failPreview(requestId)) {
             // 部分准入失败只回传进度终态，解除等待并让下次确认重新规划。
             rollbackPendingCandidateSwitch();
-            reopenPendingCandidates();
+            reopenPendingCandidates(progress == null ? List.of() : List.of(progress.detail()));
             updateConfirmButton();
         }
     }
@@ -1164,291 +949,349 @@ public final class CraftingPlanScreen extends Screen {
         this.mouseY = mouseY;
         hoveredItemForTooltip = ItemStack.EMPTY;
         hoveredStepWarnings = List.of();
-        bookmarkHits.clear();
         hoveredBookmark = null;
-        float fade = Math.min(1f, ticksOpen / 8f);
-        float ease = UIRenderer.easeOutCubic(fade);
-
-        renderBackground(gfx);
+        bookmarkHits.clear();
+        costHits.clear();
+        layoutWorkspace();
+        chrome.begin(gfx, workspace);
+        renderWorkspaceHeader(gfx);
+        renderWorkspaceSummary(gfx);
+        renderWorkspaceToolbar(gfx, partialTick);
+        if (embersDetailsOpen) renderEmbersSheet(gfx);
+        else if (materialView) materialTable.render(gfx, workspace.content(), mouseX, mouseY);
+        else {
+            Rect tree = workspace.tree();
+            renderTreeArea(gfx, tree.x(), tree.y(), tree.width(), tree.bottom(), mouseX, mouseY);
+            renderRecipeCandidates(gfx, mouseX, mouseY);
+        }
+        renderWorkspaceFooter(gfx);
         super.render(gfx, mouseX, mouseY, partialTick);
-
-        Font font = minecraft.font;
-        int contentW = width - 40;
-        int left = 20;
-
-        // Title — slide in from top, with frosted backdrop; wraps to multiple lines
-        int titleY = (int) (12 - (1f - ease) * 20);
-        int titleMaxW = width - 40;
-        {
-            var titleLines = UIRenderer.wrapLines(font, title.getString(), titleMaxW);
-            int ty = titleY;
-            for (String lineStr : titleLines) {
-                UIRenderer.textBackdrop(gfx, font, width / 2 - font.width(lineStr) / 2, ty,
-                        lineStr, fadeColor(C_TEXT_BACKDROP, ease));
-                gfx.drawString(font, lineStr,
-                        width / 2 - font.width(lineStr) / 2, ty, fadeColor(0xFFFFFF, ease));
-                ty += font.lineHeight + 2;
+        if (quantityMenuOpen) renderQuantityMenu(gfx);
+        if (!materialView && !embersDetailsOpen && workspaceSearch.isFocused()) {
+            treeSearch.render(gfx, workspaceSearchBounds, workspace.frame(), mouseX, mouseY);
+            if (treeSearch.contains(mouseX, mouseY)) {
+                hoveredItemForTooltip = ItemStack.EMPTY;
+                hoveredStepWarnings = List.of();
+                hoveredBookmark = null;
             }
-            // Subtitle — with backdrop
-            String statusKey = plan.success() ? "rsi.plan.status_ok" : "rsi.plan.status_fail";
-            int statusColor = plan.success() ? 0x55FF55 : 0xFF5555;
-            if (inventoryState != null && inventoryState.status() != null) {
-                statusKey = switch (inventoryState.status()) {
-                    case READY -> plan.executionBlocked() ? "rsi.plan.status_fail" : "rsi.plan.inventory.ready";
-                    case MISSING -> "rsi.plan.inventory.missing";
-                    case REPLAN -> "rsi.plan.inventory.replan";
-                    case UNAVAILABLE -> "rsi.plan.inventory.unavailable";
-                    case EXPIRED -> "rsi.plan.inventory.expired";
-                };
-                statusColor = inventoryState.status() == PreviewInventoryModel.Status.READY
-                        && !plan.executionBlocked() ? 0x55FF55 : 0xFFAA55;
-            }
-            String statusStr = font.plainSubstrByWidth(
-                    Component.translatable(statusKey).getString(), titleMaxW);
-            UIRenderer.textBackdrop(gfx, font, width / 2 - font.width(statusStr) / 2, ty,
-                    statusStr, fadeColor(C_TEXT_BACKDROP, ease));
-            gfx.drawString(font, statusStr,
-                    width / 2 - font.width(statusStr) / 2, ty, fadeColor(statusColor, ease));
-            ty += font.lineHeight + 4;
-            stepsTop = Math.max(STEPS_TOP_MIN, ty);
-        }
-
-        // Steps area (scrollable)
-        int areaTop = stepsTop;
-        int fullContentW = Math.max(1, width - 40);
-        layoutContentSections(font, fullContentW);
-        // Recompute the bottom stack for the current view — the material panel is card-view
-        // only (design doc §4), so tree view reclaims its band for the tree.
-        layoutBottomStack();
-        int bottomReserved = embersPedestalH > 0 ? embersPedestalY
-                : (missingAreaHeight > 0 ? missingAreaTop : materialAreaTop);
-        int areaBottom = bottomReserved - 4;
-        if (recipeCandidatePanel != null) {
-            recipeCandidatePanel.layout(width, height, areaTop, areaBottom);
-            contentW = Math.max(1, recipeCandidatePanel.contentRight(fullContentW) - left);
-        }
-
-        boolean dockedCandidates = recipeCandidatePanel != null && recipeCandidatePanel.isOpen();
-        if (dockedCandidates) gfx.enableScissor(0, 0, left + contentW, height);
-        try {
-        if (viewMode == ViewMode.TREE) {
-            cardBar.active = false; // card list not shown in tree mode
-            renderTreeArea(gfx, left, areaTop, contentW, areaBottom, mouseX, mouseY);
-        } else {
-        gfx.enableScissor(left, areaTop, left + contentW, areaBottom);
-        try {
-            orHitboxes.clear();
-            orRendered.clear();
-
-            // v3.4: card view only renders steps on the selected green path.
-            Set<ResourceLocation> activeIds = treeModel != null
-                    ? selectedPath.deriveActiveRecipeIds(treeModel)
-                    : Collections.emptySet();
-            String rootId = plan.recipeId();
-
-            int y = areaTop - scrollOffset;
-            int stepIdx = 0;
-            foldHits.clear();
-
-            // Pending-branch hint when tree has unselected alternatives.
-            int pending = selectedPath.pendingBranches();
-            if (pending > 0) {
-                String hint = I18n.get("rsi.plan.branches_pending", pending);
-                gfx.drawString(font, hint, left + 8, y, 0xFFFFAA33, false);
-                y += font.lineHeight + 6;
-            }
-
-            // [Expand All] / [Collapse All] toggle row.
-            boolean allFolded = plan.steps().stream()
-                    .allMatch(s -> isStepCollapsed(s.recipeId().toString(), s.depth()));
-            String foldLabel = allFolded ? "▶ " + I18n.get("rsi.plan.expand_all")
-                    : "▼ " + I18n.get("rsi.plan.collapse_all");
-            int foldBtnW = font.width(foldLabel) + 8;
-            int foldAllX = left + contentW - foldBtnW - 4;
-            gfx.fill(foldAllX, y, foldAllX + foldBtnW, y + font.lineHeight + 4, 0x331A3E1A);
-            gfx.drawString(font, foldLabel, foldAllX + 4, y + 2, 0xFF44AA66, false);
-            // Store hitbox for click handling.
-            foldAllHitX = foldAllX;
-            foldAllHitY = y;
-            foldAllHitW = foldBtnW;
-            foldAllHitH = font.lineHeight + 4;
-            if (mouseX >= foldAllHitX && mouseX < foldAllHitX + foldAllHitW
-                    && mouseY >= foldAllHitY && mouseY < foldAllHitY + foldAllHitH) {
-                gfx.fill(foldAllHitX, foldAllHitY, foldAllHitX + foldAllHitW,
-                        foldAllHitY + foldAllHitH, 0x22FFFFFF);
-            }
-            y += foldAllHitH + 4;
-
-            // Target recipe card — always rendered, full-width.
-            int cardW0 = contentW - 8;
-            y = drawStepCard(gfx, font, left + 4, y, cardW0,
-                    plan.targetResult(), plan.targetResult().getHoverName().getString(),
-                    null, plan.repeatCount(), stepIdx, 0, false);
-            stepIdx++;
-            int prevCardBottom = y;
-            int prevStepX = left + 4;
-
-            // Intermediate steps — only active path + collapsible.
-            for (int i = 0; i < plan.steps().size(); i++) {
-                PlanStep step = plan.steps().get(i);
-                String stepRid = step.recipeId().toString();
-
-                // Filter: only show steps on the selected path.
-                if (selectedPath.isDirty() && !activeIds.contains(step.recipeId())) continue;
-
-                int stepX = left + 4 + step.depth() * INDENT;
-                int cardW = contentW - 8 - step.depth() * INDENT;
-
-                if (isStepCollapsed(stepRid, step.depth())) {
-                    // Collapsed: single-row summary.
-                    y += CONNECTOR_GAP;
-                    renderEngine.drawTreeConnector(gfx, prevCardBottom, y, stepX, prevStepX, INDENT, i);
-                    y = drawCollapsedStepRow(gfx, font, stepX, y, cardW, step, stepIdx, i + 1);
-                    prevCardBottom = y;
-                    prevStepX = stepX;
-                } else {
-                    y += CONNECTOR_GAP;
-                    renderEngine.drawTreeConnector(gfx, prevCardBottom, y, stepX, prevStepX, INDENT, i);
-
-                    int animIdx = i + 1;
-                    y = drawStepCard(gfx, font, stepX, y, cardW,
-                            step.output(), step.output().getHoverName().getString(),
-                            step, step.batches(), stepIdx, animIdx, true);
-                    prevCardBottom = y;
-                    prevStepX = stepX;
-                }
-                stepIdx++;
-            }
-
-            maxScroll = Math.max(0, y - areaBottom + scrollOffset);
-        } finally {
-            gfx.disableScissor();
-        }
-        // Draggable scrollbar for the card list (see mouse handlers).
-        cardBar.update(left + contentW - 5, areaTop, areaBottom - areaTop, scrollOffset, maxScroll);
-        cardBar.draw(gfx, mouseX, mouseY);
-        }
-
-        } finally {
-            if (dockedCandidates) {
-                gfx.flush();
-                gfx.disableScissor();
-            }
-        }
-
-        // Embers alchemy pedestal layout
-        if (embersPedestalH > 0) {
-            renderEmbersPedestalArea(gfx, font, left, fullContentW);
-        }
-
-        // Missing items + mod warnings（始终通栏，不随右侧面板缩窄）
-        List<Component> planWarnings = displayWarnings(plan);
-        if (missingAreaHeight > 0 && (
-                !MissingMaterialBookmarkList.textEntries(plan).isEmpty() ||
-                !planWarnings.isEmpty() ||
-                (plan.machineCandidates() != null && !plan.machineCandidates().isEmpty()))) {
-            renderMissingArea(gfx, font, left, missingAreaTop, fullContentW);
-        }
-
-        // Material summary — card view only; tree view shows the total-demand strip instead.
-        if (viewMode == ViewMode.CARD && materialAreaHeight > 0) {
-            materialMaxScroll = renderEngine.renderMaterialArea(gfx, left, materialAreaTop, fullContentW,
-                    materialAreaHeight, plan.materials(), mouseX, mouseY, materialScroll,
-                    (stack, mx, my, avail, need) -> {
-                        hoveredItemForTooltip = stack;
-                        hoveredTooltipX = mx;
-                        hoveredTooltipY = my;
-                        hoveredTooltipAvail = avail;
-                        hoveredTooltipNeeded = need;
-                        hoveredTooltipReference = false;
-                    }, this::registerBookmarkHit);
-            if (materialScroll > materialMaxScroll) materialScroll = materialMaxScroll;
-            // Draggable scrollbar — grid begins below the header row (top+4 + lineHeight+4).
-            int gridTop = materialAreaTop + 8 + font.lineHeight;
-            materialBar.update(left + fullContentW - 5, gridTop,
-                    materialAreaTop + materialAreaHeight - gridTop, materialScroll, materialMaxScroll);
-            materialBar.draw(gfx, mouseX, mouseY);
-        } else {
-            materialBar.active = false;
-        }
-
-        // ── Repeat count row ─────────────────────────────────────────
-        drawRepeatRow(gfx, font);
-
-
-        renderOutputDestinationSelector(gfx, font, mouseX, mouseY);
-        renderPreparationModeSelector(gfx, font, mouseX, mouseY);
-        renderMachineCandidateDropdown(gfx, font);
-        renderRecipeCandidates(gfx, mouseX, mouseY);
-
-        // Deferred tooltip — rendered AFTER all scissors, so Legendary
-        // Tooltips' boundary avoidance works without scissor clipping.
+        } else treeSearch.close();
         renderDeferredTooltip(gfx, font);
     }
 
-    private void renderOutputDestinationSelector(GuiGraphics gfx, Font font, int mouseX, int mouseY) {
-        if (outputSelectorH <= 0) return;
-
-        String label = I18n.get("rsi.plan.output.label");
-        int labelW = font.width(label);
-        int gap = 8;
-        int totalW = labelW + gap + outputSegmentW;
-        int labelX = width / 2 - totalW / 2;
-        outputSelectorX = labelX + labelW + gap;
-
-        int textY = outputSelectorY + (outputSelectorH - font.lineHeight) / 2;
-        gfx.drawString(font, label, labelX, textY, 0xFF99AA99, false);
-
-        boolean hovered = mouseX >= outputSelectorX && mouseX < outputSelectorX + outputSegmentW
-                && mouseY >= outputSelectorY && mouseY < outputSelectorY + outputSelectorH;
-        int background = hovered ? 0xCC3B5948 : 0xCC2F7D4A;
-        int textColor = hovered ? 0xFFFFFFFF : 0xFFF0FFF4;
-        UIRenderer.rounded(gfx, outputSelectorX, outputSelectorY,
-                outputSegmentW, outputSelectorH, 4f, 0xDD101512);
-        UIRenderer.rounded(gfx, outputSelectorX + 1, outputSelectorY + 1,
-                outputSegmentW - 2, outputSelectorH - 2, 3f, background);
-        gfx.fill(outputSelectorX + 10, outputSelectorY + outputSelectorH - 2,
-                outputSelectorX + outputSegmentW - 10, outputSelectorY + outputSelectorH - 1, 0xFF69D98A);
-
-        Component destination;
-        if (outputDestination == OutputDestination.PLAYER_INVENTORY) {
-            destination = Component.translatable("rsi.plan.output.player");
-        } else if (storageReference != null) {
-            StorageNetworkDescriptor selected = storageNetworks.stream()
-                    .filter(network -> storageReference.equals(network.reference()))
-                    .findFirst().orElse(null);
-            destination = selected == null
-                    ? Component.translatable("rsi.plan.output.storage")
-                    : storageTargetLabel(selected);
-        } else {
-            destination = Component.translatable("rsi.plan.output.storage");
+    private void layoutWorkspace() {
+        workspace = PlanWorkspaceLayout.create(width, height,
+                !materialView && !embersDetailsOpen && detailsPanel != null && detailsPanel.isOpen(), PlanUiConfig.panelWidth());
+        if (detailsPanel != null) detailsPanel.layout(workspace.inspector());
+        if (confirmButton != null) {
+            Rect r = workspace.confirm();
+            confirmButton.setPosition(r.x(), r.y());
+            confirmButton.setWidth(r.width());
+            confirmButton.setHeight(r.height());
+            r = workspace.cancel();
+            cancelButton.setPosition(r.x(), r.y());
+            cancelButton.setWidth(r.width());
+            cancelButton.setHeight(r.height());
         }
-        String value = destination.getString();
-        int arrowW = font.width(" ↔");
-        gfx.drawString(font, value + " ↔", outputSelectorX + (outputSegmentW - font.width(value + " ↔")) / 2,
-                textY, textColor, false);
     }
 
-    private void renderPreparationModeSelector(GuiGraphics gfx, Font font, int mouseX, int mouseY) {
-        if (preparationModeH <= 0 || outputSelectorH <= 0) return;
-        boolean hovered = mouseX >= preparationModeX && mouseX < preparationModeX + preparationModeW
-                && mouseY >= preparationModeY && mouseY < preparationModeY + preparationModeH;
-        int background = partialPreparation ? 0xCC765A24 : 0xCC2F7D4A;
-        if (hovered) background = partialPreparation ? 0xCC98752F : 0xCC3B5948;
-        UIRenderer.rounded(gfx, preparationModeX, preparationModeY,
-                preparationModeW, preparationModeH, 4f, 0xDD101512);
-        UIRenderer.rounded(gfx, preparationModeX + 1, preparationModeY + 1,
-                preparationModeW - 2, preparationModeH - 2, 3f, background);
-        String value = I18n.get(partialPreparation
-                ? "rsi.plan.mode.prepare" : "rsi.plan.mode.strict");
-        gfx.drawString(font, value,
-                preparationModeX + (preparationModeW - font.width(value)) / 2,
-                preparationModeY + (preparationModeH - font.lineHeight) / 2,
-                0xFFF0FFF4, false);
-        if (hovered) {
-            gfx.renderTooltip(font,
-                    Component.translatable("rsi.plan.mode.prepare.tooltip"), mouseX, mouseY);
+    private void renderWorkspaceHeader(GuiGraphics g) {
+        Rect r = workspace.header();
+        boolean compact = workspace.compact();
+        int iconSize = compact ? 18 : 24;
+        g.pose().pushPose();
+        g.pose().translate(r.x() + 3, r.y() + 3, 0);
+        g.pose().scale(iconSize / 16f, iconSize / 16f, 1);
+        InkFluidRenderer.render(g, plan.targetResult(), 0, 0);
+        g.pose().popPose();
+        String shortages = workspaceText("shortage_status", detailsPanel.shortageCount()).getString();
+        String conditions = workspaceText("condition_status", detailsPanel.conditionCount()).getString();
+        int maxBadgeWidth = Math.max(40, (r.width() - (compact ? 90 : 190) - (compact ? 0 : 26) - 5) / 2);
+        int firstWidth = Math.min(maxBadgeWidth, font.width(shortages) + 12);
+        int secondWidth = Math.min(maxBadgeWidth, font.width(conditions) + 12);
+        int buttonsX = r.right() - firstWidth - secondWidth - 5 - (compact ? 0 : 26);
+        int textX = r.x() + (compact ? 26 : 35);
+        chrome.heading(g, title.getString(), textX, r.y() + 1, buttonsX - textX - 8, compact ? 1 : 1.4f);
+        String status = I18n.get(plan.success() && !plan.executionBlocked() ? "rsi.plan.status_ok" : "rsi.plan.status_fail");
+        Color statusColor = Color.MUTED;
+        if (inventoryState != null && inventoryState.status() != null) status = I18n.get("rsi.plan.inventory."
+                + inventoryState.status().name().toLowerCase(Locale.ROOT));
+        if (responseRequests.refreshScheduled()) {
+            status = workspaceText("recalculate_scheduled").getString();
+            statusColor = Color.WARNING;
+        } else if (responseRequests.pending()) {
+            PlanningProgressSnapshot progress = PlanningProgressTracker.get(responseRequests.activeRequestId());
+            String phase = progress == null ? I18n.get("rsi.planning.phase.accepting")
+                    : I18n.get(PlanningProgressOverlay.phaseKey(progress.phase()));
+            long elapsed = Math.max(progress == null ? 0L : progress.elapsedMillis(),
+                    System.currentTimeMillis() - previewStartedAt);
+            status = workspaceText("recalculating", phase, String.format(Locale.ROOT, "%.1f", elapsed / 1000.0)).getString();
+            statusColor = Color.WARNING;
+            int span = Math.max(1, r.width() / 5);
+            int offset = (int) ((System.currentTimeMillis() / 12L) % Math.max(1, r.width() - span));
+            g.fill(r.x() + offset, r.bottom() - 1, r.x() + offset + span, r.bottom(), Color.ACCENT.value());
+        } else if (previewFeedback != null) {
+            status = previewFeedback.getString();
+            statusColor = previewFeedbackColor;
         }
+        chrome.label(g, status, textX, r.y() + (compact ? 14 : 22), buttonsX - textX - 8, statusColor);
+        if (mouseX >= textX && mouseX < buttonsX && mouseY >= r.y() + (compact ? 14 : 22) && mouseY < r.bottom()) {
+            hoveredStepWarnings = List.of(Component.literal(status));
+            hoveredTooltipX = mouseX; hoveredTooltipY = mouseY;
+        }
+        // 将缺料/条件合并为标题栏中的两个状态入口：显示数量，同时点击直接打开右侧对应列表。
+        chrome.statusButton(g, new Rect(buttonsX, r.y() + 3, firstWidth, 20), shortages,
+                detailsPanel.shortageCount() == 0 ? Color.READY : Color.WARNING,
+                mouseX, mouseY, () -> showDiagnostics(false));
+        chrome.statusButton(g, new Rect(buttonsX + firstWidth + 5, r.y() + 3, secondWidth, 20), conditions,
+                detailsPanel.conditionCount() == 0 ? Color.READY : Color.WARNING,
+                mouseX, mouseY, () -> showDiagnostics(true));
+        if (!compact) chrome.button(g, new Rect(r.right() - 20, r.y() + 3, 20, 20), "×", false, true, mouseX, mouseY, this::onClose);
+    }
+
+    private void renderWorkspaceSummary(GuiGraphics g) {
+        Rect r = workspace.summary();
+        boolean compact = workspace.compact();
+        int labelWidth = compact ? 45 : 90;
+        chrome.heading(g, workspaceText("total_materials").getString(), r.x() + 9, r.y() + 9, labelWidth - 9, compact ? .85f : 1.05f);
+        if (!compact) chrome.label(g, workspaceText("need_stock").getString(), r.x() + 8, r.y() + 27, labelWidth - 6, Color.MUTED);
+        int left = r.x() + labelWidth;
+        int leftoversWidth = cachedLeftoverStrip.isEmpty() || r.width() < 500 ? 0 : Math.min(140, r.width() / 5);
+        int end = r.right() - leftoversWidth - 30;
+        int cardW = compact ? 70 : 80;
+        stripPageSize = Math.max(1, (end - left) / (cardW + 5));
+        totalStripPage = MaterialStripPaging.clampPage(totalStripPage, cachedTotalStrip.size(), stripPageSize);
+        int start = totalStripPage * stripPageSize;
+        int visibleCount = Math.min(stripPageSize, cachedTotalStrip.size() - start);
+        left += Math.max(0, (end - left - visibleCount * (cardW + 5) + 5) / 2);
+        for (int i = start; i < Math.min(cachedTotalStrip.size(), start + stripPageSize); i++) {
+            StripEntry e = cachedTotalStrip.get(i);
+            Rect card = new Rect(left + (i - start) * (cardW + 5), r.y() + (compact ? 4 : 9), cardW, r.height() - (compact ? 8 : 18));
+            PlanWorkspaceChrome.panel(g, card, e.enough() ? Color.BACKGROUND : Color.WARNING_SURFACE,
+                    e.enough() ? Color.BORDER : Color.WARNING_BORDER);
+            InkFluidRenderer.render(g, e.display(), card.x() + 3, card.y() + (card.height() - 16) / 2);
+            chrome.label(g, stripCountText(e, false), card.x() + 23, card.y() + (card.height() - font.lineHeight) / 2,
+                    cardW - 26, e.enough() ? Color.TEXT : Color.WARNING);
+            costHits.add(new CostHit(card.x(), card.y(), card.width(), card.height(), e.key()));
+            if (card.contains(mouseX, mouseY)) setStripTooltip(e);
+        }
+        if (cachedTotalStrip.size() > stripPageSize) {
+            int x = r.right() - leftoversWidth - 26;
+            chrome.button(g, new Rect(x, r.y() + 4, 11, r.height() - 8), "‹", false,
+                    totalStripPage > 0, mouseX, mouseY, () -> totalStripPage--);
+            chrome.button(g, new Rect(x + 12, r.y() + 4, 11, r.height() - 8), "›", false,
+                    start + stripPageSize < cachedTotalStrip.size(), mouseX, mouseY, () -> totalStripPage++);
+        }
+        if (leftoversWidth > 0) {
+            int x = r.right() - leftoversWidth;
+            g.fill(x, r.y() + 5, x + 1, r.bottom() - 5, Color.BORDER.value());
+            chrome.label(g, workspaceText("leftovers").getString(), x + 7, r.y() + (compact ? 2 : 5),
+                    leftoversWidth - 22, Color.MUTED);
+            int iconSize = compact ? 12 : 16, iconY = r.y() + (compact ? 12 : 18);
+            int slots = Math.max(1, (leftoversWidth - 25) / 46);
+            leftoverStripPage = MaterialStripPaging.clampPage(leftoverStripPage, cachedLeftoverStrip.size(), slots);
+            for (int i = 0; i < slots; i++) {
+                int index = leftoverStripPage * slots + i;
+                if (index >= cachedLeftoverStrip.size()) break;
+                StripEntry e = cachedLeftoverStrip.get(index);
+                int cx = x + 7 + i * 46;
+                g.pose().pushPose();
+                g.pose().translate(cx, iconY, 0);
+                g.pose().scale(iconSize / 16f, iconSize / 16f, 1);
+                InkFluidRenderer.render(g, e.display(), 0, 0);
+                g.pose().popPose();
+                chrome.label(g, "×" + PlanRenderEngine.formatCompact(e.count()), cx + iconSize + 2,
+                        iconY + (iconSize - font.lineHeight) / 2, 28, Color.WARNING);
+                Rect hit = new Rect(cx, iconY, 44, iconSize);
+                costHits.add(new CostHit(hit.x(), hit.y(), hit.width(), hit.height(), e.key()));
+                if (hit.contains(mouseX, mouseY)) setStripTooltip(e);
+            }
+            chrome.button(g, new Rect(r.right() - 15, r.y() + (compact ? 9 : 18), 11, compact ? 16 : 18), "›", false,
+                    cachedLeftoverStrip.size() > slots, mouseX, mouseY,
+                    () -> leftoverStripPage = (leftoverStripPage + 1) % MaterialStripPaging.pageCount(cachedLeftoverStrip.size(), slots));
+        }
+    }
+
+    private void setStripTooltip(StripEntry e) {
+        hoveredItemForTooltip = e.display();
+        hoveredTooltipAvail = e.available();
+        hoveredTooltipNeeded = e.count();
+        hoveredTooltipReference = false;
+        hoveredTooltipX = mouseX; hoveredTooltipY = mouseY;
+    }
+
+    private void renderWorkspaceToolbar(GuiGraphics g, float partialTick) {
+        Rect r = workspace.toolbar();
+        if (!materialView && !embersDetailsOpen && detailsPanel.isOpen()) {
+            r = new Rect(r.x(), r.y(), workspace.inspector().x() - r.x() - 8, r.height());
+        }
+        boolean narrow = width < 720;
+        chrome.button(g, new Rect(r.x(), r.y(), 67, 20), workspaceText("tree").getString(),
+                !materialView && !embersDetailsOpen, true, mouseX, mouseY, () -> { materialView = false; embersDetailsOpen = false; });
+        chrome.button(g, new Rect(r.x() + 72, r.y(), 74, 20), workspaceText("materials").getString(),
+                materialView, true, mouseX, mouseY, () -> { materialView = true; embersDetailsOpen = false; });
+        int searchWidth = narrow ? Math.max(35, r.width() - 156) : Math.min(215, Math.max(60, r.width() - 450 - (embersPedestalH > 0 ? 39 : 0)));
+        Rect search = new Rect(r.x() + 156, r.y(), searchWidth, 20);
+        workspaceSearchBounds = search;
+        PlanWorkspaceChrome.panel(g, search, Color.BACKGROUND, Color.BORDER);
+        workspaceSearch.setPosition(search.x() + 5, search.y() + 5);
+        workspaceSearch.setWidth(search.width() - 10);
+        workspaceSearch.setTextColor(Color.TEXT.value());
+        workspaceSearch.setHint(workspaceText(materialView ? "search_materials" : "search_tree"));
+        workspaceSearch.render(g, mouseX, mouseY, partialTick);
+        if (search.contains(mouseX, mouseY)) {
+            hoveredStepWarnings = List.of(workspaceText(materialView ? "search_materials_help" : "search_tree_help"));
+            hoveredTooltipX = mouseX; hoveredTooltipY = mouseY;
+        }
+        int x = narrow ? r.x() : search.right() + 6, y = narrow ? r.y() + 20 : r.y();
+        int fitWidth = narrow ? 44 : 64;
+        chrome.button(g, new Rect(x, y, narrow ? 44 : 95, 20), workspaceText("steps").getString(), false, true,
+                mouseX, mouseY, () -> { showTreeInspector(); detailsPanel.showSteps(); }); x += (narrow ? 44 : 95) + 4;
+        chrome.button(g, new Rect(x, y, fitWidth, 18), workspaceText("fit").getString(), false, true,
+                mouseX, mouseY, () -> { materialView = false; embersDetailsOpen = false; layoutWorkspace(); updateTreeViewport(); fitTree(); }); x += fitWidth + 4;
+        boolean expanded = treeAllExpanded(treeModel.root);
+        chrome.button(g, new Rect(x, y, fitWidth, 18), I18n.get(expanded ? "rsi.plan.collapse_all" : "rsi.plan.expand_all"),
+                false, true, mouseX, mouseY, () -> { setAllExpanded(treeModel.root, !expanded); treeLayout.markDirty(); }); x += fitWidth + 4;
+        chrome.button(g, new Rect(x, y, narrow ? 35 : 48, 18), workspaceText("machines").getString(), false, true,
+                mouseX, mouseY, () -> { showTreeInspector(); detailsPanel.showMachines(); }); x += (narrow ? 35 : 48) + 4;
+        if (embersPedestalH > 0) {
+            chrome.button(g, new Rect(x, y, 35, 18), workspaceText("embers").getString(), embersDetailsOpen, true,
+                    mouseX, mouseY, () -> { embersDetailsOpen = !embersDetailsOpen; materialView = false; }); x += 39;
+        }
+        int right = r.right();
+        if (right - x >= 22) chrome.button(g, new Rect(right - 18, y, 18, 18), "?", false, true, mouseX, mouseY,
+                () -> { hoveredStepWarnings = List.of(Component.translatable("rsi.plan.tree_help")); });
+        if (mouseX >= right - 18 && mouseX < right && mouseY >= y && mouseY < y + 18) {
+            hoveredStepWarnings = Arrays.stream(I18n.get("rsi.plan.tree_help").split("\n")).map(Component::literal).map(c -> (Component) c).toList();
+            hoveredTooltipX = mouseX; hoveredTooltipY = mouseY;
+        }
+        if (right - x >= 104) {
+            chrome.button(g, new Rect(right - 100, y, 18, 18), "−", false, true, mouseX, mouseY, () -> zoomTree(1 / 1.1));
+            chrome.label(g, Math.round(treeZoom * 100) + "%", right - 77, y + 5, 37, Color.MUTED);
+            chrome.button(g, new Rect(right - 40, y, 18, 18), "+", false, true, mouseX, mouseY, () -> zoomTree(1.1));
+        }
+    }
+
+    private void showTreeInspector() {
+        materialView = false; embersDetailsOpen = false;
+        unfocusRepeatCountInput(); workspaceSearch.setFocused(false);
+        treeSearch.close();
+    }
+
+    private void showDiagnostics(boolean conditions) {
+        showTreeInspector();
+        if (conditions) detailsPanel.showConditions(); else detailsPanel.showIssues();
+        dropdownNode = detailsPanel.selectedNode();
+    }
+
+    private void updateTreeViewport() {
+        Rect r = workspace.tree();
+        treeViewLeft = r.x(); treeViewRight = r.right(); treeViewTop = r.y();
+        treeContentTop = r.y() + 22; treeViewBottom = r.bottom();
+    }
+
+    private void zoomTree(double factor) {
+        double x = (treeViewLeft + treeViewRight) / 2.0, y = (treeContentTop + treeViewBottom) / 2.0;
+        double lx = (x - treePanX) / treeZoom, ly = (y - treePanY) / treeZoom;
+        treeZoom = Math.max(0.15, Math.min(2.5, treeZoom * factor));
+        treePanX = x - lx * treeZoom; treePanY = y - ly * treeZoom;
+    }
+
+    private void centerMiniMap(double x, double y) {
+        treePanX = (treeViewLeft + treeViewRight) / 2.0 - x * treeZoom;
+        treePanY = (treeContentTop + treeViewBottom) / 2.0 - y * treeZoom;
+    }
+
+    private void renderWorkspaceFooter(GuiGraphics g) {
+        Rect r = workspace.footer();
+        int y = r.y() + (workspace.compact() ? 5 : 9), x = r.x();
+        if (externalRequest == null) {
+            if (width >= 720) { chrome.label(g, workspaceText("quantity").getString(), x, y + 6, 48, Color.MUTED); x += 50; }
+            chrome.button(g, new Rect(x, y, 18, 18), "−", false, currentRepeat > 1, mouseX, mouseY,
+                    () -> setRepeatCount(currentRepeat - 1, true)); x += 22;
+            countPillX = x; countPillY = y + 4; countPillW = 40; countPillH = 14;
+            PlanWorkspaceChrome.panel(g, new Rect(x, y, 40, 18), Color.BACKGROUND, Color.BORDER);
+            renderRepeatCountInput(g, font); x += 44;
+            chrome.button(g, new Rect(x, y, 18, 18), "+", false, true, mouseX, mouseY,
+                    () -> setRepeatCount(clampRepeatCount(currentRepeat + 1L), true)); x += 22;
+            if (width >= 380) {
+                chrome.button(g, new Rect(x, y, 28, 18), "+10", false, true, mouseX, mouseY,
+                        () -> setRepeatCount(clampRepeatCount(currentRepeat + 10L), true)); x += 32;
+                chrome.button(g, new Rect(x, y, 28, 18), "+64", false, true, mouseX, mouseY,
+                        () -> setRepeatCount(clampRepeatCount(currentRepeat + 64L), true)); x += 32;
+            }
+            chrome.button(g, new Rect(x, y, 16, 18), "▾", quantityMenuOpen, true, mouseX, mouseY,
+                    () -> quantityMenuOpen = !quantityMenuOpen); x += 22;
+        } else { countPillW = countPillH = 0; }
+        boolean quest = QuestSubmissionTargetIds.isQuestSubmission(ResourceLocation.tryParse(plan.recipeId()));
+        if (!quest && externalRequest == null) {
+            if (width >= 900) {
+                chrome.label(g, workspaceText("mode_label").getString(), x, y + 5, 45, Color.MUTED);
+                x += 50;
+            }
+            int available = (width < 720 ? r.right() : workspace.confirm().x() - 6) - x;
+            preparationModeX = x; preparationModeY = y; preparationModeW = Math.min(72, Math.max(48, available / 2 - 3)); preparationModeH = 18;
+            PlanWorkspaceChrome.panel(g, new Rect(x, y, preparationModeW, 18), partialPreparation ? Color.SELECTED : Color.SURFACE, Color.BORDER);
+            chrome.label(g, I18n.get(partialPreparation ? "rsi.plan.mode.prepare" : "rsi.plan.mode.strict"), x + 5, y + 5, preparationModeW - 10, Color.TEXT);
+            x += preparationModeW + 6;
+            if (width >= 900) {
+                chrome.label(g, workspaceText("destination_label").getString(), x + 4, y + 5, 42, Color.MUTED);
+                x += 50;
+            }
+            outputSelectorX = x; outputSelectorY = y; outputSegmentW = Math.max(35, Math.min(110,
+                    (width < 720 ? r.right() : workspace.confirm().x() - 6) - x)); outputSelectorH = 18;
+            PlanWorkspaceChrome.panel(g, new Rect(x, y, outputSegmentW, 18), Color.SURFACE, Color.BORDER);
+            Component destination = outputDestination == OutputDestination.PLAYER_INVENTORY
+                    ? Component.translatable("rsi.plan.output.player") : Component.translatable("rsi.plan.output.storage");
+            if (outputDestination == OutputDestination.RS_NETWORK && storageReference != null) {
+                for (StorageNetworkDescriptor network : storageNetworks) if (storageReference.equals(network.reference())) destination = storageTargetLabel(network);
+            }
+            chrome.label(g, destination.getString() + " ↔", x + 5, y + 5, outputSegmentW - 10, Color.TEXT);
+            if (new Rect(x, y, outputSegmentW, 18).contains(mouseX, mouseY)) {
+                hoveredStepWarnings = List.of(Component.translatable("rsi.plan.output.tooltip"));
+                hoveredTooltipX = mouseX; hoveredTooltipY = mouseY;
+            }
+        } else { outputSelectorH = preparationModeH = 0; }
+        if (width >= 900 && workspace.confirm().x() - (outputSelectorX + outputSegmentW) > 120) {
+            chrome.label(g, workspaceText("live_inventory").getString(), workspace.confirm().x() - 120, y + 5, 110, Color.MUTED);
+        }
+        if (width < 720) chrome.label(g, workspaceText("live_inventory").getString(), r.x(), r.bottom() - 14,
+                Math.max(1, workspace.confirm().x() - r.x() - 6), Color.MUTED);
+    }
+
+    private void renderQuantityMenu(GuiGraphics g) {
+        Rect r = new Rect(workspace.footer().x(), workspace.footer().y() - 51, 164, 48);
+        g.pose().pushPose();
+        g.pose().translate(0, 0, 600);
+        PlanWorkspaceChrome.panel(g, r, Color.PANEL, Color.BORDER);
+        int[] offsets = {0, -10, -5, -1, 1, 5, 10, 64};
+        String[] labels = {"1", "−10", "−5", "−1", "+1", "+5", "+10", "+64"};
+        for (int i = 0; i < labels.length; i++) {
+            int offset = offsets[i];
+            chrome.button(g, new Rect(r.x() + 4 + i % 4 * 39, r.y() + 4 + i / 4 * 21, 36, 18), labels[i], false, true,
+                    mouseX, mouseY, () -> { setRepeatCount(offset == 0 ? 1 : clampRepeatCount(currentRepeat + (long) offset), true); quantityMenuOpen = false; });
+        }
+        g.pose().popPose();
+    }
+
+    private void renderEmbersSheet(GuiGraphics g) {
+        Rect r = workspace.content();
+        PlanWorkspaceChrome.panel(g, r, Color.BACKGROUND, Color.BORDER);
+        if (plan.embersCode() != null && plan.embersCode().length > 0) {
+            int cardsPerRow = Math.max(1, Math.min(plan.embersCode().length, (r.width() - 28) / 68));
+            embersCardsH = font.lineHeight + 18 + 48 * ((plan.embersCode().length + cardsPerRow - 1) / cardsPerRow);
+            embersPedestalH = embersCardsH + (showEmbersModeToggle ? 28 : 0);
+        }
+        int maxScroll = Math.max(0, embersPedestalH + 12 - r.height());
+        embersScroll = Math.max(0, Math.min(embersScroll, maxScroll));
+        embersPedestalY = r.y() + 6 - embersScroll;
+        embersModeY = embersPedestalY + embersCardsH;
+        g.enableScissor(r.x() + 1, r.y() + 1, r.right() - 1, r.bottom() - 1);
+        try { renderEmbersPedestalArea(g, font, r.x() + 6, r.width() - 12); }
+        finally { g.disableScissor(); }
+    }
+
+    private static Component workspaceText(String key, Object... args) {
+        return Component.translatable("rsi.plan.workspace." + key, args);
     }
 
     /**
@@ -1476,108 +1319,6 @@ public final class CraftingPlanScreen extends Screen {
     }
     // ── Repeat count row ─────────────────────────────────────────────
 
-    private void drawRepeatRow(GuiGraphics gfx, Font font) {
-        if (externalRequest != null) {
-            renderRepeatMissingSummary(gfx, font, repeatRowLayout(font));
-            return;
-        }
-        String[] leftLabels = {"1", "-10", "-5", "-"};
-        String[] rightLabels = {"+", "+5", "+10", "+64"};
-
-        int btnW = REPEAT_BUTTON_W, btnH = REPEAT_BUTTON_H;
-        int gap = REPEAT_BUTTON_GAP;
-        int pillW = REPEAT_INPUT_W;
-        int pillH = font.lineHeight + 6;
-        int innerGap = 12;
-
-        RepeatRowLayout layout = repeatRowLayout(font);
-        int rowW = layout.rowW();
-        int rowX = layout.rowX();
-
-        // ── Label row ──
-        ResourceLocation rootRecipe = ResourceLocation.tryParse(plan.recipeId());
-        boolean pmmoSalvage = rootRecipe != null
-                && "rs_integration".equals(rootRecipe.getNamespace())
-                && rootRecipe.getPath().startsWith("pmmo_salvage/");
-        String label = Component.translatable(pmmoSalvage
-                ? "rsi.plan.salvage_attempt_count" : "rsi.plan.repeat_count").getString();
-        int labelW = font.width(label);
-        UIRenderer.textBackdrop(gfx, font, rowX + (rowW - labelW) / 2, repeatRowY, label, C_TEXT_BACKDROP);
-        gfx.drawString(font, label, rowX + (rowW - labelW) / 2, repeatRowY, 0xFFCCCCCC);
-
-        // ── Button card ──
-        int cardY = layout.cardY();
-        int cardH = 22;
-        UIRenderer.roundedGradient(gfx, rowX, cardY, rowW, cardH, 5f, 0xE6141E18, 0xE6101814);
-        gfx.fill(rowX + 1, cardY + 2, rowX + 4, cardY + cardH - 2, 0xFF44AA66);
-
-        renderRepeatMissingSummary(gfx, font, layout);
-
-        int startX = layout.startX();
-        int btnY = layout.buttonY();
-
-        // ── Left buttons: 1, -10, -5, - ──
-        int bx = startX;
-        for (int i = 0; i < leftLabels.length; i++) {
-            repeatBtnX[i] = bx; repeatBtnY[i] = btnY; repeatBtnW[i] = btnW; repeatBtnH[i] = btnH;
-            boolean hover = mouseX >= bx && mouseX <= bx + btnW && mouseY >= btnY && mouseY <= btnY + btnH;
-            int bg = hover ? 0xAA338855 : 0x771A221E;
-            int fg = hover ? 0xFFFFFFFF : 0xFF88AA88;
-            UIRenderer.rounded(gfx, bx, btnY, btnW, btnH, 3f, bg);
-            UIRenderer.rounded(gfx, bx + 1, btnY + 1, btnW - 2, btnH - 2, 2f, 0x881A221E);
-            int tw = font.width(leftLabels[i]);
-            gfx.drawString(font, leftLabels[i], bx + (btnW - tw) / 2, btnY + (btnH - font.lineHeight) / 2, fg);
-            bx += btnW + gap;
-        }
-
-        // ── Count pill ──
-        int pillX = layout.inputX();
-        countPillX = pillX; countPillY = layout.inputY(); countPillW = pillW; countPillH = pillH;
-        UIRenderer.rounded(gfx, countPillX, countPillY, pillW, pillH,
-                pillH / 2f, 0xCC1B5E20);
-        renderRepeatCountInput(gfx, font);
-
-        // ── Right buttons: +, +5, +10, +64 ──
-        bx = pillX + pillW + innerGap;
-        for (int i = 0; i < rightLabels.length; i++) {
-            int idx = leftLabels.length + i;
-            repeatBtnX[idx] = bx; repeatBtnY[idx] = btnY; repeatBtnW[idx] = btnW; repeatBtnH[idx] = btnH;
-            boolean hover = mouseX >= bx && mouseX <= bx + btnW && mouseY >= btnY && mouseY <= btnY + btnH;
-            int bg = hover ? 0xAA338855 : 0x771A221E;
-            int fg = hover ? 0xFFFFFFFF : 0xFF88AA88;
-            UIRenderer.rounded(gfx, bx, btnY, btnW, btnH, 3f, bg);
-            UIRenderer.rounded(gfx, bx + 1, btnY + 1, btnW - 2, btnH - 2, 2f, 0x881A221E);
-            int tw = font.width(rightLabels[i]);
-            gfx.drawString(font, rightLabels[i], bx + (btnW - tw) / 2, btnY + (btnH - font.lineHeight) / 2, fg);
-            bx += btnW + gap;
-        }
-    }
-
-    private void renderRepeatMissingSummary(GuiGraphics gfx, Font font,
-                                            RepeatRowLayout layout) {
-        missingToggleW = missingToggleH = 0;
-        if (missingSummaryText.isEmpty() || layout.summaryW() <= 0) return;
-
-        int x = layout.summaryX();
-        int y = layout.summaryY();
-        int w = layout.summaryW();
-        int h = layout.summaryH();
-        boolean hovered = mouseX >= x && mouseX < x + w
-                && mouseY >= y && mouseY < y + h;
-        int accent = missingSummaryHasMissing ? 0xFFD94B4B : 0xFFD89B32;
-        UIRenderer.rounded(gfx, x, y, w, h, 3f,
-                hovered ? 0xFF4A241E : 0xFF2E1C18);
-        gfx.fill(x + 2, y + 2, x + 4, y + h - 2, accent);
-        String visible = font.plainSubstrByWidth(missingSummaryText, Math.max(1, w - 9));
-        gfx.drawString(font, visible, x + 7,
-                y + (h - font.lineHeight) / 2,
-                hovered ? 0xFFFFFFFF : accent, false);
-        missingToggleX = x;
-        missingToggleY = y;
-        missingToggleW = w;
-        missingToggleH = h;
-    }
-
     // ── Step card ─────────────────────────────────────────────────
 
     private void renderRepeatCountInput(GuiGraphics gfx, Font font) {
@@ -1593,320 +1334,29 @@ public final class CraftingPlanScreen extends Screen {
         }
         repeatCountBox.setY(countPillY);
         repeatCountBox.setTextColor(repeatCountBox.isFocused()
-                ? 0xFFFFFFFF : 0xFFC8E6C9);
+                ? Color.TEXT.value() : Color.MUTED.value());
         repeatCountBox.render(gfx, mouseX, mouseY, 0f);
         int underlineY = countPillY + countPillH - 2;
         gfx.fill(countPillX + 7, underlineY, countPillX + countPillW - 7,
-                underlineY + 1, 0xFF69D98A);
-    }
-
-    private static final int GRID_SLOT = 18;
-    private static final int GRID_GAP = 1;
-
-    private int drawStepCard(GuiGraphics gfx, Font font, int x, int y, int cardW,
-                              ItemStack output, String outputName,
-                              PlanStep step, long batches, int idx, int animIdx) {
-        return drawStepCard(gfx, font, x, y, cardW, output, outputName, step, batches, idx, animIdx, false);
-    }
-
-    private int drawStepCard(GuiGraphics gfx, Font font, int x, int y, int cardW,
-                              ItemStack output, String outputName,
-                              PlanStep step, long batches, int idx, int animIdx,
-                              boolean showFoldToggle) {
-        boolean isMultiblock = step != null
-                && step.modType() != null
-                && step.modType() != ModType.GENERIC
-                && !step.modType().isVirtual();
-        boolean isGrid = step != null && step.recipeWidth() > 0 && step.recipeHeight() > 0;
-
-        int gridW = isGrid ? step.recipeWidth() * (GRID_SLOT + GRID_GAP) - GRID_GAP : 0;
-        int gridH = isGrid ? step.recipeHeight() * (GRID_SLOT + GRID_GAP) - GRID_GAP : 0;
-
-        // Calculate card height
-        int cardH = SLOT_SIZE + CARD_PAD * 2 + font.lineHeight + 4;
-        if (step != null) {
-            if (isGrid) {
-                cardH = Math.max(cardH, CARD_PAD * 2 + gridH + font.lineHeight + 4);
-                if (isMultiblock) cardH += font.lineHeight + 4;
-            } else {
-                int inputCols = Math.max(1, Math.min(step.inputs().size(), 9));
-                int inputRows = (int) Math.ceil((double) step.inputs().size() / inputCols);
-                cardH += (SLOT_SIZE + 3) * Math.max(1, inputRows) + 4;
-                if (isMultiblock) cardH += font.lineHeight + 4;
-            }
-        }
-        int orBadgeH = (step != null && !step.alternatives().isEmpty()) ? font.lineHeight + 10 : 0;
-        cardH += orBadgeH;
-
-        // ── Card entrance animation — slide in from right ──────
-        int slideX = renderEngine.animation().getSlideOffset(animIdx, 30);
-        if (slideX != 0) {
-            gfx.pose().pushPose();
-            gfx.pose().translate(slideX, 0, 0);
-        }
-
-        int accent = step != null ? stepAccent(step, batches) : C_ACCENT_NEUTRAL;
-        if (isMultiblock) {
-            // Multiblock card — deeper emerald tint + status accent bar
-            UIRenderer.roundedGradient(gfx, x, y, cardW, cardH, 8f, 0xE61A221E, 0xE6141A16);
-            UIRenderer.rounded(gfx, x + 2, y + 1, cardW - 4, 1f, 4f, 0x18FFFFFF);
-            gfx.fill(x + 8, y + cardH - 2, x + cardW - 8, y + cardH, 0x22000000);
-            // Status-driven accent bar
-            gfx.fill(x + 1, y + 2, x + 4, y + cardH - 2, accent);
-            gfx.fill(x + 1, y + 2, x + 4, y + 3, 0x44FFFFFF);
-        } else {
-            UIRenderer.card(gfx, x, y, cardW, cardH, 8f, accent);
-        }
-
-        int cx = x + CARD_PAD;
-        int cy = y + CARD_PAD;
-
-        // ── Mod type tag ──────────────────────────────────────
-        if (isMultiblock) {
-            String modLabel = PlanRenderEngine.formatMachineLabel(step);
-            int labelW = font.width(modLabel) + 12;
-            UIRenderer.pill(gfx, cx, cy, labelW, font.lineHeight + 4, renderEngine.animation().getAlpha(animIdx), true);
-            gfx.drawString(font, modLabel, cx + 6, cy + 2, C_MODTAG_TEXT);
-            cy += font.lineHeight + 8;
-        }
-
-        // ── Batch count ───────────────────────────────────────
-        if (batches > 1) {
-            String batchStr = PlanRenderEngine.formatCompact(batches) + "x";
-            gfx.drawString(font, batchStr, cx, cy + SLOT_SIZE / 2 - font.lineHeight / 2, C_BATCH_TEXT);
-            cx += font.width(batchStr) + 6;
-        }
-
-        // ── Input slots ───────────────────────────────────────
-        if (step != null && !step.inputs().isEmpty()) {
-            if (isGrid) {
-                int gridLeft = cx;
-                int gridTop = cy;
-                for (int i = 0; i < step.inputs().size(); i++) {
-                    int col = i % step.recipeWidth();
-                    int row = i / step.recipeWidth();
-                    int sx = gridLeft + col * (GRID_SLOT + GRID_GAP);
-                    int sy = gridTop + row * (GRID_SLOT + GRID_GAP);
-                    ItemStack gs = step.inputs().get(i);
-                    long gTotal = step.totalInputCount(i, step.batches());
-                    long gDisp = batches > 1 ? gs.getCount() : gTotal;
-                    drawGridSlot(gfx, font, sx, sy, gs, gTotal, gDisp);
-                }
-                int totalCells = step.recipeWidth() * step.recipeHeight();
-                for (int i = step.inputs().size(); i < totalCells; i++) {
-                    int col = i % step.recipeWidth();
-                    int row = i / step.recipeWidth();
-                    int sx = gridLeft + col * (GRID_SLOT + GRID_GAP);
-                    int sy = gridTop + row * (GRID_SLOT + GRID_GAP);
-                    drawGridPlaceholder(gfx, sx, sy);
-                }
-                cx = gridLeft + gridW + ARROW_W;
-                cy = gridTop + gridH / 2 - SLOT_SIZE / 2;
-            } else {
-                int cols = Math.min(step.inputs().size(), 9);
-                for (int i = 0; i < step.inputs().size(); i++) {
-                    ItemStack in = step.inputs().get(i);
-                    int sx = cx + (i % cols) * (SLOT_SIZE + 3);
-                    int sy = cy + (i / cols) * (SLOT_SIZE + 3);
-                    long totalNeed = step.totalInputCount(i, step.batches());
-                    long disp = batches > 1 ? in.getCount() : totalNeed;
-                    drawSlot(gfx, font, sx, sy, in, totalNeed, disp, true);
-                }
-                cx += cols * (SLOT_SIZE + 3) + ARROW_W;
-            }
-        }
-
-        // ── Arrow ─────────────────────────────────────────────
-        int arrowCx = cx - ARROW_W / 2;
-        int arrowCy = cy + SLOT_SIZE / 2;
-        UIRenderer.chevron(gfx, arrowCx - 2, arrowCy, C_ARROW);
-
-        // ── Output slot ───────────────────────────────────────
-        long outAmount = batches > 0
-                ? SaturatingLongMath.multiply(output.getCount(), batches) : output.getCount();
-        drawSlot(gfx, font, cx, cy, output, outAmount, outAmount, false);
-
-        // ── Output name ───────────────────────────────────────
-        int nameMaxW = x + cardW - cx - SLOT_SIZE - 8;
-        String displayName = outputName;
-        if (font.width(outputName) > nameMaxW) {
-            int w = 0;
-            StringBuilder sb = new StringBuilder();
-            for (char c : outputName.toCharArray()) {
-                int cw = font.width(String.valueOf(c));
-                if (w + cw + font.width("...") > nameMaxW) break;
-                w += cw;
-                sb.append(c);
-            }
-            displayName = sb + "...";
-        }
-        gfx.drawString(font, displayName, cx + SLOT_SIZE + 6, cy + 6, C_NAME_TEXT);
-
-        // ── Fold toggle (▼/▶) — top-right corner ─────────────
-        if (showFoldToggle && step != null) {
-            String stepRid = step.recipeId().toString();
-            boolean folded = isStepCollapsed(stepRid, step.depth());
-            String icon = folded ? "▶" : "▼";
-            int iconX = x + cardW - font.width(icon) - 8;
-            int iconY = cy + 2;
-            gfx.drawString(font, icon, iconX, iconY, 0xFF88AA88, false);
-            // Record hitbox for mouseClicked (one per card, keyed by step + depth).
-            int hitX = iconX - 2, hitY = iconY - 2;
-            int hitW = font.width(icon) + 4, hitH = font.lineHeight + 4;
-            foldHits.add(new FoldHit(hitX, hitY, hitW, hitH, stepRid, step.depth()));
-            boolean hov = mouseX >= hitX && mouseX < hitX + hitW
-                    && mouseY >= hitY && mouseY < hitY + hitH;
-            if (hov) gfx.fill(hitX, hitY, hitX + hitW, hitY + hitH, 0x22FFFFFF);
-        }
-
-        // 每个材料只保留一个入口，大量候选在右侧面板中滚动、搜索。
-        String selectionKey = step == null ? null : selectionKey(step.output());
-        if (orBadgeH > 0 && selectionKey != null && orRendered.add(selectionKey)) {
-            long candidates = step.alternatives().stream().distinct().count();
-            if (!step.alternatives().contains(step.recipeId())) candidates++;
-            String label = Component.translatable("rsi.plan.recipe_picker.button", candidates).getString();
-            int badgeY = y + cardH - font.lineHeight - 7;
-            int badgeX = x + CARD_PAD;
-            int badgeH = font.lineHeight + 4;
-            int badgeW = Math.min(cardW - CARD_PAD * 2, font.width(label) + 14);
-            UIRenderer.pillBadge(gfx, font, badgeX, badgeY, badgeW, badgeH,
-                    0xCC2C6040, 0xFFE0F2E6, font.plainSubstrByWidth(label, badgeW - 10));
-            orHitboxes.add(new ORHitbox(badgeX, badgeY, badgeW, badgeH, selectionKey));
-        }
-
-        if (slideX != 0) gfx.pose().popPose();
-
-        return y + cardH + 8;
-    }
-
-    // ── Grid slot ─────────────────────────────────────────────────
-
-    /** @param needed       threshold for border color
-     *  @param displayCount number drawn in corner; 0 = hide, 1 = vanilla decorations */
-    private void drawGridSlot(GuiGraphics gfx, Font font, int x, int y,
-                               ItemStack stack, long needed, long displayCount) {
-        boolean hovered = mouseX >= x - 1 && mouseX <= x + GRID_SLOT + 1
-                && mouseY >= y - 1 && mouseY <= y + GRID_SLOT + 1;
-
-        if (stack.isEmpty()) {
-            int emptyBorder = hovered ? 0xFF555555 : 0xFF3A3A3A;
-            gfx.fill(x - 1, y - 1, x + GRID_SLOT + 1, y + GRID_SLOT + 1, emptyBorder);
-            gfx.fill(x, y, x + GRID_SLOT, y + GRID_SLOT, 0xFF252525);
-            return;
-        }
-
-        long avail = 0L;
-        PlanResponse.Availability a = plan.availability(stack);
-        if (a != null) avail = a.available();
-
-        int border = avail >= needed ? C_GREEN : (avail > 0 ? C_ORANGE : C_RED);
-
-        UIRenderer.slotBg(gfx, x, y, GRID_SLOT, border);
-        InkFluidRenderer.render(gfx, stack, x + 1, y + 1);
-
-        if (hovered) drawHoverBorder(gfx, x, y, GRID_SLOT);
-
-        if (displayCount > 1) {
-            gfx.pose().pushPose();
-            gfx.pose().translate(0, 0, 200);
-            String txt = PlanRenderEngine.formatCompact(displayCount);
-            gfx.drawString(font, txt, x + GRID_SLOT - font.width(txt),
-                    y + GRID_SLOT - font.lineHeight + 2, 0xFFFFFF);
-            gfx.pose().popPose();
-        } else if (displayCount == 1) {
-            gfx.renderItemDecorations(font, stack, x + 1, y + 1);
-        }
-    }
-
-    private void drawGridPlaceholder(GuiGraphics gfx, int x, int y) {
-        gfx.fill(x - 1, y - 1, x + GRID_SLOT + 1, y + GRID_SLOT + 1, 0xFF3A3A3A);
-        gfx.fill(x, y, x + GRID_SLOT, y + GRID_SLOT, 0xFF252525);
+                underlineY + 1, Color.ACCENT.value());
     }
 
     private static void drawHoverBorder(GuiGraphics gfx, int x, int y, int size) {
-        gfx.fill(x - 1, y - 1, x + size + 1, y, C_SLOT_HOVER);
-        gfx.fill(x - 1, y + size + 1, x + size + 1, y + size + 2, C_SLOT_HOVER);
-        gfx.fill(x - 1, y - 1, x, y + size + 1, C_SLOT_HOVER);
-        gfx.fill(x + size + 1, y - 1, x + size + 2, y + size + 1, C_SLOT_HOVER);
+        gfx.fill(x - 1, y - 1, x + size + 1, y, Color.HOVER_OVERLAY.value());
+        gfx.fill(x - 1, y + size + 1, x + size + 1, y + size + 2, Color.HOVER_OVERLAY.value());
+        gfx.fill(x - 1, y - 1, x, y + size + 1, Color.HOVER_OVERLAY.value());
+        gfx.fill(x + size + 1, y - 1, x + size + 2, y + size + 1, Color.HOVER_OVERLAY.value());
     }
 
-    // ── Alternative selection ─────────────────────────────────────
-
-    @Nullable
-    private PlanTreeNode findCandidateNode(PlanTreeNode node, String key) {
-        if (node.step != null && key.equals(selectionKey(node.displayStack))) return node;
-        for (PlanTreeNode child : node.children) {
-            PlanTreeNode match = findCandidateNode(child, key);
-            if (match != null) return match;
-        }
-        return null;
-    }
-
-    @Nullable
-    private static String selectionKey(ItemStack stack) {
-        ResourceLocation key = CraftingResolver
-                .preferenceKey(stack);
-        return key == null ? null : key.toString();
-    }
-
-    // ── Slot drawing ──────────────────────────────────────────────
-
-    /** @param needed       threshold for color (green/orange/red)
-     *  @param displayCount number shown in the slot corner; 0 = hide */
-    private void drawSlot(GuiGraphics gfx, Font font, int x, int y,
-                           ItemStack stack, long needed, long displayCount, boolean isInput) {
-        long avail = 0L;
-        PlanResponse.Availability a = plan.availability(stack);
-        if (a != null) avail = a.available();
-
-        int border;
-        if (!isInput) {
-            border = C_GREEN;
-        } else if (avail >= needed) {
-            border = C_GREEN;
-        } else if (avail > 0) {
-            border = C_ORANGE;
-        } else {
-            border = C_RED;
-        }
-
-        UIRenderer.slotBg(gfx, x, y, SLOT_SIZE, border);
-        InkFluidRenderer.render(gfx, stack, x + 1, y + 1);
-
-        boolean hovered = mouseX >= x - 1 && mouseX <= x + SLOT_SIZE + 1
-                && mouseY >= y - 1 && mouseY <= y + SLOT_SIZE + 1;
-        if (hovered) {
-            drawHoverBorder(gfx, x, y, SLOT_SIZE);
-            // Defer tooltip — render after all scissors are disabled
-            hoveredItemForTooltip = stack;
-            hoveredTooltipX = mouseX;
-            hoveredTooltipY = mouseY;
-            hoveredTooltipAvail = avail;
-            hoveredTooltipNeeded = needed;
-            hoveredTooltipReference = false;
-        }
-
-        if (displayCount > 1) {
-            gfx.pose().pushPose();
-            gfx.pose().translate(0, 0, 200);
-            String txt = PlanRenderEngine.formatCompact(displayCount);
-            gfx.drawString(font, txt, x + SLOT_SIZE - font.width(txt),
-                    y + SLOT_SIZE - font.lineHeight + 2, 0xFFFFFF);
-            gfx.pose().popPose();
-        } else if (displayCount == 1) {
-            gfx.renderItemDecorations(font, stack, x + 1, y + 1);
-        }
-    }
-
-    // ── Embers alchemy pedestal layout ──────────────────────────────
+    // ── 余烬基座 ─────────────────────────────────────────────────
 
     private void renderEmbersPedestalArea(GuiGraphics gfx, Font font, int left, int contentW) {
         int top = embersPedestalY;
 
         // Background with emerald left accent
-        UIRenderer.roundedGradient(gfx, left, top, contentW, embersPedestalH, 6f,
-                0xE6141E18, 0xE6101814);
-        gfx.fill(left + 1, top + 2, left + 4, top + embersPedestalH - 2, 0xFF44AA66);
+        PlanUiDraw.roundedGradient(gfx, left, top, contentW, embersPedestalH, 6f,
+                Color.SURFACE.value(), Color.SURFACE.value());
+        gfx.fill(left + 1, top + 2, left + 4, top + embersPedestalH - 2, Color.ACCENT.value());
 
         int[] code = plan.embersCode();
         Component[] aspects = plan.embersAspectNames();
@@ -1916,13 +1366,13 @@ public final class CraftingPlanScreen extends Screen {
         int y = top + 4;
         if (hasCards) {
             String hdr = Component.translatable("rsi.embers.pedestal_layout").getString();
-            UIRenderer.textBackdrop(gfx, font, left + 10, y, hdr, C_TEXT_BACKDROP);
-            gfx.drawString(font, hdr, left + 10, y, 0xFF88CC99);
+            PlanUiDraw.textBackdrop(gfx, font, left + 10, y, hdr, Color.TEXT_BACKDROP.value());
+            gfx.drawString(font, hdr, left + 10, y, Color.ACCENT.value());
             // Show "from prior inference" badge when code was loaded from cache
             if (plan.embersCodeFromCache()) {
                 String cachedNote = Component.translatable("rsi.embers.code_from_cache").getString();
                 int noteW = font.width(cachedNote);
-                gfx.drawString(font, cachedNote, left + contentW - noteW - 12, y, 0xFF77AA77);
+                gfx.drawString(font, cachedNote, left + contentW - noteW - 12, y, Color.ACCENT.value());
             }
             y += font.lineHeight + 6;
         }
@@ -1941,7 +1391,7 @@ public final class CraftingPlanScreen extends Screen {
                 int py = y + row * (cardH + cardGap);
 
                 // Card background
-                UIRenderer.rounded(gfx, px, py, cardW, cardH, 4f, 0xCC1A221E);
+                PlanUiDraw.rounded(gfx, px, py, cardW, cardH, 4f, Color.SURFACE.value());
 
                 // Input name (top)
                 String inputName = i < inputs.length ? inputs[i].getString() : "?";
@@ -1950,7 +1400,7 @@ public final class CraftingPlanScreen extends Screen {
                     inputName = font.plainSubstrByWidth(inputName, maxNameW - font.width("...")) + "...";
                 }
                 int nameX = px + cardW / 2 - font.width(inputName) / 2;
-                gfx.drawString(font, inputName, nameX, py + 2, 0xFFCCCCCC);
+                gfx.drawString(font, inputName, nameX, py + 2, Color.TEXT.value());
 
                 // Aspect name (bottom)
                 String aspectName = i < aspects.length ? aspects[i].getString() : "?";
@@ -1958,15 +1408,15 @@ public final class CraftingPlanScreen extends Screen {
                     aspectName = font.plainSubstrByWidth(aspectName, maxNameW - font.width("...")) + "...";
                 }
                 int aspX = px + cardW / 2 - font.width(aspectName) / 2;
-                gfx.drawString(font, aspectName, aspX, py + cardH - font.lineHeight - 2, 0xFF88CC88);
+                gfx.drawString(font, aspectName, aspX, py + cardH - font.lineHeight - 2, Color.ACCENT.value());
 
                 // Separator line
                 int sepY = py + cardH / 2;
-                gfx.fill(px + 6, sepY - 1, px + cardW - 6, sepY, 0x33338844);
+                gfx.fill(px + 6, sepY - 1, px + cardW - 6, sepY, Color.HOVER_OVERLAY.value());
 
                 // Pedestal number
                 String num = String.valueOf(i + 1);
-                gfx.drawString(font, num, px + cardW - font.width(num) - 3, py + cardH - font.lineHeight - 1, 0xFF558855);
+                gfx.drawString(font, num, px + cardW - font.width(num) - 3, py + cardH - font.lineHeight - 1, Color.READY.value());
             }
         }
 
@@ -1975,8 +1425,8 @@ public final class CraftingPlanScreen extends Screen {
             String seedStr = Component.translatable("rsi.embers.seed_label", plan.embersSeed()).getString();
             int seedW = font.width(seedStr);
             int seedX = left + contentW - seedW - 12;
-            int seedY = top + embersPedestalH - font.lineHeight - 4;
-            gfx.drawString(font, seedStr, seedX, seedY, 0xFF556644);
+            int seedY = top + embersCardsH - font.lineHeight - 4;
+            gfx.drawString(font, seedStr, seedX, seedY, Color.DISABLED.value());
         }
 
         // ── Mode toggle (Calculate / Infer) ──────────────────────────
@@ -1992,7 +1442,7 @@ public final class CraftingPlanScreen extends Screen {
             int btnTop = embersModeY + 6;
 
             // Label — match section header color
-            gfx.drawString(font, modeLabel, rowStartX, btnTop + (btnH - font.lineHeight) / 2, 0xFF88CC99);
+            gfx.drawString(font, modeLabel, rowStartX, btnTop + (btnH - font.lineHeight) / 2, Color.ACCENT.value());
 
             // Calculate button — same color scheme as repeat row buttons
             int calcX = rowStartX + labelW + 6;
@@ -2001,11 +1451,11 @@ public final class CraftingPlanScreen extends Screen {
             boolean hoverCalc = mouseX >= calcX && mouseX <= calcX + btnW
                     && mouseY >= btnTop && mouseY <= btnTop + btnH;
             boolean isCalc = !embersInferMode;
-            int calcBg = isCalc ? 0xCC338855 : (hoverCalc ? 0x88338855 : 0x661A221E);
-            int calcFg = isCalc ? 0xFFFFFFFF : (hoverCalc ? 0xFFAAFFAA : 0xFF558855);
+            int calcBg = isCalc ? Color.HOVER.value() : (hoverCalc ? Color.SURFACE.value() : Color.SURFACE.value());
+            int calcFg = isCalc ? Color.TEXT.value() : (hoverCalc ? Color.READY.value() : Color.READY.value());
             // Double-layer inset (matching repeat row buttons)
-            UIRenderer.rounded(gfx, calcX, btnTop, btnW, btnH, 4f, calcBg);
-            UIRenderer.rounded(gfx, calcX + 1, btnTop + 1, btnW - 2, btnH - 2, 3f, 0x881A221E);
+            PlanUiDraw.rounded(gfx, calcX, btnTop, btnW, btnH, 4f, calcBg);
+            PlanUiDraw.rounded(gfx, calcX + 1, btnTop + 1, btnW - 2, btnH - 2, 3f, Color.SURFACE.value());
             String calcLabel = Component.translatable("rsi.embers.mode_calc").getString();
             gfx.drawString(font, calcLabel,
                     calcX + btnW / 2 - font.width(calcLabel) / 2,
@@ -2018,10 +1468,10 @@ public final class CraftingPlanScreen extends Screen {
             boolean hoverInfer = mouseX >= inferX && mouseX <= inferX + btnW
                     && mouseY >= btnTop && mouseY <= btnTop + btnH;
             boolean isInfer = embersInferMode;
-            int inferBg = isInfer ? 0xCC338855 : (hoverInfer ? 0x88338855 : 0x661A221E);
-            int inferFg = isInfer ? 0xFFFFFFFF : (hoverInfer ? 0xFFAAFFAA : 0xFF558855);
-            UIRenderer.rounded(gfx, inferX, btnTop, btnW, btnH, 4f, inferBg);
-            UIRenderer.rounded(gfx, inferX + 1, btnTop + 1, btnW - 2, btnH - 2, 3f, 0x881A221E);
+            int inferBg = isInfer ? Color.HOVER.value() : (hoverInfer ? Color.SURFACE.value() : Color.SURFACE.value());
+            int inferFg = isInfer ? Color.TEXT.value() : (hoverInfer ? Color.READY.value() : Color.READY.value());
+            PlanUiDraw.rounded(gfx, inferX, btnTop, btnW, btnH, 4f, inferBg);
+            PlanUiDraw.rounded(gfx, inferX + 1, btnTop + 1, btnW - 2, btnH - 2, 3f, Color.SURFACE.value());
             String inferLabel = Component.translatable("rsi.embers.mode_infer").getString();
             gfx.drawString(font, inferLabel,
                     inferX + btnW / 2 - font.width(inferLabel) / 2,
@@ -2041,275 +1491,26 @@ public final class CraftingPlanScreen extends Screen {
         return List.copyOf(warnings);
     }
 
-    private void renderMissingArea(GuiGraphics gfx, Font font, int left, int top, int contentW) {
-        List<MissingMaterialBookmarkList.TextEntry> missingEntries =
-                MissingMaterialBookmarkList.textEntries(plan);
-        boolean hasMissing = !missingEntries.isEmpty();
-        List<Component> planWarnings = displayWarnings(plan);
-        boolean hasModWarnings = !planWarnings.isEmpty();
-        boolean hasMachines = plan.machineCandidates() != null && !plan.machineCandidates().isEmpty();
-
-        // Background — dark warm tone, red accent
-        UIRenderer.roundedGradient(gfx, left, top, contentW, missingAreaHeight, 6f,
-                0xE61E1814, 0xE6181410);
-        // Left accent — red when materials are missing, orange when only mod warnings
-        int accentColor = hasMissing ? C_ACCENT_MISSING
-                : (hasMachines ? C_ACCENT_READY : C_ORANGE);
-        gfx.fill(left + 1, top + 2, left + 4, top + missingAreaHeight - 2, accentColor);
-
-        List<String> summaryParts = new ArrayList<>();
-        if (hasMissing) {
-            summaryParts.add(Component.translatable(
-                    "rsi.plan.missing_summary", missingEntries.size()).getString());
-        }
-        if (hasModWarnings) {
-            summaryParts.add(Component.translatable(
-                    "rsi.plan.warning_summary", planWarnings.size()).getString());
-        }
-        if (hasMachines) {
-            summaryParts.add(Component.translatable(
-                    "rsi.plan.machine_summary", plan.machineCandidates().size()).getString());
-        }
-        String summary = String.join(" · ", summaryParts);
-        boolean canOpenDiagnostics = hasMissing || hasModWarnings || hasMachines;
-        String summaryText = summary;
-        int summaryMaxW = Math.max(1, contentW - 20);
-        String visibleSummary = font.plainSubstrByWidth(summaryText, summaryMaxW);
-        int summaryX = left + 10;
-        int summaryY = top + (missingHeaderHeight - font.lineHeight) / 2;
-        int summaryW = font.width(visibleSummary);
-        boolean headerHovered = canOpenDiagnostics
-                && mouseX >= summaryX && mouseX < summaryX + summaryW
-                && mouseY >= summaryY && mouseY < summaryY + font.lineHeight;
-        if (headerHovered) {
-            gfx.fill(summaryX - 2, summaryY - 2,
-                    summaryX + summaryW + 2, summaryY + font.lineHeight + 2,
-                    0x22FFFFFF);
-        }
-        UIRenderer.textBackdrop(gfx, font, summaryX, summaryY, visibleSummary, C_TEXT_BACKDROP);
-        gfx.drawString(font, visibleSummary, summaryX, summaryY,
-                headerHovered ? 0xFFFFFFFF : hasMissing ? 0xFFFF8888 : 0xFFDDAA00);
-
-        missingToggleX = canOpenDiagnostics ? summaryX - 2 : 0;
-        missingToggleY = canOpenDiagnostics ? summaryY - 2 : 0;
-        missingToggleW = canOpenDiagnostics ? summaryW + 4 : 0;
-        missingToggleH = canOpenDiagnostics ? font.lineHeight + 4 : 0;
-
-        if (!missingExpanded) {
-            missingBar.active = false;
-            machineModeH = 0;
-            machineModeW = 0;
-            machineCandidateH = 0;
-            machineCandidateW = 0;
-            return;
-        }
-
-        missingContentTop = top + missingHeaderHeight;
-        int contentBottom = top + missingAreaHeight - 2;
-        if (contentBottom <= missingContentTop) return;
-        int my = missingContentTop - missingScroll + 2;
-        int maxLineW = contentW - 24;
-        gfx.enableScissor(left + 4, missingContentTop, left + contentW - 4, contentBottom);
-        try {
-            if (hasMissing) {
-                my = renderMissingTextEntries(gfx, font,
-                        missingEntries, left + 10, my, maxLineW);
-            }
-            if (hasModWarnings) {
-                if (hasMissing) my += 2;
-                for (Component warn : planWarnings) {
-                    String display = font.plainSubstrByWidth(warn.getString(), maxLineW);
-                    UIRenderer.textBackdrop(gfx, font, left + 10, my, display, C_TEXT_BACKDROP);
-                    gfx.drawString(font, display, left + 10, my, 0xFFDDAA00);
-                    my += font.lineHeight + 4;
-                }
-            }
-            if (hasMachines) {
-                if (my > missingContentTop) my += 2;
-                renderMachineSelector(gfx, font, left + 10, my, contentW - 20);
-            }
-        } finally {
-            gfx.disableScissor();
-        }
-        missingBar.update(left + contentW - 6, missingContentTop,
-                Math.max(1, contentBottom - missingContentTop), missingScroll, missingMaxScroll);
-        missingBar.draw(gfx, mouseX, mouseY);
-    }
-
-    private void renderMachineSelector(GuiGraphics gfx, Font font, int left, int y, int width) {
-        machineSelectorY = y;
-        machineModeY = y;
-        machineModeH = 20;
-        machineModeW = 44;
-        String label = Component.translatable("rsi.machine_candidate.label").getString();
-        gfx.drawString(font, label, left, y + 3, 0xFFBBD8C2, false);
-
-        int modeX = left + font.width(label) + 8;
-        machineModeX = modeX;
-        String[] modeKeys = {"rsi.machine_candidate.auto", "rsi.machine_candidate.preferred",
-                "rsi.machine_candidate.exclusive"};
-        MachineSelectionMode[] modes = {MachineSelectionMode.AUTO, MachineSelectionMode.PREFERRED,
-                MachineSelectionMode.EXCLUSIVE};
-        for (int i = 0; i < modes.length; i++) {
-            int x = modeX + i * (machineModeW + 3);
-            boolean selected = machineSelectionMode == modes[i];
-            boolean hovered = mouseX >= x && mouseX < x + machineModeW
-                    && mouseY >= y && mouseY < y + machineModeH;
-            UIRenderer.rounded(gfx, x, y, machineModeW, machineModeH, 3f,
-                    selected ? 0xCC338855 : hovered ? 0x88385546 : 0x661A221E);
-            String text = Component.translatable(modeKeys[i]).getString();
-            String clipped = font.plainSubstrByWidth(text, machineModeW - 6);
-            gfx.drawString(font, clipped, x + (machineModeW - font.width(clipped)) / 2,
-                    y + (machineModeH - font.lineHeight) / 2,
-                    selected ? 0xFFFFFFFF : 0xFF9DB9A4, false);
-        }
-
-        int candidateX = modeX + 3 * (machineModeW + 3) + 8;
-        machineCandidateX = candidateX;
-        machineCandidateY = y;
-        machineCandidateH = machineModeH;
-        machineCandidateW = Math.max(60, left + width - candidateX);
-        MachineCandidateView selected = selectedMachineCandidate();
-        List<MachineCandidateView> candidates = plan.machineCandidates();
-        long ready = candidates.stream().filter(c -> c.state() == MachineCandidateView.State.READY).count();
-        String value;
-        if (machineSelectionMode == MachineSelectionMode.AUTO) {
-            value = Component.translatable("rsi.machine_candidate.auto_value", ready, candidates.size()).getString();
-        } else if (selected == null) {
-            value = Component.translatable("rsi.machine_candidate.none").getString();
-        } else {
-            value = selected.dimension() + " " + selected.x() + "," + selected.y() + "," + selected.z();
-        }
-        boolean hovered = mouseX >= candidateX && mouseX < candidateX + machineCandidateW
-                && mouseY >= y && mouseY < y + machineCandidateH;
-        UIRenderer.rounded(gfx, candidateX, y, machineCandidateW, machineCandidateH, 3f,
-                hovered ? 0x88385546 : 0x661A221E);
-        MachineCandidateView iconCandidate = selected != null ? selected
-                : candidates.stream().filter(c -> !c.icon().isEmpty()).findFirst().orElse(null);
-        int textX = candidateX + 6;
-        if (iconCandidate != null && !iconCandidate.icon().isEmpty()) {
-            gfx.renderItem(iconCandidate.icon(), candidateX + 3, y + 2);
-            textX = candidateX + 23;
-        }
-        String clipped = font.plainSubstrByWidth(value,
-                Math.max(1, candidateX + machineCandidateW - 12 - textX));
-        gfx.drawString(font, clipped, textX, y + (machineCandidateH - font.lineHeight) / 2,
-                hovered ? 0xFFFFFFFF : 0xFFBBD8C2, false);
-        gfx.drawString(font, machineDropdownOpen ? "^" : "v",
-                candidateX + machineCandidateW - 10,
-                y + (machineCandidateH - font.lineHeight) / 2, 0xFF79C995, false);
-    }
-
-    private void renderMachineCandidateDropdown(GuiGraphics gfx, Font font) {
-        machineCandidateHits.clear();
-        if (!machineDropdownOpen || plan.machineCandidates().isEmpty()) return;
-        int rowH = 22;
-        int width = Math.min(260, Math.max(170, machineCandidateW));
-        int left = Math.max(8, machineCandidateX);
-        int top = Math.max(8, machineCandidateY - rowH * plan.machineCandidates().size() - 4);
-        for (int i = 0; i < plan.machineCandidates().size(); i++) {
-            MachineCandidateView candidate = plan.machineCandidates().get(i);
-            int y = top + i * rowH;
-            boolean hovered = mouseX >= left && mouseX < left + width
-                    && mouseY >= y && mouseY < y + rowH;
-            int bg = hovered ? 0xDD31523E : 0xEE111A15;
-            UIRenderer.rounded(gfx, left, y, width, rowH, 3f, bg);
-            int color = candidate.state() == MachineCandidateView.State.READY ? C_GREEN
-                    : candidate.state() == MachineCandidateView.State.TEMPORARY ? C_ORANGE : C_RED;
-            gfx.fill(left + 3, y + 3, left + 5, y + rowH - 3, color);
-            int textX = left + 10;
-            if (!candidate.icon().isEmpty()) {
-                gfx.renderItem(candidate.icon(), left + 7, y + 3);
-                textX = left + 28;
-            }
-            String text = candidate.dimension() + " " + candidate.x() + "," + candidate.y()
-                    + "," + candidate.z() + " · " + candidate.status().getString();
-            text = font.plainSubstrByWidth(text, Math.max(1, left + width - 8 - textX));
-            gfx.drawString(font, text, textX, y + (rowH - font.lineHeight) / 2,
-                    0xFFE2F2E5, false);
-            machineCandidateHits.add(new MachineCandidateHit(left, y, width, rowH, i));
-        }
-    }
-
-    private int renderMissingTextEntries(
-            GuiGraphics gfx, Font font,
-            List<MissingMaterialBookmarkList.TextEntry> entries,
-            int left, int y, int maxLineWidth) {
-        int cursorX = left;
-        boolean firstOnLine = true;
-        for (MissingMaterialBookmarkList.TextEntry entry : entries) {
-            String prefix = firstOnLine ? "  " : ", ";
-            int prefixWidth = font.width(prefix);
-            int labelWidth = font.width(entry.label());
-            if (!firstOnLine && cursorX + prefixWidth + labelWidth > left + maxLineWidth) {
-                y += font.lineHeight + 4;
-                cursorX = left;
-                firstOnLine = true;
-                prefix = "  ";
-                prefixWidth = font.width(prefix);
-            }
-
-            gfx.drawString(font, prefix, cursorX, y, 0xFFCC8888, false);
-            cursorX += prefixWidth;
-            int availableWidth = Math.max(1, left + maxLineWidth - cursorX);
-            String visibleLabel = font.plainSubstrByWidth(entry.label(), availableWidth);
-            int visibleWidth = font.width(visibleLabel);
-            boolean hovered = entry.bookmarkable()
-                    && mouseX >= cursorX && mouseX < cursorX + visibleWidth
-                    && mouseY >= y && mouseY < y + font.lineHeight;
-            gfx.drawString(font, visibleLabel, cursorX, y,
-                    hovered ? 0xFFFFBBBB : 0xFFCC8888, false);
-            if (hovered) {
-                gfx.fill(cursorX, y + font.lineHeight,
-                        cursorX + visibleWidth, y + font.lineHeight + 1, 0xFFFF9999);
-            }
-            if (entry.bookmarkable() && visibleWidth > 0) {
-                registerBookmarkHit(entry.bookmark(), cursorX, y,
-                        visibleWidth, font.lineHeight, entry.missingCount());
-            }
-            cursorX += visibleWidth;
-            firstOnLine = false;
-        }
-        return entries.isEmpty() ? y : y + font.lineHeight + 4;
-    }
-
-    private static int missingTextLineCount(
-            Font font, List<MissingMaterialBookmarkList.TextEntry> entries, int maxLineWidth) {
-        if (entries.isEmpty()) return 0;
-        int lines = 1;
-        int used = 0;
-        boolean firstOnLine = true;
-        for (MissingMaterialBookmarkList.TextEntry entry : entries) {
-            int width = font.width(firstOnLine ? "  " : ", ") + font.width(entry.label());
-            if (!firstOnLine && used + width > maxLineWidth) {
-                lines++;
-                used = font.width("  ") + Math.min(font.width(entry.label()), maxLineWidth);
-                firstOnLine = false;
-            } else {
-                used += width;
-                firstOnLine = false;
-            }
-        }
-        return lines;
-    }
-
-    // ── Scrolling ─────────────────────────────────────────────────
-
-    // ── Recipe-tree rendering + camera (v3.4) ────────────────────
+    // ── 递归树与相机 ─────────────────────────────────────────────
 
     private void renderTreeArea(GuiGraphics gfx, int left, int areaTop, int contentW,
                                 int areaBottom, int mouseX, int mouseY) {
         if (areaBottom <= areaTop) return;
-        if (recipeCandidatePanel != null && recipeCandidatePanel.contains(mouseX, mouseY)) {
+        if (detailsPanel != null && detailsPanel.contains(mouseX, mouseY)) {
             mouseX = mouseY = Integer.MIN_VALUE;
         }
         treeLayout.ensureLayout(treeModel.root);
 
         // Backdrop over the whole area.
-        UIRenderer.rounded(gfx, left, areaTop, contentW, areaBottom - areaTop, 6f, 0x66060A08);
+        PlanWorkspaceChrome.panel(gfx, new Rect(left, areaTop, contentW, areaBottom - areaTop), Color.BACKGROUND, Color.BORDER);
+        int gridColor = Color.GRID.value();
+        gfx.drawManaged(() -> {
+            for (int gx = left + 11; gx < left + contentW - 5; gx += 13) {
+                for (int gy = areaTop + 12; gy < areaBottom - 5; gy += 13) gfx.fill(gx, gy, gx + 1, gy + 1, gridColor);
+            }
+        });
 
-        // The tree viewport fills the whole area; the total-demand strip is drawn inside
-        // the camera layer, anchored above the root — it no longer eats layout height.
+        // 材料摘要固定在画布顶部；树相机只在摘要下方缩放和平移。
         if (treeCameraInit && treeViewRight > treeViewLeft) {
             treePanX += (left + contentW - treeViewRight) / 2.0;
         }
@@ -2317,7 +1518,12 @@ public final class CraftingPlanScreen extends Screen {
         treeViewTop = areaTop;
         treeViewRight = left + contentW;
         treeViewBottom = areaBottom;
+        stripPageSize = Math.max(1, Math.min(8, (contentW - 150) / Math.max(1, stripMaxEntryWidth)));
+        treeContentTop = Math.min(areaBottom - 1, areaTop + 22);
+        chrome.label(gfx, I18n.get(treeModel.truncated() ? "rsi.plan.tree_truncated" : selectedPath.isDirty()
+                ? "rsi.plan.status_custom" : "rsi.plan.workspace.dependencies"), left + 7, areaTop + 4, contentW - 14, Color.MUTED);
         if (!treeCameraInit) centerCamera();
+        treeRenderer.setInspectedNode(detailsPanel != null && detailsPanel.isOpen() ? detailsPanel.selectedNode() : dropdownNode);
 
         PlanTreeNode hovered = nodeAt(mouseX, mouseY);
         // Reset the hover-intent timer whenever the mouse isn't resting on a previewable node
@@ -2356,12 +1562,10 @@ public final class CraftingPlanScreen extends Screen {
             }
         }
 
-        costHits.clear();
-        stripPageHits.clear();
-        gfx.enableScissor(left, treeViewTop, left + contentW, areaBottom);
+        gfx.enableScissor(left, treeContentTop, left + contentW, areaBottom);
         try {
             int logicalLeft = (int) Math.floor((treeViewLeft - treePanX) / treeZoom);
-            int logicalTop = (int) Math.floor((treeViewTop - treePanY) / treeZoom);
+            int logicalTop = (int) Math.floor((treeContentTop - treePanY) / treeZoom);
             int logicalRight = (int) Math.ceil((treeViewRight - treePanX) / treeZoom);
             int logicalBottom = (int) Math.ceil((treeViewBottom - treePanY) / treeZoom);
             gfx.pose().pushPose();
@@ -2369,105 +1573,17 @@ public final class CraftingPlanScreen extends Screen {
             gfx.pose().scale((float) treeZoom, (float) treeZoom, 1f);
             treeRenderer.render(gfx, treeLayout, selectedPath, hovered,
                     logicalLeft, logicalTop, logicalRight, logicalBottom);
-            // Total-demand + leftover strip, anchored above the root in logical space so it
-            // pans/zooms with the tree. Data is server-authoritative plan.materials()/leftovers()
-            // — same source as the card material panel, so the two never diverge (design doc §4).
-            renderRootStrip(gfx, minecraft.font, mouseX, mouseY);
             gfx.pose().popPose();
         } finally {
             gfx.disableScissor();
         }
 
-        // Top toolbar is a HUD overlay: elevate it above the tree (whose batched nodes/item icons
-        // flush after this and would otherwise overdraw the immediate-mode info-icon circle).
-        gfx.pose().pushPose();
-        gfx.pose().translate(0, 0, 250);
-
-        // Branch-customized status marker (screen space, top-left of the viewport).
-        if (selectedPath.isDirty()) {
-            gfx.drawString(font, I18n.get("rsi.plan.status_custom"),
-                    left + 6, treeViewTop + 2, 0xFF4AE04A, false);
-        }
-        if (treeModel.truncated()) {
-            int statusY = treeViewTop + 2 + (selectedPath.isDirty() ? font.lineHeight + 1 : 0);
-            gfx.drawString(font, I18n.get("rsi.plan.tree_truncated"),
-                    left + 6, statusY, 0xFFE0A040, false);
-        }
-
-        // Top-right toolbar: a circled "i" help icon (hover for controls) + expand/collapse-all.
-        int infoSize = 13;
-        int infoX = left + contentW - infoSize - 4;
-        int infoY = treeViewTop + 2;
-        boolean infoHov = mouseX >= infoX && mouseX < infoX + infoSize
-                && mouseY >= infoY && mouseY < infoY + infoSize;
-        UIRenderer.rounded(gfx, infoX, infoY, infoSize, infoSize, infoSize / 2f,
-                infoHov ? 0xFF4A8A4A : 0xFF2D5A2D);
-        UIRenderer.rounded(gfx, infoX + 1, infoY + 1, infoSize - 2, infoSize - 2, (infoSize - 2) / 2f,
-                infoHov ? 0xFF204020 : 0xFF13260F);
-        int glyphX = infoX + infoSize / 2;
-        int glyphCol = infoHov ? 0xFFE0FFE0 : 0xFF9BD59B;
-        gfx.fill(glyphX, infoY + 3, glyphX + 1, infoY + 4, glyphCol);             // dot of the "i"
-        gfx.fill(glyphX, infoY + 5, glyphX + 1, infoY + infoSize - 3, glyphCol);  // stem of the "i"
-
-        // Expand/Collapse-all toolbar button, left of the info icon (mirrors card view).
-        boolean allExpanded = treeAllExpanded(treeModel.root);
-        String faLabel = allExpanded ? "▼ " + I18n.get("rsi.plan.collapse_all")
-                : "▶ " + I18n.get("rsi.plan.expand_all");
-        treeFoldAllHitW = font.width(faLabel) + 8;
-        treeFoldAllHitH = font.lineHeight + 4;
-        treeFoldAllHitX = infoX - treeFoldAllHitW - 4;
-        treeFoldAllHitY = treeViewTop + 2;
-        boolean faHov = mouseX >= treeFoldAllHitX && mouseX < treeFoldAllHitX + treeFoldAllHitW
-                && mouseY >= treeFoldAllHitY && mouseY < treeFoldAllHitY + treeFoldAllHitH;
-        gfx.fill(treeFoldAllHitX, treeFoldAllHitY, treeFoldAllHitX + treeFoldAllHitW,
-                treeFoldAllHitY + treeFoldAllHitH, faHov ? 0x551A3E1A : 0x331A3E1A);
-        gfx.drawString(font, faLabel, treeFoldAllHitX + 4, treeFoldAllHitY + 2, 0xFF44AA66, false);
-
-        gfx.pose().popPose();
-
-        // Alternative-recipe dropdown (+ its hover preview), topmost.
-        renderMaterialDropdown(gfx, minecraft.font, mouseX, mouseY);
-
-        // Control-help tooltip — shown only when hovering the info icon (replaces the old hint bar).
-        if (infoHov) {
-            hoveredItemForTooltip = ItemStack.EMPTY;
-            List<Component> lines = new ArrayList<>();
-            lines.add(Component.translatable("rsi.plan.tree_help_title").withStyle(ChatFormatting.GREEN));
-            for (String ln : I18n.get("rsi.plan.tree_help").split("\n")) {
-                lines.add(Component.literal(ln).withStyle(ChatFormatting.GRAY));
-            }
-            gfx.renderComponentTooltip(font, lines, mouseX, mouseY);
-        }
+        miniMap.render(gfx, font, treeLayout,
+                new Rect(treeViewLeft, treeContentTop, treeViewRight - treeViewLeft, treeViewBottom - treeContentTop),
+                treePanX, treePanY, treeZoom, detailsPanel.isOpen() ? detailsPanel.selectedNode() : dropdownNode);
     }
 
-    /**
-     * Total-demand + leftover rows, drawn in the tree's logical coordinate space just above
-     * the root node so they pan/zoom with the tree. Data is server-authoritative
-     * {@link PlanResponse#materials()} / {@link PlanResponse#leftovers()} — the same source as
-     * the card-view material panel, so the two can never diverge (design doc §4).
-     */
-    private void renderRootStrip(GuiGraphics gfx, Font font, int mouseX, int mouseY) {
-        PlanTreeLayout.Box rootBox = treeLayout.boxFor(treeModel.root);
-        if (rootBox == null) return;
-        int rows = stripRowCount();
-        if (rows == 0) return;
-
-        int anchorX = rootBox.itemCenterX();
-        int rowY = rootBox.y() - STRIP_GAP - rows * STRIP_ROW_H;
-        if (!cachedTotalStrip.isEmpty()) {
-            renderStripRow(gfx, font, anchorX, rowY, I18n.get("rsi.plan.cost_total"),
-                    0xFF76B16F, cachedTotalStrip, totalStripPage, false, mouseX, mouseY);
-            rowY += STRIP_ROW_H;
-        }
-        if (!cachedLeftoverStrip.isEmpty()) {
-            renderStripRow(gfx, font, anchorX, rowY, I18n.get("rsi.plan.cost_leftover"),
-                    0xFFF08A53, cachedLeftoverStrip, leftoverStripPage, true, mouseX, mouseY);
-        }
-    }
-
-    private int stripRowCount() {
-        return (cachedTotalStrip.isEmpty() ? 0 : 1) + (cachedLeftoverStrip.isEmpty() ? 0 : 1);
-    }
+    /** 固定材料/余产物摘要，与侧栏共用服务端账单，不跟随相机移动。 */
 
     /** 计划响应是材料条数据的唯一来源，派生显示项只在响应切换时生成。 */
     private void rebuildMaterialStripCache() {
@@ -2475,10 +1591,16 @@ public final class CraftingPlanScreen extends Screen {
         inventoryStripIndices.clear();
         for (int i = 0; i < cachedTotalStrip.size(); i++) inventoryStripIndices.put(cachedTotalStrip.get(i).key(), i);
         cachedLeftoverStrip = buildLeftoverEntries();
+        stripMaxEntryWidth = 68;
+        Font font = Minecraft.getInstance().font;
+        for (StripEntry entry : cachedTotalStrip) stripMaxEntryWidth = Math.max(stripMaxEntryWidth,
+                24 + font.width(stripCountText(entry, false)));
+        for (StripEntry entry : cachedLeftoverStrip) stripMaxEntryWidth = Math.max(stripMaxEntryWidth,
+                24 + font.width(stripCountText(entry, true)));
         totalStripPage = MaterialStripPaging.clampPage(
-                totalStripPage, cachedTotalStrip.size(), STRIP_PAGE_SIZE);
+                totalStripPage, cachedTotalStrip.size(), stripPageSize);
         leftoverStripPage = MaterialStripPaging.clampPage(
-                leftoverStripPage, cachedLeftoverStrip.size(), STRIP_PAGE_SIZE);
+                leftoverStripPage, cachedLeftoverStrip.size(), stripPageSize);
     }
 
     private List<StripEntry> buildTotalEntries() {
@@ -2500,149 +1622,81 @@ public final class CraftingPlanScreen extends Screen {
         return out;
     }
 
-    /**
-     * One strip row in logical (pre-zoom) space, centered on {@code anchorX}. Hitboxes are stored
-     * in screen space (logical×zoom + pan) so click-to-center and hover work under the transform.
-     */
-    private void renderStripRow(GuiGraphics gfx, Font font, int anchorX, int rowY, String label,
-                                int accent, List<StripEntry> entries, int page, boolean leftover,
-                                int mouseX, int mouseY) {
-        int pageCount = MaterialStripPaging.pageCount(entries.size(), STRIP_PAGE_SIZE);
-        int safePage = MaterialStripPaging.clampPage(
-                page, entries.size(), STRIP_PAGE_SIZE);
-        int pageStart = MaterialStripPaging.pageStart(
-                safePage, entries.size(), STRIP_PAGE_SIZE);
-        int pageEnd = MaterialStripPaging.pageEnd(
-                safePage, entries.size(), STRIP_PAGE_SIZE);
-        boolean paged = pageCount > 1;
-        String pageLabel = paged ? (safePage + 1) + "/" + pageCount : "";
-        int pagerWidth = paged ? STRIP_PAGE_BUTTON_W * 2 + STRIP_PAGE_BUTTON_GAP * 3
-                + font.width(pageLabel) : 0;
+    /** 摘要行和命中框均使用屏幕坐标，翻页不会受到树缩放影响。 */
 
-        int labelW = font.width(label);
-        int entriesWidth = 0;
-        for (int i = pageStart; i < pageEnd; i++) {
-            StripEntry e = entries.get(i);
-            entriesWidth += 18 + font.width(stripCountText(e, leftover)) + 6;
-        }
-        int rowW = labelW + 8 + pagerWidth + entriesWidth;
-
-        int startX = anchorX - rowW / 2;
-
-        int textY = rowY + (STRIP_ROW_H - font.lineHeight) / 2;
-        gfx.drawString(font, label, startX, textY, accent, false);
-        int sx = startX + labelW + 8;
-        int slotY = rowY + (STRIP_ROW_H - 16) / 2;
-        if (paged) {
-            renderStripPageButton(gfx, font, sx, slotY, "<", safePage > 0,
-                    leftover ? StripRow.LEFTOVER : StripRow.TOTAL, -1, mouseX, mouseY);
-            sx += STRIP_PAGE_BUTTON_W + STRIP_PAGE_BUTTON_GAP;
-        }
-        for (int i = pageStart; i < pageEnd; i++) {
-            StripEntry e = entries.get(i);
-            InkFluidRenderer.render(gfx, e.display(), sx, slotY);
-            if (!leftover && !e.enough()) {
-                int buttonX = sx + 8;
-                int buttonY = slotY;
-                int buttonSize = 8;
-                int screenX = (int) Math.round(buttonX * treeZoom + treePanX);
-                int screenY = (int) Math.round(buttonY * treeZoom + treePanY);
-                int screenSize = Math.max(1, (int) Math.round(buttonSize * treeZoom));
-                boolean buttonHovered = mouseX >= screenX && mouseX < screenX + screenSize
-                        && mouseY >= screenY && mouseY < screenY + screenSize;
-                PlanRenderEngine.drawBookmarkAddButton(gfx, buttonX, buttonY,
-                        buttonSize, buttonHovered);
-                int hitLeft = Math.max(screenX, treeViewLeft);
-                int hitTop = Math.max(screenY, treeViewTop);
-                int hitRight = Math.min(screenX + screenSize, treeViewRight);
-                int hitBottom = Math.min(screenY + screenSize, treeViewBottom);
-                if (hitRight > hitLeft && hitBottom > hitTop) {
-                    registerBookmarkHit(e.display(), hitLeft, hitTop,
-                            hitRight - hitLeft, hitBottom - hitTop,
-                            Math.max(1L, plan.availability(e.key()).missingCount()));
-                }
-            }
-            String cnt = stripCountText(e, leftover);
-            int cntCol = leftover ? 0xFFF0B37A : (e.enough() ? 0xFFD8E8DC : 0xFFE0533B);
-            gfx.drawString(font, cnt, sx + 18, textY, cntCol, false);
-
-            int scrX = (int) Math.round(sx * treeZoom + treePanX);
-            int scrY = (int) Math.round(slotY * treeZoom + treePanY);
-            int scrS = Math.max(1, (int) Math.round(16 * treeZoom));
-            if (mouseX >= scrX && mouseX < scrX + scrS && mouseY >= scrY && mouseY < scrY + scrS) {
-                drawHoverBorder(gfx, sx, slotY, 16);
-                hoveredItemForTooltip = e.display();
-                hoveredTooltipX = mouseX;
-                hoveredTooltipY = mouseY;
-                PlanResponse.Availability a = plan.availability(e.key());
-                hoveredTooltipAvail = a != null ? a.available() : 0;
-                hoveredTooltipNeeded = e.count();
-                hoveredTooltipReference = false;
-            }
-            int hitLeft = Math.max(scrX, treeViewLeft);
-            int hitTop = Math.max(scrY, treeViewTop);
-            int hitRight = Math.min(scrX + scrS, treeViewRight);
-            int hitBottom = Math.min(scrY + scrS, treeViewBottom);
-            if (hitRight > hitLeft && hitBottom > hitTop) {
-                costHits.add(new CostHit(hitLeft, hitTop,
-                        hitRight - hitLeft, hitBottom - hitTop, e.key()));
-            }
-            sx += 18 + font.width(cnt) + 6;
-        }
-        if (paged) {
-            sx += STRIP_PAGE_BUTTON_GAP;
-            renderStripPageButton(gfx, font, sx, slotY, ">", safePage + 1 < pageCount,
-                    leftover ? StripRow.LEFTOVER : StripRow.TOTAL,
-                    1, mouseX, mouseY);
-            sx += STRIP_PAGE_BUTTON_W + STRIP_PAGE_BUTTON_GAP;
-            gfx.drawString(font, pageLabel, sx, textY, 0xFF9CB9A5, false);
-        }
-    }
-
-    private void renderStripPageButton(GuiGraphics gfx, Font font, int x, int y,
-                                       String label, boolean enabled, StripRow row,
-                                       int delta, int mouseX, int mouseY) {
-        int screenX = (int) Math.round(x * treeZoom + treePanX);
-        int screenY = (int) Math.round(y * treeZoom + treePanY);
-        int screenW = Math.max(1, (int) Math.round(STRIP_PAGE_BUTTON_W * treeZoom));
-        int screenH = Math.max(1, (int) Math.round(16 * treeZoom));
-        boolean hovered = enabled && mouseX >= screenX && mouseX < screenX + screenW
-                && mouseY >= screenY && mouseY < screenY + screenH;
-        int fill = !enabled ? 0xFF1C2A21 : hovered ? 0xFF4C8060 : 0xFF294936;
-        gfx.fill(x, y, x + STRIP_PAGE_BUTTON_W, y + 16, fill);
-        int textColor = enabled ? 0xFFD8E8DC : 0xFF607268;
-        gfx.drawString(font, label,
-                x + (STRIP_PAGE_BUTTON_W - font.width(label)) / 2,
-                y + (16 - font.lineHeight) / 2, textColor, false);
-        if (!enabled) return;
-
-        int hitLeft = Math.max(screenX, treeViewLeft);
-        int hitTop = Math.max(screenY, treeViewTop);
-        int hitRight = Math.min(screenX + screenW, treeViewRight);
-        int hitBottom = Math.min(screenY + screenH, treeViewBottom);
-        if (hitRight > hitLeft && hitBottom > hitTop) {
-            stripPageHits.add(new StripPageHit(hitLeft, hitTop,
-                    hitRight - hitLeft, hitBottom - hitTop, row, delta));
-        }
-    }
-
-    /** Total-demand entries show "have/need" (e.g. "3/128"); leftover entries show a single surplus count. */
+    /** 总需求先显示需求量再显示库存，余产物仅显示剩余量。 */
     private static String stripCountText(StripEntry e, boolean leftover) {
         return leftover
                 ? PlanRenderEngine.formatCompact(e.count())
-                : PlanRenderEngine.formatCompact(e.available()) + "/"
-                + PlanRenderEngine.formatCompact(e.count());
+                : PlanRenderEngine.formatCompact(e.count()) + "/"
+                + PlanRenderEngine.formatCompact(e.available());
     }
 
     /** Pan the camera so the node with this key sits at the viewport center. */
     private void centerOnKey(IngredientKey key) {
+        PlanTreeNode node = treeModel.findByKey(key);
+        if (node != null) navigateToNode(node);
+    }
+
+    /** 定位时展开祖先；不改变玩家选择的配方和材料。 */
+    private void navigateToNode(PlanTreeNode node) {
+        navigateToNode(node, false);
+    }
+
+    private void navigateToNode(PlanTreeNode node, boolean magnify) {
+        if (node == null) return;
+        showTreeInspector();
+        detailsPanel.locate(node);
+        dropdownNode = node;
+        layoutWorkspace();
+        updateTreeViewport();
+        if (revealNode(treeModel.root, node)) treeLayout.markDirty();
         treeLayout.ensureLayout(treeModel.root);
-        PlanTreeLayout.Box b = treeLayout.boxForKey(key);
+        PlanTreeLayout.Box b = treeLayout.boxFor(node);
         if (b == null) return;
+        int visualHeight = b.h() + (PlanTreeLayout.showsLabel(node) ? 0 : font.lineHeight + 3
+                + (node.step != null && node.step.modType() != null ? font.lineHeight + 6 : 0));
+        if (magnify) {
+            // 搜索结果至少放大到易读比例，小画布先保证完整卡片能够放下；已有更大缩放予以保留。
+            double fit = Math.min(Math.max(1, treeViewRight - treeViewLeft - 16) / (double) b.w(),
+                    Math.max(1, treeViewBottom - treeContentTop - 12) / (double) visualHeight);
+            treeZoom = Math.max(treeZoom, Math.min(1.5, fit));
+        }
         double viewCx = (treeViewLeft + treeViewRight) / 2.0;
-        double viewCy = (treeViewTop + treeViewBottom) / 2.0;
-        treePanX = viewCx - b.itemCenterX() * treeZoom;
-        treePanY = viewCy - (b.y() + PlanTreeLayout.NODE_HEIGHT / 2.0) * treeZoom;
+        double viewCy = (treeContentTop + treeViewBottom) / 2.0;
+        treePanX = viewCx - (magnify ? b.centerX() : b.connectorX()) * treeZoom;
+        treePanY = viewCy - (b.y() + (magnify ? visualHeight : b.h()) / 2.0) * treeZoom;
+        treeCameraInit = true;
+    }
+
+    private boolean revealNode(PlanTreeNode parent, PlanTreeNode target) {
+        List<PlanTreeNode> path = new ArrayList<>();
+        if (!findNodePath(parent, target, path)) return false;
+        boolean changed = false;
+        for (PlanTreeNode ancestor : path) {
+            if (ancestor != target && !ancestor.expanded) { ancestor.expanded = true; changed = true; }
+        }
+        return changed;
+    }
+
+    private boolean findNodePath(PlanTreeNode current, PlanTreeNode target, List<PlanTreeNode> path) {
+        path.add(current);
+        if (current == target) return true;
+        for (PlanTreeNode child : current.children) if (findNodePath(child, target, path)) return true;
+        path.remove(path.size() - 1);
+        return false;
+    }
+
+    private void fitTree() {
+        treeLayout.ensureLayout(treeModel.root);
+        double availableWidth = Math.max(1, treeViewRight - treeViewLeft - 28);
+        double availableHeight = Math.max(1, treeViewBottom - treeContentTop - 28);
+        treeZoom = Math.max(0.15, Math.min(1.0, Math.min(
+                availableWidth / Math.max(1, treeLayout.totalWidth()),
+                availableHeight / Math.max(1, treeLayout.totalHeight() + 24))));
+        treePanX = (treeViewLeft + treeViewRight - treeLayout.totalWidth() * treeZoom) / 2.0;
+        treePanY = treeContentTop + 12;
+        treeCameraInit = true;
     }
 
     /**
@@ -2653,20 +1707,13 @@ public final class CraftingPlanScreen extends Screen {
      * root recipe; intermediate switches go into the forced map keyed by item id.
      */
     private void selectTreeBranch(PlanTreeNode node, @Nullable ResourceLocation recipeId) {
-        selectTreeBranch(node, recipeId, recipeId != null);
-    }
-
-    private void selectTreeBranch(PlanTreeNode node, @Nullable ResourceLocation recipeId,
-                                  boolean persistPreference) {
-        closeRecipeCandidates();
         if (node == null || !RecipeCandidateRules.canSelect(node, recipeId)) return;
 
         ResourceLocation preferenceKey = CraftingResolver
                 .preferenceKey(node.key.stack(1));
         boolean isTarget = node.depth == 0;
         pendingCandidateSwitch = new PendingCandidateSwitch(
-                node.key, selectedPath.snapshotBranch(node.key), recipeId, preferenceKey,
-                persistPreference);
+                node.key, selectedPath.snapshotBranch(node.key), recipeCandidatePanel.draftPreferences());
         if (recipeId == null || isTarget) {
             // 根配方由请求 recipeId 表达，不能再作为中间材料约束带到确认包。
             selectedPath.clearBranch(node.key);
@@ -2689,22 +1736,23 @@ public final class CraftingPlanScreen extends Screen {
     }
 
     private void cancelStockOnly(PlanTreeNode node, ResourceLocation fallbackRecipe) {
-        selectTreeBranch(node, fallbackRecipe, false);
+        selectTreeBranch(node, fallbackRecipe);
     }
 
     private void recipeExclusionChanged(PlanTreeNode node) {
-        if (node == null || node.step == null) return;
+        if (node == null) return;
         ResourceLocation preferenceKey = CraftingResolver
                 .preferenceKey(node.key.stack(1));
+        ResourceLocation currentRecipe = node.step == null ? null : node.step.recipeId();
         pendingCandidateSwitch = new PendingCandidateSwitch(
                 node.key, selectedPath.snapshotBranch(node.key),
-                node.step.recipeId(), preferenceKey, false);
-        Set<String> excluded = CraftingPlanPreferences.load(PLAN_PREFS_PATH).excludedRecipes();
-        if (excluded.contains(node.step.recipeId().toString())) {
+                recipeCandidatePanel.draftPreferences());
+        Set<String> excluded = pendingCandidateSwitch.preferences().excludedRecipes();
+        if (currentRecipe != null && excluded.contains(currentRecipe.toString())) {
             selectedPath.clearBranch(node.key);
         }
         Map<String, String> forced = exportForcedSelections();
-        if (preferenceKey != null && excluded.contains(node.step.recipeId().toString())) {
+        if (preferenceKey != null && currentRecipe != null && excluded.contains(currentRecipe.toString())) {
             forced.remove(preferenceKey.toString());
         }
         sendCraftPacket(ResourceLocation.tryParse(plan.recipeId()), true, forced,
@@ -2712,40 +1760,45 @@ public final class CraftingPlanScreen extends Screen {
     }
 
     /** 配方切换响应重建树后，重新打开原节点的候选卡片，便于继续切换。 */
-    private void reopenPendingCandidates() {
-        PendingCandidateSwitch pending = pendingCandidateSwitch;
+    private void reopenPendingCandidates(List<Component> failure) {
+        previewFeedback = failure.stream().filter(message -> !message.getString().isBlank()).findFirst()
+                .orElse(workspaceText("recalculate_failed"));
+        previewFeedbackColor = Color.ERROR;
         pendingCandidateSwitch = null;
-        if (pending == null || treeModel == null) return;
-        PlanTreeNode node = treeModel.findByKey(pending.key());
-        if (node == null) return;
-        openRecipeCandidates(node);
+        pendingMaterialChoice = null;
+        if (detailsPanel != null) {
+            detailsPanel.update(plan, treeModel.root, displayWarnings(plan));
+            detailsPanel.showPreviewFailure(failure);
+            dropdownNode = detailsPanel.isOpen() ? detailsPanel.selectedNode() : null;
+        }
     }
 
     private void commitPendingCandidateSwitch() {
+        if (pendingMaterialChoice != null) pendingMaterialChoice.commit(PLAN_PREFS_PATH);
         PendingCandidateSwitch pending = pendingCandidateSwitch;
         if (pending == null) return;
-        if (pending.persistPreference()
-                && pending.requestedRecipe() != null && pending.preferenceKey() != null) {
-            String recipeId = pending.requestedRecipe().toString();
-            CraftingPlanPreferences.saveRecipeChoice(
-                    PLAN_PREFS_PATH, pending.preferenceKey().toString(), recipeId);
-            CraftingPlanPreferences.setExcluded(PLAN_PREFS_PATH, recipeId, false);
+        CraftingPlanPreferences.Snapshot stored = CraftingPlanPreferences.load(PLAN_PREFS_PATH);
+        CraftingPlanPreferences.Snapshot draft = pending.preferences();
+        if (CraftingPlanPreferences.save(PLAN_PREFS_PATH, new CraftingPlanPreferences.Snapshot(
+                stored.outputDestination(), draft.recipeChoices(), stored.ingredientChoices(), draft.excludedRecipes()))
+                && !stored.excludedRecipes().equals(draft.excludedRecipes())) {
+            ClientRecipeExclusions.invalidate();
         }
     }
 
     private void rollbackPendingCandidateSwitch() {
+        if (pendingMaterialChoice != null) pendingMaterialChoice.rollback(materialLocks);
         PendingCandidateSwitch pending = pendingCandidateSwitch;
         if (pending == null) return;
-        if (pending.requestedRecipe() == null) return;
         selectedPath.restoreBranch(pending.key(), pending.previous());
     }
 
     private void forgetRecipePreference(PlanTreeNode node) {
-        if (node == null || node.step == null) return;
+        if (node == null) return;
         ResourceLocation preferenceKey = CraftingResolver.preferenceKey(node.key.stack(1));
         pendingCandidateSwitch = new PendingCandidateSwitch(
                 node.key, selectedPath.snapshotBranch(node.key),
-                node.step.recipeId(), preferenceKey, false);
+                recipeCandidatePanel.draftPreferences());
         selectedPath.clearBranch(node.key);
         Map<String, String> forced = exportForcedSelections();
         if (preferenceKey != null) forced.remove(preferenceKey.toString());
@@ -2781,19 +1834,14 @@ public final class CraftingPlanScreen extends Screen {
     }
 
     private void openRecipeCandidates(PlanTreeNode node) {
-        node = candidateNodeFor(node);
+        materialView = false;
+        embersDetailsOpen = false;
+        if (workspaceSearch != null) workspaceSearch.setFocused(false);
         if (node == null) return;
-        if (node == dropdownNode) {
-            closeRecipeCandidates();
-            return;
-        }
-        closeMaterialDropdown();
         unfocusRepeatCountInput();
         setFocused(null);
         dropdownNode = node;
-        recipeCandidatePanel.open(node, plan.boundMachineTypes() == null ? Set.of() : plan.boundMachineTypes());
-        recipeCandidatePanel.setPlanDiagnostics(
-                MissingMaterialBookmarkList.textEntries(plan), displayWarnings(plan));
+        detailsPanel.open(node);
         resetHoverIntent();
     }
 
@@ -2812,6 +1860,9 @@ public final class CraftingPlanScreen extends Screen {
                 node.key, node.displayStack, node.amount, node.depth,
                 retained, node.graphNodeId, node.demandRole);
         candidateNode.productionAmount = node.productionAmount;
+        candidateNode.available = node.available;
+        candidateNode.needed = node.needed;
+        candidateNode.missingCount = node.missingCount;
         candidateNode.cycle = node.cycle;
         candidateNode.limited = node.limited;
         candidateNode.lockedMaterial = node.lockedMaterial;
@@ -2829,161 +1880,22 @@ public final class CraftingPlanScreen extends Screen {
                 && CraftingResolver.preferenceKey(node.key.stack(1)) != null;
     }
 
-    /** 底部缺料/警告摘要统一作为诊断入口。 */
-    private void openPlanDiagnostics() {
-        if (treeModel == null || treeModel.root == null || recipeCandidatePanel == null) return;
-        closeMaterialDropdown();
-        unfocusRepeatCountInput();
-        setFocused(null);
-        dropdownNode = treeModel.root;
-        recipeCandidatePanel.open(treeModel.root,
-                plan.boundMachineTypes() == null ? Set.of() : plan.boundMachineTypes());
-        recipeCandidatePanel.setPlanDiagnostics(
-                MissingMaterialBookmarkList.textEntries(plan), displayWarnings(plan));
-        recipeCandidatePanel.showDiagnostics();
-        resetHoverIntent();
-    }
-
-    private void closeRecipeCandidates() {
-        dropdownNode = null;
-        if (recipeCandidatePanel != null) recipeCandidatePanel.close();
-    }
-
     private void renderRecipeCandidates(GuiGraphics graphics, int mouseX, int mouseY) {
-        if (dropdownNode == null || recipeCandidatePanel == null) return;
-        recipeCandidatePanel.render(graphics, mouseX, mouseY);
-        if (recipeCandidatePanel.contains(mouseX, mouseY)) {
+        if (detailsPanel == null || !detailsPanel.isOpen()) return;
+        detailsPanel.render(graphics, mouseX, mouseY);
+        if (detailsPanel.contains(mouseX, mouseY)) {
             hoveredItemForTooltip = ItemStack.EMPTY;
             hoveredStepWarnings = List.of();
             hoveredBookmark = null;
         }
     }
 
-    private void renderMaterialDropdown(GuiGraphics gfx, Font font, int mouseX, int mouseY) {
-        materialDropHits.clear();
-        PlanTreeNode node = materialDropdownNode;
-        if (node == null || node.materialLockKey == null || node.materialOptions.size() <= 1) {
-            hideMaterialSearchInput();
-            return;
-        }
-        PlanTreeLayout.Box box = treeLayout.boxFor(node);
-        if (box == null) {
-            closeMaterialDropdown();
-            return;
-        }
-
-        int rowH = 20;
-        int searchAreaH = 24;
-        List<ItemStack> options = filteredMaterialOptions(node);
-        int topLimit = Math.max(4, treeViewTop + 4);
-        int bottomLimit = Math.min(height - 4, treeViewBottom - 4);
-        int rowCapacity = Math.max(2, (bottomLimit - topLimit - searchAreaH - 2) / rowH);
-        int maxVisibleOptions = Math.min(options.size(), rowCapacity - 1);
-        materialDropdownScroll = Math.max(0,
-                Math.min(materialDropdownScroll, Math.max(0, options.size() - maxVisibleOptions)));
-        int panelW = Math.min(190, Math.max(120, width - 16));
-        int sx = Math.max(4, width - panelW - 8);
-        int sy = (int) Math.round(box.y() * treeZoom + treePanY);
-        int panelH = searchAreaH + (1 + maxVisibleOptions) * rowH + 2;
-        sy = Math.max(topLimit, Math.min(sy, Math.max(topLimit, bottomLimit - panelH)));
-        materialPanelX = sx;
-        materialPanelY = sy;
-        materialPanelW = panelW;
-        materialPanelH = panelH;
-
-        gfx.fill(sx, sy, sx + panelW, sy + panelH, 0xF00A140E);
-        gfx.fill(sx, sy, sx + panelW, sy + 1, 0xFF55D080);
-        gfx.fill(sx + 4, sy + 3, sx + panelW - 4, sy + searchAreaH - 3, 0xFF15231A);
-        String forgetLabel = I18n.get("rsi.plan.material.forget");
-        boolean canForget = preferredMaterials.containsKey(node.materialLockKey)
-                || materialLocks.containsKey(node.materialLockKey);
-        materialForgetW = canForget ? font.width(forgetLabel) + 10 : 0;
-        materialForgetH = 16;
-        materialForgetX = sx + panelW - materialForgetW - 5;
-        materialForgetY = sy + 4;
-        if (canForget) {
-            boolean hover = mouseX >= materialForgetX
-                    && mouseX < materialForgetX + materialForgetW
-                    && mouseY >= materialForgetY
-                    && mouseY < materialForgetY + materialForgetH;
-            gfx.fill(materialForgetX, materialForgetY,
-                    materialForgetX + materialForgetW,
-                    materialForgetY + materialForgetH,
-                    hover ? 0xFF355D45 : 0xFF223D2D);
-            gfx.drawString(font, forgetLabel, materialForgetX + 5,
-                    materialForgetY + 4, hover ? 0xFFFFFFFF : 0xFFB9D7C3, false);
-        }
-
-        int firstRowY = sy + searchAreaH;
-        renderMaterialOption(gfx, font, mouseX, mouseY, node, ItemStack.EMPTY,
-                sx, firstRowY, panelW, rowH);
-        for (int visible = 0; visible < maxVisibleOptions; visible++) {
-            ItemStack option = options.get(materialDropdownScroll + visible);
-            int ry = firstRowY + (visible + 1) * rowH;
-            renderMaterialOption(gfx, font, mouseX, mouseY, node, option,
-                    sx, ry, panelW, rowH);
-        }
-
-        if (materialSearchBox != null) {
-            materialSearchBox.setPosition(sx + 7, sy + 5);
-            materialSearchBox.setWidth(Math.max(1,
-                    panelW - 14 - (canForget ? materialForgetW + 4 : 0)));
-            materialSearchBox.visible = true;
-            materialSearchBox.active = true;
-            materialSearchBox.render(gfx, mouseX, mouseY, 0f);
-        }
-    }
-
-    private void renderMaterialOption(GuiGraphics gfx, Font font, int mouseX, int mouseY,
-                                      PlanTreeNode node, ItemStack option,
-                                      int sx, int ry, int panelW, int rowH) {
-        boolean hovered = mouseX >= sx && mouseX < sx + panelW
-                && mouseY >= ry && mouseY < ry + rowH;
-        if (hovered) gfx.fill(sx, ry, sx + panelW, ry + rowH, 0x33FFFFFF);
-
-        boolean selected = option.isEmpty()
-                ? node.lockedMaterial == null
-                : node.lockedMaterial != null
-                && ItemStack.isSameItemSameTags(node.lockedMaterial, option);
-        if (!option.isEmpty()) InkFluidRenderer.render(gfx, option, sx + 2, ry + 2);
-        String label = option.isEmpty()
-                ? I18n.get("rsi.plan.material.auto") : option.getHoverName().getString();
-        int textX = option.isEmpty() ? sx + 6 : sx + 22;
-        gfx.drawString(font, font.plainSubstrByWidth(label, panelW - (textX - sx) - 5),
-                textX, ry + (rowH - font.lineHeight) / 2,
-                selected ? C_GREEN : 0xFFDDDDDD, false);
-        materialDropHits.add(new MaterialDropHit(sx, ry, panelW, rowH, option));
-    }
-
-    private List<ItemStack> filteredMaterialOptions(PlanTreeNode node) {
-        String query = materialSearchBox == null ? "" : materialSearchBox.getValue();
-        if (query == null || query.isBlank()) return node.materialOptions;
-        List<ItemStack> filtered = new ArrayList<>();
-        for (ItemStack option : node.materialOptions) {
-            ResourceLocation key = BuiltInRegistries.ITEM.getKey(option.getItem());
-            if (MaterialSearchMatcher.matches(option.getHoverName().getString(),
-                    key == null ? "" : key.toString(), query)) {
-                filtered.add(option);
-            }
-        }
-        return filtered;
-    }
-
     private void selectMaterial(PlanTreeNode node, ItemStack option) {
-        if (node.materialLockKey == null) return;
-        if (option.isEmpty()) {
-            materialLocks.remove(node.materialLockKey);
-            preferredMaterials.remove(node.materialLockKey);
-            CraftingPlanPreferences.saveIngredientChoice(
-                    PLAN_PREFS_PATH, node.materialLockKey, null);
-        } else {
-            materialLocks.put(node.materialLockKey, option.copyWithCount(1));
-            preferredMaterials.put(node.materialLockKey, option.copyWithCount(1));
-            CraftingPlanPreferences.saveIngredientChoice(
-                    PLAN_PREFS_PATH, node.materialLockKey, option);
-        }
-        closeMaterialDropdown();
+        if (node.materialLockKey == null || responseRequests.calculating()) return;
         ResourceLocation rootRecipe = ResourceLocation.tryParse(plan.recipeId());
+        if (rootRecipe == null) return;
+        pendingMaterialChoice = new PendingMaterialChoice(materialLocks, node.materialLockKey, option);
+        detailsPanel.expectMaterial(option);
         sendCraftPacket(rootRecipe, true, exportForcedSelections(), currentRepeat, false);
     }
 
@@ -3000,139 +1912,30 @@ public final class CraftingPlanScreen extends Screen {
         return merged;
     }
 
-    private void openMaterialDropdown(PlanTreeNode node) {
-        if (node == materialDropdownNode) {
-            closeMaterialDropdown();
-            return;
-        }
-        unfocusRepeatCountInput();
-        materialDropdownNode = node;
-        materialDropdownScroll = 0;
-        closeRecipeCandidates();
-        if (materialSearchBox != null) {
-            materialSearchBox.visible = true;
-            materialSearchBox.active = true;
-            materialSearchBox.setValue("");
-            materialSearchBox.setFocused(true);
-            setFocused(materialSearchBox);
-        }
-    }
-
-    private void closeMaterialDropdown() {
-        materialDropdownNode = null;
-        materialDropdownScroll = 0;
-        materialDropHits.clear();
-        materialPanelW = 0;
-        materialPanelH = 0;
-        materialForgetW = 0;
-        materialForgetH = 0;
-        hideMaterialSearchInput();
-    }
-
-    private void hideMaterialSearchInput() {
-        if (materialSearchBox == null) return;
-        boolean focused = materialSearchBox.isFocused();
-        materialSearchBox.visible = false;
-        materialSearchBox.active = false;
-        materialSearchBox.setFocused(false);
-        if (focused) setFocused(null);
-    }
-
     /** 侧栏开关或视图变化时，按主内容实际宽度重新排材料和缺料提示。 */
-    private void layoutContentSections(Font font, int contentWidth) {
-        if (contentLayoutWidth == contentWidth && contentLayoutMode == viewMode
-                && contentLayoutMissingExpanded == missingExpanded) return;
-        contentLayoutWidth = contentWidth;
-        contentLayoutMode = viewMode;
-        contentLayoutMissingExpanded = missingExpanded;
-        var missingEntries = MissingMaterialBookmarkList.textEntries(plan);
-        int warningCount = displayWarnings(plan).size();
-        boolean machineCandidates = plan.machineCandidates() != null && !plan.machineCandidates().isEmpty();
-        if (!missingEntries.isEmpty() || warningCount > 0 || machineCandidates) {
-            List<String> summaryParts = new ArrayList<>();
-            if (!missingEntries.isEmpty()) {
-                summaryParts.add(Component.translatable(
-                        "rsi.plan.missing_summary", missingEntries.size()).getString());
-            }
-            if (warningCount > 0) {
-                summaryParts.add(Component.translatable(
-                        "rsi.plan.warning_summary", warningCount).getString());
-            }
-            if (machineCandidates) {
-                summaryParts.add(Component.translatable(
-                        "rsi.plan.machine_summary", plan.machineCandidates().size()).getString());
-            }
-            missingSummaryText = String.join(" · ", summaryParts);
-            missingSummaryHasMissing = !missingEntries.isEmpty();
-            // 摘要并入重复数量卡片，不再单独占用一行；详情统一进入诊断页。
-            missingExpanded = false;
-            contentLayoutMissingExpanded = false;
-            missingAreaHeight = 0;
-            missingFullHeight = 0;
-            missingHeaderHeight = 0;
-            missingMaxScroll = 0;
-            missingScroll = 0;
-            missingBar.active = false;
-        } else {
-            missingSummaryText = "";
-            missingSummaryHasMissing = false;
-            missingAreaHeight = missingMaxScroll = missingScroll = 0;
-            missingFullHeight = 0;
-            missingHeaderHeight = 0;
-            missingToggleW = missingToggleH = 0;
-            missingBar.active = false;
-            missingExpanded = false;
-            contentLayoutMissingExpanded = false;
-        }
-        int countWidth = font.width("0/0");
-        for (var material : plan.materials().values()) {
-            countWidth = Math.max(countWidth, font.width(material.available() + "/" + material.needed()));
-        }
-        int columns = Math.max(1, contentWidth / (SLOT_SIZE + countWidth + 14));
-        int maxRows = MATERIAL_MAX_ROWS;
-        int rows = Math.min(maxRows, (plan.materials().size() + columns - 1) / columns);
-        materialAreaHeight = plan.materials().isEmpty() ? 0 : font.lineHeight + 6 + rows * (SLOT_SIZE + 8) + 12;
-    }
-
-    /**
-     * Recompute the bottom region stack (embers → missing → material panel → repeat row).
-     * The material panel is card-view only (design doc §4.4); in tree view its band collapses
-     * to zero so the tree reclaims the space and everything above shifts down accordingly.
-     */
-    private void layoutBottomStack() {
-        int repeatAreaH = 38;
-        // Leave separate rows for preparation mode and output destination.
-        repeatRowY = height - (externalRequest == null ? 75 : 32) - repeatAreaH;
-        int effMaterialH = (viewMode == ViewMode.CARD) ? materialAreaHeight : 0;
-        materialAreaTop = repeatRowY - effMaterialH;
-        missingAreaTop = materialAreaTop - missingAreaHeight;
-        int stackTop = missingAreaHeight > 0 ? missingAreaTop : materialAreaTop;
-        embersPedestalY = embersPedestalH > 0 ? stackTop - embersPedestalH : stackTop;
-        embersModeY = embersPedestalY + embersCardsH;
-    }
 
     /** Center the root near the top-center of the viewport (leaving room for the strip) and reset zoom. */
     private void centerCamera() {
         treeLayout.ensureLayout(treeModel.root);
         PlanTreeLayout.Box rootBox = treeLayout.boxFor(treeModel.root);
-        int rootCenter = rootBox != null ? rootBox.itemCenterX() : treeLayout.totalWidth() / 2;
+        int rootCenter = rootBox != null ? rootBox.connectorX() : treeLayout.totalWidth() / 2;
         double viewW = treeViewRight - treeViewLeft;
-        treeZoom = 1.0;
+        double fitWidth = (viewW - 24) / Math.max(1, treeLayout.totalWidth());
+        double fitHeight = (treeViewBottom - treeContentTop - 24.0) / Math.max(1, treeLayout.totalHeight() + 14);
+        treeZoom = Math.max(0.6, Math.min(1.0, Math.min(fitWidth, fitHeight)));
         treePanX = treeViewLeft + viewW / 2 - rootCenter * treeZoom;
-        int rows = stripRowCount();
-        double reserved = rows > 0 ? rows * STRIP_ROW_H + STRIP_GAP : 0;
-        treePanY = treeViewTop + 12 + reserved;
+        treePanY = treeContentTop + 12;
         treeCameraInit = true;
     }
 
     private boolean inTreeViewport(double sx, double sy) {
-        return sx >= treeViewLeft && sx < treeViewRight
+        return !materialView && !embersDetailsOpen && sx >= treeViewLeft && sx < treeViewRight
                 && sy >= treeViewTop && sy < treeViewBottom;
     }
 
     /** Node under a screen point via the single screenToTree inverse transform, or null. */
     private PlanTreeNode nodeAt(double sx, double sy) {
-        if (viewMode != ViewMode.TREE || !inTreeViewport(sx, sy)) return null;
+        if (!inTreeViewport(sx, sy) || sy < treeContentTop) return null;
         int lx = (int) Math.round((sx - treePanX) / treeZoom);
         int ly = (int) Math.round((sy - treePanY) / treeZoom);
         PlanTreeLayout.Box box = treeLayout.hitTest(lx, ly);
@@ -3170,7 +1973,7 @@ public final class CraftingPlanScreen extends Screen {
 
     /** Node whose left-edge [+]/[−] fold indicator is under a screen point, or null. */
     private PlanTreeNode foldIndicatorAt(double sx, double sy) {
-        if (viewMode != ViewMode.TREE || !inTreeViewport(sx, sy)) return null;
+        if (!inTreeViewport(sx, sy) || sy < treeContentTop) return null;
         int lx = (int) Math.round((sx - treePanX) / treeZoom);
         int ly = (int) Math.round((sy - treePanY) / treeZoom);
         for (PlanTreeLayout.Box b : treeLayout.boxes()) {
@@ -3183,53 +1986,27 @@ public final class CraftingPlanScreen extends Screen {
         return null;
     }
 
-    private boolean overMaterialDropdown(double mouseX, double mouseY) {
-        return materialDropdownNode != null && materialPanelW > 0
-                && mouseX >= materialPanelX && mouseX < materialPanelX + materialPanelW
-                && mouseY >= materialPanelY && mouseY < materialPanelY + materialPanelH;
-    }
-
-    @Nullable
-    private MachineCandidateHit machineCandidateAt(double mouseX, double mouseY) {
-        if (!machineDropdownOpen) return null;
-        for (MachineCandidateHit hit : machineCandidateHits) {
-            if (mouseX >= hit.x() && mouseX < hit.x() + hit.w()
-                    && mouseY >= hit.y() && mouseY < hit.y() + hit.h()) {
-                return hit;
-            }
-        }
-        return null;
-    }
-
     @Nullable
     private PlanTreeNode gestureNodeAt(double mouseX, double mouseY) {
-        if (recipeCandidatePanel != null && recipeCandidatePanel.contains(mouseX, mouseY)
-                || overMaterialDropdown(mouseX, mouseY)
-                || machineCandidateAt(mouseX, mouseY) != null) return null;
+        if (detailsPanel != null && detailsPanel.contains(mouseX, mouseY)
+) return null;
         return nodeAt(mouseX, mouseY);
     }
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
-        if (recipeCandidatePanel != null && recipeCandidatePanel.mouseScrolled(mouseX, mouseY, delta)) return true;
-        if (machineCandidateAt(mouseX, mouseY) != null) return true;
-        if (missingExpanded && missingMaxScroll > 0
-                && mouseY >= missingAreaTop && mouseY < missingAreaTop + missingAreaHeight) {
-            missingScroll = Math.max(0, Math.min(missingMaxScroll,
-                    missingScroll - (int) delta * 10));
-            return true;
+        if (!materialView && !embersDetailsOpen && workspaceSearch != null && workspaceSearch.isFocused()
+                && treeSearch.scroll(mouseX, mouseY, delta)) return true;
+        if (workspace != null && workspace.content().contains(mouseX, mouseY)) {
+            if (materialView) { materialTable.scroll(delta); return true; }
+            if (embersDetailsOpen) { embersScroll -= (int) (delta * 24); return true; }
         }
-        if (overMaterialDropdown(mouseX, mouseY)) {
-            int total = filteredMaterialOptions(materialDropdownNode).size();
-            int maxVisible = Math.max(1, materialDropHits.size() - 1);
-            materialDropdownScroll = Math.max(0, Math.min(Math.max(0, total - maxVisible),
-                    materialDropdownScroll - (delta > 0 ? 1 : -1)));
-            return true;
-        }
-        if (viewMode == ViewMode.TREE && inTreeViewport(mouseX, mouseY)) {
+        if (!materialView && !embersDetailsOpen && detailsPanel != null && detailsPanel.mouseScrolled(mouseX, mouseY, delta)) return true;
+
+        if (inTreeViewport(mouseX, mouseY)) {
             if (hasControlDown()) {
                 double factor = delta > 0 ? 1.1 : 1 / 1.1;
-                double newZoom = Math.max(0.5, Math.min(2.5, treeZoom * factor));
+                double newZoom = Math.max(0.15, Math.min(2.5, treeZoom * factor));
                 // Keep the point under the cursor fixed while zooming.
                 double lx = (mouseX - treePanX) / treeZoom;
                 double ly = (mouseY - treePanY) / treeZoom;
@@ -3241,127 +2018,70 @@ public final class CraftingPlanScreen extends Screen {
             treePanY += delta * 20;
             return true;
         }
-        // Material grid scroll — card view only (the panel is hidden in tree view).
-        if (viewMode == ViewMode.CARD && materialAreaHeight > 0 && materialMaxScroll > 0
-                && mouseX >= 20 && mouseX <= width - 20
-                && mouseY >= materialAreaTop && mouseY <= materialAreaTop + materialAreaHeight) {
-            materialScroll = Math.max(0, Math.min(materialMaxScroll,
-                    materialScroll - (int) delta * (SLOT_SIZE + 8)));
-            return true;
-        }
-        scrollOffset = Math.max(0, Math.min(maxScroll, scrollOffset - (int) delta * 10));
+
         return true;
     }
 
     @Override
     public boolean mouseDragged(double mx, double my, int button, double dx, double dy) {
-        if (viewMode == ViewMode.TREE && treeMouseGesture.captures(button)) {
+        if (!materialView && !embersDetailsOpen && miniMap.drag(mx, my, this::centerMiniMap)) return true;
+        if (treeMouseGesture.captures(button)) {
             PlanTreeMouseGesture.PanDelta movement = treeMouseGesture.drag(mx, my, button);
             treePanX += movement.deltaX();
             treePanY += movement.deltaY();
             return true;
         }
         // Scrollbar thumb drag takes precedence — map the cursor to a scroll offset.
-        if (draggingBar != null) {
-            int s = draggingBar.scrollForThumbTop((int) my - scrollbarGrabDy);
-            if (draggingBar == cardBar) scrollOffset = s;
-            else if (draggingBar == materialBar) materialScroll = s;
-            else if (draggingBar == missingBar) missingScroll = s;
-            return true;
-        }
-        if (recipeCandidatePanel != null && (recipeCandidatePanel.contains(mx, my)
-                || recipeCandidatePanel.contains(mx - dx, my - dy))) return true;
-        if (dragging) {
-            scrollOffset = Math.max(0, Math.min(maxScroll, scrollOffset - (int) dy));
-        }
+
+        if (detailsPanel != null && (detailsPanel.contains(mx, my)
+                || detailsPanel.contains(mx - dx, my - dy))) return true;
+
         return true;
     }
 
     @Override
     public boolean mouseClicked(double mx, double my, int button) {
         treeMouseGesture.cancel();
-        dragging = false;
-        draggingBar = null;
-        if (recipeCandidatePanel != null && recipeCandidatePanel.mouseClicked(mx, my, button)) {
-            if (!recipeCandidatePanel.isOpen()) dropdownNode = null;
+        if (treeSearch != null) {
+            if (!materialView && !embersDetailsOpen && workspaceSearch.isFocused()
+                    && treeSearch.click(mx, my, button)) return true;
+            treeSearch.close();
+        }
+        if (button == 0 && workspaceSearchBounds != null && workspaceSearchBounds.contains(mx, my)) {
+            workspaceSearch.mouseClicked(mx, my, button);
+            workspaceSearch.setFocused(true);
+            quantityMenuOpen = false;
+            unfocusRepeatCountInput();
+            detailsPanel.releaseFocus();
+            if (!materialView && !embersDetailsOpen) treeSearch.show();
             return true;
         }
-        if (button == 0 && materialDropdownNode == null
-                && missingToggleW > 0
-                && mx >= missingToggleX && mx < missingToggleX + missingToggleW
-                && my >= missingToggleY && my < missingToggleY + missingToggleH) {
-            missingExpanded = false;
-            missingScroll = 0;
-            openPlanDiagnostics();
+        if (workspaceSearch != null) workspaceSearch.setFocused(false);
+        boolean inspectorHit = !materialView && !embersDetailsOpen && detailsPanel != null && detailsPanel.contains(mx, my);
+        if (chrome != null && (!inspectorHit || quantityMenuOpen && workspace != null
+                && new Rect(workspace.footer().x(), workspace.footer().y() - 51, 164, 48).contains(mx, my))
+                && chrome.click(mx, my, button)) return true;
+        if (inspectorHit) {
+            workspaceSearch.setFocused(false);
+            unfocusRepeatCountInput();
+            detailsPanel.mouseClicked(mx, my, button);
+            if (!detailsPanel.isOpen()) dropdownNode = null;
             return true;
         }
-        if (button == 0 && dropdownNode != null
-                && (viewMode != ViewMode.TREE || nodeAt(mx, my) != dropdownNode)) {
-            closeRecipeCandidates();
+        quantityMenuOpen = false;
+        if (workspaceSearch != null) {
+            boolean searching = workspaceSearch.mouseClicked(mx, my, button);
+            workspaceSearch.setFocused(searching);
+            if (searching) { unfocusRepeatCountInput(); detailsPanel.releaseFocus(); return true; }
         }
-        if (overMaterialDropdown(mx, my)) {
-            if (button == 0 && materialForgetW > 0
-                    && mx >= materialForgetX && mx < materialForgetX + materialForgetW
-                    && my >= materialForgetY && my < materialForgetY + materialForgetH) {
-                selectMaterial(materialDropdownNode, ItemStack.EMPTY);
-                return true;
-            }
-            if (button == 0 && materialSearchBox != null
-                    && mx >= materialSearchBox.getX()
-                    && mx < materialSearchBox.getX() + materialSearchBox.getWidth()
-                    && my >= materialSearchBox.getY()
-                    && my < materialSearchBox.getY() + materialSearchBox.getHeight()) {
-                materialSearchBox.mouseClicked(mx, my, button);
-                materialSearchBox.setFocused(true);
-                setFocused(materialSearchBox);
-                return true;
-            }
-            if (button == 0) {
-                for (MaterialDropHit hit : materialDropHits) {
-                    if (mx >= hit.x() && mx < hit.x() + hit.w()
-                            && my >= hit.y() && my < hit.y() + hit.h()) {
-                        selectMaterial(materialDropdownNode, hit.option());
-                        return true;
-                    }
-                }
-            }
+        if (materialView && materialTable.click(mx, my, button)) return true;
+        if (!materialView && !embersDetailsOpen && miniMap.click(mx, my, button, this::centerMiniMap)) return true;
+        if (!materialView && !embersDetailsOpen && detailsPanel != null && detailsPanel.mouseClicked(mx, my, button)) {
+            if (!detailsPanel.isOpen()) dropdownNode = null;
             return true;
         }
-        MachineCandidateHit machineHit = machineCandidateAt(mx, my);
-        if (machineHit != null) {
-            if (button == 0) {
-                selectedMachineIndex = machineHit.index();
-                cancelQueuedConfirmation();
-                if (machineSelectionMode == MachineSelectionMode.AUTO) {
-                    machineSelectionMode = MachineSelectionMode.PREFERRED;
-                }
-                machineDropdownOpen = false;
-            }
-            return true;
-        }
+
         if (button == 0) {
-            if (!plan.machineCandidates().isEmpty()
-                    && mx >= machineModeX && mx < machineModeX + 3 * (machineModeW + 3)
-                    && my >= machineModeY && my < machineModeY + machineModeH) {
-                int index = (int) ((mx - machineModeX) / (machineModeW + 3));
-                if (index >= 0 && index < 3) {
-                    machineSelectionMode = MachineSelectionMode.values()[index];
-                    cancelQueuedConfirmation();
-                    if (machineSelectionMode != MachineSelectionMode.AUTO
-                            && selectedMachineIndex < 0) {
-                        selectedMachineIndex = plan.machineCandidates().stream()
-                                .filter(c -> c.state() == MachineCandidateView.State.READY)
-                                .findFirst().map(c -> plan.machineCandidates().indexOf(c)).orElse(-1);
-                    }
-                    return true;
-                }
-            }
-            if (!plan.machineCandidates().isEmpty()
-                    && mx >= machineCandidateX && mx < machineCandidateX + machineCandidateW
-                    && my >= machineCandidateY && my < machineCandidateY + machineCandidateH) {
-                machineDropdownOpen = !machineDropdownOpen;
-                return true;
-            }
             boolean overRepeatInput = mx >= countPillX && mx < countPillX + countPillW
                     && my >= countPillY && my < countPillY + countPillH;
             if (!overRepeatInput) unfocusRepeatCountInput();
@@ -3416,36 +2136,9 @@ public final class CraftingPlanScreen extends Screen {
                         ? OutputDestination.PLAYER_INVENTORY : OutputDestination.RS_NETWORK);
             }
             return true;
-        }        // Scrollbar thumbs first (both view modes) — grab the thumb, or click the track to jump.
-        if (button == 0) {
-            for (ScrollbarUI bar : new ScrollbarUI[]{cardBar, materialBar, missingBar}) {
-                if (bar.overThumb(mx, my)) {
-                    draggingBar = bar;
-                    scrollbarGrabDy = (int) my - bar.thumbY;
-                    return true;
-                }
-                if (bar.overTrack(mx, my)) {
-                    draggingBar = bar;
-                    scrollbarGrabDy = bar.thumbH / 2; // center the thumb under the cursor
-                    int s = bar.scrollForThumbTop((int) my - scrollbarGrabDy);
-                    if (bar == cardBar) scrollOffset = s; else if (bar == materialBar) materialScroll = s; else missingScroll = s;
-                    return true;
-                }
-            }
         }
-        if (viewMode == ViewMode.TREE) {
-            if (handleStripPageClick(mx, my, button)) return true;
-            // Expand/Collapse-all toolbar button (top-right of the viewport).
-            if (treeFoldAllHitW > 0
-                    && mx >= treeFoldAllHitX && mx < treeFoldAllHitX + treeFoldAllHitW
-                    && my >= treeFoldAllHitY && my < treeFoldAllHitY + treeFoldAllHitH) {
-                if (button == 0) {
-                    setAllExpanded(treeModel.root, !treeAllExpanded(treeModel.root));
-                    treeLayout.markDirty();
-                }
-                return true;
-            }
-            for (CostHit hit : costHits) {
+        if (treeModel != null) {
+                for (CostHit hit : costHits) {
                 if (mx >= hit.x() && mx < hit.x() + hit.w()
                         && my >= hit.y() && my < hit.y() + hit.h()) {
                     if (button == 0) centerOnKey(hit.key());
@@ -3461,66 +2154,18 @@ public final class CraftingPlanScreen extends Screen {
                 if (treeMouseGesture.begin(mx, my, button, nodeAt(mx, my))) return true;
                 if (button == 0) {
                     PlanTreeNode node = nodeAt(mx, my);
-                    if (node != null && node.materialLockKey != null
-                            && node.materialOptions.size() > 1) {
-                        openMaterialDropdown(node);
-                    } else if (node != null && canConfigureRecipeBranch(node)) {
-                        // 单一配方也打开卡片集合，保证“仅使用库存”和偏好操作可见。
+                    if (node != null) {
                         openRecipeCandidates(node);
-                    } else {
-                        closeMaterialDropdown();
                     }
                 }
-                // Consume in-viewport clicks so card-mode drag/scroll logic doesn't fire.
+                // 画布点击在这里结束，避免交给底部控件。
                 return true;
             }
-            // Clicked elsewhere → dismiss any open dropdown.
-            closeRecipeCandidates();
-            closeMaterialDropdown();
         }
-        // Card-view fold toggle hitboxes (active in card mode).
-        if (button == 0 && viewMode == ViewMode.CARD) {
-            // [Expand All] / [Collapse All] button.
-            if (foldAllHitW > 0 && mx >= foldAllHitX && mx < foldAllHitX + foldAllHitW
-                    && my >= foldAllHitY && my < foldAllHitY + foldAllHitH) {
-                boolean allFolded = plan.steps().stream()
-                        .allMatch(s -> isStepCollapsed(s.recipeId().toString(), s.depth()));
-                for (PlanStep s : plan.steps()) {
-                    collapsedSteps.put(s.recipeId().toString(), !allFolded);
-                }
-                return true;
-            }
-            // Individual step fold toggle — any card chevron or collapsed row.
-            for (FoldHit fh : foldHits) {
-                if (mx >= fh.x() && mx < fh.x() + fh.w()
-                        && my >= fh.y() && my < fh.y() + fh.h()) {
-                    toggleStepCollapsed(fh.stepId(), fh.depth());
-                    return true;
-                }
-            }
-        }
+
         if (button == 0) {
-            // Repeat row quick-set buttons.
-            for (int i = 0; i < repeatBtnX.length; i++) {
-                if (mx >= repeatBtnX[i] && mx <= repeatBtnX[i] + repeatBtnW[i]
-                        && my >= repeatBtnY[i] && my <= repeatBtnY[i] + repeatBtnH[i]) {
-                    int requested = currentRepeat;
-                    switch (i) {
-                        case 0: requested = 1; break;
-                        case 1: requested = Math.max(1, currentRepeat - 10); break;
-                        case 2: requested = Math.max(1, currentRepeat - 5); break;
-                        case 3: requested = Math.max(1, currentRepeat - 1); break;
-                        case 4: requested = clampRepeatCount(currentRepeat + 1L); break;
-                        case 5: requested = clampRepeatCount(currentRepeat + 5L); break;
-                        case 6: requested = clampRepeatCount(currentRepeat + 10L); break;
-                        case 7: requested = clampRepeatCount(currentRepeat + 64L); break;
-                    }
-                    setRepeatCount(requested, true);
-                    return true;
-                }
-            }
             // Embers mode toggle: Calculate
-            if (showEmbersModeToggle
+            if (embersDetailsOpen && showEmbersModeToggle
                     && mx >= embersModeCalcX && mx <= embersModeCalcX + embersModeCalcW
                     && my >= embersModeCalcY && my <= embersModeCalcY + embersModeCalcH) {
                 embersInferMode = false;
@@ -3528,52 +2173,20 @@ public final class CraftingPlanScreen extends Screen {
                 return true;
             }
             // Embers mode toggle: Infer
-            if (showEmbersModeToggle
+            if (embersDetailsOpen && showEmbersModeToggle
                     && mx >= embersModeInferX && mx <= embersModeInferX + embersModeInferW
                     && my >= embersModeInferY && my <= embersModeInferY + embersModeInferH) {
                 embersInferMode = true;
                 cancelQueuedConfirmation();
                 return true;
             }
-            if (my >= stepsTop) {
-                for (ORHitbox hb : orHitboxes) {
-                    if (mx >= hb.x && mx <= hb.x + hb.w
-                            && my >= hb.y && my <= hb.y + hb.h) {
-                        PlanTreeNode node = findCandidateNode(treeModel.root, hb.selectionKey);
-                        if (node != null) openRecipeCandidates(node);
-                        return true;
-                    }
-                }
-            }
-            dragging = true;
         }
         return super.mouseClicked(mx, my, button);
     }
 
-    private boolean handleStripPageClick(double mx, double my, int button) {
-        for (StripPageHit hit : stripPageHits) {
-            if (mx < hit.x() || mx >= hit.x() + hit.w()
-                    || my < hit.y() || my >= hit.y() + hit.h()) {
-                continue;
-            }
-            if (button != 0) return true;
-            if (hit.row() == StripRow.TOTAL) {
-                totalStripPage = MaterialStripPaging.movePage(
-                        totalStripPage, hit.delta(), cachedTotalStrip.size(), STRIP_PAGE_SIZE);
-            } else {
-                leftoverStripPage = MaterialStripPaging.movePage(
-                        leftoverStripPage, hit.delta(), cachedLeftoverStrip.size(), STRIP_PAGE_SIZE);
-            }
-            // 页码变化后，旧页物品的屏幕命中区立即失效，等待下一帧重建。
-            costHits.clear();
-            stripPageHits.clear();
-            return true;
-        }
-        return false;
-    }
-
     @Override
     public boolean mouseReleased(double mx, double my, int button) {
+        miniMap.release();
         if (treeMouseGesture.captures(button)) {
             PlanTreeNode selected = treeMouseGesture.release(mx, my, button, gestureNodeAt(mx, my));
             if (selected != null && selected.step != null) {
@@ -3581,27 +2194,24 @@ public final class CraftingPlanScreen extends Screen {
             }
             return true;
         }
-        dragging = false;
-        draggingBar = null;
         return super.mouseReleased(mx, my, button);
     }
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        if (recipeCandidatePanel != null && recipeCandidatePanel.keyPressed(keyCode, scanCode, modifiers)) {
-            if (!recipeCandidatePanel.isOpen()) dropdownNode = null;
-            return true;
-        }
-        if (materialSearchBox != null && materialSearchBox.isFocused()) {
+        if (workspaceSearch != null && workspaceSearch.isFocused()) {
             if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
-                closeMaterialDropdown();
-                return true;
+                treeSearch.close(); workspaceSearch.setFocused(false); return true;
             }
+            if (!materialView && !embersDetailsOpen && treeSearch.keyPressed(keyCode)) return true;
             if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
                 return true;
             }
-            return super.keyPressed(keyCode, scanCode, modifiers);
+            workspaceSearch.keyPressed(keyCode, scanCode, modifiers);
+            return true;
         }
+        if (keyCode == GLFW.GLFW_KEY_ESCAPE && quantityMenuOpen) { quantityMenuOpen = false; return true; }
+
         if (repeatCountBox != null && repeatCountBox.isFocused()) {
             if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
                 unfocusRepeatCountInput();
@@ -3614,18 +2224,19 @@ public final class CraftingPlanScreen extends Screen {
             return super.keyPressed(keyCode, scanCode, modifiers);
         }
         boolean ctrl = (modifiers & GLFW.GLFW_MOD_CONTROL) != 0;
-        if (materialDropdownNode != null && keyCode == GLFW.GLFW_KEY_ESCAPE) {
-            closeMaterialDropdown();
-            return true;
-        }
+
         // Ctrl+0 — reset camera. Must precede the digit handler, which also matches KEY_0.
         if (ctrl && keyCode == GLFW.GLFW_KEY_0) {
-            if (viewMode == ViewMode.TREE) {
+            if (treeModel != null) {
                 treeZoom = 1.0;
                 treePanX = 0;
                 treePanY = 0;
                 treeCameraInit = false;
             }
+            return true;
+        }
+        if (!materialView && !embersDetailsOpen && detailsPanel != null && detailsPanel.keyPressed(keyCode, scanCode, modifiers)) {
+            if (!detailsPanel.isOpen()) dropdownNode = null;
             return true;
         }
         // Enter — one-click start (§2.5 speedrun): apply branch selections and execute.
@@ -3638,7 +2249,8 @@ public final class CraftingPlanScreen extends Screen {
 
     @Override
     public boolean charTyped(char character, int modifiers) {
-        if (recipeCandidatePanel != null && recipeCandidatePanel.charTyped(character, modifiers)) return true;
+        if (workspaceSearch != null && workspaceSearch.isFocused()) return workspaceSearch.charTyped(character, modifiers);
+        if (!materialView && !embersDetailsOpen && detailsPanel != null && detailsPanel.charTyped(character, modifiers)) return true;
         return super.charTyped(character, modifiers);
     }
 
@@ -3656,76 +2268,8 @@ public final class CraftingPlanScreen extends Screen {
     // ── Status helpers ────────────────────────────────────────────
 
     /** Accent color driven by material availability, not mod type. */
-    // ── Card folding helpers (§3.17) ──────────────────────────
-
-    private boolean isStepCollapsed(String stepRid, int depth) {
-        return collapsedSteps.getOrDefault(stepRid, depth > 0);
-    }
-
-    private void toggleStepCollapsed(String stepRid, int depth) {
-        boolean cur = isStepCollapsed(stepRid, depth);
-        collapsedSteps.put(stepRid, !cur);
-    }
 
     /** Single-row collapsed card: mod dot + item icon + step number + batch count. */
-    private int drawCollapsedStepRow(GuiGraphics gfx, Font font, int x, int y, int cardW,
-                                     PlanStep step, int idx, int animIdx) {
-        int rowH = font.lineHeight + 6;
-        int slideX = renderEngine.animation().getSlideOffset(animIdx, 30);
-        if (slideX != 0) {
-            gfx.pose().pushPose();
-            gfx.pose().translate(slideX, 0, 0);
-        }
-
-        // Thin rounded row background.
-        UIRenderer.rounded(gfx, x, y, cardW, rowH, 4f, 0xE61A221E);
-        gfx.fill(x + 1, y + 1, x + 4, y + rowH - 1, stepAccent(step, step.batches()));
-
-        int tx = x + 8;
-
-        // Mod color dot.
-        if (step.modType() != null) {
-            int dotColor = PlanRenderEngine.modLabelColor(step.modType().id());
-            gfx.fill(tx, y + (rowH - 4) / 2, tx + 4, y + (rowH - 4) / 2 + 4, dotColor);
-            tx += 8;
-        }
-
-        // Item icon (small).
-        InkFluidRenderer.render(gfx, step.output(), tx, y + (rowH - 16) / 2);
-        tx += 18;
-
-        // Name.
-        String name = step.output().getHoverName().getString();
-        int nameMaxW = x + cardW - tx - 30;
-        name = font.plainSubstrByWidth(name, nameMaxW);
-        gfx.drawString(font, name, tx, y + (rowH - font.lineHeight) / 2, 0xFFBBCCBB, false);
-
-        // Step index + batch (▶ signals the row expands on click).
-        String summary = "▶ Step " + (idx + 1) + "  ×"
-                + PlanRenderEngine.formatCompact(step.batches());
-        int sw = font.width(summary);
-        gfx.drawString(font, summary, x + cardW - sw - 8, y + (rowH - font.lineHeight) / 2, 0xFF889988, false);
-
-        // Whole collapsed row is clickable to expand it back.
-        foldHits.add(new FoldHit(x, y, cardW, rowH, step.recipeId().toString(), step.depth()));
-
-        if (slideX != 0) gfx.pose().popPose();
-        return y + rowH;
-    }
-
-    private int stepAccent(PlanStep step, long batches) {
-        if (step == null || step.inputs().isEmpty()) return C_ACCENT_NEUTRAL;
-        for (int inputIndex = 0; inputIndex < step.inputs().size(); inputIndex++) {
-            ItemStack in = step.inputs().get(inputIndex);
-            if (in.isEmpty()) continue;
-            PlanResponse.Availability a = plan.availability(in);
-            long avail = a != null ? a.available() : 0L;
-            long need = step.totalInputCount(inputIndex, batches);
-            if (avail < need) return C_ACCENT_MISSING;
-        }
-        return C_ACCENT_READY;
-    }
-
     // ── Deferred tooltip render ─────────────────────────────────
 
     /** Renders the hovered-item tooltip AFTER all scissors are disabled.
@@ -3761,11 +2305,11 @@ public final class CraftingPlanScreen extends Screen {
                 + (InkFluidSupport.isToken(hoveredItemForTooltip) ? " mB" : "");
         int statusColor;
         if (hoveredTooltipAvail >= hoveredTooltipNeeded)
-            statusColor = 0xFF55FF55;
+            statusColor = Color.READY.value();
         else if (hoveredTooltipAvail > 0)
-            statusColor = 0xFFFFAA33;
+            statusColor = Color.WARNING.value();
         else
-            statusColor = 0xFFFF5555;
+            statusColor = Color.ERROR.value();
 
         lines.add(Component.literal(
                 Component.translatable("rsi.plan.tooltip.available").getString()
@@ -3790,25 +2334,6 @@ public final class CraftingPlanScreen extends Screen {
         gfx.renderComponentTooltip(font, lines, hoveredTooltipX, hoveredTooltipY);
 
         hoveredItemForTooltip = ItemStack.EMPTY;
-    }
-
-    // ── Color helpers ─────────────────────────────────────────────
-
-    /** Badge fill color per mod type. */
-    private static int badgeColor(String modTypeId) {
-        return switch (modTypeId) {
-            case ModIds.MALUM              -> 0xCC442288;
-            case ModIds.EIDOLON            -> 0xCC226644;
-            case ModIds.FORBIDDEN_ARCANUS  -> 0xCC663322;
-            case ModIds.GOETY, "goety_brazier" -> 0xCC222244;
-            case ModIds.WIZARDS_REBORN     -> 0xCC444466;
-            default                        -> 0xCC886622;
-        };
-    }
-
-    private static int fadeColor(int color, float alpha) {
-        int a = (int) (0xFF * alpha);
-        return (a << 24) | (color & 0x00FFFFFF);
     }
 
     @Override
