@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -21,6 +22,66 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PureRecipePlannerPropertyTest {
     private static final int CASES = 200;
+
+    @Test
+    void mixedCoProductRoutesMatchExhaustiveExecutionCountsAndConserveMaterials() {
+        Random random = new Random(0x434F50524F445543L);
+        MaterialRef a = material("input_a");
+        MaterialRef b = material("input_b");
+        MaterialRef c = material("joint_c");
+        MaterialRef d = material("joint_d");
+        for (int index = 0; index < CASES; index++) {
+            int haveA = random.nextInt(9), haveB = random.nextInt(9);
+            int useA = 1 + random.nextInt(3), useB = 1 + random.nextInt(3);
+            int ac = 1 + random.nextInt(3), ad = 1 + random.nextInt(3);
+            int bc = 1 + random.nextInt(3), bd = 1 + random.nextInt(3);
+            int needC = 1 + random.nextInt(12), needD = 1 + random.nextInt(12);
+            Map<MaterialRef, List<RecipeNode>> indexed = new LinkedHashMap<>();
+            for (MaterialRef selected : List.of(c, d)) {
+                indexed.put(selected, List.of(
+                        coProducer("first", selected, Map.of(c, (long) ac, d, (long) ad), a, useA),
+                        coProducer("second", selected, Map.of(c, (long) bc, d, (long) bd), b, useB)));
+            }
+            boolean expected = false;
+            for (int first = 0; first <= haveA / useA; first++) {
+                for (int second = 0; second <= haveB / useB; second++) {
+                    if (first * ac + second * bc >= needC && first * ad + second * bd >= needD) expected = true;
+                }
+            }
+            for (boolean reverse : List.of(false, true)) {
+                var roots = new ArrayList<>(List.of(new IngredientRef(List.of(c), needC),
+                        new IngredientRef(List.of(d), needD)));
+                if (reverse) Collections.reverse(roots);
+                var graph = new ImmutableRecipeGraph(indexed);
+                var actual = PureRecipePlanner.resolve(graph, Map.of(a, haveA, b, haveB), roots,
+                        20, 20000, 2048);
+                assertEquals(expected, actual.feasible(), "case=" + index + " reverse=" + reverse + " " + actual);
+                if (!actual.feasible()) continue;
+                Map<MaterialRef, Long> replay = new HashMap<>();
+                replay.put(a, (long) haveA);
+                replay.put(b, (long) haveB);
+                for (var step : actual.steps()) {
+                    var recipe = graph.recipesById().get(step.recipeId());
+                    var input = recipe.inputs().get(0);
+                    replay.merge(input.alternatives().get(0), -input.count() * step.batches(), Long::sum);
+                    recipe.guaranteedOutputs().forEach((material, count) ->
+                            replay.merge(material, count * step.batches(), Long::sum));
+                }
+                replay.merge(c, -(long) needC, Long::sum);
+                replay.merge(d, -(long) needD, Long::sum);
+                assertTrue(replay.values().stream().allMatch(count -> count >= 0L));
+                replay.values().removeIf(count -> count == 0L);
+                assertEquals(replay, actual.remaining(), "case=" + index);
+            }
+        }
+    }
+
+    private static RecipeNode coProducer(String name, MaterialRef selected, Map<MaterialRef, Long> outputs,
+                                         MaterialRef input, long count) {
+        return new RecipeNode(id(name), selected, outputs.get(selected),
+                List.of(new IngredientRef(List.of(input), count)), "generic", id("crafting"),
+                List.of(), false, false, outputs);
+    }
 
     @Test
     void randomizedSmallDagMatchesIndependentBreadthFirstReference() {

@@ -200,6 +200,16 @@ final class ExternalRecipeProjection {
                 .anyMatch(output -> output.resource().kind()
                         == IntegrationResourceKey.ResourceKind.FLUID);
         List<RecipeNode> nodes = new ArrayList<>();
+        // 目标索引与同次产物分开：未开放为目标的确定副产物仍可供后续需求使用。
+        Map<MaterialRef, Long> guaranteed = new LinkedHashMap<>();
+        for (OutputDeclaration output : view.outputs()) {
+            if (output.supportsDeterministicProjection() && !output.dynamicIdentity()
+                    && output.outputKind() != OutputKind.CATALYST_RETURN
+                    && output.outputKind() != OutputKind.DURABILITY_RETURN) {
+                guaranteed.merge(pureMaterial(output.resource(), false),
+                        output.guaranteedMinimum(), Math::addExact);
+            }
+        }
         List<OutputDeclaration> orderedOutputs = view.outputs().stream()
                 .sorted(Comparator
                         .comparing((OutputDeclaration output) ->
@@ -212,13 +222,15 @@ final class ExternalRecipeProjection {
                     || !output.supportsDeterministicProjection()) {
                 continue;
             }
+            MaterialRef selected = pureMaterial(output.resource(), output.dynamicIdentity());
+            if (nodes.stream().anyMatch(node -> node.output().equals(selected))) continue;
+            Map<MaterialRef, Long> outputs = new LinkedHashMap<>(guaranteed);
+            // 动态身份只沿用已有的显式目标绑定规则，不作为其他目标的附赠库存。
+            outputs.putIfAbsent(selected, output.guaranteedMinimum());
             nodes.add(new RecipeNode(
                     recipe.getId(),
-                    pureMaterial(
-                            output.resource(),
-                            output.dynamicIdentity()
-                    ),
-                    output.guaranteedMinimum(),
+                    selected,
+                    outputs.get(selected),
                     inputs,
                     modTypeId,
                     recipe.getType() == null
@@ -226,7 +238,8 @@ final class ExternalRecipeProjection {
                             : ForgeRegistries.RECIPE_TYPES.getKey(recipe.getType()),
                     MagicResourceCostCatalog.costsFor(recipe),
                     hasFluidOutputs,
-                    output.dynamicIdentity()
+                    output.dynamicIdentity(),
+                    outputs
             ));
         }
         return List.copyOf(nodes);

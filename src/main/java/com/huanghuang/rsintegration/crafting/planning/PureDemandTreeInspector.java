@@ -5,12 +5,14 @@ import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.config.CraftingPlanningConfig;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.NbtMatchMode;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
 import net.minecraft.resources.ResourceLocation;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 
 import javax.annotation.Nullable;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -206,68 +208,86 @@ public final class PureDemandTreeInspector {
         }
 
         private Coverage coverIngredient(IngredientRef ingredient) {
-            if (budgetExpired()) return Coverage.NODE_LIMIT;
-            if (ingredient.role() == DemandRole.CATALYST) {
-                return coverCatalyst(ingredient);
-            }
-            int mark = ledger.mark();
-            if (consumeAcrossAlternatives(ingredient) == 0L) return Coverage.COVERED;
-
-            Coverage best = Coverage.UNPROJECTED_DEPENDENCY;
-            boolean largeAlternativeSet = ingredient.alternatives().size()
-                    >= LARGE_ALTERNATIVE_THRESHOLD;
-            for (MaterialRef alternative : inventoryFirst(ingredient.alternatives())) {
-                ledger.rollback(mark);
-                long remaining = consumeMatching(alternative, routingCount(ingredient.count()),
-                        ingredient.nbtMatchMode());
-                Coverage coverage = coverMaterial(alternative, remaining, ingredient.nbtMatchMode());
-                if (coverage == Coverage.COVERED) return coverage;
-                if (coverage == Coverage.NODE_LIMIT) {
-                    best = Coverage.NODE_LIMIT;
-                    break;
-                }
-                // Alternatives are OR branches. A fully projected branch that ends in raw
-                // shortages is preferable to an unrelated typed-only producer.
-                if (coverage == Coverage.MISSING_MATERIALS) {
-                    best = Coverage.MISSING_MATERIALS;
-                    // A large tag can contain hundreds of reverse-conversion variants. Once
-                    // one inventory-first branch is known to be pure-compatible but short on
-                    // stock, probing the remaining variants cannot improve route selection.
-                    if (largeAlternativeSet) break;
+            // 帧保存候选游标和账本检查点，深度不再占用 Java 调用栈。
+            ArrayDeque<InspectionFrame> stack = new ArrayDeque<>();
+            stack.push(new IngredientFrame(ingredient));
+            Coverage completed = null;
+            while (!stack.isEmpty()) {
+                PlanningThreadContext.throwIfCancelled();
+                InspectionFrame frame = stack.peek();
+                InspectionFrame child = frame.advance(completed);
+                completed = null;
+                if (child != null) {
+                    stack.push(child);
+                } else {
+                    completed = frame.result;
+                    stack.pop();
                 }
             }
-            ledger.rollback(mark);
-            // A catalyst-capable producer is a compatibility fallback, not a reason to
-            // discard a pure route that was already proven usable. Only request typed
-            // planning after every immutable alternative failed.
-            noteCatalystOpportunity(ingredient);
-            if (firstUnresolved == null) firstUnresolved = first(ingredient);
-            return best;
+            return completed;
         }
 
-        private Coverage coverCatalyst(IngredientRef ingredient) {
-            int mark = ledger.mark();
-            long remaining = Math.max(0L, routingCount(ingredient.count())
-                    - ledger.countAcrossAlternatives(ingredient));
-            if (remaining <= 0) return Coverage.COVERED;
+        private abstract class InspectionFrame {
+            protected Coverage result;
 
-            Coverage best = Coverage.UNPROJECTED_DEPENDENCY;
-            for (MaterialRef alternative : inventoryFirst(ingredient.alternatives())) {
-                ledger.rollback(mark);
-                Coverage coverage = coverMaterial(alternative, remaining, ingredient.nbtMatchMode(), true);
-                if (coverage == Coverage.COVERED) return Coverage.COVERED;
-                if (coverage == Coverage.NODE_LIMIT) {
-                    best = Coverage.NODE_LIMIT;
-                    break;
-                }
-                if (coverage == Coverage.MISSING_MATERIALS) {
-                    best = Coverage.MISSING_MATERIALS;
-                }
+            /** 返回待执行子帧；返回 null 表示本帧已产生 result。 */
+            abstract InspectionFrame advance(@Nullable Coverage child);
+
+            protected InspectionFrame finish(Coverage coverage) {
+                result = coverage;
+                return null;
             }
-            ledger.rollback(mark);
-            noteCatalystOpportunity(ingredient);
-            if (firstUnresolved == null) firstUnresolved = first(ingredient);
-            return best;
+        }
+
+        private final class IngredientFrame extends InspectionFrame {
+            private final IngredientRef ingredient;
+            private final boolean catalyst;
+            private List<MaterialRef> alternatives;
+            private int mark;
+            private int cursor;
+            private long catalystMissing;
+            private Coverage best = Coverage.UNPROJECTED_DEPENDENCY;
+
+            private IngredientFrame(IngredientRef ingredient) {
+                this.ingredient = ingredient;
+                this.catalyst = ingredient.role() == DemandRole.CATALYST;
+            }
+
+            @Override
+            InspectionFrame advance(@Nullable Coverage child) {
+                if (alternatives == null) {
+                    if (budgetExpired()) return finish(Coverage.NODE_LIMIT);
+                    mark = ledger.mark();
+                    if (catalyst) {
+                        catalystMissing = Math.max(0L, routingCount(ingredient.count())
+                                - ledger.countAcrossAlternatives(ingredient));
+                        if (catalystMissing == 0L) return finish(Coverage.COVERED);
+                    } else if (consumeAcrossAlternatives(ingredient) == 0L) {
+                        return finish(Coverage.COVERED);
+                    }
+                    alternatives = inventoryFirst(ingredient.alternatives());
+                }
+                if (child == Coverage.COVERED) return finish(child);
+                if (child == Coverage.NODE_LIMIT) return failed(child);
+                if (child == Coverage.MISSING_MATERIALS) {
+                    best = child;
+                    // 宽标签找到纯图可表达的缺料路线后就停止路由探测，实际选择由主求解器决定。
+                    if (!catalyst && alternatives.size() >= LARGE_ALTERNATIVE_THRESHOLD) return failed(best);
+                }
+                if (cursor == alternatives.size()) return failed(best);
+                ledger.rollback(mark);
+                MaterialRef alternative = alternatives.get(cursor++);
+                long remaining = catalyst ? catalystMissing
+                        : consumeMatching(alternative, routingCount(ingredient.count()), ingredient.nbtMatchMode());
+                return new MaterialFrame(alternative, remaining, ingredient.nbtMatchMode(), catalyst);
+            }
+
+            private InspectionFrame failed(Coverage coverage) {
+                ledger.rollback(mark);
+                noteCatalystOpportunity(ingredient);
+                if (firstUnresolved == null) firstUnresolved = first(ingredient);
+                return finish(coverage);
+            }
         }
 
         private boolean budgetExpired() {
@@ -292,7 +312,7 @@ public final class PureDemandTreeInspector {
         }
 
         private long consumeMatching(MaterialRef requested, long count,
-                                     ImmutableRecipeGraph.NbtMatchMode mode) {
+                                     NbtMatchMode mode) {
             long remaining = count;
             for (MaterialRef stocked : ledger.byItem(requested.itemId())) {
                 long available = ledger.count(stocked);
@@ -306,90 +326,101 @@ public final class PureDemandTreeInspector {
             return remaining;
         }
 
-        private Coverage coverMaterial(MaterialRef material, long count,
-                                       ImmutableRecipeGraph.NbtMatchMode mode) {
-            return coverMaterial(material, count, mode, false);
-        }
+        private final class MaterialFrame extends InspectionFrame {
+            private final MaterialRef material;
+            private final long count;
+            private final NbtMatchMode mode;
+            private final boolean catalyst;
+            private List<RecipeNode> candidates;
+            private int mark;
+            private int cursor;
+            private boolean visitingAdded;
+            private RecipeNode candidate;
+            private List<IngredientRef> inputs;
+            private int port;
+            private long batches;
+            private Coverage candidateCoverage;
+            private Coverage best = Coverage.UNPROJECTED_DEPENDENCY;
 
-        private Coverage coverMaterial(MaterialRef material, long count,
-                                       ImmutableRecipeGraph.NbtMatchMode mode, boolean catalyst) {
-            if (count <= 0) return Coverage.COVERED;
-            if (budgetExpired()) return Coverage.NODE_LIMIT;
-            if (nodeLimitReached) return Coverage.NODE_LIMIT;
-            // A closed conversion ring cannot create missing stock. It is still a normal
-            // material shortage, not evidence that main-thread recipe semantics are needed.
-            if (visiting.contains(material)) return Coverage.MISSING_MATERIALS;
-            if (++visitedNodes > maxNodes) {
-                nodeLimitReached = true;
-                return Coverage.NODE_LIMIT;
+            private MaterialFrame(MaterialRef material, long count, NbtMatchMode mode, boolean catalyst) {
+                this.material = material;
+                this.count = count;
+                this.mode = mode;
+                this.catalyst = catalyst;
             }
 
-            List<RecipeNode> candidates = ImmutableRecipeGraphProjector.candidates(graph, material, mode);
-            if (candidates.isEmpty()) {
-                if (firstUnresolved == null) firstUnresolved = material;
-                return pureIncompatibleOutputIds.contains(material.itemId())
-                        ? Coverage.UNPROJECTED_DEPENDENCY
-                        : Coverage.MISSING_MATERIALS;
-            }
-
-            int mark = ledger.mark();
-            Coverage best = Coverage.UNPROJECTED_DEPENDENCY;
-            visiting.add(material);
-            try {
-                for (RecipeNode candidate : inventoryFirstCandidates(candidates)) {
-                    ledger.rollback(mark);
-                    long batches = ((long) count + candidate.outputCount() - 1L)
-                            / candidate.outputCount();
-                    if (batches <= 0L) continue;
-                    if (isUnseededReverseConversion(candidate, material, batches)) continue;
-
-                    Coverage candidateCoverage = Coverage.COVERED;
-                    for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(
-                            candidate.inputs())) {
-                        long scaled = scaledInputCount(input, batches);
-                        Coverage inputCoverage = coverIngredient(input.withCount(scaled));
-                        if (inputCoverage == Coverage.NODE_LIMIT) {
-                            candidateCoverage = Coverage.NODE_LIMIT;
-                            break;
-                        }
-                        // Recipe inputs are AND branches: one unprojected dependency means the
-                        // candidate still needs typed planning even if another input is missing.
-                        if (inputCoverage == Coverage.UNPROJECTED_DEPENDENCY) {
-                            candidateCoverage = Coverage.UNPROJECTED_DEPENDENCY;
-                        } else if (inputCoverage == Coverage.MISSING_MATERIALS
-                                && candidateCoverage == Coverage.COVERED) {
-                            candidateCoverage = Coverage.MISSING_MATERIALS;
-                        }
+            @Override
+            InspectionFrame advance(@Nullable Coverage child) {
+                if (candidates == null) {
+                    if (count <= 0L) return finish(Coverage.COVERED);
+                    if (budgetExpired() || nodeLimitReached) return finish(Coverage.NODE_LIMIT);
+                    if (visiting.contains(material)) return finish(Coverage.MISSING_MATERIALS);
+                    if (++visitedNodes > maxNodes) {
+                        nodeLimitReached = true;
+                        return finish(Coverage.NODE_LIMIT);
                     }
-                    if (candidateCoverage == Coverage.COVERED) {
-                        long remainingOutput = batches * candidate.outputCount() - (catalyst ? 0L : count);
-                        if (remainingOutput > 0L) ledger.add(candidate.output(), remainingOutput);
-                        return Coverage.COVERED;
+                    candidates = ImmutableRecipeGraphProjector.candidates(graph, material, mode);
+                    if (candidates.isEmpty()) {
+                        if (firstUnresolved == null) firstUnresolved = material;
+                        return finish(pureIncompatibleOutputIds.contains(material.itemId())
+                                ? Coverage.UNPROJECTED_DEPENDENCY : Coverage.MISSING_MATERIALS);
                     }
-                    if (candidateCoverage == Coverage.NODE_LIMIT) return Coverage.NODE_LIMIT;
-                    // Candidate recipes are OR branches, so any fully projected shortage path
-                    // makes this material safe for the background planner.
-                    if (candidateCoverage == Coverage.MISSING_MATERIALS) {
-                        if (!material.nbt().isEmpty() || "smithing".equals(candidate.modTypeId())) {
+                    mark = ledger.mark();
+                    visiting.add(material);
+                    visitingAdded = true;
+                    candidates = inventoryFirstCandidates(candidates);
+                }
+                if (child == Coverage.NODE_LIMIT) return finish(child);
+                if (child == Coverage.UNPROJECTED_DEPENDENCY
+                        || child == Coverage.MISSING_MATERIALS && candidateCoverage == Coverage.COVERED) {
+                    candidateCoverage = child;
+                }
+                while (true) {
+                    if (candidate != null) {
+                        // 输入是 AND 分支：遇到缺料仍继续检查后面的类型依赖。
+                        if (port < inputs.size()) {
+                            IngredientRef input = inputs.get(port++);
+                            return new IngredientFrame(input.withCount(scaledInputCount(input, batches)));
+                        }
+                        if (candidateCoverage == Coverage.COVERED) {
+                            long remainingOutput = batches * candidate.outputCount() - (catalyst ? 0L : count);
+                            if (remainingOutput > 0L) ledger.add(candidate.output(), remainingOutput);
+                            return finish(Coverage.COVERED);
+                        }
+                        if (candidateCoverage == Coverage.MISSING_MATERIALS) {
+                            if (!material.nbt().isEmpty() || "smithing".equals(candidate.modTypeId())) {
+                                best = Coverage.MISSING_MATERIALS;
+                            } else {
+                                return finish(Coverage.MISSING_MATERIALS);
+                            }
+                        }
+                        candidate = null;
+                    }
+                    if (cursor == candidates.size()) {
+                        ledger.rollback(mark);
+                        if (best == Coverage.UNPROJECTED_DEPENDENCY
+                                && !pureIncompatibleOutputIds.contains(material.itemId())) {
                             best = Coverage.MISSING_MATERIALS;
-                            continue;
                         }
-                        // This inspector chooses the planner, not the final recipe. Once one
-                        // candidate is representable by the pure graph, searching every
-                        // compression/decompression sibling only risks walking conversion rings.
-                        // The background planner still evaluates all candidates for feasibility.
-                        return Coverage.MISSING_MATERIALS;
+                        return finish(best);
+                    }
+                    ledger.rollback(mark);
+                    RecipeNode next = candidates.get(cursor++);
+                    batches = (count + next.outputCount() - 1L) / next.outputCount();
+                    if (batches > 0L && !isUnseededReverseConversion(next, material, batches)) {
+                        candidate = next;
+                        inputs = PureDemandNormalizer.mergeEquivalent(next.inputs());
+                        port = 0;
+                        candidateCoverage = Coverage.COVERED;
                     }
                 }
-            } finally {
-                visiting.remove(material);
             }
-            ledger.rollback(mark);
-            if (best == Coverage.UNPROJECTED_DEPENDENCY
-                    && !pureIncompatibleOutputIds.contains(material.itemId())) {
-                best = Coverage.MISSING_MATERIALS;
+
+            @Override
+            protected InspectionFrame finish(Coverage coverage) {
+                if (visitingAdded) visiting.remove(material);
+                return super.finish(coverage);
             }
-            return best;
         }
 
         private List<MaterialRef> inventoryFirst(List<MaterialRef> alternatives) {

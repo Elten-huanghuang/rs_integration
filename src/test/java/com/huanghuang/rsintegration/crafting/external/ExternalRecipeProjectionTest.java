@@ -23,6 +23,9 @@ import com.huanghuang.rsintegration.api.recipe.RecipeView;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
+import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -38,6 +41,7 @@ import net.minecraftforge.registries.ForgeRegistries;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -46,6 +50,73 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class ExternalRecipeProjectionTest extends BootstrapTest {
+    @Test
+    void untargetedExternalCoProductCanFollowALaterPrimaryWithoutBecomingATarget() {
+        var coal = new MaterialRef(BuiltInRegistries.ITEM.getKey(Items.COAL), "");
+        var diamond = new MaterialRef(BuiltInRegistries.ITEM.getKey(Items.DIAMOND), "");
+        var stick = new MaterialRef(BuiltInRegistries.ITEM.getKey(Items.STICK), "");
+        for (boolean guaranteed : List.of(true, false)) {
+            OutputDeclaration secondary = new OutputDeclaration(id("secondary"), "output",
+                    item(Items.STICK, new CompoundTag()), OutputAmount.exactly(1L), OutputKind.SECONDARY,
+                    guaranteed ? OutputProbability.guaranteed()
+                            : new OutputProbability(OutputProbabilityMode.PROBABILISTIC, 0.5D, 1, "bonus"),
+                    false, false, null);
+            RecipeView view = view(List.of(material("input",
+                    ingredient(ResourceMatchMode.EXACT_IDENTITY, item(Items.COAL, new CompoundTag())),
+                    1L, InputConsumption.consumed(), true)), List.of(output("primary", Items.DIAMOND, 1L), secondary));
+            Recipe<?> recipe = mock(Recipe.class);
+            when(recipe.getId()).thenReturn(view.recipeId());
+            var nodes = ExternalRecipeProjection.pureRecipeNodes(recipe, view, "integration_api");
+            assertEquals(1, nodes.size());
+            var graph = new ImmutableRecipeGraph(Map.of(diamond, nodes));
+            for (var roots : List.of(List.of(new IngredientRef(List.of(stick), 1), new IngredientRef(List.of(diamond), 1)),
+                    List.of(new IngredientRef(List.of(diamond), 1), new IngredientRef(List.of(stick), 1)))) {
+                var result = PureRecipePlanner.resolve(graph, Map.of(coal, 1), roots, 10);
+                assertEquals(guaranteed, result.feasible(), result.toString());
+                if (guaranteed) assertEquals(List.of(new PureRecipePlanner.PlannedStep(view.recipeId(), 1)), result.steps());
+            }
+            assertFalse(graph.recipesByOutput().containsKey(stick));
+            assertFalse(PureRecipePlanner.resolve(graph, Map.of(coal, 1),
+                    List.of(new IngredientRef(List.of(stick), 1)), 10).feasible());
+        }
+    }
+
+    @Test
+    void projectionsShareAllGuaranteedOutputsAndMergeDuplicateItems() {
+        OutputDeclaration primary = output("primary", Items.DIAMOND, 1L);
+        OutputDeclaration duplicate = new OutputDeclaration(id("duplicate"), "output",
+                item(Items.DIAMOND, new CompoundTag()), OutputAmount.exactly(2L),
+                OutputKind.SECONDARY, OutputProbability.guaranteed(), false, true, null);
+        OutputDeclaration secondary = new OutputDeclaration(id("secondary"), "output",
+                item(Items.EMERALD, new CompoundTag()), new OutputAmount(1L, 3L),
+                OutputKind.SECONDARY, OutputProbability.guaranteed(), false, true, null);
+        OutputDeclaration untargeted = new OutputDeclaration(id("untargeted"), "output",
+                item(Items.STICK, new CompoundTag()), OutputAmount.exactly(4L),
+                OutputKind.SECONDARY, OutputProbability.guaranteed(), false, false, null);
+        OutputDeclaration random = new OutputDeclaration(id("random"), "output",
+                item(Items.APPLE, new CompoundTag()), OutputAmount.exactly(1L), OutputKind.SECONDARY,
+                new OutputProbability(OutputProbabilityMode.PROBABILISTIC, 0.5D, 1, "bonus"), false, true, null);
+        CompoundTag template = new CompoundTag();
+        template.putString("variant", "unknown");
+        OutputDeclaration dynamic = new OutputDeclaration(id("dynamic"), "output",
+                item(Items.DIAMOND_SWORD, template), OutputAmount.exactly(1L),
+                OutputKind.SECONDARY, OutputProbability.guaranteed(), true, true, null);
+        RecipeView view = view(List.of(), List.of(primary, duplicate, secondary, untargeted, random, dynamic));
+        Recipe<?> recipe = mock(Recipe.class);
+        when(recipe.getId()).thenReturn(view.recipeId());
+        var nodes = ExternalRecipeProjection.pureRecipeNodes(recipe, view, "integration_api");
+        var diamond = new ImmutableRecipeGraph.MaterialRef(BuiltInRegistries.ITEM.getKey(Items.DIAMOND), "");
+        var emerald = new ImmutableRecipeGraph.MaterialRef(BuiltInRegistries.ITEM.getKey(Items.EMERALD), "");
+        var stick = new ImmutableRecipeGraph.MaterialRef(BuiltInRegistries.ITEM.getKey(Items.STICK), "");
+        assertEquals(3, nodes.size());
+        var expected = Map.of(diamond, 3L, emerald, 1L, stick, 4L);
+        for (var node : nodes) {
+            if (!node.output().runtimeNbt()) assertEquals(expected, node.guaranteedOutputs());
+        }
+        assertEquals(3L, nodes.get(0).outputCount());
+        assertEquals(expected, nodes.get(0).withOutputAndInputs(diamond, List.of()).guaranteedOutputs());
+    }
+
     @Test
     void externalFuelIsReservedOncePerOperationForStandardIo() {
         RecipeView view = view(

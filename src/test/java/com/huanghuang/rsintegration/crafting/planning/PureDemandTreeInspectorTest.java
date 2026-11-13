@@ -18,6 +18,50 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PureDemandTreeInspectorTest {
     @Test
+    void deepInspectionUsesExplicitFramesAndStillHonorsNodeLimit() {
+        Map<MaterialRef, List<RecipeNode>> recipes = new LinkedHashMap<>();
+        MaterialRef raw = material("raw");
+        MaterialRef previous = raw;
+        RecipeNode target = null;
+        for (int index = 0; index < 10_000; index++) {
+            MaterialRef output = material("deep_" + index);
+            target = recipe("deep_" + index, output, 1, ingredient(previous, 1));
+            recipes.put(output, List.of(target));
+            previous = output;
+        }
+        var graph = new ImmutableRecipeGraph(recipes);
+        for (int budget : new int[] {512, 4096, 12_000}) {
+            var result = PureDemandTreeInspector.inspect(graph, Map.of(raw, 1L), target.recipeId(), 1, budget);
+            assertEquals(budget < 10_000 ? PureDemandTreeInspector.Status.NODE_LIMIT
+                    : PureDemandTreeInspector.Status.COMPLETE, result.status());
+            assertEquals(Math.min(budget + 1, 9999), result.visitedNodes());
+        }
+    }
+
+    @Test
+    void deepFailedAlternativeRestoresInventoryBeforeTryingNextIngredient() {
+        Map<MaterialRef, List<RecipeNode>> recipes = new LinkedHashMap<>();
+        MaterialRef raw = material("raw");
+        MaterialRef missing = material("missing");
+        MaterialRef previous = missing;
+        for (int index = 0; index < 2_000; index++) {
+            MaterialRef output = material("failed_" + index);
+            recipes.put(output, List.of(recipe("failed_" + index, output, 1, ingredient(previous, 1))));
+            previous = output;
+        }
+        MaterialRef failed = material("failed");
+        MaterialRef success = material("success");
+        recipes.put(failed, List.of(recipe("failed", failed, 1, ingredient(raw, 1), ingredient(previous, 1))));
+        recipes.put(success, List.of(recipe("success", success, 1, ingredient(raw, 1))));
+        RecipeNode target = recipe("target", material("target"), 1, new IngredientRef(List.of(failed, success), 1));
+        recipes.put(target.output(), List.of(target));
+        var result = PureDemandTreeInspector.inspect(new ImmutableRecipeGraph(recipes), Map.of(raw, 1L),
+                target.recipeId(), 1, 4096);
+        assertEquals(PureDemandTreeInspector.Status.COMPLETE, result.status());
+        assertTrue(result.visitedNodes() > 2_000);
+    }
+
+    @Test
     void acceptsRecursivelyProjectedDemandTree() {
         MaterialRef log = material("log");
         MaterialRef plank = material("plank");

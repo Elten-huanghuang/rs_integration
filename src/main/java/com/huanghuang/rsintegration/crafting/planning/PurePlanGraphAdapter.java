@@ -34,7 +34,9 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraftforge.common.crafting.CompoundIngredient;
 import net.minecraftforge.common.crafting.StrictNBTIngredient;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -131,7 +133,7 @@ public final class PurePlanGraphAdapter {
     }
 
     private static final class Builder {
-        private final Map<MaterialRef, List<Lot>> stock = new HashMap<>();
+        private final Map<MaterialRef, Deque<Lot>> stock = new HashMap<>();
         private final Map<Integer, Map<Integer, PendingInput>> inputs = new HashMap<>();
         private final List<PureRecipePlanner.MaterialUse> rootCatalysts = new ArrayList<>();
         private final List<CraftNode> nodes = new ArrayList<>();
@@ -141,7 +143,7 @@ public final class PurePlanGraphAdapter {
         private int nextNode;
 
         private void publish(MaterialRef ref, MaterialKey material, MaterialSource source, long amount) {
-            stock.computeIfAbsent(ref, ignored -> new ArrayList<>())
+            stock.computeIfAbsent(ref, ignored -> new ArrayDeque<>())
                     .add(new Lot(material, source, amount));
         }
 
@@ -169,7 +171,7 @@ public final class PurePlanGraphAdapter {
         private List<RootAllocation> takeRecorded(Map<MaterialRef, Long> materials) {
             List<RootAllocation> supply = new ArrayList<>();
             materials.forEach((material, amount) -> {
-                supply.addAll(take(stock.getOrDefault(material, List.of()), amount));
+                supply.addAll(take(stock.getOrDefault(material, new ArrayDeque<>()), amount));
             });
             return supply;
         }
@@ -212,18 +214,24 @@ public final class PurePlanGraphAdapter {
                 }
                 if (catalyst) borrowed.put(port, supply);
             }
-            ItemStack display = stack(production.output());
-            MaterialKey material = MaterialKey.of(display);
-            long count = Math.multiplyExact(production.recipe().outputCount(), executions);
-            IntegrationResourceKey resource = InkFluidSupport.resource(display);
-            if (resource == null) resource = IntegrationResourceKey.item(display);
             List<OutputDeclaration> outputs = new ArrayList<>();
-            OutputPortId output = new OutputPortId(node, 0);
-            outputs.add(new OutputDeclaration(output, material, count, OutputKind.PRIMARY,
-                    count, count, OutputProbability.guaranteed(),
-                    production.output().runtimeNbt() || production.output().constrainedNbt(),
-                    null, resource));
-            publish(production.output(), material, new MaterialSource.ProducerOutput(output), count);
+            // 选中的产物置于首端口；其他保证产物来自同一个加工节点，成本只记一次。
+            Map<MaterialRef, Long> produced = new LinkedHashMap<>();
+            produced.put(production.output(), production.recipe().outputCount());
+            produced.putAll(production.recipe().guaranteedOutputs());
+            produced.forEach((ref, amount) -> {
+                ItemStack display = stack(ref);
+                MaterialKey material = MaterialKey.of(display);
+                long count = Math.multiplyExact(amount, executions);
+                IntegrationResourceKey resource = InkFluidSupport.resource(display);
+                if (resource == null) resource = IntegrationResourceKey.item(display);
+                OutputPortId output = new OutputPortId(node, outputs.size());
+                outputs.add(new OutputDeclaration(output, material, count,
+                        outputs.isEmpty() ? OutputKind.PRIMARY : OutputKind.SECONDARY,
+                        count, count, OutputProbability.guaranteed(),
+                        ref.runtimeNbt() || ref.constrainedNbt(), null, resource));
+                publish(ref, material, new MaterialSource.ProducerOutput(output), count);
+            });
             borrowed.forEach((port, catalysts) -> {
                 for (RootAllocation catalyst : catalysts) {
                     OutputPortId returned = new OutputPortId(node, outputs.size());
@@ -251,9 +259,11 @@ public final class PurePlanGraphAdapter {
 
         private CraftPlanGraph finish(List<ScaledIngredientSpec> terminalInputs) {
             // 只在已选定的供料中恢复原槽位；最大流避免宽标签抢走后续精确槽的材料。
-            List<Lot> remaining = lots(rootSupply.values().stream().flatMap(List::stream).toList());
+            Deque<Lot> remaining = lots(rootSupply.values().stream().flatMap(List::stream).toList());
+            Map<MaterialKey, Deque<Lot>> byMaterial = new HashMap<>();
             Map<StackKey, Long> supplied = new LinkedHashMap<>();
             for (Lot lot : remaining) {
+                byMaterial.computeIfAbsent(lot.material, ignored -> new ArrayDeque<>()).addLast(lot);
                 supplied.merge(new StackKey(lot.material.item(), lot.material.tag()),
                         lot.remaining, Math::addExact);
             }
@@ -263,7 +273,7 @@ public final class PurePlanGraphAdapter {
             Map<Integer, List<RootAllocation>> bySlot = new HashMap<>();
             for (DirectMaterialAllocator.Allocation allocation : assigned.allocations()) {
                 MaterialKey material = new MaterialKey(allocation.material().item(), allocation.material().tag());
-                List<Lot> matches = remaining.stream().filter(lot -> lot.material.equals(material)).toList();
+                Deque<Lot> matches = byMaterial.getOrDefault(material, new ArrayDeque<>());
                 bySlot.computeIfAbsent(allocation.ingredientIndex(), ignored -> new ArrayList<>())
                         .addAll(take(matches, allocation.count()));
             }
@@ -308,25 +318,30 @@ public final class PurePlanGraphAdapter {
             return graph;
         }
 
-        private static List<Lot> lots(List<RootAllocation> supply) {
-            return supply.stream().map(allocation ->
-                    new Lot(allocation.material(), allocation.source(), allocation.quantity())).toList();
+        private static Deque<Lot> lots(List<RootAllocation> supply) {
+            Deque<Lot> lots = new ArrayDeque<>();
+            for (RootAllocation allocation : supply) {
+                lots.addLast(new Lot(allocation.material(), allocation.source(), allocation.quantity()));
+            }
+            return lots;
         }
 
-        private static List<RootAllocation> take(List<Lot> lots, long quantity) {
+        private static List<RootAllocation> take(Deque<Lot> lots, long quantity) {
             List<RootAllocation> supply = new ArrayList<>();
             long remaining = quantity;
-            for (Lot lot : lots) {
+            // FIFO 保留原来的材料来源顺序；耗尽的批次立即移除，取够即停。
+            while (remaining > 0L && !lots.isEmpty()) {
+                Lot lot = lots.peekFirst();
                 long taken = Math.min(remaining, lot.remaining);
-                if (taken <= 0L) continue;
-                supply.add(new RootAllocation(lot.source, lot.material, taken));
+                if (taken > 0L) supply.add(new RootAllocation(lot.source, lot.material, taken));
                 lot.remaining -= taken;
                 remaining -= taken;
+                if (lot.remaining == 0L) lots.removeFirst();
             }
             if (remaining != 0L) throw new IllegalArgumentException("Missing recorded material supply");
             return supply;
         }
 
-        private record PendingInput(PureRecipePlanner.MaterialUse use, List<Lot> supply) {}
+        private record PendingInput(PureRecipePlanner.MaterialUse use, Deque<Lot> supply) {}
     }
 }

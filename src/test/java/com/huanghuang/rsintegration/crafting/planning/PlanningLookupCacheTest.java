@@ -507,7 +507,8 @@ class PlanningLookupCacheTest extends BootstrapTest {
         PlanningLookupCache.Stats stats = PlanningLookupCache.run(() -> {
             PureRecipePlanner.Result result = PureRecipePlanner.resolve(
                     graph, stock,
-                    List.of(new IngredientRef(List.of(target), 1, NbtMatchMode.EXACT)), 64);
+                    // 此测试专门检查通用搜索的可达性索引，避免等价路线被聚合直接完成。
+                    List.of(new IngredientRef(List.of(target), 1, NbtMatchMode.PARTIAL)), 64);
             assertTrue(result.feasible());
             return PlanningLookupCache.currentStats();
         });

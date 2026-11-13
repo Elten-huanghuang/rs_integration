@@ -293,9 +293,7 @@ public final class PureRecipePlanner {
         private static RecipeNode canonicalRecipe(RecipeNode recipe) {
             List<IngredientRef> inputs = PureDemandNormalizer.mergeEquivalent(recipe.inputs());
             if (inputs.equals(recipe.inputs())) return recipe;
-            return new RecipeNode(recipe.recipeId(), recipe.output(), recipe.outputCount(),
-                    inputs, recipe.modTypeId(), recipe.recipeTypeId(), recipe.magicCosts(),
-                    recipe.hasFluidOutputs(), recipe.dynamicIdentityTargetable());
+            return recipe.withOutputAndInputs(recipe.output(), inputs);
         }
     }
 
@@ -400,6 +398,15 @@ public final class PureRecipePlanner {
         return precise;
     }
 
+    /** 同一标签族的联产物共同计入增益，避免把真正增产的配方误判成转换环。 */
+    private static long familyOutputCount(RecipeNode recipe, List<MaterialRef> family, long batches) {
+        long count = 0L;
+        for (var output : recipe.guaranteedOutputs().entrySet()) {
+            if (family.contains(output.getKey())) count = saturatedAdd(count, output.getValue());
+        }
+        return count > Long.MAX_VALUE / batches ? Long.MAX_VALUE : count * batches;
+    }
+
     private static CandidateCycleRelation cycleRelation(
             RecipeNode candidate, Set<MaterialRef> ancestors) {
         boolean consumesOnlyAncestor = false;
@@ -427,18 +434,24 @@ public final class PureRecipePlanner {
 
     private sealed interface Task permits DemandTask, CompleteRecipeTask {}
     private record DemandTask(IngredientRef ingredient, int consumer, int port,
-                              boolean supplyOnly, boolean allowAggregation) implements Task {
+                              boolean supplyOnly, boolean allowAggregation, int deferredAtFlow) implements Task {
+        private DemandTask(IngredientRef ingredient, int consumer, int port,
+                           boolean supplyOnly, boolean allowAggregation) {
+            this(ingredient, consumer, port, supplyOnly, allowAggregation, -1);
+        }
+
         private DemandTask(IngredientRef ingredient, int consumer, int port) {
             this(ingredient, consumer, port, false, true);
         }
 
-        // 轨迹位置不影响可行性，失败缓存仍按原有搜索语义共享。
+        // 消费者位置不影响可行性；延后标记决定能否再次调整顺序，必须进入失败键。
         @Override public boolean equals(Object other) {
             return other instanceof DemandTask task && supplyOnly == task.supplyOnly
+                    && deferredAtFlow == task.deferredAtFlow
                     && ingredient.equals(task.ingredient);
         }
 
-        @Override public int hashCode() { return 31 * ingredient.hashCode() + Boolean.hashCode(supplyOnly); }
+        @Override public int hashCode() { return Objects.hash(ingredient, supplyOnly, deferredAtFlow); }
     }
     private record CompleteRecipeTask(MaterialRef output, long outputCount, long consumeCount,
                                       ResourceLocation recipeId, long batches,
@@ -466,7 +479,7 @@ public final class PureRecipePlanner {
         }
     }
     private record FailureKey(PersistentTaskQueue<Task> pending, Map<MaterialRef, Long> stockChanges,
-                              Set<MaterialRef> resolving, int stepCount) {}
+                              Set<MaterialRef> resolving, int stepCount, int flowCount) {}
 
     private enum DemandPhase { MATCHING_STOCK, SINGLE_STOCK, COMBINED_STOCK, PRODUCTION }
 
@@ -480,6 +493,7 @@ public final class PureRecipePlanner {
         private DeterministicRecipePlanner.Prepared initialPreparation;
         private PersistentTaskQueue<Task> initialTasks;
         private int aggregationWork;
+        private int routeProbeWork;
         private final int maxSteps;
         private final int maxSearchStates;
         private final int maxMemoizedFailures;
@@ -599,9 +613,18 @@ public final class PureRecipePlanner {
             private DemandPhase phase = DemandPhase.MATCHING_STOCK;
             private boolean completionStarted;
             private boolean aggregationAttempted;
+            private List<DemandTask> aggregateDemands;
+            private PersistentTaskQueue<Task> aggregateContinuation;
+            private DeterministicRecipePlanner.Prepared fallbackPreparation;
+            private DeterministicRecipePlanner.RouteSearch routeSearch;
             private int stockCursor;
             private int wantedCursor;
             private int candidateCursor;
+            private boolean partialProduction;
+            private final Set<RecipeNode> splittable = new HashSet<>();
+            private List<Long> batchHints;
+            private int batchHintCursor;
+            private long batchCursor;
             private boolean cycleBlocked;
             private boolean noRecipeBlocked;
             private List<MaterialRef> stockAlternatives;
@@ -610,6 +633,8 @@ public final class PureRecipePlanner {
             private MaterialRef wanted;
             private long have;
             private long needed;
+            private PersistentTaskQueue<Task> deferralCursor;
+            private List<Task> deferralPrefix;
 
             private SearchFrame(PersistentTaskQueue<Task> pending) {
                 this.pending = pending;
@@ -621,8 +646,9 @@ public final class PureRecipePlanner {
                         || candidates(demand.ingredient().alternatives().get(0),
                                 demand.ingredient().nbtMatchMode()).size() > 1);
                 key = maxMemoizedFailures == 0 || !branching ? null
+                        // 材料事件数用于判断延后后的进展，不能复用不同进度的失败结论。
                         : new FailureKey(pending, Map.copyOf(stockChanges),
-                                Set.copyOf(resolving), steps.size());
+                                Set.copyOf(resolving), steps.size(), flow.size());
             }
 
             private void rollback() {
@@ -650,9 +676,9 @@ public final class PureRecipePlanner {
                 DemandTask demand = (DemandTask) task;
                 IngredientRef ingredient = demand.ingredient();
                 if (!aggregationAttempted) {
-                    aggregationAttempted = true;
                     PersistentTaskQueue<Task> aggregated = aggregateSegment();
                     if (aggregated != null) return aggregated;
+                    aggregationAttempted = true;
                 }
                 boolean catalyst = ingredient.role() == DemandRole.CATALYST || demand.supplyOnly();
                 if (phase == DemandPhase.MATCHING_STOCK) {
@@ -696,28 +722,49 @@ public final class PureRecipePlanner {
                         return use(demand, consumedAmounts(previous), () -> previous.forEach(Search.this::setStock));
                     }
                 }
-                if (!ingredient.recursive()) return null;
+                if (!ingredient.recursive()) return deferForCoProduct(demand);
                 if (wantedAlternatives == null) wantedAlternatives = productionFirst(ingredient.alternatives());
                 while (true) {
                     while (candidateCursor < producers.size()) {
                         checkBudget();
-                        RecipeNode candidate = producers.get(candidateCursor++);
+                        RecipeNode candidate = producers.get(candidateCursor);
+                        long selfConsumed = selfConsumedPerBatch(candidate, candidate.output());
+                        long netGain = candidate.outputCount() - selfConsumed;
+                        long batches = batchesFor(needed, selfConsumed > 0 ? netGain : candidate.outputCount());
+                        long scheduledBatches = batches;
+                        if (partialProduction) {
+                            if (!splittable.contains(candidate) || selfConsumed > 0 || batches <= 1L
+                                    || candidates(wanted, ingredient.nbtMatchMode()).size() == 1
+                                    && ingredient.alternatives().size() == 1
+                                    && candidate.guaranteedOutputs().size() == 1) {
+                                candidateCursor++;
+                                continue;
+                            }
+                            scheduledBatches = nextPartialBatch(candidate, batches);
+                            if (scheduledBatches <= 0L) {
+                                candidateCursor++;
+                                batchHints = null;
+                                continue;
+                            }
+                            // 数量分支也占用搜索预算，不能在无可行输入时无限枚举大订单。
+                            if (++expandedStates > maxSearchStates) throw new SearchLimitException();
+                        } else {
+                            candidateCursor++;
+                        }
                         if (steps.size() + pendingRecipeCount >= maxSteps) {
                             stepLimitReached = true;
                             continue;
                         }
-                        long selfConsumed = selfConsumedPerBatch(candidate, candidate.output());
-                        long netGain = candidate.outputCount() - selfConsumed;
-                        long batches = batchesFor(needed, selfConsumed > 0 ? netGain : candidate.outputCount());
                         if (batches <= 0L) continue;
-                        if (isNonProductiveBroadFamilyConversion(candidate, ingredient.alternatives(), batches)) continue;
+                        if (isNonProductiveBroadFamilyConversion(candidate, ingredient.alternatives(), scheduledBatches)) continue;
                         boolean broadFamily = ingredient.alternatives().size() > 1;
                         if (broadFamily && !reachability().canReach(candidate)) continue;
-                        if (selfConsumed == 0 && isUnseededReverseConversion(candidate, wanted, batches)) {
+                        // 整批需要逆向补料，不代表库存已有的部分批次也不可执行。
+                        if (!partialProduction && selfConsumed == 0 && batches > 1L) splittable.add(candidate);
+                        if (selfConsumed == 0 && isUnseededReverseConversion(candidate, wanted, scheduledBatches)) {
                             cycleBlocked = true;
                             continue;
                         }
-                        long scheduledBatches = batches;
                         long consumeCount = catalyst ? 0L : ingredient.count();
                         PersistentTaskQueue<Task> continuation = rest;
                         if (selfConsumed > 0) {
@@ -728,7 +775,7 @@ public final class PureRecipePlanner {
                             continuation = rest.prepend(demand);
                         }
                         if (selfConsumed == 0 && !catalyst
-                                && (broadFamily || !candidate.output().equals(wanted))) {
+                                && (partialProduction || broadFamily || !candidate.output().equals(wanted))) {
                             consumeCount = 0;
                             continuation = rest.prepend(demand);
                         }
@@ -739,7 +786,11 @@ public final class PureRecipePlanner {
                         undo = () -> resolving.remove(resolvingMaterial);
                         return branch;
                     }
-                    if (wantedCursor >= wantedAlternatives.size()) break;
+                    if (wantedCursor >= wantedAlternatives.size()) {
+                        if (partialProduction || splittable.isEmpty()) break;
+                        partialProduction = true;
+                        wantedCursor = 0;
+                    }
                     checkBudget();
                     wanted = wantedAlternatives.get(wantedCursor++);
                     if (preferences.isNoRecipe(wanted)) {
@@ -760,12 +811,89 @@ public final class PureRecipePlanner {
                     List<RecipeNode> raw = inventoryFirstCandidates(wanted, !broadFamily, ingredient.nbtMatchMode());
                     producers = preferNonCyclicCandidates(raw);
                     candidateCursor = 0;
+                    batchHints = null;
                     if (producers.size() < raw.size()) cycleBlocked = true;
                 }
+                PersistentTaskQueue<Task> deferred = deferForCoProduct(demand);
+                if (deferred != null) return deferred;
                 recordFailure(ingredient, pending,
                         cycleBlocked && !noRecipeBlocked && !sawMissingInputFailure
                                 ? FailureReason.CYCLE : FailureReason.MISSING_INPUTS);
                 return null;
+            }
+
+            /**
+             * 只提前处理已有的、可能带来所缺副产物的需求，不为副产物建立生产索引。
+             * 完成任务的位置保持不变，消费者仍须等到所有输入齐备才能登记产物。
+             * 延后标记随队列回退；没有新的材料事件时不能再次延后或被提到前面。
+             */
+            private PersistentTaskQueue<Task> deferForCoProduct(DemandTask demand) {
+                if (demand.deferredAtFlow() == flow.size() || rest.isEmpty()) return null;
+                if (deferralCursor == null) {
+                    if (!canReceiveCoProduct(demand.ingredient())) return null;
+                    deferralCursor = rest;
+                    deferralPrefix = new ArrayList<>();
+                }
+                while (!deferralCursor.isEmpty()) {
+                    checkBudget();
+                    Task next = deferralCursor.head();
+                    deferralCursor = deferralCursor.tail();
+                    if (next instanceof DemandTask later && later.deferredAtFlow() != flow.size()
+                            && canProduceCoProduct(later.ingredient(), demand.ingredient())) {
+                        PersistentTaskQueue<Task> branch = deferralCursor;
+                        for (int index = deferralPrefix.size() - 1; index >= 0; index--) {
+                            checkBudget();
+                            branch = branch.prepend(deferralPrefix.get(index));
+                        }
+                        deferralPrefix.add(next);
+                        undo = () -> {};
+                        // 禁止聚合重建这个延后标记；取料仍沿用原消费者和端口。
+                        return branch.prepend(new DemandTask(demand.ingredient(), demand.consumer(),
+                                demand.port(), demand.supplyOnly(), false, flow.size())).prepend(later);
+                    }
+                    deferralPrefix.add(next);
+                }
+                return null;
+            }
+
+            /**
+             * 先尝试库存允许的整块数量，再按几何级数缩小；最后按预算补查其余组合。
+             * 部分生产留在库存，原需求重新取料，因此每个输入端口仍只记录一次实际分配。
+             */
+            private long nextPartialBatch(RecipeNode recipe, long fullBatches) {
+                if (batchHints == null) {
+                    long limit = fullBatches - 1L;
+                    long stockedBatches = limit;
+                    for (IngredientRef input : normalizedInputs(recipe)) {
+                        checkBudget();
+                        long available = stockAcross(input);
+                        if (input.role() == DemandRole.CATALYST) {
+                            if (available < input.count()) stockedBatches = 0L;
+                        } else {
+                            stockedBatches = Math.min(stockedBatches, available / input.count());
+                        }
+                        boolean stockOnly = !input.recursive() || input.alternatives().stream().allMatch(
+                                material -> preferences.isNoRecipe(material)
+                                        || candidates(material, input.nbtMatchMode()).isEmpty());
+                        if (!stockOnly) continue;
+                        if (input.role() == DemandRole.CATALYST) {
+                            if (available < input.count()) limit = 0L;
+                        } else {
+                            limit = Math.min(limit, available / input.count());
+                        }
+                    }
+                    batchHints = new ArrayList<>();
+                    // 即使输入还可递归生产，也优先尝试当前库存能直接支持的整块数量。
+                    if (stockedBatches > 0L) batchHints.add(stockedBatches);
+                    for (long count = limit; count > 0L; count /= 2L) {
+                        if (!batchHints.contains(count)) batchHints.add(count);
+                    }
+                    batchHintCursor = 0;
+                    batchCursor = limit - 1L;
+                }
+                if (batchHintCursor < batchHints.size()) return batchHints.get(batchHintCursor++);
+                while (batchCursor > 0L && batchHints.contains(batchCursor)) batchCursor--;
+                return Math.max(0L, batchCursor--);
             }
 
             /** 复杂边界由原搜索选择；边界内的连续确定性需求仍共享一次聚合。 */
@@ -778,24 +906,58 @@ public final class PureRecipePlanner {
                 int remainingSteps = maxSteps - steps.size() - pendingRecipeCount;
                 int remainingStates = maxSearchStates - expandedStates;
                 if (remainingSteps <= 0 || remainingStates <= 0) return null;
-                List<DemandTask> demands = new ArrayList<>();
-                PersistentTaskQueue<Task> continuation = pending;
-                while (!continuation.isEmpty() && continuation.head() instanceof DemandTask demand
-                        && demand.allowAggregation() && !demand.supplyOnly()
-                        && DeterministicRecipePlanner.supported(demand.ingredient())) {
-                    checkBudget();
-                    demands.add(demand);
-                    continuation = continuation.tail();
+                if (aggregateDemands == null) {
+                    aggregateDemands = new ArrayList<>();
+                    aggregateContinuation = pending;
+                    while (!aggregateContinuation.isEmpty() && aggregateContinuation.head() instanceof DemandTask demand
+                            && demand.allowAggregation() && !demand.supplyOnly()
+                            && DeterministicRecipePlanner.supported(demand.ingredient())) {
+                        checkBudget();
+                        aggregateDemands.add(demand);
+                        aggregateContinuation = aggregateContinuation.tail();
+                    }
+                    fallbackPreparation = pending == initialTasks ? initialPreparation : null;
+                    initialPreparation = null;
+                    if (fallbackPreparation == null) fallbackPreparation = compilationCache.prepare(stock,
+                            aggregateDemands.stream().map(DemandTask::ingredient).toList(), resolving,
+                            remainingSteps, remainingStates, Search.this::checkAggregationBudget);
+                    if ((fallbackPreparation == null || fallbackPreparation.plan() == null)
+                            && compilationCache.hasRouteChoices() && !compilationCache.prefersCommonSupply()) {
+                        boolean needsTransitiveProbe;
+                        try {
+                            needsTransitiveProbe = compilationCache.needsTransitiveRouteProbe(
+                                    stock, Search.this::checkRouteProbeBudget);
+                        } catch (DeterministicRecipePlanner.ProbeLimitReached exhausted) {
+                            needsTransitiveProbe = false;
+                        }
+                        if (needsTransitiveProbe) {
+                            routeSearch = compilationCache.routes(material ->
+                                    inventoryFirstCandidates(material, true, NbtMatchMode.EXACT),
+                                    Search.this::routeReachability);
+                        }
+                    }
                 }
-                DeterministicRecipePlanner.Prepared prepared = pending == initialTasks ? initialPreparation : null;
-                initialPreparation = null;
-                if (prepared == null) prepared = compilationCache.prepare(stock,
-                        demands.stream().map(DemandTask::ingredient).toList(), resolving,
-                        remainingSteps, remainingStates, Search.this::checkAggregationBudget);
+                List<DemandTask> demands = aggregateDemands;
+                PersistentTaskQueue<Task> continuation = aggregateContinuation;
+                DeterministicRecipePlanner.Prepared prepared = null;
+                boolean routeWorkCharged = false;
+                if (routeSearch != null) {
+                    // 游标只存在本帧；下游失败先撤销库存、事件和步骤，再按同一库存尝试下一组合。
+                    // 新增的选路、失败编译和重编译均即时计费，不能只统计成功尝试。
+                    prepared = routeSearch.prepare(stock, demands.stream().map(DemandTask::ingredient).toList(),
+                            resolving, remainingSteps, remainingStates, Search.this::checkRouteProbeBudget);
+                    routeWorkCharged = prepared != null;
+                    if (prepared == null) routeSearch = null;
+                }
+                if (prepared == null) {
+                    prepared = fallbackPreparation;
+                    fallbackPreparation = null;
+                    aggregationAttempted = true;
+                }
                 if (prepared == null) return null;
                 DeterministicRecipePlanner.Plan segment = prepared.plan();
-                if (segment == null) return scheduleSegment(prepared, demands, continuation);
-                expandedStates += segment.expandedStates();
+                if (segment == null) return scheduleSegment(prepared, demands, continuation, !routeWorkCharged);
+                if (!routeWorkCharged) expandedStates += segment.expandedStates();
                 Map<MaterialRef, Long> previous = new HashMap<>();
                 Set<MaterialRef> changed = new HashSet<>(stock.keySet());
                 changed.addAll(segment.remaining().keySet());
@@ -833,7 +995,7 @@ public final class PureRecipePlanner {
              * 整段失败仍回到本帧的原搜索，各边界候选共享现有库存撤销与材料流回溯。
              */
             private PersistentTaskQueue<Task> scheduleSegment(DeterministicRecipePlanner.Prepared prepared,
-                    List<DemandTask> demands, PersistentTaskQueue<Task> continuation) {
+                    List<DemandTask> demands, PersistentTaskQueue<Task> continuation, boolean chargeWork) {
                 List<Task> scheduled = new ArrayList<>();
                 Set<MaterialRef> produced = new HashSet<>();
                 for (DeterministicRecipePlanner.SegmentStep entry : prepared.schedule()) {
@@ -856,7 +1018,7 @@ public final class PureRecipePlanner {
                 for (DemandTask demand : demands) {
                     scheduled.add(new DemandTask(demand.ingredient(), demand.consumer(), demand.port(), false, false));
                 }
-                expandedStates += prepared.expandedStates();
+                if (chargeWork) expandedStates += prepared.expandedStates();
                 resolving.addAll(produced);
                 undo = () -> resolving.removeAll(produced);
                 for (int index = scheduled.size() - 1; index >= 0; index--) {
@@ -868,17 +1030,23 @@ public final class PureRecipePlanner {
             private PersistentTaskQueue<Task> complete(CompleteRecipeTask completed) {
                 if (completionStarted) return null;
                 completionStarted = true;
-                long before = stock.getOrDefault(completed.output(), 0L);
-                long afterProduction;
+                Map<MaterialRef, Long> previous = new LinkedHashMap<>();
+                Map<MaterialRef, Long> produced = new LinkedHashMap<>();
                 try {
-                    afterProduction = Math.addExact(before,
-                            Math.multiplyExact(completed.outputCount(), completed.batches()));
+                    for (var entry : completed.recipe().guaranteedOutputs().entrySet()) {
+                        long before = stock.getOrDefault(entry.getKey(), 0L);
+                        previous.put(entry.getKey(), before);
+                        produced.put(entry.getKey(), Math.addExact(before,
+                                Math.multiplyExact(entry.getValue(), completed.batches())));
+                    }
                 } catch (ArithmeticException overflow) {
                     return null;
                 }
+                long afterProduction = produced.get(completed.output());
                 if (afterProduction < completed.consumeCount()) return null;
                 resolving.remove(completed.resolvingMaterial());
-                setStock(completed.output(), afterProduction - completed.consumeCount());
+                produced.put(completed.output(), afterProduction - completed.consumeCount());
+                produced.forEach(Search.this::setStock);
                 RecipeNode source = graph.recipesById().get(completed.recipeId());
                 MaterialRef demanded = source != null && ("smithing".equals(source.modTypeId())
                         || completed.output().constrainedNbt()) && !completed.output().nbt().isEmpty()
@@ -887,7 +1055,7 @@ public final class PureRecipePlanner {
                 flow.add(new Production(completed.node(), completed.recipe(), completed.batches(),
                         completed.output(), demanded));
                 undo = () -> {
-                    setStock(completed.output(), before);
+                    previous.forEach(Search.this::setStock);
                     resolving.add(completed.resolvingMaterial());
                 };
                 if (completed.consumeCount() > 0L) {
@@ -899,6 +1067,43 @@ public final class PureRecipePlanner {
                 }
                 return rest;
             }
+        }
+
+        private boolean canReceiveCoProduct(IngredientRef demand) {
+            for (MaterialRef alternative : demand.alternatives()) {
+                for (MaterialRef output : graph.coProductsByItem().getOrDefault(alternative.itemId(), Set.of())) {
+                    checkBudget();
+                    if (matchesIngredient(output, demand)) return true;
+                }
+            }
+            return false;
+        }
+
+        /** 仅探测后续合法需求的生产依赖；实际数量、偏好和可行性仍由原搜索决定。 */
+        private boolean canProduceCoProduct(IngredientRef later, IngredientRef blocked) {
+            ArrayDeque<IngredientRef> pending = new ArrayDeque<>();
+            Set<CandidateLookup> visited = new HashSet<>();
+            pending.add(later);
+            while (!pending.isEmpty()) {
+                checkBudget();
+                IngredientRef input = pending.removeFirst();
+                if (!input.recursive()) continue;
+                for (MaterialRef material : input.alternatives()) {
+                    if (!visited.add(new CandidateLookup(material, input.nbtMatchMode()))
+                            || preferences.isNoRecipe(material)) continue;
+                    if (++expandedStates > maxSearchStates) throw new SearchLimitException();
+                    for (RecipeNode recipe : preferForcedCandidate(material, candidates(material, input.nbtMatchMode()))) {
+                        checkBudget();
+                        if (++expandedStates > maxSearchStates) throw new SearchLimitException();
+                        if (preferences.excludes(recipe.recipeId())) continue;
+                        for (MaterialRef output : recipe.guaranteedOutputs().keySet()) {
+                            if (!output.equals(recipe.output()) && matchesIngredient(output, blocked)) return true;
+                        }
+                        pending.addAll(normalizedInputs(recipe));
+                    }
+                }
+            }
+            return false;
         }
 
         private Map<MaterialRef, Long> consumedAmounts(Map<MaterialRef, Long> previous) {
@@ -1418,6 +1623,14 @@ public final class PureRecipePlanner {
             return reachability;
         }
 
+        /** 排序提示仅复用在当前 Search；首次整图分析由触发它的路线探测预算承担。 */
+        private SeededReachability routeReachability(Runnable budgetCheck) {
+            if (reachability == null) {
+                reachability = new SeededReachability(graph, initialStock, budgetCheck);
+            }
+            return reachability;
+        }
+
         private double inputStockCoverage(RecipeNode candidate) {
             long required = 0L;
             long covered = 0L;
@@ -1529,7 +1742,7 @@ public final class PureRecipePlanner {
                 RecipeNode candidate, List<MaterialRef> familyAlternatives, long batches) {
             if (familyAlternatives.size() < 2
                     || !familyAlternatives.contains(candidate.output())) return false;
-            long produced = (long) candidate.outputCount() * batches;
+            long produced = familyOutputCount(candidate, familyAlternatives, batches);
             if (produced <= 0L) return false;
 
             List<MaterialRef> familyKey = List.copyOf(familyAlternatives);
@@ -1622,6 +1835,16 @@ public final class PureRecipePlanner {
             checkBudget();
             if (aggregationWork >= maxSearchStates) throw new DeterministicRecipePlanner.ProbeLimitReached();
             aggregationWork++;
+        }
+
+        /** 请求级探测最多使用总额度的一半，且不挤占普通搜索剩余的一半；失败工作照常计费。 */
+        private void checkRouteProbeBudget() {
+            checkBudget();
+            if (routeProbeWork >= maxSearchStates / 2 || expandedStates >= maxSearchStates / 2) {
+                throw new DeterministicRecipePlanner.ProbeLimitReached();
+            }
+            routeProbeWork++;
+            expandedStates++;
         }
 
         private void checkBudget() {
@@ -1768,10 +1991,13 @@ public final class PureRecipePlanner {
                         ("smithing".equals(recipe.modTypeId()) || recipe.output().constrainedNbt())
                                 && !recipe.output().nbt().isEmpty()
                                 ? recipe.output() : null));
-                long surplus = recipe.outputCount() * batches
-                        - (ingredient.role() == DemandRole.CATALYST ? 0L : remaining);
-                if (surplus > 0L) {
-                    addStock(recipe.output(), surplus);
+                for (var output : recipe.guaranteedOutputs().entrySet()) {
+                    long surplus = output.getValue() > Long.MAX_VALUE / batches
+                            ? Long.MAX_VALUE : output.getValue() * batches;
+                    if (output.getKey().equals(recipe.output()) && ingredient.role() != DemandRole.CATALYST) {
+                        surplus -= remaining;
+                    }
+                    if (surplus > 0L) addStock(output.getKey(), surplus);
                 }
                 return covered;
             }
@@ -1921,7 +2147,7 @@ public final class PureRecipePlanner {
                                                      List<MaterialRef> family,
                                                      long batches) {
             if (!family.contains(recipe.output())) return false;
-            long produced = (long) recipe.outputCount() * batches;
+            long produced = familyOutputCount(recipe, family, batches);
             PartialFamilyCost analysis = familyCosts.computeIfAbsent(
                     List.copyOf(family), PartialFamilyCost::new);
             long consumed = 0L;
@@ -2040,14 +2266,14 @@ public final class PureRecipePlanner {
      * validates quantities and rejects conversion loops, so this can retain an extra candidate
      * but can never hide a valid recipe.</p>
      */
-    private static final class SeededReachability {
+    static final class SeededReachability {
         private static final int UNREACHABLE_DEPTH = Integer.MAX_VALUE;
 
         private final ImmutableRecipeGraph graph;
         private final Map<MaterialRef, Integer> materialDepth;
         private final Map<RecipeNode, Integer> recipeDepth;
 
-        private SeededReachability(ImmutableRecipeGraph graph,
+        SeededReachability(ImmutableRecipeGraph graph,
                                    Map<MaterialRef, Long> available,
                                    Runnable budgetCheck) {
             this.graph = graph;
@@ -2097,9 +2323,13 @@ public final class PureRecipePlanner {
                     seeds++;
                 }
                 for (RecipeNode recipe : inputFreeRecipes) {
+                    budgetCheck.run();
                     recipeResult.put(recipe, 1);
-                    materialResult.merge(recipe.output(), 1, Math::min);
-                    queue.add(recipe.output());
+                    for (MaterialRef output : recipe.guaranteedOutputs().keySet()) {
+                        budgetCheck.run();
+                        materialResult.merge(output, 1, Math::min);
+                        queue.add(output);
+                    }
                 }
                 while (!queue.isEmpty()) {
                     // 可达性属于本次规划工作，必须和递归搜索共享截止时间。
@@ -2118,7 +2348,8 @@ public final class PureRecipePlanner {
                         int[] depths = inputDepths.get(ref.recipe());
                         if (satisfied == null) {
                             int inputCount = ref.recipe().inputs().size();
-                            satisfied = new int[inputCount];
+                            // 最后一格记录已满足端口数，避免每到一条边就从头扫描所有端口。
+                            satisfied = new int[inputCount + 1];
                             depths = new int[inputCount];
                             inputSatisfied.put(ref.recipe(), satisfied);
                             inputDepths.put(ref.recipe(), depths);
@@ -2127,22 +2358,24 @@ public final class PureRecipePlanner {
                         if (depths[ref.inputIndex()] == 0 || depth < depths[ref.inputIndex()]) {
                             depths[ref.inputIndex()] = depth;
                         }
-                        if (satisfied[ref.inputIndex()] != 1) satisfied[ref.inputIndex()] = 1;
-                        boolean complete = true;
+                        if (satisfied[ref.inputIndex()] != 1) {
+                            satisfied[ref.inputIndex()] = 1;
+                            satisfied[depths.length]++;
+                        }
+                        if (satisfied[depths.length] != depths.length) continue;
                         int deepest = 0;
-                        for (int index = 0; index < satisfied.length; index++) {
-                            if (satisfied[index] == 0) {
-                                complete = false;
-                                break;
-                            }
+                        for (int index = 0; index < depths.length; index++) {
+                            budgetCheck.run();
                             deepest = Math.max(deepest, depths[index]);
                         }
-                        if (!complete) continue;
                         int recipeDepthValue = deepest + 1;
                         recipeResult.put(ref.recipe(), recipeDepthValue);
-                        Integer previous = materialResult.putIfAbsent(ref.recipe().output(), recipeDepthValue);
-                        if (previous == null || recipeDepthValue < previous) {
-                            queue.add(ref.recipe().output());
+                        for (MaterialRef output : ref.recipe().guaranteedOutputs().keySet()) {
+                            budgetCheck.run();
+                            Integer previous = materialResult.putIfAbsent(output, recipeDepthValue);
+                            if (previous == null || recipeDepthValue < previous) {
+                                queue.add(output);
+                            }
                         }
                     }
                 }
@@ -2155,7 +2388,7 @@ public final class PureRecipePlanner {
             }
         }
 
-        private boolean canReach(RecipeNode recipe) {
+        boolean canReach(RecipeNode recipe) {
             return recipeDepth.containsKey(recipe)
                     || recipeDepth.containsKey(graph.recipesById().get(recipe.recipeId()));
         }

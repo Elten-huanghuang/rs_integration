@@ -28,6 +28,33 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 
 class RoutedPlanningTest extends BootstrapTest {
+    @Test
+    void deepBackgroundRouteSurvivesConfiguredInspectionLimit() {
+        Map<MaterialRef, List<RecipeNode>> recipes = new LinkedHashMap<>();
+        MaterialRef previous = IRON;
+        RecipeNode target = null;
+        for (int index = 0; index < 2_000; index++) {
+            MaterialRef output = new MaterialRef(id("deep_" + index), "");
+            target = new RecipeNode(id("deep_" + index), output, 1L, List.of(new IngredientRef(List.of(previous), 1L)));
+            recipes.put(output, List.of(target));
+            previous = output;
+        }
+        var snapshot = new PlanningSnapshot(UUID.randomUUID(), 1L, 1L, target.recipeId(),
+                Map.of(new StackKey(Items.IRON_INGOT, null), 1L), Map.of(), new ImmutableRecipeGraph(recipes),
+                "network", "binding", false);
+        for (int maxNodes : new int[] {512, 4096}) {
+            var routing = routing(snapshot, Set.of(), maxNodes);
+            var routed = PlanningThreadContext.runInBackground(() -> AsyncPurePlanningService.computeRouted(
+                    snapshot, routing, 1, 65_536, 65_536, 8192, 10_000));
+            assertEquals(maxNodes == 512 ? PureDemandTreeInspector.Status.NODE_LIMIT
+                    : PureDemandTreeInspector.Status.COMPLETE, routed.inspection().status());
+            assertNotNull(routed.plan());
+            assertEquals(PureRecipePlanner.Status.SUCCESS, routed.plan().status());
+            assertEquals(1_999, routed.plan().steps().size());
+            assertTrue(routed.plan().remaining().isEmpty());
+        }
+    }
+
     private static final ResourceLocation TARGET = new ResourceLocation("test:target");
     private static final MaterialRef IRON = new MaterialRef(new ResourceLocation("minecraft:iron_ingot"), "");
     private static final MaterialRef RESULT = new MaterialRef(new ResourceLocation("minecraft:iron_block"), "");

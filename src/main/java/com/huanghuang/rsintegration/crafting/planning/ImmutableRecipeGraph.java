@@ -7,12 +7,22 @@ import net.minecraft.resources.ResourceLocation;
 import java.util.stream.Collectors;
 
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 
 /** Value-only recipe projection safe to traverse outside the server thread. */
 public record ImmutableRecipeGraph(Map<MaterialRef, List<RecipeNode>> recipesByOutput,
-                                   Map<ResourceLocation, RecipeNode> recipesById) {
+                                   Map<ResourceLocation, RecipeNode> recipesById,
+                                   Map<ResourceLocation, Set<MaterialRef>> coProductsByItem) {
+    public ImmutableRecipeGraph(Map<MaterialRef, List<RecipeNode>> recipesByOutput,
+                                Map<ResourceLocation, RecipeNode> recipesById) {
+        this(recipesByOutput, recipesById, indexCoProducts(recipesByOutput));
+    }
+
     public ImmutableRecipeGraph(Map<MaterialRef, List<RecipeNode>> recipesByOutput) {
         this(recipesByOutput, indexById(recipesByOutput));
     }
@@ -21,6 +31,25 @@ public record ImmutableRecipeGraph(Map<MaterialRef, List<RecipeNode>> recipesByO
         recipesByOutput = recipesByOutput.entrySet().stream().collect(Collectors.toUnmodifiableMap(
                 Map.Entry::getKey, entry -> List.copyOf(entry.getValue())));
         recipesById = Map.copyOf(recipesById);
+        coProductsByItem = coProductsByItem.entrySet().stream().collect(Collectors.toUnmodifiableMap(
+                Map.Entry::getKey, entry -> Set.copyOf(entry.getValue())));
+    }
+
+    /** 仅作延后需求的静态筛选，不能用于检索可生产目标。 */
+    private static Map<ResourceLocation, Set<MaterialRef>> indexCoProducts(
+            Map<MaterialRef, List<RecipeNode>> recipesByOutput) {
+        Map<ResourceLocation, Set<MaterialRef>> indexed = new LinkedHashMap<>();
+        for (List<RecipeNode> candidates : recipesByOutput.values()) {
+            for (RecipeNode recipe : candidates) {
+                if (recipe.guaranteedOutputs().size() < 2) continue;
+                for (MaterialRef output : recipe.guaranteedOutputs().keySet()) {
+                    if (!output.equals(recipe.output())) {
+                        indexed.computeIfAbsent(output.itemId(), ignored -> new LinkedHashSet<>()).add(output);
+                    }
+                }
+            }
+        }
+        return indexed;
     }
 
     private static Map<ResourceLocation, RecipeNode> indexById(
@@ -132,12 +161,32 @@ public record ImmutableRecipeGraph(Map<MaterialRef, List<RecipeNode>> recipesByO
         }
     }
 
+    /** output 是当前检索目标；guaranteedOutputs 是同次执行的全部安全产量，按材料合并。 */
     public record RecipeNode(ResourceLocation recipeId, MaterialRef output, long outputCount,
                              List<IngredientRef> inputs, String modTypeId,
                              ResourceLocation recipeTypeId,
                              List<MagicResourceCost> magicCosts,
                              boolean hasFluidOutputs,
-                             boolean dynamicIdentityTargetable) {
+                             boolean dynamicIdentityTargetable,
+                             Map<MaterialRef, Long> guaranteedOutputs) {
+        public RecipeNode(ResourceLocation recipeId, MaterialRef output, long outputCount,
+                          List<IngredientRef> inputs, String modTypeId,
+                          ResourceLocation recipeTypeId, List<MagicResourceCost> magicCosts,
+                          boolean hasFluidOutputs, boolean dynamicIdentityTargetable) {
+            this(recipeId, output, outputCount, inputs, modTypeId, recipeTypeId, magicCosts,
+                    hasFluidOutputs, dynamicIdentityTargetable, Map.of(output, outputCount));
+        }
+
+        /** 绑定输入或动态目标时，保留同次执行的其他保证产物。 */
+        public RecipeNode withOutputAndInputs(MaterialRef selected, List<IngredientRef> newInputs) {
+            Map<MaterialRef, Long> outputs = new LinkedHashMap<>(guaranteedOutputs);
+            outputs.remove(output);
+            outputs.merge(selected, outputCount, Math::addExact);
+            return new RecipeNode(recipeId, selected, outputs.get(selected), newInputs,
+                    modTypeId, recipeTypeId, magicCosts, hasFluidOutputs,
+                    dynamicIdentityTargetable, outputs);
+        }
+
         public RecipeNode(ResourceLocation recipeId, MaterialRef output, long outputCount,
                           List<IngredientRef> inputs) {
             this(recipeId, output, outputCount, inputs, "generic",
@@ -171,12 +220,17 @@ public record ImmutableRecipeGraph(Map<MaterialRef, List<RecipeNode>> recipesByO
 
         public RecipeNode {
             inputs = List.copyOf(inputs);
+            guaranteedOutputs = Collections.unmodifiableMap(new LinkedHashMap<>(guaranteedOutputs));
             magicCosts = MagicResourceCost.merge(magicCosts);
             modTypeId = modTypeId == null || modTypeId.isBlank() ? "generic" : modTypeId;
             recipeTypeId = recipeTypeId == null
                     ? new ResourceLocation("minecraft", "crafting") : recipeTypeId;
             if (recipeId == null || output == null || outputCount <= 0) {
                 throw new IllegalArgumentException("invalid recipe node");
+            }
+            if (!Objects.equals(guaranteedOutputs.get(output), outputCount)
+                    || guaranteedOutputs.values().stream().anyMatch(count -> count == null || count <= 0L)) {
+                throw new IllegalArgumentException("invalid guaranteed outputs");
             }
         }
     }

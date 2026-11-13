@@ -233,11 +233,7 @@ public final class ImmutableRecipeGraphProjector {
             for (RecipeNode recipe : entry.getValue()) {
                 List<IngredientRef> inputs = replacements.get(recipe.recipeId());
                 if (inputs != null && !inputs.equals(recipe.inputs())) {
-                    recipes.add(new RecipeNode(recipe.recipeId(), recipe.output(),
-                            recipe.outputCount(), inputs, recipe.modTypeId(),
-                            recipe.recipeTypeId(), recipe.magicCosts(),
-                            recipe.hasFluidOutputs(),
-                            recipe.dynamicIdentityTargetable()));
+                    recipes.add(recipe.withOutputAndInputs(recipe.output(), inputs));
                     changed = true;
                 } else {
                     recipes.add(recipe);
@@ -494,9 +490,7 @@ public final class ImmutableRecipeGraphProjector {
     private static RecipeNode replaceInputs(
             RecipeNode recipe, Map<ResourceLocation, List<IngredientRef>> replacements) {
         List<IngredientRef> inputs = replacements.get(recipe.recipeId());
-        return inputs == null ? recipe : new RecipeNode(recipe.recipeId(), recipe.output(),
-                recipe.outputCount(), inputs, recipe.modTypeId(), recipe.recipeTypeId(),
-                recipe.magicCosts(), recipe.hasFluidOutputs(), recipe.dynamicIdentityTargetable());
+        return inputs == null ? recipe : recipe.withOutputAndInputs(recipe.output(), inputs);
     }
 
     private static ImmutableRecipeGraph bindAvailabilityInScope(
@@ -527,10 +521,7 @@ public final class ImmutableRecipeGraphProjector {
                     }
                 }
                 RecipeNode bound = inputs != null
-                        ? new RecipeNode(recipe.recipeId(), recipe.output(), recipe.outputCount(),
-                                inputs, recipe.modTypeId(), recipe.recipeTypeId(),
-                                recipe.magicCosts(), recipe.hasFluidOutputs(),
-                                recipe.dynamicIdentityTargetable())
+                        ? recipe.withOutputAndInputs(recipe.output(), inputs)
                         : recipe;
                 if (inputs != null) {
                     if (recipes == null) recipes = new ArrayList<>(entry.getValue());
@@ -605,11 +596,7 @@ public final class ImmutableRecipeGraphProjector {
                 List<IngredientRef> inputs = new ArrayList<>(recipe.inputs());
                 inputs.set(1, new IngredientRef(List.of(actualBase), base.count(),
                         NbtMatchMode.EXACT, base.role(), base.recursive()));
-                RecipeNode specialized = new RecipeNode(recipe.recipeId(), output,
-                        recipe.outputCount(), inputs, recipe.modTypeId(),
-                        recipe.recipeTypeId(), recipe.magicCosts(),
-                        recipe.hasFluidOutputs(),
-                        recipe.dynamicIdentityTargetable());
+                RecipeNode specialized = recipe.withOutputAndInputs(output, inputs);
                 if (!graph.recipesByOutput().getOrDefault(output, List.of()).contains(specialized)) {
                     List<RecipeNode> variants = additions.computeIfAbsent(output, ignored -> new ArrayList<>());
                     if (!variants.contains(specialized)) variants.add(specialized);
@@ -792,10 +779,7 @@ public final class ImmutableRecipeGraphProjector {
         if (bases.isEmpty()) return null;
         inputs.set(1, new IngredientRef(bases, base.count(), NbtMatchMode.EXACT,
                 base.role(), base.recursive()));
-        return new RecipeNode(recipe.recipeId(), wanted, recipe.outputCount(), inputs,
-                recipe.modTypeId(), recipe.recipeTypeId(), recipe.magicCosts(),
-                recipe.hasFluidOutputs(),
-                recipe.dynamicIdentityTargetable());
+        return recipe.withOutputAndInputs(wanted, inputs);
     }
 
     /** 单刀升级把更高的目标门槛传回原料；禁止凭空提升产物数值。 */
@@ -835,11 +819,8 @@ public final class ImmutableRecipeGraphProjector {
             List<IngredientRef> inputs = new ArrayList<>(recipe.inputs());
             inputs.set(bladeInput, new IngredientRef(List.of(new MaterialRef(source.itemId(), input.toString())),
                     original.count(), NbtMatchMode.SLASHBLADE, original.role()));
-            return new RecipeNode(recipe.recipeId(), new MaterialRef(recipe.output().itemId(),
-                    output.toString(), false, true), recipe.outputCount(), inputs,
-                    recipe.modTypeId(), recipe.recipeTypeId(), recipe.magicCosts(),
-                    recipe.hasFluidOutputs(),
-                    recipe.dynamicIdentityTargetable());
+            return recipe.withOutputAndInputs(new MaterialRef(recipe.output().itemId(),
+                    output.toString(), false, true), inputs);
         } catch (Exception ignored) {
             return null;
         }
@@ -901,17 +882,7 @@ public final class ImmutableRecipeGraphProjector {
                 || wanted.runtimeNbt()) {
             return null;
         }
-        return new RecipeNode(
-                recipe.recipeId(),
-                wanted,
-                recipe.outputCount(),
-                recipe.inputs(),
-                recipe.modTypeId(),
-                recipe.recipeTypeId(),
-                recipe.magicCosts(),
-                recipe.hasFluidOutputs(),
-                recipe.dynamicIdentityTargetable()
-        );
+        return recipe.withOutputAndInputs(wanted, recipe.inputs());
     }
 
     public static IngredientRef projectIngredient(IngredientSpec spec) {
