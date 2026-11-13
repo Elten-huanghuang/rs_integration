@@ -19,6 +19,7 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.graph.GraphConcurrencyPolicy;
 import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
+import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.graph.OperationId;
 import com.huanghuang.rsintegration.crafting.graph.OperationBudget;
@@ -1671,14 +1672,10 @@ public final class ParallelCraftGroup implements IBatchDelegate {
                                               List<ItemStack> captured) {
         if (batchSize <= 0 || expectedBatch == null || expectedBatch.isEmpty()
                 || captured == null || captured.isEmpty()) return 0;
-        int matching = captured.stream()
-                .filter(stack -> stack != null && !stack.isEmpty()
-                        && MaterialMatcher.sameRuntimeFragment(expectedBatch, stack))
-                .mapToInt(ItemStack::getCount)
-                .sum();
+        long matching = countExpectedWorldOutput(captured, expectedBatch);
         if (matching <= 0) return 0;
         int perExecution = Math.max(1, expectedBatch.getCount() / batchSize);
-        return Math.min(batchSize, Math.max(1, matching / perExecution));
+        return (int) Math.min(batchSize, Math.max(1L, matching / perExecution));
     }
 
     @Override
@@ -1960,12 +1957,17 @@ public final class ParallelCraftGroup implements IBatchDelegate {
 
     static boolean containsExpectedWorldOutput(List<ItemStack> captured, ItemStack expected) {
         if (expected == null || expected.isEmpty()) return false;
-        int count = captured.stream()
-                .filter(stack -> stack != null && !stack.isEmpty()
-                        && MaterialMatcher.sameRuntimeFragment(expected, stack))
-                .mapToInt(ItemStack::getCount)
+        return countExpectedWorldOutput(captured, expected) >= expected.getCount();
+    }
+
+    private static long countExpectedWorldOutput(List<ItemStack> captured, ItemStack expected) {
+        // 与捕获器使用同一份产物声明：无 NBT 的声明允许机器继承输入状态，
+        // 带 NBT 的声明仍校验具体变体。不能把声明当作待合并的实物栈严格比较。
+        MaterialKey declaration = MaterialKey.of(expected);
+        return captured.stream()
+                .filter(stack -> MaterialMatcher.matchesCaptureExpectation(declaration, stack))
+                .mapToLong(ItemStack::getCount)
                 .sum();
-        return count >= expected.getCount();
     }
 
     static boolean containsExpectedWorldProduction(List<ItemStack> captured,

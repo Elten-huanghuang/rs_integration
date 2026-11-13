@@ -42,6 +42,44 @@ class ParallelCraftGroupCaptureTest extends BootstrapTest {
     }
 
     @Test
+    void taglessDeclarationAcceptsNbtCopiedFromMalumCenterInput() {
+        ItemStack expected = new ItemStack(Items.DIAMOND);
+        ItemStack captured = expected.copy();
+        captured.getOrCreateTag().putInt("Damage", 0);
+        captured.getOrCreateTag().putBoolean("Unbreakable", true);
+
+        assertTrue(ParallelCraftGroup.containsExpectedWorldOutput(List.of(captured), expected));
+        assertTrue(ParallelCraftGroup.containsExpectedWorldProduction(List.of(captured),
+                new ExpectedProduction(expected, 1)));
+        assertEquals(0, captured.getTag().getInt("Damage"));
+        assertTrue(captured.getTag().getBoolean("Unbreakable"));
+        assertFalse(expected.hasTag());
+    }
+
+    @Test
+    void runtimeNbtDropsStillRequireTheEntireBatchAndTheCorrectItem() {
+        ExpectedProduction expected = new ExpectedProduction(new ItemStack(Items.DIAMOND), 3);
+        ItemStack first = new ItemStack(Items.DIAMOND);
+        first.getOrCreateTag().putString("source", "first");
+        ItemStack second = new ItemStack(Items.DIAMOND, 2);
+        second.getOrCreateTag().putString("source", "second");
+
+        assertFalse(ParallelCraftGroup.containsExpectedWorldProduction(List.of(first), expected));
+        assertFalse(ParallelCraftGroup.containsExpectedWorldProduction(
+                List.of(first, new ItemStack(Items.EMERALD, 2)), expected));
+        assertTrue(ParallelCraftGroup.containsExpectedWorldProduction(List.of(first, second), expected));
+    }
+
+    @Test
+    void capturedOutputCountDoesNotOverflow() {
+        ExpectedProduction expected = new ExpectedProduction(
+                new ItemStack(Items.DIAMOND), Integer.MAX_VALUE);
+        assertTrue(ParallelCraftGroup.containsExpectedWorldProduction(List.of(
+                new ItemStack(Items.DIAMOND, Integer.MAX_VALUE - 1),
+                new ItemStack(Items.DIAMOND, 2)), expected));
+    }
+
+    @Test
     void doesNotCombineDifferentNbtVariants() {
         ItemStack expected = new ItemStack(Items.DIAMOND);
         CompoundTag expectedTag = new CompoundTag();
@@ -54,6 +92,21 @@ class ParallelCraftGroupCaptureTest extends BootstrapTest {
 
         assertFalse(ParallelCraftGroup.containsExpectedWorldOutput(List.of(other), expected));
         assertTrue(ParallelCraftGroup.containsExpectedWorldOutput(List.of(expected.copy()), expected));
+        assertFalse(ParallelCraftGroup.containsExpectedWorldProduction(List.of(other),
+                new ExpectedProduction(expected, 1)));
+        assertEquals(0, ParallelCraftGroup.completedExecutionsFromCapture(expected, 1, List.of(other)));
+    }
+
+    @Test
+    void cancellationCountsCapturedRuntimeNbtWithoutRefundingConsumedOperations() {
+        ItemStack expectedBatch = new ItemStack(Items.DIAMOND, 6);
+        ItemStack captured = new ItemStack(Items.DIAMOND, 4);
+        captured.getOrCreateTag().putBoolean("Unbreakable", true);
+
+        assertEquals(2, ParallelCraftGroup.completedExecutionsFromCapture(
+                expectedBatch, 3, List.of(captured)));
+        assertEquals(4, captured.getCount());
+        assertTrue(captured.getTag().getBoolean("Unbreakable"));
     }
 
     @Test

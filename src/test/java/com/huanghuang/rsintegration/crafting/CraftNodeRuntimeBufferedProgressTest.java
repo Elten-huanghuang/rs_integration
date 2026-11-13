@@ -87,6 +87,47 @@ import static org.mockito.Mockito.anyInt;
 
 class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
     @Test
+    void malumRuntimeNbtCaptureSettlesAndStartsTheNextReservedOperation() {
+        ModType type = ModType.register("test_malum_runtime_nbt_capture",
+                new String[0], new String[0], new String[0], () -> new BufferedDelegate() {
+                    @Override public int preferredParallelBatchSize(int operations, int workers) {
+                        return 1;
+                    }
+                });
+        BoundMachine machine = new BoundMachine(Level.OVERWORLD.location(), BlockPos.ZERO, type, "test");
+        ParallelCraftGroup group = new ParallelCraftGroup(List.of(machine), type,
+                new ResourceLocation("malum", "runtime_nbt_capture"), player, 2);
+        startGroup(group);
+        CraftNodeRuntime runtime = runtime(group);
+
+        runtime.attachOutputs(new NodeOutputAccumulator(List.of(OutputDeclaration.item(
+                new OutputPortId(new NodeId(0), 0),
+                MaterialKey.of(new ItemStack(Items.DIAMOND)), 16, OutputKind.PRIMARY))));
+
+        for (int operation = 0; operation < 2; operation++) {
+            ItemStack captured = new ItemStack(Items.DIAMOND, 8);
+            captured.getOrCreateTag().putInt("Damage", 0);
+            captured.getOrCreateTag().putString("source", "center_" + operation);
+            when(outputEntity.getItem()).thenReturn(captured);
+            EntityJoinLevelEvent event = new EntityJoinLevelEvent(outputEntity, level);
+            CraftOutputInterceptor.onEntityJoin(event);
+            assertTrue(event.isCanceled());
+
+            tick.incrementAndGet();
+            assertEquals(operation == 0 ? ConcurrentNodeExecutor.Observation.WORKING
+                    : ConcurrentNodeExecutor.Observation.SUCCEEDED, runtime.observe());
+            assertEquals(operation + 1, group.getCompletedOperations());
+            assertEquals(operation == 0 ? 1 : 0, group.getRunningOperations());
+            List<ItemStack> results = runtime.drainIncrementalOutputs().stream()
+                    .map(NodeOutputAccumulator.Publication::stack).toList();
+            assertEquals(1, results.size());
+            assertEquals(8, results.get(0).getCount());
+            assertEquals("center_" + operation, results.get(0).getTag().getString("source"));
+            assertTrue(runtime.drainIncrementalOutputs().isEmpty());
+        }
+    }
+
+    @Test
     void completedWorkerMayReleaseItsMachineContextBeforeGraphPublishesOutput() {
         AtomicBoolean contextValid = new AtomicBoolean(true);
         AtomicInteger cleanups = new AtomicInteger();
