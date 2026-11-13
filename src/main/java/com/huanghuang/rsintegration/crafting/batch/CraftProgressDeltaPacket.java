@@ -77,6 +77,7 @@ public final class CraftProgressDeltaPacket {
             buf.writeVarInt(node.reason().ordinal());
             buf.writeUtf(node.technicalDetail(), MAX_DETAIL);
             buf.writeBoolean(node.draining());
+            CraftProgressPacket.writeNodeMonitorData(buf, node);
         }
         CraftProgressPacket.writeProgressTail(buf, outputProgress, timing);
         PerformanceMonitor.recordProgressPacketBytes(buf.writerIndex() - startIndex);
@@ -108,8 +109,12 @@ public final class CraftProgressDeltaPacket {
             var nodeReason = CraftProgressSnapshot.Reason.fromOrdinal(buf.readVarInt());
             String nodeDetail = buf.readUtf(MAX_DETAIL);
             boolean draining = buf.readBoolean();
-            nodes.add(new CraftProgressSnapshot.NodeProgress(nodeId, state, recipe, mod, output,
-                    completedOps, totalOps, runningOps, machine, nodeReason, nodeDetail, draining));
+            if (completedOps > totalOps || runningOps > totalOps - completedOps) {
+                throw new DecoderException("operation counts out of bounds");
+            }
+            nodes.add(CraftProgressPacket.readNodeMonitorData(buf,
+                    new CraftProgressSnapshot.NodeProgress(nodeId, state, recipe, mod, output,
+                            completedOps, totalOps, runningOps, machine, nodeReason, nodeDetail, draining)));
         }
         var tail = CraftProgressPacket.readProgressTail(buf);
         var snapshot = new CraftProgressSnapshot(id, sequence, result, reason, completed, total,

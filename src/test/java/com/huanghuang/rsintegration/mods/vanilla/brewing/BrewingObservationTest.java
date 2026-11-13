@@ -31,6 +31,7 @@ class BrewingObservationTest extends BootstrapTest {
         when(clock.rsi$getBrewTime()).thenReturn(100);
         when(level.getGameTime()).thenReturn(10L);
         assertEquals(CraftPhase.WORKING, delegate.observeMachineCraft(level, stand).phase());
+        assertEquals(75, delegate.monitorCycleProgress().percent());
         int interval = RSIntegrationConfig.DEFAULT_PASSIVE_OBSERVATION_TICKS;
         for (int tick = 1; tick < interval; tick++) {
             when(level.getGameTime()).thenReturn(10L + tick);
@@ -42,6 +43,7 @@ class BrewingObservationTest extends BootstrapTest {
         when(clock.rsi$getBrewTime()).thenReturn(0);
         when(stand.getItem(anyInt())).thenReturn(new ItemStack(Items.GOLDEN_APPLE));
         assertEquals(CraftPhase.DONE, delegate.observeMachineCraft(level, stand).phase());
+        assertFalse(delegate.monitorCycleProgress().known());
         verify(stand, times(6)).getItem(anyInt());
     }
 

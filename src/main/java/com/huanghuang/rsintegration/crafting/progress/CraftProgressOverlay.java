@@ -12,11 +12,13 @@ import com.huanghuang.rsintegration.mods.ironsspellbooks.client.InkFluidRenderer
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.client.event.RenderGuiEvent;
+import net.minecraftforge.client.event.ScreenEvent;
 
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 
@@ -25,6 +27,7 @@ import java.util.Locale;
 /** 常驻合成摘要；步骤、机器位置和管理操作保留在 P 界面。 */
 @OnlyIn(Dist.CLIENT)
 public final class CraftProgressOverlay {
+    private static final String JEI_RECIPE_SCREEN = "mezz.jei.gui.recipes.RecipesGui";
 
     private static final int SCREEN_MARGIN = 8;
     private static final int CONTENT_PAD = 8;
@@ -41,7 +44,26 @@ public final class CraftProgressOverlay {
     @SubscribeEvent
     public static void onRenderOverlay(RenderGuiEvent.Post event) {
         Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft.player == null || minecraft.screen != null || minecraft.options.hideGui) return;
+        if (minecraft.screen != null) return;
+        render(minecraft, event.getGuiGraphics());
+    }
+
+    /** JEI 配方屏幕在游戏 HUD 之后绘制，进度摘要需排在 JEI 屏幕之上。 */
+    @SubscribeEvent
+    public static void onRecipeScreenRender(ScreenEvent.Render.Post event) {
+        if (!isRecipeViewerScreen(event.getScreen())) return;
+        render(Minecraft.getInstance(), event.getGuiGraphics());
+    }
+
+    static boolean isRecipeViewerScreen(Screen screen) {
+        for (Class<?> type = screen == null ? null : screen.getClass(); type != null; type = type.getSuperclass()) {
+            if (JEI_RECIPE_SCREEN.equals(type.getName())) return true;
+        }
+        return false;
+    }
+
+    private static void render(Minecraft minecraft, GuiGraphics graphics) {
+        if (minecraft.player == null || minecraft.options.hideGui) return;
         boolean planningVisible = PlanningProgressOverlay.isVisible();
         var planning = planningVisible ? PlanningProgressTracker.current() : null;
         int plans = planningVisible ? PlanningTasksScreen.taskCount() : 0;
@@ -53,7 +75,6 @@ public final class CraftProgressOverlay {
         var layout = combinedLayout(minecraft.getWindow().getGuiScaledWidth(), minecraft.getWindow().getGuiScaledHeight(),
                 font.lineHeight, planning != null, execution != null, hasDetail);
         if (!layout.visible()) return;
-        GuiGraphics graphics = event.getGuiGraphics();
         int x = layout.x(), y = layout.y(), right = x + layout.width() - CONTENT_PAD;
         graphics.pose().pushPose();
         graphics.pose().translate(0, 0, 500);

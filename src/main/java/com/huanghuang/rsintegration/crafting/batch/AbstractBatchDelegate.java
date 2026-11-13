@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.crafting.MaterialMatcher;
+import com.huanghuang.rsintegration.crafting.progress.MachineCycleProgress;
 import java.util.ArrayList;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.server.MinecraftServer;
@@ -56,6 +57,11 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
     protected CraftStorageEndpoint storageEndpoint;
     protected boolean usingSharedLedger;
     protected CraftPhase phase = CraftPhase.WAITING_FOR_START;
+    protected MachineCycleProgress observedCycle = MachineCycleProgress.UNKNOWN;
+
+    @Override public MachineCycleProgress monitorCycleProgress() {
+        return phase == CraftPhase.WORKING ? observedCycle : MachineCycleProgress.UNKNOWN;
+    }
     @Nullable
     protected MagicResourceTaskReservation magicResourceTaskReservation;
 
@@ -196,6 +202,7 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
     @Nonnull
     @Override
     public final CraftObservation observeCraft(@Nonnull ServerLevel playerLevel) {
+        observedCycle = MachineCycleProgress.UNKNOWN;
         BlockPos pos = getMachinePos();
         if (pos == null) {
             if (isMachineCraftFinished(null, null)) phase = CraftPhase.DONE;
@@ -234,6 +241,7 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
 
     protected final void markCraftStarted() {
         phase = CraftPhase.WAITING_FOR_START;
+        observedCycle = MachineCycleProgress.UNKNOWN;
     }
 
     protected final CraftObservation workingObservation() {

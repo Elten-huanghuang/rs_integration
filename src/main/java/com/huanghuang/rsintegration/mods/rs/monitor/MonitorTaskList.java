@@ -98,11 +98,12 @@ public final class MonitorTaskList extends AbstractWidget {
             int index = scroll.offset() + row;
             int top = getY() + 20 + row * ROW_HEIGHT;
             boolean current = index < tasks.size() && Objects.equals(id(tasks.get(index)), selected);
-            graphics.fill(getX() + 2, top, getX() + 2 + contentWidth, top + ROW_HEIGHT - 1,
-                    current ? CraftingUiColors.SELECTED_ROW.argb() : CraftingUiStyle.canvas());
-            graphics.fill(getX() + 2, top + ROW_HEIGHT - 1, getX() + 2 + contentWidth, top + ROW_HEIGHT, CraftingUiStyle.gridLine());
+            boolean hoveredRow = mouseX >= getX() + 2 && mouseX < getX() + 2 + contentWidth
+                    && mouseY >= top && mouseY < top + ROW_HEIGHT;
+            MonitorVisualStyle.cell(graphics, getX() + 2, top, contentWidth, ROW_HEIGHT,
+                    current ? CraftingUiColors.SELECTED_ROW.argb() : CraftingUiStyle.canvas(), hoveredRow);
             if (current) {
-                graphics.fill(getX() + 2, top, getX() + 4, top + ROW_HEIGHT - 1, CraftingUiStyle.highlight());
+                graphics.fill(getX() + 2, top, getX() + 4, top + ROW_HEIGHT - 1, CraftingUiStyle.accent());
                 graphics.fill(getX() + 2, top, getX() + 2 + contentWidth, top + 1, CraftingUiStyle.highlight());
             }
             if (index < tasks.size()) {

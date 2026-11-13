@@ -22,6 +22,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MaterialBrokerTest extends BootstrapTest {
 
+    @Test void monitorShortagesConsumeEachAvailableLotOnlyOnceAndDoNotReserveAnything() {
+        var broker = new MaterialBroker();
+        var copper = MaterialKey.of(new ItemStack(Items.COPPER_INGOT));
+        var source = new MaterialSource.ProducerOutput(new OutputPortId(new NodeId(7), 0));
+        broker.publish(source, copper, 4);
+        var requests = List.of(new MaterialBroker.Request(source, copper, 3), new MaterialBroker.Request(source, copper, 3));
+        long revision = broker.availabilityRevision();
+        assertEquals(List.of(new MaterialBroker.Request(source, copper, 2)), broker.monitorShortages(requests, 17));
+        assertEquals(4, broker.available(source, copper));
+        assertEquals(revision, broker.availabilityRevision());
+        broker.publish(source, copper, 2);
+        assertTrue(broker.monitorShortages(requests, 17).isEmpty());
+        assertNotNull(broker.reserve(new NodeId(10), requests));
+    }
+
     @Test void monitorSeparatesPlannedInitialPoolFromHeldProducerAssetsWithoutMutatingThem() {
         var broker = new MaterialBroker();
         var diamond = MaterialKey.of(new ItemStack(Items.DIAMOND));

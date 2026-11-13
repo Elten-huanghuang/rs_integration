@@ -5,6 +5,8 @@ import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot;
 import com.huanghuang.rsintegration.crafting.progress.CraftOutputProgress;
+import com.huanghuang.rsintegration.crafting.progress.MachineCycleProgress;
+import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot.WaitingInput;
 import com.huanghuang.rsintegration.api.execution.CollectedOutput;
 import com.huanghuang.rsintegration.api.recipe.ProductionCompletionPolicy;
 import com.huanghuang.rsintegration.api.execution.CancelReason;
@@ -3750,7 +3752,20 @@ public final class AsyncCraftChain {
                 completedOps, totalOps, runningOps,
                 runtime != null ? runtime.machineLabel() : diagnosticAvailable ? diagnostic.machineLabel() : "",
                 diagnosticReasonAvailable && diagnostic.reason() != Reason.NONE ? diagnostic.reason() : nodeFailureCode.progressReason(), detail,
-                runtime != null && runtime.isDraining());
+                runtime != null && runtime.isDraining(),
+                graphWaitingInputs(nodeId, schedulerState, runtime == null), false,
+                runtime != null && runtime.delegate() != null ? runtime.delegate().monitorCycleProgress() : MachineCycleProgress.UNKNOWN);
+    }
+
+    private List<WaitingInput> graphWaitingInputs(NodeId nodeId, DagScheduler.NodeState state, boolean notStarted) {
+        if (!notStarted || graphMaterials == null
+                || state != DagScheduler.NodeState.BLOCKED && state != DagScheduler.NodeState.READY) return List.of();
+        // 以执行时的材料请求和资产池缺口为准；不能用整张静态依赖图冒充当前等待关系。
+        var missing = graphMaterials.monitorShortages(graphRequests.getOrDefault(nodeId, List.of()),
+                CraftProgressSnapshot.MAX_WAITING_INPUTS + 1);
+        return missing.stream().map(request -> new WaitingInput(request.material().toStack(1), request.quantity(),
+                request.source() instanceof MaterialSource.ProducerOutput producer
+                        ? producer.outputPort().nodeId().value() : -1)).toList();
     }
 
     private List<CraftProgressSnapshot.NodeProgress> buildFlatNodeProgress() {
@@ -3790,7 +3805,9 @@ public final class AsyncCraftChain {
                     completedOps, totalOps, runningOps, i == currentStepIdx ? flatMachineLabel() : "",
                     nodeReason, detail,
                     i == currentStepIdx && currentDelegate instanceof ParallelCraftGroup group
-                            && group.isDraining()));
+                            && group.isDraining(), List.of(), false,
+                    i == currentStepIdx && currentDelegate != null ? currentDelegate.monitorCycleProgress()
+                            : MachineCycleProgress.UNKNOWN));
         }
         return List.copyOf(result);
     }

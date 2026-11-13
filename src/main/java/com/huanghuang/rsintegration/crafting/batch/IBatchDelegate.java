@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.api.execution.CollectedOutput;
 import com.huanghuang.rsintegration.api.execution.CancelReason;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.progress.MachineCycleProgress;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -125,6 +126,9 @@ public interface IBatchDelegate {
     default String describeExecutionState() {
         return "machine_state=unavailable";
     }
+
+    /** 返回最近一次执行观察得到的本轮计时；不得为显示进度额外轮询或推进机器。 */
+    default MachineCycleProgress monitorCycleProgress() { return MachineCycleProgress.UNKNOWN; }
 
     /** Number of repeated flat-plan operations this delegate can execute as one physical batch. */
     default int prepareFlatBatch(int remainingOperations) {

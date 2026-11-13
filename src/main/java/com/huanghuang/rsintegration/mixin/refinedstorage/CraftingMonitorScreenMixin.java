@@ -17,6 +17,7 @@ import com.huanghuang.rsintegration.mods.rs.monitor.MonitorDetailsButton;
 import com.huanghuang.rsintegration.mods.rs.monitor.MonitorDetailsPanel;
 import com.huanghuang.rsintegration.mods.rs.monitor.MonitorGridStyle;
 import com.huanghuang.rsintegration.mods.rs.monitor.MonitorGridRenderer;
+import com.huanghuang.rsintegration.mods.rs.monitor.MonitorVisualStyle;
 import com.huanghuang.rsintegration.mods.rs.monitor.MonitorTaskList;
 import com.huanghuang.rsintegration.mods.rs.monitor.MonitorScopeState;
 import com.huanghuang.rsintegration.mods.rs.monitor.RsiMonitorTask;
@@ -170,14 +171,19 @@ public abstract class CraftingMonitorScreenMixin extends BaseScreen<CraftingMoni
         cancelAllButton.setTooltip(Tooltip.create(Component.translatable("rsi.monitor.cancel_all_rs_hint")));
         cancelButton.setTooltip(Tooltip.create(Component.translatable("rsi.monitor.cancel_selected")));
         String query = rsi$details == null ? "" : rsi$details.query();
+        var detailsState = rsi$details == null ? null : rsi$details.viewState();
         boolean activeOnly = rsi$details == null || rsi$details.onlyActive();
         int detailsX = rsi$layout.detailsWidth() > 0 ? x + rsi$layout.materialWidth() + 7 : x + 7;
         int detailsWidth = rsi$layout.detailsWidth() > 0 ? rsi$layout.detailsWidth() - 14 : imageWidth - 14;
         rsi$details = new MonitorDetailsPanel(rsi$screen(), detailsX, y, detailsWidth, imageHeight,
                 widget -> addRenderableWidget(widget), index -> {
                     scrollbar.setOffset(index / 3);
-                    if (rsi$detailsReplaceGrid()) { rsi$compactDetails = false; rsi$updateDetailsVisibility(); }
+                    if (rsi$detailsReplaceGrid() && !(getCurrentTab() instanceof RsiMonitorTask)) {
+                        rsi$compactDetails = false;
+                        rsi$updateDetailsVisibility();
+                    }
                 }, query, activeOnly);
+        rsi$details.restoreViewState(detailsState);
         if (rsi$layout.detailsWidth() == 0) addSideButton(new MonitorDetailsButton(rsi$screen(), () -> {
             rsi$compactDetails = !rsi$compactDetails;
             rsi$updateDetailsVisibility();
@@ -232,6 +238,8 @@ public abstract class CraftingMonitorScreenMixin extends BaseScreen<CraftingMoni
         boolean online = craftingMonitor.isActiveOnClient();
         CraftingUiStyle.raised(graphics, x, y, rsi$screen().getXSize(), rsi$screen().getYSize(),
                 CraftingUiStyle.panel(), CraftingUiStyle.border());
+        graphics.fill(x + 5, y + 5, x + rsi$layout.materialWidth() - 5, y + 17,
+                MonitorVisualStyle.blend(CraftingUiStyle.panel(), CraftingUiStyle.highlight(), 16));
         if (rsi$detailsReplaceGrid()) {
             rsi$details.render(graphics, mouseX, mouseY, drawers);
             return;
@@ -246,7 +254,9 @@ public abstract class CraftingMonitorScreenMixin extends BaseScreen<CraftingMoni
             int cellY = y + 20 + index / 3 * (rsi$layout.cellHeight() + 1);
             int color = offset + index < elements.size()
                     ? MonitorGridStyle.nativeElement(elements.get(offset + index)).color() : CraftingUiStyle.canvas();
-            graphics.fill(cellX, cellY, cellX + rsi$layout.cellWidth(), cellY + rsi$layout.cellHeight(), color);
+            boolean hovered = mouseX >= cellX && mouseX < cellX + rsi$layout.cellWidth()
+                    && mouseY >= cellY && mouseY < cellY + rsi$layout.cellHeight();
+            MonitorVisualStyle.cell(graphics, cellX, cellY, rsi$layout.cellWidth(), rsi$layout.cellHeight(), color, hovered);
         }
         int barX = x + rsi$layout.gridRight() + ScrollBarStyle.CONTENT_GAP;
         // 始终画轨道与短滑块；数量、滚轮和拖动继续由 RS 原生 scrollbar 管理。

@@ -1,5 +1,8 @@
 package com.huanghuang.rsintegration.crafting.loadbalancer;
 
+import com.huanghuang.rsintegration.crafting.progress.MachineCycleProgress;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
+
 import com.huanghuang.rsintegration.crafting.progress.CraftMaterialView;
 
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
@@ -1746,6 +1749,21 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         BoundMachine first = workers.get(0).machine;
         String label = first.dim() + "@" + first.pos().toShortString();
         return workers.size() > 1 ? label + " (+" + (workers.size() - 1) + ")" : label;
+    }
+
+    @Override public MachineCycleProgress monitorCycleProgress() {
+        long completed = 0, total = 0;
+        int reporting = 0, active = 0;
+        for (WorkerSlot worker : workers) {
+            if (!worker.running()) continue;
+            active++;
+            var cycle = worker.delegate.monitorCycleProgress();
+            if (cycle == null || !cycle.known()) continue;
+            completed = SaturatingLongMath.add(completed, cycle.completedTicks());
+            total = SaturatingLongMath.add(total, cycle.totalTicks());
+            reporting++;
+        }
+        return new MachineCycleProgress(completed, total, reporting, active);
     }
 
     public void setMachineServer(MinecraftServer server) {

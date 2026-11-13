@@ -68,6 +68,7 @@ public record MonitorDiagnostics(Kind kind, Reason reason, int count, Set<String
     private static Kind classify(NodeProgress node) {
         if (node.draining() || node.state() == NodeState.SUCCEEDED || node.state() == NodeState.CANCELLED) return null;
         if (node.state() == NodeState.FAILED) return Kind.ATTENTION;
+        if (node.waitingInputs().stream().anyMatch(input -> input.producerNodeId() < 0)) return Kind.ATTENTION;
         if (node.reason() != Reason.NONE) return classifyReason(node.reason());
         if (node.runningOperations() > 0 || node.state() == NodeState.RUNNING) return Kind.RUNNING;
         return node.state() == NodeState.BLOCKED ? Kind.DEPENDENCIES : Kind.PREPARING;

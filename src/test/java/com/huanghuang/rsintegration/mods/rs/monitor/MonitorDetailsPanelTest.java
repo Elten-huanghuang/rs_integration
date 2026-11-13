@@ -12,6 +12,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -30,6 +31,53 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.*;
 
 class MonitorDetailsPanelTest extends BootstrapTest {
+    @ParameterizedTest
+    @CsvSource({"112,201", "132,201", "152,231", "240,231"})
+    void followsAnUpstreamStepAndKeepsSelectionAcrossUpdatesAndResize(int width, int height) throws Exception {
+        var client = mock(Minecraft.class);
+        var font = mock(Font.class);
+        when(font.plainSubstrByWidth(anyString(), anyInt())).thenAnswer(call -> call.getArgument(0));
+        var fontField = Minecraft.class.getDeclaredField("font");
+        fontField.setAccessible(true);
+        fontField.set(client, font);
+        try (var minecraft = mockStatic(Minecraft.class)) {
+            minecraft.when(Minecraft::getInstance).thenReturn(client);
+            var widgets = new ArrayList<AbstractWidget>();
+            var screen = mock(CraftingMonitorScreen.class);
+            var panel = new MonitorDetailsPanel(screen, 10, 20, width, height, widgets::add, index -> {}, "test:step_10", true);
+            var root = MonitorDependencyDetailsTest.node(10, NodeState.BLOCKED, Reason.NONE,
+                    List.of(MonitorDependencyDetailsTest.input(3)));
+            var source = MonitorDependencyDetailsTest.node(3, NodeState.READY, Reason.NO_BOUND_MACHINE, List.of());
+            UUID id = UUID.randomUUID();
+            panel.setVisible(true);
+            panel.update(task(id, List.of(root, source)), id);
+            var bar = (ListScrollBar) widgets.stream().filter(ListScrollBar.class::isInstance).findFirst().orElseThrow();
+            assertTrue(panel.mouseClicked(15, bar.getY() + 1, 0));
+            assertEquals(10, panel.viewState().nodeId());
+            assertTrue(panel.mouseClicked(15, bar.getY() + 2 * 32 + 1, 0));
+            assertEquals(3, panel.viewState().nodeId());
+            assertEquals(List.of(10), panel.viewState().history());
+            var resolved = MonitorDependencyDetailsTest.node(3, NodeState.SUCCEEDED, Reason.NONE, List.of());
+            panel.update(task(id, List.of(root, resolved)), id);
+            assertEquals(3, panel.viewState().nodeId());
+            var resizedWidgets = new ArrayList<AbstractWidget>();
+            var resized = new MonitorDetailsPanel(screen, 20, 30, width + 20, height,
+                    resizedWidgets::add, index -> {}, panel.query(), panel.onlyActive());
+            resized.restoreViewState(panel.viewState());
+            resized.setVisible(true);
+            resized.update(task(id, List.of(root, resolved)), id);
+            assertEquals(3, resized.viewState().nodeId());
+            var back = (ActionButton) resizedWidgets.stream().filter(widget -> widget instanceof ActionButton
+                    && ((ActionButton) widget).getMessage().getString().equals(Component.translatable("rsi.monitor.wait.back").getString()))
+                    .findFirst().orElseThrow();
+            back.onPress();
+            assertEquals(10, resized.viewState().nodeId());
+            back.onPress();
+            assertEquals(-1, resized.viewState().nodeId());
+            assertEquals("test:step_10", resized.query());
+        }
+    }
+
     @ParameterizedTest
     @CsvSource({"112,201", "132,201", "152,201", "152,231", "240,201"})
     void diagnosisFocusTracksTheCauseAndRestoresTheListWhenItResolves(int width, int height) throws Exception {
@@ -66,11 +114,18 @@ class MonitorDetailsPanelTest extends BootstrapTest {
             diagnosis.onPress();
             panel.mouseClicked(15, bar.getY() + 1, 0);
             assertEquals(2, selected.get(), "关注列表按节点身份定位对应材料");
+            assertEquals(2, panel.viewState().nodeId(), "点击 RSI 步骤后打开该步骤详情");
+            assertFalse(search.visible, "详情页使用返回按钮，避免搜索框截获点击");
             selected.set(-1);
             panel.mouseClicked(15, bar.getY() + 45, 0);
             assertEquals(-1, selected.get(), "关注模式不应混入运行或排队步骤");
             var resolved = node(2, NodeState.SUCCEEDED, Reason.NONE, new ItemStack(Items.IRON_INGOT));
             panel.update(task(id, List.of(running, resolved, queue)), id);
+            assertEquals(2, panel.viewState().nodeId(), "状态变化仍保留正在查看的步骤");
+            var list = (ActionButton) widgets.stream().filter(widget -> widget instanceof ActionButton
+                    && ((ActionButton) widget).getMessage().getString().equals(Component.translatable("rsi.monitor.steps").getString()))
+                    .findFirst().orElseThrow();
+            list.onPress();
             panel.mouseClicked(15, bar.getY() + 1, 0);
             assertEquals(1, selected.get(), "关注原因解决后自动恢复完整活动列表");
             panel.update(mock(CraftingMonitorScreen.Task.class), UUID.randomUUID());

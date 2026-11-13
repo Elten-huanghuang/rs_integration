@@ -531,6 +531,7 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
                 true, true, true, 7, 10, recipeId, processId, 2L, null);
         setField(delegate, "stateProvider", progressing);
         assertEquals(7L, delegate.observeCraft(level).completedWork());
+        assertEquals(70, delegate.monitorCycleProgress().percent());
         MachineStateProvider unchanged = (context, ignored) -> new MachineState(
                 true, true, true, 7, 10, recipeId, processId, 3L, null);
         setField(delegate, "stateProvider", unchanged);
@@ -542,6 +543,7 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
                 IBatchDelegate.CraftPhase.WORKING,
                 delegate.observeCraft(level).phase()
         );
+        assertFalse(delegate.monitorCycleProgress().known(), "缺少可靠计时后不能沿用上一轮百分比");
         outputSlot.set(new ItemStack(Items.STICK, 2));
         assertEquals(
                 IBatchDelegate.CraftPhase.DONE,

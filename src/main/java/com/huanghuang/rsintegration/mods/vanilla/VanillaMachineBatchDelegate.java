@@ -1,5 +1,8 @@
 package com.huanghuang.rsintegration.mods.vanilla;
 
+import com.huanghuang.rsintegration.crafting.progress.MachineCycleProgress;
+import com.huanghuang.rsintegration.mixin.minecraft.AbstractFurnaceAccessor;
+
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -1174,6 +1177,9 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     @Override
     protected CraftObservation observeMachineCraft(@NotNull ServerLevel level, @NotNull BlockEntity be) {
         if (kind == MachineKind.FURNACE && be instanceof AbstractFurnaceBlockEntity current) {
+            if (current instanceof AbstractFurnaceAccessor timer && !current.getItem(0).isEmpty()) {
+                observedCycle = MachineCycleProgress.of(timer.rsi$getCookingProgress(), timer.rsi$getCookingTotalTime());
+            }
             // A machine can consume its initial fuel earlier than the estimate
             // (augments and server-side recipe modifiers are common causes).
             // Keep a queued input from silently stalling when the furnace goes

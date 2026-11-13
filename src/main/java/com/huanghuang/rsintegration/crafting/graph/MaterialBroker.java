@@ -230,6 +230,29 @@ public final class MaterialBroker {
         return List.copyOf(shortages);
     }
 
+    /** 只读监控采样：同一批可用材料不能在多个输入请求里重复抵扣，也不创建预留。 */
+    public List<Request> monitorShortages(List<Request> requests, int maximum) {
+        requireOwnerThread();
+        if (maximum <= 0) return List.of();
+        Map<Long, Long> used = new HashMap<>();
+        List<Request> missing = new ArrayList<>();
+        for (Request request : requests) {
+            long remaining = request.quantity();
+            for (AssetLot lot : matchingLots(request.source(), request.material())) {
+                long available = Math.max(0L, lot.available - used.getOrDefault(lot.id, 0L));
+                long taken = Math.min(remaining, available);
+                if (taken > 0) used.merge(lot.id, taken, Long::sum);
+                remaining -= taken;
+                if (remaining == 0) break;
+            }
+            if (remaining > 0) {
+                missing.add(new Request(request.source(), request.material(), remaining));
+                if (missing.size() >= maximum) break;
+            }
+        }
+        return List.copyOf(missing);
+    }
+
     public ReservationToken reserve(NodeId owner, List<Request> requests) {
         requireOwnerThread();
         Objects.requireNonNull(owner, "owner");

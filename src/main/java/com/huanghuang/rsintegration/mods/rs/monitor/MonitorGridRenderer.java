@@ -29,7 +29,7 @@ public final class MonitorGridRenderer {
     public static void draw(GuiGraphics graphics, int x, int y, ItemStack item, FluidStack fluid,
                             List<Component> lines, MonitorGridStyle style, IElementDrawers drawers, int width, int height) {
         var font = Minecraft.getInstance().font;
-        graphics.fill(x, y, x + width, y + height, style.color());
+        MonitorVisualStyle.cell(graphics, x, y, width, height, style.color(), false);
         if (!item.isEmpty()) InkFluidRenderer.render(graphics, item, x + width - 20, y + (height - 16) / 2);
         else if (!fluid.isEmpty()) drawers.getFluidDrawer().draw(graphics, x + width - 20, y + (height - 16) / 2, fluid);
         int lineHeight = font.lineHeight + 1;

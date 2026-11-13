@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.vanilla.brewing;
 
+import com.huanghuang.rsintegration.crafting.progress.MachineCycleProgress;
+
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -152,6 +154,7 @@ public final class BrewingStandBatchDelegate extends AbstractBatchDelegate {
             return failObservation("brewing stand state is unavailable");
         }
         int remaining = current instanceof BrewingStandAccessor access ? access.rsi$getBrewTime() : -1;
+        if (remaining > 0 && remaining <= 400) observedCycle = MachineCycleProgress.of(400 - remaining, 400);
         if (remaining >= 0 && lastBrewTime > remaining) observedWork += lastBrewTime - remaining;
         lastBrewTime = remaining;
         long tick = level.getGameTime();

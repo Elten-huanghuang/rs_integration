@@ -95,6 +95,8 @@ class CraftPacketCodecTest extends BootstrapTest {
         buf.writeVarInt(Integer.MAX_VALUE);
         buf.writeUtf("");
         buf.writeBoolean(false);
+        CraftProgressPacket.writeNodeMonitorData(buf, new NodeProgress(0, NodeState.UNKNOWN, "", "", ItemStack.EMPTY,
+                0, 1, 0, "", CraftProgressSnapshot.Reason.UNKNOWN, "", false));
 
         CraftProgressSnapshot decoded = CraftProgressPacket.decode(buf).snapshot();
 

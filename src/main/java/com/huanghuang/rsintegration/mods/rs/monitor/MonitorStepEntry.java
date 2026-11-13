@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.HashMap;
 
 /** 仅消费已经同步的数据。RS 数量是材料量，RSI 节点数量是加工次数，两者不混用。 */
 public record MonitorStepEntry(String key, int elementIndex, ItemStack item, FluidStack fluid,
@@ -29,6 +30,10 @@ public record MonitorStepEntry(String key, int elementIndex, ItemStack item, Flu
             Component state = Component.translatable(node.draining() ? "rsi.monitor.draining"
                     : node.reason() != CraftProgressSnapshot.Reason.NONE ? node.reason().translationKey()
                     : "rsi.progress.step.state." + node.state().name().toLowerCase(Locale.ROOT));
+            if (!node.draining() && (node.reason() == CraftProgressSnapshot.Reason.NONE
+                    || node.reason() == CraftProgressSnapshot.Reason.WAITING_MATERIALS) && !node.waitingInputs().isEmpty()) {
+                state = MonitorDependencyDetails.waitingLabel(node.waitingInputs().get(0));
+            }
             long pending = Math.max(0L, (long) node.totalOperations() - node.completedOperations() - node.runningOperations());
             Component counts = Component.translatable("rsi.monitor.step_counts", node.completedOperations(),
                     node.totalOperations(), node.runningOperations());
@@ -53,6 +58,9 @@ public record MonitorStepEntry(String key, int elementIndex, ItemStack item, Flu
             if (!node.machineLabel().isBlank()) tooltip.add(Component.literal(node.machineLabel()));
             tooltip.add(Component.literal(node.recipeId()));
             if (!node.technicalDetail().isBlank()) tooltip.add(Component.literal(node.technicalDetail()));
+            for (var input : node.waitingInputs()) tooltip.add(MonitorDependencyDetails.waitingLabel(input));
+            if (node.machineProgress().known()) tooltip.add(Component.translatable("rsi.monitor.cycle.progress", node.machineProgress().percent()));
+            tooltip.add(Component.translatable("rsi.monitor.wait.open_hint"));
             boolean active = node.draining() || node.runningOperations() > 0 || switch (node.state()) {
                 case SUCCEEDED, CANCELLED -> false;
                 default -> true;
@@ -104,9 +112,21 @@ public record MonitorStepEntry(String key, int elementIndex, ItemStack item, Flu
     }
 
     public static List<MonitorStepEntry> filter(List<MonitorStepEntry> source, String query, boolean onlyActive) {
+        return filterInOrder(source, query, onlyActive).stream()
+                .sorted(Comparator.comparingInt(MonitorStepEntry::priority)).toList();
+    }
+
+    public static List<MonitorStepEntry> filterInOrder(List<MonitorStepEntry> source, String query, boolean onlyActive) {
         String normalized = query.strip().toLowerCase(Locale.ROOT);
         return source.stream().filter(entry -> !onlyActive || entry.active())
                 .filter(entry -> entry.searchText().toLowerCase(Locale.ROOT).contains(normalized))
-                .sorted(Comparator.comparingInt(MonitorStepEntry::priority)).toList();
+                .toList();
+    }
+
+    /** 首次按重要程度排列；后续状态更新保留旧位置，新步骤追加到末尾。 */
+    public static List<MonitorStepEntry> stabilize(List<MonitorStepEntry> previous, List<MonitorStepEntry> current) {
+        var order = new HashMap<String, Integer>();
+        for (int index = 0; index < previous.size(); index++) order.put(previous.get(index).key(), index);
+        return current.stream().sorted(Comparator.comparingInt(entry -> order.getOrDefault(entry.key(), Integer.MAX_VALUE))).toList();
     }
 }

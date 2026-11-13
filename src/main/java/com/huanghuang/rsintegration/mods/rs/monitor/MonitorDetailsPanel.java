@@ -21,11 +21,15 @@ import java.util.List;
 import java.util.ArrayList;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.function.Consumer;
 import java.util.function.IntConsumer;
 
 /** 当前步骤与执行诊断，仍绘制在 RS 原生屏幕和菜单内。 */
 public final class MonitorDetailsPanel {
+    public record ViewState(UUID taskId, int nodeId, List<Integer> history, int listOffset, int offset) {}
+    private ViewState pendingView;
     public static final int NATIVE_WIDTH = 254;
     public static final int DETAILS_WIDTH = 166;
     private static final int NATIVE_ROW_HEIGHT = 34;
@@ -41,6 +45,13 @@ public final class MonitorDetailsPanel {
     private final int searchWidth;
     private final ActionButton filter;
     private final ActionButton diagnosis;
+    private final ActionButton back;
+    private final ActionButton stepList;
+    private final Deque<Integer> detailHistory = new ArrayDeque<>();
+    private MonitorDependencyDetails dependencies;
+    private int selectedNodeId = -1;
+    private int listOffset;
+    private List<MonitorDependencyDetails.Row> detailRows = List.of();
     private MonitorDiagnostics.Group focusedGroup;
     private final ListScrollState scrollState = new ListScrollState();
     private final ListScrollBar scrollBar;
@@ -86,6 +97,7 @@ public final class MonitorDetailsPanel {
         register.accept(filter);
         diagnosis = new ActionButton(x, y + 21, width, 21, Component.empty(), false, button -> {
             if (!(lastTask instanceof RsiMonitorTask rsi)) return;
+            showList();
             focusedGroup = focusedGroup != null ? null : rsi.diagnostics().groups().stream()
                     .filter(group -> group.kind() == rsi.diagnostics().kind() && group.reason() == rsi.diagnostics().reason())
                     .findFirst().orElse(null);
@@ -94,6 +106,15 @@ public final class MonitorDetailsPanel {
         });
         diagnosis.visible = false;
         register.accept(diagnosis);
+        int backWidth = (width - 4) / 2;
+        back = new ActionButton(x, y + 58, backWidth, 21, Component.translatable("rsi.monitor.wait.back"), false, button -> {
+            if (detailHistory.isEmpty()) showList();
+            else selectNode(detailHistory.removeLast(), false);
+        });
+        stepList = new ActionButton(x + backWidth + 4, y + 58, width - backWidth - 4, 21,
+                Component.translatable("rsi.monitor.steps"), false, button -> showList());
+        register.accept(back);
+        register.accept(stepList);
         scrollBar = new ListScrollBar(x + width - ScrollBarStyle.WIDTH, y + 46, ScrollBarStyle.WIDTH,
                 height - 52, scrollState, () -> {
             offset = scrollState.offset();
@@ -106,14 +127,18 @@ public final class MonitorDetailsPanel {
     public String query() { return search.getValue(); }
     public boolean onlyActive() { return onlyActive; }
     public boolean visible() { return visible; }
+    public ViewState viewState() { return new ViewState(lastTaskId, selectedNodeId, List.copyOf(detailHistory), listOffset, offset); }
+    public void restoreViewState(ViewState state) { pendingView = state; }
     private Component filterLabel() { return Component.translatable(onlyActive ? "rsi.monitor.active_steps" : "rsi.monitor.all_steps"); }
 
-    private int rowHeight() { return lastTask instanceof RsiMonitorTask ? RSI_ROW_HEIGHT : NATIVE_ROW_HEIGHT; }
+    private int rowHeight() { return selectedNodeId >= 0 ? 32 : lastTask instanceof RsiMonitorTask ? RSI_ROW_HEIGHT : NATIVE_ROW_HEIGHT; }
     private int listTop() { return lastTask instanceof RsiMonitorTask ? 83 : 46; }
     private int controlsTop() { return listTop() - 25; }
     private int visibleRows() { return Math.max(1, (height - listTop() - 6) / rowHeight()); }
 
     private void layoutControls() {
+        search.visible = filter.visible = visible && selectedNodeId < 0;
+        back.visible = stepList.visible = visible && selectedNodeId >= 0;
         search.setY(y + controlsTop() + 6);
         filter.setY(y + controlsTop());
         scrollBar.setY(y + listTop());
@@ -134,6 +159,7 @@ public final class MonitorDetailsPanel {
         search.visible = filter.visible = scrollBar.visible = visible;
         updateDiagnosisButton();
         if (!visible) search.setFocused(false);
+        layoutControls();
     }
 
     public void update(IGridTab task, UUID taskId) {
@@ -141,9 +167,16 @@ public final class MonitorDetailsPanel {
         boolean sameTask = Objects.equals(lastTaskId, taskId);
         lastTask = task;
         lastTaskId = taskId;
-        if (!sameTask) focusedGroup = null;
+        if (!sameTask) {
+            focusedGroup = null;
+            selectedNodeId = -1;
+            detailHistory.clear();
+            entries = List.of();
+        }
         if (task instanceof RsiMonitorTask rsi) {
-            entries = MonitorStepEntry.forRsi(rsi.snapshot());
+            entries = MonitorStepEntry.stabilize(entries, MonitorStepEntry.filter(MonitorStepEntry.forRsi(rsi.snapshot()), "", false));
+            dependencies = new MonitorDependencyDetails(rsi.snapshot());
+            if (selectedNodeId >= 0) detailRows = dependencies.rows(selectedNodeId);
             detailedNodes = rsi.snapshot().nodes().size();
             totalNodes = rsi.snapshot().totalNodes();
             if (focusedGroup != null) {
@@ -160,21 +193,34 @@ public final class MonitorDetailsPanel {
         layoutControls();
         updateDiagnosisButton();
         refilter(sameTask);
+        if (pendingView != null) {
+            var state = pendingView;
+            pendingView = null;
+            if (Objects.equals(state.taskId(), taskId)) {
+                listOffset = state.listOffset();
+                if (state.nodeId() >= 0 && task instanceof RsiMonitorTask) {
+                    selectNode(state.nodeId(), false);
+                    detailHistory.addAll(state.history());
+                }
+                offset = state.offset();
+                scroll(0);
+            }
+        }
     }
 
     private void refilter(boolean keepAnchor) {
         String anchor = keepAnchor && offset < filtered.size() ? filtered.get(offset).key() : null;
-        filtered = MonitorStepEntry.filter(entries, search.getValue(), onlyActive);
+        filtered = MonitorStepEntry.filterInOrder(entries, search.getValue(), onlyActive);
         if (focusedGroup != null) filtered = filtered.stream().filter(entry -> focusedGroup.keys().contains(entry.key())).toList();
-        if (!keepAnchor) offset = 0;
-        if (anchor != null) {
+        if (!keepAnchor && selectedNodeId < 0) offset = 0;
+        if (anchor != null && selectedNodeId < 0) {
             for (int i = 0; i < filtered.size(); i++) if (filtered.get(i).key().equals(anchor)) { offset = i; break; }
         }
         scroll(0);
     }
 
     private void scroll(int delta) {
-        scrollState.range(filtered.size(), visibleRows());
+        scrollState.range(selectedNodeId >= 0 ? detailRows.size() : filtered.size(), visibleRows());
         scrollState.offset(offset + delta);
         offset = scrollState.offset();
     }
@@ -188,12 +234,42 @@ public final class MonitorDetailsPanel {
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (!visible || button != 0 || mouseX < x || mouseX >= x + contentWidth || mouseY < y + listTop() || mouseY >= y + listTop() + rowHeight() * visibleRows()) return false;
         int index = offset + (int) (mouseY - y - listTop()) / rowHeight();
+        if (selectedNodeId >= 0) {
+            if (index < detailRows.size() && detailRows.get(index).targetNodeId() >= 0) {
+                selectNode(detailRows.get(index).targetNodeId(), true);
+            }
+            return true;
+        }
         if (index < filtered.size()) {
             var entry = filtered.get(index);
+            if (lastTask instanceof RsiMonitorTask rsi) {
+                listOffset = offset;
+                detailHistory.clear();
+                selectNode(rsi.snapshot().nodes().get(entry.elementIndex()).nodeId(), false);
+            }
             int element = lastTask instanceof RsiMonitorTask rsi ? rsi.materialIndex(entry.item()) : entry.elementIndex();
             if (element >= 0) revealElement.accept(element);
         }
         return true;
+    }
+
+    private void selectNode(int nodeId, boolean remember) {
+        if (remember && selectedNodeId >= 0) detailHistory.addLast(selectedNodeId);
+        selectedNodeId = nodeId;
+        search.setFocused(false);
+        detailRows = dependencies.rows(nodeId);
+        offset = 0;
+        layoutControls();
+        scroll(0);
+    }
+
+    private void showList() {
+        if (selectedNodeId < 0) return;
+        selectedNodeId = -1;
+        detailHistory.clear();
+        offset = listOffset;
+        layoutControls();
+        scroll(0);
     }
 
     public boolean mouseDragged(double x, double y, int button, double dx, double dy) {
@@ -226,8 +302,12 @@ public final class MonitorDetailsPanel {
                     x, y + 45, CraftingUiStyle.muted(), false);
         } else graphics.drawString(font, Component.translatable("rsi.monitor.steps"), x, y + 8, CraftingUiStyle.text(), false);
         if (detailedNodes < totalNodes) graphics.drawString(font, "+", x + contentWidth - font.width("+"), y + 8, CraftingUiStyle.warning(), false);
-        CraftingUiStyle.surface(graphics, x, y + controlsTop(), searchWidth, 21, CraftingUiColors.INPUT.argb(), CraftingUiStyle.border());
+        if (selectedNodeId < 0) CraftingUiStyle.surface(graphics, x, y + controlsTop(), searchWidth, 21, CraftingUiColors.INPUT.argb(), CraftingUiStyle.border());
         CraftingUiStyle.inset(graphics, x, y + listTop(), contentWidth, rowHeight() * visibleRows());
+        if (selectedNodeId >= 0) {
+            renderDetailRows(graphics, mouseX, mouseY);
+            return;
+        }
         for (int row = 0; row < visibleRows(); row++) {
             int rowY = y + listTop() + row * rowHeight();
             graphics.fill(x, rowY + rowHeight() - 1, x + contentWidth, rowY + rowHeight(), CraftingUiStyle.gridLine());
@@ -253,8 +333,7 @@ public final class MonitorDetailsPanel {
                     && entry.elementIndex() < rsi.snapshot().nodes().size()) {
                 stateColor = MonitorGridStyle.node(rsi.snapshot().nodes().get(entry.elementIndex()));
             }
-            graphics.fill(x, rowY, x + contentWidth, rowY + rowHeight() - 1, stateColor.color());
-            if (hovered) graphics.fill(x, rowY, x + contentWidth, rowY + 1, CraftingUiStyle.highlight());
+            MonitorVisualStyle.cell(graphics, x, rowY, contentWidth, rowHeight() - 1, stateColor.color(), hovered);
             graphics.fill(x, rowY + 1, x + 2, rowY + rowHeight() - 3, accent);
             if (!entry.item().isEmpty()) InkFluidRenderer.render(graphics, entry.item(), x + contentWidth - 21, rowY + 5);
             else if (!entry.fluid().isEmpty()) drawers.getFluidDrawer().draw(graphics, x + contentWidth - 21, rowY + 5, entry.fluid());
@@ -273,6 +352,22 @@ public final class MonitorDetailsPanel {
         }
     }
 
+    private void renderDetailRows(GuiGraphics graphics, int mouseX, int mouseY) {
+        var font = Minecraft.getInstance().font;
+        for (int row = 0; row < visibleRows() && offset + row < detailRows.size(); row++) {
+            var detail = detailRows.get(offset + row);
+            int top = y + listTop() + row * rowHeight();
+            boolean hovered = mouseX >= x && mouseX < x + contentWidth && mouseY >= top && mouseY < top + rowHeight() - 1;
+            int color = detail.targetNodeId() >= 0 ? CraftingUiStyle.accent() : CraftingUiStyle.canvas();
+            MonitorVisualStyle.cell(graphics, x, top, contentWidth, rowHeight() - 1, color, hovered);
+            int textWidth = contentWidth - (detail.icon().isEmpty() ? 12 : 31);
+            graphics.drawString(font, CraftingUiStyle.fit(font, detail.title().getString(), textWidth), x + 5, top + 5, CraftingUiStyle.text(), false);
+            graphics.drawString(font, CraftingUiStyle.fit(font, detail.detail().getString(), contentWidth - 12), x + 5, top + 18, CraftingUiStyle.muted(), false);
+            if (!detail.icon().isEmpty()) InkFluidRenderer.render(graphics, detail.icon(), x + contentWidth - 21, top + 2);
+            if (detail.targetNodeId() >= 0 && detail.icon().isEmpty()) graphics.drawString(font, ">", x + contentWidth - 9, top + 5, CraftingUiStyle.accent(), false);
+        }
+    }
+
     public void tooltip(GuiGraphics graphics, int localMouseX, int localMouseY) {
         if (!visible) return;
         int mouseX = localMouseX + screen.getGuiLeft();
@@ -280,6 +375,15 @@ public final class MonitorDetailsPanel {
         if (mouseX < x || mouseX >= x + contentWidth) return;
         if (mouseY >= y + listTop() && mouseY < y + listTop() + rowHeight() * visibleRows()) {
             int index = offset + (mouseY - y - listTop()) / rowHeight();
+            if (selectedNodeId >= 0) {
+                if (index < detailRows.size()) {
+                    var row = detailRows.get(index);
+                    var lines = new ArrayList<Component>(List.of(row.title(), row.detail()));
+                    if (row.targetNodeId() >= 0) lines.add(Component.translatable("rsi.monitor.wait.follow_hint"));
+                    renderTooltip(graphics, lines, localMouseX, localMouseY);
+                }
+                return;
+            }
             if (index < filtered.size()) renderTooltip(graphics, filtered.get(index).tooltip(), localMouseX, localMouseY);
         } else if (lastTask instanceof RsiMonitorTask rsi && mouseY >= y + 20 && mouseY < y + 42) {
             var lines = new ArrayList<>(rsi.diagnostics().tooltip(rsi.snapshot()));

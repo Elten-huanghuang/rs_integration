@@ -206,6 +206,7 @@ public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
     protected CraftObservation observeMachineCraft(@Nonnull ServerLevel level,
                                                     @Nonnull BlockEntity be) {
         CraftObservation observation = active().observeCraft(level);
+        observedCycle = active().monitorCycleProgress();
         this.phase = observation.phase();
         return observation;
     }

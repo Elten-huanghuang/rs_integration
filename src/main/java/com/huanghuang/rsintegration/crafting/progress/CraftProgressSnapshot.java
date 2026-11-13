@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.Set;
+import java.util.Objects;
 import java.util.function.Predicate;
 
 import javax.annotation.Nullable;
@@ -29,6 +30,7 @@ public record CraftProgressSnapshot(
     public static final int MAX_TECHNICAL_DETAIL_LENGTH = 1024;
     /** 单次进度包最多携带的节点明细；完整数量仍由 completedNodes/totalNodes 表达。 */
     public static final int MAX_NODE_DETAILS = 4096;
+    public static final int MAX_WAITING_INPUTS = 16;
 
     public CraftProgressSnapshot {
         result = result == null ? Result.RUNNING : result;
@@ -142,7 +144,10 @@ public record CraftProgressSnapshot(
             String machineLabel,
             Reason reason,
             String technicalDetail,
-            boolean draining
+            boolean draining,
+            List<WaitingInput> waitingInputs,
+            boolean waitingInputsTruncated,
+            MachineCycleProgress machineProgress
     ) {
         public NodeProgress {
             state = state == null ? NodeState.UNKNOWN : state;
@@ -157,11 +162,64 @@ public record CraftProgressSnapshot(
             machineLabel = machineLabel == null ? "" : machineLabel;
             reason = reason == null ? Reason.NONE : reason;
             technicalDetail = technicalDetail == null ? "" : limitTechnicalDetail(technicalDetail);
+            waitingInputs = waitingInputs == null ? List.of() : List.copyOf(waitingInputs);
+            if (waitingInputs.size() > MAX_WAITING_INPUTS) {
+                waitingInputs = List.copyOf(waitingInputs.subList(0, MAX_WAITING_INPUTS));
+                waitingInputsTruncated = true;
+            }
+            machineProgress = machineProgress == null ? MachineCycleProgress.UNKNOWN : machineProgress;
+        }
+
+        public NodeProgress(int nodeId, NodeState state, String recipeId, String modTypeId, ItemStack displayOutput,
+                            int completedOperations, int totalOperations, int runningOperations, String machineLabel,
+                            Reason reason, String technicalDetail, boolean draining) {
+            this(nodeId, state, recipeId, modTypeId, displayOutput, completedOperations, totalOperations,
+                    runningOperations, machineLabel, reason, technicalDetail, draining, List.of(), false,
+                    MachineCycleProgress.UNKNOWN);
         }
 
         @Override
         public ItemStack displayOutput() {
             return displayOutput.copy();
+        }
+
+        @Override public boolean equals(Object other) {
+            if (this == other) return true;
+            if (!(other instanceof NodeProgress node)) return false;
+            return nodeId == node.nodeId && state == node.state && recipeId.equals(node.recipeId)
+                    && modTypeId.equals(node.modTypeId) && ItemStack.matches(displayOutput, node.displayOutput)
+                    && completedOperations == node.completedOperations && totalOperations == node.totalOperations
+                    && runningOperations == node.runningOperations && machineLabel.equals(node.machineLabel)
+                    && reason == node.reason && technicalDetail.equals(node.technicalDetail) && draining == node.draining
+                    && waitingInputs.equals(node.waitingInputs) && waitingInputsTruncated == node.waitingInputsTruncated
+                    && machineProgress.equals(node.machineProgress);
+        }
+
+        @Override public int hashCode() {
+            return Objects.hash(nodeId, state, recipeId, modTypeId, displayOutput.getItem(), displayOutput.getCount(),
+                    displayOutput.getTag(), completedOperations, totalOperations, runningOperations, machineLabel,
+                    reason, technicalDetail, draining, waitingInputs, waitingInputsTruncated, machineProgress);
+        }
+    }
+
+    /** producerNodeId 为 -1 时来自外部材料池，数量是当前尚不能满足的实际请求量。 */
+    public record WaitingInput(ItemStack material, long quantity, int producerNodeId) {
+        public WaitingInput {
+            if (material == null || material.isEmpty() || quantity <= 0 || producerNodeId < -1) {
+                throw new IllegalArgumentException("invalid waiting input");
+            }
+            material = material.copyWithCount(1);
+        }
+
+        @Override public ItemStack material() { return material.copy(); }
+
+        @Override public boolean equals(Object other) {
+            return this == other || other instanceof WaitingInput input && quantity == input.quantity
+                    && producerNodeId == input.producerNodeId && ItemStack.matches(material, input.material);
+        }
+
+        @Override public int hashCode() {
+            return Objects.hash(material.getItem(), material.getTag(), quantity, producerNodeId);
         }
     }
 

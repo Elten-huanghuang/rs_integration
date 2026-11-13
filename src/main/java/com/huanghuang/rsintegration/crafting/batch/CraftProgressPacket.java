@@ -5,6 +5,7 @@ import java.lang.reflect.Field;
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot;
 import com.huanghuang.rsintegration.crafting.progress.CraftOutputProgress;
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressTiming;
+import com.huanghuang.rsintegration.crafting.progress.MachineCycleProgress;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.util.PerformanceMonitor;
 import io.netty.handler.codec.DecoderException;
@@ -69,6 +70,7 @@ public final class CraftProgressPacket {
             buf.writeVarInt(node.reason().ordinal());
             buf.writeUtf(node.technicalDetail(), MAX_TECHNICAL_DETAIL_LENGTH);
             buf.writeBoolean(node.draining());
+            writeNodeMonitorData(buf, node);
         }
         writeProgressTail(buf, snapshot.outputProgress(), snapshot.timing());
         PerformanceMonitor.recordProgressPacketBytes(buf.writerIndex() - startIndex);
@@ -101,13 +103,51 @@ public final class CraftProgressPacket {
                     CraftProgressSnapshot.Reason.fromOrdinal(buf.readVarInt());
             String nodeDetail = buf.readUtf(MAX_TECHNICAL_DETAIL_LENGTH);
             boolean draining = buf.readBoolean();
-            nodes.add(new CraftProgressSnapshot.NodeProgress(nodeId, nodeState,
+            nodes.add(readNodeMonitorData(buf, new CraftProgressSnapshot.NodeProgress(nodeId, nodeState,
                     recipeId, modTypeId, displayOutput, completedOperations, totalOperations,
-                    runningOperations, machineLabel, nodeReason, nodeDetail, draining));
+                    runningOperations, machineLabel, nodeReason, nodeDetail, draining)));
         }
         var tail = readProgressTail(buf);
         return new CraftProgressPacket(new CraftProgressSnapshot(craftId, sequence, result, reason,
                 completed, total, running, detail, List.copyOf(nodes), tail.output(), tail.timing()));
+    }
+
+    /** 全量和增量共用同一份监控字段编码，防止等待关系在更新后丢失。 */
+    static void writeNodeMonitorData(FriendlyByteBuf buf, CraftProgressSnapshot.NodeProgress node) {
+        buf.writeVarInt(node.waitingInputs().size());
+        for (var input : node.waitingInputs()) {
+            InkFluidSupport.writePacket(buf, input.material());
+            buf.writeVarLong(input.quantity());
+            buf.writeVarInt(input.producerNodeId());
+        }
+        buf.writeBoolean(node.waitingInputsTruncated());
+        var cycle = node.machineProgress();
+        buf.writeVarLong(cycle.completedTicks());
+        buf.writeVarLong(cycle.totalTicks());
+        buf.writeVarInt(cycle.reportingMachines());
+        buf.writeVarInt(cycle.activeMachines());
+    }
+
+    static CraftProgressSnapshot.NodeProgress readNodeMonitorData(FriendlyByteBuf buf,
+                                                                  CraftProgressSnapshot.NodeProgress node) {
+        int count = buf.readVarInt();
+        if (count < 0 || count > CraftProgressSnapshot.MAX_WAITING_INPUTS) {
+            throw new DecoderException("waiting input count out of bounds");
+        }
+        var inputs = new ArrayList<CraftProgressSnapshot.WaitingInput>(count);
+        try {
+            for (int i = 0; i < count; i++) {
+                inputs.add(new CraftProgressSnapshot.WaitingInput(InkFluidSupport.readPacket(buf),
+                        buf.readVarLong(), buf.readVarInt()));
+            }
+            boolean truncated = buf.readBoolean();
+            var cycle = new MachineCycleProgress(buf.readVarLong(), buf.readVarLong(), buf.readVarInt(), buf.readVarInt());
+            return new CraftProgressSnapshot.NodeProgress(node.nodeId(), node.state(), node.recipeId(), node.modTypeId(),
+                    node.displayOutput(), node.completedOperations(), node.totalOperations(), node.runningOperations(),
+                    node.machineLabel(), node.reason(), node.technicalDetail(), node.draining(), inputs, truncated, cycle);
+        } catch (IllegalArgumentException invalid) {
+            throw new DecoderException("invalid node monitor data", invalid);
+        }
     }
 
     /** 保留旧的可选数量尾部；未知产量的 0/0 占位只在附带计时时有效。 */

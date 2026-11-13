@@ -59,6 +59,7 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.TaskFluidAccess;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.MaterialMatcher;
+import com.huanghuang.rsintegration.crafting.progress.MachineCycleProgress;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
@@ -771,6 +772,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                     return failObservation(
                             "machine active process mismatch");
                 }
+                observedCycle = MachineCycleProgress.of(state.progress(), state.totalProgress());
                 return workingObservation(state.progress());
             }
             if (observedMachineBusy || state.totalProgress() > 0
@@ -1438,6 +1440,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     }
 
     private CraftObservation observeCustomOperation(ServerLevel level) {
+        observedCycle = MachineCycleProgress.UNKNOWN;
         if (customStartPending) {
             ExecutionResult started = startCustomIntegration(
                     operationStartContext.player());
@@ -1480,6 +1483,9 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                 if (observation.activeRecipeId() != null
                         && !recipe.getId().equals(observation.activeRecipeId())) {
                     yield failObservation("custom operation active recipe mismatch");
+                }
+                if (observation.activeRecipeId() != null) {
+                    observedCycle = MachineCycleProgress.of(observation.completedTicks(), observation.totalTicks());
                 }
                 yield observation.activeRecipeId() == null
                         ? workingObservation() : workingObservation(observation.completedTicks());
