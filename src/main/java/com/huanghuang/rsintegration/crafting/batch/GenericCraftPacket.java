@@ -1001,7 +1001,7 @@ public final class GenericCraftPacket {
         String mismatch = explicitPreview ? executionLeaseMismatch(
                 entry, player, recipeId, forcedRecipes, repeatCount, targetOutput, modType) : null;
         if (mismatch != null) {
-            RSIntegrationMod.debug(
+            RSIntegrationMod.LOGGER.warn(
                     "[RSI-Generic] Rejected confirmed preview: recipeId={} request={} reason={} "
                             + "repeat={} forced={} terminal={} targetNbt={}",
                     recipeId, confirmedPreviewRequestId, mismatch, repeatCount, forcedRecipes,
@@ -1043,7 +1043,7 @@ public final class GenericCraftPacket {
                         "[RSI-Diag] execution cache state rejected recipe={} terminal={}",
                         recipeId, modType == null ? "generic" : modType.id());
             }
-            RSIntegrationMod.debug(
+            RSIntegrationMod.LOGGER.warn(
                     "[RSI-Generic] Rejected execution cache state: recipeId={} reason=state-or-required-supply outcome={} diagnostics={}",
                     recipeId, entry.plan().outcome(), entry.plan().diagnostics());
             // 保留失效租约直到重新预览，连续点击确认也不能悄悄重选路线。
@@ -1055,7 +1055,7 @@ public final class GenericCraftPacket {
                 ? cache.consumeLatestForExecution(player.getUUID(), entry)
                 : cache.consumeForExecution(exactKey, entry);
         if (!consumed) {
-            RSIntegrationMod.debug(
+            RSIntegrationMod.LOGGER.warn(
                     "[RSI-Generic] Execution lease changed before validation completed: recipeId={}",
                     recipeId);
             return new ExecutionPlanLookup(null, true);
@@ -1766,9 +1766,10 @@ public final class GenericCraftPacket {
             return;
         }
 
+        // 预览指纹来自请求位置；自动选择的执行机器不能替换预览的校验上下文。
         ExecutionPlanLookup cachedPreview = findValidatedExecutionPlan(
                 player, recipeId, forcedRecipes, repeatCount, targetOutput, modType,
-                effectiveDim, effectivePos, executionStorageReference, materialLocks, confirmedPreviewRequestId);
+                dim, pos, executionStorageReference, materialLocks, confirmedPreviewRequestId);
         if (cachedPreview.rejected()) {
             player.sendSystemMessage(Component.translatable("rsi.plan.failure.confirmation_invalid"));
             return;

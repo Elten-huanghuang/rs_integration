@@ -1,11 +1,19 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
+import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
+import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.MachineSelectionMode;
 import com.huanghuang.rsintegration.crafting.OutputDestination;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.planning.PlanCache;
 import com.huanghuang.rsintegration.crafting.planning.PlanningSnapshot;
 import com.huanghuang.rsintegration.crafting.planning.PlanningStateValidator;
+import com.huanghuang.rsintegration.mods.goety.GoetyBatchDelegate;
+import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
+import com.huanghuang.rsintegration.storage.StorageRestockSupport;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.DecoderException;
@@ -16,12 +24,15 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeAll;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -91,6 +102,60 @@ class ConfirmedPreviewExecutionTest extends BootstrapTest {
             validator.when(() -> PlanningStateValidator.revalidateForExecution(fixture.player,
                     entry.snapshot(), entry.plan(), Level.OVERWORLD, BlockPos.ZERO, null)).thenReturn(true);
             assertSame(entry, fixture.confirm(10).entry());
+        } finally { fixture.cache.removePlayer(fixture.player.getUUID()); }
+    }
+
+    @Test
+    void selectingARemoteAltarStillValidatesAtTheOriginalPreviewLocation() {
+        Fixture fixture = new Fixture();
+        ServerLevel level = fixture.player.serverLevel();
+        Recipe<?> recipe = mock(Recipe.class);
+        ModType type = mock(ModType.class);
+        when(type.id()).thenReturn("goety");
+        ItemStack target = new ItemStack(Items.DIAMOND);
+        var key = CraftPlanCacheKeys.key(fixture.player.getUUID(), fixture.recipe,
+                Map.of(), 1, target, type);
+        var snapshot = new PlanningSnapshot(fixture.player.getUUID(), 1L, key.recipeRevision(),
+                fixture.recipe, Map.of(), Map.of(), new ImmutableRecipeGraph(Map.of()), "", "", false);
+        var plan = new PlanResponse(true, "target", target, List.of(), Map.of(),
+                List.of(), fixture.recipe.toString());
+        fixture.cache.put(key, plan, snapshot, System.nanoTime());
+        var input = new IngredientSpec(Ingredient.of(Items.GRANITE), 1);
+        var altar = new AltarBindingRegistry.BoundMachine(Level.NETHER.location(),
+                new BlockPos(100, 64, 200), type, "goety:dark_altar");
+
+        try (var recipes = mockStatic(CraftRecipeResolver.class);
+             var machineSupport = mockStatic(CraftMachineBindingSupport.class);
+             var materials = mockStatic(CraftPacketUtils.class);
+             var bindings = mockStatic(AltarBindingRegistry.class);
+             var goety = mockStatic(GoetyBatchDelegate.class);
+             var restock = mockStatic(StorageRestockSupport.class);
+             var endpoints = mockStatic(CraftStorageEndpoints.class);
+             var storage = mockStatic(CraftPlanStorageService.class);
+             var validator = mockStatic(PlanningStateValidator.class)) {
+            recipes.when(() -> CraftRecipeResolver.resolve(level, fixture.recipe)).thenReturn(recipe);
+            machineSupport.when(() -> CraftMachineBindingSupport.resolveExecutionModType(
+                    fixture.player, recipe, null, null)).thenReturn(type);
+            machineSupport.when(() -> CraftMachineBindingSupport.hasBindingForExecutionType(
+                    fixture.player, recipe, type)).thenReturn(true);
+            materials.when(() -> CraftPacketUtils.extractIngredientSpecs(recipe)).thenReturn(List.of(input));
+            materials.when(() -> CraftPacketUtils.applyPlanningIngredientContext(
+                    recipe, fixture.player, List.of(input))).thenReturn(List.of(input));
+            bindings.when(() -> AltarBindingRegistry.getBoundMachinesForRecipe(
+                    fixture.player, type, fixture.recipe)).thenReturn(List.of(altar));
+            restock.when(() -> StorageRestockSupport.resolve(fixture.player)).thenReturn(Optional.empty());
+
+            GenericCraftPacket.tryResolveTypedGraphOnly(fixture.player, fixture.recipe, Map.of(),
+                    null, null, 1, false, null, target, OutputDestination.RS_NETWORK,
+                    MachineSelectionMode.AUTO, null, Map.of());
+
+            bindings.verify(() -> AltarBindingRegistry.getBoundMachinesForRecipe(
+                    fixture.player, type, fixture.recipe));
+            // 材料复验仍可拒绝执行，但不能把自动选中的异维度祭坛当成预览位置。
+            validator.verify(() -> PlanningStateValidator.revalidateForExecution(fixture.player,
+                    snapshot, plan, Level.OVERWORLD, BlockPos.ZERO, null));
+            validator.verifyNoMoreInteractions();
+            assertNotNull(fixture.cache.peekForExecution(key), "复验失败仍保留原计划");
         } finally { fixture.cache.removePlayer(fixture.player.getUUID()); }
     }
 
