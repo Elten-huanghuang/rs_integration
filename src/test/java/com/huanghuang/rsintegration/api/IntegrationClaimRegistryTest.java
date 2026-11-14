@@ -32,12 +32,74 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 class IntegrationClaimRegistryTest extends BootstrapTest {
+    @Test
+    void allRegistriesKeepFullOrderingAndRestrictClaimsToTheHighestPriority() {
+        DefaultRSIIntegrationApi api = new DefaultRSIIntegrationApi();
+        api.beginRegistration();
+        // 注册顺序故意打乱；相同 ID 可以分别用于配方、机器、执行器三种注册空间。
+        for (String id : List.of("z_high", "low", "a_high")) {
+            RegistrationOptions options = new RegistrationOptions(id.equals("low") ? -20 : 20, Map.of());
+            assertTrue(api.registerRecipe(new StubRecipe(id, false), options).accepted());
+            assertTrue(api.registerMachine(new StubMachine(id, true), options).accepted());
+            assertTrue(api.registerExecution(new StubExecution(id, true), options).accepted());
+        }
+        Recipe<?> recipe = mock(Recipe.class);
+        BlockEntity entity = mock(BlockEntity.class);
+        List<String> order = List.of("a_high", "z_high", "low");
+        assertEquals(order, api.recipes().findAll(recipe).stream().map(value -> value.id().getPath()).toList());
+        assertEquals(order, api.machines().findAll(entity).stream().map(value -> value.id().getPath()).toList());
+        assertEquals(order, api.executions().findAll(recipeView(), machineContext()).stream()
+                .map(value -> value.id().getPath()).toList());
+        var recipeClaim = api.recipes().claim(recipe);
+        var machineClaim = api.machines().claim(entity);
+        var executionClaim = api.executions().claim(recipeView(), machineContext());
+        assertNull(recipeClaim.winner());
+        assertNull(machineClaim.winner());
+        assertNull(executionClaim.winner());
+        assertEquals(order.subList(0, 2), recipeClaim.candidates().stream().map(value -> value.id().getPath()).toList());
+        assertEquals(order.subList(0, 2), machineClaim.candidates().stream().map(value -> value.id().getPath()).toList());
+        assertEquals(order.subList(0, 2), executionClaim.candidates().stream().map(value -> value.id().getPath()).toList());
+        assertEquals("20", recipeClaim.diagnostics().get(0).attributes().get("priority"));
+        assertEquals("unknown", recipeClaim.diagnostics().get(0).attributes().get("recipe"));
+        assertThrows(UnsupportedOperationException.class, () -> machineClaim.candidates().clear());
+        assertThrows(UnsupportedOperationException.class, () -> api.recipes().findAll(recipe).clear());
+    }
+
+    @Test
+    void frozenRegistryMatchesEachMachineIdentityOncePerQuery() {
+        DefaultRSIIntegrationApi api = new DefaultRSIIntegrationApi();
+        MachineIntegration integration = mock(MachineIntegration.class);
+        when(integration.id()).thenReturn(new ResourceLocation("test", "live_machine"));
+        when(integration.bindings()).thenReturn(new StubMachine("binding", true).bindings());
+        BlockEntity entity = mock(BlockEntity.class);
+        BlockEntity otherEntity = mock(BlockEntity.class);
+        when(integration.supports(entity)).thenReturn(true);
+        when(integration.supports(otherEntity)).thenReturn(false);
+        api.beginRegistration();
+        api.registerMachine(integration);
+        api.freezeRegistration();
+        assertSame(integration, api.machines().claim(entity).winner());
+        assertTrue(api.machines().findAll(otherEntity).isEmpty());
+        var absent = api.machines().claim(otherEntity);
+        assertNull(absent.winner());
+        assertFalse(absent.ambiguous());
+        assertTrue(absent.diagnostics().isEmpty());
+        assertSame(integration, api.machines().claim(entity).winner());
+        verify(integration, times(2)).supports(entity);
+        verify(integration, times(2)).supports(otherEntity);
+    }
+
     @Test
     void machineClaimUsesHighestPriorityAndRejectsTies() {
         DefaultRSIIntegrationApi api = new DefaultRSIIntegrationApi();

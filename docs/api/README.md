@@ -194,6 +194,13 @@ public final class MyRsiRegistration {
 否则使用 `RegistrationOptions.defaults()`。`attributes` 当前不参与配方或机器路由，
 不能用来传递执行所必需的运行期状态。
 
+三类 registry 的查询规则一致：`findAll` 返回全部匹配项，按 priority 降序、同优先级
+按集成 ID 排序；`claim` 的 candidates 只包含最高优先级的匹配项。单个集成的
+`supports` 抛出 `RuntimeException` 或 `LinkageError` 时，其他候选仍继续匹配，
+`claim` 会保留该失败的诊断；`findAll` 只返回匹配列表。返回列表只读。
+注册冻结表示不能继续注册，不表示可以把某个配方或机器的命中结果用于其他对象；
+`supports` 仍须遵守第 3.4 节的线程和只读身份判断约束。
+
 ## 3. 必须先理解的稳定语义
 
 ### 3.1 五种 ID

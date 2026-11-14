@@ -15,6 +15,7 @@ import org.jetbrains.annotations.ApiStatus;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 @ApiStatus.Internal
 public final class DefaultRSICraftConsumerApi
@@ -61,9 +62,10 @@ public final class DefaultRSICraftConsumerApi
     public ConsumerResult<List<ConsumerStorageOption>> storageOptions(
             ServerPlayer player
     ) {
-        ConsumerResult<List<ConsumerStorageOption>> unavailable =
-                lifecycleFailure();
-        if (unavailable != null) return unavailable;
+        return whenReady(() -> availableStorageOptions(player));
+    }
+
+    private ConsumerResult<List<ConsumerStorageOption>> availableStorageOptions(ServerPlayer player) {
         if (player == null || player.server == null
                 || !player.server.isSameThread()) {
             return reject(
@@ -100,10 +102,7 @@ public final class DefaultRSICraftConsumerApi
             ServerPlayer player,
             ConsumerRecipeCatalogRequest request
     ) {
-        ConsumerResult<ConsumerRecipeCatalogPage> unavailable =
-                lifecycleFailure();
-        if (unavailable != null) return unavailable;
-        return catalog.findRecipes(player, request, CAPABILITIES);
+        return whenReady(() -> catalog.findRecipes(player, request, CAPABILITIES));
     }
 
     @Override
@@ -111,10 +110,7 @@ public final class DefaultRSICraftConsumerApi
             ServerPlayer player,
             ConsumerInspectionRequest request
     ) {
-        ConsumerResult<ConsumerInspectionTicket> unavailable =
-                lifecycleFailure();
-        if (unavailable != null) return unavailable;
-        return runtime.openInspection(player, request, CAPABILITIES);
+        return whenReady(() -> runtime.openInspection(player, request, CAPABILITIES));
     }
 
     @Override
@@ -122,11 +118,7 @@ public final class DefaultRSICraftConsumerApi
             ServerPlayer player,
             ConsumerInspectionTicketId ticketId
     ) {
-        ConsumerResult<ConsumerInspectionPage> unavailable =
-                lifecycleFailure();
-        if (unavailable != null) return unavailable;
-        return runtime.nextInspectionPage(
-                player, ticketId, CAPABILITIES);
+        return whenReady(() -> runtime.nextInspectionPage(player, ticketId, CAPABILITIES));
     }
 
     @Override
@@ -134,10 +126,7 @@ public final class DefaultRSICraftConsumerApi
             ServerPlayer player,
             ConsumerInspectionTicketId ticketId
     ) {
-        ConsumerResult<ConsumerAck> unavailable = lifecycleFailure();
-        if (unavailable != null) return unavailable;
-        return runtime.closeInspection(
-                player, ticketId, CAPABILITIES);
+        return whenReady(() -> runtime.closeInspection(player, ticketId, CAPABILITIES));
     }
 
     @Override
@@ -146,9 +135,7 @@ public final class DefaultRSICraftConsumerApi
             ResourceLocation consumerId,
             ConsumerPlanId planId
     ) {
-        ConsumerResult<ConsumerAck> unavailable = lifecycleFailure();
-        if (unavailable != null) return unavailable;
-        return runtime.discardPlan(player, consumerId, planId);
+        return whenReady(() -> runtime.discardPlan(player, consumerId, planId));
     }
 
     @Override
@@ -156,10 +143,7 @@ public final class DefaultRSICraftConsumerApi
             ServerPlayer player,
             ConsumerOrderRequest request
     ) {
-        ConsumerResult<ConsumerOrderReceipt> unavailable =
-                lifecycleFailure();
-        if (unavailable != null) return unavailable;
-        return runtime.submit(player, request, CAPABILITIES);
+        return whenReady(() -> runtime.submit(player, request, CAPABILITIES));
     }
 
     @Override
@@ -167,10 +151,7 @@ public final class DefaultRSICraftConsumerApi
             ServerPlayer player,
             ConsumerBatchOrderRequest request
     ) {
-        ConsumerResult<ConsumerBatchOrderReceipt> unavailable =
-                lifecycleFailure();
-        if (unavailable != null) return unavailable;
-        return runtime.submitBatch(player, request, CAPABILITIES);
+        return whenReady(() -> runtime.submitBatch(player, request, CAPABILITIES));
     }
 
     @Override
@@ -179,10 +160,7 @@ public final class DefaultRSICraftConsumerApi
             ResourceLocation consumerId,
             ConsumerOrderId orderId
     ) {
-        ConsumerResult<ConsumerOrderStatus> unavailable =
-                lifecycleFailure();
-        if (unavailable != null) return unavailable;
-        return runtime.status(player, consumerId, orderId);
+        return whenReady(() -> runtime.status(player, consumerId, orderId));
     }
 
     @Override
@@ -192,15 +170,7 @@ public final class DefaultRSICraftConsumerApi
             ConsumerOrderId orderId,
             ConsumerExternalRequestId cancellationRequestId
     ) {
-        ConsumerResult<ConsumerCancelResult> unavailable =
-                lifecycleFailure();
-        if (unavailable != null) return unavailable;
-        return runtime.cancel(
-                player,
-                consumerId,
-                orderId,
-                cancellationRequestId
-        );
+        return whenReady(() -> runtime.cancel(player, consumerId, orderId, cancellationRequestId));
     }
 
     public void markIndexing() {
@@ -229,10 +199,12 @@ public final class DefaultRSICraftConsumerApi
         runtime.clearPlayer(playerId);
     }
 
-    private <T> ConsumerResult<T> lifecycleFailure() {
-        if (state == ConsumerServiceState.READY) return null;
-        if (state == ConsumerServiceState.STOPPING
-                || state == ConsumerServiceState.STOPPED) {
+    /** 延迟调用业务层，确保未就绪时不读取玩家、请求或创建订单。 */
+    private <T> ConsumerResult<T> whenReady(Supplier<ConsumerResult<T>> action) {
+        ConsumerServiceState current = state;
+        if (current == ConsumerServiceState.READY) return action.get();
+        if (current == ConsumerServiceState.STOPPING
+                || current == ConsumerServiceState.STOPPED) {
             return reject(
                     ConsumerDiagnosticCode.SERVICE_STOPPING,
                     "consumer service is stopping or stopped",

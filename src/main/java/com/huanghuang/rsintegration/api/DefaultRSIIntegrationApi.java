@@ -22,10 +22,13 @@ import org.jetbrains.annotations.ApiStatus;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 @ApiStatus.Internal
 public final class DefaultRSIIntegrationApi implements RSIIntegrationApi {
@@ -169,15 +172,13 @@ public final class DefaultRSIIntegrationApi implements RSIIntegrationApi {
         }
         RegistrationOptions safeOptions = options == null
                 ? RegistrationOptions.defaults() : options;
-        synchronized (this) {
-            List<? extends Registered<?>> target = registrations(kind);
-            if (target.stream().anyMatch(entry -> entry.id().equals(id))) {
-                return rejected(RegistrationStatus.REJECTED, phase, id,
-                        IntegrationDiagnosticCode.REGISTRATION_DUPLICATE_ID, kind,
-                        "duplicate_id");
-            }
-            addRegistration(kind, new Registered<>(id, safeOptions, integration));
+        List<? extends Registered<?>> target = registrations(kind);
+        if (target.stream().anyMatch(entry -> entry.id().equals(id))) {
+            return rejected(RegistrationStatus.REJECTED, phase, id,
+                    IntegrationDiagnosticCode.REGISTRATION_DUPLICATE_ID, kind,
+                    "duplicate_id");
         }
+        addRegistration(kind, new Registered<>(id, safeOptions, integration));
         return new RegistrationResult(
                 RegistrationStatus.ACCEPTED, id, phase, List.of());
     }
@@ -255,150 +256,43 @@ public final class DefaultRSIIntegrationApi implements RSIIntegrationApi {
     private final class DefaultRecipeRegistry implements RecipeIntegrationRegistry {
         @Override
         public List<RecipeIntegration<?>> findAll(Recipe<?> recipe) {
-            List<Registered<RecipeIntegration<?>>> matches = new ArrayList<>();
-            for (Registered<RecipeIntegration<?>> entry : recipes) {
-                if (supportsRecipe(entry.integration(), recipe)) {
-                    matches.add(entry);
-                }
-            }
-            matches.sort(Comparator
-                    .comparingInt((Registered<RecipeIntegration<?>> entry) ->
-                            entry.options().priority()).reversed()
-                    .thenComparing(entry -> entry.id().toString()));
-            return matches.stream().map(Registered::integration).toList();
+            return scanRecipes(recipe).all();
         }
 
         @Override
         public RecipeClaim claim(Recipe<?> recipe) {
-            List<Registered<RecipeIntegration<?>>> matches = new ArrayList<>();
-            List<IntegrationDiagnostic> diagnostics = new ArrayList<>();
-            for (Registered<RecipeIntegration<?>> entry : recipes) {
-                try {
-                    if (entry.integration().supports(recipe)) matches.add(entry);
-                } catch (RuntimeException | LinkageError failure) {
-                    diagnostics.add(failureDiagnostic(
-                            IntegrationDiagnosticCode.RECIPE_INSPECTION_FAILED,
-                            entry.id(),
-                            failure
-                    ));
-                }
-            }
-            if (matches.isEmpty()) {
-                return new RecipeClaim(null, List.of(), diagnostics);
-            }
-            int highest = matches.stream()
-                    .mapToInt(entry -> entry.options().priority())
-                    .max().orElseThrow();
-            List<Registered<RecipeIntegration<?>>> top = matches.stream()
-                    .filter(entry -> entry.options().priority() == highest)
-                    .sorted(Comparator.comparing(entry -> entry.id().toString()))
-                    .toList();
-            List<RecipeIntegration<?>> candidates = top.stream()
-                    .map(Registered::integration).toList();
-            if (top.size() == 1) {
-                return new RecipeClaim(
-                        candidates.get(0), candidates, diagnostics);
-            }
-            ResourceLocation recipeId = recipe.getId();
-            IntegrationDiagnostic diagnostic = new IntegrationDiagnostic(
-                    IntegrationDiagnosticCode.RECIPE_CLAIM_AMBIGUOUS,
-                    IntegrationSeverity.ERROR,
-                    null,
-                    Map.of(
-                            "recipe", recipeId == null ? "unknown" : recipeId.toString(),
-                            "priority", Integer.toString(highest)
-                    )
-            );
-            diagnostics.add(diagnostic);
-            return new RecipeClaim(null, candidates, diagnostics);
+            var selection = scanRecipes(recipe).select(
+                    IntegrationDiagnosticCode.RECIPE_CLAIM_AMBIGUOUS, () -> {
+                        ResourceLocation recipeId = recipe.getId();
+                        return Map.of("recipe", recipeId == null ? "unknown" : recipeId.toString());
+                    });
+            return new RecipeClaim(selection.winner(), selection.candidates(), selection.diagnostics());
         }
 
-        private boolean supportsRecipe(
-                RecipeIntegration<?> integration,
-                Recipe<?> recipe
-        ) {
-            try {
-                return integration.supports(recipe);
-            } catch (RuntimeException | LinkageError failure) {
-                return false;
-            }
+        private RegistryScan<RecipeIntegration<?>> scanRecipes(Recipe<?> recipe) {
+            return scan(recipes, integration -> integration.supports(recipe),
+                    IntegrationDiagnosticCode.RECIPE_INSPECTION_FAILED);
         }
     }
 
     private final class DefaultMachineRegistry implements MachineIntegrationRegistry {
         @Override
         public List<MachineIntegration> findAll(BlockEntity blockEntity) {
-            return scanMachines(blockEntity).matches().stream()
-                    .map(Registered::integration)
-                    .toList();
+            return scanMachines(blockEntity).all();
         }
 
         @Override
         public MachineClaim claim(BlockEntity blockEntity) {
-            MachineScan scan = scanMachines(blockEntity);
-            List<Registered<MachineIntegration>> matches = scan.matches();
-            List<IntegrationDiagnostic> diagnostics =
-                    new ArrayList<>(scan.diagnostics());
-            if (matches.isEmpty()) {
-                return new MachineClaim(null, List.of(), diagnostics);
-            }
-            int highest = matches.stream()
-                    .mapToInt(entry -> entry.options().priority())
-                    .max().orElseThrow();
-            List<Registered<MachineIntegration>> top = matches.stream()
-                    .filter(entry -> entry.options().priority() == highest)
-                    .sorted(Comparator.comparing(entry -> entry.id().toString()))
-                    .toList();
-            List<MachineIntegration> candidates = top.stream()
-                    .map(Registered::integration)
-                    .toList();
-            if (top.size() == 1) {
-                return new MachineClaim(
-                        candidates.get(0), candidates, diagnostics);
-            }
-            IntegrationDiagnostic diagnostic = new IntegrationDiagnostic(
+            var selection = scanMachines(blockEntity).select(
                     IntegrationDiagnosticCode.MACHINE_CLAIM_AMBIGUOUS,
-                    IntegrationSeverity.ERROR,
-                    null,
-                    Map.of(
-                            "blockEntity", blockEntity.getClass().getName(),
-                            "priority", Integer.toString(highest)
-                    )
-            );
-            diagnostics.add(diagnostic);
-            return new MachineClaim(null, candidates, diagnostics);
+                    () -> Map.of("blockEntity", blockEntity.getClass().getName()));
+            return new MachineClaim(selection.winner(), selection.candidates(), selection.diagnostics());
         }
 
-        private MachineScan scanMachines(
-                BlockEntity blockEntity
-        ) {
-            List<Registered<MachineIntegration>> matches = new ArrayList<>();
-            List<IntegrationDiagnostic> diagnostics = new ArrayList<>();
-            for (Registered<MachineIntegration> entry : machines) {
-                try {
-                    if (entry.integration().supports(blockEntity)) {
-                        matches.add(entry);
-                    }
-                } catch (RuntimeException | LinkageError failure) {
-                    diagnostics.add(failureDiagnostic(
-                            IntegrationDiagnosticCode.MACHINE_UNSUPPORTED,
-                            entry.id(),
-                            failure
-                    ));
-                }
-            }
-            matches.sort(Comparator
-                    .comparingInt((Registered<MachineIntegration> entry) ->
-                            entry.options().priority()).reversed()
-                    .thenComparing(entry -> entry.id().toString()));
-            return new MachineScan(
-                    List.copyOf(matches), List.copyOf(diagnostics));
+        private RegistryScan<MachineIntegration> scanMachines(BlockEntity blockEntity) {
+            return scan(machines, integration -> integration.supports(blockEntity),
+                    IntegrationDiagnosticCode.MACHINE_UNSUPPORTED);
         }
-
-        private record MachineScan(
-                List<Registered<MachineIntegration>> matches,
-                List<IntegrationDiagnostic> diagnostics
-        ) {}
     }
 
     private final class DefaultExecutionRegistry
@@ -408,84 +302,69 @@ public final class DefaultRSIIntegrationApi implements RSIIntegrationApi {
                 RecipeView recipe,
                 MachineContext machine
         ) {
-            return scanExecutions(recipe, machine).matches().stream()
-                    .map(Registered::integration)
-                    .toList();
+            return scanExecutions(recipe, machine).all();
         }
 
         @Override
         public ExecutionClaim claim(RecipeView recipe, MachineContext machine) {
-            ExecutionScan scan = scanExecutions(recipe, machine);
-            List<Registered<RecipeExecutionIntegration>> matches =
-                    scan.matches();
-            List<IntegrationDiagnostic> diagnostics =
-                    new ArrayList<>(scan.diagnostics());
-            if (matches.isEmpty()) {
-                return new ExecutionClaim(
-                        null, List.of(), diagnostics);
-            }
-            int highest = matches.stream()
-                    .mapToInt(entry -> entry.options().priority())
-                    .max().orElseThrow();
-            List<Registered<RecipeExecutionIntegration>> top = matches.stream()
-                    .filter(entry -> entry.options().priority() == highest)
-                    .sorted(Comparator.comparing(entry -> entry.id().toString()))
-                    .toList();
-            List<RecipeExecutionIntegration> candidates = top.stream()
-                    .map(Registered::integration)
-                    .toList();
-            if (top.size() == 1) {
-                return new ExecutionClaim(
-                        candidates.get(0), candidates, diagnostics);
-            }
-            IntegrationDiagnostic diagnostic = new IntegrationDiagnostic(
+            var selection = scanExecutions(recipe, machine).select(
                     IntegrationDiagnosticCode.EXECUTION_CLAIM_AMBIGUOUS,
-                    IntegrationSeverity.ERROR,
-                    null,
-                    Map.of(
-                            "recipe", recipe.recipeId().toString(),
-                            "machine", machine.integrationId().toString(),
-                            "priority", Integer.toString(highest)
-                    )
-            );
-            diagnostics.add(diagnostic);
-            return new ExecutionClaim(
-                    null, candidates, diagnostics);
+                    () -> Map.of("recipe", recipe.recipeId().toString(),
+                            "machine", machine.integrationId().toString()));
+            return new ExecutionClaim(selection.winner(), selection.candidates(), selection.diagnostics());
         }
 
-        private ExecutionScan scanExecutions(
-                RecipeView recipe,
-                MachineContext machine
-        ) {
-            List<Registered<RecipeExecutionIntegration>> matches =
-                    new ArrayList<>();
-            List<IntegrationDiagnostic> diagnostics = new ArrayList<>();
-            for (Registered<RecipeExecutionIntegration> entry : executions) {
-                try {
-                    if (entry.integration().supports(recipe, machine)) {
-                        matches.add(entry);
-                    }
-                } catch (RuntimeException | LinkageError failure) {
-                    diagnostics.add(failureDiagnostic(
-                            IntegrationDiagnosticCode.EXECUTION_CONTRACT_VIOLATION,
-                            entry.id(),
-                            failure
-                    ));
-                }
-            }
-            matches.sort(Comparator
-                    .comparingInt((Registered<RecipeExecutionIntegration> entry) ->
-                            entry.options().priority()).reversed()
-                    .thenComparing(entry -> entry.id().toString()));
-            return new ExecutionScan(
-                    List.copyOf(matches), List.copyOf(diagnostics));
+        private RegistryScan<RecipeExecutionIntegration> scanExecutions(
+                RecipeView recipe, MachineContext machine) {
+            return scan(executions, integration -> integration.supports(recipe, machine),
+                    IntegrationDiagnosticCode.EXECUTION_CONTRACT_VIOLATION);
         }
-
-        private record ExecutionScan(
-                List<Registered<RecipeExecutionIntegration>> matches,
-                List<IntegrationDiagnostic> diagnostics
-        ) {}
     }
+
+    /** 三种注册查询共用候选隔离和排序；不同配方或机器必须分别匹配，不能复用命中结果。 */
+    private static <T> RegistryScan<T> scan(List<Registered<T>> registrations,
+                                           Predicate<T> supports,
+                                           IntegrationDiagnosticCode failureCode) {
+        List<Registered<T>> matches = new ArrayList<>();
+        List<IntegrationDiagnostic> diagnostics = new ArrayList<>();
+        for (Registered<T> entry : registrations) {
+            try {
+                if (supports.test(entry.integration())) matches.add(entry);
+            } catch (RuntimeException | LinkageError failure) {
+                diagnostics.add(failureDiagnostic(failureCode, entry.id(), failure));
+            }
+        }
+        matches.sort(Comparator.comparingInt((Registered<T> entry) -> entry.options().priority()).reversed()
+                .thenComparing(entry -> entry.id().toString()));
+        return new RegistryScan<>(List.copyOf(matches), List.copyOf(diagnostics));
+    }
+
+    private record RegistryScan<T>(List<Registered<T>> matches, List<IntegrationDiagnostic> diagnostics) {
+        private List<T> all() {
+            return matches.stream().map(Registered::integration).toList();
+        }
+
+        private ClaimSelection<T> select(IntegrationDiagnosticCode ambiguousCode,
+                                         Supplier<Map<String, String>> context) {
+            if (matches.isEmpty()) return new ClaimSelection<>(null, List.of(), diagnostics);
+            int highest = matches.get(0).options().priority();
+            // scan 已按优先级和 ID 排序，只读取最高优先级的连续前缀，无须再次排序。
+            List<T> candidates = matches.stream()
+                    .takeWhile(entry -> entry.options().priority() == highest)
+                    .map(Registered::integration).toList();
+            if (candidates.size() == 1) {
+                return new ClaimSelection<>(candidates.get(0), candidates, diagnostics);
+            }
+            Map<String, String> details = new LinkedHashMap<>(context.get());
+            details.put("priority", Integer.toString(highest));
+            List<IntegrationDiagnostic> combined = new ArrayList<>(diagnostics);
+            combined.add(new IntegrationDiagnostic(ambiguousCode, IntegrationSeverity.ERROR, null, details));
+            return new ClaimSelection<>(null, candidates, List.copyOf(combined));
+        }
+    }
+
+    private record ClaimSelection<T>(@Nullable T winner, List<T> candidates,
+                                     List<IntegrationDiagnostic> diagnostics) {}
 
     private static IntegrationDiagnostic failureDiagnostic(
             IntegrationDiagnosticCode code,
