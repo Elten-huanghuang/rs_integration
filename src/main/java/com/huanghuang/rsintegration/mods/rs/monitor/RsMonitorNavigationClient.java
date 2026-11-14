@@ -9,12 +9,14 @@ import com.refinedmods.refinedstorage.container.CraftingMonitorContainerMenu;
 import com.refinedmods.refinedstorage.container.GridContainerMenu;
 import com.refinedmods.refinedstorage.api.network.grid.GridType;
 import com.refinedmods.refinedstorage.screen.grid.GridScreen;
+import com.refinedmods.refinedstorage.screen.factory.GridScreenFactory;
 import net.minecraft.core.GlobalPos;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.MenuScreens;
 import com.refinedmods.refinedstorage.screen.CraftingMonitorScreen;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.entity.player.Inventory;
 import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 
@@ -34,7 +36,12 @@ public final class RsMonitorNavigationClient {
     public static void registerScreen() {
         MenuScreens.register(RsMonitorMenus.NETWORK_MONITOR.get(), CraftingMonitorScreen::new);
         MenuScreens.<GridContainerMenu, GridScreen>register(RsMonitorMenus.REMOTE_CRAFTING_GRID.get(),
-                (menu, inventory, title) -> new GridScreen(menu, menu.getGrid(), inventory, title));
+                RsMonitorNavigationClient::createRemoteScreen);
+    }
+
+    static GridScreen createRemoteScreen(GridContainerMenu menu, Inventory inventory, Component title) {
+        // 原生工厂还会绑定 ScreenInfoProvider，必须在 GridScreen 初始化槽位前完成。
+        return new GridScreenFactory().create(menu, inventory, title);
     }
 
     public static void openMonitor(GridScreen screen) {

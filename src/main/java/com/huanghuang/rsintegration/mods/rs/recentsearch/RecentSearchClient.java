@@ -135,12 +135,14 @@ public final class RecentSearchClient {
 
     private static void onCharacterTyped(ScreenEvent.CharacterTyped.Pre event) {
         GridScreen screen = gridScreen(event.getScreen());
-        if (screen != null && screen.getSearchField().isFocused()) selectedIndex = -1;
+        if (screen != null && screen.getSearchField() != null
+                && screen.getSearchField().isFocused()) selectedIndex = -1;
     }
 
     private static void onScreenClosing(ScreenEvent.Closing event) {
         GridScreen screen = gridScreen(event.getScreen());
-        if (screen != null && RSIntegrationConfig.RS_RECENT_SEARCH_ENABLED.get()
+        if (screen != null && screen.getSearchField() != null
+                && RSIntegrationConfig.RS_RECENT_SEARCH_ENABLED.get()
                 && ensureLoaded()) {
             commit(screen.getSearchField().getValue());
         }
@@ -267,7 +269,8 @@ public final class RecentSearchClient {
     }
 
     private static boolean canUse(@Nullable GridScreen screen) {
-        return screen != null && RSIntegrationConfig.RS_RECENT_SEARCH_ENABLED.get()
+        return screen != null && screen.getSearchField() != null
+                && RSIntegrationConfig.RS_RECENT_SEARCH_ENABLED.get()
                 && !MachineHub.isVisible();
     }
 

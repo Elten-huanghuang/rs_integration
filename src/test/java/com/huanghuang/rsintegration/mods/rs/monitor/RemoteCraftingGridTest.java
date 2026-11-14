@@ -11,8 +11,10 @@ import com.refinedmods.refinedstorage.api.storage.cache.IStorageCacheListener;
 import com.refinedmods.refinedstorage.apiimpl.network.node.GridNetworkNode;
 import com.refinedmods.refinedstorage.blockentity.data.BlockEntitySynchronizationManager;
 import com.refinedmods.refinedstorage.blockentity.grid.GridBlockEntity;
+import com.refinedmods.refinedstorage.screen.grid.GridScreen;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.GlobalPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Inventory;
@@ -33,6 +35,20 @@ import static org.mockito.Mockito.*;
 class RemoteCraftingGridTest extends BootstrapTest {
     private Field registryValue;
     private Object originalFilter;
+
+    @Test
+    void remoteScreenBindsLayoutProviderBeforeSlotInitialization() {
+        var menu = mock(RemoteCraftingGridMenu.class);
+        var inventory = mock(Inventory.class);
+        Component title = Component.literal("远程合成终端");
+        try (var screens = mockConstruction(GridScreen.class)) {
+            GridScreen screen = RsMonitorNavigationClient.createRemoteScreen(menu, inventory, title);
+
+            assertSame(screens.constructed().get(0), screen);
+            verify(menu).setScreenInfoProvider(screen);
+            verify(menu, never()).initSlots();
+        }
+    }
 
     @BeforeEach void registerNativeFilterForTest() throws Exception {
         registryValue = RegistryObject.class.getDeclaredField("value");
