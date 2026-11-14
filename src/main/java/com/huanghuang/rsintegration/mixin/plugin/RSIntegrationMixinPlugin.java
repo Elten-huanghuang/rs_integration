@@ -437,7 +437,8 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
             return hasField(targetClassName, "bookmarkList");
         }
         if (mixinClassName.endsWith("jei.BookmarkOverlayConfigButtonMixin")) {
-            return isClassPresent("mezz.jei.gui.overlay.IngredientGridWithNavigation")
+            return hasLegacyJeiInputApi()
+                    && isClassPresent("mezz.jei.gui.overlay.IngredientGridWithNavigation")
                     && hasField(targetClassName, "contents")
                     && hasField(targetClassName, "screenPropertiesCache")
                     && hasMethod(targetClassName, "getDisplayArea")
@@ -445,7 +446,8 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
                     && hasMethod(targetClassName, "createInputHandler");
         }
         if (mixinClassName.endsWith("jei.BookmarkOverlayConfigButtonV15Mixin")) {
-            return isClassPresent("mezz.jei.gui.overlay.ingredients.IngredientGridWithNavigation")
+            return hasLegacyJeiInputApi()
+                    && isClassPresent("mezz.jei.gui.overlay.ingredients.IngredientGridWithNavigation")
                     && hasField(targetClassName, "contents")
                     && hasField(targetClassName, "screenPropertiesCache")
                     && hasMethod(targetClassName, "getDisplayArea")
@@ -519,7 +521,8 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
         if (mixinClassName.endsWith("jei.RecipeBookmarkButtonAccess")
                 || mixinClassName.endsWith("jei.RecipeBookmarkButtonMixin")
                 || mixinClassName.endsWith("jei.GuiIconToggleButtonInputHandlerMixin")) {
-            return isClassPresent("mezz.jei.gui.recipes.RecipeBookmarkButton")
+            return hasLegacyJeiInputApi()
+                    && isClassPresent("mezz.jei.gui.recipes.RecipeBookmarkButton")
                     && isClassPresent("mezz.jei.gui.elements.GuiIconToggleButton");
         }
         if (mixinClassName.contains("tetra.WorkbenchScreenJeiPreviewMixin")) {
@@ -631,8 +634,30 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
         // Use resource lookup instead of Class.forName() to avoid triggering
         // class loading during mixin transformation — Class.forName() inside
         // shouldApplyMixin causes ReEntrantTransformerError.
+        return isClassPresent(RSIntegrationMixinPlugin.class.getClassLoader(), className);
+    }
+
+    /**
+     * JEI 15.74 移除了旧输入处理器层级。依赖该层级的混入必须在 Mixin
+     * 加载类之前拒绝；只检查目标字段不够，因为新版本仍然保留目标类。
+     */
+    static boolean hasLegacyJeiInputApi() {
+        ClassLoader loader = RSIntegrationMixinPlugin.class.getClassLoader();
+        return hasLegacyJeiInputApi(loader);
+    }
+
+    static boolean hasLegacyJeiInputApi(ClassLoader loader) {
+        return isClassPresent(loader, "mezz.jei.gui.input.IUserInputHandler")
+                && isClassPresent(loader, "mezz.jei.gui.input.UserInput")
+                && isClassPresent(loader, "mezz.jei.gui.input.handlers.CombinedInputHandler");
+    }
+
+    private static boolean isClassPresent(ClassLoader loader, String className) {
+        // Use resource lookup instead of Class.forName() to avoid triggering
+        // class loading during mixin transformation — Class.forName() inside
+        // shouldApplyMixin causes ReEntrantTransformerError.
         String resource = className.replace('.', '/') + ".class";
-        return RSIntegrationMixinPlugin.class.getClassLoader().getResource(resource) != null;
+        return loader != null && loader.getResource(resource) != null;
     }
 
     static boolean hasResonanceBackend() {
