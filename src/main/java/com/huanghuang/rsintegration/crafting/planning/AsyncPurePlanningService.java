@@ -99,7 +99,7 @@ public final class AsyncPurePlanningService {
                         maxSearchStates, maxMemoizedFailures, timeoutMs), serverExecutor,
                 current -> PlanningStateValidator.sameState(snapshot, current),
                 (current, result) -> commit.accept(new RoutedPlan(current, routing,
-                        result.inspection(), result.plan(), result.forcedRecipesProjected())),
+                        result.inspection(), result.plan(), result.forcedRecipesProjected(), result.coverage())),
                 rollback);
     }
 
@@ -148,9 +148,8 @@ public final class AsyncPurePlanningService {
             var coverage = canSearch ? PurePlanningCoverage.unprojectedDependency(routingGraph,
                     snapshot.recipeId(), routing.incompatibleOutputs(), snapshot.forcedRecipes(),
                     snapshot.preferences(), Math.min(session.deadlineNanos(), System.nanoTime() + 100_000_000L))
-                    : new PurePlanningCoverage.Probe(null, true);
-            var uncovered = coverage.uncovered();
-            boolean knownCoverageGap = uncovered != null && coverage.complete();
+                    : PurePlanningCoverage.Probe.notChecked();
+            boolean knownCoverageGap = coverage.status() == PurePlanningCoverage.Status.GAP;
             // 存在类型配方缺口时，纯图只作短暂尝试。成功仍可复用；失败则尽快进入
             // 类型解析，不能花完数十秒搜索后才发现纯图根本不能证明缺料。
             long searchDeadline = knownCoverageGap ? Math.min(session.deadlineNanos(), System.nanoTime() + 250_000_000L)
@@ -162,15 +161,8 @@ public final class AsyncPurePlanningService {
                             knownCoverageGap ? Math.min(maxSearchStates, 512) : maxSearchStates,
                             maxMemoizedFailures, session, routingGraph,
                             routing.projectedAvailabilityFor(snapshot), searchDeadline) : null;
-            if (plan != null && !plan.feasible() && uncovered != null) {
-                // 纯图只证明其自身路线失败，不能把目录中未投影的生产者
-                // 当成不存在。交给原类型解析器验证，避免发布假缺料预览。
-                inspection = new PureDemandTreeInspector.Result(
-                        PureDemandTreeInspector.Status.UNPROJECTED_DEPENDENCY,
-                        inspection.visitedNodes(), uncovered, inspection.catalystRouteAvailable());
-                plan = null;
-            }
-            RoutedPlan result = new RoutedPlan(snapshot, routing, inspection, plan, forcedRecipesProjected);
+            // 保留原始结果和覆盖证据，由调用方共用的路由规则决定是否需要类型解析。
+            RoutedPlan result = new RoutedPlan(snapshot, routing, inspection, plan, forcedRecipesProjected, coverage);
             logSlowRoute(result, started, replayNanos, projectionNanos, inspectionNanos,
                     System.nanoTime() - searchStarted, routing.previousRoute() == null ? "none" : "fallback");
             return result;
@@ -202,7 +194,8 @@ public final class AsyncPurePlanningService {
         PlanningThreadContext.throwIfCancelled();
         // 缺料结果不可从缩小后的候选图发布；只接受已重新生成权威材料流的成功解。
         return plan.feasible() && plan.materialFlow() != null
-                ? new RoutedPlan(snapshot, routing, inspection, plan, true) : null;
+                ? new RoutedPlan(snapshot, routing, inspection, plan, true,
+                        PurePlanningCoverage.Probe.notChecked()) : null;
     }
 
     private static void logSlowRoute(RoutedPlan result, long started, long replayNanos,
@@ -218,7 +211,7 @@ public final class AsyncPurePlanningService {
                 inspectionNanos / 1_000_000L, searchNanos / 1_000_000L,
                 result.snapshot().recipeGraph().recipesById().size(),
                 result.routing().previousRoute() == null ? 0 : result.routing().previousRoute().recipes().size(),
-                result.inspection().status(), plan == null ? "typed" : plan.status(),
+                result.coverage().status(), plan == null ? "not_run" : plan.status(),
                 plan == null ? 0 : plan.expandedStates(), plan == null ? 0 : plan.backtracks(),
                 plan == null ? 0 : plan.memoHits());
     }
@@ -446,7 +439,8 @@ public final class AsyncPurePlanningService {
     public record RoutedPlan(PlanningSnapshot snapshot, RouteInputs routing,
                              PureDemandTreeInspector.Result inspection,
                              @Nullable PureRecipePlanner.Result plan,
-                             boolean forcedRecipesProjected) {}
+                             boolean forcedRecipesProjected,
+                             PurePlanningCoverage.Probe coverage) {}
 
     private record RoutedKey(PlanningKey planning, RouteInputs routing,
                               List<Map.Entry<ImmutableRecipeGraph.MaterialRef, Long>> availabilityOrder) {}

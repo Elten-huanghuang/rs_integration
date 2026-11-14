@@ -23,9 +23,9 @@ import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjec
 import com.huanghuang.rsintegration.crafting.planning.PlanningSnapshot;
 import com.huanghuang.rsintegration.crafting.planning.PlanningSnapshotFactory;
 import com.huanghuang.rsintegration.crafting.planning.PlanningStateValidator;
-import com.huanghuang.rsintegration.crafting.planning.PureDemandTreeInspector;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
 import com.huanghuang.rsintegration.crafting.planning.PurePlanGraphAdapter;
+import com.huanghuang.rsintegration.crafting.batch.CraftPlanDecisionRules.PlannerAction;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.storage.StorageReference;
@@ -79,9 +79,9 @@ final class CraftPureExecutionPlanner {
                     recipeId, unavailable.toString());
             return false;
         }
-        if (bindingGraph.requiresTypedPlanning()) return false;
         ImmutableRecipeGraph recipeGraph = bindingGraph.graph();
-        if (!recipeGraph.recipesById().containsKey(recipeId)) return false;
+        if (CraftPlanDecisionRules.initialRoute(bindingGraph.requiresTypedPlanning(), false,
+                true, recipeGraph.recipesById().containsKey(recipeId)).action() != PlannerAction.RUN_PURE) return false;
 
         submit(
                 player, recipeId, forcedRecipes, dimension, position, repeatCount, inferMode,
@@ -120,7 +120,8 @@ final class CraftPureExecutionPlanner {
                     recipeId, unavailable.toString());
             return false;
         }
-        if (bindingGraph.requiresTypedPlanning()) return false;
+        if (CraftPlanDecisionRules.initialRoute(bindingGraph.requiresTypedPlanning(), !materialLocks.isEmpty(),
+                true, true).action() != PlannerAction.RUN_PURE) return false;
         ImmutableRecipeGraph baseGraph = bindingGraph.graph();
         RecipeNode indexed = baseGraph.recipesById().get(recipeId);
         if (indexed != null && SelfAmplifyingRecipePolicy.isSelfAmplifying(indexed)) return false;
@@ -250,12 +251,14 @@ final class CraftPureExecutionPlanner {
                 snapshot, routeInputs, plannedExecutions,
                 player.getServer()::execute, RSIntegrationConfig.CRAFTING_MAX_STEPS.get(),
                 completed -> {
-                    PureDemandTreeInspector.Result route = completed.inspection();
-                    if (!route.backgroundCompatible() || completed.plan() == null) {
+                    var decision = CraftPlanDecisionRules.completedRoute(completed.snapshot(),
+                            !materialLocks.isEmpty(), completed.forcedRecipesProjected(), completed.inspection(),
+                            completed.plan(), completed.coverage(), completed.routing().catalystOutputs(),
+                            completed.routing().catalystRecipes().contains(recipeId));
+                    if (decision.action() == PlannerAction.RUN_TYPED) {
                         RSIntegrationMod.LOGGER.info(
-                                "[RSI-exec] immutable {} route unavailable recipe={} status={} unresolved={} catalystRoute={}",
-                                planKind, recipeId, route.status(), route.unresolved(),
-                                route.catalystRouteAvailable());
+                                "[RSI-exec] typed {} route recipe={} reason={} coverage={}",
+                                planKind, recipeId, decision.reason(), completed.coverage().status());
                         GenericCraftPacket.tryResolveTypedGraphOnly(
                                 player, recipeId, forcedRecipes, dimension, position,
                                 repeatCount, inferMode, baseItem, targetOutput,
@@ -270,31 +273,6 @@ final class CraftPureExecutionPlanner {
                                 planKind, recipeId, result.status(), result.feasibility(),
                                 result.missing(), result.expandedStates(), result.backtracks(),
                                 result.memoHits());
-                        if (CraftPlanDecisionRules.shouldRetryTypedPlanning(
-                                result, snapshot.bindingBlockedOutputIds())) {
-                            RSIntegrationMod.LOGGER.info(
-                                    "[RSI-exec] retrying typed {} execution after pure planner rejection recipe={}",
-                                    planKind, recipeId);
-                            GenericCraftPacket.tryResolveTypedGraphOnly(
-                                    player, recipeId, forcedRecipes, dimension, position,
-                                    repeatCount, inferMode, baseItem, targetOutput,
-                                    outputDestination, machineSelectionMode,
-                                    storageReference, materialLocks);
-                            return;
-                        }
-                        if (CraftPlanDecisionRules.missingTouchesOutputSet(
-                                result.missing(),
-                                RecipeIndex.pureIncompatibleOutputIds(player.serverLevel()))) {
-                            RSIntegrationMod.debug(
-                                    "[RSI-exec] retrying typed {} execution for unprojected dependency recipe={}",
-                                    planKind, recipeId);
-                            GenericCraftPacket.tryResolveTypedGraphOnly(
-                                    player, recipeId, forcedRecipes, dimension, position,
-                                    repeatCount, inferMode, baseItem, targetOutput,
-                                    outputDestination, machineSelectionMode,
-                                    storageReference, materialLocks);
-                            return;
-                        }
                         GenericCraftPacket.sendPurePlanningFailure(
                                 player, result, snapshot.availableItems(),
                                 snapshot.bindingBlockedOutputIds());

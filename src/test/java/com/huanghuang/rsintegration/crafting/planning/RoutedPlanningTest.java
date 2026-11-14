@@ -26,6 +26,11 @@ import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anySet;
+import static org.mockito.ArgumentMatchers.eq;
 
 class RoutedPlanningTest extends BootstrapTest {
     @Test
@@ -426,9 +431,31 @@ class RoutedPlanningTest extends BootstrapTest {
     void pureShortageDoesNotHideTypedAlternativeBehindAnExistingProducer() {
         var snapshot = mixedProducerSnapshot(false);
         var routed = compute(snapshot, routing(snapshot, Set.of(IRON.itemId()), 512), 1);
-        assertEquals(PureDemandTreeInspector.Status.UNPROJECTED_DEPENDENCY, routed.inspection().status());
-        assertNull(routed.plan(), "普通配方缺料并不证明未投影的机器配方也缺料");
-        assertEquals(IRON, routed.inspection().unresolved());
+        assertNotNull(routed.plan(), "覆盖证据应单独传递，不能清除纯图的原始求解结果");
+        assertFalse(routed.plan().feasible());
+        assertEquals(PurePlanningCoverage.Status.GAP, routed.coverage().status());
+        assertEquals(IRON, routed.coverage().uncovered());
+    }
+
+    @Test
+    void asynchronousHandoffPreservesCoverageAndOriginalFailure() throws Exception {
+        var snapshot = mixedProducerSnapshot(false);
+        var callbacks = new LinkedBlockingQueue<Runnable>();
+        var result = new AtomicReference<AsyncPurePlanningService.RoutedPlan>();
+        try (var coordinator = new AsyncPlanningCoordinator(1)) {
+            new AsyncPurePlanningService(coordinator).submitRouted(snapshot,
+                    routing(snapshot, Set.of(IRON.itemId()), 512), 1, callbacks::add,
+                    30, 1000, 100, 1500, result::set, failure -> fail(failure));
+            Runnable handoff = callbacks.poll(5, TimeUnit.SECONDS);
+            assertNotNull(handoff);
+            assertNull(result.get());
+            handoff.run();
+            assertNotNull(result.get().plan());
+            assertFalse(result.get().plan().feasible());
+            assertEquals(PurePlanningCoverage.Status.GAP, result.get().coverage().status());
+            assertEquals(IRON, result.get().coverage().uncovered());
+            assertEquals(snapshot, result.get().snapshot());
+        }
     }
 
     @Test
@@ -436,6 +463,7 @@ class RoutedPlanningTest extends BootstrapTest {
         var snapshot = mixedProducerSnapshot(true);
         var routed = compute(snapshot, routing(snapshot, Set.of(IRON.itemId()), 512), 1);
         assertTrue(routed.plan().feasible());
+        assertEquals(PurePlanningCoverage.Status.GAP, routed.coverage().status());
     }
 
     @Test
@@ -444,6 +472,7 @@ class RoutedPlanningTest extends BootstrapTest {
         var routed = compute(snapshot, routing(snapshot, Set.of(id("unrelated")), 512), 1);
         assertNotNull(routed.plan());
         assertFalse(routed.plan().feasible());
+        assertEquals(PurePlanningCoverage.Status.COMPLETE, routed.coverage().status());
     }
 
     @Test
@@ -465,7 +494,23 @@ class RoutedPlanningTest extends BootstrapTest {
         var uncovered = PurePlanningCoverage.unprojectedDependency(snapshot.recipeGraph(), TARGET,
                 Set.of(IRON.itemId()), Map.of(), PlanningPreferences.empty(), System.nanoTime() - 1L);
         assertNotNull(uncovered.uncovered(), "探测预算耗尽时必须保留类型解析兜底");
-        assertFalse(uncovered.complete(), "探测超时不能当成已确认的目录缺口而削减正常搜索预算");
+        assertEquals(PurePlanningCoverage.Status.UNCERTAIN, uncovered.status(),
+                "探测超时不能当成已确认的目录缺口而削减正常搜索预算");
+    }
+
+    @Test
+    void unfinishedCoverageKeepsItsStatusAlongsideThePureResult() {
+        var snapshot = mixedProducerSnapshot(false);
+        var uncertain = new PurePlanningCoverage.Probe(IRON, PurePlanningCoverage.Status.UNCERTAIN);
+        try (var coverage = mockStatic(PurePlanningCoverage.class, CALLS_REAL_METHODS)) {
+            coverage.when(() -> PurePlanningCoverage.unprojectedDependency(
+                    any(), eq(TARGET), anySet(), anyMap(), any(), anyLong())).thenReturn(uncertain);
+            var routed = compute(snapshot, routing(snapshot, Set.of(IRON.itemId()), 512), 1);
+            assertEquals(uncertain, routed.coverage());
+            assertNotNull(routed.plan());
+            assertFalse(routed.plan().feasible());
+            assertNotEquals(PureDemandTreeInspector.Status.UNPROJECTED_DEPENDENCY, routed.inspection().status());
+        }
     }
 
     @Test

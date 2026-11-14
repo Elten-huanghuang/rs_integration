@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.plan.IntegrationDiagnosticCode;
 import com.huanghuang.rsintegration.crafting.plan.PlanOutcome;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
+import com.huanghuang.rsintegration.crafting.planning.PurePlanningCoverage;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector;
 import com.huanghuang.rsintegration.crafting.planning.PureDemandTreeInspector;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
@@ -52,19 +53,63 @@ public final class CraftPlanDecisionRules {
                         .allMatch(root -> root.unresolvedQuantity() == 0);
     }
 
-    static boolean shouldUseAsyncPurePreview(boolean pureRoute, boolean directTerminalPlan) {
-        return pureRoute && !directTerminalPlan;
+    enum PlannerAction { RUN_PURE, RUN_TYPED, USE_PURE_RESULT, REPORT_FAILURE }
+
+    enum RouteReason {
+        PROJECTABLE, MAIN_THREAD_REQUIRED, MATERIAL_LOCK, FORCED_RECIPE_UNPROJECTED,
+        TARGET_NOT_PROJECTED, TYPED_CATALYST_REQUIRED, UNPROJECTED_DEPENDENCY,
+        COVERAGE_UNCERTAIN, BINDING_BLOCKED_DEPENDENCY, PURE_SUCCESS,
+        PROVEN_INFEASIBLE, BUDGET_EXHAUSTED, PURE_NOT_RUN
     }
 
-    static boolean shouldUseAsyncPreviewRoute(
-            boolean directTerminalPlan,
-            boolean mainThreadOnly,
-            boolean overridesProjectable,
-            boolean hasMaterialLocks
-    ) {
-        return shouldUseAsyncPurePreview(
-                !mainThreadOnly && overridesProjectable && !hasMaterialLocks,
-                directTerminalPlan);
+    record RouteDecision(PlannerAction action, RouteReason reason) {}
+
+    /** 首次准入与计算完成分开，避免用 null 结果同时表示“尚未提交”和“未能计算”。 */
+    static RouteDecision initialRoute(boolean mainThreadOnly, boolean hasMaterialLocks,
+                                      boolean forcedRecipesProjected, boolean targetProjected) {
+        if (mainThreadOnly) return typed(RouteReason.MAIN_THREAD_REQUIRED);
+        if (hasMaterialLocks) return typed(RouteReason.MATERIAL_LOCK);
+        if (!forcedRecipesProjected) return typed(RouteReason.FORCED_RECIPE_UNPROJECTED);
+        if (!targetProjected) return typed(RouteReason.TARGET_NOT_PROJECTED);
+        return new RouteDecision(PlannerAction.RUN_PURE, RouteReason.PROJECTABLE);
+    }
+
+    static RouteDecision completedRoute(PlanningSnapshot snapshot, boolean hasMaterialLocks,
+                                         boolean forcedRecipesProjected,
+                                         PureDemandTreeInspector.Result inspection,
+                                         @Nullable PureRecipePlanner.Result result,
+                                         PurePlanningCoverage.Probe coverage,
+                                         Set<ResourceLocation> catalystOutputs,
+                                         boolean targetUsesReusableCatalyst) {
+        RouteDecision eligibility = initialRoute(snapshot.mainThreadOnly(), hasMaterialLocks,
+                forcedRecipesProjected,
+                inspection.status() != PureDemandTreeInspector.Status.TARGET_NOT_PROJECTED);
+        if (eligibility.action() == PlannerAction.RUN_TYPED) return eligibility;
+        if (requiresTypedCatalystRoute(inspection.catalystRouteAvailable(),
+                targetUsesReusableCatalyst, result, catalystOutputs)) {
+            return typed(RouteReason.TYPED_CATALYST_REQUIRED);
+        }
+        if (!inspection.backgroundCompatible()) return typed(RouteReason.UNPROJECTED_DEPENDENCY);
+        if (result == null) return typed(RouteReason.PURE_NOT_RUN);
+        if (result.feasible()) return new RouteDecision(PlannerAction.USE_PURE_RESULT, RouteReason.PURE_SUCCESS);
+        // 成功解不受未使用生产者的覆盖缺口影响；失败解必须保留未知与已证实缺口的区别。
+        if (coverage.status() == PurePlanningCoverage.Status.GAP) {
+            return typed(RouteReason.UNPROJECTED_DEPENDENCY);
+        }
+        if (coverage.status() == PurePlanningCoverage.Status.UNCERTAIN) {
+            return typed(RouteReason.COVERAGE_UNCERTAIN);
+        }
+        if (shouldRetryTypedPlanning(result, snapshot.bindingBlockedOutputIds())) {
+            return typed(RouteReason.BINDING_BLOCKED_DEPENDENCY);
+        }
+        if (result.feasibility() == PureRecipePlanner.Feasibility.UNKNOWN) {
+            return new RouteDecision(PlannerAction.REPORT_FAILURE, RouteReason.BUDGET_EXHAUSTED);
+        }
+        return new RouteDecision(PlannerAction.USE_PURE_RESULT, RouteReason.PROVEN_INFEASIBLE);
+    }
+
+    private static RouteDecision typed(RouteReason reason) {
+        return new RouteDecision(PlannerAction.RUN_TYPED, reason);
     }
 
     static boolean hasNbtMismatch(Map<IngredientKey, PlanResponse.Availability> materials,
@@ -234,8 +279,11 @@ public final class CraftPlanDecisionRules {
     static boolean canUseBoundedTraceAfterTypedTimeout(
             @Nullable PureRecipePlanner.Result plan,
             PureDemandTreeInspector.Result demandTree,
-            boolean directTerminalPlan) {
+            boolean directTerminalPlan,
+            PurePlanningCoverage.Probe coverage) {
         return !directTerminalPlan
+                && coverage.status() != PurePlanningCoverage.Status.GAP
+                && coverage.status() != PurePlanningCoverage.Status.UNCERTAIN
                 && plan != null
                 && !plan.missing().isEmpty()
                 && demandTree != null

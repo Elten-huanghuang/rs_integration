@@ -134,6 +134,10 @@ import com.huanghuang.rsintegration.crafting.planning.PurePlanAdapter;
 import com.huanghuang.rsintegration.crafting.planning.PurePlanGraphAdapter;
 import com.huanghuang.rsintegration.crafting.planning.PureDemandTreeInspector;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
+import com.huanghuang.rsintegration.crafting.planning.PurePlanningCoverage;
+import com.huanghuang.rsintegration.crafting.batch.CraftPlanDecisionRules.PlannerAction;
+import com.huanghuang.rsintegration.crafting.batch.CraftPlanDecisionRules.RouteDecision;
+import com.huanghuang.rsintegration.crafting.batch.CraftPlanDecisionRules.RouteReason;
 import com.huanghuang.rsintegration.crafting.planning.AsyncPurePlanningService;
 import com.huanghuang.rsintegration.crafting.planning.AsyncPlanningCoordinator;
 import com.huanghuang.rsintegration.crafting.planning.PlanCache;
@@ -3005,11 +3009,12 @@ public final class GenericCraftPacket {
         Set<ResourceLocation> pureIncompatibleOutputIds = directTerminalPlan ? Set.of()
                 : RecipeIndex.pureIncompatibleOutputIds(player.serverLevel());
         int demandMaxNodes = RSIntegrationConfig.CRAFTING_PURE_DEMAND_MAX_NODES.get();
-        if (!asyncAttempted && CraftPlanDecisionRules.shouldUseAsyncPreviewRoute(directTerminalPlan,
-                planningSnapshot.mainThreadOnly(),
+        if (!asyncAttempted && !directTerminalPlan && CraftPlanDecisionRules.initialRoute(
+                planningSnapshot.mainThreadOnly(), !materialLocks.isEmpty(),
                 effectiveOverrides.isEmpty() || ForcedRecipeGraphProjector.apply(
                         planningSnapshot.recipeGraph(), effectiveOverrides) != null,
-                !materialLocks.isEmpty())) {
+                planningSnapshot.recipeGraph().recipesById().containsKey(recipeId))
+                .action() == PlannerAction.RUN_PURE) {
             var routing = AsyncPurePlanningService.RouteInputs.fromItems(
                     planningSnapshot.availableItems(), demandMaxNodes,
                     reusableCatalystOutputIds, reusableCatalystRecipeIds, pureIncompatibleOutputIds);
@@ -3087,31 +3092,28 @@ public final class GenericCraftPacket {
                     recipeId, demandTreeElapsed / 1_000_000L, demandTree.status(),
                     demandTree.visitedNodes(), demandTree.unresolved());
         }
-        // NODE_LIMIT is only a conservative routing-probe cutoff. Keep those
-        // requests on the immutable background planner without switching this
-        // attempt to the typed server-thread resolver.
         boolean projectedOverrides = effectiveOverrides.isEmpty()
                 || routedPlan != null
                 && routedPlan.snapshot().equals(planningSnapshot)
                 && routedPlan.forcedRecipesProjected();
-        boolean pureRoute = demandTree.backgroundCompatible()
-                && projectedOverrides
-                && materialLocks.isEmpty()
-                && !planningSnapshot.mainThreadOnly();
+        RouteDecision routeDecision = directTerminalPlan
+                ? new RouteDecision(PlannerAction.USE_PURE_RESULT, RouteReason.PURE_SUCCESS)
+                : CraftPlanDecisionRules.completedRoute(planningSnapshot, !materialLocks.isEmpty(),
+                        projectedOverrides, demandTree, precomputedPlan,
+                        routedPlan == null ? PurePlanningCoverage.Probe.notChecked() : routedPlan.coverage(),
+                        reusableCatalystOutputIds, targetUsesReusableCatalyst);
         // 规划只需要可用的存储端点，不能再用 RS 原生网络做可用性判断。
         boolean typedResolverAvailable = RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING.get()
                 && planningEndpoint != null;
         RSIntegrationMod.LOGGER.debug(
-                "[RSI-plan] planner route recipe={} pure={} coverage={} nodes={} unresolved={} overrides={} mainThreadOnly={} catalystRoute={} targetCatalyst={}",
-                recipeId, pureRoute, demandTree.status(), demandTree.visitedNodes(),
+                "[RSI-plan] planner route recipe={} action={} reason={} coverage={} nodes={} unresolved={} overrides={} mainThreadOnly={} catalystRoute={} targetCatalyst={}",
+                recipeId, routeDecision.action(), routeDecision.reason(), demandTree.status(), demandTree.visitedNodes(),
                 demandTree.unresolved(), !effectiveOverrides.isEmpty(), planningSnapshot.mainThreadOnly(),
                 demandTree.catalystRouteAvailable(), targetUsesReusableCatalyst);
-        boolean terminalPureResult = directTerminalPlan
-                || precomputedPlan != null;
-        boolean timedOutMissingRoute = terminalPureResult
+        // 有界轨迹只控制预览展示，不授权执行，也不启动另一轮求解。
+        boolean timedOutMissingRoute = routeDecision.action() == PlannerAction.REPORT_FAILURE
                 && CraftPlanDecisionRules.canOpenBoundedMissingPlan(precomputedPlan, demandTree);
-        if (!directTerminalPlan && terminalPureResult
-                && precomputedPlan.feasibility() == PureRecipePlanner.Feasibility.UNKNOWN
+        if (routeDecision.action() == PlannerAction.REPORT_FAILURE
                 && !timedOutMissingRoute) {
             RSIntegrationMod.LOGGER.warn(
                     "[RSI-plan] bounded planner result recipe={} status={} feasibility={} missing={} states={} backtracks={} memoHits={} directReservation=false",
@@ -3125,20 +3127,9 @@ public final class GenericCraftPacket {
                     CraftFailureMessages.purePreviewDiagnostic(precomputedPlan));
             return;
         }
-        boolean requiresTypedCatalystRoute = CraftPlanDecisionRules.requiresTypedCatalystRoute(
-                demandTree.catalystRouteAvailable(), targetUsesReusableCatalyst,
-                precomputedPlan, reusableCatalystOutputIds);
-        boolean requiresTypedIncompleteRoute = CraftPlanDecisionRules.shouldRetryTypedPlanning(
-                precomputedPlan, planningSnapshot.bindingBlockedOutputIds());
-        boolean selectedPureResolver = terminalPureResult && projectedOverrides
-                && !requiresTypedCatalystRoute
-                && !requiresTypedIncompleteRoute;
-        if (requiresTypedIncompleteRoute) {
-            RSIntegrationMod.LOGGER.debug(
-                    "[RSI-plan] retrying typed preview after incomplete pure plan recipe={} missing={}",
-                    recipeId, CraftPlanDecisionRules.summarizePureDemands(precomputedPlan.missing()));
-        }
-        boolean needsTypedResolver = !selectedPureResolver;
+        boolean selectedPureResolver = routeDecision.action() == PlannerAction.USE_PURE_RESULT
+                || timedOutMissingRoute;
+        boolean needsTypedResolver = routeDecision.action() == PlannerAction.RUN_TYPED;
         if (needsTypedResolver && !typedResolverAvailable) {
             sink.error(PlanOutcome.RUNTIME_UNAVAILABLE,
                     IntegrationDiagnostic.error(planningEndpoint == null
@@ -3297,7 +3288,8 @@ public final class GenericCraftPacket {
                 // execution: the response remains infeasible and retains its
                 // shortage/machine warnings below.
                 if (CraftPlanDecisionRules.canUseBoundedTraceAfterTypedTimeout(
-                        precomputedPlan, demandTree, directTerminalPlan)) {
+                        precomputedPlan, demandTree, directTerminalPlan,
+                        routedPlan == null ? PurePlanningCoverage.Probe.notChecked() : routedPlan.coverage())) {
                     if (missing.isEmpty()) {
                         for (var unresolved : precomputedPlan.missing()) {
                             recordMissingMaterial(missing, unresolved);
@@ -4110,12 +4102,14 @@ public final class GenericCraftPacket {
                 machineAvailability.allExecutionMachinesLeased();
         if (allExecutionMachinesLeased) feasible = false;
 
+        // 已转入 typed 的纯图失败只作路由证据，不能覆盖最终诊断或进入成功计划缓存。
+        PureRecipePlanner.Result responsePurePlan = usedPurePlan ? precomputedPlan : null;
         boolean nbtMismatch = false;
         if (!feasible) {
             nbtMismatch = CraftPlanDecisionRules.hasNbtMismatch(materials, itemAvailable);
-            boolean bindingBlocked = precomputedPlan != null
+            boolean bindingBlocked = responsePurePlan != null
                     && CraftPlanDecisionRules.allMissingRequireBlockedOutput(
-                            precomputedPlan.missing(),
+                            responsePurePlan.missing(),
                     planningSnapshot.bindingBlockedOutputIds());
             if (allExecutionMachinesLeased) {
                 modWarnings.add(Component.translatable(
@@ -4123,7 +4117,7 @@ public final class GenericCraftPacket {
             } else if (bindingBlocked) {
                 modWarnings.add(Component.translatable(
                         "rsi.plan.failure.no_bound_machine"));
-            } else if (CraftPlanDecisionRules.hasCyclicPureFailure(precomputedPlan)) {
+            } else if (CraftPlanDecisionRules.hasCyclicPureFailure(responsePurePlan)) {
                 modWarnings.add(Component.translatable(
                         "rsi.plan.failure.cyclic_dependency"));
             } else if (nbtMismatch) {
@@ -4157,7 +4151,7 @@ public final class GenericCraftPacket {
                 || materials.values().stream().anyMatch(a -> a.missingCount() > 0);
         List<IntegrationDiagnostic> diagnostics = new ArrayList<>();
         boolean cyclicPureFailure =
-                CraftPlanDecisionRules.hasCyclicPureFailure(precomputedPlan);
+                CraftPlanDecisionRules.hasCyclicPureFailure(responsePurePlan);
         CraftPlanOutcomeResolver.Resolution outcomeResolution =
                 CraftPlanOutcomeResolver.resolve(
                         feasible, timedOutMissingRoute, allExecutionMachinesLeased,
@@ -4235,7 +4229,7 @@ public final class GenericCraftPacket {
         CraftPlanResponseFinalizer.submit(
                 player, recipeId, previewGeneration, planningSnapshot, responseDraft,
                 planDimKey, planLookupPos, planStorageReference, cacheKey,
-                precomputedPlan, resolvedGraphForCache, terminalEmbedded, responseStepCount,
+                responsePurePlan, resolvedGraphForCache, terminalEmbedded, responseStepCount,
                 responseGraphNodes, responseFeasible, planStartNanos, sink);
     }
 

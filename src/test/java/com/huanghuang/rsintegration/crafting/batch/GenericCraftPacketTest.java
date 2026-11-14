@@ -32,6 +32,9 @@ import com.huanghuang.rsintegration.crafting.graph.RootDemand;
 import com.huanghuang.rsintegration.crafting.graph.TerminalGraphComposer;
 import com.huanghuang.rsintegration.crafting.graph.UnresolvedDemand;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
+import com.huanghuang.rsintegration.crafting.planning.PurePlanningCoverage;
+import com.huanghuang.rsintegration.crafting.batch.CraftPlanDecisionRules.PlannerAction;
+import com.huanghuang.rsintegration.crafting.batch.CraftPlanDecisionRules.RouteReason;
 import com.huanghuang.rsintegration.crafting.planning.PureDemandTreeInspector;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.SelfAmplifyingRecipePolicy;
@@ -691,11 +694,16 @@ class GenericCraftPacketTest extends BootstrapTest {
                 missingMaterial, false);
 
         assertTrue(CraftPlanDecisionRules.canUseBoundedTraceAfterTypedTimeout(
-                incomplete, missing, false));
+                incomplete, missing, false, PurePlanningCoverage.Probe.notChecked()));
         assertFalse(CraftPlanDecisionRules.canUseBoundedTraceAfterTypedTimeout(
-                incomplete, missing, true));
+                incomplete, missing, true, PurePlanningCoverage.Probe.notChecked()));
         assertFalse(CraftPlanDecisionRules.canUseBoundedTraceAfterTypedTimeout(
-                null, missing, false));
+                null, missing, false, PurePlanningCoverage.Probe.notChecked()));
+        for (var status : List.of(PurePlanningCoverage.Status.GAP, PurePlanningCoverage.Status.UNCERTAIN)) {
+            assertFalse(CraftPlanDecisionRules.canUseBoundedTraceAfterTypedTimeout(
+                    incomplete, missing, false, new PurePlanningCoverage.Probe(missingMaterial, status)),
+                    "保留下来的纯图失败不能在 typed 超时后变成未经证明的缺料报告");
+        }
     }
 
     @Test
@@ -899,14 +907,92 @@ class GenericCraftPacketTest extends BootstrapTest {
 
     @Test
     void missingDirectInputsKeepPureCraftingPreviewOffTheServerThread() {
-        assertTrue(CraftPlanDecisionRules.shouldUseAsyncPreviewRoute(false, false, true, false));
-        assertFalse(CraftPlanDecisionRules.shouldUseAsyncPreviewRoute(true, false, true, false));
-        assertFalse(CraftPlanDecisionRules.shouldUseAsyncPreviewRoute(false, true, true, false));
-        assertFalse(CraftPlanDecisionRules.shouldUseAsyncPreviewRoute(false, false, false, false));
-        assertFalse(CraftPlanDecisionRules.shouldUseAsyncPreviewRoute(false, false, true, true));
-        assertTrue(CraftPlanDecisionRules.shouldUseAsyncPurePreview(true, false));
-        assertFalse(CraftPlanDecisionRules.shouldUseAsyncPurePreview(true, true));
-        assertFalse(CraftPlanDecisionRules.shouldUseAsyncPurePreview(false, false));
+        assertEquals(PlannerAction.RUN_PURE, CraftPlanDecisionRules.initialRoute(false, false, true, true).action());
+        assertEquals(RouteReason.MAIN_THREAD_REQUIRED, CraftPlanDecisionRules.initialRoute(true, false, true, true).reason());
+        assertEquals(RouteReason.MATERIAL_LOCK, CraftPlanDecisionRules.initialRoute(false, true, true, true).reason());
+        assertEquals(RouteReason.FORCED_RECIPE_UNPROJECTED, CraftPlanDecisionRules.initialRoute(false, false, false, true).reason());
+        assertEquals(RouteReason.TARGET_NOT_PROJECTED, CraftPlanDecisionRules.initialRoute(false, false, true, false).reason());
+    }
+
+    @Test
+    void previewAndExecutionShareCoverageAndBudgetDecisions() {
+        var material = new ImmutableRecipeGraph.MaterialRef(new ResourceLocation("test:input"), "");
+        var missing = new ImmutableRecipeGraph.IngredientRef(List.of(material), 1);
+        var inspection = new PureDemandTreeInspector.Result(PureDemandTreeInspector.Status.NODE_LIMIT,
+                512, material, false);
+        for (long generation : List.of(0L, 9L)) {
+            var snapshot = new PlanningSnapshot(UUID.randomUUID(), generation, 7L,
+                    new ResourceLocation("test:target"), Map.of(), Map.of(),
+                    new ImmutableRecipeGraph(Map.of()), "network", "binding", false);
+            for (var feasibility : PureRecipePlanner.Feasibility.values()) {
+                var result = new PureRecipePlanner.Result(feasibility, List.of(), List.of(missing), Map.of(),
+                        feasibility == PureRecipePlanner.Feasibility.UNKNOWN ? PureRecipePlanner.Status.TIME_LIMIT
+                                : feasibility == PureRecipePlanner.Feasibility.FEASIBLE ? PureRecipePlanner.Status.SUCCESS
+                                : PureRecipePlanner.Status.UNRESOLVABLE, 4, 0, 0);
+                for (var status : List.of(PurePlanningCoverage.Status.COMPLETE,
+                        PurePlanningCoverage.Status.GAP, PurePlanningCoverage.Status.UNCERTAIN)) {
+                    var coverage = new PurePlanningCoverage.Probe(
+                            status == PurePlanningCoverage.Status.COMPLETE ? null : material, status);
+                    var decision = CraftPlanDecisionRules.completedRoute(snapshot, false, true,
+                            inspection, result, coverage, Set.of(), false);
+                    if (result.feasible()) {
+                        assertEquals(PlannerAction.USE_PURE_RESULT, decision.action());
+                        assertEquals(RouteReason.PURE_SUCCESS, decision.reason());
+                    } else if (status != PurePlanningCoverage.Status.COMPLETE) {
+                        assertEquals(PlannerAction.RUN_TYPED, decision.action());
+                        assertEquals(status == PurePlanningCoverage.Status.GAP
+                                ? RouteReason.UNPROJECTED_DEPENDENCY : RouteReason.COVERAGE_UNCERTAIN, decision.reason());
+                    } else if (feasibility == PureRecipePlanner.Feasibility.UNKNOWN) {
+                        assertEquals(PlannerAction.REPORT_FAILURE, decision.action());
+                        assertEquals(RouteReason.BUDGET_EXHAUSTED, decision.reason());
+                    } else {
+                        assertEquals(PlannerAction.USE_PURE_RESULT, decision.action());
+                        assertEquals(RouteReason.PROVEN_INFEASIBLE, decision.reason());
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    void successfulPlanCannotBypassLocksForcedRecipesOrRequiredCatalyst() {
+        var target = new ResourceLocation("test:target");
+        var snapshot = new PlanningSnapshot(UUID.randomUUID(), 0L, 7L, target,
+                Map.of(), Map.of(), new ImmutableRecipeGraph(Map.of()), "network", "binding", false);
+        var inspection = new PureDemandTreeInspector.Result(PureDemandTreeInspector.Status.COMPLETE, 1, null, true);
+        var result = new PureRecipePlanner.Result(true, List.of(), List.of(), Map.of());
+        var coverage = PurePlanningCoverage.Probe.notChecked();
+        assertEquals(RouteReason.MATERIAL_LOCK, CraftPlanDecisionRules.completedRoute(snapshot,
+                true, true, inspection, result, coverage, Set.of(), false).reason());
+        assertEquals(RouteReason.FORCED_RECIPE_UNPROJECTED, CraftPlanDecisionRules.completedRoute(snapshot,
+                false, false, inspection, result, coverage, Set.of(), false).reason());
+        assertEquals(RouteReason.TYPED_CATALYST_REQUIRED, CraftPlanDecisionRules.completedRoute(snapshot,
+                false, true, inspection, result, coverage, Set.of(), true).reason());
+        assertEquals(PlannerAction.USE_PURE_RESULT, CraftPlanDecisionRules.completedRoute(snapshot,
+                false, true, inspection, result, coverage, Set.of(), false).action());
+        assertEquals(PlannerAction.RUN_TYPED, CraftPlanDecisionRules.completedRoute(snapshot,
+                false, true, inspection, null, coverage, Set.of(), false).action());
+    }
+
+    @Test
+    void completedRouteRetainsStrictBlockedDependencyRetryRules() {
+        var blocked = new ImmutableRecipeGraph.MaterialRef(new ResourceLocation("test:blocked"), "");
+        var raw = new ImmutableRecipeGraph.MaterialRef(new ResourceLocation("test:raw"), "");
+        var snapshot = new PlanningSnapshot(UUID.randomUUID(), 1L, 7L, new ResourceLocation("test:target"),
+                Map.of(), Map.of(), new ImmutableRecipeGraph(Map.of()), "network", "binding",
+                Set.of(blocked.itemId()), false);
+        var inspection = new PureDemandTreeInspector.Result(PureDemandTreeInspector.Status.MISSING_MATERIALS,
+                2, blocked, false);
+        for (var demands : List.of(List.of(new ImmutableRecipeGraph.IngredientRef(List.of(blocked), 1)),
+                List.of(new ImmutableRecipeGraph.IngredientRef(List.of(blocked, raw), 1)),
+                List.of(new ImmutableRecipeGraph.IngredientRef(List.of(blocked), 1),
+                        new ImmutableRecipeGraph.IngredientRef(List.of(raw), 1)))) {
+            var result = new PureRecipePlanner.Result(false, List.of(), demands, Map.of());
+            var decision = CraftPlanDecisionRules.completedRoute(snapshot, false, true, inspection, result,
+                    new PurePlanningCoverage.Probe(null, PurePlanningCoverage.Status.COMPLETE), Set.of(), false);
+            assertEquals(demands.size() == 1 && demands.get(0).alternatives().size() == 1
+                    ? PlannerAction.RUN_TYPED : PlannerAction.USE_PURE_RESULT, decision.action());
+        }
     }
 
     @Test

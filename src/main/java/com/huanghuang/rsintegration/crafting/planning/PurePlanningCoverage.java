@@ -11,18 +11,25 @@ import java.util.Map;
 import java.util.Set;
 
 /** 有界探测纯图的目录覆盖缺口；不确定时保守交给类型解析器。 */
-final class PurePlanningCoverage {
+public final class PurePlanningCoverage {
     private PurePlanningCoverage() {}
 
-    record Probe(@Nullable MaterialRef uncovered, boolean complete) {}
+    public enum Status { NOT_CHECKED, COMPLETE, GAP, UNCERTAIN }
+
+    /** 未完成探测的前沿材料不是已证实缺口，更不是缺料结论。 */
+    public record Probe(@Nullable MaterialRef uncovered, Status status) {
+        public static Probe notChecked() {
+            return new Probe(null, Status.NOT_CHECKED);
+        }
+    }
 
     static Probe unprojectedDependency(ImmutableRecipeGraph graph, ResourceLocation targetId,
                                              Set<ResourceLocation> incompleteOutputs,
                                              Map<ResourceLocation, ResourceLocation> forcedRecipes,
                                              PlanningPreferences preferences, long deadlineNanos) {
-        if (incompleteOutputs.isEmpty()) return new Probe(null, true);
+        if (incompleteOutputs.isEmpty()) return new Probe(null, Status.COMPLETE);
         RecipeNode target = graph.recipesById().get(targetId);
-        if (target == null) return new Probe(null, true);
+        if (target == null) return Probe.notChecked();
         ArrayDeque<RecipeNode> pending = new ArrayDeque<>();
         Set<ResourceLocation> visited = new HashSet<>();
         pending.add(target);
@@ -35,11 +42,11 @@ final class PurePlanningCoverage {
             for (var input : recipe.inputs()) {
                 if (!input.recursive()) continue;
                 for (MaterialRef material : input.alternatives()) {
-                    if (++checkedMaterials > 4096 || System.nanoTime() >= deadlineNanos) return new Probe(material, false);
+                    if (++checkedMaterials > 4096 || System.nanoTime() >= deadlineNanos) return new Probe(material, Status.UNCERTAIN);
                     ResourceLocation forced = ForcedRecipeGraphProjector.forcedRecipeFor(material, forcedRecipes);
                     if (forced == null && preferences.isNoRecipe(material)) continue;
                     if (incompleteOutputs.contains(material.itemId())
-                            && (forced == null || !graph.recipesById().containsKey(forced))) return new Probe(material, true);
+                            && (forced == null || !graph.recipesById().containsKey(forced))) return new Probe(material, Status.GAP);
                     for (RecipeNode producer : ImmutableRecipeGraphProjector.candidates(
                             graph, material, input.nbtMatchMode())) {
                         if ((forced == null || forced.equals(producer.recipeId()))
@@ -49,6 +56,6 @@ final class PurePlanningCoverage {
                 }
             }
         }
-        return new Probe(null, true);
+        return new Probe(null, Status.COMPLETE);
     }
 }

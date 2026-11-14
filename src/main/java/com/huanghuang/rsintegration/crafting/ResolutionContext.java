@@ -109,6 +109,7 @@ final class ResolutionContext {
     // Eliminates the O(N) scan of all 546+ inventory types inside countMatching.
     private final Map<Item, List<CachedStack>> inventoryIndex = new HashMap<>();
     private final Map<CraftingResolver.StackKey, CachedStack> stacksByKey = new HashMap<>();
+    private long nextInventoryOrder;
 
     ResolutionContext(Level level,
                       Map<Item, List<RecipeIndex.Entry>> index,
@@ -529,7 +530,10 @@ final class ResolutionContext {
         while (undoStack.size() > ucp) {
             UndoEntry e = undoStack.pop();
             if (e.oldValue == null) counts.remove(e.key);
-            else counts.put(e.key, e.oldValue);
+            else {
+                if (!counts.containsKey(e.key)) indexStack(e.key);
+                counts.put(e.key, e.oldValue);
+            }
         }
         while (steps.size() > scp) steps.remove(steps.size() - 1);
         while (graphNodes.size() > ncp) graphNodes.remove(graphNodes.size() - 1);
@@ -624,8 +628,13 @@ final class ResolutionContext {
     }
 
     private void indexStack(CraftingResolver.StackKey key) {
-        if (stacksByKey.containsKey(key)) return;
+        CachedStack existing = stacksByKey.get(key);
+        if (existing != null) {
+            existing.inventoryOrder = nextInventoryOrder++;
+            return;
+        }
         CachedStack cachedStack = new CachedStack(key);
+        cachedStack.inventoryOrder = nextInventoryOrder++;
         stacksByKey.put(key, cachedStack);
         List<CachedStack> stacks = inventoryIndex.computeIfAbsent(key.item(), k -> new ArrayList<>());
         // A key removed during a speculative branch remains cached in this index.
@@ -636,36 +645,26 @@ final class ResolutionContext {
 
     long countMatching(Ingredient ingredient) {
         if (ingredient.isEmpty()) return 0;
-
         long total = 0L;
-        if (!IngredientMatcher.hasCompleteItemList(ingredient)) {
-            for (Map.Entry<CraftingResolver.StackKey, Long> entry : counts.entrySet()) {
-                if (entry.getValue() > 0 && matches(ingredient, entry.getKey())) {
-                    total = MaterialSources.saturatedAdd(total, entry.getValue());
-                }
-            }
-            return total;
-        }
-        Set<Item> checkedItems = new HashSet<>();
-
-        // Inverted-index fast path: for each Item the ingredient accepts,
-        // do an O(1) lookup in inventoryIndex instead of scanning all 546+ types.
-        for (ItemStack template : ingredient.getItems()) {
-            if (template.isEmpty()) continue;
-            Item targetItem = template.getItem();
-            if (!checkedItems.add(targetItem)) continue; // dedupe repeated Items
-
-            List<CachedStack> candidates = inventoryIndex.get(targetItem);
-            if (candidates == null) continue; // nothing of this Item in storage
-
-            for (CachedStack candidate : candidates) {
-                long count = counts.getOrDefault(candidate.key, 0L);
-                if (count > 0 && IngredientMatcher.test(ingredient, candidate.stack)) {
-                    total = MaterialSources.saturatedAdd(total, count);
-                }
+        for (CraftingResolver.StackKey key : candidateKeys(ingredient)) {
+            long count = counts.getOrDefault(key, 0L);
+            if (count > 0 && matches(ingredient, key)) {
+                total = MaterialSources.saturatedAdd(total, count);
             }
         }
         return total;
+    }
+
+    /** 计数与消费共用候选范围；只索引物品身份，数量和真实谓词每次重验。 */
+    private Iterable<CraftingResolver.StackKey> candidateKeys(Ingredient ingredient) {
+        Set<Item> items = IngredientMatcher.itemTypesForMatching(ingredient);
+        if (items == null) return counts.keySet();
+        // 物品集合和 indexStack 已分别去重；惰性遍历避免计数时复制或排序库存。
+        return () -> items.stream()
+                .flatMap(item -> inventoryIndex.getOrDefault(item, List.of()).stream())
+                .map(cached -> cached.key)
+                .filter(key -> counts.getOrDefault(key, 0L) > 0L)
+                .iterator();
     }
 
     /**
@@ -783,34 +782,8 @@ final class ResolutionContext {
     }
 
     private List<CraftingResolver.StackKey> sortedMatchingKeys(Ingredient ingredient) {
-        ItemStack[] templates = ingredient.getItems();
-        Set<Item> ingredientItems = new LinkedHashSet<>();
-        // Custom Ingredient subclasses may accept stacks that are not exposed by
-        // getItems(). Only vanilla's concrete Ingredient has a complete candidate list.
-        boolean requiresAuthoritativeScan = ingredient.getClass() != Ingredient.class
-                || templates.length == 0;
-        if (!requiresAuthoritativeScan) {
-            requiresAuthoritativeScan = true;
-            for (ItemStack template : templates) {
-                if (template.isEmpty()) continue;
-                ingredientItems.add(template.getItem());
-                if (!template.hasTag()) requiresAuthoritativeScan = false;
-            }
-            if (ingredientItems.isEmpty()) requiresAuthoritativeScan = true;
-        }
-
-        List<CraftingResolver.StackKey> sortedKeys;
-        if (requiresAuthoritativeScan) {
-            sortedKeys = new ArrayList<>(counts.keySet());
-        } else {
-            Set<CraftingResolver.StackKey> matchingItems = new LinkedHashSet<>();
-            for (Item item : ingredientItems) {
-                List<CachedStack> cached = inventoryIndex.get(item);
-                if (cached == null) continue;
-                for (CachedStack stack : cached) matchingItems.add(stack.key);
-            }
-            sortedKeys = new ArrayList<>(matchingItems);
-        }
+        List<CraftingResolver.StackKey> sortedKeys = new ArrayList<>();
+        candidateKeys(ingredient).forEach(sortedKeys::add);
         if (GoetySoulTotemCrafting.isSoulTotemIngredient(ingredient)) {
             sortedKeys.sort(Comparator
                     .comparingInt((CraftingResolver.StackKey key) ->
@@ -828,6 +801,11 @@ final class ResolutionContext {
         } else {
             MaterialVariantPreferences.Snapshot preferences =
                     MaterialVariantPreferences.snapshot();
+            // 原全表路径以 counts 的当前插入顺序打破同优先级 NBT 的平局；
+            // 原普通物品索引路径则保留族内初始顺序。只记录顺序，不再扫描全表。
+            boolean currentInsertionOrder = ingredient.getClass() != Ingredient.class
+                    || Arrays.stream(ingredient.getItems())
+                            .noneMatch(template -> !template.isEmpty() && !template.hasTag());
             sortedKeys.sort(Comparator
                     .comparingInt((CraftingResolver.StackKey key) ->
                             preferences.rank(key.item()))
@@ -835,7 +813,9 @@ final class ResolutionContext {
                     .thenComparing(k -> {
                         var rl = ForgeRegistries.ITEMS.getKey(k.item());
                         return rl != null ? rl.toString() : "";
-                    }));
+                    })
+                    .thenComparingLong(key -> currentInsertionOrder
+                            ? stacksByKey.get(key).inventoryOrder : 0L));
         }
         return sortedKeys;
     }
@@ -960,6 +940,7 @@ final class ResolutionContext {
         final CraftingResolver.StackKey key;
         final ItemStack stack;
         final MaterialKey material;
+        long inventoryOrder;
 
         CachedStack(CraftingResolver.StackKey key) {
             this.key = key;
