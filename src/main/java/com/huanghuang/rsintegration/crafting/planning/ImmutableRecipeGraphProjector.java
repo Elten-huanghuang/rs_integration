@@ -115,6 +115,13 @@ public final class ImmutableRecipeGraphProjector {
 
     /** Returns the generation-level producer index, or null for an uncompiled test graph. */
     @Nullable
+    static RecipeProducerIndex publishedProducerIndex(ImmutableRecipeGraph graph) {
+        CompiledIndexes indexes = compiledIndexes;
+        GraphIndexes found = indexes == null ? null : indexes.forGraph(graph);
+        return found == null ? null : found.producers();
+    }
+
+    @Nullable
     static List<RecipeNode> publishedProducers(ImmutableRecipeGraph graph,
                                                ResourceLocation itemId) {
         CompiledIndexes indexes = compiledIndexes;
@@ -713,25 +720,32 @@ public final class ImmutableRecipeGraphProjector {
 
     private static boolean matchesIngredientUncached(MaterialRef actual, IngredientRef ingredient) {
         for (MaterialRef expected : ingredient.alternatives()) {
-            if (actual.kind() != expected.kind()
-                    || !actual.resourceId().equals(expected.resourceId())) continue;
-            if (ingredient.nbtMatchMode() == NbtMatchMode.ANY) return true;
-            if (actual.runtimeNbt()) continue;
-            if (ingredient.nbtMatchMode() == NbtMatchMode.SLASHBLADE) {
-                if (PlanningLookupCache.matchesSlashBlade(expected.nbt(), actual.nbt())) return true;
-                continue;
-            }
-            // 继承数值的下限不能冒充实际输出的完整 NBT。
-            if (actual.constrainedNbt()) continue;
-            if (ingredient.nbtMatchMode() == NbtMatchMode.EXACT
-                    ? exactNbtMatches(expected.nbt(), actual.nbt())
-                    : partialNbtMatches(expected.nbt(), actual.nbt())) return true;
-            if (isTaintedEarthHeart(actual, expected)) return true;
-            // Purity 只补偿普通 NBT 精确比较无法表达的元数据差异，必须放在
-            // 普通比较之后，避免为完全相同的药水重复构建和解析状态。
-            if (ingredient.nbtMatchMode() == NbtMatchMode.EXACT
-                    && matchesPotionPuritySemantics(expected, actual)) return true;
+            if (matchesAlternative(actual, expected, ingredient.nbtMatchMode())) return true;
         }
+        return false;
+    }
+
+    /** 单个替代项的相同匹配语义，供可暂停探测逐项计费。 */
+    static boolean matchesAlternative(MaterialRef actual, MaterialRef expected, NbtMatchMode mode) {
+        if (actual.kind() != expected.kind()
+                || !actual.resourceId().equals(expected.resourceId())) return false;
+        if (mode == NbtMatchMode.ANY) return true;
+        if (actual.runtimeNbt()) return false;
+        if (mode == NbtMatchMode.SLASHBLADE) {
+            if (PlanningLookupCache.matchesSlashBlade(expected.nbt(), actual.nbt())) return true;
+            return false;
+        }
+        // 继承数值的下限不能冒充实际输出的完整 NBT。
+        if (actual.constrainedNbt()) return false;
+        if (mode == NbtMatchMode.EXACT
+                ? exactNbtMatches(expected.nbt(), actual.nbt())
+                : partialNbtMatches(expected.nbt(), actual.nbt())) return true;
+        if (isTaintedEarthHeart(actual, expected)) return true;
+        // Purity 只补偿普通 NBT 精确比较无法表达的元数据差异，必须放在
+        // 普通比较之后，避免为完全相同的药水重复构建和解析状态。
+        if (mode == NbtMatchMode.EXACT
+                && matchesPotionPuritySemantics(expected, actual)) return true;
+
         return false;
     }
 

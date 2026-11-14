@@ -12,6 +12,7 @@ import com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import com.huanghuang.rsintegration.magic.MagicResourceCost;
 import com.huanghuang.rsintegration.magic.MagicResourceKind;
+import com.huanghuang.rsintegration.config.PurePlannerLimits;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -23,10 +24,12 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Arrays;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.LongSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -37,6 +40,66 @@ class PureRecipePlannerTest extends BootstrapTest {
     private static final MaterialRef LOG = material("log");
     private static final MaterialRef PLANK = material("plank");
     private static final MaterialRef STICK = material("stick");
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void failureTraceKeepsDepthThenLengthPriorityIncludingEqualLengthTies() throws Exception {
+        Class<?> searchType = Arrays.stream(PureRecipePlanner.class.getDeclaredClasses())
+                .filter(type -> type.getSimpleName().equals("Search")).findFirst().orElseThrow();
+        var constructor = searchType.getDeclaredConstructors()[0];
+        constructor.setAccessible(true);
+        Object search = constructor.newInstance(new ImmutableRecipeGraph(Map.of()), Map.of(), 100, 10000, 256,
+                Long.MAX_VALUE, (LongSupplier) System::nanoTime, Set.of(), Map.of(), PlanningPreferences.empty(), PurePlannerLimits.load());
+        Class<?> completionType = Arrays.stream(PureRecipePlanner.class.getDeclaredClasses())
+                .filter(type -> type.getSimpleName().equals("CompleteRecipeTask")).findFirst().orElseThrow();
+        var completion = completionType.getDeclaredConstructors()[0];
+        completion.setAccessible(true);
+        var recorder = searchType.getDeclaredMethod("recordFailure", IngredientRef.class, PersistentTaskQueue.class, PureRecipePlanner.FailureReason.class);
+        recorder.setAccessible(true);
+        var indexer = searchType.getDeclaredMethod("indexPending", PersistentTaskQueue.class);
+        indexer.setAccessible(true);
+        Map<String, Object> fields = new LinkedHashMap<>();
+        for (String name : List.of("resolving", "steps")) {
+            var field = searchType.getDeclaredField(name); field.setAccessible(true); fields.put(name, field.get(search));
+        }
+        int bestDepth = -1, bestSize = -1, caseIndex = 0;
+        IngredientRef expectedMissing = null;
+        List<PureRecipePlanner.PlannedStep> expectedSteps = List.of();
+        PureRecipePlanner.FailureReason expectedReason = null;
+        // 更浅但更长、更深但更短、同深度长短和长度相同，都与先物化的参考算法比较。
+        for (int[] sample : new int[][] {{2, 0, 2}, {1, 8, 5}, {2, 0, 1}, {2, 2, 1}, {2, 1, 2}, {3, 0, 1}}) {
+            Set<MaterialRef> resolving = (Set<MaterialRef>) fields.get("resolving");
+            resolving.clear();
+            for (int i = 0; i < sample[0]; i++) resolving.add(material("diagnostic_ancestor_" + i));
+            List<PureRecipePlanner.PlannedStep> steps = (List<PureRecipePlanner.PlannedStep>) fields.get("steps");
+            steps.clear();
+            for (int i = 0; i < sample[1]; i++) steps.add(new PureRecipePlanner.PlannedStep(id("done_" + caseIndex + "_" + i), 1));
+            List<Object> tasks = new ArrayList<>();
+            List<PureRecipePlanner.PlannedStep> partial = new ArrayList<>(steps);
+            for (int i = 0; i < sample[2]; i++) {
+                RecipeNode recipe = recipe("pending_" + caseIndex + "_" + i, PLANK, 1, ingredient(LOG, 1));
+                tasks.add(completion.newInstance(PLANK, 1L, 0L, recipe.recipeId(), 1L, PLANK, i, recipe, null));
+                partial.add(new PureRecipePlanner.PlannedStep(recipe.recipeId(), 1));
+            }
+            PersistentTaskQueue<Object> pending = PersistentTaskQueue.from(tasks);
+            // 故意留下另一段队列的索引，验证计数会先与传入 pending 对齐。
+            indexer.invoke(search, PersistentTaskQueue.empty());
+            IngredientRef missing = ingredient(material("diagnostic_missing_" + caseIndex), 1);
+            var reason = caseIndex++ % 2 == 0 ? PureRecipePlanner.FailureReason.CYCLE : PureRecipePlanner.FailureReason.MISSING_INPUTS;
+            if (sample[0] > bestDepth || sample[0] == bestDepth && partial.size() > bestSize) {
+                bestDepth = sample[0]; bestSize = partial.size(); expectedMissing = missing;
+                expectedSteps = List.copyOf(partial); expectedReason = reason;
+            }
+            recorder.invoke(search, missing, pending, reason);
+            for (var expectation : Map.of("deepestFailure", expectedMissing, "bestFailureSteps", expectedSteps,
+                    "deepestFailureReason", expectedReason).entrySet()) {
+                var field = searchType.getDeclaredField(expectation.getKey()); field.setAccessible(true);
+                assertEquals(expectation.getValue(), field.get(search));
+            }
+        }
+        var sawMissing = searchType.getDeclaredField("sawMissingInputFailure"); sawMissing.setAccessible(true);
+        assertTrue(sawMissing.getBoolean(search));
+    }
 
     @Test
     void untargetedCoProductCanWaitForAnExistingLaterDemandInEitherOrder() {

@@ -278,7 +278,7 @@ public final class AsyncPurePlanningService {
         if (result.status() == PureRecipePlanner.Status.TIME_LIMIT) {
             PlanningLookupCache.Stats lookupStats = PlanningLookupCache.currentStats();
             LOGGER.warn(
-                    "[RSI-plan] Pure planning timed out: recipe={} phase={} elapsedMs={} states={} backtracks={} memoHits={} stockTypes={} recipes={} nbtParses={} outputIndexBuilds={} outputScans={} reachabilityBuilds={} reachabilityMs={} reachabilityMaxMs={} seedCandidates={} seeds={} indexedEdges={} matchedEdges={} reachedRecipes={} stateAllocations={}",
+                    "[RSI-plan] Pure planning timed out: recipe={} phase={} elapsedMs={} states={} backtracks={} memoHits={} stockTypes={} recipes={} nbtParses={} outputIndexBuilds={} outputScans={} reachabilityBuilds={} reachabilityMs={} reachabilityMaxMs={} seedCandidates={} seeds={} indexedEdges={} matchedEdges={} reachedRecipes={} stateAllocations={} staticIndexBuilds={} localProbeWork={} localProbeExhaustions={}",
                     snapshot.recipeId(), session.phase(), elapsedNanos / 1_000_000L, result.expandedStates(),
                     result.backtracks(), result.memoHits(), stock.size(),
                     planningGraph.recipesById().size(), lookupStats.nbtParses(),
@@ -288,7 +288,8 @@ public final class AsyncPurePlanningService {
                     lookupStats.reachabilitySeedCandidates(),
                     lookupStats.reachabilitySeeds(), lookupStats.reachabilityIndexedEdges(),
                     lookupStats.reachabilityMatchedEdges(), lookupStats.reachabilityReachedRecipes(),
-                    lookupStats.reachabilityStateAllocations());
+                    lookupStats.reachabilityStateAllocations(), lookupStats.producerIndexBuilds(),
+                    lookupStats.localProbeWork(), lookupStats.localProbeExhaustions());
         }
         return result;
     }

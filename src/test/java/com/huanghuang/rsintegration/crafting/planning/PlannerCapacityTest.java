@@ -18,12 +18,167 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Random;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class PlannerCapacityTest extends BootstrapTest {
+    @Test
+    void nbtMatchViewsTrackNewVariantsReservationsAndFailedBranchRestoration() {
+        MaterialRef pattern = new MaterialRef(id("view_item"), "{family:1}");
+        MaterialRef rare = new MaterialRef(id("view_item"), "{family:1,kind:\"rare\"}");
+        MaterialRef common = new MaterialRef(id("view_item"), "{family:1,kind:\"common\"}");
+        MaterialRef created = new MaterialRef(id("view_item"), "{family:1,kind:\"created\"}");
+        MaterialRef raw = material("view_raw");
+        MaterialRef target = material("view_target");
+        IngredientRef broad = new IngredientRef(List.of(pattern, pattern, rare), 1, NbtMatchMode.PARTIAL);
+        RecipeNode supply = recipe("view_supply", created, 2, need(raw, 1));
+        RecipeNode good = recipe("view_good", target, 1, broad);
+        RecipeNode bad = recipe("view_bad", target, 1, need(created, 1), need(common, 2));
+        RecipeNode commonSupply = recipe("view_common_supply", common, 1, need(raw, 1));
+        Map<MaterialRef, Long> stock = Map.of(raw, 1L, common, 1L, rare, 1L);
+        var graph = new ImmutableRecipeGraph(Map.of(target, List.of(good), created, List.of(supply)));
+        Scenario produced = new Scenario(graph, stock, List.of(need(target, 1), need(created, 1), broad, need(rare, 1)));
+        var result = plan(produced, 3);
+        assertFlow(produced, result);
+        assertTrue(result.remaining().isEmpty());
+        assertEquals(2, result.steps().size());
+
+        // 两个输入各自可达，但先生产 created 会耗尽 common 补产需要的同一份原料。
+        var alternate = new ImmutableRecipeGraph(Map.of(target, List.of(bad, good), created, List.of(supply),
+                common, List.of(commonSupply)));
+        Scenario rollback = new Scenario(alternate, stock, List.of(need(target, 1), need(rare, 1)));
+        var preferences = new PlanningPreferences(Map.of(target.itemId().toString(), new RecipeChoice.Normal(bad.recipeId())), Map.of(), Set.of());
+        var recovered = PureRecipePlanner.resolve(alternate, stock, rollback.roots(), 20, 10_000, 8192,
+                Long.MAX_VALUE, System::nanoTime, Set.of(), Map.of(), preferences);
+        assertEquals(PureRecipePlanner.Status.SUCCESS, recovered.status());
+        assertTrue(recovered.backtracks() > 0);
+        assertEquals(List.of(new PureRecipePlanner.PlannedStep(good.recipeId(), 1)), recovered.steps());
+        assertEquals(Map.of(raw, 1L), recovered.remaining());
+        assertFlow(rollback, recovered);
+
+        var insufficient = PureRecipePlanner.resolve(new ImmutableRecipeGraph(Map.of()),
+                Map.of(rare, 1L, common, 1L, MaterialRef.fluid(id("view_item")), 100L), List.of(broad.withCount(3)), 10);
+        assertEquals(PureRecipePlanner.Status.UNRESOLVABLE, insufficient.status());
+        Scenario catalyst = new Scenario(new ImmutableRecipeGraph(Map.of()), stock,
+                List.of(new IngredientRef(broad.alternatives(), 2, NbtMatchMode.PARTIAL, DemandRole.CATALYST), broad, need(rare, 1)));
+        assertFlow(catalyst, plan(catalyst, 10));
+    }
+
+    @Test
+    void cachedNbtTotalsRemainExactAfterSaturatedSupplyAndReservedConsumption() {
+        MaterialRef pattern = new MaterialRef(id("huge_view"), "{family:1}");
+        MaterialRef first = new MaterialRef(id("huge_view"), "{family:1,v:1}");
+        MaterialRef second = new MaterialRef(id("huge_view"), "{family:1,v:2}");
+        IngredientRef broad = new IngredientRef(List.of(pattern), Long.MAX_VALUE, NbtMatchMode.PARTIAL);
+        Scenario scenario = new Scenario(new ImmutableRecipeGraph(Map.of()), Map.of(first, Long.MAX_VALUE, second, 1L),
+                List.of(broad, need(first, 1)));
+        var result = plan(scenario, 10);
+        assertTrue(result.remaining().isEmpty());
+        assertFlow(scenario, result);
+    }
+
+    @Test
+    void branchingSnapshotsKeepDeepSearchAndMaterialFlowAcrossInputOrders() {
+        for (int depth : new int[] {64, 256, 1000, 2000}) {
+            for (int candidates : new int[] {2, 6}) {
+                for (boolean tokenFirst : new boolean[] {true, false}) {
+                    Map<MaterialRef, List<RecipeNode>> recipes = new LinkedHashMap<>();
+                    Map<MaterialRef, Long> stock = new LinkedHashMap<>();
+                    MaterialRef previous = material("snapshot_raw");
+                    stock.put(previous, 1L);
+                    for (int i = 0; i < depth; i++) {
+                        MaterialRef output = material("snapshot_" + i);
+                        IngredientRef dependency = new IngredientRef(List.of(previous), 1, NbtMatchMode.PARTIAL);
+                        List<RecipeNode> choices = new ArrayList<>();
+                        for (int candidate = 0; candidate < candidates; candidate++) {
+                            MaterialRef token = material("snapshot_token_" + i + "_" + candidate);
+                            stock.put(token, 1L);
+                            choices.add(tokenFirst ? recipe("snapshot_" + i + "_" + candidate, output, 1, need(token, 1), dependency)
+                                    : recipe("snapshot_" + i + "_" + candidate, output, 1, dependency, need(token, 1)));
+                        }
+                        recipes.put(output, choices);
+                        previous = output;
+                    }
+                    Scenario scenario = new Scenario(new ImmutableRecipeGraph(recipes), stock,
+                            List.of(new IngredientRef(List.of(previous), 1, NbtMatchMode.PARTIAL)));
+                    var result = PureRecipePlanner.resolve(scenario.graph(), stock, scenario.roots(), depth, 262_144, 8192);
+                    assertEquals(PureRecipePlanner.Status.SUCCESS, result.status());
+                    assertEquals(depth, result.steps().size());
+                    assertTrue(result.expandedStates() <= 4 * depth + 10);
+                    assertFlow(scenario, result);
+                }
+            }
+        }
+    }
+
+    @Test
+    void sharedFailureSnapshotsStillHitAndAgreeWithDisabledMemoOnRandomDags() {
+        int hits = 0, cachedStates = 0, uncachedStates = 0;
+        for (int seed = 0; seed < 30; seed++) {
+            Random random = new Random(seed);
+            List<MaterialRef> materials = new ArrayList<>();
+            Map<MaterialRef, Long> stock = new LinkedHashMap<>();
+            for (int i = 0; i < 4; i++) {
+                MaterialRef raw = material("random_raw_" + i);
+                materials.add(raw);
+                long count = random.nextInt(6);
+                if (count > 0) stock.put(raw, count);
+            }
+            Map<MaterialRef, List<RecipeNode>> recipes = new LinkedHashMap<>();
+            for (int i = 0; i < 12; i++) {
+                MaterialRef output = material("random_" + i);
+                List<RecipeNode> choices = new ArrayList<>();
+                for (int candidate = 0; candidate < 1 + random.nextInt(3); candidate++) {
+                    List<IngredientRef> inputs = new ArrayList<>();
+                    for (int input = 0; input < 1 + random.nextInt(2); input++) inputs.add(new IngredientRef(
+                            List.of(materials.get(random.nextInt(materials.size()))), 1 + random.nextInt(2), NbtMatchMode.PARTIAL));
+                    choices.add(new RecipeNode(id("random_" + i + "_" + candidate), output, 1 + random.nextInt(2), inputs));
+                }
+                recipes.put(output, choices); materials.add(output);
+            }
+            Scenario scenario = new Scenario(new ImmutableRecipeGraph(recipes), stock,
+                    List.of(need(materials.get(materials.size() - 1), 1), need(materials.get(materials.size() - 2), 1)));
+            var cached = PureRecipePlanner.resolve(scenario.graph(), stock, scenario.roots(), 65_536, 262_144, 8192);
+            var uncached = PureRecipePlanner.resolve(scenario.graph(), stock, scenario.roots(), 65_536, 262_144, 0);
+            assertEquals(uncached.status(), cached.status(), "seed=" + seed);
+            if (cached.feasible()) { assertFlow(scenario, cached); assertFlow(scenario, uncached); }
+            else assertEquals(stock, cached.remaining());
+            hits += cached.memoHits(); cachedStates += cached.expandedStates(); uncachedStates += uncached.expandedStates();
+        }
+        assertTrue(hits > 0, "严格失败键仍必须实际命中");
+        assertTrue(cachedStates < uncachedStates, "失败缓存仍应减少重复搜索");
+    }
+
+    @Test
+    void coProductDeferralScalesWithinConfiguredStateBudgets() {
+        for (int count : new int[] {64, 256, 512, 1024, 2048}) {
+            MaterialRef raw = material("deferral_raw");
+            Map<MaterialRef, List<RecipeNode>> recipes = new LinkedHashMap<>();
+            List<IngredientRef> roots = new ArrayList<>();
+            List<IngredientRef> primaryDemands = new ArrayList<>();
+            for (int i = 0; i < count; i++) {
+                MaterialRef primary = material("deferral_primary_" + i);
+                MaterialRef side = material("deferral_side_" + i);
+                recipes.put(primary, List.of(withSide(recipe("deferral_" + i, primary, 1, need(raw, 1)), side)));
+                roots.add(need(side, 1));
+                primaryDemands.add(need(primary, 1));
+            }
+            roots.addAll(primaryDemands);
+            Scenario scenario = new Scenario(new ImmutableRecipeGraph(recipes), Map.of(raw, (long) count), roots);
+            int budget = count <= 512 ? 65_536 : 262_144;
+            var result = PureRecipePlanner.resolve(scenario.graph(), scenario.stock(), roots, count, budget, 8192);
+            assertEquals(PureRecipePlanner.Status.SUCCESS, result.status(), "count=" + count);
+            assertEquals(count, result.steps().size());
+            assertEquals(0, result.backtracks());
+            assertTrue(result.expandedStates() < 40 * count + 128, "副产物结构探测必须近似线性");
+            assertFlow(scenario, result);
+            System.out.println("COPRODUCT_FIXED count=" + count + " states=" + result.expandedStates());
+        }
+    }
+
     @Test
     void transitiveMissingRoutesAndCraftedAuxiliaryKeepSparseGraphsCompact() {
         for (int levels : new int[] {10, 100, 200, 500}) {
@@ -42,7 +197,7 @@ class PlannerCapacityTest extends BootstrapTest {
                 }
                 Scenario scenario = new Scenario(new ImmutableRecipeGraph(recipes), stock, original.roots());
                 var result = PureRecipePlanner.resolve(scenario.graph(), stock, scenario.roots(), 4096, 65_536, 8192);
-                assertEquals(PureRecipePlanner.Status.SUCCESS, result.status());
+                assertEquals(PureRecipePlanner.Status.SUCCESS, result.status(), "levels=" + levels + " crafted=" + crafted);
                 assertEquals(2 * levels + (crafted ? 2 : 1), result.steps().size());
                 assertEquals(0, result.backtracks());
                 if (crafted) {
@@ -118,7 +273,7 @@ class PlannerCapacityTest extends BootstrapTest {
         assertFalse(empty.canReach(usesSide));
         AtomicInteger work = new AtomicInteger();
         assertThrows(CancellationException.class, () -> new PureRecipePlanner.SeededReachability(graph,
-                Map.of(raw, 1L), () -> { if (work.incrementAndGet() == 10) throw new CancellationException(); }));
+                Map.of(raw, 1L), () -> { if (work.incrementAndGet() == 10) throw new CancellationException(); }).canReach(usesSide));
         assertEquals(10, work.get());
     }
 
@@ -1445,7 +1600,9 @@ class PlannerCapacityTest extends BootstrapTest {
                             "分配的具体材料必须符合原始需求");
                     long left = stock.getOrDefault(material, 0L) - count;
                     assertTrue(left >= 0L, material.toString());
-                    if (left == 0L) stock.remove(material); else stock.put(material, left);
+                    if (use.demand().role() != DemandRole.CATALYST) {
+                        if (left == 0L) stock.remove(material); else stock.put(material, left);
+                    }
                 });
                 Map<Integer, IngredientRef> target = use.consumer() < 0 ? roots
                         : ports.computeIfAbsent(use.consumer(), ignored -> new HashMap<>());
@@ -1456,7 +1613,9 @@ class PlannerCapacityTest extends BootstrapTest {
                 var supplied = ports.remove(production.node());
                 assertEquals(inputs.size(), supplied == null ? 0 : supplied.size());
                 for (int port = 0; port < inputs.size(); port++) {
-                    assertEquals(inputs.get(port).withCount(Math.multiplyExact(inputs.get(port).count(), production.batches())),
+                    long count = inputs.get(port).role() == DemandRole.CATALYST ? inputs.get(port).count()
+                            : Math.multiplyExact(inputs.get(port).count(), production.batches());
+                    assertEquals(inputs.get(port).withCount(count),
                             supplied.get(port));
                 }
                 production.recipe().guaranteedOutputs().forEach((material, count) ->

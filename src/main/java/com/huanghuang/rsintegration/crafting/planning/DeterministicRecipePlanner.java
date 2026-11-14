@@ -5,11 +5,11 @@ import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.Ingre
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.NbtMatchMode;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.ResourceKind;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner.FlowEvent;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner.MaterialUse;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner.PlannedStep;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner.Production;
-import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner.SeededReachability;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner.SeededReachability;
 import net.minecraft.resources.ResourceLocation;
 
@@ -20,6 +20,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -86,7 +87,7 @@ final class DeterministicRecipePlanner {
         private final Map<MaterialRef, RouteChoice> byMaterial = new HashMap<>();
         private SeededReachability reachability;
         private Map<MaterialRef, Long> branchStock;
-        private final Set<MaterialRef> stockedFamilies = new HashSet<>();
+        private Set<MaterialRef> stockedFamilies = Set.of();
         private boolean started;
 
         private RouteSearch(CompilationCache base, Function<MaterialRef, List<RecipeNode>> order,
@@ -102,14 +103,11 @@ final class DeterministicRecipePlanner {
             try {
                 // 本游标每次返回时库存均由父帧恢复；分析只属于该帧，绝不进入公共结构缓存。
                 branchStock = stock;
-                stockedFamilies.clear();
-                for (var entry : stock.entrySet()) {
-                    checkBudget.run();
-                    if (entry.getValue() > 0L) stockedFamilies.add(Evaluation.family(entry.getKey()));
-                }
+                stockedFamilies = base.stockFamilies(stock, checkBudget);
                 while (!started || advance(checkBudget)) {
                     started = true;
                     CompilationCache trial = new CompilationCache(base.graph, base.forced, base.preferences, 0);
+                    trial.stockView = base.stockView;
                     trial.routes = this;
                     Prepared prepared = trial.prepare(stock, roots, activeOutputs, maxSteps, maxStates, checkBudget);
                     if (choices.isEmpty() || !trial.sharedDependencyFound) return null;
@@ -135,7 +133,7 @@ final class DeterministicRecipePlanner {
                     budget.tick();
                     if (candidates.remove(candidate)) ordered.add(candidate);
                 }
-                // 复用迭代种子传播，识别任意层缺料、替代生产者及保证副产物。
+                // 复用有界局部种子探测，识别缺料、替代生产者及保证副产物。
                 // 只调整本帧顺序，不删除候选；数量、动态 NBT 和后续库存变化仍由实际搜索裁决。
                 List<RecipeNode> unavailable = new ArrayList<>();
                 List<RecipeNode> supplied = new ArrayList<>();
@@ -160,7 +158,8 @@ final class DeterministicRecipePlanner {
                     List<RecipeNode> reachable = new ArrayList<>();
                     for (RecipeNode candidate : supplied) {
                         budget.tick();
-                        if (reachability.canReach(candidate) || candidate.recipeId().equals(preferred)) reachable.add(candidate);
+                        if (reachability.canReach(candidate, budget::tick)
+                                || candidate.recipeId().equals(preferred)) reachable.add(candidate);
                         else unavailable.add(candidate);
                     }
                     supplied = reachable;
@@ -217,6 +216,7 @@ final class DeterministicRecipePlanner {
         private boolean sharedDependencyFound;
         private RouteSearch routes;
         private Set<IngredientRef> activeRouteSpecificInputs = Set.of();
+        private StockFamilies stockView;
 
         CompilationCache(ImmutableRecipeGraph graph, Map<ResourceLocation, ResourceLocation> forced,
                          PlanningPreferences preferences, int maxUnits) {
@@ -227,6 +227,60 @@ final class DeterministicRecipePlanner {
         }
 
         int compilationCount() { return compilationCount; }
+
+        /** Search 的所有写入经 stockChanged 通知；其他调用者仍按其当前 Map 即时收集。 */
+        void trackStock(Map<MaterialRef, Long> stock) {
+            stockView = new StockFamilies(stock);
+        }
+
+        void stockChanged(MaterialRef material, long before, long after) {
+            if (stockView != null) stockView.changed(material, before, after);
+        }
+
+        Set<MaterialRef> stockFamilies(Map<MaterialRef, Long> stock, Runnable checkBudget) {
+            return stockIndex(stock, checkBudget).positive.keySet();
+        }
+
+        private StockFamilies stockIndex(Map<MaterialRef, Long> stock, Runnable checkBudget) {
+            StockFamilies index = stockView != null && stockView.stock == stock
+                    ? stockView : new StockFamilies(stock);
+            index.initialize(checkBudget);
+            return index;
+        }
+
+        /** 只索引当前正数变体，不保存足量结论；容量至多为当前库存键数。 */
+        private static final class StockFamilies {
+            private final Map<MaterialRef, Long> stock;
+            private Map<MaterialRef, Set<MaterialRef>> positive;
+
+            private StockFamilies(Map<MaterialRef, Long> stock) { this.stock = stock; }
+
+            private void initialize(Runnable checkBudget) {
+                if (positive == null) {
+                    Map<MaterialRef, Set<MaterialRef>> building = new HashMap<>();
+                    for (var entry : stock.entrySet()) {
+                        checkBudget.run();
+                        if (entry.getValue() != null && entry.getValue() > 0L) {
+                            building.computeIfAbsent(Evaluation.family(entry.getKey()), ignored -> new LinkedHashSet<>())
+                                    .add(entry.getKey());
+                        }
+                    }
+                    positive = building;
+                }
+            }
+
+            private void changed(MaterialRef material, long before, long after) {
+                if (positive == null || (before > 0L) == (after > 0L)) return;
+                MaterialRef family = Evaluation.family(material);
+                if (after > 0L) {
+                    positive.computeIfAbsent(family, ignored -> new LinkedHashSet<>()).add(material);
+                } else {
+                    Set<MaterialRef> variants = positive.get(family);
+                    variants.remove(material);
+                    if (variants.isEmpty()) positive.remove(family);
+                }
+            }
+        }
 
         boolean hasRouteChoices() { return routeChoicesFound; }
 
@@ -240,15 +294,18 @@ final class DeterministicRecipePlanner {
          * 让原搜索处理这些库存竞争，避免在简单但很大的共享图上先遍历整张候选图。
          */
         boolean needsTransitiveRouteProbe(Map<MaterialRef, Long> stock, Runnable chargeWork) {
+            if (activeRouteSpecificInputs.isEmpty()) return false;
+            // 一次预检查共用索引；下次调用重新收集键，纳入补产、扣减和回退后的库存。
+            StockLookup lookup = new StockLookup(stock, chargeWork);
             for (IngredientRef input : activeRouteSpecificInputs) {
                 chargeWork.run();
-                if (stockCanSatisfy(stock, input, input.count(), chargeWork)) continue;
-                if (!hasOneStepStockSource(stock, input, chargeWork)) return true;
+                if (lookup.stockCanSatisfy(input, input.count(), chargeWork)) continue;
+                if (!hasOneStepStockSource(lookup, input, chargeWork)) return true;
             }
             return false;
         }
 
-        private boolean hasOneStepStockSource(Map<MaterialRef, Long> stock, IngredientRef demand,
+        private boolean hasOneStepStockSource(StockLookup stock, IngredientRef demand,
                                               Runnable chargeWork) {
             for (MaterialRef alternative : demand.alternatives()) {
                 chargeWork.run();
@@ -275,7 +332,7 @@ final class DeterministicRecipePlanner {
                             supplied = false;
                             break;
                         }
-                        if (!stockCanSatisfy(stock, input, needed, chargeWork)) {
+                        if (!stock.stockCanSatisfy(input, needed, chargeWork)) {
                             supplied = false;
                             break;
                         }
@@ -286,21 +343,46 @@ final class DeterministicRecipePlanner {
             return false;
         }
 
-        private static boolean stockCanSatisfy(Map<MaterialRef, Long> stock, IngredientRef demand,
-                                               long required, Runnable chargeWork) {
-            long available = 0L;
-            for (Map.Entry<MaterialRef, Long> entry : stock.entrySet()) {
-                chargeWork.run();
-                Long amount = entry.getValue();
-                if (amount == null || amount <= 0L
-                        || !ImmutableRecipeGraphProjector.matchesIngredient(entry.getKey(), demand)) continue;
-                if (Long.MAX_VALUE - available < amount) {
-                    available = Long.MAX_VALUE;
-                    break;
+        /** 仅属于一次只读预检查，保存材料键而非数量或可供给结论。 */
+        static final class StockLookup {
+            private record Resource(ResourceKind kind, ResourceLocation id) {
+                private static Resource of(MaterialRef material) {
+                    return new Resource(material.kind(), material.resourceId());
                 }
-                available += amount;
             }
-            return available >= required;
+
+            private final Map<MaterialRef, Long> stock;
+            private final Map<Resource, List<MaterialRef>> variants = new HashMap<>();
+
+            StockLookup(Map<MaterialRef, Long> stock, Runnable chargeWork) {
+                this.stock = stock;
+                for (MaterialRef material : stock.keySet()) {
+                    chargeWork.run();
+                    variants.computeIfAbsent(Resource.of(material), ignored -> new ArrayList<>()).add(material);
+                }
+            }
+
+            boolean stockCanSatisfy(IngredientRef demand, long required, Runnable chargeWork) {
+                if (required <= 0L) return true;
+                long available = 0L;
+                Set<Resource> visited = new HashSet<>();
+                for (MaterialRef alternative : demand.alternatives()) {
+                    chargeWork.run();
+                    Resource resource = Resource.of(alternative);
+                    // 重叠替代项共享同一族，库存中的每个具体 NBT 变体只能计数一次。
+                    if (!visited.add(resource)) continue;
+                    for (MaterialRef material : variants.getOrDefault(resource, List.of())) {
+                        chargeWork.run();
+                        Long amount = stock.get(material);
+                        if (amount == null || amount <= 0L
+                                || !ImmutableRecipeGraphProjector.matchesIngredient(material, demand)) continue;
+                        // 先比较差额，即保留饱和计数语义，又避免溢出和足量后的多余扫描。
+                        if (amount >= required - available) return true;
+                        available += amount;
+                    }
+                }
+                return false;
+            }
         }
 
         RouteSearch routes(Function<MaterialRef, List<RecipeNode>> order,
@@ -326,22 +408,17 @@ final class DeterministicRecipePlanner {
                 List<MaterialRef> key = roots.stream().map(input -> input.alternatives().get(0))
                         .distinct().toList();
                 Program program = programs.get(key);
+                StockFamilies inventory = stockIndex(stock, checkBudget);
                 Set<MaterialRef> stockBoundaries = null;
                 if (program == null) {
-                    stockBoundaries = new HashSet<>();
-                    for (var entry : stock.entrySet()) {
-                        checkBudget.run();
-                        if (entry.getValue() != null && entry.getValue() > 0L) {
-                            stockBoundaries.add(Evaluation.family(entry.getKey()));
-                        }
-                    }
+                    stockBoundaries = inventory.positive.keySet();
                 }
                 boolean changed = program == null;
                 while (true) {
                     if (program == null) program = compile(key, budget, stockBoundaries);
                     if (program == null) return null;
                     activeRouteSpecificInputs = program.routeSpecificInputs();
-                    Evaluation evaluation = new Evaluation(program, stock, activeOutputs, maxSteps, budget);
+                    Evaluation evaluation = new Evaluation(program, stock, inventory, activeOutputs, maxSteps, budget);
                     Prepared result = evaluation.build(roots, this);
                     if (evaluation.expandStockLeaves.isEmpty()) {
                         if (changed) {
@@ -356,7 +433,7 @@ final class DeterministicRecipePlanner {
                             boundaries.addAll(evaluation.isolateCoProducts);
                             Program isolated = compile(key, budget, program.stockLeaves(), boundaries);
                             if (isolated == null) return null;
-                            evaluation = new Evaluation(isolated, stock, activeOutputs, maxSteps, budget);
+                            evaluation = new Evaluation(isolated, stock, inventory, activeOutputs, maxSteps, budget);
                             result = evaluation.build(roots, this);
                         }
                         return result;
@@ -696,20 +773,30 @@ final class DeterministicRecipePlanner {
         private final Set<MaterialRef> expandStockLeaves = new HashSet<>();
         private Set<MaterialRef> isolateCoProducts = Set.of();
 
-        private Evaluation(Program program, Map<MaterialRef, Long> initial,
+        private Evaluation(Program program, Map<MaterialRef, Long> initial, CompilationCache.StockFamilies inventory,
                            Set<MaterialRef> activeOutputs, int maxSteps, Budget budget) {
             this.program = program;
             this.initial = initial;
             this.activeOutputs = activeOutputs;
             this.maxSteps = Math.max(1, maxSteps);
             this.budget = budget;
-            initial.forEach((material, amount) -> {
-                budget.checkBudget.run();
-                if (amount == null || amount <= 0L) return;
-                MaterialRef family = family(material);
-                variants.computeIfAbsent(family, ignored -> new ArrayList<>()).add(material);
-                familyStock.merge(family, amount, Math::addExact);
-            });
+            // 编译后缀只读取相关族；成员索引跨后缀复用，数量始终从当前库存取得。
+            Set<MaterialRef> candidates = program.nodes().size() < inventory.positive.size()
+                    ? program.nodes().keySet() : inventory.positive.keySet();
+            for (MaterialRef family : candidates) {
+                Set<MaterialRef> stocked = inventory.positive.getOrDefault(family, Set.of());
+                if (!program.nodes().containsKey(family) || stocked.isEmpty()) {
+                    budget.checkBudget.run();
+                    continue;
+                }
+                for (MaterialRef material : stocked) {
+                    budget.checkBudget.run();
+                    long amount = initial.getOrDefault(material, 0L);
+                    if (amount <= 0L) continue;
+                    variants.computeIfAbsent(family, ignored -> new ArrayList<>()).add(material);
+                    familyStock.merge(family, amount, Math::addExact);
+                }
+            }
             // 先使用带标签库存，给同物品的精确无标签需求留下唯一可用的库存。
             variants.values().forEach(items -> items.sort(Comparator
                     .comparing((MaterialRef material) -> material.nbt().isEmpty())
@@ -823,7 +910,12 @@ final class DeterministicRecipePlanner {
                 }
                 return new Prepared(null, List.copyOf(schedule), budget.work);
             }
-            Map<MaterialRef, Long> remaining = new HashMap<>(initial);
+            Map<MaterialRef, Long> remaining = new HashMap<>();
+            // 完整结果仍须保存全部余料；按实际复制工作检查辅助预算，避免更便宜的预检查放大后续快照开销。
+            initial.forEach((material, amount) -> {
+                budget.checkBudget.run();
+                remaining.put(material, amount);
+            });
             List<PlannedStep> plan = new ArrayList<>(steps);
             List<FlowEvent> flow = new ArrayList<>();
             for (Node node : ordered) {

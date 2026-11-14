@@ -5,6 +5,8 @@ import com.huanghuang.rsintegration.mods.slashblade.SlashBladePlanning;
 import com.huanghuang.rsintegration.util.PerformanceMonitor;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.NbtMatchMode;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.TagParser;
 import net.minecraft.resources.ResourceLocation;
@@ -26,6 +28,10 @@ final class PlanningLookupCache {
     // This cache is scoped to one request and is released after planning.
     static final Limits DEFAULT_LIMITS = new Limits(8_192, 4 * 1024 * 1024, 4, 65_536);
     private static volatile SharedNbtCache sharedNbtCache;
+    // 未发布的派生图最多四张，按访问顺序排列；用 == 匹配，不能调用图的值相等比较。
+    private static final List<SharedProducer> SHARED_PRODUCERS = new ArrayList<>();
+    private record SharedProducer(ImmutableRecipeGraph graph, RecipeProducerIndex index) {}
+    private static long producerGeneration;
     private static final ThreadLocal<PlanningLookupCache> CURRENT = new ThreadLocal<>();
     private static final ParsedNbt EMPTY_NBT = new ParsedNbt(null, true);
     private static final ParsedNbt INVALID_NBT = new ParsedNbt(null, false);
@@ -38,8 +44,11 @@ final class PlanningLookupCache {
             new IdentityHashMap<>();
     private final Map<ImmutableRecipeGraph, RecipeProducerIndex>
             producerIndexes = new IdentityHashMap<>();
-    private final Map<ImmutableRecipeGraph.IngredientRef, Map<MaterialRef, Boolean>> ingredientMatches =
-            new IdentityHashMap<>();
+    // 数量、消费角色与递归权限不参与 matchesIngredient；withCount 不应丢掉相同匹配语义。
+    record MatchKey(List<MaterialRef> alternatives, NbtMatchMode mode) {
+        static MatchKey of(IngredientRef ingredient) { return new MatchKey(ingredient.alternatives(), ingredient.nbtMatchMode()); }
+    }
+    private final Map<MatchKey, Map<MaterialRef, Boolean>> ingredientMatches = new HashMap<>();
     private final List<PreparedGraph> preparedGraphs = new ArrayList<>();
     private final Map<PreparationStage, PreparationCounters> preparationCounters =
             new EnumMap<>(PreparationStage.class);
@@ -62,6 +71,9 @@ final class PlanningLookupCache {
     private long reachabilityStateAllocations;
     private long reachabilityNanos;
     private long reachabilityMaxNanos;
+    private long producerIndexBuilds;
+    private long localProbeWork;
+    private long localProbeExhaustions;
 
     private PlanningLookupCache(Limits limits) {
         this.limits = Objects.requireNonNull(limits);
@@ -101,7 +113,33 @@ final class PlanningLookupCache {
                 cache.reachabilitySeedCandidates, cache.reachabilitySeeds,
                 cache.reachabilityIndexedEdges, cache.reachabilityMatchedEdges,
                 cache.reachabilityReachedRecipes, cache.reachabilityStateAllocations,
-                cache.reachabilityNanos, cache.reachabilityMaxNanos);
+                cache.reachabilityNanos, cache.reachabilityMaxNanos,
+                cache.producerIndexBuilds, cache.localProbeWork, cache.localProbeExhaustions);
+    }
+
+    static void recordProducerIndexBuild(long edges) {
+        PlanningLookupCache cache = CURRENT.get();
+        if (cache != null) {
+            cache.producerIndexBuilds++;
+            cache.reachabilityIndexedEdges += edges;
+        }
+    }
+
+    static void recordLocalProbe(long work, boolean exhausted, long nanos) {
+        PlanningLookupCache cache = CURRENT.get();
+        if (cache == null) return;
+        cache.localProbeWork += work;
+        if (exhausted) cache.localProbeExhaustions++;
+        cache.reachabilityNanos += nanos;
+        cache.reachabilityMaxNanos = Math.max(cache.reachabilityMaxNanos, nanos);
+    }
+
+    static void recordPropagation(long edges, long recipes, long allocations) {
+        PlanningLookupCache cache = CURRENT.get();
+        if (cache == null) return;
+        cache.reachabilityMatchedEdges += edges;
+        cache.reachabilityReachedRecipes += recipes;
+        cache.reachabilityStateAllocations += allocations;
     }
 
     static void recordReachability(long seedCandidates, long seeds, long indexedEdges,
@@ -222,7 +260,7 @@ final class PlanningLookupCache {
                                          ImmutableRecipeGraph.IngredientRef ingredient) {
         PlanningLookupCache cache = CURRENT.get();
         if (cache == null) return null;
-        Map<MaterialRef, Boolean> matches = cache.ingredientMatches.get(ingredient);
+        Map<MaterialRef, Boolean> matches = cache.ingredientMatches.get(MatchKey.of(ingredient));
         return matches == null ? null : matches.get(actual);
     }
 
@@ -232,7 +270,7 @@ final class PlanningLookupCache {
         PlanningLookupCache cache = CURRENT.get();
         if (cache == null || cache.cachedIngredientMatches >= cache.limits.maxOutputVariants()) return;
         Map<MaterialRef, Boolean> matches = cache.ingredientMatches.computeIfAbsent(
-                ingredient, ignored -> new HashMap<>());
+                MatchKey.of(ingredient), ignored -> new HashMap<>());
         if (matches.putIfAbsent(actual, result) == null) cache.cachedIngredientMatches++;
     }
 
@@ -288,11 +326,30 @@ final class PlanningLookupCache {
     }
 
     static void publishSharedNbtCache(SharedNbtCache prepared) {
+        clearProducerIndexes();
         sharedNbtCache = prepared;
     }
 
     static void clearSharedNbtCache() {
+        clearProducerIndexes();
         sharedNbtCache = null;
+    }
+
+    private static synchronized void clearProducerIndexes() {
+        producerGeneration++;
+        SHARED_PRODUCERS.clear();
+    }
+
+    /** 调用者持有类锁；容量固定很小，按身份查找并移到最近使用端。 */
+    private static RecipeProducerIndex sharedProducer(ImmutableRecipeGraph graph) {
+        for (int i = 0; i < SHARED_PRODUCERS.size(); i++) {
+            SharedProducer entry = SHARED_PRODUCERS.get(i);
+            if (entry.graph() != graph) continue;
+            SHARED_PRODUCERS.remove(i);
+            SHARED_PRODUCERS.add(entry);
+            return entry.index();
+        }
+        return null;
     }
 
     private static void retainSharedTag(SharedNbtCache cache, String snbt) {
@@ -339,10 +396,42 @@ final class PlanningLookupCache {
         return published != null ? published : producerIndex(graph).outputs(graph, recipeId);
     }
 
-    private static RecipeProducerIndex producerIndex(ImmutableRecipeGraph graph) {
+    static RecipeProducerIndex producerIndex(ImmutableRecipeGraph graph) {
+        return producerIndex(graph, PlanningThreadContext::throwIfCancelled);
+    }
+
+    static RecipeProducerIndex producerIndex(ImmutableRecipeGraph graph, Runnable budgetCheck) {
+        RecipeProducerIndex published = ImmutableRecipeGraphProjector.publishedProducerIndex(graph);
+        if (published != null) return published;
         PlanningLookupCache cache = CURRENT.get();
-        return cache == null ? RecipeProducerIndex.build(graph)
-                : cache.producerIndexes.computeIfAbsent(graph, RecipeProducerIndex::build);
+        RecipeProducerIndex result;
+        long generation;
+        synchronized (PlanningLookupCache.class) {
+            result = sharedProducer(graph);
+            generation = producerGeneration;
+        }
+        // 请求内命中也先触碰共享 LRU；重载后旧请求的局部索引可继续使用，但不重新发布。
+        if (result == null && cache != null && cache.producerIndexes.containsKey(graph)) {
+            return cache.producerIndexes.get(graph);
+        }
+        if (result == null) {
+            // 构建会检查取消并可能协作让出线程，不能持锁阻塞目录失效或其他请求。
+            result = RecipeProducerIndex.build(graph, budgetCheck);
+            synchronized (PlanningLookupCache.class) {
+                if (generation == producerGeneration) {
+                    RecipeProducerIndex concurrent = sharedProducer(graph);
+                    if (concurrent != null) result = concurrent;
+                    else if (graph.recipesByOutput().size() <= DEFAULT_LIMITS.maxOutputVariants()) {
+                        if (SHARED_PRODUCERS.size() >= DEFAULT_LIMITS.maxGraphs()) SHARED_PRODUCERS.remove(0);
+                        SHARED_PRODUCERS.add(new SharedProducer(graph, result));
+                    }
+                }
+            }
+        }
+        if (cache != null && cache.producerIndexes.size() < cache.limits.maxGraphs()) {
+            cache.producerIndexes.put(graph, result);
+        }
+        return result;
     }
 
     private List<MaterialRef> findOutputs(ImmutableRecipeGraph graph, ResourceLocation itemId) {
@@ -421,7 +510,8 @@ final class PlanningLookupCache {
                  long reachabilitySeedCandidates, long reachabilitySeeds,
                  long reachabilityIndexedEdges, long reachabilityMatchedEdges,
                  long reachabilityReachedRecipes, long reachabilityStateAllocations,
-                 long reachabilityNanos, long reachabilityMaxNanos) {}
+                 long reachabilityNanos, long reachabilityMaxNanos,
+                 long producerIndexBuilds, long localProbeWork, long localProbeExhaustions) {}
 
     private record ParsedNbt(CompoundTag tag, boolean valid) {}
 
