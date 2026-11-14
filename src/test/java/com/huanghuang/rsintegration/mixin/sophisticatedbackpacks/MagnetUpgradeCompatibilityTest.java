@@ -16,6 +16,7 @@ import java.util.zip.ZipFile;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class MagnetUpgradeCompatibilityTest {
@@ -37,7 +38,23 @@ class MagnetUpgradeCompatibilityTest {
     void installedCoreHasMatchingHeadAndReturnCallbacks() throws Exception {
         String configured = System.getProperty("rsintegration.sophisticatedcore.compatibilityJar");
         assumeTrue(configured != null && !configured.isBlank());
-        verifyCallbacks(Path.of(configured), 2);
+        verifyCallbacks(Path.of(configured), 0);
+    }
+
+    @Test
+    void insertionContractAcceptsOnlyTheTwoSupportedCompleteDescriptors() {
+        assertEquals(1, supportedArgumentCount("(Lnet/minecraft/world/entity/item/ItemEntity;)Z"));
+        assertEquals(2, supportedArgumentCount("(Lnet/minecraft/world/entity/player/Player;Lnet/minecraft/world/entity/item/ItemEntity;)Z"));
+        assertThrows(AssertionError.class, () -> supportedArgumentCount("(Lnet/minecraft/world/entity/item/ItemEntity;)V"));
+        assertThrows(AssertionError.class, () -> supportedArgumentCount("(Ljava/lang/Object;)Z"));
+        assertThrows(AssertionError.class, () -> supportedArgumentCount("(Lnet/minecraft/world/entity/item/ItemEntity;Lnet/minecraft/world/entity/player/Player;)Z"));
+    }
+
+    private static int supportedArgumentCount(String descriptor) {
+        assertTrue(List.of("(Lnet/minecraft/world/entity/item/ItemEntity;)Z",
+                "(Lnet/minecraft/world/entity/player/Player;Lnet/minecraft/world/entity/item/ItemEntity;)Z")
+                .contains(descriptor), "不支持的完整方法描述符: " + descriptor);
+        return Type.getArgumentTypes(descriptor).length;
     }
 
     private static void verifyCallbacks(Path jarPath, int argumentCount) throws Exception {
@@ -52,7 +69,8 @@ class MagnetUpgradeCompatibilityTest {
                 .filter(method -> method.name.equals("tryToInsertItem")).toList();
         assertEquals(1, insertions.size());
         MethodNode insertion = insertions.get(0);
-        assertEquals(argumentCount, Type.getArgumentTypes(insertion.desc).length);
+        int actualArguments = supportedArgumentCount(insertion.desc);
+        if (argumentCount != 0) assertEquals(argumentCount, actualArguments);
         String callbackDescriptor = insertion.desc.substring(0, insertion.desc.indexOf(')'))
                 + CALLBACK + ")V";
         ClassNode mixin;
