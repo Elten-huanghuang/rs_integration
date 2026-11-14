@@ -18,6 +18,27 @@ import static org.mockito.Mockito.when;
 
 class OutputAccountingTest extends BootstrapTest {
     @Test
+    void receivedOutputsFillRequiredPortsBeforeOptionalAndRetainSurplus() {
+        OutputContract contract = new OutputContract(List.of(
+                new OutputContract.Port("bonus", 0, new ItemStack(Items.IRON_INGOT), 0,
+                        OutputContract.Kind.SECONDARY, OutputContract.Source.SLOT, 0, 2,
+                        OutputProbability.probabilistic(0.25, 4, "bonus"), false, null),
+                new OutputContract.Port("main", 1, new ItemStack(Items.IRON_INGOT), 3,
+                        OutputContract.Kind.PRIMARY, OutputContract.Source.SLOT, 3, 3,
+                        OutputProbability.guaranteed(), false, null)));
+        List<ItemStack> actual = List.of(new ItemStack(Items.IRON_INGOT, 8));
+        var attributed = OutputAccounting.attributeReceived(contract, 1, actual);
+        var settlement = OutputAccounting.assess(contract, 1, attributed);
+        assertTrue(settlement.complete());
+        assertEquals(3, settlement.ports().get(1).actual());
+        assertEquals(2, settlement.ports().get(0).actual());
+        assertEquals(8, actual.get(0).getCount());
+        assertTrue(OutputAccounting.assess(contract, 1,
+                OutputAccounting.attributeReceived(contract, 1,
+                        List.of(new ItemStack(Items.IRON_INGOT, 3)))).complete());
+    }
+
+    @Test
     void guaranteedVariableAmountIsCheckedAtItsLowerBoundInsteadOfItsNominalAmount() {
         OutputContract.Port port = new OutputContract.Port(
                 "main", 0, new ItemStack(Items.DIAMOND), 4,

@@ -126,9 +126,18 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
         completionTargetQuantity = Math.max(0L, quantity);
     }
 
+    private final List<CollectedOutput> deliveredReports = new ArrayList<>();
+
+    List<CollectedOutput> drainDeliveredReports() {
+        List<CollectedOutput> result = List.copyOf(deliveredReports);
+        deliveredReports.clear();
+        return result;
+    }
+
     List<NodeOutputAccumulator.Publication> drainIncrementalOutputs() {
         if (outputs == null) return List.of();
         List<ItemStack> actual = new ArrayList<>(drainSettledResults());
+        if (delegate != null) actual.addAll(delegate.drainReceivedOutputs());
         if (!actual.isEmpty()) {
             waitTicks = 0;
             progressObserved = true;
@@ -139,12 +148,14 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
         }
         List<CollectedOutput> resources = new ArrayList<>(
                 delegate.drainReportedResources());
-        resources.addAll(delegate.drainObservedProduction());
-        if (!resources.isEmpty()) {
+        // 已写回普通网络的报告和仅观察产量都不代表任务私有实物。
+        deliveredReports.addAll(resources);
+        List<CollectedOutput> observed = delegate.drainObservedProduction();
+        if (!resources.isEmpty() || !observed.isEmpty()) {
             waitTicks = 0;
             progressObserved = true;
         }
-        return outputs.add(actual, resources);
+        return outputs.add(actual);
     }
 
     boolean consumeProgressSignal() {
@@ -511,6 +522,10 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
         if (terminal) return;
         terminal = true;
         if (delegate != null) {
+            delegate.closeOutputReception();
+            if (virtualInventory != null) virtualInventory.addAll(delegate.drainReceivedOutputs());
+        }
+        if (delegate != null) {
             boolean recoverReusable = !reusableMaterialsRecovered && player != null;
             if (recoverReusable) reusableMaterialsRecovered = true;
             runFailureCleanup(recoverReusable,
@@ -528,6 +543,7 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
                         }
                     });
         }
+        drainSettledIntoVirtual();
         disarmCapture();
     }
 
@@ -584,6 +600,12 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
         List<ItemStack> captured = disarmCapture();
         ItemStack expectedWorldOutput = delegate == null ? null : delegate.getExpectedOutput();
         List<ItemStack> results = collectResults(player);
+        if (delegate != null) {
+            delegate.closeOutputReception();
+            List<ItemStack> collected = new ArrayList<>(results);
+            collected.addAll(delegate.drainReceivedOutputs());
+            results = collected;
+        }
         confirmedOutputs = OutputAccounting.mergeLegacyOutputs(
                 captured, results, expectedWorldOutput);
         if (delegate != null) {

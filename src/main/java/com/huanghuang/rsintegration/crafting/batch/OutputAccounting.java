@@ -140,4 +140,31 @@ public final class OutputAccounting {
         byPort.values().forEach(unexpected::addAll);
         return new Settlement(settlements, unexpected);
     }
+
+    /** 旧串行入口只在最终结算时取走私有收货；按同一合同分配，不重新生成实物。 */
+    public static List<CollectedOutput> attributeReceived(OutputContract contract, long operations,
+                                                         List<ItemStack> received) {
+        List<ItemStack> remaining = new ArrayList<>();
+        for (ItemStack stack : received) if (!stack.isEmpty()) remaining.add(stack.copy());
+        List<CollectedOutput> result = new ArrayList<>();
+        Map<String, Long> assigned = new LinkedHashMap<>();
+        for (int pass = 0; pass < 2; pass++) {
+            for (OutputContract.Port port : contract.ports()) {
+                long limit = pass == 0 ? port.guaranteedCount(operations) : port.maximumCount(operations);
+                long needed = limit - assigned.getOrDefault(port.portId(), 0L);
+                for (ItemStack stack : remaining) {
+                    if (needed <= 0) break;
+                    if (stack.isEmpty() || !MaterialMatcher.matchesOutputDeclaration(
+                            MaterialKey.of(port.prototype()), stack)) continue;
+                    int take = (int) Math.min(needed, stack.getCount());
+                    result.add(new CollectedOutput(port.portId(), port.source(), stack.copyWithCount(take)));
+                    stack.shrink(take);
+                    assigned.merge(port.portId(), (long) take, Math::addExact);
+                    needed -= take;
+                }
+            }
+        }
+        // 这里只核对合同份额。余量仍由调用方的原始实物列表持有并交付，不能判为短缺。
+        return List.copyOf(result);
+    }
 }

@@ -1,5 +1,9 @@
 package com.huanghuang.rsintegration.crafting.external;
 
+import com.huanghuang.rsintegration.crafting.TaskOutputReception;
+import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import net.minecraftforge.fluids.capability.templates.FluidTank;
+
 import com.huanghuang.rsintegration.api.DefaultRSIIntegrationApi;
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.api.RegistrationOptions;
@@ -121,6 +125,101 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
+    @Test
+    void standardMachinePublishesPartialCollectionsAndWaitsForMachineCompletion() throws Exception {
+        ResourceLocation recipeId = resource("received_recipe");
+        ResourceLocation processId = resource("received_process");
+        RecipeView base = recipeView(recipeId, processId);
+        OutputDeclaration output = new OutputDeclaration(resource("output"), "output",
+                IntegrationResourceKey.item(new ItemStack(Items.STICK)), OutputAmount.exactly(8),
+                OutputKind.PRIMARY, OutputProbability.guaranteed(), false, false, null);
+        RecipeView view = new RecipeView(recipeId, processId, base.materials(), List.of(), List.of(output), base.flags());
+        DefaultRSIIntegrationApi api = new DefaultRSIIntegrationApi();
+        ItemStackHandler inventory = new ItemStackHandler(3);
+        StubMachineIntegration machine = new StubMachineIntegration(processId).withInternalItemHandler(inventory);
+        AtomicReference<MachineState> state = new AtomicReference<>(
+                new MachineState(true, true, false, 0, 0, null, null, 1, null));
+        machine.stateProvider = (context, entity) -> state.get();
+        api.beginRegistration();
+        api.registerRecipe(new StubRecipeIntegration(view), new RegistrationOptions(10, Map.of()));
+        api.registerMachine(machine, new RegistrationOptions(10, Map.of()));
+        api.freezeRegistration();
+        ServerLevel level = mock(ServerLevel.class);
+        ServerPlayer player = mock(ServerPlayer.class);
+        MinecraftServer server = mock(MinecraftServer.class);
+        BlockEntity entity = mock(BlockEntity.class);
+        when(level.hasChunkAt(BlockPos.ZERO)).thenReturn(true);
+        when(level.getBlockEntity(BlockPos.ZERO)).thenReturn(entity);
+        when(level.registryAccess()).thenReturn(RegistryAccess.EMPTY);
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        when(player.level()).thenReturn(level);
+        setServer(player, server);
+        Recipe<?> recipe = mock(Recipe.class);
+        when(recipe.getId()).thenReturn(recipeId);
+        RecipeManager recipes = mock(RecipeManager.class);
+        doReturn(Optional.of(recipe)).when(recipes).byKey(recipeId);
+        when(level.getRecipeManager()).thenReturn(recipes);
+        ExternalIntegrationBatchDelegate delegate = new ExternalIntegrationBatchDelegate(api);
+        assertEquals(IBatchDelegate.PreparationState.READY, delegate.prepare(player, recipeId, null, BlockPos.ZERO).state());
+        try (var session = TaskOutputReception.open()) {
+            delegate.setOutputReception(session);
+            assertTrue(delegate.startPreparedOperation(player, List.of(new ItemStack(Items.DIAMOND, 2)), new ExtractionLedger()));
+            state.set(new MachineState(true, true, true, 1, 10, recipeId, processId, 2, null));
+            inventory.setStackInSlot(1, new ItemStack(Items.STICK, 5));
+            assertEquals(IBatchDelegate.CraftPhase.WORKING, delegate.observeCraft(level).phase());
+            assertEquals(5, delegate.drainReceivedOutputs().stream().mapToInt(ItemStack::getCount).sum());
+            inventory.setStackInSlot(1, new ItemStack(Items.STICK, 3));
+            assertEquals(IBatchDelegate.CraftPhase.WORKING, delegate.observeCraft(level).phase());
+            assertEquals(3, delegate.drainReceivedOutputs().stream().mapToInt(ItemStack::getCount).sum());
+            assertTrue(inventory.getStackInSlot(1).isEmpty());
+            inventory.setStackInSlot(0, ItemStack.EMPTY);
+            state.set(new MachineState(true, true, false, 0, 0, null, null, 3, null));
+            assertEquals(IBatchDelegate.CraftPhase.DONE, delegate.observeCraft(level).phase());
+            assertTrue(delegate.collectAllResults(player).isEmpty());
+            assertTrue(delegate.drainReceivedOutputs().isEmpty());
+        }
+    }
+
+    @Test
+    void fluidSampleOwnsOnlyActuallyDrainedFluidAcrossPartialCollections() throws Exception {
+        FluidTank tank = new FluidTank(1000);
+        tank.setFluid(new FluidStack(Fluids.WATER, 400));
+        ExternalIntegrationBatchDelegate delegate = fluidDelegate(tank);
+        RecipeView base = recipeView(resource("fluid_reception"), resource("fluid_process"));
+        var water = IntegrationResourceKey.fluid(new FluidStack(Fluids.WATER, 1));
+        OutputDeclaration output = new OutputDeclaration(resource("water"), "fluids", water,
+                OutputAmount.exactly(1000), OutputKind.PRIMARY, OutputProbability.guaranteed(), false, false, null);
+        setField(delegate, "recipeView", new RecipeView(base.recipeId(), base.processId(), List.of(), List.of(),
+                List.of(output), base.flags()));
+        MachineDescriptor descriptor = mock(MachineDescriptor.class);
+        when(descriptor.fluidPorts()).thenReturn(List.of(new MachineFluidPort("water", 0, Direction.NORTH,
+                InputOutputAccess.OUTPUT, FluidPortAccess.FLUID_HANDLER, null, "fluids", 1000)));
+        setField(delegate, "descriptor", descriptor);
+        try (var session = TaskOutputReception.open()) {
+            delegate.setOutputReception(session);
+            var batch = session.prepare(List.of(new TaskOutputReception.Demand("water", water, 1000, 1000)));
+            batch.activate();
+            Field field = AbstractBatchDelegate.class.getDeclaredField("outputBatch");
+            field.setAccessible(true);
+            field.set(delegate, batch);
+            Method collect = ExternalIntegrationBatchDelegate.class.getDeclaredMethod(
+                    "collectReceptionOutputs", ServerPlayer.class);
+            collect.setAccessible(true);
+            collect.invoke(delegate, mock(ServerPlayer.class));
+            assertEquals(0, tank.getFluidAmount());
+            assertEquals(400, session.drain().get(0).amount());
+            assertFalse(batch.complete());
+            tank.setFluid(new FluidStack(Fluids.WATER, 600));
+            collect.invoke(delegate, mock(ServerPlayer.class));
+            assertEquals(0, tank.getFluidAmount());
+            assertEquals(600, session.drain().get(0).amount());
+            assertTrue(batch.complete());
+            assertTrue(delegate.drainReportedResources().isEmpty());
+            assertTrue(delegate.collectAllResults(mock(ServerPlayer.class)).isEmpty());
+            assertTrue(session.drain().isEmpty());
+        }
+    }
+
     @Test
     void selectedWaterTankNeverUsesUntypedDrainAndKeepsNbtOnPartialExtraction() throws Exception {
         IFluidHandler handler = mock(IFluidHandler.class);

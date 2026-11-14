@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
+import com.huanghuang.rsintegration.crafting.TaskOutputReception;
+
 import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.api.execution.CollectedOutput;
@@ -527,6 +529,23 @@ public interface IBatchDelegate {
     @Nonnull
     default List<CollectedOutput> drainObservedProduction() {
         return List.of();
+    }
+
+    /** 仅完成批次、实际提取及清理适配的执行器才启用公共产物持有。 */
+    default boolean supportsOutputReception() { return false; }
+
+    @Nullable
+    default TaskOutputReception.Session outputReception() { return null; }
+
+    /** 接收器已持有的真实资源。取走后不得在最终收取中再次返回。 */
+    default List<ItemStack> drainReceivedOutputs() {
+        TaskOutputReception.Session reception = outputReception();
+        return reception == null ? List.of() : reception.drainStacks();
+    }
+
+    default void closeOutputReception() {
+        TaskOutputReception.Session reception = outputReception();
+        if (reception != null) reception.close();
     }
 
     /** 直接资源交付失败时返回稳定详情，使订单不能伪装成成功。 */

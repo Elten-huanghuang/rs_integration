@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.ironfurnaces;
 
+import com.huanghuang.rsintegration.crafting.TaskOutputReception;
+
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -49,6 +51,30 @@ import java.util.Map;
 
 /** Batch delegate for Iron Furnaces ordinary furnace mode. */
 public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
+    private int receptionIdleTicks;
+
+    @Override public boolean supportsOutputReception() { return true; }
+
+    private void prepareFurnaceOutputBatch(int operations) {
+        receptionIdleTicks = 0;
+        ItemStack result = recipe.getResultItem(level.registryAccess());
+        long amount = expectedOutputCount(operations);
+        prepareOutputBatch(List.of(new TaskOutputReception.Demand("result",
+                TaskOutputReception.resource(result), amount, amount)));
+    }
+
+    /** 收取产物后仍须确认机器安全结束；连续观察空闲以覆盖铁炉延后一 tick 出槽。 */
+    private boolean receivedAndPhysicallyIdle(BlockIronFurnaceTileBase current) {
+        boolean idle = true;
+        if (factoryMode) {
+            for (int lane = 0; lane < FACTORY_INPUT.length; lane++) {
+                if (!ownedFactoryLanes[lane] || initialFactoryInputCounts[lane] <= 0) continue;
+                idle &= current.getItem(FACTORY_INPUT[lane]).isEmpty() && current.factoryCookTime[lane] <= 0;
+            }
+        } else idle = current.getItem(INPUT).isEmpty() && current.cookTime <= 0;
+        receptionIdleTicks = idle ? Math.min(2, receptionIdleTicks + 1) : 0;
+        return outputBatch != null && outputBatch.complete() && receptionIdleTicks >= 2;
+    }
 
     @Override
     public BatchConcurrencyCapabilities concurrencyCapabilities() {
@@ -473,6 +499,7 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
                     queuedMaterial, operations, laneCapacity, !rainbowMode,
                     ownedFactoryLanes, available);
             if (layout == null) return false;
+            prepareFurnaceOutputBatch(operations);
             for (IronFactoryLanePlan.Lane lane : layout.lanes()) {
                 furnace.setItem(lane.inputSlot(), lane.input());
                 initialFactoryInputCounts[lane.index()] = lane.input().getCount();
@@ -490,6 +517,7 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
                     layout.lanes().stream().map(lane -> lane.input().getCount()).toList());
         } else {
             if (!evacuateIdleFurnaceSlots()) return false;
+            prepareFurnaceOutputBatch(operations);
             ItemStack placed = queuedMaterial.copyWithCount(operations);
             furnace.setItem(INPUT, placed);
             inputPlaced = true;
@@ -498,6 +526,7 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
 
         queuedOperations -= operations;
         activePhysicalOperations = operations;
+        activateOutputBatch();
         furnace.setChanged();
         level.sendBlockUpdated(pos, level.getBlockState(pos), level.getBlockState(pos), 3);
         observedWorking = false;
@@ -660,9 +689,12 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
             RSIntegrationMod.debug(
                     "[RSI-IronFurnaces] factory observation pos={} expectedTotal={} capturedTotal={} allLanesDone={} working={} queued={}",
                     pos, expectedTotal, capturedTotal, allDone, observedWorking, queuedOperations);
-            if (!observedWorking || (!allDone && !aggregateDone)) return workingObservation();
+            boolean complete = outputBatch != null ? receivedAndPhysicallyIdle(current)
+                    : allDone || aggregateDone;
+            if (!observedWorking || !complete) return workingObservation();
             if (queuedOperations <= 0) return doneObservation();
             drainActivePhysicalResults(current, completedBatchResults);
+            finishOutputBatch();
             clearActivePhysicalState();
             return startNextPhysicalBatch()
                     ? workingObservation()
@@ -694,10 +726,20 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
         // Furnaces: the machine can clear the input and publish the result on
         // the following tick. Require the actual output stack so the progress
         // panel cannot finish and collect before the product exists.
-        boolean physicalDone = output.getCount() >= expectedOutputCount(activePhysicalOperations);
+        boolean physicalDone;
+        if (outputBatch != null) {
+            if (!output.isEmpty()) {
+                ItemStack actual = output.copy();
+                current.setItem(OUTPUT, ItemStack.EMPTY);
+                receiveDirectOutput(actual, completedBatchResults);
+                current.setChanged();
+            }
+            physicalDone = receivedAndPhysicallyIdle(current);
+        } else physicalDone = output.getCount() >= expectedOutputCount(activePhysicalOperations);
         if (!physicalDone) return workingObservation();
         if (queuedOperations <= 0) return doneObservation();
         drainActivePhysicalResults(current, completedBatchResults);
+        finishOutputBatch();
         clearActivePhysicalState();
         return startNextPhysicalBatch()
                 ? workingObservation()
@@ -732,6 +774,7 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
         for (ItemStack result : completedBatchResults) results.add(result.copy());
         completedBatchResults.clear();
         drainActivePhysicalResults(furnace, results);
+        finishOutputBatch();
         return results;
     }
 
@@ -742,32 +785,17 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
             captureFactoryOutputs(current, destination);
             for (int lane = 0; lane < FACTORY_INPUT.length; lane++) {
                 if (!ownedFactoryLanes[lane] || initialFactoryInputCounts[lane] <= 0) continue;
-                // Lane ownership is the authoritative boundary. Do not gate
-                // collection on expectedFactoryOutputCounts: that counter is
-                // preparation state and may already be cleared after a lane
-                // completed, while Iron Furnaces still has its real output in
-                // the corresponding slot.
                 int inputSlot = FACTORY_INPUT[lane];
-                ItemStack result = current.getItem(inputSlot + 6).copy();
-                if (!result.isEmpty()) {
-                    destination.add(result);
-                    RSIntegrationMod.debug("[RSI-IronFurnaces] collected factory output lane={} slot={} count={}",
-                            lane, inputSlot + 6, result.getCount());
-                }
                 if (!current.getItem(inputSlot).isEmpty()) {
                     current.setItem(inputSlot, ItemStack.EMPTY);
-                    changed = true;
-                }
-                if (!current.getItem(inputSlot + 6).isEmpty()) {
-                    current.setItem(inputSlot + 6, ItemStack.EMPTY);
                     changed = true;
                 }
             }
         } else {
             ItemStack result = current.getItem(OUTPUT).copy();
-            if (!result.isEmpty()) destination.add(result);
             if (!current.getItem(INPUT).isEmpty()) current.setItem(INPUT, ItemStack.EMPTY);
             if (!current.getItem(OUTPUT).isEmpty()) current.setItem(OUTPUT, ItemStack.EMPTY);
+            receiveDirectOutput(result, destination);
             changed = true;
         }
         if (changed) {
@@ -782,16 +810,17 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
                                        List<ItemStack> destination) {
         boolean changed = false;
         for (int lane = 0; lane < FACTORY_INPUT.length; lane++) {
-            if (!ownedFactoryLanes[lane] || expectedFactoryOutputCounts[lane] <= 0) continue;
+            // 通道所有权和实际投料决定收取范围，不能因预期计数已清零而漏掉迟到产物。
+            if (!ownedFactoryLanes[lane] || initialFactoryInputCounts[lane] <= 0) continue;
             int outputSlot = FACTORY_INPUT[lane] + 6;
             ItemStack output = current.getItem(outputSlot);
             if (output.isEmpty()) continue;
             ItemStack captured = output.copy();
-            destination.add(captured);
             capturedFactoryOutputCounts[lane] += captured.getCount();
             RSIntegrationMod.debug("[RSI-IronFurnaces] captured factory output lane={} slot={} count={}",
                     lane, outputSlot, captured.getCount());
             current.setItem(outputSlot, ItemStack.EMPTY);
+            receiveDirectOutput(captured, destination);
             changed = true;
         }
         if (changed) {

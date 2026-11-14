@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.loadbalancer;
 
 import com.huanghuang.rsintegration.crafting.progress.MachineCycleProgress;
+import com.huanghuang.rsintegration.crafting.TaskOutputReception;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 
 import com.huanghuang.rsintegration.crafting.progress.CraftMaterialView;
@@ -1230,7 +1231,9 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         }
 
         ExpectedProduction expected = worker.delegate.getExpectedProduction();
-        if (expected != null && countMatching(actual, expected) < expected.count()) {
+        long received = worker.delegate.outputReception() == null || expected == null ? 0L
+                : worker.delegate.outputReception().received(TaskOutputReception.resource(expected.item()));
+        if (expected != null && received + countMatching(actual, expected) < expected.count()) {
             // DONE proves the inputs were consumed. Preserve the residual output and
             // settle this token so an externally extracted result cannot pair with a refund.
             settledResults.addAll(StackCopies.excludingEmpty(actual));
@@ -1291,8 +1294,19 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     }
 
     private void drainWorkerResources(WorkerSlot worker) {
+        drainWorkerReception(worker);
         reportedResources.addAll(worker.delegate.drainReportedResources());
         observedProduction.addAll(worker.delegate.drainObservedProduction());
+    }
+
+    private void drainWorkerReception(WorkerSlot worker) {
+        if (worker.delegate == null) return;
+        List<ItemStack> received = worker.delegate.drainReceivedOutputs();
+        if (received.isEmpty()) return;
+        settledResults.addAll(received);
+        productionSequence++;
+        workProgressSequence++;
+        lastProgressTick = currentTick;
     }
 
     @Override
@@ -2004,6 +2018,10 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     }
 
     private void closeOperationResources(WorkerSlot worker) {
+        if (worker.delegate != null) {
+            worker.delegate.closeOutputReception();
+            drainWorkerReception(worker);
+        }
         OperationExecutionKernel.Session session = worker.operationSession;
         worker.operationSession = null;
         if (session != null) session.close();

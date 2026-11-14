@@ -87,6 +87,81 @@ import static org.mockito.Mockito.anyInt;
 
 class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
     @Test
+    void cancellationRecoversUndrainedCollectedResourcesOnceAndClosesHolding() {
+        var resource = TaskOutputReception.resource(new ItemStack(Items.DIAMOND));
+        List<ItemStack> recovered = new ArrayList<>();
+        try (var session = TaskOutputReception.open()) {
+            ModType type = ModType.register("test_received_output_cancel", new String[0], new String[0],
+                    new String[0], () -> new BufferedDelegate() {
+                        @Override public boolean startOperation(OperationStartContext context) {
+                            session.prepare(List.of(new TaskOutputReception.Demand("out", resource, 8, 8))).activate();
+                            return true;
+                        }
+                        @Override public TaskOutputReception.Session outputReception() { return session; }
+                        @Override public ItemStack getExpectedOutput() { return null; }
+                        @Override public AABB getOutputCaptureRegion() { return null; }
+                    });
+            BoundMachine machine = new BoundMachine(Level.OVERWORLD.location(), BlockPos.ZERO, type, "test");
+            ParallelCraftGroup group = new ParallelCraftGroup(List.of(machine), type,
+                    new ResourceLocation("test", "received_output_cancel"), player, 1);
+            startGroup(group);
+            CraftNodeRuntime runtime = runtime(group);
+            runtime.setChainContext(recovered, player);
+            assertEquals(5, session.current().collect(resource, 5));
+            runtime.cleanupFailure();
+            assertEquals(5, recovered.stream().mapToInt(ItemStack::getCount).sum());
+            runtime.cleanupFailure();
+            assertEquals(5, recovered.stream().mapToInt(ItemStack::getCount).sum());
+            assertTrue(session.closed());
+        }
+    }
+
+    @Test
+    void partialCollectionsPublishIncrementallyOnceAndDoNotFinishABusyWorker() {
+        var resource = TaskOutputReception.resource(new ItemStack(Items.DIAMOND));
+        AtomicBoolean finished = new AtomicBoolean();
+        try (var session = TaskOutputReception.open()) {
+            ModType type = ModType.register("test_received_output_progress", new String[0], new String[0],
+                    new String[0], () -> new BufferedDelegate() {
+                        @Override public boolean startOperation(OperationStartContext context) {
+                            session.prepare(List.of(new TaskOutputReception.Demand("out", resource, 8, 8))).activate();
+                            return true;
+                        }
+                        @Override public TaskOutputReception.Session outputReception() { return session; }
+                        @Override public ItemStack getExpectedOutput() { return null; }
+                        @Override public AABB getOutputCaptureRegion() { return null; }
+                        @Override public boolean isCraftComplete(ServerLevel current) { return finished.get(); }
+                    });
+            BoundMachine machine = new BoundMachine(Level.OVERWORLD.location(), BlockPos.ZERO, type, "test");
+            ParallelCraftGroup group = new ParallelCraftGroup(List.of(machine), type,
+                    new ResourceLocation("test", "received_output_progress"), player, 1);
+            startGroup(group);
+            CraftNodeRuntime runtime = runtime(group);
+            runtime.attachOutputs(new NodeOutputAccumulator(List.of(OutputDeclaration.item(
+                    new OutputPortId(new NodeId(0), 0), MaterialKey.of(new ItemStack(Items.DIAMOND)),
+                    8, OutputKind.PRIMARY))));
+            assertEquals(5, session.current().collect(resource, 5));
+            tick.incrementAndGet();
+            assertEquals(ConcurrentNodeExecutor.Observation.WORKING, runtime.observe());
+            assertEquals(5, runtime.drainIncrementalOutputs().stream()
+                    .mapToInt(output -> output.stack().getCount()).sum());
+            session.current().collect(resource, 3);
+            tick.incrementAndGet();
+            assertEquals(ConcurrentNodeExecutor.Observation.WORKING, runtime.observe());
+            assertEquals(3, runtime.drainIncrementalOutputs().stream()
+                    .mapToInt(output -> output.stack().getCount()).sum());
+            assertEquals(0, group.getCompletedOperations());
+            finished.set(true);
+            tick.incrementAndGet();
+            assertEquals(ConcurrentNodeExecutor.Observation.SUCCEEDED, runtime.observe());
+            assertEquals(1, group.getCompletedOperations());
+            assertTrue(runtime.drainIncrementalOutputs().isEmpty());
+            assertTrue(runtime.outputsComplete());
+            assertTrue(session.closed());
+        }
+    }
+
+    @Test
     void malumRuntimeNbtCaptureSettlesAndStartsTheNextReservedOperation() {
         ModType type = ModType.register("test_malum_runtime_nbt_capture",
                 new String[0], new String[0], new String[0], () -> new BufferedDelegate() {

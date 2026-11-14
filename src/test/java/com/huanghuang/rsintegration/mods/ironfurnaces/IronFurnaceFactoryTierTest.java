@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.ironfurnaces;
 
+import com.huanghuang.rsintegration.crafting.TaskOutputReception;
+
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
@@ -241,6 +243,7 @@ class IronFurnaceFactoryTierTest extends BootstrapTest {
 
     private static Fixture fixture(int tier) throws ReflectiveOperationException {
         BlockIronFurnaceTileBase furnace = mock(BlockIronFurnaceTileBase.class);
+        furnace.factoryCookTime = new int[6];
         furnace.recipeType = RecipeType.SMELTING;
         when(furnace.getTier()).thenReturn(tier);
         when(furnace.isFactory()).thenReturn(true);
@@ -276,6 +279,65 @@ class IronFurnaceFactoryTierTest extends BootstrapTest {
         set(delegate, "recipe", smelting);
         set(delegate, "factoryLeaseKey", IronFurnaceFactoryLeases.key(level, BlockPos.ZERO));
         return new Fixture(delegate, items, written);
+    }
+
+    @Test
+    void collectedOutputCannotFinishRunningFactoryAndNextPhysicalBatchGetsANewIdentity() throws Exception {
+        Fixture fixture = fixture(2);
+        var furnace = (BlockIronFurnaceTileBase) get(fixture.delegate, "furnace");
+        // 限制每通道容量为一，明确让七次加工跨越六通道的两个物理批次。
+        when(furnace.getMaxStackSize()).thenReturn(1);
+        var level = (ServerLevel) get(fixture.delegate, "level");
+        try (var session = TaskOutputReception.open()) {
+            fixture.delegate.setOutputReception(session);
+            set(fixture.delegate, "queuedMaterial", new ItemStack(Items.IRON_ORE));
+            set(fixture.delegate, "queuedOperations", 7);
+            assertTrue(startNextBatch(fixture.delegate));
+            var first = session.current();
+            for (int slot = 13; slot < 19; slot++) fixture.items[slot] = new ItemStack(Items.IRON_INGOT);
+            assertEquals(CraftPhase.WORKING, fixture.delegate.observeMachineCraft(level, furnace).phase());
+            assertEquals(6, session.current().received("result"));
+            assertEquals(first, session.current());
+            assertEquals(1, get(fixture.delegate, "queuedOperations"));
+            Arrays.fill(fixture.items, 7, 13, ItemStack.EMPTY);
+            assertEquals(CraftPhase.WORKING, fixture.delegate.observeMachineCraft(level, furnace).phase());
+            assertEquals(CraftPhase.WORKING, fixture.delegate.observeMachineCraft(level, furnace).phase());
+            assertFalse(first == session.current());
+            assertEquals(0, session.current().received("result"));
+            assertEquals(0, get(fixture.delegate, "queuedOperations"));
+            // 第二批由机器直接给货；第一批已经发布的资源不再进入最终收取。
+            assertEquals(6, fixture.delegate.drainReceivedOutputs().get(0).getCount());
+            fixture.items[7] = ItemStack.EMPTY;
+            fixture.items[13] = new ItemStack(Items.IRON_INGOT);
+            assertEquals(CraftPhase.WORKING, fixture.delegate.observeMachineCraft(level, furnace).phase());
+            assertEquals(CraftPhase.DONE, fixture.delegate.observeMachineCraft(level, furnace).phase());
+            assertTrue(fixture.delegate.collectAllResults(mock(ServerPlayer.class)).isEmpty());
+            assertEquals(1, fixture.delegate.drainReceivedOutputs().get(0).getCount());
+            assertTrue(fixture.delegate.drainReceivedOutputs().isEmpty());
+        }
+    }
+
+    @Test
+    void partialFactoryOutputUsesOnePhysicalBatchQuota() throws Exception {
+        Fixture fixture = fixture(2);
+        var furnace = (BlockIronFurnaceTileBase) get(fixture.delegate, "furnace");
+        var level = (ServerLevel) get(fixture.delegate, "level");
+        try (var session = TaskOutputReception.open()) {
+            fixture.delegate.setOutputReception(session);
+            set(fixture.delegate, "rainbowMode", true);
+            set(fixture.delegate, "queuedMaterial", new ItemStack(Items.IRON_ORE));
+            set(fixture.delegate, "queuedOperations", 8);
+            assertTrue(startNextBatch(fixture.delegate));
+            fixture.items[13] = new ItemStack(Items.IRON_INGOT, 5);
+            assertEquals(CraftPhase.WORKING, fixture.delegate.observeMachineCraft(level, furnace).phase());
+            assertEquals(5, fixture.delegate.drainReceivedOutputs().get(0).getCount());
+            fixture.items[7] = ItemStack.EMPTY;
+            fixture.items[13] = new ItemStack(Items.IRON_INGOT, 3);
+            assertEquals(CraftPhase.WORKING, fixture.delegate.observeMachineCraft(level, furnace).phase());
+            assertEquals(CraftPhase.DONE, fixture.delegate.observeMachineCraft(level, furnace).phase());
+            assertTrue(fixture.delegate.collectAllResults(mock(ServerPlayer.class)).isEmpty());
+            assertEquals(3, fixture.delegate.drainReceivedOutputs().stream().mapToInt(ItemStack::getCount).sum());
+        }
     }
 
     private static IronFurnaceBatchProfile profile(IronFurnacesBatchDelegate delegate)

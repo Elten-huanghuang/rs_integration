@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.mods.vanilla;
 
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.TaskOutputReception;
+import com.huanghuang.rsintegration.mods.ironfurnaces.IronFurnacesBatchDelegate;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
@@ -26,6 +28,26 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class CookingMachineRecoveryTest extends BootstrapTest {
+    @Test
+    void receptionContextIsForwardedAndSurvivesDiscardingTheChild() throws Exception {
+        CookingMachineBatchDelegate wrapper = new CookingMachineBatchDelegate();
+        IronFurnacesBatchDelegate child = new IronFurnacesBatchDelegate();
+        childField().set(wrapper, child);
+        var iron = TaskOutputReception.resource(new ItemStack(Items.IRON_INGOT));
+        try (var session = TaskOutputReception.open()) {
+            wrapper.setOutputReception(session);
+            assertSame(session, child.outputReception());
+            session.prepare(List.of(new TaskOutputReception.Demand("out", iron, 8, 8))).activate();
+            assertEquals(3, session.current().collect(iron, 3));
+            wrapper.clearMachineState(mock(BlockEntity.class), null);
+            assertNull(childField().get(wrapper));
+            assertSame(session, wrapper.outputReception());
+            assertEquals(3, wrapper.drainReceivedOutputs().get(0).getCount());
+            assertTrue(wrapper.drainReceivedOutputs().isEmpty());
+            assertTrue(session.closed());
+        }
+    }
+
     @Test
     void finishedWrapperStillCollectsAndReleasesChildReusableMaterials() throws Exception {
         CookingMachineBatchDelegate wrapper = new CookingMachineBatchDelegate();

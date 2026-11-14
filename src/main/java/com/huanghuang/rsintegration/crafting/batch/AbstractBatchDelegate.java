@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
+import com.huanghuang.rsintegration.crafting.TaskOutputReception;
+
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.crafting.MaterialMatcher;
 import com.huanghuang.rsintegration.crafting.progress.MachineCycleProgress;
@@ -11,7 +13,6 @@ import net.minecraft.world.item.ItemStack;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
-import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.util.ForcedChunkTicketManager;
 import com.huanghuang.rsintegration.magic.MagicResourceTaskReservation;
 import net.minecraft.core.BlockPos;
@@ -50,6 +51,39 @@ import java.util.function.Supplier;
  * via a {@link HashSet} of seen state keys, cleared on {@link #resetState()}.</p>
  */
 public abstract class AbstractBatchDelegate implements IBatchDelegate {
+
+    @Nullable private TaskOutputReception.Session outputReception;
+    @Nullable protected TaskOutputReception.Batch outputBatch;
+
+    @Override
+    @Nullable public TaskOutputReception.Session outputReception() { return outputReception; }
+
+    /** 可供受控执行入口注入上下文；包装 delegate 应将它转发给实际执行器。 */
+    public void setOutputReception(@Nullable TaskOutputReception.Session reception) {
+        if (outputReception != null && outputReception != reception) {
+            throw new IllegalStateException("不能替换已有收货上下文");
+        }
+        outputReception = reception;
+    }
+
+    protected final void prepareOutputBatch(List<TaskOutputReception.Demand> demands) {
+        if (outputReception != null) outputBatch = outputReception.prepare(demands);
+    }
+
+    protected final void activateOutputBatch() {
+        if (outputBatch != null) outputBatch.activate();
+    }
+
+    protected final void finishOutputBatch() {
+        if (outputBatch != null) outputBatch.close();
+    }
+
+    /** 调用前必须已实际取出；超额实物也由统一持有层保留。 */
+    protected final void receiveDirectOutput(ItemStack actual, List<ItemStack> legacyResults) {
+        if (actual == null || actual.isEmpty()) return;
+        if (outputBatch == null) legacyResults.add(actual.copy());
+        else outputBatch.collect(TaskOutputReception.resource(actual), actual.getCount());
+    }
 
     protected ExtractionLedger ledger;
     protected ExtractionLedger sharedLedger;
@@ -123,7 +157,17 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
     public final boolean startOperation(@Nonnull OperationStartContext context) {
         Objects.requireNonNull(context, "context");
         if (context.repeatedOperationPlan() != null) return false;
-        return startOperationImpl(context);
+        if (supportsOutputReception() && outputReception() == null) {
+            setOutputReception(TaskOutputReception.open());
+        }
+        boolean accepted = false;
+        try {
+            accepted = startOperationImpl(context);
+            return accepted;
+        } finally {
+            // 同步产出已被接收时，失败只能关闭资格，不能销毁已持有资源。
+            if (!accepted) closeOutputReception();
+        }
     }
 
     /**
@@ -286,6 +330,7 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
      */
     @Override
     public final void onBatchFailed(@Nullable ServerPlayer player, String reason) {
+        closeOutputReception();
         // Exactly-once. A second call would be actively harmful, not merely
         // redundant: clearMachineState ends in resetState(), which clears
         // usingSharedLedger, so the repeat would see the shared-ledger guard

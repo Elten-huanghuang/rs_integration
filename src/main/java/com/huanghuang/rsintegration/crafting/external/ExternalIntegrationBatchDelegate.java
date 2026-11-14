@@ -1,5 +1,9 @@
 package com.huanghuang.rsintegration.crafting.external;
 
+
+import com.huanghuang.rsintegration.crafting.TaskOutputReception;
+import java.util.UUID;
+
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.api.RSIIntegrationApi;
 import com.huanghuang.rsintegration.api.diagnostic.IntegrationDiagnostic;
@@ -112,7 +116,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.UUID;
+
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -291,6 +295,55 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     protected boolean startOperationImpl(OperationStartContext context) {
         this.operationStartContext = context;
         return super.startOperationImpl(context);
+    }
+
+    @Override
+    public boolean supportsOutputReception() {
+        // 增量取出产物不等于机器安全结束，异步执行仍须可靠的结束信号。
+        return executionKind == RecipeExecutionKind.STANDARD_IO && recipeView != null && descriptor != null
+                && !recipeView.outputs().isEmpty()
+                && (stateProvider != null || descriptor.executionMode() == MachineExecutionMode.IMMEDIATE_ON_INSERT)
+                && recipeView.outputs().stream().noneMatch(output -> output.dynamicIdentity()
+                || output.sourceInputEntryId() != null);
+    }
+
+    private void prepareReceptionBatch() {
+        prepareOutputBatch(recipeView.outputs().stream().map(output -> new TaskOutputReception.Demand(
+                output.portId().toString(), output.resource(),
+                Math.multiplyExact(output.guaranteedMinimum(), plannedBatchOperations),
+                Math.multiplyExact(output.maximumAmount(), plannedBatchOperations))).toList());
+    }
+
+    /** 两种收取入口复用同一套槽位提取，统一收货模式只向私有持有移交一次。 */
+    private void collectReceptionOutputs(ServerPlayer player) {
+        if (outputBatch == null) return;
+        collectStandardItemOutputs(player);
+        collectFluidOutputs(player);
+    }
+
+    private List<OutputAccounting.CollectedOutput> collectStandardItemOutputs(ServerPlayer player) {
+        List<OutputAccounting.CollectedOutput> collected = new ArrayList<>();
+        for (OutputDeclaration output : recipeView.outputs()) {
+            if (output.resource().kind() != IntegrationResourceKey.ResourceKind.ITEM) continue;
+            long remaining = plannedOutputMaximum(output);
+            for (MachineItemPort port : outputPorts(output.outputGroup())) {
+                if (remaining <= 0) break;
+                ItemStack actual = extractMatching(port, output,
+                        (int) Math.min(Integer.MAX_VALUE, remaining), player);
+                if (actual.isEmpty()) continue;
+                if (outputBatch != null) {
+                    outputBatch.collect(IntegrationResourceKey.item(actual), actual.getCount());
+                } else {
+                    collected.add(new OutputAccounting.CollectedOutput(
+                            output.portId().toString(), OutputContract.Source.SLOT, actual));
+                }
+                remaining -= actual.getCount();
+            }
+        }
+        return List.copyOf(collected);
+    }
+    private CraftObservation receptionCompletion() {
+        return outputBatch == null || outputBatch.complete() ? doneObservation() : workingObservation();
     }
 
     @Override
@@ -663,6 +716,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             return failPreparedStart(
                     "machine output ports have insufficient capacity");
         }
+        if (outputReception() != null) prepareReceptionBatch();
         for (int index = 0; index < recipeView.materials().size(); index++) {
             MaterialRequirement requirement = recipeView.materials().get(index);
             ItemStack stack = materials.get(index).copy();
@@ -697,6 +751,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         }
         markCraftStarted();
         this.operationStarted = true;
+        activateOutputBatch();
         retainMachineChunk();
         return true;
     }
@@ -732,6 +787,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         if (executionKind == RecipeExecutionKind.CUSTOM) {
             return observeCustomOperation(level);
         }
+        if (outputBatch != null) collectReceptionOutputs(null);
         if (stateProvider != null) {
             MachineState state;
             try {
@@ -777,8 +833,14 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             }
             if (observedMachineBusy || state.totalProgress() > 0
                     && state.progress() >= state.totalProgress()) {
-                return doneObservation();
+                return receptionCompletion();
             }
+        }
+        if (outputBatch != null) {
+            // 有状态提供者时必须等它证明工艺结束；即时机器则核对原料已消费。
+            if (stateProvider == null && consumedInputsAreEmpty()
+                    && level.getGameTime() > startedAtTick) return receptionCompletion();
+            return workingObservation();
         }
         if (hasNewExpectedProduction()) {
             return doneObservation();
@@ -805,28 +867,18 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     @Override
     public List<ItemStack> collectAllResults(ServerPlayer player) {
         if (resultsCollected || recipeView == null) return List.of();
+        if (outputBatch != null) {
+            collectReceptionOutputs(player);
+            resultsCollected = true;
+            finishOutputBatch();
+            return List.of();
+        }
         if (executionKind == RecipeExecutionKind.CUSTOM) {
             return collectCustomResults(player);
         }
         resultsCollected = true;
         Map<ItemStackKey, ItemStack> collected = new LinkedHashMap<>();
-        for (OutputDeclaration output : recipeView.outputs()) {
-            if (output.resource().kind()
-                    == IntegrationResourceKey.ResourceKind.FLUID) {
-                continue;
-            }
-            long requested = plannedOutputMaximum(output);
-            long remaining = Math.min(Integer.MAX_VALUE, requested);
-            for (MachineItemPort port : outputPorts(output.outputGroup())) {
-                if (remaining <= 0L) break;
-                ItemStack actual = extractMatching(
-                        port, output, (int) Math.min(
-                                Integer.MAX_VALUE, remaining), player);
-                if (actual.isEmpty()) continue;
-                remaining -= actual.getCount();
-                merge(collected, actual);
-            }
-        }
+        for (var output : collectStandardItemOutputs(player)) merge(collected, output.stack());
         collectFluidOutputs(player);
         List<ItemStack> result = new ArrayList<>(collected.values());
         result.addAll(taskFluidOutputs);
@@ -839,6 +891,10 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             ServerPlayer player
     ) {
         if (resultsCollected || recipeView == null) return List.of();
+        if (outputBatch != null) {
+            collectAllResults(player);
+            return List.of();
+        }
         if (executionKind == RecipeExecutionKind.CUSTOM) {
             if (!customCollectionComplete) return List.of();
             List<OutputAccounting.CollectedOutput> collected =
@@ -860,34 +916,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             return List.copyOf(collected);
         }
 
-        List<OutputAccounting.CollectedOutput> collected =
-                new ArrayList<>();
-        for (OutputDeclaration output : recipeView.outputs()) {
-            if (output.resource().kind()
-                    != IntegrationResourceKey.ResourceKind.ITEM) {
-                continue;
-            }
-            long remaining = Math.min(
-                    Integer.MAX_VALUE, plannedOutputMaximum(output));
-            for (MachineItemPort port : outputPorts(
-                    output.outputGroup())) {
-                if (remaining <= 0L) break;
-                ItemStack actual = extractMatching(
-                        port,
-                        output,
-                        (int) Math.min(
-                                Integer.MAX_VALUE, remaining),
-                        player
-                );
-                if (actual.isEmpty()) continue;
-                collected.add(new OutputAccounting.CollectedOutput(
-                        output.portId().toString(),
-                        OutputContract.Source.SLOT,
-                        actual
-                ));
-                remaining -= actual.getCount();
-            }
-        }
+        List<OutputAccounting.CollectedOutput> collected = collectStandardItemOutputs(player);
         resultsCollected = true;
         return List.copyOf(collected);
     }
@@ -2025,7 +2054,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                         == IntegrationResourceKey.ResourceKind.FLUID)) {
             return;
         }
-        if (taskFluids == null && !hasStorageAccess()) {
+        if (outputBatch == null && taskFluids == null && !hasStorageAccess()) {
             failReportedResource("selected storage has no fluid capability");
             return;
         }
@@ -2034,9 +2063,8 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                     != IntegrationResourceKey.ResourceKind.FLUID) {
                 continue;
             }
-            long expected = output.guaranteedMinimum();
-            long remaining = Math.min(
-                    Integer.MAX_VALUE, output.amount().max());
+            long expected = plannedOutputMinimum(output);
+            long remaining = plannedOutputMaximum(output);
             for (MachineFluidPort port : fluidOutputPorts(
                     output.outputGroup())) {
                 if (remaining <= 0L) break;
@@ -2053,10 +2081,17 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                 int available = Math.max(
                         0, current.getAmount() - protectedAmount);
                 if (available <= 0) continue;
-                int requested = (int) Math.min(
-                        remaining, available);
+                int requested = (int) Math.min(remaining, available);
                 FluidStack candidate = current.copy();
                 candidate.setAmount(requested);
+                if (outputBatch != null) {
+                    FluidStack extracted = extractFluid(port, current, requested);
+                    if (!extracted.isEmpty()) {
+                        outputBatch.collect(IntegrationResourceKey.fluid(extracted), extracted.getAmount());
+                        remaining -= extracted.getAmount();
+                    }
+                    continue;
+                }
                 if (taskFluids != null) {
                     FluidStack extracted = extractFluid(port, current, requested);
                     if (extracted.isEmpty()) {
@@ -2111,7 +2146,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                     return;
                 }
             }
-            if (expected > 0L && remaining > 0L) {
+            if (outputBatch == null && expected > 0L && plannedOutputMaximum(output) - remaining < expected) {
                 failReportedResource(
                         "declared fluid output was not fully collected");
                 return;

@@ -2980,6 +2980,7 @@ public final class AsyncCraftChain {
     private void publishIncrementalGraphOutputs(NodeId nodeId, ConcurrentNodeExecutor.Worker worker) {
         if (!(worker instanceof CraftNodeRuntime runtime) || graphMaterials == null) return;
         List<NodeOutputAccumulator.Publication> publications = runtime.drainIncrementalOutputs();
+        reportedResources.addAll(runtime.drainDeliveredReports());
         boolean advanced = runtime.consumeProgressSignal() || !publications.isEmpty();
         if (advanced) executionClock.markProgress();
         if (advanced || runtime.isWaitingForLeasedMachine()) {
@@ -4462,6 +4463,15 @@ public final class AsyncCraftChain {
                                                           ServerPlayer player,
                                                           List<ItemStack> capturedWorldOutputs) {
         OutputContract contract = delegate.outputContract();
+        if (delegate.outputReception() != null) {
+            List<ItemStack> actual = new ArrayList<>(delegate.collectAllResults(player));
+            actual.addAll(capturedWorldOutputs);
+            delegate.closeOutputReception();
+            actual.addAll(delegate.drainReceivedOutputs());
+            return new OutputCollection(List.copyOf(actual), contract == null || contract.ports().isEmpty()
+                    ? null : OutputAccounting.assess(contract, Math.max(1, machineCount),
+                    OutputAccounting.attributeReceived(contract, Math.max(1, machineCount), actual)));
+        }
         if (contract == null || contract.ports().isEmpty()) {
             ItemStack expectedWorldOutput = delegate.getExpectedOutput();
             List<ItemStack> collectedResults = delegate.collectAllResults(player);
@@ -5180,6 +5190,8 @@ public final class AsyncCraftChain {
                 ? null : flatOperationSession.terminalClass();
         if (currentDelegate != null) {
             try {
+                currentDelegate.closeOutputReception();
+                for (ItemStack output : currentDelegate.drainReceivedOutputs()) addToVirtualInventory(output);
                 CancelReason cancelReason = cancellationReason(cause);
                 if (cancelReason != null) {
                     currentDelegate.prepareCancellation(online, cancelReason);

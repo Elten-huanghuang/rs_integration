@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.vanilla;
 
+import com.huanghuang.rsintegration.crafting.TaskOutputReception;
+
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import net.minecraft.server.MinecraftServer;
@@ -201,6 +203,24 @@ public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
         return active().startOperation(context);
     }
 
+    @Override
+    public boolean supportsOutputReception() {
+        return delegate != null && delegate.supportsOutputReception();
+    }
+
+    @Override
+    @Nullable public TaskOutputReception.Session outputReception() {
+        TaskOutputReception.Session child = delegate == null ? null : delegate.outputReception();
+        return child == null ? super.outputReception() : child;
+    }
+
+    @Override
+    public void setOutputReception(@Nullable TaskOutputReception.Session reception) {
+        super.setOutputReception(reception);
+        configureChild();
+        if (delegate instanceof AbstractBatchDelegate child) child.setOutputReception(reception);
+    }
+
     @Nonnull
     @Override
     protected CraftObservation observeMachineCraft(@Nonnull ServerLevel level,
@@ -288,6 +308,8 @@ public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
 
     private void clearChildState(@Nullable ServerPlayer player) {
         if (delegate != null) {
+            // 失败清理会丢弃子实例，但公共层稍后仍需取走已收到的实物。
+            if (delegate.outputReception() != null) super.setOutputReception(delegate.outputReception());
             delegate.onBatchFailed(player, "cooking delegate aborted");
             List<ItemStack> recovered = delegate.failureRecoveredInputs();
             if (recovered != null) recordFailureRecoveredInputs(recovered);
