@@ -12,13 +12,55 @@ import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PlanTreeProductionDisplayTest extends BootstrapTest {
+    @Test
+    void fullGraphReachabilityDoesNotUseDisplayDepthOrTheJavaCallStack() {
+        int count = 50000;
+        List<PlanGraphView.NodeView> nodes = new ArrayList<>();
+        List<PlanGraphView.EdgeView> edges = new ArrayList<>();
+        List<Integer> order = new ArrayList<>();
+        ItemStack previous = new ItemStack(Items.IRON_ORE);
+        for (int i = 0; i < count; i++) {
+            ItemStack output = new ItemStack(Items.IRON_INGOT);
+            output.getOrCreateTag().putInt("stage", i);
+            nodes.add(node(i, new ResourceLocation("test:deep_" + i), output, previous, 1, null));
+            edges.add(new PlanGraphView.EdgeView(i, 0,
+                    new PlanGraphView.SourceView(i == 0, i - 1, i == 0 ? -1 : 0), previous, 1));
+            order.add(i);
+            previous = output;
+        }
+        nodes.add(node(count, new ResourceLocation("test:unrelated"), new ItemStack(Items.GOLD_INGOT),
+                new ItemStack(Items.GOLD_ORE), 1, null));
+        order.add(count);
+        PlanGraphView graph = new PlanGraphView(1, nodes, edges,
+                List.of(new PlanGraphView.RootView(previous, 1, 0, List.of(
+                        new PlanGraphView.RootEdgeView(new PlanGraphView.SourceView(false, count - 1, 0), previous, 1)))),
+                List.of(), order);
+        PlanTreeModel model = PlanTreeModel.from(response(graph), 8, 256);
+        assertTrue(model.truncated());
+        Deque<PlanTreeNode> pending = new ArrayDeque<>();
+        pending.add(model.root);
+        int displayed = 0;
+        while (!pending.isEmpty()) {
+            PlanTreeNode node = pending.removeFirst();
+            assertTrue(node.depth <= 8);
+            assertTrue(node.graphNodeId == null || node.graphNodeId != count, "无关生产者不能被补挂到根下");
+            pending.addAll(node.children);
+            displayed++;
+        }
+        assertTrue(displayed <= 256);
+        assertEquals(50001, graph.nodes().size(), "显示裁剪不改变完整执行图");
+    }
+
     @Test
     void eightAndOneBatchesDisplayOneNineItemProducerAcrossFourMachines() {
         ResourceLocation recipe = new ResourceLocation("test", "iron_ingot");

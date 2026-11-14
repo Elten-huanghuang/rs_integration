@@ -429,7 +429,6 @@ public final class CraftingPlanScreen extends Screen {
         }
         PlanTreeModel.applyCollapsedNodes(treeModel.root, collapsed);
         JeiSubtreeBuilder.enrichCarousels(treeModel.root, materialDisplayLocks());
-        if (treeSearch != null) treeSearch.update(treeModel.root);
         recipePreview.clear();
 
         selectedPath.bindTree(treeModel);

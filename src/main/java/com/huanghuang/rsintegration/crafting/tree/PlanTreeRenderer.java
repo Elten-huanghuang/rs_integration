@@ -13,8 +13,6 @@ import net.minecraft.world.item.ItemStack;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.client.InkFluidRenderer;
 
 import javax.annotation.Nullable;
-import java.util.IdentityHashMap;
-import java.util.Map;
 
 /**
  * Draws the recipe tree in logical coordinates. The screen applies camera (translate + scale)
@@ -36,9 +34,6 @@ public final class PlanTreeRenderer {
     private final Font font;
     @Nullable
     private PlanTreeNode inspectedNode;
-    private PlanTreeLayout cachedLayout;
-    private long cachedRevision = -1;
-    private final Map<PlanTreeNode, Boolean> alternatives = new IdentityHashMap<>();
 
     public void setInspectedNode(@Nullable PlanTreeNode node) { inspectedNode = node; }
 
@@ -67,91 +62,18 @@ public final class PlanTreeRenderer {
     public void render(GuiGraphics gfx, PlanTreeLayout layout, SelectedPath path,
                        @Nullable PlanTreeNode hovered, int viewportLeft, int viewportTop,
                        int viewportRight, int viewportBottom) {
-        if (cachedLayout != layout || cachedRevision != layout.revision()) {
-            cachedLayout = layout;
-            cachedRevision = layout.revision();
-            alternatives.clear();
-        }
         // Connectors behind nodes.
-        gfx.drawManaged(() -> {
-            for (PlanTreeLayout.Box box : layout.boxes()) {
-                drawConnectors(gfx, layout, box, path,
-                        viewportLeft, viewportTop, viewportRight, viewportBottom);
-            }
-        });
-        for (PlanTreeLayout.Box box : layout.boxes()) {
-            if (!intersectsViewport(viewportLeft, viewportTop, viewportRight, viewportBottom,
-                    box.x() - 8, box.y() - 4, box.x() + box.w() + 4, box.y() + box.h() + 8)) {
-                continue;
-            }
-            drawNode(gfx, box, path, box.node() == hovered,
-                    alternatives.computeIfAbsent(box.node(), PlanTreeNode::hasAlternatives));
-        }
-    }
-
-    // ── Connectors with batch labels ───────────────────────────────
-
-    private void drawConnectors(GuiGraphics gfx, PlanTreeLayout layout,
-                                 PlanTreeLayout.Box parent, SelectedPath path,
-                                 int viewportLeft, int viewportTop,
-                                 int viewportRight, int viewportBottom) {
-        PlanTreeNode node = parent.node();
-        if (!node.expanded || node.children.isEmpty()) return;
-
-        int parentBottomY = parent.bottom();
-        int busY = parentBottomY + (PlanTreeLayout.LEVEL_GAP - parent.h()) / 2;
-        int minX = parent.connectorX();
-        int maxX = parent.connectorX();
-        int maxY = busY;
-        boolean anyChild = false;
-        for (PlanTreeNode child : node.children) {
-            PlanTreeLayout.Box cb = layout.boxFor(child);
-            if (cb == null) continue;
-            anyChild = true;
-            minX = Math.min(minX, cb.connectorX());
-            maxX = Math.max(maxX, cb.connectorX());
-            maxY = Math.max(maxY, cb.y());
-        }
-        if (!anyChild || !intersectsViewport(viewportLeft, viewportTop, viewportRight, viewportBottom,
-                minX - PlanUiConfig.connectorWidth(), parentBottomY,
-                maxX + PlanUiConfig.connectorWidth() + 1, maxY + 1)) {
-            return;
-        }
-
-        int dirtyColor = path.isDirty() ? Color.CONNECTOR_PENDING.value() : Color.CONNECTOR.value();
-        // Vertical stub from parent bottom down to horizontal bus.
         int lineWidth = PlanUiConfig.connectorWidth();
-        if (intersectsViewport(viewportLeft, viewportTop, viewportRight, viewportBottom,
-                parent.connectorX() - lineWidth, parentBottomY, parent.connectorX() + lineWidth, busY)) {
-            vLine(gfx, parent.connectorX(), parentBottomY, busY, dirtyColor);
-        }
-        for (PlanTreeNode child : node.children) {
-            PlanTreeLayout.Box cb = layout.boxFor(child);
-            if (cb == null) continue;
-            if (!intersectsViewport(viewportLeft, viewportTop, viewportRight, viewportBottom,
-                    cb.connectorX() - lineWidth, busY, cb.connectorX() + lineWidth, cb.y())) continue;
-            vLine(gfx, cb.connectorX(), busY, cb.y(), dirtyColor);
-        }
-
-        // Horizontal bus.
-        if (maxX > minX) {
-            hLine(gfx, minX, maxX, busY, dirtyColor);
-        }
-
-    }
-
-    private static void vLine(GuiGraphics gfx, int cx, int y1, int y2, int color) {
-        if (y2 <= y1) return;
-        int width = PlanUiConfig.connectorWidth();
-        int half = width / 2;
-        gfx.fill(cx - half, y1, cx - half + width, y2, color);
-    }
-
-    private static void hLine(GuiGraphics gfx, int x1, int x2, int cy, int color) {
-        if (x2 <= x1) return;
-        int width = PlanUiConfig.connectorWidth();
-        int half = width / 2;
-        gfx.fill(x1, cy - half, x2, cy - half + width, color);
+        int lineColor = path.isDirty() ? Color.CONNECTOR_PENDING.value() : Color.CONNECTOR.value();
+        gfx.drawManaged(() -> {
+            layout.forEachVisibleConnector(viewportLeft, viewportTop, viewportRight, viewportBottom, lineWidth,
+                    line -> gfx.fill(line.left(lineWidth), line.top(lineWidth), line.right(lineWidth),
+                            line.bottom(lineWidth), lineColor));
+        });
+        layout.forEachVisibleBox(viewportLeft, viewportTop, viewportRight, viewportBottom, box -> {
+            drawNode(gfx, box, path, box.node() == hovered,
+                    layout.hasAlternatives(box.node()));
+        });
     }
 
     static boolean intersectsViewport(int viewportLeft, int viewportTop,

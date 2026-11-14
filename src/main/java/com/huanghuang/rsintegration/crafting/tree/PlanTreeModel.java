@@ -11,7 +11,9 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 
 import javax.annotation.Nullable;
 import java.util.HashMap;
@@ -366,8 +368,16 @@ public final class PlanTreeModel {
                                                        GraphViewIndex index,
                                                        Set<Integer> reachable) {
         if (source == null || source.initial() || !reachable.add(source.producerNodeId())) return;
-        for (GraphReference edge : mergeConsumerEdges(index, source.producerNodeId())) {
-            collectReachableProducerNodes(edge.source(), index, reachable);
+        // 完整执行图不受显示深度限制，不能借用 Java 调用栈遍历。
+        Deque<Integer> pending = new ArrayDeque<>();
+        pending.push(source.producerNodeId());
+        while (!pending.isEmpty()) {
+            for (PlanGraphView.EdgeView edge : index.edgesFor(pending.pop())) {
+                PlanGraphView.SourceView upstream = edge.source();
+                if (upstream != null && !upstream.initial() && reachable.add(upstream.producerNodeId())) {
+                    pending.push(upstream.producerNodeId());
+                }
+            }
         }
     }
 

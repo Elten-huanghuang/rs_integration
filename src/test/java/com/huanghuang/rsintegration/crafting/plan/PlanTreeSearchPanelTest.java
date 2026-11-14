@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.crafting.plan.PlanWorkspaceLayout.Rect;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.crafting.tree.PlanTreeNode;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import com.huanghuang.rsintegration.util.PinyinUtil;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
@@ -15,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.lwjgl.glfw.GLFW;
 
 import java.lang.reflect.Field;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -25,6 +27,36 @@ class PlanTreeSearchPanelTest extends BootstrapTest {
     private final Font font = mock(Font.class);
     private final GuiGraphics graphics = mock(GuiGraphics.class);
     private final AtomicReference<PlanTreeNode> located = new AtomicReference<>();
+
+    @Test
+    void thousandsOfNamesKeepPreparedPinyinAcrossQueriesAndDropItOnModelReplacement() {
+        AtomicInteger conversions = new AtomicInteger();
+        try (var pinyin = mockStatic(PinyinUtil.class)) {
+            pinyin.when(() -> PinyinUtil.toPinyin(anyString())).thenAnswer(call -> {
+                conversions.incrementAndGet();
+                return "zhuangzhi";
+            });
+            pinyin.when(() -> PinyinUtil.toPinyinInitials(anyString())).thenReturn("zz");
+            PlanTreeNode root = node(Items.STICK, "装置 0");
+            for (int i = 1; i < 5000; i++) root.children.add(node(Items.IRON_INGOT, "装置 " + i));
+            PlanTreeSearchPanel panel = panel(root);
+            assertEquals(0, conversions.get(), "打开页面不应提前转换整棵树的拼音");
+            panel.search("not_present_a");
+            assertEquals(5000, conversions.get());
+            panel.search("not_present_b");
+            panel.search("  ZZ  ");
+            panel.keyPressed(GLFW.GLFW_KEY_ENTER);
+            assertSame(root, located.get());
+            assertEquals(5000, conversions.get(), "再次输入不能依赖全局 512 项缓存命中");
+            PlanTreeNode replacement = node(Items.DIAMOND, "新装置");
+            panel.update(replacement);
+            assertEquals(5001, conversions.get(), "新模型重新获取名称和拼音");
+            panel.search("zz");
+            panel.keyPressed(GLFW.GLFW_KEY_ENTER);
+            assertSame(replacement, located.get());
+            assertEquals(5001, conversions.get());
+        }
+    }
 
     private PlanTreeSearchPanel panel(PlanTreeNode root) {
         when(graphics.pose()).thenReturn(new PoseStack());

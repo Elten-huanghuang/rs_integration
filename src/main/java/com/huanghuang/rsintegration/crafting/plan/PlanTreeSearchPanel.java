@@ -21,7 +21,8 @@ final class PlanTreeSearchPanel {
     private static final int ROW_HEIGHT = 32;
     private static final int HEADER_HEIGHT = 21;
     private static final int FOOTER_HEIGHT = 17;
-    private record Entry(PlanTreeNode node, String name, String registry, String parent, int position) {}
+    private record Entry(PlanTreeNode node, String name, MaterialSearchMatcher.SearchText search,
+                         String parent, int position) {}
     private record Pending(PlanTreeNode node, String parent) {}
     private final Font font;
     private final PlanWorkspaceChrome chrome;
@@ -47,7 +48,8 @@ final class PlanTreeSearchPanel {
             Pending current = pending.pop();
             PlanTreeNode node = current.node();
             String name = node.displayStack.getHoverName().getString();
-            entries.add(new Entry(node, name, BuiltInRegistries.ITEM.getKey(node.displayStack.getItem()).toString(),
+            entries.add(new Entry(node, name, MaterialSearchMatcher.prepare(name,
+                    BuiltInRegistries.ITEM.getKey(node.displayStack.getItem()).toString()),
                     current.parent(), entries.size() + 1));
             for (int i = node.children.size() - 1; i >= 0; i--) pending.push(new Pending(node.children.get(i), name));
         }
@@ -62,8 +64,9 @@ final class PlanTreeSearchPanel {
     }
 
     private void filter() {
-        matches = query.isEmpty() ? List.of() : entries.stream()
-                .filter(entry -> MaterialSearchMatcher.matches(entry.name(), entry.registry(), query)).toList();
+        String normalized = MaterialSearchMatcher.normalizeQuery(query);
+        matches = normalized.isEmpty() ? List.of() : entries.stream()
+                .filter(entry -> entry.search().matches(normalized)).toList();
         selected = 0;
         firstRow = 0;
         bounds = null;

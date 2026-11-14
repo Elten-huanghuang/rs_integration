@@ -137,7 +137,7 @@ public final class PlanTreeNode {
     public boolean hasAlternatives() {
         // 循环引用只用于揭示计划中的回边，不允许继续从这里改写分支，
         // 否则 9x -> 8x -> 9x 一类路径会被再次提交给服务端。
-        return step != null && !containsCycle() && step.hasOrSiblings();
+        return step != null && step.hasOrSiblings() && !containsCycle();
     }
 
     /** 当前节点或其子树是否包含循环回边。 */
