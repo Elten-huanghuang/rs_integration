@@ -11,6 +11,15 @@ import com.huanghuang.rsintegration.mods.ironsspellbooks.InkBottleFluidHandler;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.core.RegistryAccess;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.item.crafting.RecipeManager;
+import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.item.crafting.ShapelessRecipe;
+import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.item.crafting.CraftingBookCategory;
+import net.minecraft.core.NonNullList;
+import com.huanghuang.rsintegration.crafting.CraftPlanningRevision;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.BucketItem;
 import net.minecraft.world.item.ItemStack;
@@ -25,6 +34,11 @@ import net.minecraftforge.fluids.capability.IFluidHandlerItem;
 import net.minecraftforge.fluids.capability.IFluidHandler;
 import net.minecraftforge.fluids.capability.wrappers.FluidBucketWrapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import net.minecraftforge.eventbus.api.IEventBus;
+import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import org.mockito.MockedStatic;
 
 import java.util.ArrayList;
@@ -33,13 +47,250 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
 
 class FluidContainerCatalogTest extends BootstrapTest {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void interleavedManagersKeepBothPublishedCatalogsResolvable(boolean reverseOrder) {
+        FluidContainerCatalog.invalidate();
+        ServerLevel firstLevel = mock(ServerLevel.class);
+        ServerLevel secondLevel = mock(ServerLevel.class);
+        RecipeManager firstManager = mock(RecipeManager.class);
+        RecipeManager secondManager = mock(RecipeManager.class);
+        when(firstLevel.getRecipeManager()).thenReturn(firstManager);
+        when(secondLevel.getRecipeManager()).thenReturn(secondManager);
+        when(firstLevel.registryAccess()).thenReturn(RegistryAccess.EMPTY);
+        when(secondLevel.registryAccess()).thenReturn(RegistryAccess.EMPTY);
+        ItemStack firstSample = new ItemStack(Items.FLINT);
+        firstSample.getOrCreateTag().putInt("capacity", 1375);
+        firstSample.getOrCreateTag().putString("owner", "review_first");
+        ItemStack secondSample = firstSample.copy();
+        secondSample.getOrCreateTag().putString("owner", "review_second");
+        Recipe<?> firstRecipe = new ShapelessRecipe(id("review_first"), "", CraftingBookCategory.MISC,
+                firstSample, NonNullList.of(Ingredient.EMPTY, Ingredient.of(Items.DIRT)));
+        Recipe<?> secondRecipe = new ShapelessRecipe(id("review_second"), "", CraftingBookCategory.MISC,
+                secondSample, NonNullList.of(Ingredient.EMPTY, Ingredient.of(Items.DIRT)));
+        when(firstManager.getRecipes()).thenReturn(List.of(firstRecipe));
+        when(secondManager.getRecipes()).thenReturn(List.of(secondRecipe));
+        try (var tokens = mockStatic(InkFluidSupport.class, CALLS_REAL_METHODS);
+             var capabilities = mockStatic(FluidUtil.class, CALLS_REAL_METHODS)) {
+            tokens.when(() -> InkFluidSupport.token(any(FluidStack.class))).thenAnswer(call -> token(call.getArgument(0)));
+            capabilities.when(() -> FluidUtil.getFluidHandler(any(ItemStack.class))).thenAnswer(call -> {
+                ItemStack stack = call.getArgument(0);
+                IFluidHandlerItem handler = stack.is(Items.FLINT) || stack.is(Items.STICK)
+                        ? new NbtContainer(stack) : bucketHandler(stack);
+                return handler == null ? LazyOptional.empty() : LazyOptional.of(() -> handler);
+            });
+            var firstBuild = FluidContainerCatalog.incrementalIndex(firstLevel, new HashMap<>(), new HashSet<>(),
+                    new HashMap<>(), () -> true);
+            var secondBuild = FluidContainerCatalog.incrementalIndex(secondLevel, new HashMap<>(), new HashSet<>(),
+                    new HashMap<>(), () -> true);
+            assertTrue(firstBuild.advance(() -> false));
+            assertTrue(secondBuild.advance(() -> false));
+            var firstId = FluidContainerCatalog.discover(List.of(firstSample), List.of(new FluidStack(Fluids.WATER, 1)),
+                    NbtContainer::new, FluidContainerCatalogTest::token).get(0).getId();
+            var secondId = FluidContainerCatalog.discover(List.of(secondSample), List.of(new FluidStack(Fluids.WATER, 1)),
+                    NbtContainer::new, FluidContainerCatalogTest::token).get(0).getId();
+            assertNull(FluidContainerCatalog.byId(firstId));
+            assertNull(FluidContainerCatalog.resolve(firstLevel, firstId));
+            assertNull(FluidContainerCatalog.byId(secondId));
+            ItemStack compatibilitySample = firstSample.copy();
+            compatibilitySample.getOrCreateTag().putString("owner", "compatibility_only");
+            var compatibility = FluidContainerCatalog.discover(List.of(compatibilitySample),
+                    List.of(new FluidStack(Fluids.WATER, 1)), NbtContainer::new, FluidContainerCatalogTest::token);
+            FluidContainerCatalog.publish(compatibility, new HashMap<>(), new HashSet<>(), new HashMap<>());
+            var compatibilityId = compatibility.get(0).getId();
+            assertSame(compatibility.get(0), FluidContainerCatalog.byId(compatibilityId));
+            // 两种顺序都从同一份旧状态开始完成构建，再交错发布。
+            assertTrue((reverseOrder ? secondBuild : firstBuild).publish());
+            assertNotNull(FluidContainerCatalog.byId(reverseOrder ? secondId : firstId));
+            assertNull(FluidContainerCatalog.byId(reverseOrder ? firstId : secondId));
+            assertTrue((reverseOrder ? firstBuild : secondBuild).publish());
+            FluidContainerRecipe uniqueFirst = FluidContainerCatalog.allRecipes(firstLevel).stream()
+                    .filter(recipe -> recipe.emptyContainer().hasTag()
+                            && "review_first".equals(recipe.emptyContainer().getTag().getString("owner")))
+                    .findFirst().orElseThrow();
+            assertNotNull(FluidContainerCatalog.byId(uniqueFirst.getId()));
+            assertFalse(FluidContainerCatalog.allRecipes(firstLevel).isEmpty());
+            assertNotNull(FluidContainerCatalog.byId(uniqueFirst.getId()),
+                    "后发布的目录不能清掉另一 manager 已发布且仍被缓存的转换 ID");
+            assertNotNull(FluidContainerCatalog.byId(secondId));
+            assertSame(compatibility.get(0), FluidContainerCatalog.byId(compatibilityId));
+            for (ServerLevel level : List.of(firstLevel, secondLevel)) {
+                for (FluidContainerRecipe recipe : FluidContainerCatalog.allRecipes(level)) {
+                    assertNotNull(FluidContainerCatalog.byId(recipe.getId()));
+                    assertSame(recipe, FluidContainerCatalog.resolve(level, recipe.getId()));
+                }
+            }
+            var firstPublished = FluidContainerCatalog.allRecipes(firstLevel);
+            var secondPublished = FluidContainerCatalog.allRecipes(secondLevel);
+            var cancelled = FluidContainerCatalog.incrementalIndex(firstLevel, new HashMap<>(), new HashSet<>(),
+                    new HashMap<>(), () -> true);
+            assertTrue(cancelled.advance(() -> false));
+            cancelled.cancel();
+            assertFalse(cancelled.publish());
+            assertSame(firstPublished, FluidContainerCatalog.allRecipes(firstLevel));
+            assertSame(secondPublished, FluidContainerCatalog.allRecipes(secondLevel));
+            assertNotNull(FluidContainerCatalog.byId(firstId));
+            assertNotNull(FluidContainerCatalog.byId(secondId));
+            // 同一 manager 的新目录仅替换其旧子表，不能改变另一 manager 和同步定义。
+            when(firstManager.getRecipes()).thenReturn(List.of());
+            FluidContainerCatalog.index(firstLevel, new HashMap<>(), new HashSet<>(), new HashMap<>());
+            assertNull(FluidContainerCatalog.byId(firstId));
+            assertNull(FluidContainerCatalog.resolve(firstLevel, firstId));
+            assertNotNull(FluidContainerCatalog.byId(secondId));
+            assertSame(secondPublished, FluidContainerCatalog.allRecipes(secondLevel));
+            assertSame(compatibility.get(0), FluidContainerCatalog.byId(compatibilityId));
+            assertFalse(firstBuild.publish());
+            when(firstManager.getRecipes()).thenReturn(List.of(firstRecipe));
+            var stale = FluidContainerCatalog.incrementalIndex(secondLevel, new HashMap<>(), new HashSet<>(),
+                    new HashMap<>(), () -> true);
+            assertTrue(stale.advance(() -> false));
+            FluidContainerCatalog.invalidate();
+            assertNull(FluidContainerCatalog.byId(firstId));
+            assertNull(FluidContainerCatalog.byId(secondId));
+            assertNull(FluidContainerCatalog.byId(compatibilityId));
+            assertFalse(stale.publish());
+            assertFalse(firstBuild.publish());
+            assertFalse(secondBuild.publish());
+            // 同步兼容入口只发布自己的完整子表，不能恢复另一个已失效目录。
+            FluidContainerCatalog.index(firstLevel, new HashMap<>(), new HashSet<>(), new HashMap<>());
+            assertNotNull(FluidContainerCatalog.byId(firstId));
+            assertNull(FluidContainerCatalog.byId(secondId));
+            assertFalse(FluidContainerCatalog.allRecipes(secondLevel).isEmpty());
+            assertNotNull(FluidContainerCatalog.byId(firstId));
+            assertNotNull(FluidContainerCatalog.byId(secondId));
+        } finally {
+            FluidContainerCatalog.invalidate();
+        }
+    }
+
+    @BeforeAll static void initializeModLogger() throws ClassNotFoundException {
+        FMLJavaModLoadingContext context = mock(FMLJavaModLoadingContext.class);
+        when(context.getModEventBus()).thenReturn(mock(IEventBus.class));
+        try (var loading = mockStatic(FMLJavaModLoadingContext.class)) {
+            loading.when(FMLJavaModLoadingContext::get).thenReturn(context);
+            Class.forName("com.huanghuang.rsintegration.RSIntegrationMod");
+        }
+    }
+    @Test void incrementalDiscoveryPreservesNbtInkAndBucketConversions() {
+        ItemStack special = new ItemStack(Items.FLINT);
+        special.getOrCreateTag().putInt("capacity", 250);
+        special.getOrCreateTag().putString("owner", "special");
+        List<ItemStack> samples = List.of(special, special.copy(), new ItemStack(Items.BUCKET),
+                new ItemStack(Items.LAVA_BUCKET), waterBottle(2), new ItemStack(Items.GLASS_BOTTLE));
+        List<FluidStack> fluids = List.of(new FluidStack(Fluids.WATER, 1), purityWater(2));
+        var handlers = new Function<ItemStack, IFluidHandlerItem>() {
+            @Override public IFluidHandlerItem apply(ItemStack stack) {
+                if (stack.is(Items.FLINT) || stack.is(Items.STICK)) return new NbtContainer(stack);
+                IFluidHandlerItem bottle = InkBottleFluidHandler.create(stack);
+                return bottle != null ? bottle : bucketHandler(stack);
+            }
+        };
+        var expected = FluidContainerCatalog.discover(samples, fluids, handlers, FluidContainerCatalogTest::token);
+        var build = new FluidContainerCatalog.Discovery(samples, fluids, handlers, FluidContainerCatalogTest::token);
+        int advances = 0;
+        while (true) {
+            AtomicInteger work = new AtomicInteger();
+            boolean complete = build.advance(() -> work.getAndIncrement() >= 1);
+            advances++;
+            if (complete) break;
+            assertThrows(IllegalStateException.class, build::result);
+        }
+        assertTrue(advances > samples.size());
+        assertEquals(expected.stream().map(FluidContainerRecipe::getId).toList(),
+                build.result().stream().map(FluidContainerRecipe::getId).toList());
+        assertTrue(build.advance(() -> true));
+        assertThrows(UnsupportedOperationException.class, () -> build.result().clear());
+    }
+
+    @Test void incrementalCatalogPublishesOnlyAfterCompletionAndRejectsStaleSessions() {
+        FluidContainerCatalog.invalidate();
+        ServerLevel level = mock(ServerLevel.class);
+        RecipeManager manager = mock(RecipeManager.class);
+        when(level.getRecipeManager()).thenReturn(manager);
+        when(level.registryAccess()).thenReturn(RegistryAccess.EMPTY);
+        ItemStack special = new ItemStack(Items.FLINT);
+        special.getOrCreateTag().putInt("capacity", 1375);
+        special.getOrCreateTag().putString("owner", "recipe_only");
+        Recipe<?> specialRecipe = new ShapelessRecipe(id("special_container"), "", CraftingBookCategory.MISC,
+                special, NonNullList.of(Ingredient.EMPTY, Ingredient.of(Items.DIRT)));
+        when(manager.getRecipes()).thenReturn(List.of(specialRecipe));
+        var tokenItem = InkFluidTestFixtures.tokenItem();
+        try (var tokens = mockStatic(InkFluidSupport.class, CALLS_REAL_METHODS);
+             var capabilities = mockStatic(FluidUtil.class, CALLS_REAL_METHODS)) {
+            tokens.when(() -> InkFluidSupport.token(any(FluidStack.class))).thenAnswer(call ->
+                    InkFluidSupport.token(tokenItem, call.getArgument(0)));
+            capabilities.when(() -> FluidUtil.getFluidHandler(any(ItemStack.class))).thenAnswer(call -> {
+                ItemStack stack = call.getArgument(0);
+                IFluidHandlerItem handler = stack.is(Items.FLINT) || stack.is(Items.STICK)
+                        ? new NbtContainer(stack) : bucketHandler(stack);
+                return handler == null ? LazyOptional.empty() : LazyOptional.of(() -> handler);
+            });
+            AtomicBoolean current = new AtomicBoolean(true);
+            var build = FluidContainerCatalog.incrementalIndex(level, new HashMap<>(), new HashSet<>(),
+                    new HashMap<>(), current::get);
+            assertFalse(build.advance(() -> true));
+            assertTrue(FluidContainerCatalog.allRecipes(level).isEmpty());
+            assertFalse(build.publish());
+            int advances = 0;
+            while (true) {
+                AtomicInteger work = new AtomicInteger();
+                boolean complete = build.advance(() -> work.getAndIncrement() >= 64);
+                advances++;
+                assertNull(FluidContainerCatalog.byId(waterFill().getId()));
+                assertTrue(FluidContainerCatalog.allRecipes(level).isEmpty());
+                if (complete) break;
+                assertTrue(advances < 10_000);
+            }
+            assertTrue(advances > 1);
+            assertTrue(build.publish());
+            assertTrue(build.publish());
+            var ready = FluidContainerCatalog.allRecipes(level);
+            assertFalse(ready.isEmpty());
+            assertTrue(ready.stream().anyMatch(recipe -> recipe.filling() && recipe.fluid().getAmount() == 1375
+                    && "recipe_only".equals(recipe.emptyContainer().getTag().getString("owner"))));
+            assertSame(ready, FluidContainerCatalog.allRecipes(level));
+            FluidContainerCatalog.invalidate();
+            assertFalse(build.publish());
+            var cancelled = FluidContainerCatalog.incrementalIndex(level, new HashMap<>(), new HashSet<>(),
+                    new HashMap<>(), current::get);
+            cancelled.cancel();
+            assertFalse(cancelled.advance(() -> false));
+            assertFalse(cancelled.publish());
+            var stale = FluidContainerCatalog.incrementalIndex(level, new HashMap<>(), new HashSet<>(),
+                    new HashMap<>(), current::get);
+            assertTrue(stale.advance(() -> false));
+            current.set(false);
+            assertFalse(stale.publish());
+            current.set(true);
+            CraftPlanningRevision.bump();
+            assertFalse(stale.publish());
+            var reloaded = FluidContainerCatalog.incrementalIndex(level, new HashMap<>(), new HashSet<>(),
+                    new HashMap<>(), () -> true);
+            assertTrue(reloaded.advance(() -> false));
+            assertTrue(reloaded.publish());
+            assertEquals(ready.stream().map(FluidContainerRecipe::getId).toList(),
+                    FluidContainerCatalog.allRecipes(level).stream().map(FluidContainerRecipe::getId).toList());
+            var replaced = FluidContainerCatalog.incrementalIndex(level, new HashMap<>(), new HashSet<>(),
+                    new HashMap<>(), () -> true);
+            assertTrue(replaced.advance(() -> false));
+            when(level.getRecipeManager()).thenReturn(mock(RecipeManager.class));
+            assertFalse(replaced.publish());
+        } finally {
+            FluidContainerCatalog.invalidate();
+        }
+    }
     static ItemStack token(FluidStack fluid) { return InkFluidSupport.token(InkFluidTestFixtures.tokenItem(), fluid); }
     static List<FluidContainerRecipe> buckets() {
         return FluidContainerCatalog.discover(List.of(new ItemStack(Items.BUCKET), new ItemStack(Items.WATER_BUCKET)),

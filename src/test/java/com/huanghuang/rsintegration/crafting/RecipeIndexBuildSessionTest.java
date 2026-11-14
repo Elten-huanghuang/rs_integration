@@ -4,6 +4,12 @@ import com.electronwill.nightconfig.core.CommentedConfig;
 import com.carrot123.until_eternity.recipe.EndCraftingIngredient;
 import com.carrot123.until_eternity.recipe.EndCraftingRecipe;
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.crafting.fluid.FluidContainerCatalog;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidTestFixtures;
+import net.minecraftforge.fluids.FluidStack;
+import net.minecraftforge.fluids.FluidUtil;
+import net.minecraftforge.common.util.LazyOptional;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
@@ -56,6 +62,37 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class RecipeIndexBuildSessionTest extends BootstrapTest {
+    @Test
+    void fluidSourceYieldsAndOnlyPublishesWithCurrentGeneration() throws Exception {
+        withServer((level, manager) -> {
+            var tokenItem = InkFluidTestFixtures.tokenItem();
+            try (var tokens = mockStatic(InkFluidSupport.class, CALLS_REAL_METHODS);
+                 var capabilities = mockStatic(FluidUtil.class, CALLS_REAL_METHODS)) {
+                tokens.when(() -> InkFluidSupport.token(any(FluidStack.class))).thenAnswer(call ->
+                        InkFluidSupport.token(tokenItem, call.getArgument(0)));
+                capabilities.when(() -> FluidUtil.getFluidHandler(any(ItemStack.class))).thenReturn(LazyOptional.empty());
+                RecipeIndex.BuildSession session = newSession(level);
+                session.phase = RecipeIndex.BuildPhase.SOURCES;
+                session.sourceStep = 7;
+                assertFalse(session.advance(2, new AtomicLong()::getAndIncrement));
+                assertNotNull(session.fluidIndex);
+                assertEquals(7, session.sourceStep);
+                assertTrue(FluidContainerCatalog.allRecipes(level).isEmpty());
+                int slices = 0;
+                while (!session.advance(128, new AtomicLong()::getAndIncrement)) {
+                    assertTrue(++slices < 10_000);
+                    assertTrue(FluidContainerCatalog.allRecipes(level).isEmpty());
+                }
+                assertTrue(slices > 1);
+                assertTrue(FluidContainerCatalog.allRecipes(level).isEmpty());
+                var result = RecipeIndex.finalizeBuild(session.input());
+                assertTrue(RecipeIndex.publishBuildResult(session, result));
+                assertFalse(FluidContainerCatalog.allRecipes(level).isEmpty());
+                RecipeIndex.invalidate();
+                assertFalse(RecipeIndex.publishBuildResult(session, result));
+            }
+        });
+    }
     @BeforeAll
     static void loadModTypes() {
         CommentedConfig config = CommentedConfig.inMemory();

@@ -118,6 +118,11 @@ public final class RecipeIndex {
         return generationBuildFailed && failedRevision == CraftPlanningRevision.current();
     }
 
+    /** 同步兼容读者不能在服务端预热期间另起一次容器扫描。 */
+    public static boolean isBuildInFlight() {
+        return BUILD_IN_FLIGHT.get();
+    }
+
     /** Rebuilds once when late spell-config synchronization changes ink mappings. */
     public static void refreshDynamicRuntimeIfNeeded(Level level) {
         requireServerLevel(level);
@@ -241,6 +246,7 @@ public final class RecipeIndex {
     }
 
     private static void discardBuild() {
+        if (activeBuild != null && activeBuild.fluidIndex != null) activeBuild.fluidIndex.cancel();
         if (activeBuild != null && activeBuild.finalized != null) {
             activeBuild.finalized.cancel(false);
         }
@@ -320,6 +326,7 @@ public final class RecipeIndex {
     static synchronized boolean publishBuildResult(BuildSession session, BuildResult result) {
         requireServerLevel(session.level);
         if (!session.isCurrent()) return false;
+        if (session.fluidIndex != null && !session.fluidIndex.publish()) return false;
         ImmutableRecipeGraphProjector.publishPrepared(session.manager, session.revision,
                 result.prepared, session.timing.graphNanos + result.finalizeNanos);
         generation = new PublishedGeneration(session.manager, session.revision, result);
@@ -387,6 +394,8 @@ public final class RecipeIndex {
         Iterator<Item> outputItems = Collections.emptyIterator();
         @Nullable
         VanillaBrewingCatalog.IncrementalIndex brewingIndex;
+        @Nullable
+        FluidContainerCatalog.IncrementalIndex fluidIndex;
         CompletableFuture<BuildResult> finalized;
 
         BuildSession(Level level, long epoch) {
@@ -414,6 +423,10 @@ public final class RecipeIndex {
 
         boolean advance(long deadline, LongSupplier nanoTime) {
             requireServerLevel(level);
+            if (!isCurrent()) {
+                if (fluidIndex != null) fluidIndex.cancel();
+                return false;
+            }
             while (phase != BuildPhase.COMPLETE && nanoTime.getAsLong() < deadline) {
                 long unitStarted = System.nanoTime();
                 String unit = phase.name();
@@ -438,7 +451,10 @@ public final class RecipeIndex {
                         else if (outcome == IndexOutcome.IDENTITY) skippedIdentity++;
                     }
                     case SOURCES -> {
-                        if (brewingIndex != null) {
+                        if (fluidIndex != null && sourceStep == 7) {
+                            unit = "fluid containers";
+                            if (fluidIndex.advance(() -> nanoTime.getAsLong() >= deadline)) sourceStep++;
+                        } else if (brewingIndex != null) {
                             unit = "vanilla brewing";
                             if (brewingIndex.advance(() -> nanoTime.getAsLong() >= deadline)) {
                                 VanillaBrewingCatalog.projectIndexedDefinitions(projected);
@@ -464,10 +480,11 @@ public final class RecipeIndex {
                                 case 5 -> indexPmmoSalvage(index, seen);
                                 case 6 -> brewingIndex =
                                         VanillaBrewingCatalog.incrementalIndex(level, index, seen);
-                                case 7 -> FluidContainerCatalog.index(level, index, seen, projected);
+                                case 7 -> fluidIndex = FluidContainerCatalog.incrementalIndex(
+                                        level, index, seen, projected, this::isCurrent);
                                 default -> { }
                             }
-                            if (activeSource != 6) sourceStep++;
+                            if (activeSource != 6 && activeSource != 7) sourceStep++;
                         }
                     }
                     case SPELL_SCROLLS -> {

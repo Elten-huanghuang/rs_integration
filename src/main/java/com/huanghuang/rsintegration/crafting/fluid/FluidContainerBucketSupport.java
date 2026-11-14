@@ -25,21 +25,32 @@ public final class FluidContainerBucketSupport {
 
     static Function<ItemStack, IFluidHandlerItem> handlers(List<ItemStack> samples,
             Function<ItemStack, IFluidHandlerItem> original) {
-        Map<CompoundTag, Pair> filledPairs = new LinkedHashMap<>();
-        Map<CompoundTag, Map<CompoundTag, Pair>> emptyPairs = new LinkedHashMap<>();
-        for (ItemStack sample : samples) {
-            if (sample.isEmpty() || !(sample.getItem() instanceof BucketItem)) continue;
+        HandlerIndex index = new HandlerIndex(original);
+        samples.forEach(index::inspect);
+        return index::apply;
+    }
+
+    /** 先逐样本收集桶关系，再用于容器探测；保持跨样本的自定义空桶身份。 */
+    static final class HandlerIndex {
+        private final Function<ItemStack, IFluidHandlerItem> original;
+        private final Map<CompoundTag, Pair> filledPairs = new LinkedHashMap<>();
+        private final Map<CompoundTag, Map<CompoundTag, Pair>> emptyPairs = new LinkedHashMap<>();
+
+        HandlerIndex(Function<ItemStack, IFluidHandlerItem> original) { this.original = original; }
+
+        void inspect(ItemStack sample) {
+            if (sample.isEmpty() || !(sample.getItem() instanceof BucketItem)) return;
             try {
                 IFluidHandlerItem handler = handler(sample.copyWithCount(1), original);
-                if (handler == null || handler.getClass() != FluidBucketWrapper.class) continue;
+                if (handler == null || handler.getClass() != FluidBucketWrapper.class) return;
                 FluidStack fluid = handler.getFluidInTank(0).copy();
-                if (fluid.isEmpty()) continue;
+                if (fluid.isEmpty()) return;
                 ItemStack empty = sample.getCraftingRemainingItem();
                 if (empty.isEmpty() || empty.getCount() != 1 || empty.is(Items.BUCKET)
-                        || ItemStack.isSameItemSameTags(empty, sample)) continue;
+                        || ItemStack.isSameItemSameTags(empty, sample)) return;
                 IFluidHandlerItem emptyHandler = handler(empty.copy(), original);
                 if (emptyHandler != null && (emptyHandler.getTanks() != 1
-                        || !emptyHandler.getFluidInTank(0).isEmpty())) continue;
+                        || !emptyHandler.getFluidInTank(0).isEmpty())) return;
                 Pair pair = new Pair(empty.copy(), sample.copyWithCount(1), fluid);
                 filledPairs.putIfAbsent(key(sample), pair);
                 emptyPairs.computeIfAbsent(key(empty), ignored -> new LinkedHashMap<>())
@@ -48,7 +59,8 @@ public final class FluidContainerBucketSupport {
                 // 不支持的容器继续交给原始能力探测。
             }
         }
-        return stack -> {
+
+        IFluidHandlerItem apply(ItemStack stack) {
             IFluidHandlerItem handler = handler(stack, original);
             // 自定义能力可能有容量、损耗等规则，应完整保留。
             if (handler != null && handler.getClass() != FluidBucketWrapper.class) return handler;
@@ -77,7 +89,7 @@ public final class FluidContainerBucketSupport {
                     }
                 }
             };
-        };
+        }
     }
 
     public static IFluidHandlerItem getHandler(ItemStack stack) {
