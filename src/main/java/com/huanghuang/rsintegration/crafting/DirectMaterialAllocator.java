@@ -59,39 +59,77 @@ public final class DirectMaterialAllocator {
         List<List<Ingredient>> variantOptions = new ArrayList<>();
         for (int i = 0; i < demands.size(); i++) {
             IndexedDemand demand = demands.get(i);
+            // 单件需求天然只能分到一种变体，交给流分配即可，避免无意义的组合枚举。
+            if (demand.count() <= 1L) continue;
             ItemStack[] candidates = candidateItems(demand.ingredient());
             if (candidates.length <= 1) continue;
             LinkedHashMap<StackKey, Ingredient> variants = new LinkedHashMap<>();
             boolean strictNbt = IngredientMatcher.requiresNbt(demand.ingredient());
             for (ItemStack candidate : candidates) {
                 if (candidate == null || candidate.isEmpty()) continue;
+                Ingredient option = CraftingResolver.ingredientOf(candidate, strictNbt);
+                long available = 0L;
+                for (var supply : supplied.entrySet()) {
+                    if (supply.getKey() != null && supply.getValue() != null
+                            && supply.getValue().longValue() > 0L
+                            && IngredientMatcher.test(option, supply.getKey())) {
+                        available = saturatedAdd(available, supply.getValue().longValue());
+                    }
+                }
+                // 这里只分配现有库存；不足以填满槽位的候选不应消耗组合搜索预算。
+                if (available < demand.count()) continue;
                 variants.putIfAbsent(StackKey.of(candidate, candidate.hasTag()),
-                        CraftingResolver.ingredientOf(candidate, strictNbt));
+                        option);
             }
-            if (variants.size() <= 1) continue;
+            if (variants.isEmpty()) return new Result(false, List.of(), demand.index(), demand.count());
+            if (variants.size() == 1) {
+                demands.set(i, new IndexedDemand(demand.index(), variants.values().iterator().next(),
+                        demand.count()));
+                continue;
+            }
             variantDemandIndices.add(i);
             variantOptions.add(new ArrayList<>(variants.values()));
         }
         if (variantDemandIndices.isEmpty()) return allocateDemands(demands, supplied);
 
-        return allocateSingleVariantAt(0, demands, variantDemandIndices,
+        return allocateSingleVariantAt(demands, variantDemandIndices,
                 variantOptions, supplied, new int[] {0});
     }
 
     private static Result allocateSingleVariantAt(
-            int depth, List<IndexedDemand> demands, List<Integer> variantDemandIndices,
+            List<IndexedDemand> demands, List<Integer> variantDemandIndices,
             List<List<Ingredient>> variantOptions,
             Map<StackKey, ? extends Number> supplied, int[] attempts) {
-        if (depth >= variantDemandIndices.size()) return allocateDemands(demands, supplied);
+        // 先整体分配现有库存；已经满足单一变体约束的槽位无需再枚举组合。
+        Result allocation = allocateDemands(demands, supplied);
+        if (!allocation.feasible()) return allocation;
+        Map<Integer, List<Allocation>> allocationsByInput = new HashMap<>();
+        for (Allocation fragment : allocation.allocations()) {
+            allocationsByInput.computeIfAbsent(fragment.ingredientIndex(), ignored -> new ArrayList<>())
+                    .add(fragment);
+        }
+        int selected = -1;
+        for (int i = 0; i < variantDemandIndices.size(); i++) {
+            List<Allocation> fragments = allocationsByInput.get(
+                    demands.get(variantDemandIndices.get(i)).index());
+            // 使用候选谓词判断整槽，保留严格 NBT 和兼容匹配的语义。
+            boolean singleVariant = variantOptions.get(i).stream().anyMatch(option ->
+                    fragments.stream().allMatch(fragment -> IngredientMatcher.test(option, fragment.material())));
+            if (!singleVariant
+                    && (selected < 0 || variantOptions.get(i).size() < variantOptions.get(selected).size())) {
+                selected = i;
+            }
+        }
+        if (selected < 0) return allocation;
 
-        int demandIndex = variantDemandIndices.get(depth);
+        int demandIndex = variantDemandIndices.get(selected);
         IndexedDemand original = demands.get(demandIndex);
         Result lastFailure = null;
-        for (Ingredient option : variantOptions.get(depth)) {
+        for (Ingredient option : variantOptions.get(selected)) {
             attempts[0]++;
             if (attempts[0] > 512) break;
             demands.set(demandIndex, new IndexedDemand(original.index(), option, original.count()));
-            Result result = allocateSingleVariantAt(depth + 1, demands, variantDemandIndices,
+            Result result = allocateSingleVariantAt(demands, variantDemandIndices,
                     variantOptions, supplied, attempts);
             if (result.feasible()) return result;
             lastFailure = result;

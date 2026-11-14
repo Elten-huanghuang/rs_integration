@@ -398,6 +398,11 @@ final class StepExecutor {
             Ingredient ingredient, long quantity, ResolutionContext ctx, int depth,
             CraftingResolver.EdgeTracker edges, @Nullable InputPortId port,
             @Nullable List<ResolutionContext.SupplySlice> consumedOut) {
+        // 单件材料不可能混用变体，保留完整谓词，让解析器直接选择可用材料。
+        if (quantity <= 1L) {
+            return CraftingResolver.ensureIngredient(ingredient, quantity, ctx, depth, edges,
+                    port, consumedOut) ? ingredient : null;
+        }
         List<ItemStack> variants = Arrays.stream(ingredient.getItems())
                 .filter(stack -> stack != null && !stack.isEmpty())
                 .map(stack -> stack.copyWithCount(1))
@@ -425,14 +430,15 @@ final class StepExecutor {
 
         MaterialVariantPreferences.Snapshot preferences =
                 MaterialVariantPreferences.snapshot();
-        variants.sort(Comparator
-                .comparing((ItemStack stack) -> ctx.countMatching(
-                        CraftingResolver.ingredientOf(stack, stack.hasTag())) >= quantity)
+        Map<ItemStack, Long> availableByVariant = new LinkedHashMap<>();
+        for (ItemStack variant : variants) {
+            availableByVariant.put(variant, ctx.countMatching(
+                    CraftingResolver.ingredientOf(variant, strictNbt)));
+        }
+        // 库存多的变体优先；不足整槽时也先补已有变体的缺口，软偏好仅用于同库存量。
+        variants.sort(Comparator.comparingLong((ItemStack stack) -> availableByVariant.get(stack))
                 .reversed()
                 .thenComparingInt(stack -> preferences.rank(stack.getItem()))
-                .thenComparing(Comparator.comparingLong((ItemStack stack) ->
-                        ctx.countMatching(CraftingResolver.ingredientOf(
-                                stack, stack.hasTag()))).reversed())
                 .thenComparing(stack -> {
                     ResourceLocation id = ForgeRegistries.ITEMS.getKey(stack.getItem());
                     return id != null ? id.toString() : "";

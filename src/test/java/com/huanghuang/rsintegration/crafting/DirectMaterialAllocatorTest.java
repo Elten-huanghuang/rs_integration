@@ -7,11 +7,13 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraftforge.common.crafting.CompoundIngredient;
 import net.minecraftforge.common.crafting.StrictNBTIngredient;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Collections;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -116,5 +118,105 @@ class DirectMaterialAllocatorTest extends BootstrapTest {
 
         assertTrue(DirectMaterialAllocator.allocateScaledSingleVariant(
                 List.of(tag), Map.of(new StackKey(Items.APPLE, null), 3L)).feasible());
+    }
+
+    @Test
+    void singleItemPedestalsDoNotExhaustVariantSearchBeforeReachingStockedStone() {
+        ScaledIngredientSpec stone = new ScaledIngredientSpec(
+                Ingredient.of(Items.STONE, Items.DIORITE, Items.GRANITE), 1,
+                InputConsumption.consumed());
+
+        var result = DirectMaterialAllocator.allocateScaledSingleVariant(
+                Collections.nCopies(12, stone), Map.of(new StackKey(Items.GRANITE, null), 12L));
+
+        assertTrue(result.feasible());
+        assertEquals(12L, result.allocations().stream()
+                .mapToLong(DirectMaterialAllocator.Allocation::count).sum());
+        assertTrue(result.allocations().stream().allMatch(
+                allocation -> allocation.material().item() == Items.GRANITE));
+    }
+
+    @Test
+    void unavailableVariantsDoNotExhaustSearchForMultiItemSlots() {
+        ScaledIngredientSpec stone = new ScaledIngredientSpec(
+                Ingredient.of(Items.STONE, Items.DIORITE, Items.GRANITE), 2,
+                InputConsumption.consumed());
+
+        var result = DirectMaterialAllocator.allocateScaledSingleVariant(
+                Collections.nCopies(12, stone), Map.of(new StackKey(Items.GRANITE, null), 24L));
+
+        assertTrue(result.feasible());
+        assertEquals(24L, result.allocations().stream()
+                .mapToLong(DirectMaterialAllocator.Allocation::count).sum());
+    }
+
+    @Test
+    void singleVariantSlotsShareStockWithoutStealingExactInputs() {
+        var broad = new ScaledIngredientSpec(Ingredient.of(Items.STONE, Items.GRANITE), 2,
+                InputConsumption.consumed());
+        var exact = new ScaledIngredientSpec(Ingredient.of(Items.STONE), 2,
+                InputConsumption.consumed());
+
+        var result = DirectMaterialAllocator.allocateScaledSingleVariant(List.of(broad, exact),
+                Map.of(new StackKey(Items.STONE, null), 2L,
+                        new StackKey(Items.GRANITE, null), 2L));
+
+        assertTrue(result.feasible());
+        assertTrue(result.allocations().stream().anyMatch(allocation ->
+                allocation.ingredientIndex() == 0 && allocation.material().item() == Items.GRANITE));
+    }
+
+    @Test
+    void alreadyFeasibleStockDoesNotEnumerateHundredsOfMultiItemSlots() {
+        var stone = new ScaledIngredientSpec(Ingredient.of(Items.STONE, Items.GRANITE), 2,
+                InputConsumption.consumed());
+
+        var result = DirectMaterialAllocator.allocateScaledSingleVariant(Collections.nCopies(600, stone),
+                Map.of(new StackKey(Items.STONE, null), 400L,
+                        new StackKey(Items.GRANITE, null), 800L));
+
+        assertTrue(result.feasible());
+        assertEquals(600, result.allocations().size());
+        assertTrue(result.allocations().stream().allMatch(allocation -> allocation.count() == 2L));
+    }
+
+    @Test
+    void mixedFlowBranchesAroundSharedStockAndExactSlotConstraints() {
+        Ingredient stones = Ingredient.of(Items.STONE, Items.GRANITE);
+        var broadThree = new ScaledIngredientSpec(stones, 3, InputConsumption.consumed());
+        var broadTwo = new ScaledIngredientSpec(stones, 2, InputConsumption.consumed());
+        var exactTwo = new ScaledIngredientSpec(Ingredient.of(Items.STONE), 2,
+                InputConsumption.consumed());
+
+        var result = DirectMaterialAllocator.allocateScaledSingleVariant(
+                List.of(broadThree, broadTwo, exactTwo),
+                Map.of(new StackKey(Items.STONE, null), 4L,
+                        new StackKey(Items.GRANITE, null), 3L));
+
+        assertTrue(result.feasible());
+        assertEquals(3, result.allocations().size());
+        assertTrue(result.allocations().stream().anyMatch(allocation ->
+                allocation.ingredientIndex() == 0 && allocation.material().item() == Items.GRANITE
+                        && allocation.count() == 3L));
+    }
+
+    @Test
+    void singleVariantSearchPreservesStrictNbtAlternatives() {
+        ItemStack first = new ItemStack(Items.PAPER);
+        first.getOrCreateTag().putInt("variant", 1);
+        ItemStack second = new ItemStack(Items.PAPER);
+        second.getOrCreateTag().putInt("variant", 2);
+        Ingredient broad = CompoundIngredient.of(StrictNBTIngredient.of(first), StrictNBTIngredient.of(second));
+        var broadThree = new ScaledIngredientSpec(broad, 3, InputConsumption.consumed());
+        var exactTwo = new ScaledIngredientSpec(StrictNBTIngredient.of(first), 2, InputConsumption.consumed());
+
+        var result = DirectMaterialAllocator.allocateScaledSingleVariant(List.of(broadThree, exactTwo),
+                Map.of(StackKey.of(first, true), 4L, StackKey.of(second, true), 3L));
+
+        assertTrue(result.feasible());
+        assertEquals(2, result.allocations().size());
+        assertTrue(result.allocations().stream().anyMatch(allocation ->
+                allocation.ingredientIndex() == 0 && allocation.material().equals(StackKey.of(second, true))
+                        && allocation.count() == 3L));
     }
 }
