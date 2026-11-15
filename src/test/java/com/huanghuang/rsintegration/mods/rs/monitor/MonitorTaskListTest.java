@@ -1,5 +1,9 @@
 package com.huanghuang.rsintegration.mods.rs.monitor;
 
+import com.electronwill.nightconfig.core.CommentedConfig;
+import com.huanghuang.rsintegration.client.gui.CraftingThemeButton;
+import com.huanghuang.rsintegration.config.CraftingUiTheme;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.progress.CraftOutputProgress;
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot;
 import com.huanghuang.rsintegration.mixin.refinedstorage.MonitorTaskAccessor;
@@ -8,13 +12,19 @@ import com.refinedmods.refinedstorage.api.autocrafting.task.ICraftingRequestInfo
 import com.refinedmods.refinedstorage.api.network.grid.IGridTab;
 import com.refinedmods.refinedstorage.api.render.IElementDrawers;
 import net.minecraft.network.chat.Component;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.components.AbstractWidget;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.sounds.SoundManager;
 import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraftforge.fluids.FluidStack;
+import org.lwjgl.glfw.GLFW;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.ArrayList;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -22,6 +32,36 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class MonitorTaskListTest extends BootstrapTest {
+    @Test void paletteReceivesHeaderClicksBeforeTheTaskListAtEveryViewportSize() {
+        RSIntegrationConfig.CLIENT_SPEC.setConfig(CommentedConfig.inMemory());
+        Minecraft client = mock(Minecraft.class);
+        when(client.getSoundManager()).thenReturn(mock(SoundManager.class));
+        try (var game = mockStatic(Minecraft.class); var keys = mockStatic(Screen.class)) {
+            game.when(Minecraft::getInstance).thenReturn(client);
+            for (int width : List.of(960, 640, 427, 320)) {
+                MonitorLayout layout = MonitorLayout.forViewport(width, 336);
+                int left = Math.max(1, layout.mainLeft(width) - layout.railWidth() - 4);
+                var widgets = new ArrayList<AbstractWidget>();
+                var selected = new AtomicReference<UUID>();
+                new MonitorTaskList(left, 20, layout.railWidth(), layout.height(), mock(IElementDrawers.class),
+                        selected::set, widgets::add);
+                CraftingThemeButton palette = new CraftingThemeButton(left + 3, 21, false);
+                widgets.add(palette);
+                assertTrue(palette.getX() >= 0 && palette.getX() + palette.getWidth() <= width);
+                CraftingUiTheme before = CraftingUiTheme.current();
+                assertTrue(widgets.stream().anyMatch(widget -> widget.mouseClicked(palette.getX() + 3, 25, 0)));
+                assertTrue(palette.isWheelOpen());
+                assertEquals(before, CraftingUiTheme.current());
+                palette.wheelKeyPressed(GLFW.GLFW_KEY_RIGHT);
+                palette.wheelKeyPressed(GLFW.GLFW_KEY_ENTER);
+                assertEquals(before.next(), CraftingUiTheme.current());
+                assertNull(selected.get(), "调色盘不能切换监控任务");
+            }
+        } finally {
+            RSIntegrationConfig.CLIENT_SPEC.setConfig(null);
+        }
+    }
+
     @Test void nativeItemAndFluidTasksShowTheirOwnNamesQuantitiesAndProgress() {
         var item = nativeTask(new ItemStack(Items.DIAMOND), null, 64, 42);
         assertEquals(new ItemStack(Items.DIAMOND).getHoverName(), MonitorTaskList.title(item));
@@ -53,6 +93,7 @@ class MonitorTaskListTest extends BootstrapTest {
         var selected = new AtomicReference<UUID>();
         var list = new MonitorTaskList(10, 20, 96, 231, mock(IElementDrawers.class), selected::set, widget -> {});
         list.update(List.of(first, second), ((MonitorTaskAccessor) first).rsi$id());
+        assertFalse(list.mouseClicked(15, 25, 0), "标题区点击必须让给调色盘按钮");
         assertTrue(list.isMouseOver(80, 75));
         list.onClick(80, 75);
         assertEquals(secondId, selected.get());

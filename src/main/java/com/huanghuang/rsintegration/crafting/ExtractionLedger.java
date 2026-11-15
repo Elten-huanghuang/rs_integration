@@ -12,7 +12,6 @@ import com.huanghuang.rsintegration.util.ItemStackUtils;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.Optional;
-import net.minecraft.core.NonNullList;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.LivingEntity;
@@ -66,6 +65,19 @@ public final class ExtractionLedger implements AutoCloseable {
     }
 
     private final List<Entry> entries = new ArrayList<>();
+    private final MaterialSourceSelection materialSources = MaterialSourceSelection.current();
+
+    private List<ItemStack> selectedMainInventory(ServerPlayer player) {
+        return materialSources.inventory() ? player.getInventory().items : List.of();
+    }
+
+    private List<ItemStack> selectedOffhand(ServerPlayer player) {
+        return materialSources.inventory() ? player.getInventory().offhand : List.of();
+    }
+
+    private List<IItemHandler> selectedBackpackInventories(ServerPlayer player) {
+        return materialSources.backpacks() ? findAllBackpackInventories(player) : List.of();
+    }
     private final Map<Integer, Entry> entriesById = new HashMap<>();
     private final Map<CraftingResolver.StackKey, Long> pendingNet = new HashMap<>();
     private final Map<CraftingResolver.StackKey, Long> pendingInv = new HashMap<>();
@@ -237,6 +249,10 @@ public final class ExtractionLedger implements AutoCloseable {
 
     private StorageSnapshotResult reservationSnapshotResult(
             CraftStorageEndpoint endpoint, ServerPlayer player) {
+        if (!materialSources.storageNetwork()) {
+            return StorageSnapshotResult.success(new StorageSnapshot(
+                    endpoint.session().reference().backendId(), List.of()));
+        }
         long currentTick = player.server.getTickCount();
         if (reservationSnapshotResult != null && reservationSnapshotEndpoint == endpoint
                 && reservationSnapshotTick == currentTick) {
@@ -315,10 +331,10 @@ public final class ExtractionLedger implements AutoCloseable {
         }
         Map<CraftingResolver.StackKey, ItemStack> matches = new LinkedHashMap<>();
         Map<CraftingResolver.StackKey, Long> counts = new LinkedHashMap<>();
-        collectMatchingInventory(player.getInventory().items, ingredient, matches, counts);
-        collectMatchingInventory(player.getInventory().offhand, ingredient, matches, counts);
+        collectMatchingInventory(selectedMainInventory(player), ingredient, matches, counts);
+        collectMatchingInventory(selectedOffhand(player), ingredient, matches, counts);
         try {
-            for (IItemHandler backpack : findAllBackpackInventories(player)) {
+            for (IItemHandler backpack : selectedBackpackInventories(player)) {
                 for (int slot = 0; slot < backpack.getSlots(); slot++) {
                     collectMatchingStack(backpack.getStackInSlot(slot), ingredient, matches, counts);
                 }
@@ -784,7 +800,8 @@ public final class ExtractionLedger implements AutoCloseable {
     private ItemStack reserveFromPreferredResonance(
             Ingredient requested, ItemStack exactTemplate, int count,
             CraftStorageEndpoint endpoint, ServerPlayer player) {
-        if (preferredResonanceIngredients.isEmpty() || count <= 0) return ItemStack.EMPTY;
+        if (!materialSources.storageNetwork()
+                || preferredResonanceIngredients.isEmpty() || count <= 0) return ItemStack.EMPTY;
         for (ResonanceStorageView view : ResonanceCraftingSource.viewsFor(endpoint, player)) {
             for (ResonanceStorageView.StoredStack stored : view.storedStacks()) {
                 ItemStack stack = stored.stack();
@@ -833,7 +850,7 @@ public final class ExtractionLedger implements AutoCloseable {
 
         LinkedHashMap<CraftingResolver.StackKey, ItemStack> inventoryTemplates = new LinkedHashMap<>();
         LinkedHashMap<CraftingResolver.StackKey, Long> inventoryCounts = new LinkedHashMap<>();
-        collectMatchingAvailability(player.getInventory().items, ingredient, pendingInv,
+        collectMatchingAvailability(selectedMainInventory(player), ingredient, pendingInv,
                 inventoryTemplates, inventoryCounts);
 
         LinkedHashMap<CraftingResolver.StackKey, ItemStack> networkTemplates = new LinkedHashMap<>();
@@ -1646,7 +1663,7 @@ public final class ExtractionLedger implements AutoCloseable {
                 yield extracted;
             }
             case PLAYER_INVENTORY -> {
-                ItemStack extracted = extractFromSlots(entry, player.getInventory().items);
+                ItemStack extracted = extractFromSlots(entry, selectedMainInventory(player));
                 if (extracted.getCount() < entry.count) {
                     ItemStack bp = extractFromBackpackSlots(entry, player,
                             entry.count - extracted.getCount());
@@ -1660,7 +1677,7 @@ public final class ExtractionLedger implements AutoCloseable {
         };
     }
 
-    private static ItemStack extractFromSlots(Entry entry, NonNullList<ItemStack> slots) {
+    private static ItemStack extractFromSlots(Entry entry, List<ItemStack> slots) {
         ItemStack extracted = ItemStack.EMPTY;
         int needed = entry.count;
         for (ItemStack stack : slots) {
@@ -1681,7 +1698,7 @@ public final class ExtractionLedger implements AutoCloseable {
         return extracted;
     }
 
-    private static ItemStack extractFromSlots(Entry entry, NonNullList<ItemStack> slots, int limit) {
+    private static ItemStack extractFromSlots(Entry entry, List<ItemStack> slots, int limit) {
         ItemStack extracted = ItemStack.EMPTY;
         int remaining = Math.min(limit, entry.count);
         for (ItemStack stack : slots) {
@@ -1727,6 +1744,7 @@ public final class ExtractionLedger implements AutoCloseable {
 
     private int countExactAvailableInPreferredResonance(
             ItemStack template, CraftStorageEndpoint endpoint, ServerPlayer player) {
+        if (!materialSources.storageNetwork()) return 0;
         if (template.isEmpty() || !matchesPreferredResonanceIngredient(template)) return 0;
         long available = 0L;
         for (ResonanceStorageView view : ResonanceCraftingSource.viewsFor(endpoint, player)) {
@@ -1745,8 +1763,8 @@ public final class ExtractionLedger implements AutoCloseable {
 
     private int countExactAvailableInInventory(ServerPlayer player, ItemStack template) {
         CraftingResolver.StackKey key = CraftingResolver.StackKey.of(template, true);
-        int available = countExact(player.getInventory().items, template);
-        for (IItemHandler backpack : findAllBackpackInventories(player)) {
+        int available = countExact(selectedMainInventory(player), template);
+        for (IItemHandler backpack : selectedBackpackInventories(player)) {
             for (int slot = 0; slot < backpack.getSlots(); slot++) {
                 ItemStack stored = readBackpackSlot(backpack, slot);
                 if (MaterialMatcher.sameRuntimeFragment(template, stored)) available += stored.getCount();
@@ -1759,17 +1777,17 @@ public final class ExtractionLedger implements AutoCloseable {
     private long countExactAvailableInInventoryLong(ServerPlayer player, ItemStack template) {
         CraftingResolver.StackKey key = CraftingResolver.StackKey.of(template, true);
         long available = 0L;
-        for (ItemStack stack : player.getInventory().items) {
+        for (ItemStack stack : selectedMainInventory(player)) {
             if (!stack.isEmpty() && MaterialMatcher.sameRuntimeFragment(template, stack)) {
                 available = saturatedAdd(available, stack.getCount());
             }
         }
-        for (ItemStack stack : player.getInventory().offhand) {
+        for (ItemStack stack : selectedOffhand(player)) {
             if (!stack.isEmpty() && MaterialMatcher.sameRuntimeFragment(template, stack)) {
                 available = saturatedAdd(available, stack.getCount());
             }
         }
-        for (IItemHandler backpack : findAllBackpackInventories(player)) {
+        for (IItemHandler backpack : selectedBackpackInventories(player)) {
             for (int slot = 0; slot < backpack.getSlots(); slot++) {
                 ItemStack stored = readBackpackSlot(backpack, slot);
                 if (MaterialMatcher.sameRuntimeFragment(template, stored)) {
@@ -1924,7 +1942,7 @@ public final class ExtractionLedger implements AutoCloseable {
     private ItemStack findAvailableInInventory(ServerPlayer player, Ingredient ingredient, int needed) {
         if (GoetySoulTotemCrafting.isSoulTotemIngredient(ingredient)) {
             ItemStack best = ItemStack.EMPTY;
-            for (ItemStack stack : player.getInventory().items) {
+            for (ItemStack stack : selectedMainInventory(player)) {
                 if (!IngredientMatcher.test(ingredient, stack)) continue;
                 long available = stack.getCount()
                         - pendingInv.getOrDefault(CraftingResolver.StackKey.of(stack, true), 0L);
@@ -1934,7 +1952,7 @@ public final class ExtractionLedger implements AutoCloseable {
                     best = stack;
                 }
             }
-            for (IItemHandler backpack : findAllBackpackInventories(player)) {
+            for (IItemHandler backpack : selectedBackpackInventories(player)) {
                 for (int slot = 0; slot < backpack.getSlots(); slot++) {
                     ItemStack stack = readBackpackSlot(backpack, slot);
                     if (!IngredientMatcher.test(ingredient, stack)
@@ -1954,7 +1972,7 @@ public final class ExtractionLedger implements AutoCloseable {
             return best.copyWithCount(1);
         }
         // Single-stack fast path: one stack has enough → track pendingInv here
-        for (ItemStack stack : player.getInventory().items) {
+        for (ItemStack stack : selectedMainInventory(player)) {
             if (!IngredientMatcher.test(ingredient, stack)) continue;
             long available = stack.getCount()
                     - pendingInv.getOrDefault(CraftingResolver.StackKey.of(stack, true), 0L);
@@ -1969,7 +1987,7 @@ public final class ExtractionLedger implements AutoCloseable {
         }
 
         // Fast path for backpack contents
-        for (IItemHandler bp : findAllBackpackInventories(player)) {
+        for (IItemHandler bp : selectedBackpackInventories(player)) {
             for (int s = 0; s < bp.getSlots(); s++) {
                 ItemStack stack = readBackpackSlot(bp, s);
                 if (stack.isEmpty() || !IngredientMatcher.test(ingredient, stack)) continue;
@@ -1991,7 +2009,7 @@ public final class ExtractionLedger implements AutoCloseable {
         ItemStack pass2Template = ItemStack.EMPTY;
         long pass2Total = 0L;
 
-        for (ItemStack stack : player.getInventory().items) {
+        for (ItemStack stack : selectedMainInventory(player)) {
             if (!IngredientMatcher.test(ingredient, stack)) continue;
             long available = stack.getCount()
                     - pendingInv.getOrDefault(CraftingResolver.StackKey.of(stack, true), 0L);
@@ -2013,7 +2031,7 @@ public final class ExtractionLedger implements AutoCloseable {
         }
 
         // Aggregate backpack contents into availability
-        for (IItemHandler bp : findAllBackpackInventories(player)) {
+        for (IItemHandler bp : selectedBackpackInventories(player)) {
             for (int s = 0; s < bp.getSlots(); s++) {
                 ItemStack stack = readBackpackSlot(bp, s);
                 if (stack.isEmpty() || !IngredientMatcher.test(ingredient, stack)) continue;
@@ -2049,7 +2067,7 @@ public final class ExtractionLedger implements AutoCloseable {
 
         // Distribute pendingInv across all contributing stacks (main inventory)
         long remaining = needed;
-        for (ItemStack stack : player.getInventory().items) {
+        for (ItemStack stack : selectedMainInventory(player)) {
             if (remaining <= 0) break;
             if (!IngredientMatcher.test(ingredient, stack)) continue;
             long available = stack.getCount()
@@ -2061,7 +2079,7 @@ public final class ExtractionLedger implements AutoCloseable {
             remaining -= contrib;
         }
         // Distribute remaining across backpack contents
-        for (IItemHandler bp : findAllBackpackInventories(player)) {
+        for (IItemHandler bp : selectedBackpackInventories(player)) {
             if (remaining <= 0) break;
             for (int s = 0; s < bp.getSlots(); s++) {
                 if (remaining <= 0) break;
@@ -2155,7 +2173,7 @@ public final class ExtractionLedger implements AutoCloseable {
     private ItemStack extractFromBackpackSlots(Entry entry, ServerPlayer player, int limit) {
         ItemStack collected = ItemStack.EMPTY;
         int remaining = Math.min(limit, entry.count);
-        for (IItemHandler bp : findAllBackpackInventories(player)) {
+        for (IItemHandler bp : selectedBackpackInventories(player)) {
             for (int s = 0; s < bp.getSlots() && remaining > 0; s++) {
                 ItemStack inSlot = readBackpackSlot(bp, s);
                 if (inSlot.isEmpty() || !IngredientMatcher.test(entry.originalIngredient, inSlot)
@@ -2540,6 +2558,7 @@ public final class ExtractionLedger implements AutoCloseable {
 
     private List<ItemStack> endpointEntries(@Nullable CraftStorageEndpoint endpoint,
                                             @Nullable ServerPlayer player) {
+        if (!materialSources.storageNetwork()) return List.of();
         List<ItemStack> cached = endpointEntryCache.get(endpoint);
         if (cached != null) return cached;
 

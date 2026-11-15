@@ -311,7 +311,7 @@ public final class RecipeCandidatePanel {
             else choices.put(preferenceKey, choice);
         }
         return new CraftingPlanPreferences.Snapshot(stored.outputDestination(), choices,
-                stored.ingredientChoices(), excludedRecipes);
+                stored.ingredientChoices(), excludedRecipes, stored.materialSources());
     }
 
     void resumeCrafting() {

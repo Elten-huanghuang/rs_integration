@@ -7,6 +7,9 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.config.CraftingUiColors;
 import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.client.gui.CraftingUiStyle;
+import com.huanghuang.rsintegration.client.gui.CraftingThemeButton;
+import com.huanghuang.rsintegration.client.gui.CraftingGlassBackground;
+import com.huanghuang.rsintegration.config.CraftingUiTheme;
 import com.huanghuang.rsintegration.client.gui.CraftingPanelBounds;
 import com.huanghuang.rsintegration.client.gui.CraftingUiStyle.ActionButton;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.client.InkFluidRenderer;
@@ -35,6 +38,7 @@ public final class PlanningTasksScreen extends Screen implements CraftingPanelBo
     private Component monitorNotice;
     private Button executionMonitorButton;
     private Button visibilityButton;
+    private CraftingThemeButton themeButton;
     private int paginationCenterX;
     private int page;
     private int rowsPerPage;
@@ -101,6 +105,8 @@ public final class PlanningTasksScreen extends Screen implements CraftingPanelBo
         panelY = (height - panelHeight) / 2;
         page = Math.min(page, Math.max(0, (rows.size() - 1) / rowsPerPage));
         int left = panelX + 12;
+        themeButton = addRenderableWidget(new CraftingThemeButton(panelX + 12, panelY + 12, false));
+        themeButton.setWheelViewport(width, height);
         int contentWidth = panelWidth - 24;
         int navigationWidth = (contentWidth - (closePage == null ? 12 : 6)) / (closePage == null ? 3 : 2);
         addRenderableWidget(new ActionButton(left, panelY + 44, navigationWidth, 22,
@@ -176,6 +182,7 @@ public final class PlanningTasksScreen extends Screen implements CraftingPanelBo
     }
     @Override public boolean isPauseScreen() { return false; }
     @Override public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
+        if (themeButton != null && themeButton.wheelScrolled(delta)) return true;
         if (mouseX < panelX || mouseX >= panelX + panelWidth || mouseY < panelY || mouseY >= panelY + panelHeight) return false;
         int next = Math.max(0, Math.min(Math.max(0, (rows.size() - 1) / rowsPerPage), page + (delta < 0 ? 1 : -1)));
         if (delta != 0 && next != page) { page = next; init(); return true; }
@@ -187,9 +194,11 @@ public final class PlanningTasksScreen extends Screen implements CraftingPanelBo
     }
 
     @Override public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
-        renderBackground(graphics);
+        int wheelMouseX = mouseX, wheelMouseY = mouseY;
+        if (themeButton != null && themeButton.isWheelOpen()) mouseX = mouseY = -10000;
+        CraftingGlassBackground.render(graphics, CraftingUiTheme.current(), partialTick);
+        if (!CraftingUiTheme.current().isGlass()) renderBackground(graphics);
         CraftingUiStyle.panel(graphics, panelX, panelY, panelWidth, panelHeight);
-        CraftingUiStyle.planIcon(graphics, panelX + 14, panelY + 16, CraftingUiStyle.accent());
         graphics.drawString(font, title, panelX + 36, panelY + 13, CraftingUiStyle.text(), false);
         Component hint = monitorNotice != null ? monitorNotice : Component.translatable(network == null
                 ? "rsi.planning.tasks.personal_hint" : "rsi.planning.tasks.network_hint");
@@ -211,13 +220,35 @@ public final class PlanningTasksScreen extends Screen implements CraftingPanelBo
         }
         super.render(graphics, mouseX, mouseY, partialTick);
         // 托管在原生监控器中时，原版 Tooltip 会排入外层 Screen；这里直接绘制完整条目名称。
-        for (var child : children()) if (child instanceof PlanRowButton button && button.isHovered()) {
+        for (var child : children()) if (!themeButton.isWheelOpen() && child instanceof PlanRowButton button && button.isHovered()) {
             Component tooltip = button.cancelHovered(mouseX, mouseY)
                     ? Component.translatable(button.row.completed()
                             ? "rsi.planning.tasks.cancel_plan_hint" : "rsi.planning.tasks.cancel_calculation_hint")
                     : button.getMessage();
             graphics.renderComponentTooltip(font, List.of(tooltip), mouseX, mouseY);
         }
+        themeButton.renderWheel(graphics, font, width, height, wheelMouseX, wheelMouseY);
+    }
+
+    @Override public boolean mouseClicked(double x, double y, int button) {
+        if (themeButton != null && themeButton.mouseClicked(x, y, button)) return true;
+        return super.mouseClicked(x, y, button);
+    }
+
+    @Override public boolean mouseDragged(double x, double y, int button, double dx, double dy) {
+        return themeButton != null && themeButton.isWheelOpen() || super.mouseDragged(x, y, button, dx, dy);
+    }
+
+    @Override public boolean mouseReleased(double x, double y, int button) {
+        return themeButton != null && themeButton.isWheelOpen() || super.mouseReleased(x, y, button);
+    }
+
+    @Override public boolean keyPressed(int key, int scan, int modifiers) {
+        return themeButton != null && themeButton.wheelKeyPressed(key) || super.keyPressed(key, scan, modifiers);
+    }
+
+    @Override public boolean charTyped(char character, int modifiers) {
+        return themeButton != null && themeButton.isWheelOpen() || super.charTyped(character, modifiers);
     }
 
     private void openExecutionMonitor() {

@@ -61,8 +61,13 @@ public final class PlanBackgroundClient {
         if (requestId <= 0L || plan == null) return;
         long now = System.currentTimeMillis();
         prune(now);
-        PREVIEW_TARGETS.remove(requestId);
-        CACHED_PLANS.put(requestId, new CachedPlan(plan, now));
+        PreviewTarget target = PREVIEW_TARGETS.remove(requestId);
+        CachedPlan previous = CACHED_PLANS.get(requestId);
+        if (target == null && previous != null) target = previous.previewTarget();
+        // 服务端可能补全底材、产物等执行信息，复用判断仍须沿用浏览器首次点击的身份。
+        // 根配方切换后则交给新方案的身份，避免把另一目标误认作原计划。
+        if (target != null && !target.recipeId().toString().equals(plan.recipeId())) target = null;
+        CACHED_PLANS.put(requestId, new CachedPlan(plan, now, target));
         while (CACHED_PLANS.size() > MAX_CACHED_PLANS) {
             CACHED_PLANS.remove(CACHED_PLANS.keySet().iterator().next());
         }
@@ -71,8 +76,15 @@ public final class PlanBackgroundClient {
     /** 同一编辑页的新版本替换旧条目；独立打开的其他计划不按配方名称去重。 */
     public static synchronized void replaceRevision(long previousRequest, long nextRequest) {
         if (previousRequest <= 0 || nextRequest <= 0 || previousRequest == nextRequest) return;
-        CACHED_PLANS.remove(previousRequest);
-        PREVIEW_TARGETS.remove(previousRequest);
+        CachedPlan previous = CACHED_PLANS.remove(previousRequest);
+        PreviewTarget target = PREVIEW_TARGETS.remove(previousRequest);
+        if (target == null && previous != null) target = previous.previewTarget();
+        if (target != null) {
+            StorageReference network = previous != null && previous.plan().storageReference() != null
+                    ? previous.plan().storageReference() : target.network();
+            PREVIEW_TARGETS.put(nextRequest, new PreviewTarget(target.recipeId(),
+                    target.baseItem(), target.clickedOutput(), network));
+        }
         DETACHED_REQUESTS.remove(previousRequest);
         PlanningProgressTracker.responseReceived(previousRequest);
     }
@@ -99,7 +111,7 @@ public final class PlanBackgroundClient {
         return true;
     }
 
-    /** 只登记配方浏览器发起的请求，页面内重算和独立入口仍保持原有语义。 */
+    /** 登记配方浏览器首次点击的身份，后续页面重算通过 replaceRevision 继承。 */
     public static synchronized void startPreview(long requestId, ResourceLocation recipeId,
                                                   @Nullable ItemStack baseItem, @Nullable ItemStack clickedOutput) {
         PREVIEW_TARGETS.put(requestId, new PreviewTarget(recipeId, copyVariant(baseItem), copyVariant(clickedOutput),
@@ -114,7 +126,8 @@ public final class PlanBackgroundClient {
                                            @Nullable ItemStack clickedOutput, @Nullable StorageReference network) {
         PREVIEW_TARGETS.entrySet().removeIf(entry -> {
             var progress = PlanningProgressTracker.get(entry.getKey());
-            return progress == null || progress.terminal()
+            return progress == null || !entry.getValue().recipeId().equals(progress.recipeId())
+                    || progress.terminal()
                     && progress.state() != PlanningProgressSnapshot.State.SUCCEEDED;
         });
         return PREVIEW_TARGETS.entrySet().stream().filter(entry -> {
@@ -126,18 +139,22 @@ public final class PlanBackgroundClient {
         }).mapToLong(Map.Entry::getKey).max().orElse(0L);
     }
 
-    static long findExisting(ResourceLocation recipeId, @Nullable ItemStack baseItem,
+    static synchronized long findExisting(ResourceLocation recipeId, @Nullable ItemStack baseItem,
                              @Nullable ItemStack clickedOutput, @Nullable StorageReference network) {
-        for (var entry : completedPlans().entrySet()) {
-            PlanResponse plan = entry.getValue();
+        prune(System.currentTimeMillis());
+        long latest = 0L;
+        for (var entry : CACHED_PLANS.entrySet()) {
+            CachedPlan cached = entry.getValue();
+            PlanResponse plan = cached.plan();
+            PreviewTarget target = cached.previewTarget();
             if (recipeId.toString().equals(plan.recipeId())
                     && (network == null || Objects.equals(network, plan.storageReference()))
-                    && sameVariant(baseItem, plan.baseItem())
-                    && sameVariant(clickedOutput, plan.clickedOutput())) {
-                return entry.getKey();
+                    && sameVariant(baseItem, target == null ? plan.baseItem() : target.baseItem())
+                    && sameVariant(clickedOutput, target == null ? plan.clickedOutput() : target.clickedOutput())) {
+                latest = Math.max(latest, entry.getKey());
             }
         }
-        return 0L;
+        return latest;
     }
 
     private static boolean sameVariant(@Nullable ItemStack first, @Nullable ItemStack second) {
@@ -170,15 +187,8 @@ public final class PlanBackgroundClient {
         if (requestId <= 0L || plan == null || !DETACHED_REQUESTS.containsKey(requestId)) {
             return false;
         }
-        long now = System.currentTimeMillis();
         DETACHED_REQUESTS.remove(requestId);
-        prune(now);
-        CACHED_PLANS.put(requestId, new CachedPlan(plan, now));
-        while (CACHED_PLANS.size() > MAX_CACHED_PLANS) {
-            Iterator<Long> iterator = CACHED_PLANS.keySet().iterator();
-            iterator.next();
-            iterator.remove();
-        }
+        remember(requestId, plan);
         return true;
     }
 
@@ -270,6 +280,7 @@ public final class PlanBackgroundClient {
     public static synchronized void accepted(long requestId, UUID craftId) {
         if (requestId <= 0L) return;
         CACHED_PLANS.remove(requestId);
+        PREVIEW_TARGETS.remove(requestId);
         DETACHED_REQUESTS.remove(requestId);
         PlanningProgressTracker.responseReceived(requestId);
         if (Minecraft.getInstance().screen instanceof PlanScreenHost host) {
@@ -280,6 +291,7 @@ public final class PlanBackgroundClient {
     /** 移除尚未确认的计算结果；不会向服务器发送取消，也不会影响已提交的合成。 */
     public static synchronized boolean dismiss(long requestId) {
         if (requestId <= 0L || CACHED_PLANS.remove(requestId) == null) return false;
+        PREVIEW_TARGETS.remove(requestId);
         DETACHED_REQUESTS.remove(requestId);
         PlanningProgressTracker.responseReceived(requestId);
         return true;
@@ -297,7 +309,7 @@ public final class PlanBackgroundClient {
                 now - entry.getValue().cachedAt() >= CACHE_TTL_MS);
     }
 
-    private record CachedPlan(PlanResponse plan, long cachedAt) {}
+    private record CachedPlan(PlanResponse plan, long cachedAt, @Nullable PreviewTarget previewTarget) {}
     private record PreviewTarget(ResourceLocation recipeId, ItemStack baseItem,
                                  ItemStack clickedOutput, @Nullable StorageReference network) {}
 }

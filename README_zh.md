@@ -16,9 +16,9 @@
 
 RS Integration（RSI）为 Refined Storage 和 Beyond Dimensions 增加递归合成、机器远程访问、存储联动及可选魔法资源集成。它是附属模组，不替代两种存储网络。
 
-**当前版本：1.6.0 | Minecraft 1.20.1**
+**当前版本：1.6.0.1 | Minecraft 1.20.1**
 
-[1.6.0 更新公告](docs/announcements/RELEASE_NOTES_1.6.0.md)
+[1.6.0.1 更新公告](docs/announcements/RELEASE_NOTES_1.6.0.1.md)
 
 ## 目录
 
@@ -271,6 +271,8 @@ long souls = session.amount(BdMagicApi.SOUL_KEY);
 - `config/rs_integration/client.toml`：界面、JEI 和 Tetra 显示设置。
 
 客户端 `[craftingUi]` 可自定义计划列表、计划材料格、合成监控器和共用控件的颜色，默认保持原有配色。`panel`、`canvas`、`text` 等控制背景与文字，`materialStored`、`materialRunning`、`materialScheduled`、`materialBlocked`、`materialStopping`、`materialCompleted` 分别控制库存、合成中、待合成、阻塞、停止中和已完成的整格底色。颜色写成字符串，例如 `panel = "#D0CFD6"`；也支持 `#AARRGGBB`，其中 `AA` 是透明度（`FF` 不透明，`00` 全透明）。配置重新加载后生效，也可在游戏内客户端配置界面的“合成界面配色”分类修改并应用。完整默认值见 [配色示例](docs/config/crafting-ui.example.toml)。
+
+点击递归树、计划列表或监控器左上角的调色盘可打开配色轮盘：每页最多八张带名称和配色预览的主题卡，中央 ‹ / › 翻页。点选卡片应用，或用方向键/滚轮选择、回车确认；Esc、右键或点击外侧取消。递归树使用 `[craftingUi].treeTheme`，监控器和计划列表使用 `[craftingUi].theme`，各自保存，互不联动。提供自定义、森林绿、冰川蓝、丁香紫、暖纸色、原版灰、黄铜工坊、绯月秘法、石英终端、樱霞、余烬、石墨、高透磨砂玻璃、高透黑玻璃和宇宙深空。黄铜以深黄、棕色和旧金为主；魔法主题使用暗酒红、黑曜紫、旧金和骨白，不使用绿色；深空以靛蓝和星云紫为主。磨砂玻璃模糊背景，黑玻璃清晰透光，内容卡片保留可读衬底。预设不会覆盖自定义色值，切回 `CUSTOM` 即恢复；首次升级沿用旧主题。详见[主题说明](docs/config/plan-ui.md#调色与尺寸)。
 
 客户端 `[tooltips]` 中的 `customBackgrounds` 控制 RSI 特殊物品的主题底板，`obscureTooltipsCompat` 和 `modernUiCompat` 分别防止 Obscure Tooltips、Modern UI 圆角提示框接管这些物品。三个选项默认开启，配置重新加载后生效，也可在游戏内客户端配置界面编辑；关闭总开关后，两项兼容处理一起退出，不影响其他物品或原模组的字体设置。
 

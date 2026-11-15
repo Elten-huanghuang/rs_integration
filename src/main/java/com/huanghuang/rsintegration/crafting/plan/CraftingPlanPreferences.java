@@ -6,6 +6,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.huanghuang.rsintegration.crafting.OutputDestination;
+import com.huanghuang.rsintegration.crafting.MaterialSourceSelection;
 import com.huanghuang.rsintegration.crafting.planning.PlanningPreferences;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.TagParser;
@@ -37,8 +38,10 @@ final class CraftingPlanPreferences {
     record Snapshot(OutputDestination outputDestination,
                     Map<String, RecipeChoice> recipeChoices,
                     Map<String, ItemStack> ingredientChoices,
-                    Set<String> excludedRecipes) {
+                    Set<String> excludedRecipes,
+                    MaterialSourceSelection materialSources) {
         Snapshot {
+            materialSources = materialSources == null ? MaterialSourceSelection.ALL : materialSources;
             outputDestination = outputDestination == null
                     ? OutputDestination.RS_NETWORK : outputDestination;
             recipeChoices = recipeChoices == null
@@ -46,6 +49,12 @@ final class CraftingPlanPreferences {
             ingredientChoices = immutableItems(ingredientChoices);
             excludedRecipes = excludedRecipes == null
                     ? Set.of() : Set.copyOf(excludedRecipes);
+        }
+
+        Snapshot(OutputDestination outputDestination, Map<String, RecipeChoice> recipeChoices,
+                 Map<String, ItemStack> ingredientChoices, Set<String> excludedRecipes) {
+            this(outputDestination, recipeChoices, ingredientChoices, excludedRecipes,
+                    MaterialSourceSelection.ALL);
         }
 
         static Snapshot empty() {
@@ -58,7 +67,7 @@ final class CraftingPlanPreferences {
                 ResourceLocation id = ResourceLocation.tryParse(value);
                 if (id != null) excluded.add(id);
             }
-            return new PlanningPreferences(recipeChoices, ingredientChoices, excluded);
+            return new PlanningPreferences(recipeChoices, ingredientChoices, excluded, materialSources);
         }
     }
 
@@ -79,7 +88,8 @@ final class CraftingPlanPreferences {
             return new Snapshot(destination,
                     readRecipeChoices(root.getAsJsonObject("recipeChoices")),
                     readIngredientChoices(root.getAsJsonObject("ingredientChoices")),
-                    readStringSet(root.getAsJsonArray("excludedRecipes")));
+                    readStringSet(root.getAsJsonArray("excludedRecipes")),
+                    readMaterialSources(root.get("materialSources")));
         } catch (Exception ignored) {
             return Snapshot.empty();
         }
@@ -94,6 +104,11 @@ final class CraftingPlanPreferences {
             JsonObject root = new JsonObject();
             root.addProperty("version", 1);
             root.addProperty("outputDestination", snapshot.outputDestination().name());
+            JsonObject sources = new JsonObject();
+            sources.addProperty("inventory", snapshot.materialSources().inventory());
+            sources.addProperty("storageNetwork", snapshot.materialSources().storageNetwork());
+            sources.addProperty("backpacks", snapshot.materialSources().backpacks());
+            root.add("materialSources", sources);
             root.add("recipeChoices", writeRecipeChoices(snapshot.recipeChoices()));
             root.add("ingredientChoices", writeIngredientChoices(snapshot.ingredientChoices()));
             root.add("excludedRecipes", writeStringSet(snapshot.excludedRecipes()));
@@ -120,7 +135,7 @@ final class CraftingPlanPreferences {
     static boolean saveOutputDestination(Path path, OutputDestination destination) {
         Snapshot current = load(path);
         return save(path, new Snapshot(destination, current.recipeChoices(),
-                current.ingredientChoices(), current.excludedRecipes()));
+                current.ingredientChoices(), current.excludedRecipes(), current.materialSources()));
     }
 
     static boolean saveRecipeChoice(Path path, String key, @Nullable RecipeChoice choice) {
@@ -130,7 +145,7 @@ final class CraftingPlanPreferences {
         if (choice == null) choices.remove(key);
         else choices.put(key, choice);
         return save(path, new Snapshot(current.outputDestination(), choices,
-                current.ingredientChoices(), current.excludedRecipes()));
+                current.ingredientChoices(), current.excludedRecipes(), current.materialSources()));
     }
 
     static boolean saveRecipeChoice(Path path, String key, @Nullable String recipeId) {
@@ -144,7 +159,7 @@ final class CraftingPlanPreferences {
         if (stack == null || stack.isEmpty()) choices.remove(key);
         else choices.put(key, stack.copyWithCount(1));
         return save(path, new Snapshot(current.outputDestination(), current.recipeChoices(),
-                choices, current.excludedRecipes()));
+                choices, current.excludedRecipes(), current.materialSources()));
     }
 
     static boolean setExcluded(Path path, String recipeId, boolean excluded) {
@@ -154,9 +169,28 @@ final class CraftingPlanPreferences {
         if (excluded) values.add(recipeId);
         else values.remove(recipeId);
         boolean saved = save(path, new Snapshot(current.outputDestination(),
-                current.recipeChoices(), current.ingredientChoices(), values));
+                current.recipeChoices(), current.ingredientChoices(), values, current.materialSources()));
         if (saved) ClientRecipeExclusions.invalidate();
         return saved;
+    }
+
+    static boolean saveMaterialSources(Path path, MaterialSourceSelection sources) {
+        Snapshot current = load(path);
+        return save(path, new Snapshot(current.outputDestination(), current.recipeChoices(),
+                current.ingredientChoices(), current.excludedRecipes(), sources));
+    }
+
+    private static MaterialSourceSelection readMaterialSources(@Nullable JsonElement value) {
+        if (value == null || !value.isJsonObject()) return MaterialSourceSelection.ALL;
+        JsonObject sources = value.getAsJsonObject();
+        return new MaterialSourceSelection(readSource(sources, "inventory"),
+                readSource(sources, "storageNetwork"), readSource(sources, "backpacks"));
+    }
+
+    private static boolean readSource(JsonObject sources, String key) {
+        JsonElement value = sources.get(key);
+        return value == null || !value.isJsonPrimitive()
+                || !value.getAsJsonPrimitive().isBoolean() || value.getAsBoolean();
     }
 
     private static Map<String, RecipeChoice> readRecipeChoices(@Nullable JsonObject object) {

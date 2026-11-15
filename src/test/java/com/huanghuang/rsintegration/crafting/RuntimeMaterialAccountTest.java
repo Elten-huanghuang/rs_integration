@@ -154,6 +154,27 @@ class RuntimeMaterialAccountTest extends BootstrapTest {
     }
 
     @Test
+    void laterAdmissionKeepsTheSourceSelectionCapturedAtTaskCreation() {
+        stock.put(IRON, 100L);
+        player.getInventory().items.set(0, IRON.toStack(7));
+        RuntimeMaterialAccount account;
+        try (var sources = new MaterialSourceSelection(true, false, false).enter()) {
+            account = account();
+        }
+        assertEquals(MaterialSourceSelection.ALL, MaterialSourceSelection.current());
+        assertEquals(7L, account.available(player).get(CraftingResolver.StackKey.of(IRON.toStack(1), true)));
+        try (var inventoryUpdates = mockStatic(PlayerUtils.class)) {
+            assertFalse(acquire(account, IRON, 10), "后续 tick 不能回退到已禁用的网络取料");
+            assertTrue(acquire(account, IRON, 3));
+            assertEquals(4, player.getInventory().items.get(0).getCount());
+            assertEquals(100L, stock.get(IRON));
+            assertTrue(account.take(IRON.toStack(3), 3).complete());
+            account.close();
+        }
+        verify(session, never()).extractExact(any(), any(), anyLong(), anyBoolean());
+    }
+
+    @Test
     void mixedItemAndFluidPartialAcquisitionRollsBackBothAndDoesNotHoldHalfAdmission() {
         MaterialKey water = MaterialKey.of(InkFluidSupport.token(InkFluidTestFixtures.tokenItem(),
                 new FluidStack(Fluids.WATER, 1)));

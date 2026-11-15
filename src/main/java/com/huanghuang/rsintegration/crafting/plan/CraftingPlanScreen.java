@@ -14,6 +14,8 @@ import com.huanghuang.rsintegration.crafting.planning.PlanningProgressOverlay;
 import com.huanghuang.rsintegration.crafting.planning.PlanningProgressTracker;
 import com.huanghuang.rsintegration.crafting.planning.PlanningRequestIds;
 import com.huanghuang.rsintegration.crafting.planning.PlanningPreferences;
+import com.huanghuang.rsintegration.crafting.MaterialSourceSelection;
+import com.huanghuang.rsintegration.crafting.MaterialSourceSelection.Source;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.item.TooltipFlag;
 import net.minecraftforge.fml.ModList;
@@ -21,6 +23,10 @@ import net.minecraftforge.fml.ModList;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.ClientSyncedConfig;
 import com.huanghuang.rsintegration.config.PlanUiConfig;
+import com.huanghuang.rsintegration.client.gui.CraftingThemeButton;
+import com.huanghuang.rsintegration.client.gui.CraftingGlassBackground;
+import com.huanghuang.rsintegration.client.gui.CraftingThemeDecoration;
+import com.huanghuang.rsintegration.config.CraftingUiTheme;
 import com.huanghuang.rsintegration.config.PlanUiConfig.Color;
 import com.huanghuang.rsintegration.crafting.plan.PlanWorkspaceLayout.Rect;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
@@ -166,6 +172,9 @@ public final class CraftingPlanScreen extends Screen {
     @Nullable
     private BookmarkHit hoveredBookmark;
     private OutputDestination outputDestination;
+    private MaterialSourceSelection materialSources = CraftingPlanPreferences.load(PLAN_PREFS_PATH).materialSources();
+    private boolean materialSourcesMenuOpen;
+    private Rect materialSourcesButton;
     @Nullable
     private StorageReference storageReference;
     private List<StorageNetworkDescriptor> storageNetworks = List.of();
@@ -181,6 +190,7 @@ public final class CraftingPlanScreen extends Screen {
     private PlanDetailsPanel detailsPanel;
     private PlanWorkspaceLayout workspace;
     private PlanWorkspaceChrome chrome;
+    private CraftingThemeButton themeButton;
     private PlanMaterialTable materialTable;
     private final PlanTreeMiniMap miniMap = new PlanTreeMiniMap();
     private EditBox workspaceSearch;
@@ -522,6 +532,9 @@ public final class CraftingPlanScreen extends Screen {
         createRepeatCountInput(font);
 
         chrome = new PlanWorkspaceChrome(font);
+        PlanWorkspaceLayout initialLayout = PlanWorkspaceLayout.create(width, height, false, PlanUiConfig.panelWidth());
+        themeButton = addRenderableWidget(new CraftingThemeButton(initialLayout.header().x(), initialLayout.header().y() + 1, true));
+        themeButton.setWheelViewport(width, height);
         materialTable = new PlanMaterialTable(font, this::centerOnKey,
                 (stack, count) -> bookmarkMissingMaterial(new BookmarkHit(0, 0, 0, 0, stack, count)),
                 this::bookmarkAllMissingMaterials);
@@ -664,6 +677,18 @@ public final class CraftingPlanScreen extends Screen {
         if (!CraftingPlanPreferences.saveOutputDestination(PLAN_PREFS_PATH, selected)) {
             RSIntegrationMod.LOGGER.debug("[RSI-Plan] Failed to save output destination preference");
         }
+    }
+
+    private void toggleMaterialSource(Source source) {
+        materialSources = materialSources.toggle(source);
+        cancelQueuedConfirmation();
+        stopInventoryWatch();
+        if (!CraftingPlanPreferences.saveMaterialSources(PLAN_PREFS_PATH, materialSources)) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Plan] 无法保存原材料来源偏好");
+        }
+        planRefreshTick = ticksOpen + 10;
+        responseRequests.scheduleRefresh();
+        updateConfirmButton();
     }
 
     private void cycleStorageTarget() {
@@ -831,8 +856,10 @@ public final class CraftingPlanScreen extends Screen {
     private PlanningPreferences requestPreferences() {
         CraftingPlanPreferences.Snapshot stored = pendingCandidateSwitch == null
                 ? CraftingPlanPreferences.load(PLAN_PREFS_PATH) : pendingCandidateSwitch.preferences();
-        return (pendingMaterialChoice == null ? stored : pendingMaterialChoice.preview(stored))
+        PlanningPreferences preferences = (pendingMaterialChoice == null ? stored : pendingMaterialChoice.preview(stored))
                 .toPlanningPreferences();
+        return new PlanningPreferences(preferences.recipeChoices(), preferences.ingredientChoices(),
+                preferences.excludedRecipes(), materialSources);
     }
 
     /** Open the active recipe browser for a specific recipe id. */
@@ -944,6 +971,9 @@ public final class CraftingPlanScreen extends Screen {
 
     @Override
     public void render(GuiGraphics gfx, int mouseX, int mouseY, float partialTick) {
+        CraftingGlassBackground.render(gfx, CraftingUiTheme.current(CraftingUiTheme.Scope.TREE), partialTick);
+        int wheelMouseX = mouseX, wheelMouseY = mouseY;
+        if (themeButton != null && themeButton.isWheelOpen()) mouseX = mouseY = -10000;
         this.mouseX = mouseX;
         this.mouseY = mouseY;
         hoveredItemForTooltip = ItemStack.EMPTY;
@@ -966,6 +996,7 @@ public final class CraftingPlanScreen extends Screen {
         renderWorkspaceFooter(gfx);
         super.render(gfx, mouseX, mouseY, partialTick);
         if (quantityMenuOpen) renderQuantityMenu(gfx);
+        if (materialSourcesMenuOpen) renderMaterialSourcesMenu(gfx);
         if (!materialView && !embersDetailsOpen && workspaceSearch.isFocused()) {
             treeSearch.render(gfx, workspaceSearchBounds, workspace.frame(), mouseX, mouseY);
             if (treeSearch.contains(mouseX, mouseY)) {
@@ -975,6 +1006,7 @@ public final class CraftingPlanScreen extends Screen {
             }
         } else treeSearch.close();
         renderDeferredTooltip(gfx, font);
+        if (themeButton != null) themeButton.renderWheel(gfx, font, width, height, wheelMouseX, wheelMouseY);
     }
 
     private void layoutWorkspace() {
@@ -998,7 +1030,7 @@ public final class CraftingPlanScreen extends Screen {
         boolean compact = workspace.compact();
         int iconSize = compact ? 18 : 24;
         g.pose().pushPose();
-        g.pose().translate(r.x() + 3, r.y() + 3, 0);
+        g.pose().translate(r.x() + 25, r.y() + 3, 0);
         g.pose().scale(iconSize / 16f, iconSize / 16f, 1);
         InkFluidRenderer.render(g, plan.targetResult(), 0, 0);
         g.pose().popPose();
@@ -1008,7 +1040,7 @@ public final class CraftingPlanScreen extends Screen {
         int firstWidth = Math.min(maxBadgeWidth, font.width(shortages) + 12);
         int secondWidth = Math.min(maxBadgeWidth, font.width(conditions) + 12);
         int buttonsX = r.right() - firstWidth - secondWidth - 5 - (compact ? 0 : 26);
-        int textX = r.x() + (compact ? 26 : 35);
+        int textX = r.x() + (compact ? 48 : 57);
         chrome.heading(g, title.getString(), textX, r.y() + 1, buttonsX - textX - 8, compact ? 1 : 1.4f);
         String status = I18n.get(plan.success() && !plan.executionBlocked() ? "rsi.plan.status_ok" : "rsi.plan.status_fail");
         Color statusColor = Color.MUTED;
@@ -1202,12 +1234,15 @@ public final class CraftingPlanScreen extends Screen {
 
     private void renderWorkspaceFooter(GuiGraphics g) {
         Rect r = workspace.footer();
-        int y = r.y() + (workspace.compact() ? 5 : 9), x = r.x();
+        // 宽屏共用操作按钮的中心线；窄屏将材料来源与确认按钮放在第二行。
+        int y = width < 900 ? r.y() + 5
+                : workspace.confirm().y() + (workspace.confirm().height() - 18) / 2;
+        int textY = y + (18 - font.lineHeight) / 2, x = r.x();
         if (externalRequest == null) {
-            if (width >= 720) { chrome.label(g, workspaceText("quantity").getString(), x, y + 6, 48, Color.MUTED); x += 50; }
+            if (width >= 720) { chrome.label(g, workspaceText("quantity").getString(), x, textY, 48, Color.MUTED); x += 50; }
             chrome.button(g, new Rect(x, y, 18, 18), "−", false, currentRepeat > 1, mouseX, mouseY,
                     () -> setRepeatCount(currentRepeat - 1, true)); x += 22;
-            countPillX = x; countPillY = y + 4; countPillW = 40; countPillH = 14;
+            countPillX = x; countPillY = textY; countPillW = 40; countPillH = 14;
             PlanWorkspaceChrome.panel(g, new Rect(x, y, 40, 18), Color.BACKGROUND, Color.BORDER);
             renderRepeatCountInput(g, font); x += 44;
             chrome.button(g, new Rect(x, y, 18, 18), "+", false, true, mouseX, mouseY,
@@ -1224,16 +1259,16 @@ public final class CraftingPlanScreen extends Screen {
         boolean quest = QuestSubmissionTargetIds.isQuestSubmission(ResourceLocation.tryParse(plan.recipeId()));
         if (!quest && externalRequest == null) {
             if (width >= 900) {
-                chrome.label(g, workspaceText("mode_label").getString(), x, y + 5, 45, Color.MUTED);
+                chrome.label(g, workspaceText("mode_label").getString(), x, textY, 45, Color.MUTED);
                 x += 50;
             }
             int available = (width < 720 ? r.right() : workspace.confirm().x() - 6) - x;
             preparationModeX = x; preparationModeY = y; preparationModeW = Math.min(72, Math.max(48, available / 2 - 3)); preparationModeH = 18;
             PlanWorkspaceChrome.panel(g, new Rect(x, y, preparationModeW, 18), partialPreparation ? Color.SELECTED : Color.SURFACE, Color.BORDER);
-            chrome.label(g, I18n.get(partialPreparation ? "rsi.plan.mode.prepare" : "rsi.plan.mode.strict"), x + 5, y + 5, preparationModeW - 10, Color.TEXT);
+            chrome.label(g, I18n.get(partialPreparation ? "rsi.plan.mode.prepare" : "rsi.plan.mode.strict"), x + 5, textY, preparationModeW - 10, Color.TEXT);
             x += preparationModeW + 6;
             if (width >= 900) {
-                chrome.label(g, workspaceText("destination_label").getString(), x + 4, y + 5, 42, Color.MUTED);
+                chrome.label(g, workspaceText("destination_label").getString(), x + 4, textY, 42, Color.MUTED);
                 x += 50;
             }
             outputSelectorX = x; outputSelectorY = y; outputSegmentW = Math.max(35, Math.min(110,
@@ -1244,17 +1279,76 @@ public final class CraftingPlanScreen extends Screen {
             if (outputDestination == OutputDestination.RS_NETWORK && storageReference != null) {
                 for (StorageNetworkDescriptor network : storageNetworks) if (storageReference.equals(network.reference())) destination = storageTargetLabel(network);
             }
-            chrome.label(g, destination.getString() + " ↔", x + 5, y + 5, outputSegmentW - 10, Color.TEXT);
+            chrome.label(g, destination.getString() + " ↔", x + 5, textY, outputSegmentW - 10, Color.TEXT);
             if (new Rect(x, y, outputSegmentW, 18).contains(mouseX, mouseY)) {
                 hoveredStepWarnings = List.of(Component.translatable("rsi.plan.output.tooltip"));
                 hoveredTooltipX = mouseX; hoveredTooltipY = mouseY;
             }
         } else { outputSelectorH = preparationModeH = 0; }
-        if (width >= 900 && workspace.confirm().x() - (outputSelectorX + outputSegmentW) > 120) {
-            chrome.label(g, workspaceText("live_inventory").getString(), workspace.confirm().x() - 120, y + 5, 110, Color.MUTED);
+        if (externalRequest == null) {
+            Rect sourceArea = width >= 900 && workspace.confirm().x() - (outputSelectorX + outputSegmentW) > 120
+                    ? new Rect(workspace.confirm().x() - 120, y, 110, 18)
+                    : new Rect(r.x(), workspace.confirm().y() + (workspace.confirm().height() - 14) / 2,
+                            Math.max(1, workspace.confirm().x() - r.x() - 6), 14);
+            renderMaterialSources(g, sourceArea);
         }
-        if (width < 720) chrome.label(g, workspaceText("live_inventory").getString(), r.x(), r.bottom() - 14,
-                Math.max(1, workspace.confirm().x() - r.x() - 6), Color.MUTED);
+    }
+
+    private void renderMaterialSources(GuiGraphics g, Rect footer) {
+        materialSourcesButton = new Rect(footer.x(), footer.y(), Math.min(110, footer.width()), footer.height());
+        chrome.button(g, materialSourcesButton, I18n.get("rsi.plan.sources.label") + " ▾",
+                materialSourcesMenuOpen, true, mouseX, mouseY, () -> {
+                    materialSourcesMenuOpen = !materialSourcesMenuOpen;
+                    quantityMenuOpen = false;
+                    if (workspaceSearch != null) workspaceSearch.setFocused(false);
+                    if (treeSearch != null) treeSearch.close();
+                    unfocusRepeatCountInput();
+                });
+    }
+
+    private Rect materialSourcesMenuBounds() {
+        int menuWidth = Math.min(154, workspace.frame().width() - 8);
+        return new Rect(Math.min(materialSourcesButton.x(), workspace.frame().right() - menuWidth - 4),
+                Math.max(workspace.frame().y() + 4, materialSourcesButton.y() - 78), menuWidth, 74);
+    }
+
+    private Rect materialSourceOptionBounds(Rect menu, Source source) {
+        return new Rect(menu.x() + 4, menu.y() + 4 + source.ordinal() * 22, menu.width() - 8, 20);
+    }
+
+    private void renderMaterialSourcesMenu(GuiGraphics g) {
+        if (materialSourcesButton == null) return;
+        Rect menu = materialSourcesMenuBounds();
+        g.pose().pushPose();
+        g.pose().translate(0, 0, 600);
+        PlanWorkspaceChrome.panel(g, menu, Color.PANEL, Color.BORDER);
+        if (menu.contains(mouseX, mouseY)) {
+            hoveredItemForTooltip = ItemStack.EMPTY;
+            hoveredStepWarnings = List.of();
+            hoveredBookmark = null;
+        }
+        for (Source source : Source.values()) {
+            boolean selected = materialSources.includes(source);
+            Rect bounds = materialSourceOptionBounds(menu, source);
+            int x = bounds.x();
+            chrome.button(g, bounds, "", selected, true, mouseX, mouseY,
+                    () -> toggleMaterialSource(source));
+            int checkY = bounds.y() + (bounds.height() - 8) / 2;
+            g.fill(x + 3, checkY, x + 11, checkY + 8, Color.BORDER.value());
+            g.fill(x + 4, checkY + 1, x + 10, checkY + 7, Color.BACKGROUND.value());
+            if (selected) {
+                g.fill(x + 5, checkY + 3, x + 6, checkY + 6, Color.ACCENT.value());
+                g.fill(x + 6, checkY + 2, x + 9, checkY + 4, Color.ACCENT.value());
+            }
+            String key = "rsi.plan.sources." + source.name().toLowerCase(Locale.ROOT);
+            chrome.label(g, I18n.get(key), x + 17, bounds.y() + (bounds.height() - 9) / 2, bounds.width() - 21, Color.TEXT);
+            if (bounds.contains(mouseX, mouseY)) {
+                hoveredStepWarnings = List.of(Component.translatable(key),
+                        Component.translatable("rsi.plan.sources.tooltip"));
+                hoveredTooltipX = mouseX; hoveredTooltipY = mouseY;
+            }
+        }
+        g.pose().popPose();
     }
 
     private void renderQuantityMenu(GuiGraphics g) {
@@ -1502,6 +1596,8 @@ public final class CraftingPlanScreen extends Screen {
 
         // Backdrop over the whole area.
         PlanWorkspaceChrome.panel(gfx, new Rect(left, areaTop, contentW, areaBottom - areaTop), Color.BACKGROUND, Color.BORDER);
+        gfx.drawManaged(() -> CraftingThemeDecoration.sigil(gfx, left, areaTop, contentW, areaBottom - areaTop,
+                CraftingUiTheme.current(CraftingUiTheme.Scope.TREE)));
         int gridColor = Color.GRID.value();
         gfx.drawManaged(() -> {
             for (int gx = left + 11; gx < left + contentW - 5; gx += 13) {
@@ -1779,7 +1875,7 @@ public final class CraftingPlanScreen extends Screen {
         CraftingPlanPreferences.Snapshot stored = CraftingPlanPreferences.load(PLAN_PREFS_PATH);
         CraftingPlanPreferences.Snapshot draft = pending.preferences();
         if (CraftingPlanPreferences.save(PLAN_PREFS_PATH, new CraftingPlanPreferences.Snapshot(
-                stored.outputDestination(), draft.recipeChoices(), stored.ingredientChoices(), draft.excludedRecipes()))
+                stored.outputDestination(), draft.recipeChoices(), stored.ingredientChoices(), draft.excludedRecipes(), stored.materialSources()))
                 && !stored.excludedRecipes().equals(draft.excludedRecipes())) {
             ClientRecipeExclusions.invalidate();
         }
@@ -1994,6 +2090,7 @@ public final class CraftingPlanScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
+        if (themeButton != null && themeButton.wheelScrolled(delta)) return true;
         if (!materialView && !embersDetailsOpen && workspaceSearch != null && workspaceSearch.isFocused()
                 && treeSearch.scroll(mouseX, mouseY, delta)) return true;
         if (workspace != null && workspace.content().contains(mouseX, mouseY)) {
@@ -2023,6 +2120,7 @@ public final class CraftingPlanScreen extends Screen {
 
     @Override
     public boolean mouseDragged(double mx, double my, int button, double dx, double dy) {
+        if (themeButton != null && themeButton.isWheelOpen()) return true;
         if (!materialView && !embersDetailsOpen && miniMap.drag(mx, my, this::centerMiniMap)) return true;
         if (treeMouseGesture.captures(button)) {
             PlanTreeMouseGesture.PanDelta movement = treeMouseGesture.drag(mx, my, button);
@@ -2040,6 +2138,22 @@ public final class CraftingPlanScreen extends Screen {
 
     @Override
     public boolean mouseClicked(double mx, double my, int button) {
+        // 换色不提交数量、不关闭搜索，也不改变树的选择和相机。
+        if (themeButton != null && themeButton.mouseClicked(mx, my, button)) return true;
+        if (materialSourcesMenuOpen && materialSourcesButton != null) {
+            Rect menu = materialSourcesMenuBounds();
+            if (menu.contains(mx, my)) {
+                if (button == 0) {
+                    for (Source source : Source.values()) {
+                        if (materialSourceOptionBounds(menu, source).contains(mx, my)) {
+                            toggleMaterialSource(source);
+                            break;
+                        }
+                    }
+                }
+            } else materialSourcesMenuOpen = false;
+            return true;
+        }
         treeMouseGesture.cancel();
         if (treeSearch != null) {
             if (!materialView && !embersDetailsOpen && workspaceSearch.isFocused()
@@ -2185,6 +2299,7 @@ public final class CraftingPlanScreen extends Screen {
 
     @Override
     public boolean mouseReleased(double mx, double my, int button) {
+        if (themeButton != null && themeButton.isWheelOpen()) return true;
         miniMap.release();
         if (treeMouseGesture.captures(button)) {
             PlanTreeNode selected = treeMouseGesture.release(mx, my, button, gestureNodeAt(mx, my));
@@ -2198,6 +2313,11 @@ public final class CraftingPlanScreen extends Screen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (themeButton != null && themeButton.wheelKeyPressed(keyCode)) return true;
+        if (keyCode == GLFW.GLFW_KEY_ESCAPE && materialSourcesMenuOpen) {
+            materialSourcesMenuOpen = false;
+            return true;
+        }
         if (workspaceSearch != null && workspaceSearch.isFocused()) {
             if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
                 treeSearch.close(); workspaceSearch.setFocused(false); return true;
@@ -2248,6 +2368,7 @@ public final class CraftingPlanScreen extends Screen {
 
     @Override
     public boolean charTyped(char character, int modifiers) {
+        if (themeButton != null && themeButton.isWheelOpen()) return true;
         if (workspaceSearch != null && workspaceSearch.isFocused()) return workspaceSearch.charTyped(character, modifiers);
         if (!materialView && !embersDetailsOpen && detailsPanel != null && detailsPanel.charTyped(character, modifiers)) return true;
         return super.charTyped(character, modifiers);

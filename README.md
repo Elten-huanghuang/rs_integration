@@ -16,9 +16,9 @@
 
 RS Integration (RSI) extends Refined Storage and Beyond Dimensions with recursive crafting, remote machine access, storage-aware interactions, and optional magic-resource integration. It is an add-on, not a replacement for either storage mod.
 
-**Current version: 1.6.0 | Minecraft 1.20.1**
+**Current version: 1.6.0.1 | Minecraft 1.20.1**
 
-[1.6.0 release notes (Chinese)](docs/announcements/RELEASE_NOTES_1.6.0.md)
+[1.6.0.1 release notes (Chinese)](docs/announcements/RELEASE_NOTES_1.6.0.1.md)
 
 ## Contents
 
@@ -278,6 +278,8 @@ Recipe handlers describe instant execution through `InstantRecipePolicy`: `NONE`
 - `config/rs_integration/client.toml`: UI, JEI, and Tetra display options.
 
 The client `[craftingUi]` section customizes colors for the plan list, plan material cells, crafting monitor, and shared controls. Defaults preserve the existing palette. `panel`, `canvas`, and `text` control backgrounds and text; `materialStored`, `materialRunning`, `materialScheduled`, `materialBlocked`, `materialStopping`, and `materialCompleted` control material status backgrounds. Use quoted `#RRGGBB` or `#AARRGGBB` strings, such as `panel = "#D0CFD6"`; `AA` is opacity (`FF` opaque, `00` transparent). Changes apply after configuration reload or after applying them in the in-game client config editor. See the [complete default palette](docs/config/crafting-ui.example.toml).
+
+Click the palette icon at the top left of the tree, plan list, or monitor to open a theme wheel. Up to eight named theme cards with palette previews surround the center; ‹ / › changes pages. Click a card to apply, or use arrows / scroll and Enter; Escape, right-click, or clicking outside cancels. The tree saves its choice in `[craftingUi].treeTheme`; the monitor and plan list independently use `[craftingUi].theme`. Choices include `CUSTOM` (default), `FOREST`, `OCEAN` (Glacier), `AMETHYST` (Lilac), `WARM_PAPER`, `VANILLA`, `BRASS` (dark brass and caramel brown), `ARCANE` (Crimson Ritual: burgundy, obsidian purple, antique gold, and ivory, without green), `QUARTZ`, `ROSE`, `EMBER`, `GRAPHITE`, `FROSTED_GLASS` (translucent with background blur), `BLACK_GLASS` (translucent with a clear background), and `DEEP_SPACE` (near-black indigo, nebula purple, and icy blue). Existing theme selections migrate automatically. Presets preserve custom color values; switching back to `CUSTOM` restores them, including tree colors in `plan_ui.toml`. See [theme configuration](docs/config/plan-ui.md).
 
 The client `[tooltips]` section provides `customBackgrounds` for RSI's themed item backgrounds, plus `obscureTooltipsCompat` and `modernUiCompat` to keep Obscure Tooltips and Modern UI's rounded tooltips from replacing them. All three default to `true`, take effect after configuration reload, and are available in the in-game client config editor. Disabling the background master switch also disables both compatibility overrides; other items and font settings are unchanged.
 

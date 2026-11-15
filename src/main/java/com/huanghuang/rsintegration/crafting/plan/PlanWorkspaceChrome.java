@@ -1,6 +1,9 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
 import com.huanghuang.rsintegration.config.PlanUiConfig.Color;
+import com.huanghuang.rsintegration.config.CraftingUiTheme;
+import com.huanghuang.rsintegration.client.gui.CraftingUiStyle;
+import com.huanghuang.rsintegration.client.gui.CraftingThemeDecoration;
 import com.huanghuang.rsintegration.crafting.plan.PlanWorkspaceLayout.Rect;
 import net.minecraft.client.gui.Font;
 import net.minecraft.network.chat.Component;
@@ -21,24 +24,34 @@ public final class PlanWorkspaceChrome {
 
     public void begin(GuiGraphics g, PlanWorkspaceLayout layout) {
         actions.clear();
-        g.fill(0, 0, layout.frame().right() + layout.frame().x(),
-                layout.frame().bottom() + layout.frame().y(), Color.SHADOW.value());
-        panel(g, layout.frame(), Color.FRAME, Color.NODE_BORDER);
+        if (!CraftingUiTheme.current(CraftingUiTheme.Scope.TREE).isGlass()) {
+            g.fill(0, 0, layout.frame().right() + layout.frame().x(),
+                    layout.frame().bottom() + layout.frame().y(), Color.SHADOW.value());
+            panel(g, layout.frame(), Color.FRAME, Color.NODE_BORDER);
+        }
         g.fill(layout.frame().x() + 1, layout.frame().y() + 1, layout.frame().right() - 1,
                 layout.header().bottom() + 2, Color.HEADER.value());
         g.fill(layout.header().x(), layout.header().bottom() + 1,
                 layout.header().right(), layout.header().bottom() + 2, Color.BORDER.value());
         panel(g, layout.summary(), Color.HEADER, Color.BORDER);
+        if (CraftingUiTheme.current(CraftingUiTheme.Scope.TREE).isGlass()) {
+            panel(g, layout.footer(), Color.HEADER, Color.BORDER);
+        }
         g.fill(layout.footer().x(), layout.footer().y(), layout.footer().right(),
                 layout.footer().y() + 1, Color.BORDER.value());
+        CraftingThemeDecoration.frame(g, layout.frame().x(), layout.frame().y(), layout.frame().width(),
+                layout.frame().height(), CraftingUiTheme.current(CraftingUiTheme.Scope.TREE));
     }
 
     public static void panel(GuiGraphics g, Rect bounds, Color fill, Color border) {
+        if (CraftingUiTheme.current(CraftingUiTheme.Scope.TREE) == CraftingUiTheme.VANILLA) {
+            CraftingUiStyle.raised(g, bounds.x(), bounds.y(), bounds.width(), bounds.height(), fill.value(), border.value(),
+                    0xFFFFFFFF, Color.BACKGROUND.value());
+            return;
+        }
         // 1.20.1 的 fill 在非托管模式下逐次 flush；两层圆角统一提交。
         g.drawManaged(() -> {
-            PlanUiDraw.rounded(g, bounds.x(), bounds.y(), bounds.width(), bounds.height(), 3, border.value());
-            PlanUiDraw.rounded(g, bounds.x() + 1, bounds.y() + 1, bounds.width() - 2,
-                    bounds.height() - 2, 2, fill.value());
+            PlanUiDraw.framed(g, bounds.x(), bounds.y(), bounds.width(), bounds.height(), 3, fill.value(), border.value());
         });
     }
 
@@ -81,7 +94,13 @@ public final class PlanWorkspaceChrome {
     }
 
     public void label(GuiGraphics g, String value, int x, int y, int width, Color color) {
-        g.drawString(font, fit(value, width), x, y, color.value(), false);
+        String visible = fit(value, width);
+        CraftingUiTheme theme = CraftingUiTheme.current(CraftingUiTheme.Scope.TREE);
+        if (theme.isGlass() && !visible.isEmpty()) {
+            g.fill(x - 1, y - 1, x + font.width(visible) + 1, y + font.lineHeight + 1,
+                    theme == CraftingUiTheme.FROSTED_GLASS ? 0x90F1F8FB : 0xA00D141C);
+        }
+        g.drawString(font, visible, x, y, color.value(), theme == CraftingUiTheme.BLACK_GLASS);
     }
 
     public boolean click(double x, double y, int button) {

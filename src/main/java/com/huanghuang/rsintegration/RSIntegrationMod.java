@@ -4,6 +4,7 @@ package com.huanghuang.rsintegration;
 import com.huanghuang.rsintegration.mods.sophisticatedbackpacks.SophisticatedBackpacksItems;
 import com.huanghuang.rsintegration.reflection.contract.ContractValidation;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.config.CraftingUiTheme;
 import com.huanghuang.rsintegration.config.RSStorageConfig;
 import com.huanghuang.rsintegration.storage.disk.UnifiedDiskEnabledCondition;
 import com.huanghuang.rsintegration.feature.unifiedgrid.UnifiedGridUpdatePacket;
@@ -342,6 +343,8 @@ public final class RSIntegrationMod {
         RSIntegrationConfig.register();
         RSStorageConfig.register();
         MOD_BUS.addListener((ModConfigEvent.Loading e) -> {
+            if (e.getConfig().getSpec() == RSIntegrationConfig.CLIENT_SPEC
+                    && CraftingUiTheme.migrateIndependentThemes()) e.getConfig().save();
             RSIntegrationConfig.migratePlanningHudLayout(e.getConfig());
             if (e.getConfig().getSpec() == RSIntegrationConfig.COMMON_SPEC) {
                 migrateCommonConfig(e.getConfig());
@@ -353,6 +356,8 @@ public final class RSIntegrationMod {
             }
         });
         MOD_BUS.addListener((ModConfigEvent.Reloading e) -> {
+            if (e.getConfig().getSpec() == RSIntegrationConfig.CLIENT_SPEC
+                    && CraftingUiTheme.migrateIndependentThemes()) e.getConfig().save();
             if (e.getConfig().getSpec() == RSIntegrationConfig.COMMON_SPEC) {
                 refreshConfigCache();
                 if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {

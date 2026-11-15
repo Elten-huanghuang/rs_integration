@@ -66,8 +66,10 @@ public enum CraftingUiColors {
         builder.comment("合成界面配色",
                         "计划列表、计划材料格、合成监控器和共用控件的本地配色。",
                         "使用引号包围的 #RRGGBB 或 #AARRGGBB；AA 为透明度，FF 不透明，00 全透明。",
-                        "配置重新加载后生效；可在游戏内客户端配置界面修改并应用。")
+                        "配置重新加载后生效；可在游戏内客户端配置界面修改并应用。",
+                        "监控器 theme 为 CUSTOM 时使用以下颜色；递归树由 treeTheme 单独控制。")
                 .push("craftingUi");
+        CraftingUiTheme.define(builder);
         for (CraftingUiColors color : values()) {
             color.config = builder.comment(color.description,
                             "格式：#RRGGBB 或 #AARRGGBB。默认：" + color.defaultValue)
@@ -77,6 +79,8 @@ public enum CraftingUiColors {
     }
 
     public int argb() {
+        CraftingUiTheme theme = CraftingUiTheme.current();
+        if (theme != CraftingUiTheme.CUSTOM) return theme.craftingColor(this);
         if (config == null || !RSIntegrationConfig.CLIENT_SPEC.isLoaded()) return defaultArgb;
         String value = config.get();
         Resolved current = resolved;
@@ -90,6 +94,11 @@ public enum CraftingUiColors {
         // 仅在配置值改变时解析，逐格绘制不重复解析字符串。
         resolved = new Resolved(value, argb);
         return argb;
+    }
+
+    /** 深色预设的强调文字用亮色，主按钮用深色以保证白色按钮文字清晰。 */
+    public static int primaryButtonArgb() {
+        return CraftingUiTheme.current() == CraftingUiTheme.CUSTOM ? ACCENT.argb() : BUTTON.argb();
     }
 
     static boolean isValid(Object value) {

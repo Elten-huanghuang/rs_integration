@@ -2,6 +2,10 @@ package com.huanghuang.rsintegration.mixin.refinedstorage;
 
 import com.huanghuang.rsintegration.crafting.plan.CraftingPlanScreen;
 import com.huanghuang.rsintegration.client.gui.CraftingUiStyle;
+import com.huanghuang.rsintegration.client.gui.CraftingThemeButton;
+import com.huanghuang.rsintegration.client.gui.CraftingGlassBackground;
+import com.huanghuang.rsintegration.client.gui.CraftingThemeDecoration;
+import com.huanghuang.rsintegration.config.CraftingUiTheme;
 import com.huanghuang.rsintegration.client.gui.CraftingUiStyle.ActionButton;
 import com.huanghuang.rsintegration.client.gui.ScrollBarStyle;
 import com.huanghuang.rsintegration.crafting.plan.PlanBackgroundClient;
@@ -86,6 +90,7 @@ public abstract class CraftingMonitorScreenMixin extends BaseScreen<CraftingMoni
     @Unique private long rsi$submittedRequest;
     @Unique private UUID rsi$pendingSelection;
     @Unique private GlobalPos rsi$returnTerminal;
+    @Unique private CraftingThemeButton rsi$themeButton;
 
     protected CraftingMonitorScreenMixin(CraftingMonitorContainerMenu menu, int width, int height,
                                          Inventory inventory, Component title) {
@@ -195,6 +200,8 @@ public abstract class CraftingMonitorScreenMixin extends BaseScreen<CraftingMoni
                 updateScrollbar();
             }
         }, widget -> addRenderableWidget(widget));
+        rsi$themeButton = addRenderableWidget(new CraftingThemeButton(Math.max(1, x - rsi$layout.railWidth() - 1), y + 1, false));
+        rsi$themeButton.setWheelViewport(width, height);
         // 左边留给任务选择，原生红石和 RSI 功能按钮统一移至右边，避免互相遮挡。
         for (var side : getSideButtons()) side.setX(x + imageWidth + 3);
     }
@@ -238,6 +245,9 @@ public abstract class CraftingMonitorScreenMixin extends BaseScreen<CraftingMoni
         boolean online = craftingMonitor.isActiveOnClient();
         CraftingUiStyle.raised(graphics, x, y, rsi$screen().getXSize(), rsi$screen().getYSize(),
                 CraftingUiStyle.panel(), CraftingUiStyle.border());
+        graphics.drawManaged(() -> {
+            CraftingThemeDecoration.frame(graphics, x, y, imageWidth, imageHeight, CraftingUiTheme.current());
+        });
         graphics.fill(x + 5, y + 5, x + rsi$layout.materialWidth() - 5, y + 17,
                 MonitorVisualStyle.blend(CraftingUiStyle.panel(), CraftingUiStyle.highlight(), 16));
         if (rsi$detailsReplaceGrid()) {
@@ -258,6 +268,8 @@ public abstract class CraftingMonitorScreenMixin extends BaseScreen<CraftingMoni
                     && mouseY >= cellY && mouseY < cellY + rsi$layout.cellHeight();
             MonitorVisualStyle.cell(graphics, cellX, cellY, rsi$layout.cellWidth(), rsi$layout.cellHeight(), color, hovered);
         }
+        graphics.drawManaged(() -> CraftingThemeDecoration.sigil(graphics, x + 7, y + 20,
+                rsi$layout.gridRight() - 7, rsi$layout.gridHeight(), CraftingUiTheme.current()));
         int barX = x + rsi$layout.gridRight() + ScrollBarStyle.CONTENT_GAP;
         // 始终画轨道与短滑块；数量、滚轮和拖动继续由 RS 原生 scrollbar 管理。
         ScrollBarStyle.render(graphics, barX, y + 20, ScrollBarStyle.WIDTH, rsi$layout.gridHeight(),
@@ -273,11 +285,13 @@ public abstract class CraftingMonitorScreenMixin extends BaseScreen<CraftingMoni
 
     @Inject(method = {"mouseScrolled", "m_6050_"}, at = @At("HEAD"), cancellable = true, require = 1)
     private void rsi$scrollSteps(double mouseX, double mouseY, double delta, CallbackInfoReturnable<Boolean> cir) {
-        if (rsi$taskList != null && rsi$taskList.mouseScrolled(mouseX, mouseY, delta)) cir.setReturnValue(true);
+        if (rsi$themeButton != null && rsi$themeButton.wheelScrolled(delta)) cir.setReturnValue(true);
+        else if (rsi$taskList != null && rsi$taskList.mouseScrolled(mouseX, mouseY, delta)) cir.setReturnValue(true);
         else if (rsi$details != null && rsi$details.mouseScrolled(mouseX, mouseY, delta)) cir.setReturnValue(true);
     }
 
     @Override public boolean mouseDragged(double mouseX, double mouseY, int button, double dx, double dy) {
+        if (rsi$themeButton != null && rsi$themeButton.isWheelOpen()) return true;
         if (rsi$taskList != null && rsi$taskList.mouseDragged(mouseX, mouseY, button, dx, dy)) return true;
         if (rsi$details != null && rsi$details.mouseDragged(mouseX, mouseY, button, dx, dy)) return true;
         return super.mouseDragged(mouseX, mouseY, button, dx, dy);
@@ -285,6 +299,7 @@ public abstract class CraftingMonitorScreenMixin extends BaseScreen<CraftingMoni
 
     @Inject(method = {"mouseReleased", "m_6348_"}, at = @At("HEAD"), cancellable = true, require = 1)
     private void rsi$releaseLists(double mouseX, double mouseY, int button, CallbackInfoReturnable<Boolean> cir) {
+        if (rsi$themeButton != null && rsi$themeButton.isWheelOpen()) { cir.setReturnValue(true); return; }
         boolean handled = rsi$taskList != null && rsi$taskList.mouseReleased(mouseX, mouseY, button);
         if (rsi$details != null) handled |= rsi$details.mouseReleased(mouseX, mouseY, button);
         if (handled) cir.setReturnValue(true);
@@ -305,7 +320,8 @@ public abstract class CraftingMonitorScreenMixin extends BaseScreen<CraftingMoni
 
     @Inject(method = {"mouseClicked", "m_6375_"}, at = @At("HEAD"), cancellable = true, require = 1)
     private void rsi$selectStep(double mouseX, double mouseY, int button, CallbackInfoReturnable<Boolean> cir) {
-        if (rsi$details != null && rsi$details.mouseClicked(mouseX, mouseY, button)) cir.setReturnValue(true);
+        if (rsi$themeButton != null && rsi$themeButton.mouseClicked(mouseX, mouseY, button)) cir.setReturnValue(true);
+        else if (rsi$details != null && rsi$details.mouseClicked(mouseX, mouseY, button)) cir.setReturnValue(true);
         else if (rsi$detailsReplaceGrid() && mouseY >= topPos + 20 && mouseY < topPos + 20 + rsi$layout.gridHeight()) {
             cir.setReturnValue(super.mouseClicked(mouseX, mouseY, button));
         }
@@ -371,6 +387,25 @@ public abstract class CraftingMonitorScreenMixin extends BaseScreen<CraftingMoni
     }
 
     @Override public Screen rsi$planPage() { return rsi$page; }
+
+    @Override public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+        CraftingGlassBackground.render(graphics, CraftingUiTheme.current(), partialTick);
+        boolean wheel = rsi$themeButton != null && rsi$themeButton.isWheelOpen();
+        super.render(graphics, wheel ? -10000 : mouseX, wheel ? -10000 : mouseY, partialTick);
+        if (rsi$themeButton != null) rsi$themeButton.renderWheel(graphics, font, width, height, mouseX, mouseY);
+    }
+
+    @Override public void renderBackground(GuiGraphics graphics) {
+        if (!CraftingUiTheme.current().isGlass()) super.renderBackground(graphics);
+    }
+
+    @Override public boolean keyPressed(int key, int scan, int modifiers) {
+        return rsi$themeButton != null && rsi$themeButton.wheelKeyPressed(key) || super.keyPressed(key, scan, modifiers);
+    }
+
+    @Override public boolean charTyped(char character, int modifiers) {
+        return rsi$themeButton != null && rsi$themeButton.isWheelOpen() || super.charTyped(character, modifiers);
+    }
     @Override public GlobalPos rsi$returnTerminal() { return rsi$returnTerminal; }
     @Override public void rsi$returnTerminal(@Nullable GlobalPos terminal) { rsi$returnTerminal = terminal; }
     @Override public void rsi$openPlans() { rsi$showPlans(); }

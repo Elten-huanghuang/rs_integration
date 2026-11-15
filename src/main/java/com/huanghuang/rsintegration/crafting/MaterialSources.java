@@ -114,13 +114,14 @@ public final class MaterialSources {
     public static Map<StackKey, Long> countInventoryForTypes(Player player, @Nullable Set<Item> itemTypes) {
         Map<StackKey, Long> map = new HashMap<>();
         Inventory inv = player.getInventory();
-        for (ItemStack stack : inv.items) {
+        for (ItemStack stack : MaterialSourceSelection.current().inventory() ? inv.items : List.<ItemStack>of()) {
             if (!stack.isEmpty() && (itemTypes == null || itemTypes.contains(stack.getItem()))) {
                 mergeAvailable(map, StackKey.of(stack, true), stack.getCount(), "player_inventory");
             }
         }
         // Count backpack contents (including backpacks in curio slots)
-        if (player instanceof ServerPlayer sp && ModList.get().isLoaded("sophisticatedbackpacks")) {
+        if (MaterialSourceSelection.current().backpacks()
+                && player instanceof ServerPlayer sp && ModList.get().isLoaded("sophisticatedbackpacks")) {
             try {
                 for (var bp : ExtractionLedger
                         .findAllBackpackInventories(sp)) {
@@ -152,7 +153,7 @@ public final class MaterialSources {
         RuntimeMaterialAccount account = RuntimeMaterialAccount.current();
         if (account != null && account.belongsTo(player) && account.usesEndpoint(endpoint)) return account.available(player);
         int currentTick = currentTick(player);
-        String cacheKey = cacheKey(player, endpoint);
+        String cacheKey = cacheKey(player, endpoint) + ":sources=" + MaterialSourceSelection.current().mask();
         rotateCache(currentTick);
         Map<StackKey, Long> cached = cache.get(cacheKey);
         if (cached != null) {
@@ -181,7 +182,7 @@ public final class MaterialSources {
     private static AvailabilityLoad loadAllAvailable(
             ServerPlayer player, @Nullable CraftStorageEndpoint endpoint) {
         Map<StackKey, Long> available = new HashMap<>(toLongCounts(countInventory(player)));
-        if (endpoint == null) {
+        if (endpoint == null || !MaterialSourceSelection.current().storageNetwork()) {
             return new AvailabilityLoad(available, true);
         }
         var snapshotResult = endpoint.snapshot(player);
@@ -231,7 +232,7 @@ public final class MaterialSources {
         if (itemTypes == null || itemTypes.isEmpty()) return Map.of();
         Map<StackKey, Long> available = new HashMap<>(toLongCounts(countInventory(player)));
         available.entrySet().removeIf(entry -> !itemTypes.contains(entry.getKey().item()));
-        if (endpoint == null) return Map.copyOf(available);
+        if (endpoint == null || !MaterialSourceSelection.current().storageNetwork()) return Map.copyOf(available);
 
         StorageSnapshotResult snapshotResult = endpoint.snapshot(player, Set.copyOf(itemTypes));
         snapshotResult.snapshot().ifPresent(snapshot -> snapshot.items().forEach(item -> {
@@ -267,6 +268,13 @@ public final class MaterialSources {
     public static void invalidateFor(ServerPlayer player, @Nullable CraftStorageEndpoint endpoint) {
         String prefix = player.getUUID() + ":";
         cache.keySet().removeIf(key -> key.startsWith(prefix));
+    }
+
+    public static Map<StackKey, Long> listAvailableForTypes(ServerPlayer player,
+            @Nullable CraftStorageEndpoint endpoint, Set<Item> itemTypes, MaterialSourceSelection sources) {
+        try (MaterialSourceSelection.Scope ignored = sources.enter()) {
+            return listAvailableForTypes(player, endpoint, itemTypes);
+        }
     }
 
     private static int currentTick(ServerPlayer player) {

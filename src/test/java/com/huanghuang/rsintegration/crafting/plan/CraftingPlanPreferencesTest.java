@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
 import com.huanghuang.rsintegration.crafting.OutputDestination;
+import com.huanghuang.rsintegration.crafting.MaterialSourceSelection;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -22,6 +23,26 @@ class CraftingPlanPreferencesTest extends BootstrapTest {
 
     @TempDir
     Path directory;
+
+    @Test
+    void materialSourcesDefaultToAllAndSurviveOtherPreferenceChanges() throws Exception {
+        Path file = directory.resolve("sources.json");
+        assertEquals(MaterialSourceSelection.ALL, CraftingPlanPreferences.load(file).materialSources());
+        Files.writeString(file, "{\"outputDestination\":\"PLAYER_INVENTORY\"}");
+        assertEquals(MaterialSourceSelection.ALL, CraftingPlanPreferences.load(file).materialSources());
+        for (int mask = 0; mask < 8; mask++) {
+            MaterialSourceSelection sources = MaterialSourceSelection.fromMask(mask);
+            assertTrue(CraftingPlanPreferences.saveMaterialSources(file, sources));
+            assertTrue(CraftingPlanPreferences.saveOutputDestination(file, OutputDestination.RS_NETWORK));
+            assertTrue(CraftingPlanPreferences.saveRecipeChoice(file, "minecraft:stone", "minecraft:stone"));
+            assertTrue(CraftingPlanPreferences.saveIngredientChoice(file, "test", new ItemStack(Items.STONE)));
+            assertTrue(CraftingPlanPreferences.setExcluded(file, "minecraft:stone", true));
+            var loaded = CraftingPlanPreferences.load(file);
+            assertEquals(sources, loaded.materialSources());
+            assertEquals(sources, loaded.toPlanningPreferences().materialSources());
+            assertFalse(loaded.recipeChoices().isEmpty());
+        }
+    }
 
     @Test
     void missingPreferenceDefaultsToRsNetwork() {

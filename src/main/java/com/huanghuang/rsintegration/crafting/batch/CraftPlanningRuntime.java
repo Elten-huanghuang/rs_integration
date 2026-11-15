@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.batch;
 import com.huanghuang.rsintegration.config.CraftingPlanningConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
+import com.huanghuang.rsintegration.crafting.MaterialSourceSelection;
 import com.huanghuang.rsintegration.crafting.planning.PlanCache;
 import com.huanghuang.rsintegration.crafting.planning.PlanRequestService;
 import com.huanghuang.rsintegration.crafting.planning.TypedPreviewAdmissionQueue;
@@ -37,6 +38,10 @@ public final class CraftPlanningRuntime {
     @Nullable
     public static PlanResponse publishedPlan(UUID playerId, long requestId) {
         return PLAN_CACHE.publishedPlan(playerId, requestId);
+    }
+
+    public static MaterialSourceSelection publishedMaterialSources(UUID playerId, long requestId) {
+        return PLAN_CACHE.publishedMaterialSources(playerId, requestId);
     }
 
     static void removePlayer(UUID playerId) {

@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
 import com.huanghuang.rsintegration.config.PlanUiConfig.Color;
+import com.huanghuang.rsintegration.config.CraftingUiTheme;
+import com.huanghuang.rsintegration.client.gui.CraftingUiStyle;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
@@ -17,10 +19,13 @@ final class PlanUiButton extends Button {
     @Override
     protected void renderWidget(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         int x = getX(), y = getY(), width = getWidth(), height = getHeight();
-        PlanUiDraw.rounded(graphics, x, y, width, height, 3,
-                (primary && active ? Color.PRIMARY_BORDER : isHoveredOrFocused() ? Color.ACTIVE_BORDER : Color.BORDER).value());
-        PlanUiDraw.rounded(graphics, x + 1, y + 1, width - 2, height - 2, 2,
-                (primary && active ? Color.PRIMARY : isHoveredOrFocused() ? Color.HOVER : Color.BUTTON).value());
+        int border = (primary && active ? Color.PRIMARY_BORDER : isHoveredOrFocused() ? Color.ACTIVE_BORDER : Color.BORDER).value();
+        int fill = (primary && active ? Color.PRIMARY : isHoveredOrFocused() ? Color.HOVER : Color.BUTTON).value();
+        if (CraftingUiTheme.current(CraftingUiTheme.Scope.TREE) == CraftingUiTheme.VANILLA) {
+            CraftingUiStyle.raised(graphics, x, y, width, height, fill, border, 0xFFFFFFFF, Color.BACKGROUND.value());
+        } else {
+            PlanUiDraw.framed(graphics, x, y, width, height, 3, fill, border);
+        }
         PlanWorkspaceChrome chrome = new PlanWorkspaceChrome(Minecraft.getInstance().font);
         String label = chrome.fit(getMessage().getString(), width - 10);
         graphics.drawString(Minecraft.getInstance().font, label,

@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.CraftPlanningRevision;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
+import com.huanghuang.rsintegration.crafting.MaterialSourceSelection;
 import com.huanghuang.rsintegration.crafting.batch.CraftPlanningRuntime;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
@@ -73,7 +74,8 @@ public final class PreviewInventorySyncManager {
         Session existing = SESSIONS.get(key);
         if (existing != null) return existing;
         try {
-            Session next = new Session(plan, requestId, tick);
+            Session next = new Session(plan, requestId, tick,
+                    CraftPlanningRuntime.publishedMaterialSources(playerId, requestId));
             SESSIONS.put(key, next);
             return next;
         } catch (IllegalArgumentException unsupported) {
@@ -197,6 +199,7 @@ public final class PreviewInventorySyncManager {
         final long requestId;
         final long revision = CraftPlanningRevision.current();
         final PreviewInventoryModel model;
+        final MaterialSourceSelection materialSources;
         final boolean watchesContainers;
         final Map<IngredientKey, Long> stored = new HashMap<>();
         final Map<IngredientKey, Long> local = new HashMap<>();
@@ -220,6 +223,11 @@ public final class PreviewInventorySyncManager {
         PreviewInventoryModel.Status lastStatus;
 
         Session(PlanResponse plan, long requestId, int tick) {
+            this(plan, requestId, tick, MaterialSourceSelection.ALL);
+        }
+
+        Session(PlanResponse plan, long requestId, int tick, MaterialSourceSelection materialSources) {
+            this.materialSources = materialSources;
             this.plan = plan;
             this.requestId = requestId;
             this.model = new PreviewInventoryModel(plan);
@@ -259,7 +267,8 @@ public final class PreviewInventorySyncManager {
             if (invalidated || poll) {
                 lastPollTick = tick;
                 CraftStorageEndpoint resolved = resolve(player);
-                if (resolved == null && (plan.storageReference() != null || boundReference != null)) {
+                if (materialSources.storageNetwork() && resolved == null
+                        && (plan.storageReference() != null || boundReference != null)) {
                     unavailable();
                 } else if (resolved != null && (!resolved.isAvailable()
                         || !resolved.session().hasPermission(player, StoragePermission.VIEW))) {
@@ -279,10 +288,12 @@ public final class PreviewInventorySyncManager {
             if (poll || full || !pending.isEmpty() || derivedDirty) {
                 // 背包没有统一原生通知；仅在对账间隔或相关网络变化时读取，不能重复扫描网络。
                 Map<IngredientKey, Long> fresh = new HashMap<>();
-                MaterialSources.countInventoryForTypes(player, model.itemTypes()).forEach((key, amount) -> {
-                    IngredientKey material = IngredientKey.of(key.toStack());
-                    if (model.tracks(material)) fresh.merge(material, amount, SaturatingLongMath::add);
-                });
+                try (MaterialSourceSelection.Scope ignored = materialSources.enter()) {
+                    MaterialSources.countInventoryForTypes(player, model.itemTypes()).forEach((key, amount) -> {
+                        IngredientKey material = IngredientKey.of(key.toStack());
+                        if (model.tracks(material)) fresh.merge(material, amount, SaturatingLongMath::add);
+                    });
+                }
                 replace(local, fresh);
             }
             for (var change : pending.entrySet()) {
@@ -307,6 +318,7 @@ public final class PreviewInventorySyncManager {
         }
 
         private CraftStorageEndpoint resolve(ServerPlayer player) {
+            if (!materialSources.storageNetwork()) return null;
             if (plan.storageReference() != null) return CraftStorageEndpoints.resolve(plan.storageReference(), player).orElse(null);
             ResourceLocation dimension = ResourceLocation.tryParse(Objects.requireNonNullElse(plan.executionDim(), ""));
             return CraftPacketUtils.resolveEndpointForCraft(player,

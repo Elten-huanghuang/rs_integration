@@ -122,6 +122,7 @@ import com.huanghuang.rsintegration.crafting.MaterialMatcher;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.SelfAmplifyingRecipePolicy;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
+import com.huanghuang.rsintegration.crafting.MaterialSourceSelection;
 import com.huanghuang.rsintegration.crafting.PreviewRateLimiter;
 import com.huanghuang.rsintegration.crafting.planning.PlanningSnapshot;
 import com.huanghuang.rsintegration.crafting.planning.PlanningSnapshotFactory;
@@ -707,7 +708,7 @@ public final class GenericCraftPacket {
                             player, new CraftMaxCraftableSearchService.Request(
                                     packet.recipeId, packet.forcedRecipes, packet.dim, packet.pos,
                                     packet.baseItem, packet.targetOutput, packet.requestId,
-                                    packet.storageReference, packet.materialLocks),
+                                    packet.storageReference, packet.materialLocks, packet.planningPreferences),
                             previewGeneration);
                 } else {
                     tryBuildPlan(player, packet.recipeId, packet.forcedRecipes,
@@ -1036,7 +1037,8 @@ public final class GenericCraftPacket {
                 Registries.DIMENSION, dimension)
                 : player.serverLevel().dimension();
         BlockPos lookupPos = position != null ? position : player.blockPosition();
-        boolean valid = CraftPlanDecisionRules.canExecuteCachedPlan(
+        boolean valid = entry.snapshot().preferences().materialSources().equals(MaterialSourceSelection.current())
+                && CraftPlanDecisionRules.canExecuteCachedPlan(
                 entry.plan(), entry.resolvedGraph())
                 && PlanningStateValidator.revalidateForExecution(
                 player, entry.snapshot(), entry.plan(),
@@ -1500,6 +1502,25 @@ public final class GenericCraftPacket {
                                    boolean typedGraphOnly,
                                    boolean partialPreparation,
                                    PlanningPreferences preferences, long confirmedPreviewRequestId) {
+        PlanningPreferences selected = preferences == null ? PlanningPreferences.empty() : preferences;
+        try (MaterialSourceSelection.Scope ignored = selected.materialSources().enter()) {
+            tryResolveWithSources(player, recipeId, forcedRecipes, dim, pos, repeatCount, inferMode,
+                    baseItem, targetOutput, outputDestination, machineSelectionMode, storageReference,
+                    materialLocks, typedGraphOnly, partialPreparation, selected, confirmedPreviewRequestId);
+        }
+    }
+
+    private static void tryResolveWithSources(ServerPlayer player, ResourceLocation recipeId,
+                                   Map<String, String> forcedRecipes,
+                                   @Nullable ResourceLocation dim, @Nullable BlockPos pos,
+                                   int repeatCount, boolean inferMode,
+                                   @Nullable ItemStack baseItem, @Nullable ItemStack targetOutput,
+                                   OutputDestination outputDestination,
+                                   MachineSelectionMode machineSelectionMode,
+                                   @Nullable StorageReference storageReference,
+                                   Map<String, ItemStack> materialLocks, boolean typedGraphOnly,
+                                   boolean partialPreparation, PlanningPreferences preferences,
+                                   long confirmedPreviewRequestId) {
         PlanningPreferences safePreferences = preferences == null
                 ? PlanningPreferences.empty() : preferences;
         CraftForcedRecipeOverrides.Resolution forcedResolution =
@@ -2465,6 +2486,27 @@ public final class GenericCraftPacket {
                              Map<String, ItemStack> materialLocks,
                              @Nullable AsyncPurePlanningService.RoutedPlan routedPlan,
                              PlanningPreferences preferences) {
+        PlanningPreferences selected = preferences == null ? PlanningPreferences.empty() : preferences;
+        try (MaterialSourceSelection.Scope ignored = selected.materialSources().enter()) {
+            tryBuildPlanWithSources(player, recipeId, forcedRecipes, dim, pos, repeatCount, baseItem,
+                    clickedOutput, requestId, previewGeneration, precomputedPlan, precomputedSnapshot,
+                    asyncAttempted, reuseValidatedSnapshot, sink, storageReference, materialLocks,
+                    routedPlan, selected);
+        }
+    }
+
+    private static void tryBuildPlanWithSources(ServerPlayer player, ResourceLocation recipeId,
+                             Map<String, String> forcedRecipes,
+                             @Nullable ResourceLocation dim, @Nullable BlockPos pos, int repeatCount,
+                             @Nullable ItemStack baseItem, @Nullable ItemStack clickedOutput,
+                             long requestId, long previewGeneration,
+                             @Nullable PureRecipePlanner.Result precomputedPlan,
+                             @Nullable PlanningSnapshot precomputedSnapshot, boolean asyncAttempted,
+                             boolean reuseValidatedSnapshot, CraftPlanResultDispatcher.Sink sink,
+                             @Nullable StorageReference storageReference,
+                             Map<String, ItemStack> materialLocks,
+                             @Nullable AsyncPurePlanningService.RoutedPlan routedPlan,
+                             PlanningPreferences preferences) {
         long planStartNanos = System.nanoTime();
         PlanningPreferences safePreferences = preferences == null
                 ? PlanningPreferences.empty() : preferences;
@@ -2856,7 +2898,8 @@ public final class GenericCraftPacket {
         if (machineInventoryAffectsPlan(previewModType, cached == null ? null : cached.plan())) {
             cached = null;
         }
-        if (cached != null && cached.plan().success() && cached.plan().graph() != null
+        if (cached != null && cached.snapshot().preferences().equals(safePreferences)
+                && cached.plan().success() && cached.plan().graph() != null
                 && PlanningStateValidator.revalidateForExecution(player, cached.snapshot(),
                 cached.plan(), planDimKey, planLookupPos, planStorageReference)) {
             if (CraftPlanningRuntime.planCache().grantExecutionLease(cacheKey, System.nanoTime())) {

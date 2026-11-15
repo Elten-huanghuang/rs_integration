@@ -123,10 +123,12 @@ class CraftingUiColorsTest extends BootstrapTest {
         var colors = RSIntegrationConfig.CLIENT_SPEC.getValues().get("craftingUi");
         assertTrue(colors instanceof UnmodifiableConfig);
         UnmodifiableConfig section = (UnmodifiableConfig) colors;
-        assertEquals(CraftingUiColors.values().length, section.valueMap().size());
+        assertEquals(CraftingUiColors.values().length + 3, section.valueMap().size());
         for (String key : section.valueMap().keySet()) {
             ForgeConfigSpec.ConfigValue<?> value = section.get(key);
-            assertEquals(value.getDefault(), example.get("craftingUi." + key), key);
+            Object expected = value.getDefault();
+            assertEquals(expected instanceof Enum<?> enumeration ? enumeration.name() : expected,
+                    example.get("craftingUi." + key), key);
         }
     }
 }

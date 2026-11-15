@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.ConfigEditorModel;
 import com.huanghuang.rsintegration.config.ConfigEditorModel.ConfigFile;
 import com.huanghuang.rsintegration.config.ConfigEditorModel.Option;
+import com.huanghuang.rsintegration.config.CraftingUiTheme;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
@@ -329,6 +330,13 @@ public final class RSIntegrationConfigScreen extends Screen {
                     button.setMessage(booleanLabel());
                     updateControls();
                 });
+            } else if (entry.parsed() instanceof CraftingUiTheme) {
+                editor = new ConfigTheme.ConfigButton(0, 0, 99, 18, themeLabel(), button -> {
+                    CraftingUiTheme theme = (CraftingUiTheme) entry.parsed();
+                    entry.setText(theme.next().name());
+                    button.setMessage(themeLabel());
+                    updateControls();
+                });
             } else if (entry.isList()) {
                 editor = new ConfigTheme.ConfigButton(0, 0, 99, 18, listLabel(),
                         button -> minecraft.setScreen(new ListEditorScreen(entry)));
@@ -345,7 +353,8 @@ public final class RSIntegrationConfigScreen extends Screen {
             reset = new ConfigTheme.ConfigButton(0, 0, 18, 18, Component.literal("↺"), button -> {
                 entry.resetDefault();
                 if (editor instanceof EditBox input) input.setValue(entry.text());
-                else editor.setMessage(entry.isBoolean() ? booleanLabel() : listLabel());
+                else editor.setMessage(entry.parsed() instanceof CraftingUiTheme ? themeLabel()
+                        : entry.isBoolean() ? booleanLabel() : listLabel());
                 updateControls();
             });
             reset.setTooltip(Tooltip.create(Component.translatable("controls.reset").append(" · ")
@@ -354,6 +363,11 @@ public final class RSIntegrationConfigScreen extends Screen {
 
         private Component booleanLabel() {
             return tr(Boolean.TRUE.equals(entry.parsed()) ? "enabled" : "disabled");
+        }
+
+        private Component themeLabel() {
+            CraftingUiTheme theme = (CraftingUiTheme) entry.parsed();
+            return tr("crafting_theme." + theme.name().toLowerCase(Locale.ROOT));
         }
 
         private Component listLabel() {

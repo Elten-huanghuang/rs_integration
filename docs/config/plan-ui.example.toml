@@ -1,6 +1,8 @@
 # 保存到游戏目录 config/rs_integration/plan_ui.toml。
 # 递归合成树的展示图主题；覆盖已有文件前请保留玩家自己的配色。
 # 颜色支持 #RRGGBB 和 #AARRGGBB。重新打开界面查看效果。
+# client.toml 的 [craftingUi] treeTheme = "CUSTOM" 时使用下方颜色。
+# 树与监控器独立切换，预设不覆盖本文件；可用主题见 crafting-ui.example.toml。
 
 [layout]
 panelWidth = 290

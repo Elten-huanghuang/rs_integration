@@ -56,6 +56,8 @@ public final class PlanUiConfig {
         }
 
         public int value() {
+            CraftingUiTheme theme = CraftingUiTheme.current(CraftingUiTheme.Scope.TREE);
+            if (theme != CraftingUiTheme.CUSTOM) return theme.treeColor(this);
             String text = SPEC.isLoaded() ? config.get() : config.getDefault();
             if (!text.equals(cachedText)) {
                 cachedColor = parseColor(text, defaultColor);
@@ -98,7 +100,8 @@ public final class PlanUiConfig {
                 .defineInRange("minimapHeight", 100, 70, 200);
         builder.pop();
         builder.comment("颜色支持 #RRGGBB（不透明）或 #AARRGGBB（含透明度）。",
-                "AA 为透明度：00 完全透明，FF 完全不透明。")
+                "AA 为透明度：00 完全透明，FF 完全不透明。",
+                "client.toml 的 craftingUi.treeTheme 为 CUSTOM 时使用这些颜色；预设模式不改写这些值。")
                 .push("colors");
         for (Color color : Color.values()) {
             color.config = builder.comment(color.label).define(color.key,

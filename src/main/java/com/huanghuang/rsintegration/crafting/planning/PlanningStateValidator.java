@@ -168,7 +168,7 @@ public final class PlanningStateValidator {
         }
         Map<StackKey, Long> required = requiredInitialSupply(graph);
         Map<StackKey, Long> currentAvailable = MaterialSources.listAvailableForTypes(
-                player, endpoint, itemTypes(required));
+                player, endpoint, itemTypes(required), snapshot.preferences().materialSources());
         for (Map.Entry<StackKey, Long> entry : required.entrySet()) {
             long available = currentAvailable.getOrDefault(entry.getKey(), 0L);
             if (available < entry.getValue()) {
@@ -220,7 +220,7 @@ public final class PlanningStateValidator {
                 ? CraftPacketUtils.resolveEndpointForCraft(player, dimension, lookupPos).orElse(null)
                 : CraftStorageEndpoints.resolve(selectedReference, player).orElse(null);
         return previewNeedsRefresh(snapshot, plan,
-                MaterialSources.listAvailableForTypes(player, endpoint, types));
+                MaterialSources.listAvailableForTypes(player, endpoint, types, snapshot.preferences().materialSources()));
     }
 
     private static Set<Item> previewItemTypes(PlanningSnapshot snapshot, PlanResponse plan) {

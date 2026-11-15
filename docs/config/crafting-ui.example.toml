@@ -1,6 +1,15 @@
 # 客户端合成界面配色示例；复制到 config/rs_integration/client.toml 的
 # [craftingUi] 段落后修改即可。颜色支持 #RRGGBB 和 #AARRGGBB。
 [craftingUi]
+# 点击各界面左上角调色盘打开轮盘；鼠标点选或方向键/滚轮选择，回车应用，Esc 取消。
+# CUSTOM、FOREST、OCEAN、AMETHYST、WARM_PAPER、VANILLA、BRASS、ARCANE、QUARTZ、ROSE、EMBER、GRAPHITE、FROSTED_GLASS、BLACK_GLASS、DEEP_SPACE。
+# CUSTOM 使用下方颜色和 plan_ui.toml 的颜色；预设模式保留这些值但暂不使用。
+# 监控器和计划列表主题；与递归树独立。
+theme = "CUSTOM"
+# 递归树主题（包括材料表及树内控件）。
+treeTheme = "CUSTOM"
+# 内部迁移标记；首次加载后自动变为 1，之后请保留程序生成的值。
+themeSchema = 0
 panel = "#D0CFD6"
 canvas = "#A1A5BB"
 border = "#666B82"

@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
+import com.huanghuang.rsintegration.crafting.MaterialSourceSelection;
+
 import com.huanghuang.rsintegration.config.CraftingPreviewPolicy;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPlanningRevision;
@@ -54,6 +56,11 @@ public final class PlanCache {
         this.ttlNanos = ttlNanos;
         this.maxEntries = maxEntries;
         this.maxNodes = maxNodes;
+    }
+
+    public MaterialSourceSelection publishedMaterialSources(UUID playerId, long requestId) {
+        ExecutionLease lease = requestLeases.get(new PreviewKey(playerId, requestId));
+        return lease == null ? MaterialSourceSelection.ALL : lease.entry().snapshot().preferences().materialSources();
     }
 
     public Entry get(Key key, long now) {

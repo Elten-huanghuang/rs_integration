@@ -102,9 +102,7 @@ public final class PlanTreeRenderer {
             PlanUiDraw.rounded(gfx, x + 2, y + 2, w, h, NODE_RADIUS, Color.SHADOW.value());
             int borderColor = node == inspectedNode ? Color.ACCENT.value()
                     : marketRecipe && !hovered && !isSelected ? Color.READY.value() : borderColor(node, hovered, isSelected);
-            PlanUiDraw.rounded(gfx, x, y, w, h, NODE_RADIUS, borderColor);
-            PlanUiDraw.roundedGradient(gfx, x + 1, y + 1, w - 2, h - 2, NODE_RADIUS - 1,
-                    fillTopColor(node), fillBotColor(node));
+            PlanUiDraw.framed(gfx, x, y, w, h, NODE_RADIUS, fillTopColor(node), borderColor);
             // 引用节点压暗：该批产出已在树中别处展开成本，这里只表示消耗关系。
             if (node.referenceOnly) {
                 PlanUiDraw.rounded(gfx, x + 1, y + 1, w - 2, h - 2, NODE_RADIUS - 1, Color.REFERENCE_OVERLAY.value());

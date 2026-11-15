@@ -2,14 +2,19 @@ package com.huanghuang.rsintegration.crafting.plan;
 
 import com.google.gson.Gson;
 import com.electronwill.nightconfig.core.CommentedConfig;
+import com.huanghuang.rsintegration.config.CraftingUiTheme;
+import com.huanghuang.rsintegration.config.PlanUiConfig.Color;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.client.gui.CraftingThemeButton;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
+import com.huanghuang.rsintegration.crafting.MaterialSourceSelection;
 import com.huanghuang.rsintegration.crafting.tree.JeiSubtreeBuilder;
 import com.huanghuang.rsintegration.crafting.tree.PlanTreeModel;
 import com.huanghuang.rsintegration.crafting.tree.PlanTreeNode;
 import com.huanghuang.rsintegration.crafting.tree.PlanTreeLayout;
 import com.huanghuang.rsintegration.crafting.tree.RecipePreviewRenderer;
 import com.huanghuang.rsintegration.crafting.planning.PlanningProgressTracker;
+import com.huanghuang.rsintegration.crafting.planning.PlanningPreferences;
 import com.huanghuang.rsintegration.crafting.planning.PlanningProgressSnapshot;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -19,6 +24,8 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.sounds.SoundManager;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.locale.Language;
@@ -32,6 +39,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.Item;
 import org.lwjgl.glfw.GLFW;
 import net.minecraftforge.fml.ModList;
+import net.minecraftforge.client.event.ScreenEvent;
 import org.joml.Vector3f;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -67,7 +75,20 @@ class PlanWorkspaceRenderTest extends BootstrapTest {
         when(font.width(any(FormattedCharSequence.class))).thenAnswer(call -> measure(sequence(call.getArgument(0))));
         when(font.plainSubstrByWidth(anyString(), anyInt())).thenAnswer(call -> trim(call.getArgument(0), call.getArgument(1)));
         when(font.plainSubstrByWidth(anyString(), anyInt(), anyBoolean())).thenAnswer(call -> trim(call.getArgument(0), call.getArgument(1)));
+        when(font.split(any(FormattedText.class), anyInt())).thenAnswer(call -> {
+            String remaining = call.<FormattedText>getArgument(0).getString();
+            int lineWidth = call.getArgument(1);
+            List<FormattedCharSequence> lines = new ArrayList<>();
+            while (!remaining.isEmpty()) {
+                String line = trim(remaining, lineWidth);
+                if (line.isEmpty()) break;
+                lines.add(FormattedCharSequence.forward(line, Style.EMPTY));
+                remaining = remaining.substring(line.length());
+            }
+            return lines;
+        });
         Minecraft game = mock(Minecraft.class);
+        when(game.getSoundManager()).thenReturn(mock(SoundManager.class));
         when(game.getNarrator()).thenReturn(mock(GameNarrator.class));
         set(game, "font", font);
         CraftingPlanScreen.RequestHandler requests = mock(CraftingPlanScreen.RequestHandler.class);
@@ -132,6 +153,45 @@ class PlanWorkspaceRenderTest extends BootstrapTest {
                 // 通过生产工具栏切换材料页、缺料页；检查查看行为不会发起试算。
                 write(capture, size, "01-tree");
                 checkScaledBounds(screen, capture);
+                CraftingThemeButton palette = screen.children().stream().filter(CraftingThemeButton.class::isInstance)
+                        .map(CraftingThemeButton.class::cast).findFirst().orElseThrow();
+                PlanWorkspaceLayout beforeTheme = field(screen, "workspace");
+                assertTrue(palette.getX() >= beforeTheme.header().x());
+                assertTrue(palette.getY() >= beforeTheme.header().y());
+                assertTrue(palette.getY() + palette.getHeight() <= beforeTheme.header().bottom());
+                Object modelBeforeTheme = field(screen, "treeModel");
+                double panBeforeTheme = field(screen, "treePanX"), zoomBeforeTheme = field(screen, "treeZoom");
+                try (var keys = mockStatic(Screen.class)) {
+                    Screen host = mock(Screen.class, withSettings().extraInterfaces(PlanScreenHost.class));
+                    when(((PlanScreenHost) host).rsi$planPage()).thenReturn(screen);
+                    var click = new ScreenEvent.MouseButtonPressed.Pre(host, palette.getX() + 4, palette.getY() + 4, 0);
+                    HostedPlanEvents.click(click);
+                    assertTrue(click.isCanceled());
+                    assertTrue(palette.isWheelOpen());
+                    capture.clear();
+                    var render = new ScreenEvent.Render.Pre(host, capture.graphics, -10, -10, 0);
+                    HostedPlanEvents.render(render);
+                    assertTrue(render.isCanceled());
+                    write(capture, size, "19-theme-wheel");
+                    screen.keyPressed(GLFW.GLFW_KEY_LEFT, 0, 0);
+                    capture.clear(); screen.render(capture.graphics, -10, -10, 0);
+                    write(capture, size, "20-theme-wheel-second-page");
+                    assertEquals(CraftingUiTheme.CUSTOM, CraftingUiTheme.current(CraftingUiTheme.Scope.TREE));
+                    screen.keyPressed(GLFW.GLFW_KEY_RIGHT, 0, 0);
+                    HostedPlanEvents.key(new ScreenEvent.KeyPressed.Pre(host, GLFW.GLFW_KEY_RIGHT, 0, 0));
+                    HostedPlanEvents.key(new ScreenEvent.KeyPressed.Pre(host, GLFW.GLFW_KEY_ENTER, 0, 0));
+                    assertEquals(CraftingUiTheme.FOREST, CraftingUiTheme.current(CraftingUiTheme.Scope.TREE));
+                    assertEquals(CraftingUiTheme.CUSTOM, CraftingUiTheme.current());
+                    assertTrue(screen.mouseClicked(palette.getX() + 4, palette.getY() + 4, 0));
+                    screen.keyPressed(GLFW.GLFW_KEY_LEFT, 0, 0);
+                    screen.keyPressed(GLFW.GLFW_KEY_ENTER, 0, 0);
+                    assertEquals(CraftingUiTheme.CUSTOM, CraftingUiTheme.current(CraftingUiTheme.Scope.TREE));
+                    verify((PlanScreenHost) host, never()).rsi$setPlanPage(any());
+                }
+                assertSame(modelBeforeTheme, field(screen, "treeModel"));
+                assertEquals(panBeforeTheme, (Double) field(screen, "treePanX"));
+                assertEquals(zoomBeforeTheme, (Double) field(screen, "treeZoom"));
+                verifyNoInteractions(requests);
                 PlanDetailsPanel panel = field(screen, "detailsPanel");
                 panel.showIssues(); capture.clear(); screen.render(capture.graphics, -10, -10, 0);
                 write(capture, size, "02-shortages");
@@ -213,19 +273,115 @@ class PlanWorkspaceRenderTest extends BootstrapTest {
                 clearInvocations(requests);
                 PlanningProgressTracker.clear();
             }
+            CraftingThemeButton compactWheel = new CraftingThemeButton(5, 5, true);
+            compactWheel.onPress();
+            Capture compactCapture = new Capture();
+            compactWheel.renderWheel(compactCapture.graphics, font, 320, 180, -10, -10);
+            write(compactCapture, new int[]{320, 180}, "19-theme-wheel");
+            compactWheel.wheelKeyPressed(GLFW.GLFW_KEY_LEFT);
+            compactCapture.clear();
+            compactWheel.renderWheel(compactCapture.graphics, font, 320, 180, -10, -10);
+            write(compactCapture, new int[]{320, 180}, "20-theme-wheel-second-page");
             CraftingPlanScreen nativeScreen = new CraftingPlanScreen(plan, 1);
             set(nativeScreen, "recipePreview", preview);
+            for (int[] size : new int[][]{{960, 540}, {900, 540}, {800, 450}, {640, 336}, {427, 240}, {960, 336}}) {
+                nativeScreen.init(game, size[0], size[1]);
+                Capture footerCapture = new Capture();
+                nativeScreen.render(footerCapture.graphics, -10, -10, 0);
+                checkFooterAlignment(nativeScreen, footerCapture, size[0]);
+                write(footerCapture, size, "22-footer-alignment");
+            }
             nativeScreen.init(game, 640, 336);
             Capture nativeCapture = new Capture();
             nativeScreen.render(nativeCapture.graphics, -10, -10, 0);
             checkScaledBounds(nativeScreen, nativeCapture);
             write(nativeCapture, new int[]{640, 336}, "16-scale-3x-footer");
+            // 同一已初始化界面重载主题，覆盖浅色文字、按钮、缩略导航和材料页。
+            for (CraftingUiTheme theme : CraftingUiTheme.values()) {
+                CommentedConfig colors = CommentedConfig.inMemory();
+                colors.set("craftingUi.theme", theme.name());
+                colors.set("craftingUi.treeTheme", theme.name());
+                colors.set("craftingUi.themeSchema", 1);
+                RSIntegrationConfig.CLIENT_SPEC.setConfig(colors);
+                nativeCapture.clear();
+                nativeScreen.render(nativeCapture.graphics, -10, -10, 0);
+                assertTrue(nativeCapture.commands.stream().anyMatch(command -> "text".equals(command.get("type"))
+                        && Integer.valueOf(Color.TEXT.value()).equals(command.get("color"))), theme.name());
+                checkScaledBounds(nativeScreen, nativeCapture);
+                write(nativeCapture, new int[]{640, 336}, "17-theme-" + theme.name().toLowerCase(Locale.ROOT));
+                PlanWorkspaceLayout themedLayout = field(nativeScreen, "workspace");
+                nativeScreen.mouseClicked(themedLayout.toolbar().x() + 90, themedLayout.toolbar().y() + 9, 0);
+                nativeCapture.clear();
+                nativeScreen.render(nativeCapture.graphics, -10, -10, 0);
+                write(nativeCapture, new int[]{640, 336}, "18-materials-" + theme.name().toLowerCase(Locale.ROOT));
+                nativeScreen.mouseClicked(themedLayout.toolbar().x() + 30, themedLayout.toolbar().y() + 9, 0);
+            }
+            nativeCapture.clear();
+            nativeScreen.render(nativeCapture.graphics, -10, -10, 0);
+            assertNull(nativeCapture.textPoint("物品栏"), "来源选项应在点击按钮后显示");
+            float[] sourceButton = nativeCapture.textPoint("材料来源 ▾");
+            assertNotNull(sourceButton, "材料来源按钮应替换底部库存自动更新提示");
+            assertFalse(nativeCapture.hasText("库存数量自动更新"));
+            assertTrue(nativeScreen.mouseClicked(sourceButton[0] + 1, sourceButton[1] + 1, 0));
+            nativeCapture.clear();
+            nativeScreen.render(nativeCapture.graphics, -10, -10, 0);
+            float[] inventorySource = nativeCapture.textPoint("物品栏");
+            assertNotNull(inventorySource);
+            assertNotNull(nativeCapture.textPoint("存储网络"));
+            assertNotNull(nativeCapture.textPoint("精妙背包"));
+            assertEquals(MaterialSourceSelection.ALL, field(nativeScreen, "materialSources"));
+            write(nativeCapture, new int[]{640, 336}, "21-material-sources-menu");
+            assertTrue(nativeScreen.mouseClicked(inventorySource[0] + 1, inventorySource[1] + 1, 0));
+            assertTrue((Boolean) field(nativeScreen, "materialSourcesMenuOpen"), "勾选后保持展开，便于多选");
+            nativeCapture.clear();
+            nativeScreen.render(nativeCapture.graphics, -10, -10, 0);
+            float[] networkSource = nativeCapture.textPoint("存储网络");
+            assertTrue(nativeScreen.mouseClicked(networkSource[0] + 1, networkSource[1] + 1, 0));
+            MaterialSourceSelection sources = CraftingPlanPreferences.load(directory.resolve("preferences.json")).materialSources();
+            assertFalse(sources.inventory());
+            assertFalse(sources.storageNetwork());
+            assertTrue(sources.backpacks());
+            assertTrue(((PlanResponseRequestState) field(nativeScreen, "responseRequests")).refreshScheduled());
+            var preferenceMethod = CraftingPlanScreen.class.getDeclaredMethod("requestPreferences");
+            preferenceMethod.setAccessible(true);
+            assertEquals(sources, ((PlanningPreferences)
+                    preferenceMethod.invoke(nativeScreen)).materialSources());
+            assertEquals(sources, field(new CraftingPlanScreen(plan, 1), "materialSources"));
+            assertTrue(nativeScreen.keyPressed(GLFW.GLFW_KEY_ESCAPE, 0, 0));
+            assertFalse((Boolean) field(nativeScreen, "materialSourcesMenuOpen"));
+            nativeCapture.clear(); nativeScreen.render(nativeCapture.graphics, -10, -10, 0);
+            assertTrue(nativeScreen.mouseClicked(sourceButton[0] + 1, sourceButton[1] + 1, 0));
+            nativeCapture.clear(); nativeScreen.render(nativeCapture.graphics, -10, -10, 0);
+            assertTrue(nativeScreen.mouseClicked(0, 0, 0));
+            assertFalse((Boolean) field(nativeScreen, "materialSourcesMenuOpen"), "点击外部只收起菜单");
             verifyNoInteractions(requests);
         } finally {
             Language.inject(previous);
             RSIntegrationConfig.SERVER_SPEC.setConfig(null);
             RSIntegrationConfig.CLIENT_SPEC.setConfig(null);
             RSIntegrationConfig.COMMON_SPEC.setConfig(null);
+        }
+    }
+
+    private static void checkFooterAlignment(CraftingPlanScreen screen, Capture capture, int width) throws Exception {
+        PlanWorkspaceLayout layout = field(screen, "workspace");
+        PlanWorkspaceLayout.Rect sources = field(screen, "materialSourcesButton");
+        Button confirm = field(screen, "confirmButton");
+        int modeY = field(screen, "preparationModeY"), modeHeight = field(screen, "preparationModeH");
+        int outputY = field(screen, "outputSelectorY");
+        assertEquals(modeY, outputY, "模式和产物去向应处于同一行");
+        assertEquals(confirm.getY() * 2 + confirm.getHeight(), sources.y() * 2 + sources.height(),
+                "材料来源与确认按钮的垂直中心应对齐");
+        assertEquals(capture.textPoint(confirm.getMessage().getString())[1], capture.textPoint("材料来源 ▾")[1],
+                "材料来源与确认按钮的文字基线应一致");
+        assertTrue(sources.right() < confirm.getX());
+        assertTrue(sources.bottom() <= layout.footer().bottom());
+        if (width >= 900) {
+            assertEquals(modeY, sources.y());
+            assertEquals(modeHeight, sources.height());
+            assertEquals(capture.textPoint("严格模式")[1], capture.textPoint("材料来源 ▾")[1]);
+        } else {
+            assertTrue(modeY + modeHeight < sources.y(), "两行布局的来源按钮不能与第一行重叠");
         }
     }
 

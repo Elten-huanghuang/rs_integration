@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.planning;
 
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.MaterialLocks;
+import com.huanghuang.rsintegration.crafting.MaterialSourceSelection;
 import com.huanghuang.rsintegration.crafting.plan.RecipeChoice;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
@@ -19,7 +20,8 @@ import java.util.Set;
 public record PlanningPreferences(
         Map<String, RecipeChoice> recipeChoices,
         Map<String, ItemStack> ingredientChoices,
-        Set<ResourceLocation> excludedRecipes) {
+        Set<ResourceLocation> excludedRecipes,
+        MaterialSourceSelection materialSources) {
 
     public static final int MAX_RECIPE_CHOICES = 4_096;
     public static final int MAX_INGREDIENT_CHOICES = 4_096;
@@ -29,6 +31,7 @@ public record PlanningPreferences(
             new PlanningPreferences(Map.of(), Map.of(), Set.of());
 
     public PlanningPreferences {
+        materialSources = materialSources == null ? MaterialSourceSelection.ALL : materialSources;
         recipeChoices = immutableRecipeChoices(recipeChoices);
         ingredientChoices = immutableIngredientChoices(ingredientChoices);
         excludedRecipes = excludedRecipes == null ? Set.of() : Set.copyOf(excludedRecipes);
@@ -37,11 +40,22 @@ public record PlanningPreferences(
         }
     }
 
+    public PlanningPreferences(Map<String, RecipeChoice> recipeChoices,
+                               Map<String, ItemStack> ingredientChoices,
+                               Set<ResourceLocation> excludedRecipes) {
+        this(recipeChoices, ingredientChoices, excludedRecipes, MaterialSourceSelection.ALL);
+    }
+
     public static PlanningPreferences empty() {
         return EMPTY;
     }
 
     public void write(FriendlyByteBuf buf) {
+        // 默认来源保持旧编码；负数标记为携带来源选择的新快照。
+        if (!materialSources.equals(MaterialSourceSelection.ALL)) {
+            buf.writeVarInt(-1);
+            buf.writeByte(materialSources.mask());
+        }
         buf.writeVarInt(recipeChoices.size());
         recipeChoices.entrySet().stream().sorted(Map.Entry.comparingByKey())
                 .forEach(entry -> {
@@ -62,6 +76,11 @@ public record PlanningPreferences(
 
     public static PlanningPreferences read(FriendlyByteBuf buf) {
         int recipeCount = buf.readVarInt();
+        MaterialSourceSelection sources = MaterialSourceSelection.ALL;
+        if (recipeCount == -1) {
+            sources = MaterialSourceSelection.fromMask(buf.readUnsignedByte());
+            recipeCount = buf.readVarInt();
+        }
         if (recipeCount < 0 || recipeCount > MAX_RECIPE_CHOICES) {
             throw new IllegalArgumentException("recipe choice count out of range");
         }
@@ -91,11 +110,12 @@ public record PlanningPreferences(
         for (int i = 0; i < excludedCount; i++) {
             excluded.add(buf.readResourceLocation());
         }
-        return new PlanningPreferences(recipes, ingredients, excluded);
+        return new PlanningPreferences(recipes, ingredients, excluded, sources);
     }
 
     public boolean isEmpty() {
-        return recipeChoices.isEmpty() && ingredientChoices.isEmpty() && excludedRecipes.isEmpty();
+        return recipeChoices.isEmpty() && ingredientChoices.isEmpty() && excludedRecipes.isEmpty()
+                && materialSources.equals(MaterialSourceSelection.ALL);
     }
 
     @Nullable

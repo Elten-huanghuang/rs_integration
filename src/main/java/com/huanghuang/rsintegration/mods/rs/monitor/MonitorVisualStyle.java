@@ -12,7 +12,8 @@ public final class MonitorVisualStyle {
         int red = ((base >>> 16 & 255) * inverse + (tint >>> 16 & 255) * percent) / 100;
         int green = ((base >>> 8 & 255) * inverse + (tint >>> 8 & 255) * percent) / 100;
         int blue = ((base & 255) * inverse + (tint & 255) * percent) / 100;
-        return 0xFF000000 | red << 16 | green << 8 | blue;
+        int alpha = ((base >>> 24) * inverse + (tint >>> 24) * percent) / 100;
+        return alpha << 24 | red << 16 | green << 8 | blue;
     }
 
     public static void cell(GuiGraphics graphics, int x, int y, int width, int height,

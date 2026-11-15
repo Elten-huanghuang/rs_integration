@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.client.gui;
 
 import com.huanghuang.rsintegration.config.CraftingUiColors;
+import com.huanghuang.rsintegration.config.CraftingUiTheme;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
@@ -26,31 +27,48 @@ public final class CraftingUiStyle {
 
     public static void surface(GuiGraphics graphics, int x, int y, int width, int height,
                                int background, int border) {
-        graphics.fill(x + 1, y, x + width - 1, y + height, border);
-        graphics.fill(x, y + 1, x + width, y + height - 1, border);
+        graphics.fill(x + 1, y, x + width - 1, y + 1, border);
+        graphics.fill(x + 1, y + height - 1, x + width - 1, y + height, border);
+        graphics.fill(x, y + 1, x + 1, y + height - 1, border);
+        graphics.fill(x + width - 1, y + 1, x + width, y + height - 1, border);
         graphics.fill(x + 1, y + 1, x + width - 1, y + height - 1, background);
     }
 
     public static void panel(GuiGraphics graphics, int x, int y, int width, int height) {
-        graphics.fill(x + 3, y + 4, x + width + 3, y + height + 4, CraftingUiColors.PANEL_SHADOW.argb());
+        if (!CraftingUiTheme.current().isGlass()) {
+            graphics.fill(x + 3, y + 4, x + width + 3, y + height + 4, CraftingUiColors.PANEL_SHADOW.argb());
+        }
         surface(graphics, x, y, width, height, panel(), border());
-        graphics.fill(x + 1, y + 1, x + width - 1, y + 2, CraftingUiColors.PANEL_TOP_EDGE.argb());
-        graphics.fill(x + 1, y + 2, x + 2, y + height - 1, CraftingUiColors.PANEL_LEFT_EDGE.argb());
+        if (!CraftingUiTheme.current().isGlass()) {
+            graphics.fill(x + 1, y + 1, x + width - 1, y + 2, CraftingUiColors.PANEL_TOP_EDGE.argb());
+            graphics.fill(x + 1, y + 2, x + 2, y + height - 1, CraftingUiColors.PANEL_LEFT_EDGE.argb());
+        }
+        CraftingThemeDecoration.frame(graphics, x, y, width, height, CraftingUiTheme.current());
     }
 
     /** 监控器使用紧凑的像素边框，避免深色粗线与大阴影争抢内容。 */
     public static void raised(GuiGraphics graphics, int x, int y, int width, int height,
                               int background, int border) {
-        graphics.fill(x, y, x + width, y + height, border);
+        if (CraftingUiTheme.current().isGlass()) {
+            surface(graphics, x, y, width, height, background, border);
+            return;
+        }
+        raised(graphics, x, y, width, height, background, border, highlight(), CraftingUiColors.EDGE_SHADOW.argb());
+    }
+
+    public static void raised(GuiGraphics graphics, int x, int y, int width, int height,
+                              int background, int border, int lightEdge, int darkEdge) {
+        graphics.renderOutline(x, y, width, height, border);
         graphics.fill(x + 1, y + 1, x + width - 1, y + height - 1, background);
-        graphics.fill(x + 1, y + 1, x + width - 1, y + 2, highlight());
-        graphics.fill(x + 1, y + 2, x + 2, y + height - 1, highlight());
-        graphics.fill(x + 2, y + height - 2, x + width - 1, y + height - 1, CraftingUiColors.EDGE_SHADOW.argb());
-        graphics.fill(x + width - 2, y + 2, x + width - 1, y + height - 2, CraftingUiColors.EDGE_SHADOW.argb());
+        graphics.fill(x + 1, y + 1, x + width - 1, y + 2, lightEdge);
+        graphics.fill(x + 1, y + 2, x + 2, y + height - 1, lightEdge);
+        graphics.fill(x + 2, y + height - 2, x + width - 1, y + height - 1, darkEdge);
+        graphics.fill(x + width - 2, y + 2, x + width - 1, y + height - 2, darkEdge);
     }
 
     public static void inset(GuiGraphics graphics, int x, int y, int width, int height) {
-        graphics.fill(x - 1, y - 1, x + width + 1, y + height + 1, highlight());
+        graphics.renderOutline(x - 1, y - 1, width + 2, height + 2,
+                CraftingUiTheme.current().isGlass() ? border() : highlight());
         graphics.fill(x, y, x + width, y + height, canvas());
     }
 
@@ -77,7 +95,7 @@ public final class CraftingUiStyle {
 
         @Override protected void renderWidget(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
             int fill = !active ? CraftingUiColors.BUTTON_DISABLED.argb()
-                    : primary ? (isHoveredOrFocused() ? CraftingUiColors.BUTTON_PRIMARY_HOVER.argb() : accent())
+                    : primary ? (isHoveredOrFocused() ? CraftingUiColors.BUTTON_PRIMARY_HOVER.argb() : CraftingUiColors.primaryButtonArgb())
                     : isHoveredOrFocused() ? CraftingUiColors.BUTTON_HOVER.argb() : CraftingUiColors.BUTTON.argb();
             raised(graphics, getX(), getY(), getWidth(), getHeight(), fill,
                     active && isHoveredOrFocused() ? accent() : border());

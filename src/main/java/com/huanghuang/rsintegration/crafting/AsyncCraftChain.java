@@ -197,6 +197,7 @@ public final class AsyncCraftChain {
     private final List<CraftingResolver.ResolutionStep> steps;
     @Nullable private InitialMaterialPlan initialMaterialPlan;
     @Nullable private RuntimeMaterialAccount materialAccount;
+    private final MaterialSourceSelection materialSources = MaterialSourceSelection.current();
     @Nullable private GlobalMaterialCoordinator materialCoordinator;
     private boolean initialMaterialsReady;
     private int nextMaterialAdmissionTick;
@@ -451,6 +452,7 @@ public final class AsyncCraftChain {
         closeMagicReservation();
         materialCoordinator = coordinator;
         materialAccount = coordinator.open(craftId, playerId, server, storageEndpoint);
+        materialAccount.setMaterialSources(materialSources);
         ledger.setMaterialAccount(materialAccount);
         materialAdmissionStartedTick = server.getTickCount();
         nextMaterialAdmissionTick = materialAdmissionStartedTick;
@@ -942,7 +944,8 @@ public final class AsyncCraftChain {
     boolean tick(VanillaCraftingTickBudget.ChainAllowance vanillaAllowance,
                  BooleanSupplier dispatchAllowed) {
         if (isDone()) return true;
-        try (RuntimeMaterialAccount.Scope ignored = RuntimeMaterialAccount.enter(materialAccount)) {
+        try (MaterialSourceSelection.Scope sources = materialSources.enter();
+             RuntimeMaterialAccount.Scope ignored = RuntimeMaterialAccount.enter(materialAccount)) {
             if (!acquireInitialMaterials()) return isDone();
             return tickWithMaterials(vanillaAllowance, dispatchAllowed);
         }

@@ -20,7 +20,8 @@ public record PlanWorkspaceLayout(Rect frame, Rect header, Rect summary, Rect to
         Rect header = new Rect(margin + (compact ? 6 : 8), margin + 4, inner - 12, compact ? 24 : 36);
         Rect summary = new Rect(margin + (compact ? 6 : 8), header.bottom() + gap, inner - 12, compact ? 28 : 46);
         Rect toolbar = new Rect(summary.x(), summary.bottom() + gap, summary.width(), width < 720 ? 38 : 20);
-        int footerHeight = width < 720 ? 48 : 42;
+        boolean stackedFooter = width < 900;
+        int footerHeight = stackedFooter ? 48 : 42;
         Rect footer = new Rect(summary.x(), height - margin - footerHeight, summary.width(), footerHeight);
         Rect content = new Rect(summary.x(), toolbar.bottom() + gap, summary.width(),
                 Math.max(1, footer.y() - gap - toolbar.bottom() - gap));
@@ -34,7 +35,10 @@ public record PlanWorkspaceLayout(Rect frame, Rect header, Rect summary, Rect to
         Rect tree = inspectorOpen ? new Rect(content.x(), content.y(),
                 Math.max(1, content.width() - inspectorWidth - gap), content.height()) : content;
         int cancelWidth = compact ? 44 : 72, confirmWidth = compact ? 88 : 150;
-        Rect cancel = new Rect(footer.right() - cancelWidth, footer.bottom() - (compact ? 22 : 31), cancelWidth, compact ? 20 : 24);
+        int actionHeight = stackedFooter || compact ? 20 : 24;
+        int actionY = stackedFooter ? footer.bottom() - actionHeight - 2
+                : footer.y() + (footer.height() - actionHeight) / 2;
+        Rect cancel = new Rect(footer.right() - cancelWidth, actionY, cancelWidth, actionHeight);
         Rect confirm = new Rect(cancel.x() - gap - confirmWidth, cancel.y(), confirmWidth, cancel.height());
         return new PlanWorkspaceLayout(frame, header, summary, toolbar, content, footer, tree,
                 inspector, confirm, cancel, compact);

@@ -25,7 +25,7 @@ final class PendingMaterialChoice {
         if (requested.isEmpty()) ingredients.remove(key);
         else ingredients.put(key, requested);
         return new CraftingPlanPreferences.Snapshot(stored.outputDestination(), stored.recipeChoices(),
-                ingredients, stored.excludedRecipes());
+                ingredients, stored.excludedRecipes(), stored.materialSources());
     }
 
     void rollback(Map<String, ItemStack> locks) {

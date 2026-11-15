@@ -92,7 +92,8 @@ public final class MonitorTaskList extends AbstractWidget {
     @Override public void renderWidget(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         var font = Minecraft.getInstance().font;
         CraftingUiStyle.raised(graphics, getX(), getY(), width, height, CraftingUiStyle.panel(), CraftingUiStyle.border());
-        graphics.drawString(font, CraftingUiStyle.fit(font, getMessage().getString(), width - 4), getX() + 3, getY() + 7, CraftingUiStyle.text(), false);
+        if (width > 34) graphics.drawString(font, CraftingUiStyle.fit(font, getMessage().getString(), width - 26),
+                getX() + 23, getY() + 7, CraftingUiStyle.text(), false);
         CraftingUiStyle.inset(graphics, getX() + 2, getY() + 20, contentWidth, ROW_HEIGHT * visibleRows);
         for (int row = 0; row < visibleRows; row++) {
             int index = scroll.offset() + row;
@@ -146,8 +147,9 @@ public final class MonitorTaskList extends AbstractWidget {
         if (index >= 0) select.accept(id(tasks.get(index)));
     }
     @Override public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        // 滚动条独立接收焦点和拖拽，列表不能截获其点击。
-        return mouseX < getX() + 2 + contentWidth && super.mouseClicked(mouseX, mouseY, button);
+        // 标题区留给调色盘，滚动条独立接收焦点和拖拽。
+        return mouseY >= getY() + 20 && mouseX < getX() + 2 + contentWidth
+                && super.mouseClicked(mouseX, mouseY, button);
     }
     @Override public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
         if (!isMouseOver(mouseX, mouseY)) return false;

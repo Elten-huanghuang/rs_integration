@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.crafting.plan.MaxCraftableSearch;
 import com.huanghuang.rsintegration.crafting.plan.PlanOutcome;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import com.huanghuang.rsintegration.crafting.planning.PlanningSnapshot;
+import com.huanghuang.rsintegration.crafting.planning.PlanningPreferences;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
 import com.huanghuang.rsintegration.storage.StorageReference;
 import net.minecraft.core.BlockPos;
@@ -30,7 +31,16 @@ final class CraftMaxCraftableSearchService {
             @Nullable ItemStack targetOutput,
             long requestId,
             @Nullable StorageReference storageReference,
-            Map<String, ItemStack> materialLocks) {}
+            Map<String, ItemStack> materialLocks, PlanningPreferences preferences) {
+        Request(ResourceLocation recipeId, Map<String, String> forcedRecipes,
+                @Nullable ResourceLocation dimension, @Nullable BlockPos position,
+                @Nullable ItemStack baseItem, @Nullable ItemStack targetOutput,
+                long requestId, @Nullable StorageReference storageReference,
+                Map<String, ItemStack> materialLocks) {
+            this(recipeId, forcedRecipes, dimension, position, baseItem, targetOutput,
+                    requestId, storageReference, materialLocks, PlanningPreferences.empty());
+        }
+    }
 
     static void start(ServerPlayer player, Request request, long previewGeneration) {
         GenericCraftPacket.tryBuildPlan(
@@ -98,7 +108,7 @@ final class CraftMaxCraftableSearchService {
                                 .error(outcome, diagnostic);
                     }
                 },
-                request.storageReference(), request.materialLocks());
+                request.storageReference(), request.materialLocks(), null, request.preferences());
     }
 
     private static void finishSearch(
@@ -112,7 +122,7 @@ final class CraftMaxCraftableSearchService {
                 request.baseItem(), request.targetOutput(), request.requestId(),
                 previewGeneration, maximum > 0 ? plan : null, snapshot, true,
                 true, networkSink(player, request, previewGeneration),
-                request.storageReference(), request.materialLocks());
+                request.storageReference(), request.materialLocks(), null, request.preferences());
     }
 
     private static void continueSearch(
@@ -132,7 +142,7 @@ final class CraftMaxCraftableSearchService {
                         request.baseItem(), request.targetOutput(), request.requestId(),
                         previewGeneration, null, snapshot, false,
                         true, networkSink(player, request, previewGeneration),
-                        request.storageReference(), request.materialLocks());
+                        request.storageReference(), request.materialLocks(), null, request.preferences());
                 return;
             }
             GenericCraftPacket.tryBuildPlan(
@@ -141,7 +151,7 @@ final class CraftMaxCraftableSearchService {
                     request.baseItem(), request.targetOutput(), request.requestId(),
                     previewGeneration, null, snapshot, false,
                     true, networkSink(player, request, previewGeneration),
-                    request.storageReference(), request.materialLocks());
+                    request.storageReference(), request.materialLocks(), null, request.preferences());
             return;
         }
 
@@ -165,7 +175,7 @@ final class CraftMaxCraftableSearchService {
                 request.dimension(), request.position(), candidate,
                 request.baseItem(), request.targetOutput(), request.requestId(),
                 previewGeneration, null, snapshot, false,
-                true, probeSink, request.storageReference(), request.materialLocks());
+                true, probeSink, request.storageReference(), request.materialLocks(), null, request.preferences());
     }
 
     private static CraftPlanResultDispatcher.Sink networkSink(

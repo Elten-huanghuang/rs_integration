@@ -37,6 +37,7 @@ final class RuntimeMaterialAccount {
     private final UUID playerId;
     private final MinecraftServer server;
     private final CraftStorageEndpoint endpoint;
+    private MaterialSourceSelection materialSources = MaterialSourceSelection.current();
     private final Map<MaterialKey, Long> heldItems = new LinkedHashMap<>();
     private final Map<TaskFluidKey, Long> heldFluids = new LinkedHashMap<>();
     private final List<ExtractionLedger> acquisitions = new ArrayList<>();
@@ -53,6 +54,8 @@ final class RuntimeMaterialAccount {
     }
 
     @Nullable static RuntimeMaterialAccount current() { return CURRENT.get(); }
+
+    void setMaterialSources(MaterialSourceSelection sources) { materialSources = sources; }
 
     /** 只在当前链的同步推进期间继承账户；嵌套开链和异常退出都会恢复原作用域。 */
     static Scope enter(@Nullable RuntimeMaterialAccount account) {
@@ -157,7 +160,7 @@ final class RuntimeMaterialAccount {
 
     Map<StackKey, Long> available(ServerPlayer player) {
         Map<StackKey, Long> result = heldMaterials();
-        try (Scope ignored = enter(null)) {
+        try (MaterialSourceSelection.Scope sources = materialSources.enter(); Scope ignored = enter(null)) {
             MaterialSources.listAllAvailableFresh(player, endpoint).forEach(
                     (key, amount) -> result.merge(key, amount, MaterialSources::saturatedAdd));
         }
@@ -174,7 +177,10 @@ final class RuntimeMaterialAccount {
         });
         if (missing.isEmpty()) return true;
         acquiring = true;
-        ExtractionLedger acquisition = new ExtractionLedger();
+        ExtractionLedger acquisition;
+        try (MaterialSourceSelection.Scope sources = materialSources.enter()) {
+            acquisition = new ExtractionLedger();
+        }
         acquisition.setExternalMaterialAccess();
         acquisition.setStorageEndpoint(endpoint);
         try (Scope ignored = enter(null)) {
