@@ -10,9 +10,9 @@ displayURL = "https://modrinth.com/mod/rs-integration"
 logoFile = "rs_integration_logo.png"
 authors = "Huanghuang"
 description = '''
-Deep integration between Refined Storage and modded machines, providing
-recursive remote crafting, machine management, storage utilities, and
-cross-mod automation for Minecraft 1.20.1.
+Recursive crafting, remote machine access, and storage utilities for
+Refined Storage and Beyond Dimensions, with optional cross-mod integrations.
+Minecraft 1.20.1 / Forge 47+; JEI is required on the client.
 '''
 
 [[dependencies.${mod_id}]]

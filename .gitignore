@@ -43,10 +43,14 @@ libs/
 # 本机依赖版本与离线打包快捷入口
 /build-release.bat
 
-# 文档目录：保留更新公告、API 文档、配置示例和 Goety 兼容说明
+# 文档目录：保留更新公告、使用指南、发布文案、API 文档、配置示例和 Goety 兼容说明
 /docs/*
 !/docs/announcements/
 !/docs/announcements/**
+!/docs/guide/
+!/docs/guide/**
+!/docs/publishing/
+!/docs/publishing/**
 !/docs/api/
 !/docs/api/**
 !/docs/config/
