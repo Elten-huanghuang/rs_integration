@@ -539,6 +539,7 @@ public final class RecipeIndex {
                                             Map<Item, List<ReusableCatalystRoute>> catalystRoutes,
                                             BuildTiming timing, Recipe<?> recipe) {
         if (!seen.add(recipe.getId())) return IndexOutcome.DUPLICATE;
+        if (RecursiveRecipePolicy.isExcluded(recipe)) return IndexOutcome.EXCLUDED;
 
         ModRecipeHandler handler = ModRecipeHandlers.claimFor(recipe).winner();
         List<ImmutableRecipeGraph.RecipeNode> resourceNodes =
@@ -705,7 +706,7 @@ public final class RecipeIndex {
 
     /** Returns whether the immutable recipe graph can represent this recipe's inputs. */
     public static boolean isBackgroundProjectable(Recipe<?> recipe) {
-        if (recipe == null) return false;
+        if (recipe == null || RecursiveRecipePolicy.isExcluded(recipe)) return false;
         ModRecipeHandler handler = ModRecipeHandlers.claimFor(recipe).winner();
         ModType type = handler == null
                 ? ModType.classifyRecipe(recipe)
@@ -769,7 +770,7 @@ public final class RecipeIndex {
     }
 
     private enum IndexOutcome {
-        INDEXED, DUPLICATE, UNKNOWN, EMPTY_RESULT, IDENTITY
+        INDEXED, DUPLICATE, EXCLUDED, UNKNOWN, EMPTY_RESULT, IDENTITY
     }
 
     private static void recordUnknownRecipeType(

@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.crafting.RecursiveRecipePolicy;
 import com.huanghuang.rsintegration.recipe.viewer.RecipeIdNormalizer;
 import com.huanghuang.rsintegration.crafting.fluid.FluidContainerCatalog;
 import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisGemCuttingCatalog;
@@ -33,6 +34,12 @@ final class CraftRecipeResolver {
 
     @Nullable
     static Recipe<?> resolve(ServerLevel level, ResourceLocation recipeId) {
+        Recipe<?> recipe = resolveAvailable(level, recipeId);
+        return RecursiveRecipePolicy.isExcluded(recipe) ? null : recipe;
+    }
+
+    @Nullable
+    private static Recipe<?> resolveAvailable(ServerLevel level, ResourceLocation recipeId) {
         recipeId = RecipeIdNormalizer.normalize(recipeId);
         Recipe<?> recipe = level.getRecipeManager().byKey(recipeId).orElse(null);
         if (recipe != null) return recipe;

@@ -66,6 +66,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.item.crafting.ShapelessRecipe;
 import net.minecraft.world.item.crafting.SmithingTransformRecipe;
 import org.junit.jupiter.api.Test;
@@ -77,6 +78,7 @@ import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.AbstractMap;
 import java.util.HashMap;
 import java.util.ArrayList;
@@ -98,6 +100,26 @@ import static org.mockito.Mockito.when;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 class GenericCraftPacketTest extends BootstrapTest {
+
+    @Test
+    void recursiveRecipeResolverRejectsAlkahestryButKeepsOrdinaryRecipes() {
+        ServerLevel level = mock(ServerLevel.class);
+        RecipeManager manager = mock(RecipeManager.class);
+        when(level.getRecipeManager()).thenReturn(manager);
+        Recipe<?> excluded = mock(Recipe.class);
+        ResourceLocation excludedId = new ResourceLocation("reliquary", "alkahestry/crafting/netherrack");
+        when(excluded.getId()).thenReturn(excludedId);
+        when(manager.byKey(excludedId)).thenAnswer(call -> Optional.of(excluded));
+        Recipe<?> ordinary = mock(Recipe.class);
+        ResourceLocation ordinaryId = new ResourceLocation("reliquary", "alkahestry_tome");
+        when(ordinary.getId()).thenReturn(ordinaryId);
+        when(manager.byKey(ordinaryId)).thenAnswer(call -> Optional.of(ordinary));
+
+        assertNull(CraftRecipeResolver.resolve(level, excludedId));
+        assertEquals(ordinary, CraftRecipeResolver.resolve(level, ordinaryId));
+        // 仅 RSI 递归入口过滤，原版配方管理器仍可用于正常手动合成。
+        assertEquals(excluded, manager.byKey(excludedId).orElseThrow());
+    }
 
     @Test
     void directRecursiveTerminalPlanCountsAsASelectedPlanner() {

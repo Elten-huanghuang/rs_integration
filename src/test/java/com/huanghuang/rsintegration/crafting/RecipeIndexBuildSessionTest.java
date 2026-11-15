@@ -28,12 +28,15 @@ import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.core.RegistryAccess;
+import net.minecraft.core.NonNullList;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.item.crafting.CraftingBookCategory;
+import net.minecraft.world.item.crafting.ShapelessRecipe;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.item.crafting.RecipeType;
@@ -62,6 +65,46 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class RecipeIndexBuildSessionTest extends BootstrapTest {
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "alkahestry/crafting/netherrack",
+            "alkahestry/crafting/diamond",
+            "alkahestry/charging/redstone",
+            "alkahestry/drain/redstone"
+    })
+    void alkahestryRecipesNeverEnterRecursiveCatalogOrGraph(String path) throws Exception {
+        withServer((level, manager) -> {
+            ShapelessRecipe excluded = new ShapelessRecipe(
+                    new ResourceLocation("reliquary", path), "", CraftingBookCategory.MISC,
+                    new ItemStack(Items.NETHERRACK, 9),
+                    NonNullList.of(Ingredient.EMPTY, Ingredient.of(Items.REDSTONE)));
+            // 普通配方与书本身的制作配方仍然保留。
+            ShapelessRecipe ordinary = new ShapelessRecipe(
+                    new ResourceLocation("reliquary", "alkahestry_tome"), "",
+                    CraftingBookCategory.MISC, new ItemStack(Items.BOOK),
+                    NonNullList.of(Ingredient.EMPTY, Ingredient.of(Items.PAPER)));
+            doReturn(List.of(excluded, ordinary)).when(manager).getRecipes();
+            when(level.registryAccess()).thenReturn(RegistryAccess.EMPTY);
+            try (var handlers = mockStatic(ModRecipeHandlers.class)) {
+                handlers.when(() -> ModRecipeHandlers.claimFor(ordinary))
+                        .thenReturn(new ModRecipeHandlers.Claim(null, List.of()));
+                handlers.when(() -> ModRecipeHandlers.tryGetResultItem(ordinary, RegistryAccess.EMPTY))
+                        .thenReturn(ordinary.getResultItem(RegistryAccess.EMPTY));
+                assertFalse(RecipeIndex.isBackgroundProjectable(excluded));
+                RecipeIndex.BuildSession session = newSession(level);
+                session.advance(2L, new AtomicLong()::getAndIncrement);
+                RecipeIndex.BuildResult result = RecipeIndex.finalizeBuild(new RecipeIndex.BuildInput(
+                        session.index, session.projected, session.catalystRoutes,
+                        session.catalystOutputs, session.catalystRecipes, session.scrolls,
+                        session.producersByOutput));
+                assertEquals(Set.of(Items.BOOK), result.index().keySet());
+                assertEquals(Set.of(ordinary.getId()), result.graph().recipesById().keySet());
+                assertTrue(result.catalystRecipes().isEmpty());
+                handlers.verify(() -> ModRecipeHandlers.claimFor(excluded), never());
+            }
+        });
+    }
+
     @Test
     void fluidSourceYieldsAndOnlyPublishesWithCurrentGeneration() throws Exception {
         withServer((level, manager) -> {
