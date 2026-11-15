@@ -16,6 +16,11 @@ import java.util.function.Supplier;
 
 public record ApothSpawnerExecutePacket(ResourceLocation dimension, BlockPos pos,
                                         Map<ResourceLocation, Integer> selected, boolean preview) {
+    /** 请求重新预览服务端保存的升级选择。 */
+    public static void refreshPreview(ResourceLocation dimension, BlockPos pos) {
+        NetworkHandler.CHANNEL.sendToServer(new ApothSpawnerExecutePacket(dimension, pos, Map.of(), true));
+    }
+
     public void encode(FriendlyByteBuf buf) {
         buf.writeResourceLocation(dimension); buf.writeBlockPos(pos);
         buf.writeBoolean(preview);

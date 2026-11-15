@@ -12,6 +12,9 @@ import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponsePublisher;
 import com.huanghuang.rsintegration.crafting.plan.PlanStep;
 import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
+import com.huanghuang.rsintegration.crafting.plan.IntegrationDiagnostic;
+import com.huanghuang.rsintegration.crafting.plan.IntegrationDiagnosticCode;
+import com.huanghuang.rsintegration.crafting.plan.PlanOutcome;
 import com.huanghuang.rsintegration.mods.apotheosis.ApothSpawnerPlanTarget;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.mods.apotheosis.ApothSpawnerModels.Entry;
@@ -51,18 +54,34 @@ public final class ApothSpawnerUpgradeService {
     private ApothSpawnerUpgradeService() {}
 
     public record Snapshot(ResourceLocation dimension, BlockPos pos, List<Entry> entries, String message) {}
-    private record PendingPlan(ResourceLocation dimension, BlockPos pos,
-                               Map<ResourceLocation, Integer> selected, long expiresAt) {}
+    record PendingPlan(ResourceLocation dimension, BlockPos pos,
+                       Map<ResourceLocation, Integer> selected, long expiresAt) {
+        @Nullable
+        Map<ResourceLocation, Integer> selectionFor(ResourceLocation dimension, BlockPos pos, long now) {
+            return expiresAt >= now && this.dimension.equals(dimension) && this.pos.equals(pos)
+                    ? selected : null;
+        }
+    }
 
     public static void preview(ServerPlayer player, ResourceLocation dimension, BlockPos pos,
                                Map<ResourceLocation, Integer> selected) {
         long now = System.currentTimeMillis();
         PENDING.entrySet().removeIf(entry -> entry.getValue().expiresAt() < now);
+        if (selected.isEmpty()) {
+            // 计划页的刷新包不重复携带选择，必须沿用同一刷怪笼的有效预览。
+            PendingPlan pending = PENDING.get(player.getUUID());
+            selected = pending == null ? null : pending.selectionFor(dimension, pos, now);
+            if (selected == null) {
+                PlanResponsePublisher.sendError(player, PlanOutcome.STALE,
+                        IntegrationDiagnostic.error(IntegrationDiagnosticCode.STALE_PLAN), 0L);
+                return;
+            }
+        }
         Context context = context(player, dimension, pos);
         CraftStorageEndpoint endpoint = storageEndpoint(player);
         if (context == null || endpoint == null) {
-            player.sendSystemMessage(Component.translatable(
-                    "rsi.apotheosis.spawner.context_changed"));
+            PlanResponsePublisher.sendError(player, PlanOutcome.STALE,
+                    IntegrationDiagnostic.error(IntegrationDiagnosticCode.STALE_PLAN), 0L);
             return;
         }
         Map<ResourceLocation, SpawnerModifier> recipes = new HashMap<>();

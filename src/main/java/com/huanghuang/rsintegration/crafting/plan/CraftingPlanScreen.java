@@ -772,7 +772,8 @@ public final class CraftingPlanScreen extends Screen {
     private void sendCraftPacket(ResourceLocation rid, boolean preview,
                                  Map<String, String> forced, int repeatCount, boolean inferMode) {
         if (rid == null) return;
-        long requestId = preview && QuestSubmissionTargetIds.isQuestSubmission(rid)
+        long requestId = preview && (QuestSubmissionTargetIds.isQuestSubmission(rid)
+                || ApothSpawnerPlanTarget.ID.equals(rid))
                 ? 0L : PlanningRequestIds.next();
         if (preview) {
             previewStartedAt = System.currentTimeMillis();
@@ -807,6 +808,17 @@ public final class CraftingPlanScreen extends Screen {
             execDim = ResourceLocation.tryParse(plan.executionDim());
             execPos = new BlockPos(
                     plan.executionPosX(), plan.executionPosY(), plan.executionPosZ());
+        }
+        if (preview && ApothSpawnerPlanTarget.ID.equals(rid)) {
+            // 刷怪笼升级是虚拟目标，刷新时由专用服务复用服务端保存的升级选择。
+            PlanningProgressTracker.responseReceived(requestId);
+            if (execDim == null || execPos == null) {
+                responseRequests.failPreview(requestId);
+                updateConfirmButton();
+                return;
+            }
+            ApothSpawnerExecutePacket.refreshPreview(execDim, execPos);
+            return;
         }
         MachineCandidateView selected = selectedMachineCandidate();
         if (machineSelectionMode != MachineSelectionMode.AUTO) {
