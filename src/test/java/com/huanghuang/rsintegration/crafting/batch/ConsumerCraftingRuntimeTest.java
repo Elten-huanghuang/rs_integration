@@ -10,6 +10,8 @@ import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.api.execution.CollectedOutput;
 import com.huanghuang.rsintegration.api.recipe.OutputKind;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
+import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
+import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.plan.RecipeChoice;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
@@ -19,11 +21,17 @@ import com.huanghuang.rsintegration.crafting.planning.PlanningPreferences;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidTestFixtures;
+import com.huanghuang.rsintegration.mods.crockpot.CrockPotRecipeHandler;
+import com.huanghuang.rsintegration.mods.crockpot.CrockPotTestFixtures;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraftforge.fluids.FluidStack;
 import org.junit.jupiter.api.Test;
@@ -35,10 +43,82 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class ConsumerCraftingRuntimeTest extends BootstrapTest {
+    @Test
+    void categoryOnlyCrockPotPreflightIncludesAllFourInputsDespiteNoFixedIngredients() {
+        try (CrockPotTestFixtures fixture = new CrockPotTestFixtures()) {
+            ServerPlayer player = mock(ServerPlayer.class);
+            ServerLevel level = mock(ServerLevel.class);
+            when(player.serverLevel()).thenReturn(level);
+            var recipe = CrockPotTestFixtures.fishRecipe();
+            CrockPotRecipeHandler handler = new CrockPotRecipeHandler();
+            assertNull(handler.getIngredients(recipe));
+
+            List<IngredientSpec> specs = ConsumerCraftingRuntime.typedPlanningIngredients(
+                    recipe, handler, player, Map.of(
+                            new StackKey(Items.COD, null), 1L,
+                            new StackKey(Items.STICK, null), 3L));
+
+            assertNotNull(specs);
+            assertEquals(1, CrockPotTestFixtures.count(specs, Items.COD));
+            assertEquals(3, CrockPotTestFixtures.count(specs, Items.STICK));
+            assertTrue(CrockPotTestFixtures.matches(recipe, specs, level));
+        }
+    }
+
+    @Test
+    void mixedCrockPotPreflightIncludesAttributeFoodAndValidFiller() {
+        try (CrockPotTestFixtures fixture = new CrockPotTestFixtures()) {
+            ServerPlayer player = mock(ServerPlayer.class);
+            ServerLevel level = mock(ServerLevel.class);
+            when(player.serverLevel()).thenReturn(level);
+            var recipe = CrockPotTestFixtures.fishSticksRecipe();
+
+            List<IngredientSpec> specs = ConsumerCraftingRuntime.typedPlanningIngredients(
+                    recipe, new CrockPotRecipeHandler(), player, Map.of(
+                            new StackKey(Items.STICK, null), 64L,
+                            new StackKey(Items.COD, null), 1L,
+                            new StackKey(Items.CARROT, null), 2L));
+
+            assertNotNull(specs);
+            assertEquals(1, CrockPotTestFixtures.count(specs, Items.STICK));
+            assertEquals(1, CrockPotTestFixtures.count(specs, Items.COD));
+            assertEquals(2, CrockPotTestFixtures.count(specs, Items.CARROT));
+            assertTrue(CrockPotTestFixtures.matches(recipe, specs, level));
+        }
+    }
+
+    @Test
+    void crockPotPreflightRejectsEnoughFixedIngredientsButInsufficientDynamicInputs() {
+        try (CrockPotTestFixtures fixture = new CrockPotTestFixtures()) {
+            ServerPlayer player = mock(ServerPlayer.class);
+            when(player.serverLevel()).thenReturn(mock(ServerLevel.class));
+
+            assertNull(ConsumerCraftingRuntime.typedPlanningIngredients(
+                    CrockPotTestFixtures.fishSticksRecipe(), new CrockPotRecipeHandler(), player,
+                    Map.of(new StackKey(Items.STICK, null), 64L)));
+        }
+    }
+
+    @Test
+    void otherRecipesStillUseTheirHandlersPlanningContext() {
+        Recipe<?> recipe = mock(Recipe.class);
+        ModRecipeHandler handler = mock(ModRecipeHandler.class);
+        ServerPlayer player = mock(ServerPlayer.class);
+        List<IngredientSpec> declared = List.of(new IngredientSpec(Ingredient.of(Items.WHEAT), 3));
+        List<IngredientSpec> contextual = List.of(new IngredientSpec(Ingredient.of(Items.WHEAT), 2));
+        when(handler.getIngredients(recipe)).thenReturn(declared);
+        when(handler.getPlanningIngredients(recipe, player, declared)).thenReturn(contextual);
+
+        assertEquals(contextual, ConsumerCraftingRuntime.typedPlanningIngredients(
+                recipe, handler, player, Map.of()));
+    }
+
     @Test
     void stockOnlyPreferenceSurvivesConsumerConversionWithoutForcingAFakeRecipe() throws Exception {
         var preferences = new ConsumerPlanningPreferences(

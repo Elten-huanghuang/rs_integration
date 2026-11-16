@@ -15,6 +15,9 @@ import com.huanghuang.rsintegration.crafting.batch.RecipeAvailabilityChecker;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.feature.foodorder.network.FoodOrderListPacket;
+import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
+import com.huanghuang.rsintegration.mods.crockpot.CrockPotFoodValues;
+import com.huanghuang.rsintegration.mods.crockpot.CrockPotRecipeHandler;
 import com.huanghuang.rsintegration.mods.historystages.HistoryStagesCompat;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.storage.StorageRestockSupport;
@@ -303,9 +306,22 @@ public final class FoodOrderListService {
                     && !AltarBindingRegistry.hasBindingForRecipe(player, recipe, modType)) {
                 return new Evaluation(FoodOrderKind.NO_MACHINE, List.of());
             }
-            List<IngredientSpec> specs = recipe instanceof CraftingRecipe craftingRecipe
-                    ? CraftPacketUtils.extractCraftingIngredientSpecs(craftingRecipe)
-                    : CraftPacketUtils.extractIngredientSpecs(recipe);
+            boolean crockCategory = CrockPotRecipeHandler.hasCategoryConstraints(recipe);
+            if (crockCategory && !CrockPotFoodValues.isReady()) {
+                return new Evaluation(FoodOrderKind.WAITING, List.of());
+            }
+            List<IngredientSpec> specs;
+            if (crockCategory) {
+                specs = CrockPotBatchDelegate.buildCategoryPlanIngredients(
+                        recipe, available, player.serverLevel(), CrockPotRecipeHandler.INPUT_SLOT_COUNT);
+            } else if (recipe instanceof CraftingRecipe craftingRecipe) {
+                specs = CraftPacketUtils.extractCraftingIngredientSpecs(craftingRecipe);
+            } else {
+                specs = CraftPacketUtils.extractIngredientSpecs(recipe);
+            }
+            if (crockCategory && (specs == null || specs.isEmpty())) {
+                return new Evaluation(FoodOrderKind.MISSING, List.of());
+            }
             if (specs == null || specs.isEmpty()
                     || specs.stream().allMatch(IngredientSpec::isEmpty)) {
                 return new Evaluation(FoodOrderKind.NORECIPE, List.of());

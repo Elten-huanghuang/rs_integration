@@ -76,6 +76,9 @@ import com.huanghuang.rsintegration.crafting.planning.PurePlanAdapter;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
+import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
+import com.huanghuang.rsintegration.mods.crockpot.CrockPotFoodValues;
+import com.huanghuang.rsintegration.mods.crockpot.CrockPotRecipeHandler;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
@@ -1176,24 +1179,26 @@ public final class ConsumerCraftingRuntime {
                     "typed recipe target is not registered"
             );
         }
-        List<IngredientSpec> declared = handler.getIngredients(recipe);
-        if (declared == null) {
+        boolean crockCategory = CrockPotRecipeHandler.hasCategoryConstraints(recipe);
+        if (crockCategory && !CrockPotFoodValues.isReady()) {
             return unavailable(
                     key,
                     ConsumerCraftabilityStatus.RECIPE_UNSUPPORTED,
                     ConsumerDiagnosticCode.RECIPE_UNSUPPORTED,
-                    "typed recipe ingredients cannot be enumerated"
+                    "crock pot food values are unavailable"
             );
         }
-        List<IngredientSpec> contextual =
-                handler.getPlanningIngredients(
-                        recipe, player, declared);
+        List<IngredientSpec> contextual = typedPlanningIngredients(
+                recipe, handler, player, session.capture.available);
         if (contextual == null) {
             return unavailable(
                     key,
-                    ConsumerCraftabilityStatus.RECIPE_UNSUPPORTED,
-                    ConsumerDiagnosticCode.RECIPE_UNSUPPORTED,
-                    "machine context rejected the typed recipe inputs"
+                    crockCategory ? ConsumerCraftabilityStatus.MISSING_MATERIALS
+                            : ConsumerCraftabilityStatus.RECIPE_UNSUPPORTED,
+                    crockCategory ? ConsumerDiagnosticCode.MATERIAL_MISSING
+                            : ConsumerDiagnosticCode.RECIPE_UNSUPPORTED,
+                    crockCategory ? "crock pot ingredients cannot fill every input slot"
+                            : "machine context rejected the typed recipe inputs"
             );
         }
         ItemStack routedDeclaredTarget =
@@ -1498,6 +1503,19 @@ public final class ConsumerCraftingRuntime {
                 planId,
                 List.of()
         );
+    }
+
+    @Nullable
+    static List<IngredientSpec> typedPlanningIngredients(
+            Recipe<?> recipe, ModRecipeHandler handler, ServerPlayer player,
+            Map<CraftingResolver.StackKey, Long> available) {
+        if (CrockPotRecipeHandler.hasCategoryConstraints(recipe)) {
+            return CrockPotBatchDelegate.buildCategoryPlanIngredients(
+                    recipe, available, player.serverLevel(), CrockPotRecipeHandler.INPUT_SLOT_COUNT);
+        }
+        List<IngredientSpec> declared = handler.getIngredients(recipe);
+        return declared == null ? null
+                : handler.getPlanningIngredients(recipe, player, declared);
     }
 
     static CraftingResolver.ResolutionStep typedTerminalStep(

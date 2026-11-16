@@ -12,6 +12,7 @@ import net.minecraftforge.registries.ForgeRegistries;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
+import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
@@ -45,7 +46,6 @@ import org.jetbrains.annotations.NotNull;
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -254,6 +254,12 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
         this.usingSharedLedger = shared;
         this.craftDone = false;
 
+        long requestedSlots = materials.stream()
+                .filter(stack -> !stack.isEmpty())
+                .mapToLong(ItemStack::getCount)
+                .sum();
+        if (requestedSlots != potLevel) return false;
+
         if (!myLevel.hasChunkAt(myPos)) return false;
 
         BlockEntity be = myLevel.getBlockEntity(myPos);
@@ -275,14 +281,6 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
         }
         if (!hasStorageAccess() || !acquireInventory(itemHandler, be)) return false;
 
-        int requestedSlots = materials.stream()
-                .filter(stack -> !stack.isEmpty())
-                .mapToInt(ItemStack::getCount)
-                .sum();
-        if (requestedSlots > potLevel) {
-            resetInventoryOwnership();
-            return false;
-        }
         int simulatedSlot = 0;
         for (ItemStack material : materials) {
             for (int i = 0; i < material.getCount(); i++) {
@@ -455,6 +453,25 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
         return flattenCategoryPlan(plan);
     }
 
+    /** 列表和 Consumer 预检复用已有库存快照，不额外读取存储或遗漏动态补位材料。 */
+    @Nullable
+    public static List<IngredientSpec> buildCategoryPlanIngredients(
+            Recipe<?> recipe, Map<StackKey, Long> available, Level level, int inputSlots) {
+        if (!CrockPotFoodValues.isReady()) return null;
+        List<CrockPotFoodValues.Candidate> candidates = new ArrayList<>();
+        Map<MaterialKey, Integer> baseAvail = new HashMap<>();
+        for (var entry : available.entrySet()) {
+            if (entry.getValue() == null || entry.getValue() <= 0) continue;
+            ItemStack stack = entry.getKey().toStack();
+            if (stack.isEmpty()) continue;
+            int amount = (int) Math.min(Integer.MAX_VALUE, entry.getValue());
+            candidates.add(new CrockPotFoodValues.Candidate(stack, amount));
+            baseAvail.put(MaterialKey.of(stack), amount);
+        }
+        CategoryPlan plan = resolveCategoryPlan(candidates, baseAvail, recipe, level, inputSlots);
+        return plan == null ? null : flattenCategoryPlan(plan);
+    }
+
     /** A resolved DNF term: the fixed ingredients to reserve plus the filler items to place. */
     public record CategoryPlan(List<IngredientSpec> fixed, List<ItemStack> filler) {}
 
@@ -569,11 +586,6 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
         if (remaining < 0) return null; // more fixed items than the pot can hold
 
         float[] startFV = CrockPotFoodValues.combined(fixedStacks, level);
-        if (remaining == 0) {
-            // Pot is full of fixed items; accept the term (recipe match verified in-game).
-            return new CategoryPlan(fixedSpecs, Collections.emptyList());
-        }
-
         // Filler candidates draw from the decremented snapshot so fixed items aren't re-picked.
         List<CrockPotFoodValues.Candidate> fillerCands = new ArrayList<>();
         for (CrockPotFoodValues.Candidate c : candidates) {
@@ -702,7 +714,8 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
     public static int getBlockPotLevel(Level level, BlockPos pos) {
         if (level == null || pos == null) return -1;
         BlockEntity be = level.getBlockEntity(pos);
-        if (be == null || !CrockPotReflection.crockPotBEClass.isInstance(be)) return -1;
+        if (be == null || CrockPotReflection.crockPotBEClass == null
+                || !CrockPotReflection.crockPotBEClass.isInstance(be)) return -1;
         IItemHandler handler = getItemHandler(be);
         if (handler == null) return -1;
         return handler.getSlots() - 2; // subtract fuel + output slots

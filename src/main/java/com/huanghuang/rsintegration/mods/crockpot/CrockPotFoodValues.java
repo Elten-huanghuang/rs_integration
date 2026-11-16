@@ -1,11 +1,12 @@
 package com.huanghuang.rsintegration.mods.crockpot;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
-import com.huanghuang.rsintegration.mods.crockpot.CrockPotRecipeHandler;
 import com.huanghuang.rsintegration.reflection.probes.CrockPotReflection;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.level.Level;
 
 import javax.annotation.Nullable;
@@ -128,24 +129,22 @@ public final class CrockPotFoodValues {
     }
 
     /**
-     * Greedily choose up to {@code remaining} items whose food values, added to {@code startFV},
-     * satisfy every category minimum without breaching any maximum. Nothing is consumed — the
-     * caller extracts the returned items.
+     * 选出恰好 {@code remaining} 个材料，与 {@code startFV} 合计后满足所有属性上下限。
+     * 此方法不消耗材料，实际取出由调用方负责。
      *
-     * <p>Two-phase selection: Phase 1 picks items that reduce category deficits. Once all
-     * minimums are met, Phase 2 fills any remaining slots with the most neutral items
-     * (lowest total food-value magnitude) that don't breach any maximum. Crock Pot requires
-     * every slot up to potLevel to be filled for cooking to start, so stopping early would
-     * leave the pot unable to begin.</p>
+     * <p>先贪心选择能补足属性下限的食材，再优先用配置的填充物补位；填充物不可用时，
+     * 选择属性影响最小且不突破上限的食材。烹饪锅必须填满四个输入槽才能开煮，
+     * 因此任何槽位无法补齐时都不返回方案。</p>
      *
-     * @return the chosen items (each count 1), or null if the constraints cannot be met.
+     * @return 每组数量为 1 的已选材料；无法满足条件时返回 null。
      */
     @Nullable
     public static List<ItemStack> select(float[] startFV, float[] catMins, float[] catMaxs,
                                          int remaining, List<Candidate> candidates, Level level) {
-        if (!isReady() || remaining <= 0) return null;
+        if (!isReady() || remaining < 0) return null;
 
         float[] current = Arrays.copyOf(startFV, CAT);
+        if (breachesMax(current, catMaxs, new float[CAT])) return null;
         Map<MaterialKey, Integer> avail = new HashMap<>();
         for (Candidate c : candidates) {
             avail.merge(MaterialKey.of(c.stack()), c.available(), Integer::sum);
@@ -176,23 +175,31 @@ public final class CrockPotFoodValues {
         }
 
         if (!meetsMins(current, catMins)) return null;
+        if (remaining == 0) return chosen;
 
-        // Phase 2: fill remaining slots with neutral items (lowest total food-value
-        // magnitude) that don't breach any max.  Needed because Crock Pot requires
-        // all slots up to potLevel to be occupied for cooking to start.
+        // 默认填充物也有食材属性，只有不突破配方上限时才能优先用于补位。
+        Ingredient preferredFiller = CrockPotRecipeHandler.resolveFillerIngredient();
         int slotsLeft = remaining - chosen.size();
         for (int r = 0; r < slotsLeft; r++) {
             ItemStack best = ItemStack.EMPTY;
             float bestImpact = Float.POSITIVE_INFINITY; // lower = more neutral
+            boolean bestPreferred = false;
             for (Candidate cand : candidates) {
                 ItemStack stack = cand.stack();
                 if (stack.isEmpty() || avail.getOrDefault(MaterialKey.of(stack), 0) <= 0) continue;
                 float[] fv = compute(stack, level);
                 if (fv == null || breachesMax(current, catMaxs, fv)) continue;
                 float impact = foodValueMagnitude(fv);
-                if (impact < bestImpact) { bestImpact = impact; best = stack; }
+                boolean preferred = preferredFiller != null
+                        && IngredientMatcher.test(preferredFiller, stack);
+                if (best.isEmpty() || (preferred && !bestPreferred)
+                        || (preferred == bestPreferred && impact < bestImpact)) {
+                    bestImpact = impact;
+                    best = stack;
+                    bestPreferred = preferred;
+                }
             }
-            if (best.isEmpty()) break; // no neutral filler available — pot starts with fewer slots
+            if (best.isEmpty()) return null; // 四个输入槽未填满时不能开煮。
 
             avail.merge(MaterialKey.of(best), -1, Integer::sum);
             chosen.add(best.copyWithCount(1));

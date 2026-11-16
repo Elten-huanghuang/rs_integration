@@ -327,6 +327,8 @@ dependencies {
     testImplementation fg.deobf('local:tacz:1.20.1-1.1.4-hotfix-all')
     // 用实际怪物锅配方和库存接口验证批量适配。
     testImplementation fg.deobf("local:FarmersDelight:${farmersDelightVersion}")
+    // 用烹饪锅原生配方条件验证动态食材、默认填充物与四槽补齐。
+    testImplementation fg.deobf('local:CrockPot:1.20.1-1.0.4-release')
     if (!skipMissingTestDependencies
             || file('libs/forge-dungeonsdelight-1.20.1-1.3.0.jar').exists()) {
         testImplementation fg.deobf('local:forge-dungeonsdelight:1.20.1-1.3.0')

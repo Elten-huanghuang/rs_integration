@@ -9,8 +9,13 @@ import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.feature.foodorder.network.FoodOrderListPacket;
+import com.huanghuang.rsintegration.mods.crockpot.CrockPotRecipeHandler;
+import com.huanghuang.rsintegration.mods.crockpot.CrockPotTestFixtures;
+import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.storage.StorageRestockSupport;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import com.sihenzhang.crockpot.recipe.cooking.CrockPotCookingRecipe;
 import net.minecraft.core.NonNullList;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
@@ -212,6 +217,87 @@ class FoodOrderListServiceTest extends BootstrapTest {
 
         FoodOrderListService.clearPlayer(player.getUUID());
         assertNull(FoodOrderListService.cached(player));
+    }
+
+    @Test
+    void categoryOnlyCrockPotFoodIsOrderableWithFoodAndEnoughFiller() {
+        FoodOrderEntry entry = crockPotEntry(CrockPotTestFixtures.fishRecipe(), Map.of(
+                new StackKey(Items.COD, null), 1L,
+                new StackKey(Items.STICK, null), 3L), true);
+
+        assertEquals(FoodOrderKind.READY, entry.kind());
+        assertTrue(entry.orderable());
+    }
+
+    @Test
+    void categoryOnlyCrockPotFoodWithInsufficientFillerIsMissingInsteadOfNoRecipe() {
+        FoodOrderEntry entry = crockPotEntry(CrockPotTestFixtures.fishRecipe(), Map.of(
+                new StackKey(Items.COD, null), 1L,
+                new StackKey(Items.STICK, null), 2L), true);
+
+        assertEquals(FoodOrderKind.MISSING, entry.kind());
+        assertFalse(entry.orderable());
+    }
+
+    @Test
+    void fixedStickAloneDoesNotMakeFishSticksOrderable() {
+        FoodOrderEntry entry = crockPotEntry(CrockPotTestFixtures.fishSticksRecipe(),
+                Map.of(new StackKey(Items.STICK, null), 64L), true);
+
+        assertEquals(FoodOrderKind.MISSING, entry.kind());
+        assertFalse(entry.orderable());
+    }
+
+    @Test
+    void mixedCrockPotFoodIsOrderableWhenEveryDynamicSlotCanBeFilled() {
+        FoodOrderEntry entry = crockPotEntry(CrockPotTestFixtures.fishSticksRecipe(), Map.of(
+                new StackKey(Items.STICK, null), 1L,
+                new StackKey(Items.COD, null), 1L,
+                new StackKey(Items.CARROT, null), 2L), true);
+
+        assertEquals(FoodOrderKind.READY, entry.kind());
+        assertTrue(entry.orderable());
+    }
+
+    @Test
+    void crockPotFoodStillRequiresABoundMachine() {
+        FoodOrderEntry entry = crockPotEntry(CrockPotTestFixtures.fishRecipe(), Map.of(
+                new StackKey(Items.COD, null), 1L,
+                new StackKey(Items.STICK, null), 3L), false);
+
+        assertEquals(FoodOrderKind.NO_MACHINE, entry.kind());
+        assertFalse(entry.orderable());
+    }
+
+    private FoodOrderEntry crockPotEntry(CrockPotCookingRecipe recipe,
+                                          Map<StackKey, Long> available, boolean bound) {
+        try (CrockPotTestFixtures fixture = new CrockPotTestFixtures();
+             MockedStatic<ModRecipeHandlers> handlers = mockStatic(ModRecipeHandlers.class);
+             MockedStatic<AltarBindingRegistry> bindings = mockStatic(AltarBindingRegistry.class)) {
+            CrockPotRecipeHandler handler = new CrockPotRecipeHandler();
+            handlers.when(() -> ModRecipeHandlers.claimFor(recipe))
+                    .thenReturn(new ModRecipeHandlers.Claim(handler, List.of(handler)));
+            ModType type = mock(ModType.class);
+            bindings.when(() -> AltarBindingRegistry.hasBindingForRecipe(player, recipe, type))
+                    .thenReturn(bound);
+            foods.when(() -> FoodOrderFoods.uneaten(player)).thenReturn(List.of(Items.COOKED_COD));
+            recipes.when(() -> RecipeIndex.isReady(level)).thenReturn(true);
+            recipes.when(() -> RecipeIndex.get(level)).thenReturn(Map.of(Items.COOKED_COD,
+                    List.of(new RecipeIndex.Entry(recipe, type,
+                            ResourceLocation.fromNamespaceAndPath("crockpot", "crock_pot_cooking")))));
+            materials.when(() -> MaterialSources.countInventory(player)).thenReturn(available);
+
+            FoodOrderListService.request(player);
+            for (int tick = 0; tick < 20 && (sent.isEmpty() || sent.get(sent.size() - 1).partial()); tick++) {
+                time.incrementAndGet();
+                FoodOrderListService.tick(server);
+            }
+
+            FoodOrderSnapshot snapshot = sent.get(sent.size() - 1);
+            assertFalse(snapshot.partial());
+            materials.verify(() -> MaterialSources.countInventory(player), times(1));
+            return snapshot.entries().get(0);
+        }
     }
 
     private void prepareOrderableBread() {
