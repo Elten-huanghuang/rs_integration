@@ -1006,7 +1006,7 @@ public final class ConsumerCraftingRuntime {
     ) {
         ItemStack preview = target.copyWithCount(
                 Math.max(1, SaturatingLongMath.clampToInt(requested)));
-        return endpoint.insert(player, preview, true)
+        return CraftStorageEndpoint.insertInternal(endpoint, player, preview, true)
                 .remainder().orElse(ItemStack.EMPTY).isEmpty();
     }
 
@@ -1027,7 +1027,7 @@ public final class ConsumerCraftingRuntime {
                     Integer.MAX_VALUE, remaining);
             FluidStack stack = fluidStack(target, chunk);
             if (stack.isEmpty()) return false;
-            var result = endpoint.session().insertFluid(
+            var result = CraftStorageEndpoint.insertFluidInternal(endpoint,
                     player, stack, true);
             long accepted = result.transferredAmountExact()
                     .orElse(-1L);

@@ -63,13 +63,13 @@ public final class CraftStorageEndpoints {
         }
     }
 
-    /** Transitional insert bridge for non-delegate compatibility services. */
+    /** 兼容服务的退款入口；现有调用者均返还刚取出的材料或燃料。 */
     @Nonnull
     public static ItemStack insertLegacy(@Nonnull INetwork network,
                                          @Nonnull ServerPlayer player,
                                          @Nonnull ItemStack stack,
                                          boolean simulate) {
-        return fromLegacyNetwork(network).insert(player, stack, simulate)
+        return CraftStorageEndpoint.insertInternal(fromLegacyNetwork(network), player, stack, simulate)
                 .remainder().orElse(ItemStack.EMPTY);
     }
 

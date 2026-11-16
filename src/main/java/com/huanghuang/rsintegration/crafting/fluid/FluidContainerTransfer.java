@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting.fluid;
 
+import com.huanghuang.rsintegration.crafting.NetworkOutputReception;
+
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkBottleFluidHandler;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.AlchemistBottleSupport;
 import net.minecraft.world.item.Item;
@@ -142,7 +144,8 @@ public final class FluidContainerTransfer {
                                       FluidStack recovery) {
         ItemStack held = cursor;
         if (borrowed) {
-            ItemStack leftover = network.insertItem(bucket, bucket.getCount(), false);
+            ItemStack leftover = NetworkOutputReception.internal(
+                    () -> network.insertItem(bucket, bucket.getCount(), false));
             held = leftover == null ? bucket.copy() : leftover.copy();
         }
         return new Result(held, ItemStack.EMPTY, recovery, FluidStack.EMPTY, 0);
@@ -158,7 +161,8 @@ public final class FluidContainerTransfer {
 
     private static FluidStack refund(Storage network, FluidStack fluid) {
         if (fluid == null || fluid.isEmpty()) return FluidStack.EMPTY;
-        FluidStack remainder = network.insertFluid(fluid, fluid.getAmount(), false);
+        FluidStack remainder = NetworkOutputReception.internal(
+                () -> network.insertFluid(fluid, fluid.getAmount(), false));
         accepted(fluid, remainder);
         return remainder.copy();
     }

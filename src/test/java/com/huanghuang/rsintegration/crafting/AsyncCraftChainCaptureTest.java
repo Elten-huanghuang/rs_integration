@@ -8,6 +8,10 @@ import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.loadbalancer.ParallelCraftGroup;
 import com.huanghuang.rsintegration.storage.StorageOperationMode;
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
+import com.huanghuang.rsintegration.storage.rs.RefinedStorageOutputReception;
+import com.huanghuang.rsintegration.util.PlayerUtils;
+import com.refinedmods.refinedstorage.api.network.INetwork;
+import com.refinedmods.refinedstorage.api.util.Action;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.network.chat.Component;
@@ -24,19 +28,23 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.MockedStatic;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -47,6 +55,60 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class AsyncCraftChainCaptureTest extends BootstrapTest {
+    @ParameterizedTest
+    @EnumSource(OutputDestination.class)
+    @SuppressWarnings("unchecked")
+    void networkCaptureWaitsForFinalDestinationAndNeverReclaimsWriteback(OutputDestination destination) throws Exception {
+        Fixture fixture = fixture();
+        INetwork network = mock(INetwork.class);
+        ItemStack diamond = new ItemStack(Items.DIAMOND);
+        var key = TaskOutputReception.resource(diamond);
+        AtomicInteger stored = new AtomicInteger();
+        AtomicInteger deliveredToPlayer = new AtomicInteger();
+        when(network.insertItem(any(), anyInt(), any())).thenAnswer(call ->
+                RefinedStorageOutputReception.insertItem(network, call.getArgument(0), call.getArgument(1),
+                        call.getArgument(2), (stack, amount) -> {
+                            if (call.getArgument(2) == Action.PERFORM) stored.addAndGet(amount);
+                            return ItemStack.EMPTY;
+                        }));
+        CraftStorageEndpoint endpoint = (CraftStorageEndpoint) field(fixture.chain, "storageEndpoint");
+        when(endpoint.insert(eq(fixture.player), any(), eq(false))).thenAnswer(call -> {
+            ItemStack stack = call.getArgument(1);
+            return StorageOperationResult.inserted(StorageOperationMode.PERFORM, stack,
+                    network.insertItem(stack, stack.getCount(), Action.PERFORM));
+        });
+        try (var reception = TaskOutputReception.open(); var otherTask = TaskOutputReception.open();
+             var players = mockStatic(PlayerUtils.class)) {
+            players.when(() -> PlayerUtils.insertIntoPlayerInventory(eq(fixture.player), any()))
+                    .thenAnswer(call -> {
+                        deliveredToPlayer.addAndGet(call.getArgument(1, ItemStack.class).getCount());
+                        return ItemStack.EMPTY;
+                    });
+            reception.bindNetwork(network, () -> true);
+            reception.prepare(List.of(new TaskOutputReception.Demand("out", key, 3, 3))).activate();
+            assertTrue(network.insertItem(diamond, 5, Action.PERFORM).isEmpty());
+            assertEquals(2, stored.get(), "仅超额两件进入磁盘，任务截留三件");
+            assertEquals(0, deliveredToPlayer.get());
+            reception.close();
+            List<ItemStack> inventory = (List<ItemStack>) field(fixture.chain, "virtualInventory");
+            inventory.addAll(reception.drainStacks());
+            otherTask.bindNetwork(network, () -> true);
+            otherTask.prepare(List.of(new TaskOutputReception.Demand("out", key, 3, 3))).activate();
+            fixture.chain.setOutputDestination(destination);
+            set(fixture.chain, "targetOutput", diamond);
+            set(fixture.chain, "finalSettlementPrepared", true);
+            Method finish = AsyncCraftChain.class.getDeclaredMethod("finish", ServerPlayer.class);
+            finish.setAccessible(true);
+            assertEquals(true, finish.invoke(fixture.chain, fixture.player));
+            assertEquals(destination == OutputDestination.PLAYER_INVENTORY ? 3 : 0, deliveredToPlayer.get());
+            assertEquals(destination == OutputDestination.RS_NETWORK ? 5 : 2, stored.get());
+            assertEquals(0, otherTask.received(key), "最终写回不能被另一任务再次认领");
+            assertTrue(reception.drain().isEmpty());
+            assertTrue(fixture.chain.tick());
+            assertEquals(5, deliveredToPlayer.get() + stored.get());
+        }
+    }
+
     @BeforeAll
     static void initializeRuntime() throws Exception {
         CommentedConfig config = CommentedConfig.inMemory();

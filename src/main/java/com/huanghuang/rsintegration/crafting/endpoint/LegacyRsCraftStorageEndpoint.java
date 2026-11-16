@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.endpoint;
 
+import com.huanghuang.rsintegration.crafting.TaskOutputReception;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.crafting.RSICraftException;
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -157,6 +158,10 @@ public final class LegacyRsCraftStorageEndpoint implements CraftStorageEndpoint 
         private final INetwork network;
         private StorageSession matchingSession;
         LegacyRsStorageSession(INetwork network) { this.network = network; }
+
+        @Override public void bindOutputReception(TaskOutputReception.Session reception) {
+            reception.bindNetwork(network, this::isAvailable);
+        }
 
         @Override public StorageReference reference() {
             // Keep the transitional endpoint on the same canonical reference

@@ -64,6 +64,8 @@
     "refinedstorage.NetworkNodeVoidUpgradeMixin",
     "refinedstorage.NetworkVoidUpgradeMixin",
     "refinedstorage.NetworkExperienceFluidMixin",
+    "refinedstorage.NetworkOutputReceptionMixin",
+    "refinedstorage.CraftingTaskOutputWritebackMixin",
     "refinedstorage.StackUtilsMixin",
     "refinedstorage.UnifiedDiskStackUtilsMixin",
     "refinedstorage.UnifiedDiskDriveMixin",

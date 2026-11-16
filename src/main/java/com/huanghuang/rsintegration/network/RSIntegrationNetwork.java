@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.network;
 
+import com.huanghuang.rsintegration.crafting.NetworkOutputReception;
+
 import com.refinedmods.refinedstorage.container.CraftingMonitorContainerMenu;
 import com.huanghuang.rsintegration.mods.rs.monitor.RsMonitorServer;
 
@@ -697,7 +699,9 @@ public final class RSIntegrationNetwork {
                 // RS: the following craft step cannot use it and the ledger
                 // would report a misleading commit failure. Put the partial
                 // result back before returning failure.
-                ItemStack refund = network.insertItem(result.copy(), result.getCount(), Action.PERFORM);
+                ItemStack refunding = result.copy();
+                ItemStack refund = NetworkOutputReception.internal(
+                        () -> network.insertItem(refunding, refunding.getCount(), Action.PERFORM));
                 if (!refund.isEmpty()) {
                     RSIntegrationMod.LOGGER.error("[RSI] partial extraction refund was rejected: {} x{}",
                             itemId(refund), refund.getCount());
@@ -747,7 +751,8 @@ public final class RSIntegrationNetwork {
                 RSIntegrationMod.LOGGER.warn("[RSI] extractExactFromNetwork: partial extraction — requested {} but only got {}",
                         count, extracted.getCount());
                 if (!simulate) {
-                    ItemStack partialRefund = network.insertItem(extracted.copy(), extracted.getCount(), Action.PERFORM);
+                    ItemStack partialRefund = NetworkOutputReception.internal(
+                            () -> network.insertItem(extracted.copy(), extracted.getCount(), Action.PERFORM));
                     if (!partialRefund.isEmpty()) {
                         RSIntegrationMod.LOGGER.error("[RSI] partial exact extraction refund was rejected: {} x{}",
                                 itemId(partialRefund), partialRefund.getCount());
@@ -762,7 +767,8 @@ public final class RSIntegrationNetwork {
             }
             RSIntegrationMod.LOGGER.error("[RSI] Exact extraction returned the wrong identity; refunding {} x{}",
                     itemId(extracted), extracted.getCount());
-            ItemStack leftover = network.insertItem(extracted, extracted.getCount(), Action.PERFORM);
+            ItemStack leftover = NetworkOutputReception.internal(
+                    () -> network.insertItem(extracted, extracted.getCount(), Action.PERFORM));
             if (!leftover.isEmpty()) {
                 RSIntegrationMod.LOGGER.error("[RSI] Exact extraction identity refund left {} x{} unreturned",
                         itemId(leftover), leftover.getCount());

@@ -67,8 +67,17 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
     }
 
     protected final void prepareOutputBatch(List<TaskOutputReception.Demand> demands) {
-        if (outputReception != null) outputBatch = outputReception.prepare(demands);
+        if (outputReception != null) {
+            if (supportsNetworkOutputReception() && storageEndpoint != null
+                    && storageEndpoint.session() != null) {
+                storageEndpoint.session().bindOutputReception(outputReception);
+            }
+            outputBatch = outputReception.prepare(demands);
+        }
     }
+
+    /** 独立审核机器安全结束条件后才启用网络收货，不自动扩展到全部本地账本使用者。 */
+    protected boolean supportsNetworkOutputReception() { return false; }
 
     protected final void activateOutputBatch() {
         if (outputBatch != null) outputBatch.activate();
@@ -427,6 +436,7 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
 
     /** Attach the chain-selected storage backend before private-ledger starts. */
     public final void setStorageEndpoint(@Nullable CraftStorageEndpoint endpoint) {
+        if (storageEndpoint != endpoint && outputReception != null) outputReception.unbindNetwork();
         this.storageEndpoint = endpoint;
     }
 
@@ -601,7 +611,7 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
         if (stack.isEmpty()) return ItemStack.EMPTY;
         CraftStorageEndpoint endpoint = storageEndpoint();
         if (endpoint == null || player == null) return stack.copy();
-        return endpoint.insert(player, stack, simulate).remainder().orElse(ItemStack.EMPTY);
+        return CraftStorageEndpoint.insertInternal(endpoint, player, stack, simulate).remainder().orElse(ItemStack.EMPTY);
     }
 
     /** Extract an exact item count through the selected storage backend. */
@@ -686,6 +696,7 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
 
     /** Call at end of onBatchFailed and onBatchFinished — resets all shared state. */
     protected void resetState() {
+        closeOutputReception();
         releaseMachineChunk();
         if (ledger != null) {
             ledger.close();

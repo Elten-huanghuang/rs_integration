@@ -2,6 +2,8 @@ package com.huanghuang.rsintegration.feature.experience;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.huanghuang.rsintegration.api.IntegrationResourceKey;
+import com.huanghuang.rsintegration.crafting.TaskOutputReception;
 import com.huanghuang.rsintegration.feature.experience.client.ExperienceFluidClient;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.Registry;
@@ -51,6 +53,39 @@ import static org.mockito.Mockito.when;
 
 class ExperienceFluidsTest extends BootstrapTest {
     private static final Path RESOURCES = Path.of("src/main/resources");
+
+    @Test
+    void receptionNormalizesOnlySophisticatedExperienceAndPreservesNbtAndMillibuckets() {
+        CompoundTag identity = new CompoundTag();
+        identity.putString("grade", "test");
+        var kind = IntegrationResourceKey.ResourceKind.FLUID;
+        var source = new IntegrationResourceKey(kind, new ResourceLocation("sophisticatedcore", "xp_still"), identity);
+        var flowing = new IntegrationResourceKey(kind, new ResourceLocation("sophisticatedcore", "xp_flowing"), identity);
+        var normalized = new IntegrationResourceKey(kind, new ResourceLocation("rs_integration", "experience"), identity);
+        Object network = new Object();
+        try (var session = TaskOutputReception.open()) {
+            session.bindNetwork(network, () -> true);
+            var batch = session.prepare(List.of(new TaskOutputReception.Demand("xp", source, 1000, 1000)));
+            batch.activate();
+            assertTrue(TaskOutputReception.hasWaitingResourceType(network, kind, source.id()));
+            assertTrue(TaskOutputReception.hasWaitingResourceType(network, kind, flowing.id()));
+            assertTrue(TaskOutputReception.hasWaitingResourceType(network, kind, normalized.id()));
+            assertFalse(TaskOutputReception.hasWaitingResourceType(
+                    network, IntegrationResourceKey.ResourceKind.ITEM, source.id()));
+            batch.collect(flowing, 200);
+            assertEquals(800, TaskOutputReception.receive(network, normalized, 900, true));
+            assertEquals(200, session.received(source));
+            assertEquals(0, TaskOutputReception.receive(network,
+                    new IntegrationResourceKey(kind, normalized.id(), new CompoundTag()), 900, false));
+            assertEquals(0, TaskOutputReception.receive(network,
+                    new IntegrationResourceKey(kind, new ResourceLocation("test", "experience"), identity), 900, false));
+            assertEquals(800, TaskOutputReception.receive(network, source, 900, false));
+            assertTrue(batch.complete());
+            assertFalse(TaskOutputReception.hasWaitingResourceType(network, kind, source.id()));
+            assertFalse(TaskOutputReception.hasWaitingResourceType(network, kind, normalized.id()));
+            assertEquals(List.of(new TaskOutputReception.Received(normalized, 1000)), session.drain());
+        }
+    }
 
     @BeforeAll
     static void registerFluids() throws ReflectiveOperationException {

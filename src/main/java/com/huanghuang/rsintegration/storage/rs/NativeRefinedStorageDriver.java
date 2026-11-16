@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.storage.rs;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.crafting.TaskOutputReception;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.storage.disk.core.FrozenKey;
 import com.huanghuang.rsintegration.storage.disk.rs.UnifiedDiskAmountResolver;
@@ -35,6 +36,11 @@ final class NativeRefinedStorageDriver implements RefinedStorageDriver {
 
     NativeRefinedStorageDriver(INetwork network) {
         this.network = Objects.requireNonNull(network, "network");
+    }
+
+    @Override
+    public void bindOutputReception(TaskOutputReception.Session reception) {
+        reception.bindNetwork(network, this::isAvailable);
     }
 
     @Override

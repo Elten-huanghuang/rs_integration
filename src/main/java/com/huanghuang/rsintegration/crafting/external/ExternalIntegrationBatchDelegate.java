@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.external;
 
 
 import com.huanghuang.rsintegration.crafting.TaskOutputReception;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import java.util.UUID;
 
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
@@ -1749,7 +1750,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             }
             StorageFluidOperationResult simulated;
             try {
-                simulated = storageEndpoint().session().insertFluid(
+                simulated = CraftStorageEndpoint.insertFluidInternal(storageEndpoint(),
                         player, candidate, true);
             } catch (RuntimeException | LinkageError failure) {
                 retainCustomFluidOutput(remaining(
@@ -1763,7 +1764,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                 return "storage rejected custom fluid output";
             }
             StorageFluidOperationResult inserted =
-                    storageEndpoint().session().insertFluid(
+                    CraftStorageEndpoint.insertFluidInternal(storageEndpoint(),
                             player, candidate, false);
             long accepted = inserted.transferredAmountExact()
                     .orElse(-1L);
@@ -2103,7 +2104,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                     continue;
                 }
                 StorageFluidOperationResult simulated =
-                        storageEndpoint().session().insertFluid(
+                        CraftStorageEndpoint.insertFluidInternal(storageEndpoint(),
                                 player, candidate, true);
                 long simulatedAccepted =
                         simulated.transferredAmountExact().orElse(-1L);
@@ -2121,7 +2122,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                 }
                 remaining -= extracted.getAmount();
                 StorageFluidOperationResult inserted =
-                        storageEndpoint().session().insertFluid(
+                        CraftStorageEndpoint.insertFluidInternal(storageEndpoint(),
                                 player, extracted, false);
                 long accepted = inserted.transferredAmountExact()
                         .orElse(-1L);
@@ -2503,7 +2504,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             List<FluidStack> remainder = new ArrayList<>();
             for (FluidStack fluid : entry.getValue()) {
                 StorageFluidOperationResult inserted =
-                        storageEndpoint().session().insertFluid(
+                        CraftStorageEndpoint.insertFluidInternal(storageEndpoint(),
                                 player, fluid.copy(), false);
                 if (inserted.remainder() != null
                         && !inserted.remainder().isEmpty()) {
@@ -2807,7 +2808,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         for (FluidStack fluid : fluids) {
             if (fluid == null || fluid.isEmpty()) continue;
             StorageFluidOperationResult refund =
-                    storageEndpoint().session().insertFluid(
+                    CraftStorageEndpoint.insertFluidInternal(storageEndpoint(),
                             player, fluid.copy(), false);
             if (refund.remainder() == null || refund.remainder().isEmpty()) {
                 continue;

@@ -432,7 +432,7 @@ final class RuntimeMaterialAccount {
                     ItemStack stack = entry.getKey().toStack(amount);
                     if (endpoint != null && online != null) {
                         try {
-                            StorageOperationResult receipt = endpoint.insert(online, stack.copy(), false);
+                            StorageOperationResult receipt = CraftStorageEndpoint.insertInternal(endpoint, online, stack.copy(), false);
                             stack = confirmedItemRemainder(receipt, stack);
                         } catch (RuntimeException | LinkageError failure) {
                             uncertain = true;
@@ -463,7 +463,7 @@ final class RuntimeMaterialAccount {
                     FluidStack stack = entry.getKey().toStack(amount);
                     if (endpoint != null && online != null && !stack.isEmpty()) {
                         try {
-                            StorageFluidOperationResult receipt = endpoint.session().insertFluid(online, stack.copy(), false);
+                            StorageFluidOperationResult receipt = CraftStorageEndpoint.insertFluidInternal(endpoint, online, stack.copy(), false);
                             stack = confirmedFluidRemainder(receipt, stack);
                         } catch (RuntimeException | LinkageError failure) {
                             uncertain = true;

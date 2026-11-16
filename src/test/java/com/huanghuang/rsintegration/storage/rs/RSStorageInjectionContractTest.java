@@ -10,6 +10,7 @@ import org.objectweb.asm.tree.MethodNode;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.jar.JarFile;
 
@@ -20,6 +21,41 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** 检查实际依赖字节码中的注入位置；不将普通单元测试冒充运行中的 Mixin 测试。 */
 class RSStorageInjectionContractTest {
     private static final String RS = "com/refinedmods/refinedstorage/";
+
+    @Test
+    void receptionHooksMatchRealInsertionAndEveryNativeCraftWriteback() throws IOException {
+        ClassNode network = read(RS + "apiimpl/network/Network");
+        ClassNode api = read(RS + "api/network/INetwork");
+        ClassNode task = read(RS + "apiimpl/autocrafting/task/v6/CraftingTask");
+        method(network, "onRemoved", "()V");
+        method(network, "update", "()V");
+        for (String type : List.of("Item", "Fluid")) {
+            String stack = type.equals("Item") ? "net/minecraft/world/item/ItemStack"
+                    : "net/minecraftforge/fluids/FluidStack";
+            String insert = "insert" + type;
+            String descriptor = "(L" + stack + ";IL" + RS + "api/util/Action;)L" + stack + ";";
+            method(network, insert, descriptor);
+            assertTrue(network.methods.stream().noneMatch(m -> m.name.equals(insert + "Tracked")));
+            MethodNode tracked = method(api, insert + "Tracked", "(L" + stack + ";I)L" + stack + ";");
+            List<String> calls = new ArrayList<>();
+            for (AbstractInsnNode instruction : tracked.instructions) {
+                if (instruction instanceof MethodInsnNode call
+                        && (call.name.equals("track") || call.name.equals(insert))) calls.add(call.name);
+            }
+            assertEquals(List.of("track", insert), calls);
+            int writes = 0;
+            for (MethodNode target : task.methods) {
+                for (AbstractInsnNode instruction : target.instructions) {
+                    if (instruction instanceof MethodInsnNode call && call.owner.equals(RS + "api/network/INetwork")
+                            && call.name.equals(insert) && call.desc.equals(descriptor)) {
+                        assertTrue(List.of("update", "onCancelled", "onTrackedInsert").contains(target.name));
+                        writes++;
+                    }
+                }
+            }
+            assertEquals(3, writes);
+        }
+    }
 
     @Test
     void mixedGridLifecycleAndLegacySnapshotHooksMatchDependency() throws IOException {

@@ -289,7 +289,7 @@ public final class CraftPacketUtils {
             for (ItemStack vi : virtualInventory) {
                 if (!vi.isEmpty()) {
                     if (endpoint != null) {
-                        ItemStack remainder = endpoint.insert(player, vi, false)
+                        ItemStack remainder = CraftStorageEndpoint.insertInternal(endpoint, player, vi, false)
                                 .remainder().orElse(ItemStack.EMPTY);
                         if (!remainder.isEmpty()) {
                             PlayerUtils.safeGiveToStorage(player, remainder, endpoint);

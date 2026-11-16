@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
 
 import com.huanghuang.rsintegration.config.RSStorageConfig;
+import com.huanghuang.rsintegration.crafting.NetworkOutputReception;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.storage.disk.core.FrozenKey;
 import com.huanghuang.rsintegration.storage.disk.core.ResourceTable;
@@ -249,7 +250,8 @@ public abstract class DiskManipulatorThroughputMixin {
         ItemStack extracted = network.extractItem(source.copy(), request, compare, Action.PERFORM);
         if (extracted.isEmpty()) return Step.SKIP;
         ItemStack remainder = disk.insert(extracted, extracted.getCount(), Action.PERFORM);
-        if (!remainder.isEmpty()) network.insertItem(remainder, remainder.getCount(), Action.PERFORM);
+        if (!remainder.isEmpty()) NetworkOutputReception.internal(
+                () -> network.insertItem(remainder, remainder.getCount(), Action.PERFORM));
         int moved = extracted.getCount() - (remainder.isEmpty() ? 0 : remainder.getCount());
         if (moved > 0) session.passProgress = true;
         return moved > 0 ? Step.PROGRESS : Step.SKIP;
@@ -434,7 +436,8 @@ public abstract class DiskManipulatorThroughputMixin {
         FluidStack extracted = network.extractFluid(source.copy(), request, compare, Action.PERFORM);
         if (extracted.isEmpty()) return Step.SKIP;
         FluidStack remainder = disk.insert(extracted, extracted.getAmount(), Action.PERFORM);
-        if (!remainder.isEmpty()) network.insertFluid(remainder, remainder.getAmount(), Action.PERFORM);
+        if (!remainder.isEmpty()) NetworkOutputReception.internal(
+                () -> network.insertFluid(remainder, remainder.getAmount(), Action.PERFORM));
         int moved = extracted.getAmount() - (remainder.isEmpty() ? 0 : remainder.getAmount());
         if (moved > 0) session.passProgress = true;
         return moved > 0 ? Step.PROGRESS : Step.SKIP;

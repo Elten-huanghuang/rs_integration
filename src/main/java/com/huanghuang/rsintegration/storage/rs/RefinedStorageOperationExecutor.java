@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.storage.rs;
 
+import com.huanghuang.rsintegration.crafting.NetworkOutputReception;
 import com.huanghuang.rsintegration.storage.StorageDiagnosticCode;
 import com.huanghuang.rsintegration.storage.StorageItemKey;
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
@@ -205,7 +206,7 @@ final class RefinedStorageOperationExecutor {
     private static boolean recoverWrongIdentity(RefinedStorageDriver driver, ItemStack result,
                                                 List<ItemStack> recovery) {
         try {
-            ItemStack remainder = driver.insert(result.copy(), false);
+            ItemStack remainder = NetworkOutputReception.internal(() -> driver.insert(result.copy(), false));
             if (remainder == null) return false;
             if (!remainder.isEmpty()) recovery.add(remainder.copy());
             return true;

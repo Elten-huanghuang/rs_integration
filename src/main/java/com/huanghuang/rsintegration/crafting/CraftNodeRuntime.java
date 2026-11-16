@@ -395,6 +395,7 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
             }
             IBatchDelegate.CraftObservation observation;
             try {
+                delegate.transferOutputs(observeLevel);
                 observation = delegate.observeCraft(observeLevel);
             } catch (Throwable error) {
                 // A broken optional-mod delegate must fail its node cleanly.  In

@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.storage.rs;
 
+import com.huanghuang.rsintegration.crafting.TaskOutputReception;
 import com.huanghuang.rsintegration.util.LogSampler;
 import com.huanghuang.rsintegration.storage.StorageDiagnosticCode;
 import com.huanghuang.rsintegration.storage.StorageCapability;
@@ -58,6 +59,11 @@ final class RefinedStorageSession implements StorageSession {
 
     @Override
     public StorageReference reference() { return reference; }
+
+    @Override
+    public void bindOutputReception(TaskOutputReception.Session reception) {
+        driver.bindOutputReception(reception);
+    }
 
     @Override
     public boolean isAvailable() {

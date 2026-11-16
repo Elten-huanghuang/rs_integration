@@ -9,6 +9,10 @@ import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate.CraftPhase;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.endpoint.LegacyRsCraftStorageEndpoint;
+import com.huanghuang.rsintegration.storage.rs.RefinedStorageOutputReception;
+import com.refinedmods.refinedstorage.api.network.INetwork;
+import com.refinedmods.refinedstorage.api.util.Action;
 import com.huanghuang.rsintegration.mixin.minecraft.AbstractFurnaceAccessor;
 import com.huanghuang.rsintegration.storage.StorageBackendId;
 import com.huanghuang.rsintegration.storage.StorageItemKey;
@@ -362,7 +366,35 @@ class VanillaMachineFuelTest extends BootstrapTest {
 
     private CraftPhase observe(long tick) {
         when(level.getGameTime()).thenReturn(tick);
+        delegate.transferOutputs(level);
         return delegate.observeMachineCraft(level, furnace).phase();
+    }
+
+    @Test
+    void observationDoesNotExtractAndNetworkDeliveryDoesNotFinishRunningMachine() {
+        stock(64);
+        Object network = new Object();
+        try (var session = TaskOutputReception.open()) {
+            session.bindNetwork(network, () -> true);
+            delegate.setOutputReception(session);
+            assertTrue(start(4));
+            furnace.setItem(2, new ItemStack(Items.IRON_INGOT, 2));
+            assertEquals(CraftPhase.WORKING, delegate.observeMachineCraft(level, furnace).phase());
+            assertEquals(2, furnace.getItem(2).getCount());
+            assertEquals(0, session.current().received("vanilla:primary"));
+            delegate.transferOutputs(level);
+            assertTrue(furnace.getItem(2).isEmpty());
+            assertEquals(2, TaskOutputReception.receive(network, TaskOutputReception.resource(
+                    new ItemStack(Items.IRON_INGOT)), 3, false));
+            assertEquals(CraftPhase.WORKING, observe(1));
+            assertEquals(CraftPhase.WORKING, observe(2));
+            assertEquals(4, session.drainStacks().get(0).getCount());
+            furnace.setItem(0, ItemStack.EMPTY);
+            assertEquals(CraftPhase.WORKING, observe(3));
+            assertEquals(CraftPhase.DONE, observe(4));
+            assertTrue(delegate.collectAllResults(player).isEmpty());
+            assertTrue(delegate.drainReceivedOutputs().isEmpty());
+        }
     }
 
     private StorageSnapshot stock(long amount) {
@@ -371,6 +403,51 @@ class VanillaMachineFuelTest extends BootstrapTest {
                         BACKEND, new ItemStack(Items.COAL)), amount)));
         when(endpoint.snapshot(player)).thenReturn(StorageSnapshotResult.success(snapshot));
         return snapshot;
+    }
+
+    @Test
+    void operationAutomaticallyBindsRsAndSettlesMixedPhysicalDeliveryOnlyOnce() {
+        stock(64);
+        INetwork network = mock(INetwork.class, RETURNS_DEEP_STUBS);
+        when(network.canRun()).thenReturn(true);
+        when(network.getLevel()).thenReturn(level);
+        var rsEndpoint = new LegacyRsCraftStorageEndpoint(network);
+        when(endpoint.session()).thenReturn(rsEndpoint.session());
+        // 使用生产桥接及真实 Legacy 会话，磁盘拒收余量；不手工绑定任务。
+        when(network.insertItem(any(), anyInt(), any())).thenAnswer(call ->
+                RefinedStorageOutputReception.insertItem(network, call.getArgument(0), call.getArgument(1),
+                        call.getArgument(2), (stack, count) -> stack.copyWithCount(count)));
+        var plan = delegate.inputBufferPlan(4);
+        assertTrue(delegate.startOperation(OperationStartContext.chainReserved(player, mock(ExtractionLedger.class),
+                MaterialPlan.fromLegacy(delegate.getRequiredMaterials()),
+                List.of(new ItemStack(Items.IRON_ORE, 4)), plan)));
+        try (var session = delegate.outputReception()) {
+            ItemStack iron = new ItemStack(Items.IRON_INGOT);
+            assertEquals(1, network.insertItem(iron, 5, Action.SIMULATE).getCount());
+            assertEquals(0, session.received(TaskOutputReception.resource(iron)));
+            furnace.setItem(2, iron.copyWithCount(2));
+            assertEquals(CraftPhase.WORKING, delegate.observeCraft(level).phase());
+            assertEquals(2, furnace.getItem(2).getCount());
+            delegate.transferOutputs(level);
+            delegate.transferOutputs(level);
+            assertEquals(2, session.received(TaskOutputReception.resource(iron)));
+            assertEquals(1, network.insertItem(iron, 3, Action.PERFORM).getCount());
+            assertEquals(CraftPhase.WORKING, observe(1));
+            furnace.setItem(0, ItemStack.EMPTY);
+            assertEquals(CraftPhase.WORKING, observe(2));
+            assertEquals(CraftPhase.DONE, observe(3));
+            assertTrue(delegate.collectAllResults(player).isEmpty());
+            assertEquals(4, delegate.drainReceivedOutputs().get(0).getCount());
+            // 已关闭批次不能在重复结算时移走后来放入机器的物品。
+            furnace.setItem(2, iron.copy());
+            assertTrue(delegate.collectAllResults(player).isEmpty());
+            delegate.transferOutputs(level);
+            assertEquals(1, furnace.getItem(2).getCount());
+            assertTrue(delegate.drainReceivedOutputs().isEmpty());
+            assertEquals(2, network.insertItem(iron, 2, Action.PERFORM).getCount());
+            delegate.onBatchFinished(player);
+            assertTrue(session.closed());
+        }
     }
 
     private boolean start(int operations) {

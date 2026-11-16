@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.feature.experience;
 
+import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.registries.ForgeRegistries;
@@ -14,6 +15,20 @@ public final class ExperienceFluidNormalization {
             new ResourceLocation("sophisticatedcore", "xp_flowing"));
 
     private ExperienceFluidNormalization() {}
+
+    /** 等待项、直接抽取和入网收货沿用同一条等量 mB 规则，保留流体 NBT。 */
+    public static IntegrationResourceKey normalizeResource(IntegrationResourceKey resource) {
+        if (resource.kind() != IntegrationResourceKey.ResourceKind.FLUID) return resource;
+        ResourceLocation id = normalizeFluidId(resource.id());
+        return id.equals(resource.id()) ? resource
+                : new IntegrationResourceKey(resource.kind(), id, resource.identity());
+    }
+
+    /** 粗筛和完整资源键共用身份转换，避免经验流体别名在复制 NBT 前被漏掉。 */
+    public static ResourceLocation normalizeFluidId(ResourceLocation id) {
+        if (!SOPHISTICATED_EXPERIENCE.contains(id) || !ExperienceFluids.EXPERIENCE.isPresent()) return id;
+        return ForgeRegistries.FLUIDS.getKey(ExperienceFluids.EXPERIENCE.get());
+    }
 
     public static boolean canNormalize(FluidStack stack) {
         if (stack.isEmpty() || !ExperienceFluids.EXPERIENCE.isPresent()) return false;

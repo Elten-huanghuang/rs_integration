@@ -119,7 +119,7 @@ public final class PlayerUtils {
         }
 
         if (!leftover.isEmpty() && endpoint != null) {
-            StorageOperationResult result = endpoint.insert(player, leftover, false);
+            StorageOperationResult result = CraftStorageEndpoint.insertInternal(endpoint, player, leftover, false);
             if (result.remainder().isEmpty()) {
                 RSIntegrationMod.LOGGER.error(
                         "[RSI] Storage outcome is unknown; not retrying to avoid duplication: {} x{}",

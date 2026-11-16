@@ -33,7 +33,10 @@ import com.huanghuang.rsintegration.crafting.loadbalancer.ParallelCraftGroup;
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot.Reason;
 import com.huanghuang.rsintegration.mixin.minecraft.ItemEntityAccessor;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry.BoundMachine;
+import com.huanghuang.rsintegration.storage.rs.RefinedStorageOutputReception;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import com.refinedmods.refinedstorage.api.network.INetwork;
+import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
@@ -86,6 +89,136 @@ import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.anyInt;
 
 class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
+    @Test
+    void mixedReceptionDispatchesNextBatchOnlyAfterSafeFinishAndCleanup() {
+        INetwork network = mock(INetwork.class);
+        when(network.insertItem(any(), anyInt(), any())).thenAnswer(call ->
+                RefinedStorageOutputReception.insertItem(network, call.getArgument(0), call.getArgument(1),
+                        call.getArgument(2), (stack, count) -> stack.copyWithCount(count)));
+        var resource = TaskOutputReception.resource(new ItemStack(Items.DIAMOND));
+        List<TaskOutputReception.Session> sessions = new ArrayList<>();
+        List<Integer> dispatched = new ArrayList<>();
+        AtomicBoolean safelyFinished = new AtomicBoolean();
+        AtomicInteger outputSlot = new AtomicInteger();
+        AtomicInteger cleanups = new AtomicInteger();
+        ModType type = ModType.register("test_multi_batch_network_reception",
+                new String[0], new String[0], new String[0], () -> new BufferedDelegate() {
+                    private int operations;
+                    private TaskOutputReception.Session reception;
+                    @Override public int preferredParallelBatchSize(int total, int workers) { return 2; }
+                    @Override public void prepareGraphBatch(int count) {
+                        super.prepareGraphBatch(count);
+                        operations = count;
+                    }
+                    @Override public boolean startOperation(OperationStartContext context) {
+                        assertEquals(dispatched.size(), cleanups.get(), "前批清理完成后才能再次派发");
+                        reception = TaskOutputReception.open();
+                        reception.bindNetwork(network, () -> true);
+                        reception.prepare(List.of(new TaskOutputReception.Demand("out", resource,
+                                8L * operations, 8L * operations))).activate();
+                        sessions.add(reception);
+                        dispatched.add(operations);
+                        safelyFinished.set(false);
+                        return true;
+                    }
+                    @Override public TaskOutputReception.Session outputReception() { return reception; }
+                    @Override public ItemStack getExpectedOutput() { return null; }
+                    @Override public AABB getOutputCaptureRegion() { return null; }
+                    @Override public void transferOutputs(ServerLevel current) {
+                        int extracted = outputSlot.getAndSet(0);
+                        if (extracted > 0) reception.current().collect(resource, extracted);
+                    }
+                    @Override public CraftObservation observeCraft(ServerLevel current) {
+                        return new CraftObservation(safelyFinished.get() && reception.current().complete()
+                                ? CraftPhase.DONE : CraftPhase.WORKING);
+                    }
+                    @Override public void onBatchFinished(ServerPlayer current) {
+                        assertTrue(safelyFinished.get());
+                        assertTrue(reception.current().complete());
+                        cleanups.incrementAndGet();
+                        reception.close();
+                    }
+                });
+        BoundMachine machine = new BoundMachine(Level.OVERWORLD.location(), BlockPos.ZERO, type, "test");
+        ParallelCraftGroup group = new ParallelCraftGroup(List.of(machine), type,
+                new ResourceLocation("test", "multi_batch_network_reception"), player, 5);
+        try {
+            startGroup(group);
+            CraftNodeRuntime runtime = runtime(group);
+            runtime.attachOutputs(new NodeOutputAccumulator(List.of(OutputDeclaration.item(
+                    new OutputPortId(new NodeId(0), 0), MaterialKey.of(new ItemStack(Items.DIAMOND)),
+                    40, OutputKind.PRIMARY))));
+            int published = 0;
+            int completed = 0;
+            for (int batch = 0; batch < 3; batch++) {
+                int operations = batch < 2 ? 2 : 1;
+                var reception = sessions.get(batch);
+                assertEquals(batch + 1, dispatched.size());
+                assertEquals(0, reception.received(resource), "前批收货不能成为新批进度");
+                // 机器先报告可安全结束，但缺货时仍不得完成本批。
+                safelyFinished.set(true);
+                tick.incrementAndGet();
+                assertEquals(ConcurrentNodeExecutor.Observation.WORKING, runtime.observe());
+                assertEquals(completed, group.getCompletedOperations());
+                safelyFinished.set(false);
+                outputSlot.set(2);
+                tick.incrementAndGet();
+                assertEquals(ConcurrentNodeExecutor.Observation.WORKING, runtime.observe());
+                published += runtime.drainIncrementalOutputs().stream().mapToInt(p -> p.stack().getCount()).sum();
+                assertEquals(2, reception.received(resource));
+                assertEquals(3, network.insertItem(new ItemStack(Items.DIAMOND),
+                        operations * 8 + 1, Action.PERFORM).getCount());
+                tick.incrementAndGet();
+                assertEquals(ConcurrentNodeExecutor.Observation.WORKING, runtime.observe());
+                published += runtime.drainIncrementalOutputs().stream().mapToInt(p -> p.stack().getCount()).sum();
+                assertEquals(completed, group.getCompletedOperations(), "收货齐全不能代替机器安全结束");
+                assertEquals(batch + 1, dispatched.size());
+                assertEquals(batch, cleanups.get());
+                safelyFinished.set(true);
+                tick.incrementAndGet();
+                assertEquals(batch == 2 ? ConcurrentNodeExecutor.Observation.SUCCEEDED
+                        : ConcurrentNodeExecutor.Observation.WORKING, runtime.observe());
+                completed += operations;
+                assertEquals(completed, group.getCompletedOperations());
+                assertTrue(reception.closed());
+                assertEquals(batch + 1, cleanups.get());
+                assertTrue(runtime.drainIncrementalOutputs().isEmpty(), "结算不能重复发布已移交实物");
+            }
+            assertEquals(List.of(2, 2, 1), dispatched);
+            assertEquals(40, published);
+            assertTrue(runtime.outputsComplete());
+            assertEquals(1, network.insertItem(new ItemStack(Items.DIAMOND), 1, Action.PERFORM).getCount());
+        } finally {
+            for (var session : sessions) session.close();
+            group.onBatchFailed(player, "test cleanup");
+        }
+    }
+
+    @Test
+    void parallelObservationNeverTransfersButRuntimeTransfersBeforeObservation() {
+        List<String> calls = new ArrayList<>();
+        ModType type = ModType.register("test_transfer_before_observe", new String[0], new String[0],
+                new String[0], () -> new BufferedDelegate() {
+                    @Override public void transferOutputs(ServerLevel current) { calls.add("transfer"); }
+                    @Override public CraftObservation observeCraft(ServerLevel current) {
+                        calls.add("observe");
+                        return new CraftObservation(CraftPhase.WORKING);
+                    }
+                    @Override public AABB getOutputCaptureRegion() { return null; }
+                });
+        BoundMachine machine = new BoundMachine(Level.OVERWORLD.location(), BlockPos.ZERO, type, "test");
+        ParallelCraftGroup group = new ParallelCraftGroup(List.of(machine), type,
+                new ResourceLocation("test", "transfer_before_observe"), player, 1);
+        startGroup(group);
+        group.observeCraft(level);
+        assertEquals(List.of("observe"), calls);
+        calls.clear();
+        tick.incrementAndGet();
+        assertEquals(ConcurrentNodeExecutor.Observation.WORKING, runtime(group).observe());
+        assertEquals(List.of("transfer", "observe"), calls);
+        group.onBatchFailed(player, "test cleanup");
+    }
+
     @Test
     void cancellationRecoversUndrainedCollectedResourcesOnceAndClosesHolding() {
         var resource = TaskOutputReception.resource(new ItemStack(Items.DIAMOND));

@@ -1,5 +1,8 @@
 package com.huanghuang.rsintegration.crafting.endpoint;
 
+import com.huanghuang.rsintegration.crafting.NetworkOutputReception;
+import com.huanghuang.rsintegration.storage.StorageFluidOperationResult;
+import net.minecraftforge.fluids.FluidStack;
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
@@ -29,6 +32,23 @@ import java.util.Optional;
  */
 public interface CraftStorageEndpoint {
     StorageSession session();
+
+    /** 退款、恢复、最终发布都属于已有实物写回，不能成为任何任务的新收货。 */
+    static StorageOperationResult insertInternal(CraftStorageEndpoint endpoint, ItemStack stack, boolean simulate) {
+        return NetworkOutputReception.internal(() -> endpoint.insert(stack, simulate));
+    }
+
+    static StorageOperationResult insertInternal(CraftStorageEndpoint endpoint, ServerPlayer player, ItemStack stack, boolean simulate) {
+        return NetworkOutputReception.internal(() -> endpoint.insert(player, stack, simulate));
+    }
+
+    static StorageOperationResult insertInternal(CraftStorageEndpoint endpoint, Player player, ItemStack stack, boolean simulate) {
+        return NetworkOutputReception.internal(() -> endpoint.insert(player, stack, simulate));
+    }
+
+    static StorageFluidOperationResult insertFluidInternal(CraftStorageEndpoint endpoint, ServerPlayer player, FluidStack stack, boolean simulate) {
+        return NetworkOutputReception.internal(() -> endpoint.session().insertFluid(player, stack, simulate));
+    }
 
     default boolean isAvailable() {
         StorageSession current = session();

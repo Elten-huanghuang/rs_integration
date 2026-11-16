@@ -1187,7 +1187,7 @@ public final class ExtractionLedger implements AutoCloseable {
                 ? rec.sourceEndpoint : storageEndpoint;
         if (InkFluidSupport.isToken(s)) {
             ItemStack leftover = destination == null ? s : refundRemainder(
-                    destination.insert(player, s, false), rec.entryId, s);
+                    CraftStorageEndpoint.insertInternal(destination, player, s, false), rec.entryId, s);
             if (!leftover.isEmpty()) {
                 CraftFluidRecovery.retainToEndpoint(
                         player.server, player.getUUID(), player, leftover, destination);
@@ -1197,7 +1197,7 @@ public final class ExtractionLedger implements AutoCloseable {
         switch (rec.source) {
             case ALTAR_BINDING, NETWORK -> {
                 ItemStack leftover = destination == null ? s : refundRemainder(
-                        destination.insert(player, s, false), rec.entryId, s);
+                        CraftStorageEndpoint.insertInternal(destination, player, s, false), rec.entryId, s);
                 if (!leftover.isEmpty()) {
                     PlayerUtils.safeGiveToStorage(player, leftover, destination);
                 }
@@ -2282,8 +2282,8 @@ public final class ExtractionLedger implements AutoCloseable {
             ItemStack leftover = refund;
             if (destination != null) {
                 StorageOperationResult result = player != null
-                        ? destination.insert(player, refund, false)
-                        : destination.insert(refund, false);
+                        ? CraftStorageEndpoint.insertInternal(destination, player, refund, false)
+                        : CraftStorageEndpoint.insertInternal(destination, refund, false);
                 leftover = refundRemainder(result, e.id, refund);
             }
             refundLeftoverToPlayerOrStorage(leftover, player, destination);
@@ -2293,7 +2293,7 @@ public final class ExtractionLedger implements AutoCloseable {
             case NETWORK, ALTAR_BINDING -> {
                 ServerPlayer actor = player != null ? player : refundActor;
                 if (destination != null && actor != null) {
-                    var result = destination.insert(actor, refund, false);
+                    var result = CraftStorageEndpoint.insertInternal(destination, actor, refund, false);
                     ItemStack leftover = refundRemainder(result, e.id, refund);
                     if (!leftover.isEmpty()) {
                         LOGGER.warn("[RSI-Ledger] Endpoint refund had leftover for {} x{}",
@@ -2347,7 +2347,7 @@ public final class ExtractionLedger implements AutoCloseable {
 
         ItemStack leftover = stack;
         if (endpoint != null) {
-            leftover = endpoint.insert(stack, false)
+            leftover = CraftStorageEndpoint.insertInternal(endpoint, stack, false)
                     .remainder().orElse(ItemStack.EMPTY);
             if (leftover.isEmpty()) return;
         }

@@ -114,7 +114,8 @@ class MalumConfirmedPreviewTest extends BootstrapTest {
             Map<StackKey, Long> insufficient = new HashMap<>(available);
             insufficient.put(new StackKey(Items.AMETHYST_SHARD, null), 64L * operations - 1L);
             materials.when(() -> MaterialSources.listAvailableForTypes(player, endpoint,
-                    Set.of(Items.SLIME_BALL, Items.GHAST_TEAR, Items.AMETHYST_SHARD)))
+                    Set.of(Items.SLIME_BALL, Items.GHAST_TEAR, Items.AMETHYST_SHARD),
+                    snapshot.preferences().materialSources()))
                     .thenReturn(insufficient, available);
             var confirmation = roundTrip(plan);
             assertTrue(confirm(player, malum, confirmation).rejected());

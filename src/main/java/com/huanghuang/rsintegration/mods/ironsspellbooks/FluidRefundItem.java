@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.ironsspellbooks;
 
+import com.huanghuang.rsintegration.crafting.NetworkOutputReception;
+
 import com.huanghuang.rsintegration.ModItems;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
@@ -152,7 +154,8 @@ public final class FluidRefundItem extends Item {
             if (security != null && !security.hasPermission(Permission.INSERT, player)) {
                 return RestoreResult.NO_PERMISSION;
             }
-            FluidStack remainder = network.insertFluid(fluid, fluid.getAmount(), Action.PERFORM);
+            FluidStack remainder = NetworkOutputReception.internal(
+                    () -> network.insertFluid(fluid, fluid.getAmount(), Action.PERFORM));
             if (remainder == null || (!remainder.isEmpty() && (!remainder.isFluidEqual(fluid)
                     || remainder.getAmount() < 0 || remainder.getAmount() > fluid.getAmount()))) {
                 return RestoreResult.UNAVAILABLE;

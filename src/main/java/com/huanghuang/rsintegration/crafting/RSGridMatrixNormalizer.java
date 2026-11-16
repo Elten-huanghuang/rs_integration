@@ -66,7 +66,8 @@ public final class RSGridMatrixNormalizer {
         for (int slot = 0; slot < matrix.getContainerSize(); slot++) {
             ItemStack stack = matrix.getItem(slot);
             if (stack.isEmpty()) continue;
-            ItemStack remainder = target.insertItem(stack.copy(), stack.getCount(), Action.SIMULATE);
+            ItemStack remainder = NetworkOutputReception.internal(
+                    () -> target.insertItem(stack.copy(), stack.getCount(), Action.SIMULATE));
             if (!remainder.isEmpty()) {
                 return false;
             }
@@ -77,7 +78,8 @@ public final class RSGridMatrixNormalizer {
             ItemStack stack = matrix.getItem(slot);
             if (stack.isEmpty()) continue;
 
-            ItemStack remainder = target.insertItem(stack.copy(), stack.getCount(), Action.PERFORM);
+            ItemStack remainder = NetworkOutputReception.internal(
+                    () -> target.insertItem(stack.copy(), stack.getCount(), Action.PERFORM));
             matrix.setItem(slot, remainder);
             changed = true;
             if (!remainder.isEmpty()) {

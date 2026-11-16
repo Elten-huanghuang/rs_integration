@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.storage;
 
+import com.huanghuang.rsintegration.crafting.TaskOutputReception;
 import java.lang.reflect.Method;
 
 import net.minecraft.server.level.ServerPlayer;
@@ -27,6 +28,9 @@ public interface StorageSession {
     default boolean isAvailable() {
         return true;
     }
+
+    /** 将等待记录绑定到本会话的真实存储入口；未实现入网桥接的后端保持本地持有模式。 */
+    default void bindOutputReception(TaskOutputReception.Session reception) {}
 
     /** 网络稳定坐标；无法安全确定位置时返回空。 */
     default Optional<StorageNetworkLocation> location() {

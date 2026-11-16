@@ -109,6 +109,17 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
                 TaskOutputReception.resource(result), amount, amount)));
     }
 
+    @Override
+    protected boolean supportsNetworkOutputReception() { return supportsOutputReception(); }
+
+    @Override
+    public void transferOutputs(ServerLevel playerLevel) {
+        if (outputBatch == null || outputReception().closed()) return;
+        ServerLevel level = resolveMachineLevel(playerLevel);
+        if (level == null || myPos == null || !level.hasChunkAt(myPos)) return;
+        if (level.getBlockEntity(myPos) == furnaceBE && !furnaceBE.isRemoved()) collectFurnaceOutput();
+    }
+
     private boolean receivedAndPhysicallyIdle(AbstractFurnaceBlockEntity current) {
         boolean idle = current == furnaceBE && current.getItem(0).isEmpty()
                 && current instanceof AbstractFurnaceAccessor timer
@@ -1237,7 +1248,6 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
                 if (!output.isEmpty() && !matchesFurnaceOutput(output)) {
                     return failObservation("furnace output slot contains another item");
                 }
-                collectFurnaceOutput();
                 return receivedAndPhysicallyIdle(current) ? doneObservation() : workingObservation();
             }
             if (!output.isEmpty()) {
@@ -1334,6 +1344,8 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     /** 唯一的炉输出提取入口；统一收货启用后，实际取出物只进入私有持有。 */
     private ItemStack collectFurnaceOutput() {
         if (furnaceBE == null) return ItemStack.EMPTY;
+        // 结算、取消之后的重复调用不能先移走槽内实物再向已关闭账本交货。
+        if (outputBatch != null && (outputBatch.closed() || outputReception().closed())) return ItemStack.EMPTY;
 
         ItemStack visible = furnaceBE.getItem(2);
         if (!matchesFurnaceOutput(visible)) return ItemStack.EMPTY;

@@ -1010,6 +1010,7 @@ public final class AsyncCraftChain {
                 // Capture and observation are processed before timeout so an output
                 // produced on the deadline tick is never collected and then refunded.
                 boolean capturedOutput = hasCapturedOutput();
+                currentDelegate.transferOutputs(online.serverLevel());
                 IBatchDelegate.CraftObservation observation = currentDelegate.observeCraft(online.serverLevel());
                 if (observation.phase() == IBatchDelegate.CraftPhase.WORKING
                         && observation.completedWork() > flatObservedCompletedWork) {
@@ -5009,7 +5010,7 @@ public final class AsyncCraftChain {
     private ItemStack insertIntoStorage(@Nullable ServerPlayer player, ItemStack stack) {
         if (stack == null || stack.isEmpty()) return ItemStack.EMPTY;
         if (storageEndpoint == null || player == null) return stack.copy();
-        return storageEndpoint.insert(player, stack, false).remainder().orElse(ItemStack.EMPTY);
+        return CraftStorageEndpoint.insertInternal(storageEndpoint, player, stack, false).remainder().orElse(ItemStack.EMPTY);
     }
 
     private void fireOnDone() {
@@ -5090,6 +5091,7 @@ public final class AsyncCraftChain {
             }
         } else if (currentDelegate != null) {
             try {
+                currentDelegate.transferOutputs(server.overworld());
                 IBatchDelegate.CraftObservation observation = currentDelegate.observeCraft(server.overworld());
                 boolean capturedWorldOutput = OutputAccounting.hasCapturedExpectedProduction(
                         currentDelegate, capturedOutputSnapshot());

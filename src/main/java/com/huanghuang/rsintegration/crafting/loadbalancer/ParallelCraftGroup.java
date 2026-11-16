@@ -1062,6 +1062,25 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     }
 
     @Override
+    public void transferOutputs(ServerLevel level) {
+        if (!started && !draining) return;
+        for (WorkerSlot worker : workers) {
+            if (!worker.running()) continue;
+            try {
+                worker.delegate.transferOutputs(level);
+            } catch (Exception failure) {
+                RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] Worker output transfer threw at {}",
+                        worker.machine.pos(), failure);
+                operations.abandonBatch(worker.id);
+                worker.clearOperations();
+                closeOperationResources(worker);
+                worker.needsFailureCleanup = true;
+                beginDraining("worker output transfer failed at " + worker.machine.pos());
+            }
+        }
+    }
+
+    @Override
     public CraftObservation observeCraft(ServerLevel level) {
         if (!started && !draining) return new CraftObservation(CraftPhase.WAITING_FOR_START);
         currentTick = level.getGameTime();

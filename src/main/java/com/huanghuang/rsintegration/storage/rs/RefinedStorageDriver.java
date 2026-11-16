@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.storage.rs;
 
+import com.huanghuang.rsintegration.crafting.TaskOutputReception;
 import com.huanghuang.rsintegration.storage.StoragePermission;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
@@ -15,6 +16,8 @@ import java.util.List;
 /** Replaceable boundary around native RS calls. This interface deliberately exposes no RS types. */
 interface RefinedStorageDriver {
     boolean isAvailable();
+
+    default void bindOutputReception(TaskOutputReception.Session reception) {}
 
     RefinedStorageSnapshotRead snapshotItems();
 
