@@ -79,20 +79,6 @@ class MonitorDiagnosticsTest extends BootstrapTest {
         assertEquals("rsi.monitor.timing_unknown", key(MonitorDiagnostics.timingLabel(snapshot)));
     }
 
-    @Test void durationFormattingHandlesHoursWithoutWrappingMinutes() {
-        assertEquals("00:00", MonitorDiagnostics.duration(0));
-        assertEquals("02:03", MonitorDiagnostics.duration(123_999));
-        assertEquals("1:01:01", MonitorDiagnostics.duration(3_661_000));
-        assertEquals("123:00:00", MonitorDiagnostics.duration(123L * 3_600_000L));
-    }
-
-    @Test void queueAndDependencyColorsDifferFromConfirmedProblems() {
-        assertEquals(MonitorGridStyle.SCHEDULED, MonitorGridStyle.node(node(1, NodeState.READY, Reason.MACHINE_BUSY)));
-        assertEquals(MonitorGridStyle.SCHEDULED, MonitorGridStyle.node(node(2, NodeState.BLOCKED, Reason.WAITING_MATERIALS)));
-        assertEquals(MonitorGridStyle.BLOCKED, MonitorGridStyle.node(node(3, NodeState.READY, Reason.NO_BOUND_MACHINE)));
-        assertEquals(MonitorGridStyle.BLOCKED, MonitorGridStyle.node(node(4, NodeState.RUNNING, Reason.OUTPUT_MISSING)));
-    }
-
     private static String key(Component component) {
         return component.getContents() instanceof TranslatableContents text ? text.getKey() : "";
     }

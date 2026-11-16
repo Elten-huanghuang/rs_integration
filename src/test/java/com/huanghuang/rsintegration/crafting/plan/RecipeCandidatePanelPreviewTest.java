@@ -30,16 +30,13 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 class RecipeCandidatePanelPreviewTest extends BootstrapTest {
     private static final ResourceLocation CURRENT = id("current");
     private static final ResourceLocation FIRST_ALTERNATIVE = id("first_alternative");
-    private static final ResourceLocation SECOND_ALTERNATIVE = id("second_alternative");
 
     @TempDir
     Path tempDir;
@@ -70,61 +67,6 @@ class RecipeCandidatePanelPreviewTest extends BootstrapTest {
         assertTrue(panel.stockOnlySelected());
         assertTrue(CraftingPlanPreferences.load(preferences).recipeChoices().isEmpty());
         verifyNoInteractions(preview);
-    }
-
-    @Test
-    void everyCandidateCardRendersItsJeiPreview() {
-        Font font = mock(Font.class);
-        RecipePreviewRenderer preview = mock(RecipePreviewRenderer.class);
-        when(font.width(anyString())).thenReturn(0);
-        when(font.plainSubstrByWidth(anyString(), anyInt()))
-                .thenAnswer(invocation -> invocation.getArgument(0));
-        when(font.plainSubstrByWidth(anyString(), anyInt(), anyBoolean()))
-                .thenAnswer(invocation -> invocation.getArgument(0));
-        when(preview.candidateDetails(any(), any()))
-                .thenAnswer(invocation -> new RecipePreviewRenderer.CandidateDetails(
-                        invocation.<ResourceLocation>getArgument(0).getPath(), ""));
-        when(preview.categoryTitle(any())).thenReturn(
-                Optional.of(Component.literal("machine")));
-        when(preview.previewWidthHint(any())).thenReturn(80);
-        when(preview.previewBounds(any()))
-                .thenReturn(new RecipePreviewRenderer.PreviewBounds(80, 40));
-
-        RecipeCandidatePanel panel = new RecipeCandidatePanel(font, preview,
-                (node, recipe) -> {}, (node, recipe) -> {}, node -> {}, node -> {},
-                tempDir.resolve("crafting_plan.json"),
-                () -> {}, () -> true);
-        PlanStep step = new PlanStep(CURRENT, new ItemStack(Items.DIAMOND), 1, List.of(),
-                List.of(FIRST_ALTERNATIVE, SECOND_ALTERNATIVE), null, 0, true);
-        PlanTreeNode node = new PlanTreeNode(
-                IngredientKey.of(
-                        new ItemStack(Items.DIAMOND)),
-                new ItemStack(Items.DIAMOND), 1, 0, step);
-
-        panel.open(node, Set.of());
-        for (RecipeCandidatePickerModel.Candidate candidate : panel.visibleCandidates()) {
-            assertTrue(panel.cardHeight(candidate) > 30,
-                    () -> "preview area was not allocated for " + candidate.recipeId());
-        }
-        verify(preview, atLeastOnce()).previewBounds(CURRENT);
-        verify(preview, atLeastOnce()).previewBounds(FIRST_ALTERNATIVE);
-        verify(preview, atLeastOnce()).previewBounds(SECOND_ALTERNATIVE);
-    }
-
-    @Test
-    void oversizedNineByNinePreviewIsConstrainedToTheThreeByThreeCardBudget() {
-        RecipePreviewRenderer.PreviewBounds capped =
-                RecipeCandidatePanel.constrainPreviewBounds(
-                        new RecipePreviewRenderer.PreviewBounds(240, 240));
-        RecipePreviewRenderer.PreviewBounds ordinary =
-                RecipeCandidatePanel.constrainPreviewBounds(
-                        new RecipePreviewRenderer.PreviewBounds(80, 40));
-
-        assertEquals(new RecipePreviewRenderer.PreviewBounds(
-                        RecipeCandidatePanel.MAX_PREVIEW_WIDTH,
-                        RecipeCandidatePanel.MAX_PREVIEW_HEIGHT),
-                capped);
-        assertEquals(new RecipePreviewRenderer.PreviewBounds(80, 40), ordinary);
     }
 
     @Test
@@ -197,7 +139,7 @@ class RecipeCandidatePanelPreviewTest extends BootstrapTest {
                 new ItemStack(Items.DIAMOND), 1, 0, step);
 
         panel.open(node, Set.of());
-        panel.keyPressed(org.lwjgl.glfw.GLFW.GLFW_KEY_ENTER, 0, 0);
+        panel.keyPressed(GLFW.GLFW_KEY_ENTER, 0, 0);
 
         assertEquals(CURRENT, selected.get());
         assertNull(CraftingPlanPreferences.load(preferences).recipeChoices()

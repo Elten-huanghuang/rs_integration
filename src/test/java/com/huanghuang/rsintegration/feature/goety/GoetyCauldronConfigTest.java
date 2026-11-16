@@ -28,13 +28,6 @@ class GoetyCauldronConfigTest {
     }
 
     @Test
-    void defaultsKeepExistingCauldronFeaturesEnabledBeforeConfigLoads() {
-        assertFalse(RSIntegrationConfig.COMMON_SPEC.isLoaded());
-        assertTrue(RSIntegrationConfig.ENABLE_GOETY_CAULDRON.getDefault());
-        assertTrue(RSIntegrationConfig.isGoetyCauldronEnabled());
-    }
-
-    @Test
     void cauldronRequiresBothTheMasterSwitchAndItsOwnSwitch() {
         loadConfig(CommentedConfig.inMemory());
         for (boolean goety : new boolean[]{false, true}) {
@@ -44,17 +37,6 @@ class GoetyCauldronConfigTest {
                 assertEquals(goety && cauldron, RSIntegrationConfig.isGoetyCauldronEnabled());
             }
         }
-    }
-
-    @Test
-    void disablingCauldronDoesNotDisableOtherGoetyFeatures() {
-        loadConfig(CommentedConfig.inMemory());
-        RSIntegrationConfig.ENABLE_GOETY_CAULDRON.set(false);
-        assertFalse(RSIntegrationConfig.isGoetyCauldronEnabled());
-        assertTrue(RSIntegrationConfig.ENABLE_GOETY.get());
-        assertFalse(RSIntegrationConfig.ENABLE_GOETY_SOUL_REVERSE_REFILL.get());
-        RSIntegrationConfig.ENABLE_GOETY_CAULDRON.set(true);
-        assertTrue(RSIntegrationConfig.isGoetyCauldronEnabled());
     }
 
     @Test

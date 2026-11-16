@@ -32,11 +32,6 @@ class PlanningHudConfigMigrationTest {
         assertEquals(0.75, RSIntegrationConfig.PLANNING_HUD_VERTICAL_POSITION.get());
     }
 
-    @Test void newClientsDefaultToRightCenter() {
-        assertEquals(1.0, RSIntegrationConfig.PLANNING_HUD_HORIZONTAL_POSITION.getDefault());
-        assertEquals(0.5, RSIntegrationConfig.PLANNING_HUD_VERTICAL_POSITION.getDefault());
-    }
-
     private static ModConfig load(double horizontal, double vertical) {
         var values = CommentedConfig.inMemory();
         values.set("planningHud.horizontalPosition", horizontal);

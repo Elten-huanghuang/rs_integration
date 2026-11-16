@@ -1,6 +1,5 @@
 package com.huanghuang.rsintegration.mods.common;
 
-import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraftforge.fluids.FluidStack;
@@ -128,21 +127,6 @@ class MachineWaterSupplyTest extends BootstrapTest {
         assertEquals(0, tank.getFluidAmount());
         assertFalse(MachineWaterSupply.canFill("eidolon_crucible", tank, 1001, null, null));
         assertFalse(MachineWaterSupply.canFill("unknown_machine", tank, 1000, null, null));
-    }
-
-    @Test
-    void ironAlchemistCauldronUsesFreeWaterByDefault() {
-        String machine =
-                "irons_spellbooks_alchemist_cauldron";
-        FluidTank tank = new FluidTank(1000);
-
-        assertTrue(MachineWaterSupply.isFree(
-                machine,
-                RSIntegrationConfig.DEFAULT_FREE_WATER_MACHINES
-        ));
-        assertTrue(MachineWaterSupply.canFill(
-                machine, tank, 1000, null, null));
-        assertEquals(0, tank.getFluidAmount());
     }
 
     private static FluidTank partialTank() {

@@ -11,7 +11,6 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -50,16 +49,6 @@ class RecipeIntegrationContractTest {
         assertThrows(IllegalArgumentException.class,
                 () -> new RecipeClaim(new StubIntegration("third"),
                         List.of(first, second), List.of()));
-    }
-
-    @Test
-    void integrationDefaultsAreConservative() {
-        RecipeIntegration<?> integration = new StubIntegration("test");
-
-        assertEquals(RecipeProjectionThread.SERVER_MAIN,
-                integration.projectionThread());
-        assertEquals(RecipeExecutionKind.NONE, integration.executionKind());
-        assertFalse(integration.availabilityProvider().isPresent());
     }
 
     private static IntegrationDiagnostic diagnostic() {

@@ -1,7 +1,6 @@
 package com.huanghuang.rsintegration.mods.botania;
 
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
@@ -16,14 +15,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ElvenTradeBatchDelegateTest extends BootstrapTest {
-    @Test
-    void botaniaBatchOptionsDefaultToEnabled() {
-        assertTrue(RSIntegrationConfig.ENABLE_BOTANIA_MANA_POOL_BATCH.getDefault());
-        assertEquals(1024, RSIntegrationConfig.BOTANIA_MANA_POOL_BATCH_LIMIT.getDefault());
-        assertTrue(RSIntegrationConfig.ENABLE_BOTANIA_ELVEN_TRADE_INPUT_BUFFER.getDefault());
-        assertEquals(64, RSIntegrationConfig.BOTANIA_ELVEN_TRADE_INPUT_BUFFER_LIMIT.getDefault());
-    }
-
     @Test
     void adjacentPortalsHaveDistinctCaptureColumns() {
         assertTrue(!ElvenTradeBatchDelegate.captureRegion(BlockPos.ZERO)

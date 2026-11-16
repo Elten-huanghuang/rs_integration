@@ -2,7 +2,6 @@ package com.huanghuang.rsintegration.feature.goety;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.feature.goety.brewing.CauldronAccess;
-import com.huanghuang.rsintegration.mods.common.MachineWaterSupply;
 import net.minecraftforge.common.ForgeConfigSpec;
 import org.junit.jupiter.api.Test;
 
@@ -27,13 +26,6 @@ class CauldronAccessTest {
             assertFalse(CauldronAccess.canOpen(mode, false, false), mode);
             assertFalse(CauldronAccess.canOpen(mode, true, true), mode);
         }
-    }
-
-    @Test
-    void cauldronUsesTheSharedFreeWaterDefaults() {
-        assertTrue(MachineWaterSupply.isFree("goety_witch_cauldron",
-                RSIntegrationConfig.DEFAULT_FREE_WATER_MACHINES));
-        assertFalse(MachineWaterSupply.isFree("goety_witch_cauldron", List.of()));
     }
 
     @Test

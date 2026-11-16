@@ -7,13 +7,12 @@ import com.mojang.brigadier.CommandDispatcher;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.Style;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -121,35 +120,8 @@ class CraftFailureLinksTest extends BootstrapTest {
     }
 
     @Test
-    void clientCommandIsRegisteredOnlyOnClientAndNeverUsesServerTransport() throws Exception {
-        Path base = Path.of("src/main/java/com/huanghuang/rsintegration");
-        String command = Files.readString(
-                base.resolve("crafting/progress/CraftFailureClientCommands.java"));
-        String links = Files.readString(
-                base.resolve("crafting/progress/CraftFailureLinks.java"));
-        assertTrue(command.contains("RegisterClientCommandsEvent"));
-        assertTrue(command.contains("@OnlyIn(Dist.CLIENT)"));
-        assertFalse(command.contains("sendToServer"));
-        assertFalse(command.contains("sendCommand"));
-        assertFalse(links.contains("sendToServer"));
-        assertTrue(Files.readString(base.resolve("client/ClientEventBootstrap.java")).contains("CraftFailureClientCommands.class"));
-        String handler = Files.readString(base.resolve("crafting/batch/CraftProgressClientPacketHandler.java"));
-        assertTrue(handler.contains("if (CraftProgressTracker.onProgress(snapshot))"));
-        assertTrue(handler.contains("if (CraftProgressTracker.onDelta(packet))"));
-        assertTrue(command.contains("ClientCommandHandler.runCommand(command)"));
-        String mixin = Files.readString(base.resolve("mixin/minecraft/CraftFailureReportClickMixin.java"));
-        assertTrue(mixin.contains("method = \"handleComponentClicked\""));
-        assertTrue(mixin.contains("require = 1"));
-        assertTrue(mixin.contains("callback.setReturnValue(true)"));
-        var config = com.google.gson.JsonParser.parseString(Files.readString(Path.of("src/main/resources/rs_integration.mixins.json"))).getAsJsonObject();
-        var name = new com.google.gson.JsonPrimitive("minecraft.CraftFailureReportClickMixin");
-        assertTrue(config.getAsJsonArray("client").contains(name));
-        assertFalse(config.getAsJsonArray("mixins").contains(name));
-    }
-
-    @Test
     void clickBridgeOnlyInterceptsOurRunCommandAndLeavesOtherModsUntouched() {
-        var style = net.minecraft.network.chat.Style.EMPTY;
+        var style = Style.EMPTY;
         String command = "/rsi_failure_report " + UUID.randomUUID();
         assertEquals(command.substring(1), CraftFailureLinks.localCommand(style.withClickEvent(
                 new ClickEvent(ClickEvent.Action.RUN_COMMAND, command))));

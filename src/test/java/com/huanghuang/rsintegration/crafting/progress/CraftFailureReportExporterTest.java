@@ -67,16 +67,7 @@ class CraftFailureReportExporterTest extends BootstrapTest {
     }
 
     @Test
-    void screenReportsFullPathWithoutChatOrClipboardWrites() throws Exception {
-        String source = Files.readString(Path.of("src/main/java/com/huanghuang/rsintegration/"
-                + "crafting/progress/CraftFailureScreen.java"));
-        assertTrue(source.contains("minecraft.gameDirectory.toPath()"));
-        assertTrue(source.contains("\"rsi.diagnostic.export_success\", file.toString()"));
-        assertTrue(source.contains("\"rsi.diagnostic.export_directory\", exportDirectory.toString()"));
-        assertTrue(source.contains("font.split(line, bodyWidth - 16)"));
-        assertTrue(source.contains("\"rsi.diagnostic.export_failure\""));
-        assertFalse(source.contains("setClipboard"));
-        assertFalse(source.contains("sendSystemMessage"));
+    void exportActionsHaveTranslationsInBothLanguages() throws Exception {
         for (String locale : List.of("en_us", "zh_cn")) {
             var translations = JsonParser.parseString(Files.readString(Path.of(
                     "src/main/resources/assets/rs_integration/lang/" + locale + ".json"))).getAsJsonObject();

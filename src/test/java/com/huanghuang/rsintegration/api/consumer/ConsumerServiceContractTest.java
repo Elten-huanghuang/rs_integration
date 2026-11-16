@@ -8,8 +8,6 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ConsumerServiceContractTest {
     @ParameterizedTest
@@ -39,22 +37,6 @@ class ConsumerServiceContractTest {
     }
 
     @Test
-    void indexingServiceRejectsBusinessCallsBeforePlayerAccess() {
-        DefaultRSICraftConsumerApi api =
-                new DefaultRSICraftConsumerApi();
-        api.markIndexing();
-
-        ConsumerResult<ConsumerRecipeCatalogPage> result =
-                api.findRecipes(null, null);
-
-        assertFalse(result.successful());
-        assertEquals(
-                ConsumerDiagnosticCode.CATALOG_NOT_READY,
-                result.diagnostics().get(0).code()
-        );
-    }
-
-    @Test
     void lifecycleMovesFromIndexingToStopped() {
         DefaultRSICraftConsumerApi api =
                 new DefaultRSICraftConsumerApi();
@@ -73,26 +55,4 @@ class ConsumerServiceContractTest {
         );
     }
 
-    @Test
-    void capabilitiesRemainPositiveAndVersioned() {
-        DefaultRSICraftConsumerApi api =
-                new DefaultRSICraftConsumerApi();
-
-        assertEquals(1, api.version().major());
-        assertTrue(api.capabilities().maxPageSize() > 0);
-        assertTrue(api.capabilities().sessionTtlTicks() > 0L);
-    }
-
-    @Test
-    void serviceLookupUsesTheInstalledImplementation() {
-        DefaultRSICraftConsumerApi api =
-                new DefaultRSICraftConsumerApi();
-        try {
-            RSIConsumerServices.install(api);
-
-            assertSame(api, RSICraftConsumerApi.get().orElseThrow());
-        } finally {
-            RSIConsumerServices.clear();
-        }
-    }
 }

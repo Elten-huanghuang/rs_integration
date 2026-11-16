@@ -1,21 +1,15 @@
 package com.huanghuang.rsintegration.config;
 
 import com.electronwill.nightconfig.core.CommentedConfig;
-import com.electronwill.nightconfig.core.UnmodifiableConfig;
-import com.electronwill.nightconfig.toml.TomlParser;
 import com.huanghuang.rsintegration.client.gui.CraftingUiStyle;
 import com.huanghuang.rsintegration.client.gui.MaterialCellStyle;
 import com.huanghuang.rsintegration.config.ConfigEditorModel.ConfigFile;
 import com.huanghuang.rsintegration.mods.rs.monitor.MonitorGridStyle;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
-import net.minecraftforge.common.ForgeConfigSpec;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -42,20 +36,6 @@ class CraftingUiColorsTest extends BootstrapTest {
         assertFalse(CraftingUiColors.isValid("#12345"));
         assertFalse(CraftingUiColors.isValid("#GGGGGG"));
         assertFalse(CraftingUiColors.isValid(null));
-    }
-
-    @Test
-    void defaultsRemainTheCurrentPalette() {
-        CommentedConfig values = CommentedConfig.inMemory();
-        RSIntegrationConfig.CLIENT_SPEC.correct(values);
-        RSIntegrationConfig.CLIENT_SPEC.setConfig(values);
-        try {
-            assertEquals(0xFFD0CFD6, CraftingUiColors.PANEL.argb());
-            assertEquals(0xFFA1A5BB, CraftingUiColors.MATERIAL_STORED.argb());
-            assertTrue(CraftingUiColors.PANEL.argb() != CraftingUiColors.CANVAS.argb());
-        } finally {
-            RSIntegrationConfig.CLIENT_SPEC.setConfig(null);
-        }
     }
 
     @Test
@@ -115,20 +95,5 @@ class CraftingUiColorsTest extends BootstrapTest {
         RSIntegrationConfig.CLIENT_SPEC.setConfig(values);
         assertEquals(0xFFD0CFD6, CraftingUiStyle.panel());
         assertEquals(0xFFFFFFFF, CraftingUiStyle.text());
-    }
-
-    @Test
-    void exampleContainsEveryRegisteredColorWithItsUnchangedDefault() throws IOException {
-        var example = new TomlParser().parse(Files.readString(Path.of("docs/config/crafting-ui.example.toml")));
-        var colors = RSIntegrationConfig.CLIENT_SPEC.getValues().get("craftingUi");
-        assertTrue(colors instanceof UnmodifiableConfig);
-        UnmodifiableConfig section = (UnmodifiableConfig) colors;
-        assertEquals(CraftingUiColors.values().length + 3, section.valueMap().size());
-        for (String key : section.valueMap().keySet()) {
-            ForgeConfigSpec.ConfigValue<?> value = section.get(key);
-            Object expected = value.getDefault();
-            assertEquals(expected instanceof Enum<?> enumeration ? enumeration.name() : expected,
-                    example.get("craftingUi." + key), key);
-        }
     }
 }

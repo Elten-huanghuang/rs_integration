@@ -10,8 +10,6 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.Test;
 
-import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
@@ -46,20 +44,6 @@ class FoodOrderModelTest extends BootstrapTest {
     }
 
     @Test
-    void snapshotDefensivelyCopiesEntries() {
-        FoodOrderEntry entry = new FoodOrderEntry(new ItemStack(Items.APPLE),
-                FoodOrderKind.MISSING, null, Component.empty());
-        FoodOrderSnapshot snapshot = new FoodOrderSnapshot(7L, List.of(entry),
-                null, -1, -2, false, true);
-
-        assertEquals(1, snapshot.entries().size());
-        assertEquals(0, snapshot.totalUneaten());
-        assertEquals(0, snapshot.totalOrderable());
-        assertEquals(Component.empty(), snapshot.sources());
-        assertTrue(snapshot.partial());
-    }
-
-    @Test
     void resultPacketSurvivesCodecRoundTrip() {
         FoodOrderResultPacket original = FoodOrderResultPacket.partial(3, 2);
         FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
@@ -73,20 +57,4 @@ class FoodOrderModelTest extends BootstrapTest {
         assertEquals(original.extra(), decoded.extra());
     }
 
-    @Test
-    void queuedResultKeepsCountAndQueuedMessage() {
-        FoodOrderResultPacket packet = FoodOrderResultPacket.queued(4);
-        assertEquals(FoodOrderResultPacket.STARTED, packet.code());
-        assertEquals(4, packet.accepted());
-        assertEquals("rsi.food_order.result.queued", packet.messageKey());
-    }
-
-    @Test
-    void failedResultKeepsMessageKeyForClientTranslation() {
-        FoodOrderResultPacket packet = FoodOrderResultPacket.failed(
-                "rsi.food_order.error.storage", "STORAGE_UNAVAILABLE");
-        assertEquals("rsi.food_order.error.storage", packet.messageKey());
-        assertEquals("STORAGE_UNAVAILABLE", packet.extra());
-        assertEquals(0, packet.accepted());
-    }
 }

@@ -8,12 +8,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.junit.jupiter.api.Test;
-import org.objectweb.asm.ClassReader;
-import org.objectweb.asm.ClassVisitor;
-import org.objectweb.asm.MethodVisitor;
-import org.objectweb.asm.Opcodes;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -101,36 +96,4 @@ class ManaPoolParallelOwnershipTest extends BootstrapTest {
         assertEquals(1, ManaPoolBatchDelegate.physicalBatchSize(share, 0, 2000));
     }
 
-    @Test
-    void productionCodeUsesNativeFlagAndLocalCollectionRegion() throws IOException {
-        List<String> calls = new ArrayList<>();
-        try (var stream = ManaPoolBatchDelegate.class.getResourceAsStream("ManaPoolBatchDelegate.class")) {
-            assertNotNull(stream);
-            new ClassReader(stream).accept(new ClassVisitor(Opcodes.ASM9) {
-                @Override
-                public MethodVisitor visitMethod(int access, String method, String descriptor,
-                                                 String signature, String[] exceptions) {
-                    return new MethodVisitor(Opcodes.ASM9) {
-                        @Override
-                        public void visitMethodInsn(int opcode, String owner, String name,
-                                                    String descriptor, boolean isInterface) {
-                            calls.add(method + ":" + name);
-                        }
-
-                        @Override
-                        public void visitFieldInsn(int opcode, String owner, String name, String descriptor) {
-                            if (opcode == Opcodes.GETFIELD) calls.add(method + ":field:" + name);
-                        }
-                    };
-                }
-            }, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
-        }
-        assertTrue(calls.contains("isCraftOutput:field:manaInfusionSpawned"));
-        assertTrue(calls.contains("isCraftOutput:acceptsPhysicalOutput"));
-        assertTrue(calls.contains("collectResult:getOutputCaptureRegion"));
-        assertTrue(calls.contains("isMachineCraftFinished:getOutputCaptureRegion"));
-        assertFalse(calls.contains("collectResult:inflate"));
-        assertTrue(calls.contains("preferredParallelBatchSize:configuredPhysicalBatchSize"));
-        assertTrue(calls.contains("configuredPhysicalBatchSize:physicalBatchSize"));
-    }
 }

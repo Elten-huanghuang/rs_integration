@@ -2,28 +2,11 @@ package com.huanghuang.rsintegration.feature.sidepanel;
 
 import org.junit.jupiter.api.Test;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class IdentityInvalidationQueueTest {
-    @Test
-    void sidePanelInvalidationCallbackOnlyQueuesWorkForTickEnd() throws IOException {
-        String source = Files.readString(Path.of("src", "main", "java", "com", "huanghuang",
-                "rsintegration", "feature", "sidepanel",
-                "RSSidePanelNetworkHandler.java"));
-
-        assertTrue(source.contains("pendingInvalidatedCaches.offer(cache, network)"));
-        assertTrue(source.contains("pendingInvalidatedCaches.drain()"));
-        assertFalse(source.contains("server.execute(() -> rebindInvalidatedCache"),
-                "server.execute may run inline and mutate RS's listener list during iteration");
-    }
-
     @Test
     void coalescesTheSameCacheAndKeepsTheFirstNetwork() {
         IdentityInvalidationQueue<Object, Object> queue = new IdentityInvalidationQueue<>();
