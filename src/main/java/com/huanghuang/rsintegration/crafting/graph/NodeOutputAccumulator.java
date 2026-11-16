@@ -16,12 +16,14 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Predicate;
 
 /** Accumulates actual node outputs and publishes each declared unit once. */
 public final class NodeOutputAccumulator {
     private static final Logger LOGGER = LogUtils.getLogger();
     private final List<OutputDeclaration> declarations;
     private final Map<OutputPortId, Long> published = new LinkedHashMap<>();
+    private final Map<OutputPortId, Predicate<ItemStack>> outputMatchers = new LinkedHashMap<>();
     private final List<ItemStack> pending = new ArrayList<>();
     private final List<CollectedOutput> pendingResources =
             new ArrayList<>();
@@ -31,6 +33,7 @@ public final class NodeOutputAccumulator {
         this.declarations = List.copyOf(declarations);
         for (OutputDeclaration declaration : this.declarations) {
             published.put(declaration.id(), 0L);
+            outputMatchers.put(declaration.id(), MaterialMatcher.outputMatcher(declaration.material()));
         }
     }
 
@@ -77,8 +80,7 @@ public final class NodeOutputAccumulator {
         }
         for (ItemStack stack : pending) {
             if (remaining <= 0L) break;
-            if (stack.isEmpty()
-                    || !MaterialMatcher.matchesOutputDeclaration(declaration.material(), stack)) continue;
+            if (stack.isEmpty() || !outputMatchers.get(declaration.id()).test(stack)) continue;
             int take = (int) Math.min(remaining, stack.getCount());
             ItemStack fragment = stack.copyWithCount(take);
             stack.shrink(take);

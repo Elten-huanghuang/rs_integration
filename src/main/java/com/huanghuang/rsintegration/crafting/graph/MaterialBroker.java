@@ -89,6 +89,7 @@ public final class MaterialBroker {
     private final Map<Long, AssetLot> lots = new LinkedHashMap<>();
     // 只保存原批次的引用，桶内沿用发布顺序；数量和退款仍由原账本维护。
     private final Map<MaterialSource, Map<MaterialKey, List<AssetLot>>> lotsBySource = new HashMap<>();
+    private final Map<MaterialKey, Predicate<ItemStack>> outputMatchers = new HashMap<>();
     private final Map<ReservationToken, Reservation> reservations = new HashMap<>();
     private final Set<MaterialSource> increasedSources = new HashSet<>();
     private final Thread ownerThread = Thread.currentThread();
@@ -155,7 +156,7 @@ public final class MaterialBroker {
             throw new IllegalArgumentException("published stack must be non-empty");
         }
         boolean matches = source instanceof MaterialSource.ProducerOutput
-                ? MaterialMatcher.matchesOutputDeclaration(material, stack)
+                ? outputMatchers.computeIfAbsent(material, MaterialMatcher::outputMatcher).test(stack)
                 : MaterialMatcher.matchesExact(material, stack);
         if (!matches) {
             throw new IllegalArgumentException("published stack does not match material key");

@@ -170,6 +170,38 @@ class CraftProgressRuntimeTest extends BootstrapTest {
     }
 
     @Test
+    void failureAfterPartialPublicationRecoversOnlyUnpublishedPhysicalFragmentsOnce() {
+        NodeId node = new NodeId(19);
+        StubDelegate delegate = new StubDelegate(IBatchDelegate.CraftPhase.DONE, "") {
+            @Override
+            public List<ItemStack> collectAllResults(ServerPlayer player) {
+                return List.of(new ItemStack(Items.DIAMOND, 4), new ItemStack(Items.DIAMOND, 2));
+            }
+        };
+        List<ItemStack> recovered = new ArrayList<>();
+        CraftNodeRuntime runtime = new CraftNodeRuntime(node, "test:partial-publication",
+                delegate, null, null);
+        runtime.setChainContext(recovered, player);
+        runtime.attachOutputs(new NodeOutputAccumulator(List.of(OutputDeclaration.item(
+                new OutputPortId(node, 0), MaterialKey.of(new ItemStack(Items.DIAMOND)),
+                6, OutputKind.PRIMARY))));
+
+        assertEquals(ConcurrentNodeExecutor.Observation.SUCCEEDED, runtime.observe());
+        runtime.prepareGraphPublications();
+        assertEquals(4, runtime.nextGraphPublication().stack().getCount());
+        runtime.graphPublicationCompleted();
+
+        runtime.cleanupFailure();
+        runtime.cleanupFailure();
+
+        assertFalse(runtime.hasPendingPublications());
+        assertEquals(2, recovered.stream().mapToInt(ItemStack::getCount).sum());
+        assertTrue(runtime.drainIncrementalOutputs().isEmpty());
+        assertEquals(1, delegate.finishCleanups);
+        assertEquals(0, delegate.failureCleanups);
+    }
+
+    @Test
     void graphStillRejectsAnUnrecoveredCatalyst() {
         StubDelegate delegate = new StubDelegate(IBatchDelegate.CraftPhase.DONE, "");
         NodeId node = new NodeId(21);
@@ -203,6 +235,24 @@ class CraftProgressRuntimeTest extends BootstrapTest {
         assertSame(level, delegate.observedLevel);
         assertEquals(1, runtime.completedOperations());
         assertEquals(0, runtime.runningOperations());
+    }
+
+    @Test
+    void observationSlicesCountElapsedWorldTicksInsteadOfOnlyPollingCalls() {
+        StubDelegate delegate = new StubDelegate(IBatchDelegate.CraftPhase.WORKING, "");
+        CraftNodeRuntime runtime = new CraftNodeRuntime(new NodeId(4), "test:waiting", delegate, null, null);
+        runtime.setChainContext(new ArrayList<>(), player);
+        when(level.getGameTime()).thenReturn(100L);
+        assertEquals(ConcurrentNodeExecutor.Observation.WORKING, runtime.observe());
+        assertEquals(1, runtime.waitTicks());
+
+        when(level.getGameTime()).thenReturn(120L);
+        assertEquals(ConcurrentNodeExecutor.Observation.WORKING, runtime.observe());
+        assertEquals(21, runtime.waitTicks());
+        when(level.getGameTime()).thenReturn(120L
+                + RSIntegrationConfig.MULTIBLOCK_CRAFT_TIMEOUT_SECONDS.get() * 20L);
+        assertEquals(ConcurrentNodeExecutor.Observation.FAILED, runtime.observe());
+        assertEquals(CraftFailureCode.TIMEOUT, runtime.failureCode());
     }
 
     @Test

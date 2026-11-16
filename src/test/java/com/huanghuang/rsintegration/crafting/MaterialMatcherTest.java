@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidTestFixtures;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
@@ -57,6 +58,84 @@ class MaterialMatcherTest extends BootstrapTest {
         assertTrue(MaterialMatcher.matchesExact(MaterialKey.of(first), first));
         assertFalse(MaterialMatcher.matchesExact(MaterialKey.of(first), second));
         assertFalse(MaterialMatcher.sameRuntimeFragment(first, second));
+    }
+
+    @Test
+    void exactIdentityIgnoresCompoundOrderButRetainsListOrderAndNumericTypes() {
+        ItemStack first = new ItemStack(Items.DIAMOND);
+        CompoundTag nested = new CompoundTag();
+        nested.putInt("second", 2);
+        nested.putInt("first", 1);
+        first.getOrCreateTag().put("nested", nested);
+        ListTag ordered = new ListTag();
+        ordered.add(nested.copy());
+        CompoundTag last = new CompoundTag();
+        last.putInt("last", 3);
+        ordered.add(last);
+        first.getOrCreateTag().put("ordered", ordered);
+        MaterialKey expected = MaterialKey.of(first);
+
+        ItemStack reordered = first.copy();
+        CompoundTag reversedKeys = new CompoundTag();
+        reversedKeys.putInt("first", 1);
+        reversedKeys.putInt("second", 2);
+        reordered.getOrCreateTag().put("nested", reversedKeys);
+        assertTrue(MaterialMatcher.matchesExact(expected, reordered));
+
+        ItemStack differentType = first.copy();
+        differentType.getOrCreateTag().getCompound("nested").putByte("first", (byte) 1);
+        assertFalse(MaterialMatcher.matchesExact(expected, differentType));
+
+        ItemStack differentOrder = first.copy();
+        ListTag reversedList = new ListTag();
+        reversedList.add(last.copy());
+        reversedList.add(nested.copy());
+        differentOrder.getOrCreateTag().put("ordered", reversedList);
+        assertFalse(MaterialMatcher.matchesExact(expected, differentOrder));
+    }
+
+    @Test
+    void exactIdentityTreatsEmptyTagAsAbsentAndRejectsMalformedDeclarations() {
+        ItemStack empty = new ItemStack(Items.DIAMOND);
+        empty.setTag(new CompoundTag());
+
+        assertTrue(MaterialMatcher.matchesExact(new MaterialKey(Items.DIAMOND, null), empty));
+        assertFalse(MaterialMatcher.matchesExact(new MaterialKey(Items.DIAMOND, "{invalid"), empty));
+        assertFalse(MaterialMatcher.matchesExact(new MaterialKey(Items.IRON_INGOT, null), empty));
+    }
+
+    @Test
+    void nonFiniteNumericTagsKeepTheLegacyNormalizedIdentity() {
+        ItemStack actual = new ItemStack(Items.DIAMOND);
+        actual.getOrCreateTag().putFloat("nan", Float.NaN);
+        actual.getOrCreateTag().putDouble("infinity", Double.POSITIVE_INFINITY);
+
+        assertTrue(MaterialMatcher.matchesExact(MaterialKey.of(actual), actual));
+    }
+
+    @Test
+    void preparedOutputMatcherStillChecksMutatedStacksAndSpecialRuntimeState() {
+        ItemStack expected = tagged("one");
+        var matcher = MaterialMatcher.outputMatcher(MaterialKey.of(expected));
+        ItemStack actual = expected.copy();
+
+        assertTrue(matcher.test(actual));
+        actual.getOrCreateTag().putString("variant", "two");
+        assertFalse(matcher.test(actual));
+        assertFalse(matcher.test(new ItemStack(Items.IRON_INGOT)));
+        assertFalse(matcher.test(ItemStack.EMPTY));
+        assertFalse(matcher.test(null));
+
+        ItemStack sword = new ItemStack(Items.DIAMOND_SWORD);
+        sword.getOrCreateTag().putInt("Damage", 0);
+        var swordMatcher = MaterialMatcher.outputMatcher(MaterialKey.of(sword));
+        sword.setDamageValue(4);
+        assertEquals(MaterialMatcher.matchesOutputDeclaration(MaterialKey.of(
+                new ItemStack(Items.DIAMOND_SWORD)), sword), swordMatcher.test(sword));
+
+        ItemStack nonFinite = new ItemStack(Items.DIAMOND);
+        nonFinite.getOrCreateTag().putDouble("value", Double.NaN);
+        assertTrue(MaterialMatcher.outputMatcher(MaterialKey.of(nonFinite)).test(nonFinite));
     }
 
     @Test

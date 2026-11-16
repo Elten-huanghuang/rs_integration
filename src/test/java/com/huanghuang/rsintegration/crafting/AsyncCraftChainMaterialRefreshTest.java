@@ -21,10 +21,16 @@ import com.huanghuang.rsintegration.crafting.graph.NodeOutputAccumulator;
 import com.huanghuang.rsintegration.crafting.graph.OutputDeclaration;
 import com.huanghuang.rsintegration.crafting.graph.OutputKind;
 import com.huanghuang.rsintegration.crafting.graph.OutputPortId;
+import com.huanghuang.rsintegration.crafting.graph.NodeAdmissionCoordinator;
+import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.storage.StorageOperationMode;
+import com.huanghuang.rsintegration.storage.StorageOperationResult;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.players.PlayerList;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -46,12 +52,20 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.spy;
@@ -82,7 +96,7 @@ class AsyncCraftChainMaterialRefreshTest extends BootstrapTest {
     @Test
     void emptyWorkerCallbacksDoNotRepeatScanOrSuppressProgress() throws Exception {
         Fixture fixture = new Fixture();
-        CraftNodeRuntime runtime = mock(CraftNodeRuntime.class);
+        CraftNodeRuntime runtime = spy(new CraftNodeRuntime(PRODUCER, "test", null, null, null));
         when(runtime.drainIncrementalOutputs()).thenReturn(List.of());
         fixture.publish(runtime);
         clearInvocations(fixture.scheduler);
@@ -101,11 +115,11 @@ class AsyncCraftChainMaterialRefreshTest extends BootstrapTest {
     void incrementalOutputUnlocksConsumerBeforeProducerCompletes() throws Exception {
         Fixture fixture = new Fixture();
         fixture.scheduler.claim(PRODUCER);
-        CraftNodeRuntime runtime = mock(CraftNodeRuntime.class);
+        CraftNodeRuntime runtime = spy(new CraftNodeRuntime(PRODUCER, "test", null, null, null));
         NodeOutputAccumulator.Publication unit = new NodeOutputAccumulator.Publication(
                 PORT, IRON, new ItemStack(Items.IRON_INGOT),
                 IntegrationResourceKey.item(new ItemStack(Items.IRON_INGOT)));
-        when(runtime.drainIncrementalOutputs()).thenReturn(List.of(unit), List.of(unit), List.of());
+        doReturn(List.of(unit), List.of(unit), List.of()).when(runtime).drainIncrementalOutputs();
         fixture.publish(runtime);
         assertEquals(DagScheduler.NodeState.BLOCKED, fixture.scheduler.state(CONSUMER));
         fixture.publish(runtime);
@@ -119,6 +133,108 @@ class AsyncCraftChainMaterialRefreshTest extends BootstrapTest {
         fixture.publish(runtime);
         verify(fixture.scheduler, times(1)).refreshBlocked(any());
         verify(fixture.scheduler, times(1)).refreshBlocked(any(BitSet.class), any());
+    }
+
+    @Test
+    void publicationBudgetKeepsUnpublishedFragmentsAndResumesWithoutDrainingTwice() throws Exception {
+        Fixture fixture = new Fixture();
+        CraftNodeRuntime runtime = spy(new CraftNodeRuntime(PRODUCER, "test", null, null, null));
+        NodeOutputAccumulator.Publication unit = new NodeOutputAccumulator.Publication(
+                PORT, IRON, new ItemStack(Items.IRON_INGOT),
+                IntegrationResourceKey.item(new ItemStack(Items.IRON_INGOT)));
+        doReturn(List.of(unit, unit), List.of()).when(runtime).drainIncrementalOutputs();
+        AtomicInteger permits = new AtomicInteger(1);
+        set(fixture.chain, "dispatchAllowed", (BooleanSupplier) () -> permits.getAndDecrement() > 0);
+
+        fixture.publish(runtime);
+        assertEquals(1L, fixture.broker.totalAvailable());
+        assertTrue(runtime.hasPendingPublications());
+        verify(runtime, times(1)).drainIncrementalOutputs();
+
+        set(fixture.chain, "dispatchAllowed", (BooleanSupplier) () -> true);
+        fixture.publish(runtime);
+        assertEquals(2L, fixture.broker.totalAvailable());
+        assertFalse(runtime.hasPendingPublications());
+        verify(runtime, times(1)).drainIncrementalOutputs();
+        fixture.publish(runtime);
+        assertEquals(2L, fixture.broker.totalAvailable());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void cancellationAfterPhysicalCollectionPublishesAndDeliversExactlyOnce() throws Exception {
+        Fixture fixture = new Fixture();
+        MinecraftServer server = (MinecraftServer) field(fixture.chain, "server");
+        ServerPlayer player = server.getPlayerList().getPlayer(fixture.chain.getPlayerId());
+        ServerLevel level = mock(ServerLevel.class);
+        when(player.getServer()).thenReturn(server);
+        when(player.serverLevel()).thenReturn(level);
+        List<ItemStack> delivered = new ArrayList<>();
+        CraftStorageEndpoint endpoint = mock(CraftStorageEndpoint.class);
+        when(endpoint.insert(eq(player), any(), eq(false))).thenAnswer(call -> {
+            ItemStack stack = call.getArgument(1);
+            delivered.add(stack.copy());
+            return StorageOperationResult.inserted(
+                    StorageOperationMode.PERFORM, stack, ItemStack.EMPTY);
+        });
+        set(fixture.chain, "storageEndpoint", endpoint);
+        IBatchDelegate delegate = mock(IBatchDelegate.class, CALLS_REAL_METHODS);
+        when(delegate.isCraftComplete(level)).thenReturn(true);
+        when(delegate.collectResult(player)).thenReturn(new ItemStack(Items.IRON_INGOT, 2));
+        AtomicBoolean allowed = new AtomicBoolean(true);
+        NodeAdmissionCoordinator admissions =
+                (NodeAdmissionCoordinator) field(fixture.chain, "graphAdmissions");
+        Map<NodeId, CraftNodeRuntime> chainRuntimes =
+                (Map<NodeId, CraftNodeRuntime>) field(fixture.chain, "nodeRuntimes");
+        List<CraftNodeRuntime> runtimes = new ArrayList<>();
+        ConcurrentNodeExecutor executor = new ConcurrentNodeExecutor(fixture.scheduler,
+                (ConcurrentNodeExecutor.AdmissionWorkerFactory) node -> {
+                    NodeAdmissionCoordinator.Admission admission = admissions.tryAdmitClaimed(
+                            new NodeAdmissionCoordinator.Candidate(node, List.of()));
+                    admissions.commit(admission);
+                    CraftNodeRuntime runtime = spy(new CraftNodeRuntime(node, "test",
+                            delegate, null, admission, null));
+                    runtime.setChainContext(new ArrayList<>(), player);
+                    runtime.attachOutputs(new NodeOutputAccumulator(List.of(
+                            OutputDeclaration.item(PORT, IRON, 2, OutputKind.PRIMARY))));
+                    doAnswer(call -> {
+                        Object observation = call.callRealMethod();
+                        allowed.set(false);
+                        return observation;
+                    }).when(runtime).observe();
+                    runtimes.add(runtime);
+                    chainRuntimes.put(node, runtime);
+                    return ConcurrentNodeExecutor.StartResult.started(runtime);
+                }, 1, node -> false,
+                (node, worker) -> {
+                    try { fixture.publish((CraftNodeRuntime) worker); }
+                    catch (Exception exception) { throw new IllegalStateException(exception); }
+                },
+                (node, worker) -> {
+                    try {
+                        Method completion = AsyncCraftChain.class.getDeclaredMethod(
+                                "completeGraphNode", NodeId.class, ConcurrentNodeExecutor.Worker.class);
+                        completion.setAccessible(true);
+                        return (ConcurrentNodeExecutor.CompletionStatus) completion.invoke(fixture.chain, node, worker);
+                    } catch (Exception exception) { throw new IllegalStateException(exception); }
+                }, 1, 2);
+        set(fixture.chain, "graphExecutor", executor);
+        executor.tick();
+        executor.tick(allowed::get);
+        assertTrue(executor.hasPendingRound());
+        assertEquals(0L, fixture.broker.totalAvailable());
+
+        fixture.chain.abortOffline("test cancellation");
+        fixture.chain.abortOffline("test cancellation again");
+
+        assertEquals(AsyncCraftChain.State.ABORTED, fixture.chain.state());
+        assertEquals(2, delivered.stream().mapToInt(ItemStack::getCount).sum());
+        assertEquals(0L, fixture.broker.totalAvailable());
+        assertFalse(runtimes.get(0).hasPendingPublications());
+        assertEquals(MaterialBroker.ReservationState.SETTLED,
+                fixture.broker.state(runtimes.get(0).admission().materialToken()));
+        verify(delegate, times(1)).collectResult(player);
+        verify(delegate, times(1)).onBatchFinished(player);
     }
 
     @ParameterizedTest

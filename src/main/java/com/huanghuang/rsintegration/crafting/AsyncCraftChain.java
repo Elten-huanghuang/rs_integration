@@ -1424,11 +1424,13 @@ public final class AsyncCraftChain {
 
         // Process synchronous GENERIC nodes outside the executor.
         // They complete immediately and don't wait for observation ticks.
-        refreshBlockedGraphNodes();
-        settleReadyVanillaNodes(online, vanillaAllowance);
-        refreshBlockedGraphNodes();
+        if (!graphExecutor.hasPendingRound()) {
+            refreshBlockedGraphNodes();
+            settleReadyVanillaNodes(online, vanillaAllowance);
+            refreshBlockedGraphNodes();
+        }
 
-        // Drive the executor: observe all running, settle completed, dispatch new.
+        // 预算耗尽时保留本轮阶段，避免重复观察、发布或结算。
         try {
             graphExecutor.tick(dispatchAllowed);
         } catch (Exception e) {
@@ -2983,16 +2985,19 @@ public final class AsyncCraftChain {
 
     private void publishIncrementalGraphOutputs(NodeId nodeId, ConcurrentNodeExecutor.Worker worker) {
         if (!(worker instanceof CraftNodeRuntime runtime) || graphMaterials == null) return;
-        List<NodeOutputAccumulator.Publication> publications = runtime.drainIncrementalOutputs();
+        runtime.prepareGraphPublications();
         reportedResources.addAll(runtime.drainDeliveredReports());
-        boolean advanced = runtime.consumeProgressSignal() || !publications.isEmpty();
+        boolean advanced = runtime.consumeProgressSignal();
         if (advanced) executionClock.markProgress();
         if (advanced || runtime.isWaitingForLeasedMachine()) {
             graphProgressWatchdog.markProgress();
         }
-        for (NodeOutputAccumulator.Publication publication : publications) {
+        while (runtime.hasPendingPublications()) {
+            if (state != State.ABORTED && !dispatchAllowed.getAsBoolean()) break;
+            NodeOutputAccumulator.Publication publication = runtime.nextGraphPublication();
             graphMaterials.publishActual(new MaterialSource.ProducerOutput(publication.port()),
                     publication.material(), publication.stack());
+            runtime.graphPublicationCompleted();
             recordPublishedOutput(publication.port(), publication.stack());
             if (publication.resource().kind()
                     == IntegrationResourceKey.ResourceKind.ITEM
@@ -3000,6 +3005,8 @@ public final class AsyncCraftChain {
                     graphNodes.get(nodeId), publication)) {
                 ExternalItemProgressBridge.enqueueCrafted(resolvePlayer(), publication.stack());
             }
+            executionClock.markProgress();
+            graphProgressWatchdog.markProgress();
         }
         refreshBlockedGraphNodes();
     }
@@ -4834,6 +4841,7 @@ public final class AsyncCraftChain {
     }
 
     private boolean finish(ServerPlayer online) {
+        if (!dispatchAllowed.getAsBoolean()) return false;
         if (!finalSettlementPrepared && useGraphExecution && graphMaterials != null) {
             for (ItemStack stack : graphMaterials.drainAvailableProducerAssets()) {
                 addToVirtualInventory(stack);
@@ -4850,7 +4858,8 @@ public final class AsyncCraftChain {
         finalSettlementPrepared = true;
 
         int stackBudget = finalSettlementStacksPerTick();
-        while (finalSettlementCursor < virtualInventory.size() && stackBudget-- > 0) {
+        while (finalSettlementCursor < virtualInventory.size() && stackBudget-- > 0
+                && dispatchAllowed.getAsBoolean()) {
             ItemStack vi = virtualInventory.get(finalSettlementCursor++);
             if (!vi.isEmpty()) {
                 if (InkFluidSupport.isToken(vi)) {
@@ -5084,10 +5093,14 @@ public final class AsyncCraftChain {
 
     public void abortForServerStop() {
         if (graphExecutor != null) {
+            BooleanSupplier previousAllowance = dispatchAllowed;
             try {
+                dispatchAllowed = () -> true;
                 graphExecutor.quiesceOnce();
             } catch (RuntimeException exception) {
                 RSIntegrationMod.LOGGER.error(ctx.format("Server-stop quiesce failed"), exception);
+            } finally {
+                dispatchAllowed = previousAllowance;
             }
         } else if (currentDelegate != null) {
             try {
@@ -5233,6 +5246,15 @@ public final class AsyncCraftChain {
         }
         boolean refundFlatCommitted = shouldRefundFlatCommitted(
                 flatTerminalClass, flatFailureRefundSafe);
+
+        if (graphExecutor != null) {
+            // 暂停前已收取的产物必须先入账，不能按尚在机器里的投入退款。
+            try {
+                graphExecutor.settleObservedOnStop();
+            } catch (RuntimeException exception) {
+                RSIntegrationMod.LOGGER.error(ctx.format("Failed to settle paused graph results"), exception);
+            }
+        }
 
         terminationReport = terminationService.terminate(craftId, cause, reason, policy,
                 new TerminationService.Actions() {

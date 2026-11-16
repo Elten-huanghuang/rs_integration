@@ -11,7 +11,7 @@ import java.util.function.Predicate;
 
 /**
  * Server-thread tick loop for bounded concurrent DAG node execution.
- * Every running node is observed before any completion changes the ready set.
+ * 每轮先观察全部运行节点，再发布和结算；预算耗尽时保留阶段，下一 tick 续行。
  */
 public final class ConcurrentNodeExecutor {
     static final int MAX_DISPATCH_PROBES_PER_TICK = 32;
@@ -28,6 +28,10 @@ public final class ConcurrentNodeExecutor {
         default void stopDispatch() {}
 
         default void cleanupFailure() {}
+
+        default boolean hasPendingPublications() { return false; }
+
+        default void setWorkAllowed(BooleanSupplier workAllowed) {}
     }
 
     public enum StartStatus {
@@ -111,6 +115,13 @@ public final class ConcurrentNodeExecutor {
     private int dispatchedThisCraft;
     private final Map<NodeId, RunningWorker> running = new LinkedHashMap<>();
     private final Map<NodeId, Boolean> exclusiveNodes = new LinkedHashMap<>();
+    private List<Map.Entry<NodeId, RunningWorker>> roundWorkers;
+    private final List<Result> roundResults = new ArrayList<>();
+    private int observationCursor;
+    private int publicationCursor;
+    private int completionCursor;
+    private boolean observationsComplete;
+    private boolean observationFailed;
 
     /** Legacy constructor: every node is treated as concurrency-safe. */
     public ConcurrentNodeExecutor(DagScheduler scheduler, WorkerFactory workers,
@@ -201,36 +212,75 @@ public final class ConcurrentNodeExecutor {
         tick(() -> true);
     }
 
-    public void tick(BooleanSupplier dispatchAllowed) {
-        processTick(true, Objects.requireNonNull(dispatchAllowed, "dispatchAllowed"));
+    public void tick(BooleanSupplier workAllowed) {
+        processTick(true, Objects.requireNonNull(workAllowed, "workAllowed"));
     }
 
     /** Observe, publish and settle once without permitting any new dispatch. */
     public void quiesceOnce() {
         stopScheduling();
-        processTick(false, () -> false);
+        boolean resuming = hasPendingRound();
+        processTick(false, () -> true);
+        if (resuming && !running.isEmpty()) processTick(false, () -> true);
     }
 
-    private void processTick(boolean allowDispatch, BooleanSupplier dispatchAllowed) {
-        List<Result> observations = observeAll();
-        boolean failed = observations.stream().anyMatch(result -> result.observation == Observation.FAILED);
-        if (failed && !scheduler.isStopping()) {
-            for (RunningWorker runningWorker : running.values()) runningWorker.worker().stopDispatch();
-        }
+    /** 取消时只处理已经观察到的结果，不再轮询未观察机器或派发新操作。 */
+    public void settleObservedOnStop() {
+        stopScheduling();
+        if (roundWorkers == null) return;
+        observationsComplete = true;
+        if (!publishAndComplete(() -> true)) return;
+        clearRound();
+    }
 
-        List<Result> published = new ArrayList<>(observations.size());
-        for (Result result : observations) {
+    public boolean hasPendingRound() {
+        return roundWorkers != null;
+    }
+
+    private void processTick(boolean allowDispatch, BooleanSupplier workAllowed) {
+        if (!workAllowed.getAsBoolean()) return;
+        if (roundWorkers == null) {
+            roundWorkers = List.copyOf(running.entrySet());
+        }
+        while (!observationsComplete && observationCursor < roundWorkers.size()) {
+            if (!workAllowed.getAsBoolean()) return;
+            Map.Entry<NodeId, RunningWorker> entry = roundWorkers.get(observationCursor++);
+            entry.getValue().worker().setWorkAllowed(workAllowed);
+            Result result = observe(entry.getKey(), entry.getValue());
+            roundResults.add(result);
+            observationFailed |= result.observation == Observation.FAILED;
+        }
+        if (!observationsComplete) {
+            observationsComplete = true;
+            if (observationFailed && !scheduler.isStopping()) {
+                for (RunningWorker worker : running.values()) worker.worker().stopDispatch();
+            }
+        }
+        if (!publishAndComplete(workAllowed)) return;
+        clearRound();
+        if (allowDispatch && !scheduler.isStopping()) {
+            dispatchAvailable(maxDispatchPerTick, workAllowed);
+        }
+    }
+
+    private boolean publishAndComplete(BooleanSupplier workAllowed) {
+        while (publicationCursor < roundResults.size()) {
+            if (!workAllowed.getAsBoolean()) return false;
+            Result result = roundResults.get(publicationCursor);
             Observation observation = result.observation;
             try {
                 publications.publish(result.nodeId, result.worker);
+                if (result.worker.hasPendingPublications()) return false;
             } catch (RuntimeException exception) {
                 RSIntegrationMod.LOGGER.error("Graph node publication failed: {}", result.nodeId, exception);
                 observation = Observation.FAILED;
             }
-            published.add(new Result(result.nodeId, result.worker, result.epoch, observation));
+            roundResults.set(publicationCursor++,
+                    new Result(result.nodeId, result.worker, result.epoch, observation));
         }
-
-        for (Result result : published) {
+        while (completionCursor < roundResults.size()) {
+            if (!workAllowed.getAsBoolean()) return false;
+            Result result = roundResults.get(completionCursor++);
             switch (result.observation) {
                 case WORKING -> { }
                 case SUCCEEDED -> {
@@ -276,10 +326,17 @@ public final class ConcurrentNodeExecutor {
                 }
             }
         }
+        return true;
+    }
 
-        if (allowDispatch && !scheduler.isStopping()) {
-            dispatchAvailable(maxDispatchPerTick, dispatchAllowed);
-        }
+    private void clearRound() {
+        roundWorkers = null;
+        roundResults.clear();
+        observationCursor = 0;
+        publicationCursor = 0;
+        completionCursor = 0;
+        observationsComplete = false;
+        observationFailed = false;
     }
 
     public void stopScheduling() {
@@ -303,21 +360,15 @@ public final class ConcurrentNodeExecutor {
         };
     }
 
-    private List<Result> observeAll() {
-        List<Result> results = new ArrayList<>(running.size());
-        for (Map.Entry<NodeId, RunningWorker> entry : List.copyOf(running.entrySet())) {
-            Observation observation;
-            try {
-                observation = Objects.requireNonNull(entry.getValue().worker().observe(), "worker observation");
-            } catch (RuntimeException exception) {
-                RSIntegrationMod.LOGGER.error(
-                        "Graph node observation failed: {}", entry.getKey(), exception);
-                observation = Observation.FAILED;
-            }
-            results.add(new Result(entry.getKey(), entry.getValue().worker(),
-                    entry.getValue().epoch(), observation));
+    private Result observe(NodeId nodeId, RunningWorker runningWorker) {
+        Observation observation;
+        try {
+            observation = Objects.requireNonNull(runningWorker.worker().observe(), "worker observation");
+        } catch (RuntimeException exception) {
+            RSIntegrationMod.LOGGER.error("Graph node observation failed: {}", nodeId, exception);
+            observation = Observation.FAILED;
         }
-        return results;
+        return new Result(nodeId, runningWorker.worker(), runningWorker.epoch(), observation);
     }
 
     private void dispatchAvailable(int tickBudget, BooleanSupplier dispatchAllowed) {

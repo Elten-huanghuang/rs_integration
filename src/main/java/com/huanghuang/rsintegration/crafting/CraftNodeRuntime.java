@@ -24,6 +24,9 @@ import net.minecraft.server.level.ServerLevel;
 
 import javax.annotation.Nullable;
 import java.util.List;
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.function.BooleanSupplier;
 
 /**
  * Wraps a single DAG node's physical delegate, ledger, capture handle, and timeout.
@@ -54,7 +57,9 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     private boolean resourcesClosed;
     private List<ItemStack> confirmedOutputs = List.of();
     private boolean terminalOutputsDrained;
+    private final Deque<NodeOutputAccumulator.Publication> queuedPublications = new ArrayDeque<>();
     private int waitTicks;
+    private long lastObservationTick = Long.MIN_VALUE;
     private int drainingTicks;
     private int observedCompletedOperations;
     private long observedProductionSequence;
@@ -156,6 +161,28 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
             progressObserved = true;
         }
         return outputs.add(actual);
+    }
+
+    void prepareGraphPublications() {
+        if (queuedPublications.isEmpty()) queuedPublications.addAll(drainIncrementalOutputs());
+    }
+
+    @Override
+    public boolean hasPendingPublications() {
+        return !queuedPublications.isEmpty();
+    }
+
+    NodeOutputAccumulator.Publication nextGraphPublication() {
+        return queuedPublications.getFirst();
+    }
+
+    void graphPublicationCompleted() {
+        queuedPublications.removeFirst();
+    }
+
+    @Override
+    public void setWorkAllowed(BooleanSupplier workAllowed) {
+        if (delegate instanceof ParallelCraftGroup group) group.setObservationAllowed(workAllowed);
     }
 
     boolean consumeProgressSignal() {
@@ -374,16 +401,8 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
         if (delegate == null || failureReason != null) {
             return ConcurrentNodeExecutor.Observation.FAILED;
         }
-        waitTicks++;
-
         long observeStartNanos = System.nanoTime();
         try {
-            if (delegate instanceof ParallelCraftGroup group && group.isDraining()) {
-                drainingTicks++;
-            } else {
-                drainingTicks = 0;
-            }
-
             // Graph workers previously passed null here. Delegates that resolve
             // machine state through the supplied level (notably Goety rituals)
             // then dereferenced a null ServerLevel during recursive crafts.
@@ -392,6 +411,17 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
                 failureReason = "graph observation level unavailable";
                 failureCode = CraftFailureCode.CHUNK_UNLOADED;
                 return ConcurrentNodeExecutor.Observation.FAILED;
+            }
+            long currentTick = observeLevel.getGameTime();
+            int elapsedTicks = lastObservationTick == Long.MIN_VALUE ? 1
+                    : (int) Math.min(Integer.MAX_VALUE, Math.max(1L, currentTick - lastObservationTick));
+            lastObservationTick = currentTick;
+            // 分片跳过的 tick 仍计入无进展超时，不能把少轮询当成延长机器寿命。
+            waitTicks = (int) Math.min(Integer.MAX_VALUE, (long) waitTicks + elapsedTicks);
+            if (delegate instanceof ParallelCraftGroup group && group.isDraining()) {
+                drainingTicks = (int) Math.min(Integer.MAX_VALUE, (long) drainingTicks + elapsedTicks);
+            } else {
+                drainingTicks = 0;
             }
             IBatchDelegate.CraftObservation observation;
             try {
@@ -520,6 +550,11 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
 
     @Override
     public void cleanupFailure() {
+        if (virtualInventory != null) {
+            while (!queuedPublications.isEmpty()) {
+                virtualInventory.add(queuedPublications.removeFirst().stack());
+            }
+        }
         if (terminal) return;
         terminal = true;
         if (delegate != null) {

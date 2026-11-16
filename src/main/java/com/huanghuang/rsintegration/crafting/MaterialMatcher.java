@@ -14,6 +14,7 @@ import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCat
 
 import javax.annotation.Nullable;
 import java.util.Objects;
+import java.util.function.Predicate;
 
 /** Shared matching semantics for graph planning and runtime material ownership. */
 public final class MaterialMatcher {
@@ -34,7 +35,12 @@ public final class MaterialMatcher {
         if (stack == null || stack.isEmpty() || stack.getItem() != material.item()) return false;
         if (InkFluidSupport.isToken(stack)
                 && InkFluidSupport.sameIdentity(material.toStack(1), stack)) return true;
-        if (!isSlashBladeItem(material.item())) return MaterialKey.of(stack).equals(material);
+        // 声明已规范化，运行时只需生成一次稳定身份，避免构造 MaterialKey 再解析同一份 SNBT。
+        if (!isSlashBladeItem(material.item())) {
+            String actual = CanonicalNbt.exactSnbt(stack.getTag());
+            return Objects.equals(material.tag(), actual)
+                    || Objects.equals(material.tag(), CanonicalNbt.normalizeSnbt(actual));
+        }
 
         CompoundTag expectedTag = parseTag(material.tag());
         if (material.tag() != null && expectedTag == null) return false;
@@ -61,6 +67,16 @@ public final class MaterialMatcher {
         } catch (LinkageError ignored) {
             return false;
         }
+    }
+
+    /** 固定声明只解析一次；特殊产物和非常规 SNBT 继续走原匹配规则。 */
+    public static Predicate<ItemStack> outputMatcher(MaterialKey declared) {
+        Objects.requireNonNull(declared, "declared");
+        CompoundTag expected = parseTag(declared.tag());
+        return stack -> stack != null && !stack.isEmpty() && stack.getItem() == declared.item()
+                && (declared.tag() == null
+                || expected != null && expected.equals(stack.getTag())
+                || matchesOutputDeclaration(declared, stack));
     }
 
     /**

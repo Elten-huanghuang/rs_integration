@@ -162,6 +162,11 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     private int startProbes;
     private int dispatchCursor;
     private BooleanSupplier dispatchAllowed = () -> true;
+    private BooleanSupplier observationAllowed = () -> true;
+    private int transferCursor;
+    private int observationCursor;
+    private boolean transferStarted;
+    private boolean transferComplete;
     /** Whether every worker requiring physical cleanup was successfully cleaned. */
     private boolean physicalFailureCleanupCompleted;
     private boolean failureCleanupFinished;
@@ -249,6 +254,10 @@ public final class ParallelCraftGroup implements IBatchDelegate {
 
     public void setDispatchAllowed(BooleanSupplier dispatchAllowed) {
         this.dispatchAllowed = Objects.requireNonNull(dispatchAllowed, "dispatchAllowed");
+    }
+
+    public void setObservationAllowed(BooleanSupplier observationAllowed) {
+        this.observationAllowed = Objects.requireNonNull(observationAllowed, "observationAllowed");
     }
 
     public void setMachineLeases(MachineLeaseRegistry machineLeases) {
@@ -1064,7 +1073,11 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     @Override
     public void transferOutputs(ServerLevel level) {
         if (!started && !draining) return;
-        for (WorkerSlot worker : workers) {
+        if (transferComplete || observationCursor > 0) return;
+        transferStarted = true;
+        while (transferCursor < workers.size()) {
+            if (!observationAllowed.getAsBoolean()) return;
+            WorkerSlot worker = workers.get(transferCursor++);
             if (!worker.running()) continue;
             try {
                 worker.delegate.transferOutputs(level);
@@ -1078,6 +1091,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
                 beginDraining("worker output transfer failed at " + worker.machine.pos());
             }
         }
+        transferComplete = true;
     }
 
     @Override
@@ -1085,7 +1099,15 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         if (!started && !draining) return new CraftObservation(CraftPhase.WAITING_FOR_START);
         currentTick = level.getGameTime();
 
-        for (WorkerSlot worker : workers) {
+        // 搬运和观察都保留游标，不能因为外层只看到一个节点就整组越过时间预算。
+        if (transferStarted && !transferComplete) {
+            return new CraftObservation(CraftPhase.WORKING).withCompletedWork(workProgressSequence);
+        }
+        while (observationCursor < workers.size()) {
+            if (!observationAllowed.getAsBoolean()) {
+                return new CraftObservation(CraftPhase.WORKING).withCompletedWork(workProgressSequence);
+            }
+            WorkerSlot worker = workers.get(observationCursor++);
             if (!worker.running()) continue;
             CraftObservation observation;
             try {
@@ -1127,6 +1149,10 @@ public final class ParallelCraftGroup implements IBatchDelegate {
                 settleCompletedOperation(worker);
             }
         }
+        observationCursor = 0;
+        transferCursor = 0;
+        transferStarted = false;
+        transferComplete = false;
 
         if (!draining && operations.queuedOperations() > 0) {
             dispatchQueuedOperations();
@@ -1148,7 +1174,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             return new CraftObservation(CraftPhase.FAILED, failureDetail);
         }
         if (operations.isComplete()) return new CraftObservation(CraftPhase.DONE);
-        reportWaitingWorkers(level.getGameTime());
+        if (observationAllowed.getAsBoolean()) reportWaitingWorkers(level.getGameTime());
         return new CraftObservation(CraftPhase.WORKING).withCompletedWork(workProgressSequence);
     }
 

@@ -18,6 +18,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ConcurrentNodeExecutorTest extends BootstrapTest {
@@ -204,7 +205,7 @@ class ConcurrentNodeExecutorTest extends BootstrapTest {
     }
 
     @Test
-    void timeBudgetStopsNewProbesButStillObservesRunningWorkers() {
+    void timeBudgetStopsNewProbesAndDefersObservationUntilNextSlice() {
         DagScheduler scheduler = new DagScheduler(forkJoinGraph());
         AtomicBoolean allowed = new AtomicBoolean(true);
         AtomicInteger observations = new AtomicInteger();
@@ -222,11 +223,265 @@ class ConcurrentNodeExecutorTest extends BootstrapTest {
         executor.tick(allowed::get);
         assertEquals(1, starts.get());
         executor.tick(allowed::get);
-        assertEquals(1, observations.get());
+        assertEquals(0, observations.get());
         assertEquals(1, starts.get());
         allowed.set(true);
         executor.tick(allowed::get);
+        assertEquals(1, observations.get());
         assertEquals(2, starts.get());
+    }
+
+    @Test
+    void observationResumesBeforeAnyPublicationOrCompletion() {
+        DagScheduler scheduler = new DagScheduler(independentNodes(2));
+        AtomicBoolean allowed = new AtomicBoolean(true);
+        List<Integer> observed = new ArrayList<>();
+        List<Integer> published = new ArrayList<>();
+        List<Integer> completed = new ArrayList<>();
+        ConcurrentNodeExecutor executor = new ConcurrentNodeExecutor(scheduler,
+                (ConcurrentNodeExecutor.AdmissionWorkerFactory) node ->
+                        ConcurrentNodeExecutor.StartResult.started(() -> {
+                            observed.add(node.value());
+                            if (node.value() == 0) allowed.set(false);
+                            return ConcurrentNodeExecutor.Observation.SUCCEEDED;
+                        }),
+                2, node -> false,
+                (node, worker) -> published.add(node.value()),
+                (node, worker) -> {
+                    completed.add(node.value());
+                    return ConcurrentNodeExecutor.CompletionStatus.SUCCEEDED;
+                }, 2, 2);
+        executor.tick();
+
+        executor.tick(allowed::get);
+        assertEquals(List.of(0), observed);
+        assertTrue(published.isEmpty());
+        assertTrue(completed.isEmpty());
+        assertTrue(executor.hasPendingRound());
+
+        allowed.set(true);
+        executor.tick(allowed::get);
+        assertEquals(List.of(0, 1), observed);
+        assertEquals(List.of(0, 1), published);
+        assertEquals(List.of(0, 1), completed);
+        assertTrue(executor.isTerminal());
+        assertFalse(executor.hasPendingRound());
+    }
+
+    @Test
+    void publicationResumesExactlyOnceBeforeCompletionStarts() {
+        DagScheduler scheduler = new DagScheduler(independentNodes(2));
+        AtomicBoolean allowed = new AtomicBoolean(true);
+        AtomicInteger observed = new AtomicInteger();
+        List<Integer> published = new ArrayList<>();
+        List<Integer> completed = new ArrayList<>();
+        ConcurrentNodeExecutor executor = new ConcurrentNodeExecutor(scheduler,
+                (ConcurrentNodeExecutor.AdmissionWorkerFactory) node ->
+                        ConcurrentNodeExecutor.StartResult.started(() -> {
+                            observed.incrementAndGet();
+                            return ConcurrentNodeExecutor.Observation.SUCCEEDED;
+                        }),
+                2, node -> false,
+                (node, worker) -> {
+                    published.add(node.value());
+                    if (node.value() == 0) allowed.set(false);
+                },
+                (node, worker) -> {
+                    completed.add(node.value());
+                    return ConcurrentNodeExecutor.CompletionStatus.SUCCEEDED;
+                }, 2, 2);
+        executor.tick();
+
+        executor.tick(allowed::get);
+        assertEquals(2, observed.get());
+        assertEquals(List.of(0), published);
+        assertTrue(completed.isEmpty());
+
+        allowed.set(true);
+        executor.tick(allowed::get);
+        assertEquals(2, observed.get());
+        assertEquals(List.of(0, 1), published);
+        assertEquals(List.of(0, 1), completed);
+        assertTrue(executor.isTerminal());
+    }
+
+    @Test
+    void pendingWorkerPublicationsMustFinishBeforeSettlement() {
+        DagScheduler scheduler = new DagScheduler(singleNodeGraph());
+        AtomicInteger observed = new AtomicInteger();
+        AtomicInteger published = new AtomicInteger();
+        AtomicInteger completed = new AtomicInteger();
+        AtomicBoolean pending = new AtomicBoolean(true);
+        ConcurrentNodeExecutor.Worker worker = new ConcurrentNodeExecutor.Worker() {
+            @Override
+            public ConcurrentNodeExecutor.Observation observe() {
+                observed.incrementAndGet();
+                return ConcurrentNodeExecutor.Observation.SUCCEEDED;
+            }
+
+            @Override
+            public boolean hasPendingPublications() {
+                return pending.get();
+            }
+        };
+        ConcurrentNodeExecutor executor = new ConcurrentNodeExecutor(scheduler,
+                (ConcurrentNodeExecutor.AdmissionWorkerFactory) node ->
+                        ConcurrentNodeExecutor.StartResult.started(worker),
+                1, node -> false,
+                (node, running) -> {
+                    if (published.incrementAndGet() == 2) pending.set(false);
+                },
+                (node, running) -> {
+                    completed.incrementAndGet();
+                    return ConcurrentNodeExecutor.CompletionStatus.SUCCEEDED;
+                }, 1, 1);
+        executor.tick();
+        executor.tick();
+
+        assertTrue(executor.hasPendingRound());
+        assertEquals(0, completed.get());
+        assertEquals(DagScheduler.NodeState.RUNNING, scheduler.state(new NodeId(0)));
+        executor.tick();
+
+        assertEquals(1, observed.get());
+        assertEquals(2, published.get());
+        assertEquals(1, completed.get());
+        assertTrue(executor.isTerminal());
+    }
+
+    @Test
+    void completionResumesWithoutRepeatingObservationPublicationOrSettlement() {
+        DagScheduler scheduler = new DagScheduler(independentNodes(2));
+        AtomicBoolean allowed = new AtomicBoolean(true);
+        AtomicInteger observed = new AtomicInteger();
+        AtomicInteger published = new AtomicInteger();
+        List<Integer> completed = new ArrayList<>();
+        ConcurrentNodeExecutor executor = new ConcurrentNodeExecutor(scheduler,
+                (ConcurrentNodeExecutor.AdmissionWorkerFactory) node ->
+                        ConcurrentNodeExecutor.StartResult.started(() -> {
+                            observed.incrementAndGet();
+                            return ConcurrentNodeExecutor.Observation.SUCCEEDED;
+                        }),
+                2, node -> false, (node, worker) -> published.incrementAndGet(),
+                (node, worker) -> {
+                    completed.add(node.value());
+                    if (node.value() == 0) allowed.set(false);
+                    return ConcurrentNodeExecutor.CompletionStatus.SUCCEEDED;
+                }, 2, 2);
+        executor.tick();
+
+        executor.tick(allowed::get);
+        assertEquals(1, executor.runningCount());
+        assertEquals(List.of(0), completed);
+        allowed.set(true);
+        executor.tick(allowed::get);
+
+        assertEquals(2, observed.get());
+        assertEquals(2, published.get());
+        assertEquals(List.of(0, 1), completed);
+        assertTrue(executor.isTerminal());
+    }
+
+    @Test
+    void cancellationSettlesOnlyObservedResultsAndCannotUnlockDependents() {
+        DagScheduler scheduler = new DagScheduler(forkJoinGraph());
+        AtomicBoolean allowed = new AtomicBoolean(true);
+        List<Integer> observed = new ArrayList<>();
+        List<Integer> published = new ArrayList<>();
+        List<Integer> completed = new ArrayList<>();
+        ConcurrentNodeExecutor executor = new ConcurrentNodeExecutor(scheduler,
+                (ConcurrentNodeExecutor.AdmissionWorkerFactory) node ->
+                        ConcurrentNodeExecutor.StartResult.started(() -> {
+                            observed.add(node.value());
+                            allowed.set(false);
+                            return ConcurrentNodeExecutor.Observation.SUCCEEDED;
+                        }),
+                2, node -> false,
+                (node, worker) -> published.add(node.value()),
+                (node, worker) -> {
+                    completed.add(node.value());
+                    return ConcurrentNodeExecutor.CompletionStatus.SUCCEEDED;
+                }, 2, 3);
+        executor.tick();
+        executor.tick(allowed::get);
+
+        executor.settleObservedOnStop();
+        executor.settleObservedOnStop();
+
+        assertEquals(List.of(0), observed);
+        assertEquals(List.of(0), published);
+        assertEquals(List.of(0), completed);
+        assertEquals(DagScheduler.NodeState.CANCELLED, scheduler.state(new NodeId(0)));
+        assertEquals(DagScheduler.NodeState.RUNNING, scheduler.state(new NodeId(1)));
+        assertEquals(DagScheduler.NodeState.CANCELLED, scheduler.state(new NodeId(2)));
+        assertFalse(executor.hasPendingRound());
+    }
+
+    @Test
+    void shutdownResumesPartialPublicationAndDrainsWithoutDuplicatingResults() {
+        DagScheduler scheduler = new DagScheduler(independentNodes(2));
+        AtomicBoolean allowed = new AtomicBoolean(true);
+        AtomicInteger observed = new AtomicInteger();
+        List<Integer> published = new ArrayList<>();
+        List<Integer> completed = new ArrayList<>();
+        ConcurrentNodeExecutor executor = new ConcurrentNodeExecutor(scheduler,
+                (ConcurrentNodeExecutor.AdmissionWorkerFactory) node ->
+                        ConcurrentNodeExecutor.StartResult.started(() -> {
+                            observed.incrementAndGet();
+                            return ConcurrentNodeExecutor.Observation.SUCCEEDED;
+                        }),
+                2, node -> false,
+                (node, worker) -> {
+                    published.add(node.value());
+                    allowed.set(false);
+                },
+                (node, worker) -> {
+                    completed.add(node.value());
+                    return ConcurrentNodeExecutor.CompletionStatus.SUCCEEDED;
+                }, 2, 2);
+        executor.tick();
+        executor.tick(allowed::get);
+        executor.quiesceOnce();
+
+        assertEquals(2, observed.get());
+        assertEquals(List.of(0, 1), published);
+        assertEquals(List.of(0, 1), completed);
+        assertTrue(executor.isTerminal());
+    }
+
+    @Test
+    void shutdownReobservesWorkingResultFromPausedRoundWithoutStartingNewWork() {
+        DagScheduler scheduler = new DagScheduler(independentNodes(2));
+        AtomicBoolean allowed = new AtomicBoolean(true);
+        AtomicInteger observed = new AtomicInteger();
+        AtomicInteger started = new AtomicInteger();
+        AtomicInteger completed = new AtomicInteger();
+        ConcurrentNodeExecutor executor = new ConcurrentNodeExecutor(scheduler,
+                (ConcurrentNodeExecutor.AdmissionWorkerFactory) node -> {
+                    started.incrementAndGet();
+                    return ConcurrentNodeExecutor.StartResult.started(() -> {
+                        int count = observed.incrementAndGet();
+                        allowed.set(false);
+                        return count == 1 ? ConcurrentNodeExecutor.Observation.WORKING
+                                : ConcurrentNodeExecutor.Observation.SUCCEEDED;
+                    });
+                }, 1, node -> false,
+                (node, running) -> { },
+                (node, running) -> {
+                    completed.incrementAndGet();
+                    return ConcurrentNodeExecutor.CompletionStatus.SUCCEEDED;
+                }, 1, 2);
+        executor.tick();
+        executor.tick(allowed::get);
+        assertTrue(executor.hasPendingRound());
+
+        executor.quiesceOnce();
+
+        assertEquals(1, started.get());
+        assertEquals(2, observed.get());
+        assertEquals(1, completed.get());
+        assertTrue(executor.isTerminal());
+        assertEquals(DagScheduler.NodeState.CANCELLED, scheduler.state(new NodeId(1)));
     }
 
     @Test

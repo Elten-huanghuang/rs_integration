@@ -185,14 +185,15 @@ class AsyncCraftDisplayTargetTest extends BootstrapTest {
         OutputPortId secondary = new OutputPortId(node, 1);
         MaterialKey gold = MaterialKey.of(new ItemStack(Items.GOLD_INGOT));
         MaterialKey iron = MaterialKey.of(new ItemStack(Items.IRON_INGOT));
-        CraftNodeRuntime runtime = mock(CraftNodeRuntime.class);
-        when(runtime.drainIncrementalOutputs()).thenReturn(
+        CraftNodeRuntime runtime = spy(new CraftNodeRuntime(node, "test", null, null, null));
+        doReturn(
                 List.of(new NodeOutputAccumulator.Publication(secondary, gold,
                         new ItemStack(Items.GOLD_INGOT, 4), IntegrationResourceKey.item(new ItemStack(Items.GOLD_INGOT)))),
                 List.of(new NodeOutputAccumulator.Publication(new OutputPortId(node, 0), iron,
                         new ItemStack(Items.IRON_INGOT, 16), IntegrationResourceKey.item(new ItemStack(Items.IRON_INGOT)))),
                 List.of(new NodeOutputAccumulator.Publication(secondary, gold,
-                        new ItemStack(Items.GOLD_INGOT, 60), IntegrationResourceKey.item(new ItemStack(Items.GOLD_INGOT)))));
+                        new ItemStack(Items.GOLD_INGOT, 60), IntegrationResourceKey.item(new ItemStack(Items.GOLD_INGOT)))))
+                .when(runtime).drainIncrementalOutputs();
         Method publish = AsyncCraftChain.class.getDeclaredMethod("publishIncrementalGraphOutputs",
                 NodeId.class, ConcurrentNodeExecutor.Worker.class);
         publish.setAccessible(true);
