@@ -16,11 +16,11 @@ public final class SteamerBatchConfig {
     /** 每个蒸笼层的格子数（RackData 构造时创建长度为 4 的 RackItemData 数组）。 */
     public static final int SLOTS_PER_RACK = 4;
 
-    /** 蒸锅本体自带的基础层数（RackInfo：pot 为真时层数再加 1）。 */
-    public static final int POT_BASE_RACKS = 1;
+    /** 原生 MAX_STACK 限制的是方块实体数量，包含锅底。 */
+    public static final int MAX_STRUCTURE_BLOCKS = 5;
 
-    /** 整座蒸锅允许的最大层数（SteamerBlockEntity 的原生上限 MAX_STACK）。 */
-    public static final int MAX_RACKS = 5;
+    /** 锅底最多容纳两层蒸笼，其余每个方块最多容纳四层。 */
+    public static final int MAX_RACKS = 2 + (MAX_STRUCTURE_BLOCKS - 1) * 4;
 
     /** 每份蒸制配方的基准耗时（tick），用于把批次折算成有限的占机时间。 */
     public static final int BASE_STEAM_TIME = 100;
@@ -36,14 +36,13 @@ public final class SteamerBatchConfig {
     }
 
     /**
-     * 给定"蒸锅本体 + 若干层蒸笼"，蒸锅一共能放几份食材。
+     * 按整座结构实际持有的蒸笼层数计算容量，锅底本身不额外提供格子。
      *
-     * @param rackLayers 蒸笼层数（不含蒸锅本体自带的那一层），负数按 0 处理
-     * @return 至少为一个蒸笼层的格数
+     * @param rackLayers 所有方块实体的蒸笼总层数，负数按 0 处理
+     * @return 蒸笼总格数，没有蒸笼时为 0
      */
     public static int slotCapacity(int rackLayers) {
-        int layers = POT_BASE_RACKS + Math.max(0, rackLayers);
-        return Math.min(MAX_RACKS, layers) * SLOTS_PER_RACK;
+        return Math.min(MAX_RACKS, Math.max(0, rackLayers)) * SLOTS_PER_RACK;
     }
 
     /**
@@ -66,7 +65,7 @@ public final class SteamerBatchConfig {
     /**
      * 本机一次能预载几份。
      *
-     * @param rackLayers  蒸笼层数（不含蒸锅本体）
+     * @param rackLayers  整座结构实际持有的蒸笼总层数
      * @param processTime 单份蒸制耗时（tick）
      * @param limit       配置的操作上限
      * @return 0 表示当前结构放不下任何一份

@@ -157,16 +157,12 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
     // -- 并发与批量契约 --
     // 三台锅共用同一份实现：并发声明、批量份数、输入缓冲契约都在这里统一声明。
-    //
-    // 注意：这三台锅的 ModType 已在 GraphConcurrencyEligibility.WORLD_CAPTURE_TYPES 里，
-    // 而 AsyncCraftChain 是「资格表非空则优先」，所以下面的 concurrencyCapabilities()
-    // 对它们只是契约完整性，实际并发由资格表决定，改这里不会改变并发行为。
 
     @Override
     public BatchConcurrencyCapabilities concurrencyCapabilities() {
-        // 原料与容器全部由共享账本预留，成品始终落在机器自己的槽位/世界掉落，
-        // 失败清理可在机器离线下独立完成，因此允许与同类型机器并行。
-        return BatchConcurrencyCapabilities.machineSlotWithLocalWorldItems();
+        // 原料与容器由共享账本预留，取餐时的世界掉落由操作独占捕获。
+        // 运行时声明须与 getExpectedOutput() 一致，否则调度器会在投料前拒绝启动。
+        return BatchConcurrencyCapabilities.ownedWorldCapture();
     }
 
     @Override

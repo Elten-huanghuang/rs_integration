@@ -88,8 +88,7 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
         this.myDim = level.dimension();
         this.myPos = pos;
         this.player = player;
-        ResourceLocation machineId = BuiltInRegistries.BLOCK.getKey(
-                level.getBlockState(pos).getBlock());
+        ResourceLocation machineId = blockIdAt(pos);
         this.machineNamespace = YoukaiRegistryIds.isSupportedNamespace(machineId.getNamespace())
                 ? machineId.getNamespace()
                 : recipeId.getNamespace();
@@ -101,6 +100,8 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
         }
         this.recipe = (AbstractCookingRecipe) found;
         this.craftDone = false;
+        // 绑定指向蒸笼或盖子时，操作租约也必须落在同一座蒸锅的锅底。
+        findPotBase();
         return true;
     }
 
@@ -198,8 +199,7 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
         if (!supportsInputBuffer()) return InputBufferContract.none();
         BlockEntity be = myLevel.getBlockEntity(potPos());
         if (be == null || !isSteamerBE(be)) return InputBufferContract.none();
-        List<?> racks = getRacks(be);
-        if (racks == null || racks.isEmpty()) return InputBufferContract.none();
+        if (structureRacks(be).isEmpty()) return InputBufferContract.none();
 
         ItemStack prototype = ingredientPrototype();
         if (prototype.isEmpty()) return InputBufferContract.none();
@@ -346,8 +346,7 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
         forceChunkLoad(true);
         if (!myLevel.hasChunkAt(myPos)) return false;
 
-        // Find pot base -- the BE lives in the bottom pot block.
-        // myPos might be the rack or lid position if the user bound those.
+        // 锅底与上方蒸笼可各有方块实体，绑定位置统一归一到锅底。
         BlockEntity be = findPotBase();
         if (be == null) {
             RSIntegrationMod.LOGGER.warn("[RSI-Steamer] Pot base not found at myPos={}", myPos);
@@ -372,8 +371,8 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
         }
 
         // Verify racks exist and are valid
-        List<?> racks = getRacks(be);
-        if (racks == null || racks.isEmpty()) {
+        List<OwnedRack> racks = structureRacks(be);
+        if (racks.isEmpty()) {
             RSIntegrationMod.LOGGER.warn("[RSI-Steamer] No racks at potBase={}", potBasePos);
             player.sendSystemMessage(Component.translatable("rsi.youkaishomecoming.rack_invalid"));
             forceChunkLoad(false);
@@ -395,7 +394,7 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
         boolean inserted = true;
         for (ItemStack portion : materials) {
             if (portion.isEmpty()) continue;
-            if (tryAddItemToAnyRack(racks, be, portion.copyWithCount(1))) {
+            if (tryAddItemToAnyRack(racks, portion.copyWithCount(1))) {
                 placed.add(portion.copyWithCount(1));
                 placedInputs.add(portion.copyWithCount(1));
                 continue;
@@ -418,9 +417,9 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
     }
 
     /** 依次尝试每个蒸笼格，第一个装得下这份食材的格胜出。 */
-    private boolean tryAddItemToAnyRack(List<?> racks, BlockEntity be, ItemStack portion) {
-        for (Object rack : racks) {
-            if (tryAddItemToRack(rack, be, portion)) return true;
+    private boolean tryAddItemToAnyRack(List<OwnedRack> racks, ItemStack portion) {
+        for (OwnedRack rack : racks) {
+            if (tryAddItemToRack(rack.rack(), rack.owner(), portion)) return true;
         }
         return false;
     }
@@ -431,21 +430,23 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
      * 正在蒸的食材不属于本次失败回滚范围，动它会与原生进度对不上。
      */
     private void detachRecoveredInputs(BlockEntity be, List<ItemStack> placed) {
-        List<?> racks = getRacks(be);
-        if (racks != null) {
+        List<OwnedRack> racks = structureRacks(be);
+        if (!racks.isEmpty()) {
             for (ItemStack expected : placed) {
                 if (expected.isEmpty()) continue;
-                for (Object rack : racks) {
-                    Object[] items = getRackItems(rack);
+                rackSearch:
+                for (OwnedRack rack : racks) {
+                    Object[] items = getRackItems(rack.rack());
                     if (items == null) continue;
                     for (Object itemData : items) {
                         if (itemData == null) continue;
                         ItemStack visible = getStack(itemData);
                         if (visible.isEmpty() || !ItemStack.isSameItemSameTags(visible, expected)) continue;
                         if (!mayExtract(itemData)) continue;
-                        setStack(itemData, be, ItemStack.EMPTY);
+                        setStack(itemData, rack.owner(), ItemStack.EMPTY);
                         markItemDirty(itemData);
-                        break;
+                        rack.owner().setChanged();
+                        break rackSearch;
                     }
                 }
             }
@@ -467,16 +468,14 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
      * 原生的 {@code mayExtract()} 只有在食材"已经变成成品"时才为真，
      * 因此这里取到的都是熟食，不会把生食材当成品交出去。
      */
-    private List<Object> getReadyItemData(BlockEntity be) {
-        List<Object> ready = new ArrayList<>();
-        List<?> racks = getRacks(be);
-        if (racks == null) return ready;
-        for (Object rack : racks) {
-            Object[] items = getRackItems(rack);
+    private List<OwnedItem> getReadyItemData(BlockEntity be) {
+        List<OwnedItem> ready = new ArrayList<>();
+        for (OwnedRack rack : structureRacks(be)) {
+            Object[] items = getRackItems(rack.rack());
             if (items == null) continue;
             for (Object itemData : items) {
                 if (itemData == null) continue;
-                if (mayExtract(itemData)) ready.add(itemData);
+                if (mayExtract(itemData)) ready.add(new OwnedItem(rack.owner(), itemData));
             }
         }
         return ready;
@@ -494,11 +493,12 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
         if (be == null || !isSteamerBE(be)) return List.of();
 
         List<ItemStack> results = new ArrayList<>();
-        for (Object itemData : getReadyItemData(be)) {
-            ItemStack s = getStack(itemData);
+        for (OwnedItem item : getReadyItemData(be)) {
+            ItemStack s = getStack(item.data());
             if (s.isEmpty()) continue;
-            setStack(itemData, be, ItemStack.EMPTY);
-            markItemDirty(itemData);
+            setStack(item.data(), item.owner(), ItemStack.EMPTY);
+            markItemDirty(item.data());
+            item.owner().setChanged();
             results.add(s.copy());
         }
         if (!results.isEmpty()) {
@@ -570,18 +570,18 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
         if (be == null || !isSteamerBE(be)) return recovered;
 
         ItemStack raw = ingredientPrototype();
-        List<?> racks = getRacks(be);
-        if (racks != null && !raw.isEmpty()) {
-            for (Object rack : racks) {
-                Object[] items = getRackItems(rack);
+        if (!raw.isEmpty()) {
+            for (OwnedRack rack : structureRacks(be)) {
+                Object[] items = getRackItems(rack.rack());
                 if (items == null) continue;
                 for (Object itemData : items) {
                     if (itemData == null) continue;
                     ItemStack s = getStack(itemData);
                     if (s.isEmpty() || !mayExtract(itemData)) continue;
                     if (!ItemStack.isSameItemSameTags(s, raw)) continue;
-                    setStack(itemData, be, ItemStack.EMPTY);
+                    setStack(itemData, rack.owner(), ItemStack.EMPTY);
                     markItemDirty(itemData);
+                    rack.owner().setChanged();
                     recovered.add(s.copy());
                 }
             }
@@ -597,18 +597,17 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
         if (!myLevel.hasChunkAt(pos)) return;
         BlockEntity be = myLevel.getBlockEntity(pos);
         if (be == null || !isSteamerBE(be)) return;
-        List<?> racks = getRacks(be);
-        if (racks == null) return;
         boolean cleared = false;
-        for (Object rack : racks) {
-            Object[] items = getRackItems(rack);
+        for (OwnedRack rack : structureRacks(be)) {
+            Object[] items = getRackItems(rack.rack());
             if (items == null) continue;
             for (Object itemData : items) {
                 if (itemData == null) continue;
                 ItemStack s = getStack(itemData);
                 if (s.isEmpty() || !mayExtract(itemData)) continue;
-                setStack(itemData, be, ItemStack.EMPTY);
+                setStack(itemData, rack.owner(), ItemStack.EMPTY);
                 markItemDirty(itemData);
+                rack.owner().setChanged();
                 cleared = true;
             }
         }
@@ -632,18 +631,34 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
 
     // -- multi-block structure --
 
-    /** 蒸锅本体之上叠了几层蒸笼（不含本体自带的那一层）。 */
-    private int rackLayers() {
-        if (myLevel == null || potBasePos == null) return 0;
-        int layers = 0;
-        BlockPos pos = potBasePos.above();
-        for (int i = 0; i < SteamerBatchConfig.MAX_RACKS - SteamerBatchConfig.POT_BASE_RACKS; i++) {
-            ResourceLocation key = BuiltInRegistries.BLOCK.getKey(myLevel.getBlockState(pos).getBlock());
-            if (!matchesMachineBlock(key, "steamer_rack")) break;
-            layers++;
+    private record OwnedRack(BlockEntity owner, Object rack) {}
+
+    private record OwnedItem(BlockEntity owner, Object data) {}
+
+    /** 汇总锅底与连续上层方块中的蒸笼，同时保留原生槽位的所属实体。 */
+    private List<OwnedRack> structureRacks(BlockEntity base) {
+        List<OwnedRack> racks = new ArrayList<>();
+        BlockPos pos = potPos();
+        for (int i = 0; i < SteamerBatchConfig.MAX_STRUCTURE_BLOCKS; i++) {
+            if (!myLevel.hasChunkAt(pos)) break;
+            if (i > 0 && !matchesMachineBlock(blockIdAt(pos), "steamer_rack")) break;
+            BlockEntity owner = i == 0 ? base : myLevel.getBlockEntity(pos);
+            if (owner == null || !isSteamerBE(owner)) break;
+            List<?> localRacks = getRacks(owner);
+            if (localRacks == null) break;
+            for (Object rack : localRacks) {
+                racks.add(new OwnedRack(owner, rack));
+            }
             pos = pos.above();
         }
-        return layers;
+        return racks;
+    }
+
+    /** 层数来自原生槽位列表，不能按方块数量推算压缩堆叠中的蒸笼数量。 */
+    private int rackLayers() {
+        if (myLevel == null || potBasePos == null) return 0;
+        BlockEntity base = myLevel.getBlockEntity(potBasePos);
+        return base == null ? 0 : structureRacks(base).size();
     }
 
     /** 蒸笼层数与盖子是否满足批量铺料的前置条件。 */
@@ -677,12 +692,11 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
     }
 
     private BlockEntity findPotBase() {
-        // Walk downward from myPos to find the steamer pot block.
-        // The SteamerBlockEntity lives in the pot (bottom) block.
+        // 允许绑定最高一层之上的独立盖子，但不跨过结构间的空隙寻找其他蒸锅。
         BlockPos pos = myPos;
-        for (int i = 0; i < 5; i++) {
-            BlockState state = myLevel.getBlockState(pos);
-            ResourceLocation key = BuiltInRegistries.BLOCK.getKey(state.getBlock());
+        for (int i = 0; i <= SteamerBatchConfig.MAX_STRUCTURE_BLOCKS; i++) {
+            if (!myLevel.hasChunkAt(pos)) return null;
+            ResourceLocation key = blockIdAt(pos);
             if (matchesMachineBlock(key, "steamer_pot")) {
                 BlockEntity be = myLevel.getBlockEntity(pos);
                 if (be != null && isSteamerBE(be)) {
@@ -690,6 +704,8 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
                     return be;
                 }
             }
+            if (!matchesMachineBlock(key, "steamer_rack")
+                    && !matchesMachineBlock(key, "steamer_lid")) return null;
             pos = pos.below();
         }
         return null;
@@ -703,9 +719,9 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
         // stack places a separate steamer_lid block above the structure.
         List<SteamerStructurePolicy.Layer> layers = new ArrayList<>();
         BlockPos checkPos = potBasePos;
-        for (int i = 0; i < 6; i++) {
+        for (int i = 0; i <= SteamerBatchConfig.MAX_STRUCTURE_BLOCKS; i++) {
             BlockState state = myLevel.getBlockState(checkPos);
-            ResourceLocation key = BuiltInRegistries.BLOCK.getKey(state.getBlock());
+            ResourceLocation key = blockIdAt(checkPos);
             boolean structural = matchesMachineBlock(key, "steamer_pot")
                     || matchesMachineBlock(key, "steamer_rack");
             layers.add(new SteamerStructurePolicy.Layer(
@@ -719,6 +735,10 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
 
     private boolean matchesMachineBlock(ResourceLocation id, String path) {
         return id != null && machineNamespace.equals(id.getNamespace()) && path.equals(id.getPath());
+    }
+
+    ResourceLocation blockIdAt(BlockPos pos) {
+        return BuiltInRegistries.BLOCK.getKey(myLevel.getBlockState(pos).getBlock());
     }
 
     private static boolean isCapped(BlockState state) {
