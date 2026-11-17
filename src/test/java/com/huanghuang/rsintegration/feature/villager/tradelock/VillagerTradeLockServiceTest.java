@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.feature.villager.tradelock;
 
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.trading.MerchantOffer;
@@ -9,11 +10,33 @@ import net.minecraft.world.item.trading.MerchantOffers;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class VillagerTradeLockServiceTest extends BootstrapTest {
+
+    @Test
+    void sharedBookmarkLookupKeepsPlayersAndNbtIsolated() {
+        ServerPlayer first = mock(ServerPlayer.class);
+        ServerPlayer second = mock(ServerPlayer.class);
+        when(first.getUUID()).thenReturn(UUID.randomUUID());
+        when(second.getUUID()).thenReturn(UUID.randomUUID());
+        try {
+            VillagerTradeLockService.replace(first, List.of(taggedDiamond("locked", 1)));
+            assertTrue(VillagerTradeLockService.isBookmarked(first, taggedDiamond("locked", 64)));
+            assertFalse(VillagerTradeLockService.isBookmarked(first, taggedDiamond("other", 1)));
+            assertFalse(VillagerTradeLockService.isBookmarked(second, taggedDiamond("locked", 1)));
+            assertFalse(VillagerTradeLockService.isBookmarked(null, taggedDiamond("locked", 1)));
+            VillagerTradeLockService.remove(first.getUUID());
+            assertFalse(VillagerTradeLockService.isBookmarked(first, taggedDiamond("locked", 1)));
+        } finally {
+            VillagerTradeLockService.clear();
+        }
+    }
 
     @Test
     void sameItemAndNbtMatchRegardlessOfCount() {

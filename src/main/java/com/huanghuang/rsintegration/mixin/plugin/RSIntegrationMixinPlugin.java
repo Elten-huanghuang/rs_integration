@@ -46,6 +46,26 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
 
     @Override
     public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
+        if (mixinClassName.contains(".alexsmobs.")) {
+            return hasMethod("com.github.alexthe666.alexsmobs.inventory.MenuTransmutationTable",
+                    "transmute", "(Lnet/minecraft/world/entity/player/Player;I)V")
+                    && hasField("com.github.alexthe666.alexsmobs.inventory.MenuTransmutationTable",
+                    "table", "Lcom/github/alexthe666/alexsmobs/tileentity/TileEntityTransmutationTable;")
+                    && hasMethod("com.github.alexthe666.alexsmobs.inventory.MenuTransmutationTable",
+                    "<init>", "(ILnet/minecraft/world/entity/player/Inventory;"
+                            + "Lnet/minecraft/world/inventory/ContainerLevelAccess;"
+                            + "Lnet/minecraft/world/entity/player/Player;"
+                            + "Lcom/github/alexthe666/alexsmobs/tileentity/TileEntityTransmutationTable;)V")
+                    && hasField("com.github.alexthe666.alexsmobs.tileentity.TileEntityTransmutationTable",
+                    "rerollPlayerUUID", "Ljava/util/UUID;")
+                    && hasMethod("com.github.alexthe666.alexsmobs.tileentity.TileEntityTransmutationTable",
+                    "randomizeResults", "(Lnet/minecraft/world/entity/player/Player;)V")
+                    && hasMethod("com.github.alexthe666.alexsmobs.tileentity.TileEntityTransmutationTable",
+                    "getPossibility", "(I)Lnet/minecraft/world/item/ItemStack;")
+                    && hasField("com.github.alexthe666.alexsmobs.config.AMConfig",
+                    "transmutingExperienceCost", "I")
+                    && isClassPresent(targetClassName);
+        }
         if (mixinClassName.contains(".taxfreelevels.")) {
             // 原模组存在时整组退出，避免重复扣费或争用同一个铁砧注入点。
             return !isClassPresent("io.github.fourmisain.taxfreelevels.TaxFreeLevels")

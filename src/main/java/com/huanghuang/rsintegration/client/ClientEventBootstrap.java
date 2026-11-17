@@ -26,6 +26,7 @@ import com.huanghuang.rsintegration.machine.client.BeyondDimensionsMachineHubCli
 import com.huanghuang.rsintegration.feature.resonance.bridge.ClientDiskData;
 import com.huanghuang.rsintegration.feature.sidepanel.RSSidePanelClient;
 import com.huanghuang.rsintegration.feature.villager.tradelock.client.VillagerTradeLockClient;
+import com.huanghuang.rsintegration.feature.transmutation.client.TransmutationTableClient;
 
 /** Owns client-only listener references so the common mod class remains dedicated-server safe. */
 @OnlyIn(Dist.CLIENT)
@@ -43,6 +44,9 @@ public final class ClientEventBootstrap {
         MinecraftForge.EVENT_BUS.register(EquipmentTooltipClient.class);
         MinecraftForge.EVENT_BUS.register(
                 VillagerTradeLockClient.class);
+        if (ModList.get().isLoaded("alexsmobs")) {
+            MinecraftForge.EVENT_BUS.register(TransmutationTableClient.class);
+        }
         // The auto-eat UI supports both RS Grid and the BD terminal. The
         // listener uses class-name checks, so it remains safe in BD-only
         // installations where RS client classes are absent.

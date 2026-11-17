@@ -7,6 +7,8 @@
   "compatibilityLevel": "JAVA_17",
   "refmap": "rs_integration.refmap.json",
   "mixins": [
+    "alexsmobs.TransmutationTableMenuMixin",
+    "alexsmobs.TransmutationTableTileMixin",
     "taxfreelevels.TaxFreeAnvilMenuMixin",
     "taxfreelevels.TaxFreeEnchantmentMixin",
     "taxfreelevels.TaxFreeModLevelCostsMixin",

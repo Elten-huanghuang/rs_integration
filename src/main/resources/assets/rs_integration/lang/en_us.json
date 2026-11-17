@@ -2091,6 +2091,8 @@
   "rsi.plan.workspace.recalculating": "Recalculating · %s · %s s",
   "rsi.plan.workspace.recalculated": "Recalculation complete; plan updated",
   "rsi.plan.workspace.recalculate_failed": "Recalculation failed; previous plan kept. Change the route or check again.",
+  "rsi.transmutation.matched": "A bookmarked item is available. Auto-transmutation stopped.",
+  "rsi.transmutation.unavailable": "Unable to transmute. Auto-transmutation stopped.",
   "rsi.plan.sources.label": "Material sources",
   "rsi.plan.sources.inventory": "Inventory",
   "rsi.plan.sources.storage_network": "Storage network",

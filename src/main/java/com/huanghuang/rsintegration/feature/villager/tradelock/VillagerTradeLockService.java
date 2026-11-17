@@ -38,6 +38,12 @@ public final class VillagerTradeLockService {
         return containsBookmarkedResult(index, menu.getOffers());
     }
 
+    public static boolean isBookmarked(ServerPlayer player, ItemStack stack) {
+        if (player == null) return false;
+        BookmarkIndex index = BOOKMARKS.get(player.getUUID());
+        return index != null && index.contains(stack);
+    }
+
     static boolean containsBookmarkedResult(BookmarkIndex index, MerchantOffers offers) {
         if (index == null || index.isEmpty() || offers == null || offers.isEmpty()) return false;
         for (MerchantOffer offer : offers) {

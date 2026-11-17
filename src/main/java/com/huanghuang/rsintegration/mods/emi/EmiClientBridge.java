@@ -69,6 +69,10 @@ public final class EmiClientBridge {
         return EmiApi.getSearchText();
     }
 
+    public static boolean hasSearchFocus() {
+        return EmiApi.isSearchFocused();
+    }
+
     public static void showRecipesOrUses(ItemStack stack, boolean uses) {
         EmiStack ingredient = browserIngredient(stack);
         if (uses) EmiApi.displayUses(ingredient); else EmiApi.displayRecipes(ingredient);

@@ -64,6 +64,18 @@ public final class RecipeBrowserBridge {
         return List.copyOf(result);
     }
 
+    public static boolean hasSearchFocus() {
+        if (hasEmi()) {
+            try {
+                if (EmiClientBridge.hasSearchFocus()) return true;
+            } catch (LinkageError | RuntimeException exception) {
+                RSIntegrationMod.LOGGER.debug("[RSI-EMI] Failed to read search focus", exception);
+            }
+        }
+        var runtime = RSJeiPlugin.getRuntime();
+        return runtime != null && runtime.getIngredientListOverlay().hasKeyboardFocus();
+    }
+
     public static void setSearchText(String text) {
         String value = text == null ? "" : text;
         if (hasEmi()) {
