@@ -1959,8 +1959,8 @@ public final class ConsumerCraftingRuntime {
                 }
             }
         }
-        GenericCraftPacket.BindingAwareGraph bindingGraph =
-                GenericCraftPacket.consumerBindingAwareGraph(
+        CraftPlanningApplicationService.BindingAwareGraph bindingGraph =
+                CraftPlanningApplicationService.consumerBindingAwareGraph(
                         player,
                         ImmutableRecipeGraphProjector.capture(
                                 player.serverLevel())

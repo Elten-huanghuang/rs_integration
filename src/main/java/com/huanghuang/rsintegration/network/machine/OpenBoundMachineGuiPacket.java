@@ -331,8 +331,7 @@ public final class OpenBoundMachineGuiPacket {
             ItemStack stack = entry.getStack();
             if (stack.isEmpty()) continue;
             if (IngredientMatcher.test(ingredient, stack)) {
-                ItemStack extracted = CraftStorageEndpoints
-                        .extractExactLegacy(network, player, stack.copyWithCount(1), 1, false);
+                ItemStack extracted = extractExact(network, player, stack.copyWithCount(1), 1, false);
                 if (!extracted.isEmpty()) return extracted;
             }
         }
@@ -350,11 +349,9 @@ public final class OpenBoundMachineGuiPacket {
             if (burn <= 0 || needed > existing.getMaxStackSize()) return;
             if (existing.getCount() >= needed) return;
             int topUp = needed - existing.getCount();
-            ItemStack extra = CraftStorageEndpoints
-                    .extractExactLegacy(network, player, existing.copyWithCount(1), topUp, false);
+            ItemStack extra = extractExact(network, player, existing.copyWithCount(1), topUp, false);
             if (extra.getCount() < topUp) {
-                if (!extra.isEmpty()) CraftStorageEndpoints
-                        .insertLegacy(network, player, extra, false);
+                if (!extra.isEmpty()) insert(network, player, extra, false);
                 return;
             }
             ItemStack merged = existing.copy();
@@ -373,12 +370,10 @@ public final class OpenBoundMachineGuiPacket {
                 stack -> BrickFurnaceCompat.effectiveBurnTicks(
                         furnace, stack, recipeTypeFor(furnace, recipe)));
         if (selection == null) return;
-        ItemStack extracted = CraftStorageEndpoints
-                .extractExactLegacy(network, player, selection.fuel().copyWithCount(1),
-                        selection.amount(), false);
+        ItemStack extracted = extractExact(network, player, selection.fuel().copyWithCount(1),
+                selection.amount(), false);
         if (extracted.getCount() < selection.amount()) {
-            if (!extracted.isEmpty()) CraftStorageEndpoints
-                    .insertLegacy(network, player, extracted, false);
+            if (!extracted.isEmpty()) insert(network, player, extracted, false);
             return;
         }
         if (!extracted.isEmpty()) {
@@ -565,8 +560,7 @@ public final class OpenBoundMachineGuiPacket {
             // container slot 1 = base
             if (menu.getSlot(1).getItem().isEmpty()) {
                 if (baseItem != null && !baseItem.isEmpty()) {
-                    ItemStack extracted = CraftStorageEndpoints
-                            .extractExactLegacy(network, player, baseItem.copyWithCount(1), 1, false);
+                    ItemStack extracted = extractExact(network, player, baseItem.copyWithCount(1), 1, false);
                     if (!extracted.isEmpty()) {
                         menu.getSlot(1).set(extracted.copy());
                         filled++;
@@ -607,8 +601,7 @@ public final class OpenBoundMachineGuiPacket {
             if (stack.isEmpty()) continue;
             if (IngredientMatcher.test(ingredient, stack)) {
                 int toExtract = Math.min(remaining, stack.getCount());
-                    ItemStack extracted = CraftStorageEndpoints
-                            .extractExactLegacy(network, player, stack.copyWithCount(1), toExtract, false);
+                    ItemStack extracted = extractExact(network, player, stack.copyWithCount(1), toExtract, false);
                 if (!extracted.isEmpty()) {
                     if (result.isEmpty()) {
                         result = extracted;
@@ -632,6 +625,20 @@ public final class OpenBoundMachineGuiPacket {
             result.add(acc.rsi$getAddition());
         }
         return result;
+    }
+
+    private static ItemStack extractExact(INetwork network, ServerPlayer player,
+                                          ItemStack template, int amount, boolean simulate) {
+        return CraftStorageEndpoints.extractExact(
+                CraftStorageEndpoints.fromResolvedNetwork(network),
+                player, template, amount, simulate);
+    }
+
+    private static ItemStack insert(INetwork network, ServerPlayer player,
+                                    ItemStack stack, boolean simulate) {
+        return CraftStorageEndpoints.fromResolvedNetwork(network)
+                .insert(player, stack, simulate)
+                .remainder().orElse(ItemStack.EMPTY);
     }
 
     // ── FA ApplyModifierRecipe: dispatch ──────────────────────────

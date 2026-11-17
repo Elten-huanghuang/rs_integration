@@ -91,7 +91,7 @@ public final class BackpackRSUtils {
         }
 
         var endpoint = CraftStorageEndpoints
-                .fromLegacyNetwork(network);
+                .fromResolvedNetwork(network);
         if (simulate) return endpoint.insert(getOrCreateFakePlayer((ServerLevel) world, backpackUuid),
                 stack.copy(), true).remainder().orElse(ItemStack.EMPTY);
         Player fakePlayer = getOrCreateFakePlayer((ServerLevel) world, backpackUuid);
@@ -106,7 +106,7 @@ public final class BackpackRSUtils {
 
         IItemHandler backpackInv = storageWrapper.getInventoryForUpgradeProcessing();
         var endpoint = CraftStorageEndpoints
-                .fromLegacyNetwork(network);
+                .fromResolvedNetwork(network);
         Player fakePlayer = getOrCreateFakePlayer((ServerLevel) level,
                 new UUID(rsPos.asLong(), rsPos.asLong() ^ 0x5f3759dfL));
 

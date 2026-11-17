@@ -76,7 +76,7 @@ public final class RSIIntegrationServices {
             BlockEntityType<?> type,
             MachineGuiOpener opener
     ) {
-        return BlockGuiRegistry.registerPreferred(
+        return BlockGuiRegistry.register(
                 Objects.requireNonNull(type, "type"),
                 Objects.requireNonNull(opener, "opener"));
     }

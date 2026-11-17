@@ -61,10 +61,12 @@ public interface CraftStorageEndpoint {
     }
 
     default StorageOperationResult insert(@Nonnull ItemStack stack, boolean simulate) {
-        return StorageOperationResult.failedInsert(
+        StorageSession current = session();
+        return current == null ? StorageOperationResult.failedInsert(
                 simulate ? StorageOperationMode.SIMULATE
                         : StorageOperationMode.PERFORM,
-                stack, StorageOperationStatus.UNAVAILABLE);
+                stack, StorageOperationStatus.UNAVAILABLE)
+                : current.insertInternal(stack, simulate);
     }
 
     default StorageSnapshotResult snapshot(@Nonnull ServerPlayer player) {

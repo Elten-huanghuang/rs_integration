@@ -2,7 +2,7 @@ package com.huanghuang.rsintegration.storage.rs;
 
 import com.huanghuang.rsintegration.crafting.TaskOutputReception;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
-import com.huanghuang.rsintegration.crafting.endpoint.LegacyRsCraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.storage.StorageSession;
 import com.huanghuang.rsintegration.mixin.refinedstorage.CraftingTaskOutputWritebackMixin;
@@ -14,10 +14,12 @@ import com.refinedmods.refinedstorage.api.storage.IStorage;
 import com.refinedmods.refinedstorage.api.storage.cache.IStorageCache;
 import com.refinedmods.refinedstorage.api.util.Action;
 import com.refinedmods.refinedstorage.apiimpl.network.Network;
+import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraftforge.fluids.FluidStack;
 import org.junit.jupiter.api.Test;
@@ -43,28 +45,24 @@ class RefinedStorageOutputReceptionTest extends BootstrapTest {
     }
 
     @Test
-    void nativeAndLegacySessionsUseTheSameLiveNetworkAndRevokeInvalidEligibility() {
+    void formalSessionUsesTheLiveNetworkAndRevokesInvalidEligibility() {
         INetwork network = mock(INetwork.class, RETURNS_DEEP_STUBS);
         when(network.canRun()).thenReturn(true);
         when(network.getLevel()).thenReturn(mock(ServerLevel.class));
-        StorageSession nativeSession = new RefinedStorageSession(new NativeRefinedStorageDriver(network),
+        StorageSession storage = new RefinedStorageSession(new NativeRefinedStorageDriver(network),
                 new StorageReference(RefinedStorageIds.BACKEND, "test"), (p, ref, stack) -> {});
-        StorageSession legacySession = new LegacyRsCraftStorageEndpoint(network).session();
         var key = TaskOutputReception.resource(iron);
-        for (StorageSession storage : List.of(nativeSession, legacySession)) {
+        try (var reception = TaskOutputReception.open()) {
+            storage.bindOutputReception(reception);
+            reception.prepare(List.of(new TaskOutputReception.Demand("out", key, 4, 4))).activate();
+            assertEquals(0, TaskOutputReception.receive(mock(INetwork.class), key, 1, false));
+            assertEquals(1, TaskOutputReception.receive(network, key, 1, false));
+            when(network.canRun()).thenReturn(false);
+            TaskOutputReception.pruneNetwork(network);
+            assertEquals(0, TaskOutputReception.receive(network, key, 3, false));
             when(network.canRun()).thenReturn(true);
-            try (var reception = TaskOutputReception.open()) {
-                storage.bindOutputReception(reception);
-                reception.prepare(List.of(new TaskOutputReception.Demand("out", key, 4, 4))).activate();
-                assertEquals(0, TaskOutputReception.receive(mock(INetwork.class), key, 1, false));
-                assertEquals(1, TaskOutputReception.receive(network, key, 1, false));
-                when(network.canRun()).thenReturn(false);
-                TaskOutputReception.pruneNetwork(network);
-                assertEquals(0, TaskOutputReception.receive(network, key, 3, false));
-                when(network.canRun()).thenReturn(true);
-                assertEquals(0, TaskOutputReception.receive(network, key, 3, false));
-                assertEquals(1, reception.drain().get(0).amount());
-            }
+            assertEquals(0, TaskOutputReception.receive(network, key, 3, false));
+            assertEquals(1, reception.drain().get(0).amount());
         }
     }
 
@@ -247,15 +245,19 @@ class RefinedStorageOutputReceptionTest extends BootstrapTest {
     }
 
     @Test
-    void legacyEndpointInternalWritebackBypassesOtherWaitingTasks() {
+    void formalEndpointInternalWritebackBypassesOtherWaitingTasks() {
         INetwork network = mock(INetwork.class);
+        ServerLevel level = mock(ServerLevel.class);
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        when(network.getLevel()).thenReturn(level);
+        when(network.getPosition()).thenReturn(new BlockPos(1, 64, 1));
         when(network.insertItem(any(), anyInt(), any())).thenAnswer(call ->
                 RefinedStorageOutputReception.insertItem(network, call.getArgument(0), call.getArgument(1),
                         call.getArgument(2), (stack, size) -> {
                             assertEquals(3, size);
                             return ItemStack.EMPTY;
                         }));
-        CraftStorageEndpoint endpoint = new LegacyRsCraftStorageEndpoint(network);
+        CraftStorageEndpoint endpoint = CraftStorageEndpoints.fromResolvedNetwork(network);
         try (var session = waiting(network, 5)) {
             assertEquals(3L, CraftStorageEndpoint.insertInternal(endpoint, iron.copyWithCount(3), false)
                     .transferredAmount().orElseThrow());

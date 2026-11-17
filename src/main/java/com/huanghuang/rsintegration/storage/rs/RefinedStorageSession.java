@@ -284,6 +284,14 @@ final class RefinedStorageSession implements StorageSession {
     }
 
     @Override
+    public StorageOperationResult insertInternal(ItemStack stack, boolean simulate) {
+        Objects.requireNonNull(stack, "stack");
+        if (stack.isEmpty()) return StorageOperationResult.inserted(
+                mode(simulate), ItemStack.EMPTY, ItemStack.EMPTY);
+        return RefinedStorageOperationExecutor.insertInternal(driver, stack, simulate);
+    }
+
+    @Override
     public StorageOperationResult insert(ServerPlayer player, ItemStack stack, boolean simulate) {
         StorageThreadGuard.requireServerThread(player);
         Objects.requireNonNull(stack, "stack");

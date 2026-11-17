@@ -9,7 +9,7 @@ import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate.CraftPhase;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
-import com.huanghuang.rsintegration.crafting.endpoint.LegacyRsCraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.storage.rs.RefinedStorageOutputReception;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
@@ -34,6 +34,7 @@ import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.item.crafting.SmeltingRecipe;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.FurnaceBlockEntity;
+import net.minecraft.world.level.Level;
 import net.minecraftforge.common.ForgeHooks;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
@@ -89,6 +90,7 @@ class VanillaMachineFuelTest extends BootstrapTest {
         player = mock(ServerPlayer.class);
         endpoint = mock(CraftStorageEndpoint.class);
         level = mock(ServerLevel.class);
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
         when(player.serverLevel()).thenReturn(level);
         when(level.hasChunkAt(POS)).thenReturn(true);
         when(level.getBlockEntity(POS)).thenReturn(furnace);
@@ -411,9 +413,10 @@ class VanillaMachineFuelTest extends BootstrapTest {
         INetwork network = mock(INetwork.class, RETURNS_DEEP_STUBS);
         when(network.canRun()).thenReturn(true);
         when(network.getLevel()).thenReturn(level);
-        var rsEndpoint = new LegacyRsCraftStorageEndpoint(network);
+        when(network.getPosition()).thenReturn(POS);
+        var rsEndpoint = CraftStorageEndpoints.fromResolvedNetwork(network);
         when(endpoint.session()).thenReturn(rsEndpoint.session());
-        // 使用生产桥接及真实 Legacy 会话，磁盘拒收余量；不手工绑定任务。
+        // 使用正式 RS 会话，磁盘拒收余量；不手工绑定任务。
         when(network.insertItem(any(), anyInt(), any())).thenAnswer(call ->
                 RefinedStorageOutputReception.insertItem(network, call.getArgument(0), call.getArgument(1),
                         call.getArgument(2), (stack, count) -> stack.copyWithCount(count)));

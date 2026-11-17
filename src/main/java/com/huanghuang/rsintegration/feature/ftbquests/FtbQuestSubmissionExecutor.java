@@ -37,7 +37,7 @@ public final class FtbQuestSubmissionExecutor {
 
     public static boolean submit(ServerPlayer player, long questId, INetwork network) {
         return submit(player, questId,
-                network == null ? null : CraftStorageEndpoints.fromLegacyNetwork(network));
+                network == null ? null : CraftStorageEndpoints.fromResolvedNetwork(network));
     }
 
     public static boolean submit(ServerPlayer player, long questId,
@@ -67,9 +67,6 @@ public final class FtbQuestSubmissionExecutor {
 
     private static boolean submitLocked(ServerPlayer player, TeamData data, Quest quest,
                                      CraftStorageEndpoint endpoint) {
-        INetwork network = endpoint != null && "refinedstorage".equals(
-                endpoint.session().reference().backendId().value())
-                ? CraftStorageEndpoints.legacyNetwork(endpoint) : null;
         QuestSubmissionSnapshot snapshot = FtbQuestSubmissionScanner.inspect(quest, data, true);
         if (!snapshot.eligible()) {
             player.sendSystemMessage(Component.translatable("rsi.ftb_quest.error.not_eligible"));
@@ -81,7 +78,7 @@ public final class FtbQuestSubmissionExecutor {
             if (task instanceof ItemTask itemTask) tasks.put(FtbQuestObjectId.getId(itemTask), itemTask);
         }
 
-        try (QuestSubmissionEscrow escrow = new QuestSubmissionEscrow(player, endpoint, network)) {
+        try (QuestSubmissionEscrow escrow = new QuestSubmissionEscrow(player, endpoint)) {
             for (QuestItemRequirement requirement : snapshot.requirements()) {
                 ItemTask task = tasks.get(requirement.taskId());
                 if (task == null) return false;

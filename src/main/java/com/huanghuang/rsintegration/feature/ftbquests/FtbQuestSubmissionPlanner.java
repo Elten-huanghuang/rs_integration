@@ -30,7 +30,7 @@ public final class FtbQuestSubmissionPlanner {
                                             QuestSubmissionSnapshot snapshot,
                                             INetwork network) {
         return plan(player, snapshot,
-                network == null ? null : CraftStorageEndpoints.fromLegacyNetwork(network), network);
+                network == null ? null : CraftStorageEndpoints.fromResolvedNetwork(network), network);
     }
 
     public static QuestSubmissionPlan plan(ServerPlayer player,

@@ -109,6 +109,41 @@ final class RefinedStorageOperationExecutor {
         }
     }
 
+    static StorageOperationResult insertInternal(RefinedStorageDriver driver, ItemStack input,
+                                                 boolean simulate) {
+        StorageOperationMode mode = simulate
+                ? StorageOperationMode.SIMULATE : StorageOperationMode.PERFORM;
+        try {
+            ItemStack remainder = driver.insertInternal(input.copy(), simulate);
+            if (remainder == null) {
+                return simulate
+                        ? StorageOperationResult.failedInsert(
+                                mode, input, StorageOperationStatus.INVALID_RESPONSE,
+                                StorageDiagnosticCode.INVALID_NATIVE_RESPONSE)
+                        : StorageOperationResult.indeterminateInsert(
+                                input, StorageDiagnosticCode.INVALID_NATIVE_RESPONSE);
+            }
+            return StorageOperationResult.inserted(mode, input, remainder);
+        } catch (RefinedStorageUnavailableException e) {
+            return StorageOperationResult.failedInsert(
+                    mode, input, StorageOperationStatus.UNAVAILABLE);
+        } catch (IllegalArgumentException e) {
+            return simulate
+                    ? StorageOperationResult.failedInsert(
+                            mode, input, StorageOperationStatus.INVALID_RESPONSE,
+                            StorageDiagnosticCode.INVALID_NATIVE_RESPONSE)
+                    : StorageOperationResult.indeterminateInsert(
+                            input, StorageDiagnosticCode.INVALID_NATIVE_RESPONSE);
+        } catch (RuntimeException | LinkageError e) {
+            return simulate
+                    ? StorageOperationResult.failedInsert(
+                            mode, input, StorageOperationStatus.FAILED,
+                            StorageDiagnosticCode.BACKEND_EXCEPTION)
+                    : StorageOperationResult.indeterminateInsert(
+                            input, StorageDiagnosticCode.NATIVE_OPERATION_FAILED_AFTER_MUTATION);
+        }
+    }
+
     private static StorageOperationResult invalidSimulatedInsert(ItemStack input,
                                                                  StorageOperationMode resultMode) {
         return StorageOperationResult.failedInsert(resultMode, input,

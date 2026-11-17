@@ -309,6 +309,12 @@ final class NativeRefinedStorageDriver implements RefinedStorageDriver {
     }
 
     @Override
+    public ItemStack insertInternal(ItemStack stack, boolean simulate) {
+        if (InkFluidSupport.isToken(stack)) return InkFluidSupport.insert(network, stack, simulate);
+        return network.insertItem(stack, stack.getCount(), simulate ? Action.SIMULATE : Action.PERFORM);
+    }
+
+    @Override
     public FluidStack extractFluid(
             FluidStack template,
             int amount,

@@ -488,7 +488,7 @@ public final class DebugCommand {
         // Candidate decision tree — use actual inventory when available
         var network = noInventory ? null : RSIntegrationNetwork.resolveNetworkFromPlayer(player);
         CraftStorageEndpoint endpoint = network == null
-                ? null : CraftStorageEndpoints.fromLegacyNetwork(network);
+                ? null : CraftStorageEndpoints.fromResolvedNetwork(network);
         Map<CraftingResolver.StackKey, Long> available = noInventory
                 ? Map.of()
                 : MaterialSources.listAllAvailable(player, endpoint);

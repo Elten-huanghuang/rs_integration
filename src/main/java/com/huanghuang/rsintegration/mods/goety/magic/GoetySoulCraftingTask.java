@@ -13,6 +13,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.storage.disk.rs.UnifiedDiskManager;
+import com.huanghuang.rsintegration.storage.rs.RefinedStorageBackend;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.mods.goety.GoetySoulTotemCrafting;
@@ -772,11 +773,9 @@ public final class GoetySoulCraftingTask implements AutoCloseable {
     static INetwork resolveRsNetwork(ServerPlayer player,
                                      @Nullable INetwork network,
                                      @Nullable CraftStorageEndpoint endpoint) {
-        INetwork legacy = CraftStorageEndpoints.legacyNetwork(endpoint);
-        if (legacy != null) return legacy;
         if (endpoint != null && !CraftStorageEndpoints.isRefinedStorage(endpoint)) return null;
         if (network != null) return network;
         if (player == null || !CraftStorageEndpoints.isRefinedStorage(endpoint)) return null;
-        return RSIntegrationNetwork.resolveCurrentNetworkFromPlayer(player);
+        return RefinedStorageBackend.resolveNativeNetwork(endpoint.session().reference(), player);
     }
 }

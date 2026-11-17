@@ -34,7 +34,6 @@ class StorageCoreIsolationTest {
                 StoragePermissionResult.class,
                 StoragePermissionStatus.class,
                 StorageReference.class,
-                StorageReservationSource.class,
                 StorageResolutionResult.class,
                 StorageResolutionStatus.class,
                 StorageSession.class,
@@ -43,14 +42,6 @@ class StorageCoreIsolationTest {
                 StorageSnapshot.MatchStatus.class,
                 StorageSnapshotResult.class,
                 StorageSnapshotStatus.class,
-                StorageSettlementLedger.class,
-                StorageSettlementLedger.EntryId.class,
-                StorageSettlementLedger.EntrySnapshot.class,
-                StorageSettlementLedger.EntryState.class,
-                StorageSettlementLedger.RecoveryAsset.class,
-                StorageSettlementLedger.RecoveryAssetId.class,
-                StorageSettlementLedger.ReservationToken.class,
-                StorageSettlementLedger.State.class,
                 StorageThreadGuard.class,
                 StoredItem.class);
 

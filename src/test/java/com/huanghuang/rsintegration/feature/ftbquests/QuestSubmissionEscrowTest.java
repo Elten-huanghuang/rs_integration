@@ -43,7 +43,7 @@ class QuestSubmissionEscrowTest extends BootstrapTest {
         when(session.snapshotItems(player)).thenReturn(StorageSnapshotResult.success(snapshot));
         CraftStorageEndpoint endpoint = () -> session;
 
-        try (QuestSubmissionEscrow escrow = new QuestSubmissionEscrow(player, endpoint, null)) {
+        try (QuestSubmissionEscrow escrow = new QuestSubmissionEscrow(player, endpoint)) {
             assertTrue(escrow.reserve(1L, Ingredient.of(Items.IRON_INGOT), 10));
             assertFalse(escrow.reserve(2L, Ingredient.of(Items.IRON_INGOT), 1));
         }

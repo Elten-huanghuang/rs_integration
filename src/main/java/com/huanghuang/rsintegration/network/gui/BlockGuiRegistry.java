@@ -1,10 +1,9 @@
 package com.huanghuang.rsintegration.network.gui;
 
-import com.huanghuang.rsintegration.util.ChunkUtils;
 import net.minecraft.network.chat.Component;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.network.gui.PlaceboRemoteMenuSnapshotPacket;
+import com.huanghuang.rsintegration.api.machine.gui.MachineGuiOpener;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceKey;
@@ -21,8 +20,11 @@ import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraftforge.network.NetworkHooks;
 
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -30,27 +32,22 @@ import java.util.concurrent.ConcurrentHashMap;
  * Each supported mod registers its opener during mod init.
  */
 public final class BlockGuiRegistry {
-    private static final Map<BlockEntityType<?>, IMachineGuiOpener> OPENERS = new ConcurrentHashMap<>();
-    private static final Map<BlockEntityType<?>, com.huanghuang.rsintegration.api.machine.gui.MachineGuiOpener> PREFERRED_OPENERS = new ConcurrentHashMap<>();
+    private static final Map<BlockEntityType<?>, MachineGuiOpener> OPENERS = new ConcurrentHashMap<>();
 
     private BlockGuiRegistry() {}
 
     /** Register a GUI opener for a specific BlockEntityType. */
-    public static void register(BlockEntityType<?> type, IMachineGuiOpener opener) {
-        OPENERS.put(type, opener);
+    public static boolean register(BlockEntityType<?> type, MachineGuiOpener opener) {
+        boolean registered = OPENERS.putIfAbsent(
+                Objects.requireNonNull(type),
+                Objects.requireNonNull(opener)) == null;
         RSIntegrationMod.LOGGER.debug("[RSI-MachineGUI] Registered opener for {}", type);
+        return registered;
     }
 
     /** Check if a BlockEntityType has a registered GUI opener. */
     public static boolean hasGui(BlockEntityType<?> type) {
-        return OPENERS.containsKey(type) || PREFERRED_OPENERS.containsKey(type);
-    }
-
-    /** Internal implementation of the public GUI API. Existing legacy handlers keep their routing. */
-    public static boolean registerPreferred(BlockEntityType<?> type,
-            com.huanghuang.rsintegration.api.machine.gui.MachineGuiOpener opener) {
-        return PREFERRED_OPENERS.putIfAbsent(java.util.Objects.requireNonNull(type),
-                java.util.Objects.requireNonNull(opener)) == null;
+        return OPENERS.containsKey(type);
     }
 
     /** Open the GUI for a bound machine.
@@ -120,12 +117,10 @@ public final class BlockGuiRegistry {
     private static boolean openAtTarget(ServerPlayer player, ResourceKey<Level> dim, BlockPos pos,
                                         ServerLevel level, BlockEntity be) {
         if (be != null) {
-            var preferred = PREFERRED_OPENERS.get(be.getType());
-            if (preferred != null) {
-                var previous = player.containerMenu;
-                preferred.open(player, be, dim, pos);
-                // An interaction result is insufficient: verify an actual menu was opened.
-                return player.containerMenu != previous && player.containerMenu != player.inventoryMenu;
+            MachineGuiOpener opener = OPENERS.get(be.getType());
+            if (opener != null) {
+                // 公共 opener 是明确的优先策略；失败后不再执行可能有副作用的原生交互。
+                return openWithRegisteredOpener(player, opener, be, dim, pos);
             }
         }
         if (be == null) {
@@ -155,18 +150,26 @@ public final class BlockGuiRegistry {
 
     private static boolean openWithBlockEntity(ServerPlayer player, BlockEntity be,
                                                 ResourceKey<Level> dim, BlockPos pos) {
-        var opener = OPENERS.get(be.getType());
-        if (opener == null) {
-            if (be instanceof MenuProvider) {
-                opener = StandardMenuProviderOpener.INSTANCE;
-            } else {
-                RSIntegrationMod.LOGGER.warn("[RSI-MachineGUI] No opener registered for {} at {}", be.getType(), pos);
-                return false;
-            }
+        if (!(be instanceof MenuProvider provider)) {
+            RSIntegrationMod.LOGGER.warn("[RSI-MachineGUI] No opener registered for {} at {}", be.getType(), pos);
+            return false;
         }
         RSIntegrationMod.LOGGER.debug("[RSI-MachineGUI] Opening GUI for {} at {} dim={}", be.getType(), pos, dim);
-        opener.openGui(player, be, dim, pos);
-        return true;
+        var previous = player.containerMenu;
+        NetworkHooks.openScreen(player, provider, pos);
+        return menuOpened(player, previous);
+    }
+
+    private static boolean openWithRegisteredOpener(ServerPlayer player, MachineGuiOpener opener,
+                                                     BlockEntity blockEntity,
+                                                     ResourceKey<Level> dim, BlockPos pos) {
+        var previous = player.containerMenu;
+        opener.open(player, blockEntity, dim, pos);
+        return menuOpened(player, previous);
+    }
+
+    private static boolean menuOpened(ServerPlayer player, AbstractContainerMenu previous) {
+        return player.containerMenu != previous && player.containerMenu != player.inventoryMenu;
     }
 
     private static boolean openWithoutBlockEntity(ServerPlayer player, ResourceKey<Level> dim, BlockPos pos) {
@@ -179,8 +182,9 @@ public final class BlockGuiRegistry {
         if (provider != null) {
             RSIntegrationMod.LOGGER.debug("[RSI-MachineGUI] Opening GUI via block state for {} at {} dim={}",
                     state.getBlock(), pos, dim);
+            AbstractContainerMenu previous = player.containerMenu;
             player.openMenu(provider);
-            return true;
+            return menuOpened(player, previous);
         }
         RSIntegrationMod.LOGGER.warn("[RSI-MachineGUI] No BlockEntity and no MenuProvider at {} (block={})",
                 pos, state.getBlock());
@@ -200,6 +204,7 @@ public final class BlockGuiRegistry {
                 Direction.UP, pos, false);
         // Temporarily empty the main hand so Block.use() doesn't consume the
         // held item (e.g. CrockPot inserting food into the pot on right-click).
+        AbstractContainerMenu previous = player.containerMenu;
         ItemStack saved = player.getMainHandItem();
         player.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY);
         InteractionResult result;
@@ -208,7 +213,7 @@ public final class BlockGuiRegistry {
         } finally {
             player.setItemInHand(InteractionHand.MAIN_HAND, saved);
         }
-        if (result.consumesAction()) {
+        if (result.consumesAction() && menuOpened(player, previous)) {
             RSIntegrationMod.LOGGER.debug("[RSI-MachineGUI] Opened via Block.use() for {} at {}",
                     state.getBlock(), pos);
             return true;
@@ -220,8 +225,6 @@ public final class BlockGuiRegistry {
 
     /** Get the number of registered openers (for diagnostics). */
     public static int size() {
-        var types = new java.util.HashSet<>(OPENERS.keySet());
-        types.addAll(PREFERRED_OPENERS.keySet());
-        return types.size();
+        return OPENERS.size();
     }
 }

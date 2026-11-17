@@ -27,7 +27,6 @@ import java.util.Set;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -43,17 +42,14 @@ class CraftStorageEndpointTest extends BootstrapTest {
     }
 
     @Test
-    void backendNeutralEndpointDoesNotExposeAnRsNetwork() throws Exception {
+    void backendNeutralEndpointUsesOnlyItsResolvedSession() {
         StorageReference reference = new StorageReference(
                 new StorageBackendId("beyonddimensions"), "bd-network");
         StorageSession session = new RecordingSession(reference);
         CraftStorageEndpoint endpoint = new SessionCraftStorageEndpoint(session);
 
-        Object legacyNetwork = CraftStorageEndpoints.class
-                .getMethod("legacyNetwork", CraftStorageEndpoint.class)
-                .invoke(null, endpoint);
-        assertNull(legacyNetwork,
-                "BD endpoint must not be reinterpreted as an RS INetwork");
+        assertSame(session, endpoint.session(),
+                "通用端点只持有已经解析的正式会话");
     }
 
     @Test

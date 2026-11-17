@@ -1,10 +1,12 @@
 package com.huanghuang.rsintegration.crafting;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
-import com.huanghuang.rsintegration.crafting.endpoint.LegacyRsCraftStorageEndpoint;
-
 import com.huanghuang.rsintegration.feature.resonance.api.ResonanceStorageResolvers;
 import com.huanghuang.rsintegration.feature.resonance.api.ResonanceStorageView;
+import com.huanghuang.rsintegration.feature.resonance.bridge.RSResonanceDiskAccess;
+import com.huanghuang.rsintegration.storage.rs.RefinedStorageBackend;
+import com.huanghuang.rsintegration.storage.StorageReference;
 import net.minecraft.server.level.ServerPlayer;
+import com.refinedmods.refinedstorage.api.network.INetwork;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -18,13 +20,15 @@ public final class ResonanceCraftingSource {
     public static List<ResonanceStorageView> viewsFor(
             @Nullable CraftStorageEndpoint endpoint, ServerPlayer player) {
         if (endpoint == null || player == null) return List.of();
-        if (endpoint instanceof LegacyRsCraftStorageEndpoint legacy) {
-            ResonanceStorageView view = legacy.resonanceView();
-            return view == null ? List.of() : List.of(view);
-        }
         String backendId;
         try {
-            backendId = endpoint.session().reference().backendId().value();
+            StorageReference reference = endpoint.session().reference();
+            backendId = reference.backendId().value();
+            if ("refinedstorage".equals(backendId)) {
+                INetwork network = RefinedStorageBackend.resolveNativeNetwork(reference, player);
+                ResonanceStorageView view = RSResonanceDiskAccess.find(network);
+                return view == null ? List.of() : List.of(view);
+            }
         } catch (RuntimeException exception) {
             return List.of();
         }

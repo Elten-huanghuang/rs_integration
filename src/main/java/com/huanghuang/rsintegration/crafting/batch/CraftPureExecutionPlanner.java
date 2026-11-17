@@ -70,9 +70,9 @@ final class CraftPureExecutionPlanner {
                 recipe, player.serverLevel().registryAccess());
         if (recipeOutput.isEmpty()) return false;
 
-        final GenericCraftPacket.BindingAwareGraph bindingGraph;
+        final CraftPlanningApplicationService.BindingAwareGraph bindingGraph;
         try {
-            bindingGraph = GenericCraftPacket.scopedBindingAwareGraph(
+            bindingGraph = CraftPlanningApplicationService.scopedBindingAwareGraph(
                     player, ImmutableRecipeGraphProjector.capture(player.serverLevel()), recipeId);
         } catch (RuntimeException unavailable) {
             RSIntegrationMod.debug("[RSI-exec] immutable graph unavailable for {}: {}",
@@ -110,9 +110,9 @@ final class CraftPureExecutionPlanner {
                 || !RSIntegrationConfig.ENABLE_AUTO_CRAFTING.get()
                 || recipeOutput == null || recipeOutput.isEmpty()) return false;
 
-        final GenericCraftPacket.BindingAwareGraph bindingGraph;
+        final CraftPlanningApplicationService.BindingAwareGraph bindingGraph;
         try {
-            bindingGraph = GenericCraftPacket.scopedBindingAwareGraph(
+            bindingGraph = CraftPlanningApplicationService.scopedBindingAwareGraph(
                     player, ImmutableRecipeGraphProjector.capture(player.serverLevel()), recipeId);
         } catch (RuntimeException unavailable) {
             RSIntegrationMod.debug(
@@ -259,7 +259,7 @@ final class CraftPureExecutionPlanner {
                         RSIntegrationMod.LOGGER.info(
                                 "[RSI-exec] typed {} route recipe={} reason={} coverage={}",
                                 planKind, recipeId, decision.reason(), completed.coverage().status());
-                        GenericCraftPacket.tryResolveTypedGraphOnly(
+                        CraftPlanningApplicationService.tryResolveTypedGraphOnly(
                                 player, recipeId, forcedRecipes, dimension, position,
                                 repeatCount, inferMode, baseItem, targetOutput,
                                 outputDestination, machineSelectionMode,
@@ -273,7 +273,7 @@ final class CraftPureExecutionPlanner {
                                 planKind, recipeId, result.status(), result.feasibility(),
                                 result.missing(), result.expandedStates(), result.backtracks(),
                                 result.memoHits());
-                        GenericCraftPacket.sendPurePlanningFailure(
+                        CraftPlanningApplicationService.sendPurePlanningFailure(
                                 player, result, snapshot.availableItems(),
                                 snapshot.bindingBlockedOutputIds());
                         return;
@@ -298,9 +298,10 @@ final class CraftPureExecutionPlanner {
                         RSIntegrationMod.LOGGER.info(
                                 "[RSI-exec] async {} plan validated recipe={} states={} graphNodes={}",
                                 planKind, recipeId, result.expandedStates(), graph.nodes().size());
-                        CraftExecutionLauncher.launchGraph(player, graph, storageEndpoint,
-                                recipeId, forcedRecipes, dimension, position, targetOutput,
-                                outputDestination, machineSelectionMode, materialLocks);
+                        CraftExecutionService.launchGraph(
+                                player, storageEndpoint, graph, recipeId, null, targetOutput,
+                                outputDestination, machineSelectionMode, dimension, position,
+                                forcedRecipes, materialLocks, 0L, chain -> {});
                     } catch (IllegalArgumentException | ArithmeticException mismatch) {
                         RSIntegrationMod.LOGGER.warn(
                                 "[RSI-exec] Cannot execute recorded {} material flow recipe={}",
@@ -362,7 +363,8 @@ final class CraftPureExecutionPlanner {
         ResolutionStep terminal = terminalInputs == null
                 ? CraftTerminalSteps.genericTerminalStep(recipe.getId(), repeatCount)
                 : CraftTerminalSteps.backgroundPhysicalTerminalStep(recipe.getId(),
-                        GenericCraftPacket.modTypeForCachedExecution(recipe), inferMode, repeatCount);
+                        CraftPlanningApplicationService.modTypeForCachedExecution(recipe),
+                        inferMode, repeatCount);
         return CraftTerminalSteps.composeEquivalentTerminalGraph(input, terminal,
                 CraftTerminalSteps.selectTerminalGraphOutput(recipe, output, targetOutput),
                 player.serverLevel());

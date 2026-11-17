@@ -50,6 +50,11 @@ interface RefinedStorageDriver {
 
     ItemStack insert(ItemStack stack, boolean simulate);
 
+    /** 已拥有实物的内部写回，不经过网络可用性或玩家权限探测。 */
+    default ItemStack insertInternal(ItemStack stack, boolean simulate) {
+        return insert(stack, simulate);
+    }
+
     default FluidStack extractFluid(
             FluidStack template,
             int amount,

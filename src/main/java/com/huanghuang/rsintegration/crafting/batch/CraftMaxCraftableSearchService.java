@@ -43,7 +43,7 @@ final class CraftMaxCraftableSearchService {
     }
 
     static void start(ServerPlayer player, Request request, long previewGeneration) {
-        GenericCraftPacket.tryBuildPlan(
+        CraftPlanningApplicationService.tryBuildPlan(
                 player, request.recipeId(), request.forcedRecipes(),
                 request.dimension(), request.position(), 1,
                 request.baseItem(), request.targetOutput(), request.requestId(),
@@ -116,7 +116,7 @@ final class CraftMaxCraftableSearchService {
             int maximum, @Nullable PureRecipePlanner.Result plan,
             PlanningSnapshot snapshot) {
         int displayCount = Math.max(1, maximum);
-        GenericCraftPacket.tryBuildPlan(
+        CraftPlanningApplicationService.tryBuildPlan(
                 player, request.recipeId(), request.forcedRecipes(),
                 request.dimension(), request.position(), displayCount,
                 request.baseItem(), request.targetOutput(), request.requestId(),
@@ -129,14 +129,15 @@ final class CraftMaxCraftableSearchService {
             ServerPlayer player, Request request, long previewGeneration,
             MaxCraftableSearch search, @Nullable PlanningSnapshot snapshot) {
         if (snapshot != null
-                && !GenericCraftPacket.isSnapshotActive(player, snapshot, previewGeneration)) {
+                && !CraftPlanningApplicationService.isSnapshotActive(
+                        player, snapshot, previewGeneration)) {
             return;
         }
         var probe = search.nextProbe();
         if (probe.isEmpty()) {
             int maximum = search.result();
             if (maximum <= 0) {
-                GenericCraftPacket.tryBuildPlan(
+                CraftPlanningApplicationService.tryBuildPlan(
                         player, request.recipeId(), request.forcedRecipes(),
                         request.dimension(), request.position(), 1,
                         request.baseItem(), request.targetOutput(), request.requestId(),
@@ -145,7 +146,7 @@ final class CraftMaxCraftableSearchService {
                         request.storageReference(), request.materialLocks(), null, request.preferences());
                 return;
             }
-            GenericCraftPacket.tryBuildPlan(
+            CraftPlanningApplicationService.tryBuildPlan(
                     player, request.recipeId(), request.forcedRecipes(),
                     request.dimension(), request.position(), maximum,
                     request.baseItem(), request.targetOutput(), request.requestId(),
@@ -170,7 +171,7 @@ final class CraftMaxCraftableSearchService {
                         .error(outcome, diagnostic);
             }
         };
-        GenericCraftPacket.tryBuildPlan(
+        CraftPlanningApplicationService.tryBuildPlan(
                 player, request.recipeId(), request.forcedRecipes(),
                 request.dimension(), request.position(), candidate,
                 request.baseItem(), request.targetOutput(), request.requestId(),

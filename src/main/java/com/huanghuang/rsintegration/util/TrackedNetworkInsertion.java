@@ -17,11 +17,11 @@ public final class TrackedNetworkInsertion {
         if (network == null) return input == null ? ItemStack.EMPTY : input.copy();
         if (player != null) {
             var result = CraftStorageEndpoints
-                    .fromLegacyNetwork(network).insert(player, input, false);
+                    .fromResolvedNetwork(network).insert(player, input, false);
             return result.remainder().orElse(ItemStack.EMPTY);
         }
         var endpoint = CraftStorageEndpoints
-                .fromLegacyNetwork(network);
+                .fromResolvedNetwork(network);
         return TrackedInsertionSequence.insert(input,
                 (stack, phase) -> endpoint.insert(stack,
                         phase == TrackedInsertionSequence.Phase.SIMULATE).remainder()

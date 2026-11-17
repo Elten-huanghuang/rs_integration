@@ -110,6 +110,17 @@ public interface StorageSession {
     }
 
     /**
+     * 无玩家上下文的内部写回，仅用于已归本次流程所有的实物恢复；
+     * 不得把它当作绕过后端授权的普通插入入口。
+     */
+    default StorageOperationResult insertInternal(ItemStack stack, boolean simulate) {
+        return StorageOperationResult.failedInsert(
+                simulate ? StorageOperationMode.SIMULATE
+                        : StorageOperationMode.PERFORM,
+                stack, StorageOperationStatus.UNAVAILABLE);
+    }
+
+    /**
      * Returns how many filled containers can be derived from this backend's
      * stored empty containers and typed fluid inventory.  This is a planning
      * hint only; commit-time extraction must still use

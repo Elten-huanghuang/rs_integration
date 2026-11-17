@@ -1,6 +1,5 @@
 package com.huanghuang.rsintegration.crafting.endpoint;
 
-import com.huanghuang.rsintegration.crafting.MaterialMatcher;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.network.binding.RSAltarBindingResolver;
 import net.minecraft.server.level.ServerPlayer;
@@ -11,6 +10,7 @@ import net.minecraft.world.level.Level;
 import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.storage.StorageSession;
+import com.huanghuang.rsintegration.storage.rs.RefinedStorageBackend;
 import com.huanghuang.rsintegration.util.ModIds;
 
 import javax.annotation.Nonnull;
@@ -24,21 +24,14 @@ import javax.annotation.Nullable;
 public final class CraftStorageEndpoints {
     private CraftStorageEndpoints() {}
 
-    /** Transitional bridge for legacy call sites; native RS stays isolated here. */
-    public static CraftStorageEndpoint fromLegacyNetwork(@Nonnull INetwork network) {
-        return new LegacyRsCraftStorageEndpoint(network);
-    }
-
     /**
-     * Returns the native RS handle only when this endpoint is the RS bridge.
-     * Backend-neutral callers may use this for legacy recipe APIs while BD
-     * endpoints correctly return {@code null} instead of being re-resolved.
+     * 把已经由 RS 原生入口解析出的网络接入正式后端会话。
+     *
+     * <p>该方法不会创建第二套存储实现；所有快照、权限和操作都归
+     * {@link RefinedStorageBackend} 创建的 {@link StorageSession} 所有。</p>
      */
-    @Nullable
-    public static INetwork legacyNetwork(@Nullable CraftStorageEndpoint endpoint) {
-        if (!isRefinedStorageLoaded()) return null;
-        return endpoint instanceof LegacyRsCraftStorageEndpoint legacy
-                ? legacy.network() : null;
+    public static CraftStorageEndpoint fromResolvedNetwork(@Nonnull INetwork network) {
+        return new SessionCraftStorageEndpoint(new RefinedStorageBackend().openSession(network));
     }
 
     /** 判断结构化端点是否代表 Refined Storage，而不暴露其原生网络对象。 */
@@ -63,28 +56,18 @@ public final class CraftStorageEndpoints {
         }
     }
 
-    /** 兼容服务的退款入口；现有调用者均返还刚取出的材料或燃料。 */
+    /** 从正式端点提取并合并同一运行时片段，供原生 GUI 兼容逻辑使用。 */
     @Nonnull
-    public static ItemStack insertLegacy(@Nonnull INetwork network,
+    public static ItemStack extractExact(@Nonnull CraftStorageEndpoint endpoint,
                                          @Nonnull ServerPlayer player,
-                                         @Nonnull ItemStack stack,
+                                         @Nonnull ItemStack template,
+                                         int amount,
                                          boolean simulate) {
-        return CraftStorageEndpoint.insertInternal(fromLegacyNetwork(network), player, stack, simulate)
-                .remainder().orElse(ItemStack.EMPTY);
-    }
-
-    /** Transitional exact-extraction bridge for non-crafting compatibility services. */
-    @Nonnull
-    public static ItemStack extractExactLegacy(@Nonnull INetwork network,
-                                               @Nonnull ServerPlayer player,
-                                               @Nonnull ItemStack template,
-                                               int amount,
-                                               boolean simulate) {
-        var result = fromLegacyNetwork(network).extractExact(player, template, amount, simulate);
+        var result = endpoint.extractExact(player, template, amount, simulate);
         return result.extractedStacks().stream().reduce(ItemStack.EMPTY, (left, right) -> {
             if (left.isEmpty()) return right.copy();
             ItemStack merged = left.copy();
-            if (MaterialMatcher.equivalentRuntimeFragment(merged, right)) merged.grow(right.getCount());
+            if (ItemStack.isSameItemSameTags(merged, right)) merged.grow(right.getCount());
             return merged;
         });
     }
@@ -124,7 +107,7 @@ public final class CraftStorageEndpoints {
         INetwork network = RSAltarBindingResolver.resolveNetworkForAltar(
                 player, dimension, position);
         return network == null ? Optional.empty()
-                : Optional.of(fromLegacyNetwork(network));
+                : Optional.of(fromResolvedNetwork(network));
     }
 
     /** Resolves a persisted backend-qualified reference without exposing native backend types. */
@@ -148,7 +131,7 @@ public final class CraftStorageEndpoints {
                 // or another backend as this recovery source.
                 INetwork current = RSIntegrationNetwork.resolveCurrentNetworkFromPlayer(player);
                 if (current != null && !reference.networkId().startsWith("v1|")) {
-                    CraftStorageEndpoint refreshed = fromLegacyNetwork(current);
+                    CraftStorageEndpoint refreshed = fromResolvedNetwork(current);
                     RSIntegrationMod.LOGGER.info(
                             "[RSI-Storage] refreshed legacy RS reference player={} old={} new={}",
                             player.getGameProfile().getName(), reference.networkId(),
@@ -175,7 +158,7 @@ public final class CraftStorageEndpoints {
                 && !reference.networkId().startsWith("v1|")) {
             INetwork current = RSIntegrationNetwork.resolveCurrentNetworkFromPlayer(player);
             if (current != null) {
-                CraftStorageEndpoint refreshed = fromLegacyNetwork(current);
+                CraftStorageEndpoint refreshed = fromResolvedNetwork(current);
                 RSIntegrationMod.LOGGER.info(
                         "[RSI-Storage] refreshed unavailable RS reference from current credential player={} old={} new={}",
                         player.getGameProfile().getName(), reference.networkId(),

@@ -471,7 +471,7 @@ class ExtractionLedgerEndpointTest extends BootstrapTest {
     }
 
     @Test
-    void cancelledCatalystReservationDoesNotConsumeItemsOrLeaveAnUnfinishedMirror() throws Exception {
+    void cancelledCatalystReservationDoesNotConsumeItems() {
         Ingredient catalyst = net.minecraftforge.common.crafting.StrictNBTIngredient.of(named("first", 1));
         assertEquals(1, ledger.reserveFromEndpoint(catalyst, 1, endpoint, player).getCount());
         ledger.cancelLastReservation();
@@ -480,11 +480,6 @@ class ExtractionLedgerEndpointTest extends BootstrapTest {
         reserve(2, StorageOperationResult.extracted(StorageOperationMode.PERFORM, 2, List.of(named("second", 2))));
         assertTrue(ledger.commitToEndpoint(null, player));
         verify(session, never()).extractMatching(player, catalyst, 1, false);
-        var field = ExtractionLedger.class.getDeclaredField("settlementLedger");
-        field.setAccessible(true);
-        StorageSettlementLedger mirror = (StorageSettlementLedger) field.get(ledger);
-        assertEquals(StorageSettlementLedger.State.COMMITTED, mirror.state());
-        assertEquals(1, mirror.size());
         ledger.refundCommittedToEndpoint(null, player);
         assertStacks(List.of(named("second", 2)), refunds);
     }

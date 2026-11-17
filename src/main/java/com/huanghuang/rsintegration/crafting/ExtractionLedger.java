@@ -5,7 +5,6 @@ import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 
 import java.lang.reflect.Method;
 
-import com.huanghuang.rsintegration.storage.StorageBackendId;
 import com.huanghuang.rsintegration.storage.StorageOperationStatus;
 import com.huanghuang.rsintegration.storage.StoredItem;
 import com.huanghuang.rsintegration.util.ItemStackUtils;
@@ -18,7 +17,6 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.Items;
 
 import com.huanghuang.rsintegration.crafting.RSICraftException;
-import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.util.CraftLogContext;
 import com.huanghuang.rsintegration.util.Diagnostics;
@@ -28,9 +26,6 @@ import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.mods.goety.GoetySoulTotemCrafting;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.feature.resonance.api.ResonanceStorageView;
-import com.huanghuang.rsintegration.storage.StorageItemKey;
-import com.huanghuang.rsintegration.storage.StorageReservationSource;
-import com.huanghuang.rsintegration.storage.StorageSettlementLedger;
 import com.huanghuang.rsintegration.storage.StorageOperationMode;
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
 import com.huanghuang.rsintegration.storage.StorageSnapshot;
@@ -57,7 +52,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 public final class ExtractionLedger implements AutoCloseable {
     private static final org.apache.logging.log4j.Logger LOGGER =
             org.apache.logging.log4j.LogManager.getLogger("RS Integration");
-    private static final LogSampler SETTLEMENT_MIRROR_LOGS = new LogSampler(60_000L);
     private static final LogSampler REFUND_LOGS = new LogSampler(60_000L);
 
     public enum State {
@@ -230,10 +224,6 @@ public final class ExtractionLedger implements AutoCloseable {
     @Nullable
     private StorageSnapshot reservationSnapshot;
     private long reservationSnapshotTick = Long.MIN_VALUE;
-
-    /** Backend-neutral settlement mirror; physical extraction remains here for compatibility. */
-    private StorageSettlementLedger settlementLedger = new StorageSettlementLedger();
-    private final Map<Integer, StorageSettlementLedger.EntryId> settlementEntries = new HashMap<>();
 
     public void setStorageEndpoint(@Nullable CraftStorageEndpoint endpoint) {
         if (this.storageEndpoint == endpoint) return;
@@ -475,45 +465,6 @@ public final class ExtractionLedger implements AutoCloseable {
                 "reserve item=" + itemId + " count=" + e.count + " src=" + e.source);
         entries.add(e);
         entriesById.put(e.id, e);
-        registerSettlementEntry(e);
-    }
-
-    private void registerSettlementEntry(Entry entry) {
-        try {
-            StorageReservationSource source;
-            StorageItemKey key;
-            CraftStorageEndpoint endpoint = endpointFor(entry.sourceEndpoint);
-            if (entry.source == Source.PLAYER_INVENTORY) {
-                // Player inventory reservations are tied to the active player
-                // at execution time; this mirror is descriptive only.
-                source = StorageReservationSource.external("player_inventory");
-                key = StorageItemKey.fromItemStack(
-                        new StorageBackendId("local"),
-                        entry.template);
-            } else if (entry.source == Source.RESONANCE_DISK && entry.resonanceView != null) {
-                source = StorageReservationSource.external(
-                        "resonance_disk:" + entry.resonanceView.backendId());
-                key = StorageItemKey.fromItemStack(
-                        new StorageBackendId(
-                                entry.resonanceView.backendId()), entry.template);
-            } else if (endpoint != null) {
-                var reference = endpoint.session().reference();
-                source = StorageReservationSource.storage(reference);
-                key = endpoint.session().itemKey(entry.template);
-            } else {
-                source = StorageReservationSource.external(entry.source.name().toLowerCase(Locale.ROOT));
-                key = StorageItemKey.fromItemStack(
-                        new StorageBackendId("unknown"),
-                        entry.template);
-            }
-            settlementEntries.put(entry.id,
-                    settlementLedger.reserve(source, key, entry.count));
-        } catch (RuntimeException ex) {
-            // The compatibility ledger must never change the established
-            // physical extraction path; an unavailable descriptive key is
-            // recorded in diagnostics and handled by the legacy ledger.
-            LOGGER.debug("[RSI-Ledger] settlement mirror skipped for entry {}", entry.id, ex);
-        }
     }
 
     // ── reservations ─────────────────────────────────────────────
@@ -962,13 +913,11 @@ public final class ExtractionLedger implements AutoCloseable {
         }
 
         transition(State.COMMITTING);
-        settlementLedger.beginCommit();
 
         // ── Phase 1: Pre-check ──────────────────────────────────
         if (!preCheck(endpoint, player)) {
             commitFailureDetail = "材料提取前检查失败";
             LOGGER.warn(fmt("Ledger commit pre-check failed, rolling back"));
-            resetSettlementMirror();
             releaseUncommittedAccountReservations();
             transition(State.ROLLED_BACK);
             return false;
@@ -1021,7 +970,6 @@ public final class ExtractionLedger implements AutoCloseable {
             extractionFailed = true;
         }
         if (extractionFailed) {
-            resetSettlementMirror();
             releaseUncommittedAccountReservations();
             transition(State.ROLLED_BACK);
             rollbackExtractedPhases(extracted, player);
@@ -1040,52 +988,11 @@ public final class ExtractionLedger implements AutoCloseable {
             Entry entry = entriesById.get(record.entryId);
             if (entry == null) {
                 rollbackExtractedPhases(extracted, player);
-                resetSettlementMirror();
                 transition(State.ROLLED_BACK);
                 return false;
             }
             entry.confirmExtracted(record.result.extractedStacks());
             entry.accountHeld = false;
-            StorageSettlementLedger.EntryId settlementId = settlementEntries.get(entry.id);
-            if (settlementId != null) {
-                try {
-                    CraftStorageEndpoint sourceEndpoint = endpointFor(entry.sourceEndpoint);
-                    settlementLedger.recordExtraction(settlementId, record.result,
-                            stack -> settlementKey(entry, sourceEndpoint));
-                } catch (RuntimeException mirrorFailure) {
-                    String key = "extraction:" + mirrorFailure.getClass().getName()
-                            + ":" + String.valueOf(mirrorFailure.getMessage());
-                    if (SETTLEMENT_MIRROR_LOGS.allow(key)) {
-                        LOGGER.warn(
-                                "[RSI-Ledger] settlement mirror extraction skipped; legacy extraction committed ({}: {})",
-                                mirrorFailure.getClass().getSimpleName(), mirrorFailure.getMessage());
-                        RSIntegrationMod.debug(
-                                "[RSI-Ledger] settlement mirror extraction detail entry={} template={} returned={}",
-                                entry.id, entry.template, entry.extracted, mirrorFailure);
-                    }
-                }
-            }
-        }
-        if (settlementLedger.state() == StorageSettlementLedger.State.COMMITTING) {
-            try {
-                settlementLedger.finishCommit();
-            } catch (RuntimeException mirrorFailure) {
-                // The settlement ledger is a diagnostic mirror.  It must not
-                // veto the authoritative extraction ledger: doing so leaves
-                // graph nodes in an endless retry loop after RS has already
-                // removed the requested items.  Keep the legacy transaction
-                // committed and discard only the failed mirror state.
-                String key = "commit:" + mirrorFailure.getClass().getName()
-                        + ":" + String.valueOf(mirrorFailure.getMessage());
-                if (SETTLEMENT_MIRROR_LOGS.allow(key)) {
-                    LOGGER.warn(
-                            "[RSI-Ledger] settlement mirror commit skipped; legacy extraction committed ({}: {})",
-                            mirrorFailure.getClass().getSimpleName(), mirrorFailure.getMessage());
-                    RSIntegrationMod.debug(
-                            "[RSI-Ledger] settlement mirror commit detail", mirrorFailure);
-                }
-                resetSettlementMirror();
-            }
         }
         MaterialSources.invalidateFor(player, storageEndpoint);
         pendingNet.clear();
@@ -1287,7 +1194,6 @@ public final class ExtractionLedger implements AutoCloseable {
         }
         requireState(State.RESERVING, State.RESERVED, State.COMMITTING);
         releaseReservations(player);
-        resetSettlementMirror();
         transition(State.ROLLED_BACK);
     }
 
@@ -1300,11 +1206,6 @@ public final class ExtractionLedger implements AutoCloseable {
         pendingResonance.clear();
         endpointEntryCache.clear();
         clearReservationSnapshot();
-    }
-
-    private void resetSettlementMirror() {
-        settlementLedger.reset();
-        settlementEntries.clear();
     }
 
     /**
@@ -1370,17 +1271,8 @@ public final class ExtractionLedger implements AutoCloseable {
     public void settleCommitted(ReservationToken token) {
         requireState(State.COMMITTED);
         List<Entry> owned = requireOwnedEntries(token);
-        List<StorageSettlementLedger.EntryId> settlementIds = owned.stream()
-                .map(entry -> settlementEntries.get(entry.id))
-                .filter(Objects::nonNull)
-                .toList();
         entries.removeAll(owned);
         for (Entry entry : owned) entriesById.remove(entry.id);
-        if (!settlementIds.isEmpty()
-                && settlementLedger.state() == StorageSettlementLedger.State.COMMITTED) {
-            settlementLedger.settle(new StorageSettlementLedger.ReservationToken(settlementIds));
-        }
-        for (Entry entry : owned) settlementEntries.remove(entry.id);
     }
 
     /** Refund only the committed entries owned by operations that never dispatched. */
@@ -1392,7 +1284,6 @@ public final class ExtractionLedger implements AutoCloseable {
         for (Entry entry : owned) refundEntry(entry, endpoint, player);
         entries.removeAll(owned);
         for (Entry entry : owned) entriesById.remove(entry.id);
-        resetSettlementMirror();
     }
 
     /** 仅返还紧凑批量计划中已确认未派发的数量，保留在途操作的提交记录。 */
@@ -1443,7 +1334,6 @@ public final class ExtractionLedger implements AutoCloseable {
         requireState(State.COMMITTED);
         entries.clear();
         entriesById.clear();
-        resetSettlementMirror();
     }
 
     public void reset() {
@@ -1461,10 +1351,6 @@ public final class ExtractionLedger implements AutoCloseable {
         refundActor = null;
         commitFailureStatus = null;
         commitFailureDetail = "";
-        // A chain reuses its master ledger across vanilla steps. The settlement
-        // mirror is a per-commit scope and must be reset with the legacy ledger;
-        // otherwise the next step calls beginCommit() on COMMITTED state.
-        resetSettlementMirror();
         state = State.IDLE;
     }
 
@@ -1493,7 +1379,6 @@ public final class ExtractionLedger implements AutoCloseable {
         preferredResonanceIngredients.clear();
         endpointEntryCache.clear();
         clearReservationSnapshot();
-        resetSettlementMirror();
         state = State.ROLLED_BACK;
     }
 
@@ -1804,28 +1689,6 @@ public final class ExtractionLedger implements AutoCloseable {
         if (available < needed) return false;
         pendingInv.merge(key, (long) needed, ExtractionLedger::saturatedAdd);
         return true;
-    }
-
-    private static StorageItemKey settlementKey(
-            Entry entry, @Nullable CraftStorageEndpoint endpoint) {
-        // The mirror key must use the same source namespace as reserve(). A
-        // ledger can contain RS and player-inventory entries at once; mapping
-        // an inventory entry through the active RS session changes only the
-        // backend id and falsely reports an NBT/item identity mismatch.
-        if (entry.source == Source.PLAYER_INVENTORY) {
-            return StorageItemKey.fromItemStack(
-                    new StorageBackendId("local"),
-                    entry.template);
-        }
-        if (entry.source == Source.RESONANCE_DISK && entry.resonanceView != null) {
-            return StorageItemKey.fromItemStack(
-                    new StorageBackendId(
-                            entry.resonanceView.backendId()), entry.template);
-        }
-        if (endpoint != null) return endpoint.session().itemKey(entry.template);
-        return StorageItemKey.fromItemStack(
-                new StorageBackendId("unknown"),
-                entry.template);
     }
 
     /** Diagnostic snapshot used when a graph reservation cannot be fulfilled. */
@@ -2420,18 +2283,6 @@ public final class ExtractionLedger implements AutoCloseable {
         Entry last = entries.remove(entries.size() - 1);
         entriesById.remove(last.id);
         decrementPending(last);
-        cancelSettlementEntry(last);
-    }
-
-    private void cancelSettlementEntry(Entry entry) {
-        StorageSettlementLedger.EntryId id = settlementEntries.remove(entry.id);
-        if (id == null) return;
-        try {
-            settlementLedger.cancelReservation(id);
-        } catch (RuntimeException failure) {
-            resetSettlementMirror();
-            LOGGER.debug("[RSI-Ledger] cancellation mirror reset for entry {}", entry.id, failure);
-        }
     }
 
     /** Undo every uncommitted reservation created after the supplied mark. */
@@ -2495,9 +2346,7 @@ public final class ExtractionLedger implements AutoCloseable {
         entries.removeAll(removed);
         for (Entry entry : removed) {
             entriesById.remove(entry.id);
-            settlementEntries.remove(entry.id);
         }
-        resetSettlementMirror();
     }
 
     static List<ItemStack> matchRecoveredRefunds(List<ItemStack> committed,
@@ -2551,7 +2400,6 @@ public final class ExtractionLedger implements AutoCloseable {
             if (idsToRemove.contains(entries.get(i).id)) {
                 Entry removed = entries.remove(i);
                 entriesById.remove(removed.id);
-                if (updatePending) cancelSettlementEntry(removed);
             }
         }
     }

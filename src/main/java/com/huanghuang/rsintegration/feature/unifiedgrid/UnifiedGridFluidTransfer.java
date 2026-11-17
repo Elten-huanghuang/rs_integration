@@ -64,7 +64,7 @@ public final class UnifiedGridFluidTransfer {
     public static void apply(ServerPlayer player, INetwork network, Result result, boolean filling, boolean shift) {
         if (!result.recovery().isEmpty()) {
             CraftFluidRecovery.retainToEndpoint(player, InkFluidSupport.token(result.recovery()),
-                    CraftStorageEndpoints.fromLegacyNetwork(network));
+                    CraftStorageEndpoints.fromResolvedNetwork(network));
             RSIntegrationMod.LOGGER.warn("终端容器转移留下 {} mB 流体，已封装为退款物品", result.recovery().getAmount());
         }
         player.containerMenu.setCarried(result.cursor());

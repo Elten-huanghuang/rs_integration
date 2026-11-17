@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
 import com.huanghuang.rsintegration.storage.StoragePermission;
 import com.huanghuang.rsintegration.storage.StorageRestockSupport;
+import com.huanghuang.rsintegration.storage.rs.RefinedStorageBackend;
 import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.network.security.Permission;
@@ -348,8 +349,7 @@ public final class RSSidePanelClickPacket {
         extractTemplate.setCount(1);
 
         // SIMULATE first — matches RS ItemGridHandler.onExtract
-        ItemStack simulated = CraftStorageEndpoints
-                .extractExactLegacy(network, player, extractTemplate, count, true);
+        ItemStack simulated = extractExact(network, player, extractTemplate, count, true);
         if (simulated.isEmpty()) {
             forceSyncZero(player, targetItem, stackId);
             return ItemStack.EMPTY;
@@ -362,8 +362,7 @@ public final class RSSidePanelClickPacket {
         }
 
         // PERFORM extract
-        ItemStack extracted = CraftStorageEndpoints
-                .extractExactLegacy(network, player, extractTemplate, count, false);
+        ItemStack extracted = extractExact(network, player, extractTemplate, count, false);
         if (extracted.isEmpty()) return ItemStack.EMPTY;
 
         if (isShift || (player.isCreative() && action == ACTION_EXTRACT_MAX)) {
@@ -448,7 +447,9 @@ public final class RSSidePanelClickPacket {
         player.inventoryMenu.broadcastChanges();
         player.containerMenu.broadcastChanges();
         syncPlayerInventorySlot(player, selectedSlot);
-        drainExtractEnergy(CraftStorageEndpoints.legacyNetwork(endpoint), player);
+        drainExtractEnergy(
+                RefinedStorageBackend.resolveNativeNetwork(endpoint.session().reference(), player),
+                player);
         return extracted;
     }
 
@@ -492,6 +493,13 @@ public final class RSSidePanelClickPacket {
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI] Energy drain failed after extraction", e);
         }
+    }
+
+    private static ItemStack extractExact(INetwork network, ServerPlayer player,
+                                          ItemStack template, int amount, boolean simulate) {
+        return CraftStorageEndpoints.extractExact(
+                CraftStorageEndpoints.fromResolvedNetwork(network),
+                player, template, amount, simulate);
     }
 
     private static void handleInsert(ServerPlayer player, boolean isRightClick, ItemStack clientCarried) {
@@ -575,14 +583,12 @@ public final class RSSidePanelClickPacket {
             req.setCount(1);
 
             // SIMULATE first — matches RS pattern
-            ItemStack sim = CraftStorageEndpoints
-                    .extractExactLegacy(network, player, req, 1, true);
+            ItemStack sim = extractExact(network, player, req, 1, true);
             if (sim.isEmpty()) continue;
 
             if (tracker != null) tracker.changed(player, req.copy());
 
-            ItemStack extracted = CraftStorageEndpoints
-                    .extractExactLegacy(network, player, req, 1, false);
+            ItemStack extracted = extractExact(network, player, req, 1, false);
             if (!extracted.isEmpty()) {
                 ItemStack remainder = ItemHandlerHelper.insertItemStacked(
                         playerFullInv(player), extracted, false);

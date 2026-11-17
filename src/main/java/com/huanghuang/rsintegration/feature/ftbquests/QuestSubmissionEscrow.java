@@ -1,10 +1,8 @@
 package com.huanghuang.rsintegration.feature.ftbquests;
 
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
-import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.util.PlayerUtils;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
@@ -23,10 +21,9 @@ final class QuestSubmissionEscrow implements AutoCloseable {
     private final CraftStorageEndpoint endpoint;
     private boolean committed;
 
-    QuestSubmissionEscrow(ServerPlayer player, CraftStorageEndpoint endpoint, INetwork network) {
+    QuestSubmissionEscrow(ServerPlayer player, CraftStorageEndpoint endpoint) {
         this.player = player;
-        this.endpoint = endpoint != null ? endpoint
-                : network == null ? null : CraftStorageEndpoints.fromLegacyNetwork(network);
+        this.endpoint = endpoint;
         this.ledger.setStorageEndpoint(this.endpoint);
     }
 

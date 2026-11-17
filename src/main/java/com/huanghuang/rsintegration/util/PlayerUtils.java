@@ -94,7 +94,7 @@ public final class PlayerUtils {
             @Nullable INetwork network
     ) {
         return safeGiveToStorage(player, stack,
-                network == null ? null : CraftStorageEndpoints.fromLegacyNetwork(network));
+                network == null ? null : CraftStorageEndpoints.fromResolvedNetwork(network));
     }
 
     /**

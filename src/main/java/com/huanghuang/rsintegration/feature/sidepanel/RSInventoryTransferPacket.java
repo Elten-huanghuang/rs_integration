@@ -165,8 +165,9 @@ public final class RSInventoryTransferPacket {
 
                 ItemStack req = stored.copy();
                 req.setCount(take);
-                ItemStack extracted = CraftStorageEndpoints
-                        .extractExactLegacy(network, player, req, take, false);
+                ItemStack extracted = CraftStorageEndpoints.extractExact(
+                        CraftStorageEndpoints.fromResolvedNetwork(network),
+                        player, req, take, false);
                 if (!extracted.isEmpty()) {
                     ItemStack remainder = ItemHandlerHelper.insertItemStacked(inv, extracted, false);
                     if (!remainder.isEmpty()) {
@@ -175,8 +176,8 @@ public final class RSInventoryTransferPacket {
                             dropsRemaining--;
                         } else {
                             // Drop throttle exhausted: refund to RS network
-                            CraftStorageEndpoints
-                                    .insertLegacy(network, player, remainder, false);
+                            CraftStorageEndpoints.fromResolvedNetwork(network)
+                                    .insert(player, remainder, false);
                         }
                     }
                     transferred += extracted.getCount() - remainder.getCount();

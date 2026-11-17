@@ -93,7 +93,7 @@ final class CraftMarketPlanService {
         List<PlanStep> steps = graphView.nodes().stream()
                 .map(PlanGraphView.NodeView::asPlanStep).toList();
         Map<IngredientKey, PlanResponse.Availability> materials =
-                GenericCraftPacket.directMaterialView(allocation, available);
+                CraftPlanningApplicationService.directMaterialView(allocation, available);
         CraftMachineBindingSupport.PlanAvailability machines =
                 CraftMachineBindingSupport.inspectPlanAvailability(
                         player, recipeId, modType, steps, dimension, position);
