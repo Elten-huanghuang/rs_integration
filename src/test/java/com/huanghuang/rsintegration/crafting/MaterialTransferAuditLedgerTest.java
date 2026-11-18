@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
-import com.huanghuang.rsintegration.feature.unifiedgrid.UnifiedGridFluidRecovery;
+import com.huanghuang.rsintegration.crafting.recovery.FluidRecoveryStore;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.server.MinecraftServer;
@@ -236,7 +236,7 @@ class MaterialTransferAuditLedgerTest extends BootstrapTest {
         UUID id = record(ledger, owner, fluid, 10L);
         UUID partId = MaterialTransferAuditLedger.RefundJournal.partId(id, 0);
         if (fluid) {
-            UnifiedGridFluidRecovery.get(server).retainRawOnce(owner,
+            FluidRecoveryStore.get(server).retainRawOnce(owner,
                     new FluidStack(Fluids.WATER, 3).writeToNBT(new CompoundTag()), null, partId);
         } else {
             CraftItemRecovery.get(server).retainOnce(owner, new ItemStack(Items.IRON_INGOT, 3), partId);
@@ -278,7 +278,7 @@ class MaterialTransferAuditLedgerTest extends BootstrapTest {
         UUID id = record(ledger, UUID.randomUUID(), fluid, amount);
         CompoundTag olderAudit = ledger.save(new CompoundTag());
         CraftItemRecovery items = spy(CraftItemRecovery.get(server));
-        UnifiedGridFluidRecovery fluids = spy(UnifiedGridFluidRecovery.get(server));
+        FluidRecoveryStore fluids = spy(FluidRecoveryStore.get(server));
         AtomicInteger parts = new AtomicInteger();
         doAnswer(call -> {
             if (parts.incrementAndGet() == 2) throw new IllegalStateException("第二片写入失败");
@@ -290,9 +290,9 @@ class MaterialTransferAuditLedgerTest extends BootstrapTest {
         }).when(fluids).retainRawOnce(any(), any(), any(), any());
         Map<String, CompoundTag> saved;
         try (var itemRecovery = mockStatic(CraftItemRecovery.class);
-             var fluidRecovery = mockStatic(UnifiedGridFluidRecovery.class)) {
+             var fluidRecovery = mockStatic(FluidRecoveryStore.class)) {
             itemRecovery.when(() -> CraftItemRecovery.get(server)).thenReturn(items);
-            fluidRecovery.when(() -> UnifiedGridFluidRecovery.get(server)).thenReturn(fluids);
+            fluidRecovery.when(() -> FluidRecoveryStore.get(server)).thenReturn(fluids);
             assertFalse(ledger.resolve(server, id, MaterialTransferAuditLedger.Resolution.REFUND, amount, resolver, 2L));
             assertEquals(Integer.MAX_VALUE, recoveryAmount(server, fluid));
             saved = saveRecoveries(server);
@@ -315,7 +315,7 @@ class MaterialTransferAuditLedgerTest extends BootstrapTest {
     }
 
     private static long recoveryAmount(MinecraftServer server, boolean fluid) {
-        CompoundTag tag = fluid ? UnifiedGridFluidRecovery.get(server).save(new CompoundTag())
+        CompoundTag tag = fluid ? FluidRecoveryStore.get(server).save(new CompoundTag())
                 : CraftItemRecovery.get(server).save(new CompoundTag());
         return tag.getList("pending", Tag.TAG_COMPOUND).stream().mapToLong(value -> fluid
                 ? ((CompoundTag) value).getCompound("fluid").getInt("Amount")
@@ -324,7 +324,7 @@ class MaterialTransferAuditLedgerTest extends BootstrapTest {
 
     private static Map<String, CompoundTag> saveRecoveries(MinecraftServer server) {
         return Map.of("rs_integration_craft_item_recovery", CraftItemRecovery.get(server).save(new CompoundTag()),
-                "rs_integration_unified_grid_fluid_recovery", UnifiedGridFluidRecovery.get(server).save(new CompoundTag()));
+                "rs_integration_unified_grid_fluid_recovery", FluidRecoveryStore.get(server).save(new CompoundTag()));
     }
 
     private static MinecraftServer serverWithRecoveryStorage(Map<String, CompoundTag> saved) {

@@ -1,6 +1,7 @@
-package com.huanghuang.rsintegration.feature.unifiedgrid;
+package com.huanghuang.rsintegration.crafting.recovery;
 
-import com.huanghuang.rsintegration.mods.ironsspellbooks.FluidRefundItem;
+import java.util.function.BooleanSupplier;
+import java.util.function.BiPredicate;
 import com.huanghuang.rsintegration.crafting.MaterialTransferAuditLedger.RefundJournal;
 import com.huanghuang.rsintegration.crafting.MaterialTransferAuditLedger.Resolved;
 import net.minecraft.nbt.CompoundTag;
@@ -8,7 +9,6 @@ import net.minecraft.nbt.IntArrayTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.saveddata.SavedData;
 import net.minecraftforge.fluids.FluidStack;
 
@@ -25,7 +25,7 @@ import java.util.Set;
 import java.util.UUID;
 
 /** 玩家离线或背包满时暂存退款；只有领取物品时才读取该玩家的记录。 */
-public final class UnifiedGridFluidRecovery extends SavedData {
+public final class FluidRecoveryStore extends SavedData {
     private static final int MAX_CLAIM_PER_ACTION = 32;
     private static final int MAX_VISITS_PER_ACTION = 64;
     /** 按玩家和原网络索引，领取时无需扫描其他玩家的退款。 */
@@ -51,8 +51,8 @@ public final class UnifiedGridFluidRecovery extends SavedData {
         boolean isEmpty() { return entries.isEmpty(); }
     }
 
-    UnifiedGridFluidRecovery() { }
-    UnifiedGridFluidRecovery(CompoundTag tag) {
+    FluidRecoveryStore() { }
+    FluidRecoveryStore(CompoundTag tag) {
         refundJournal = new RefundJournal(tag);
         for (Tag value : tag.getList("pending", Tag.TAG_COMPOUND)) {
             CompoundTag entry = ((CompoundTag) value).copy();
@@ -73,13 +73,9 @@ public final class UnifiedGridFluidRecovery extends SavedData {
         }
     }
 
-    static UnifiedGridFluidRecovery get(ServerPlayer player) {
-        return get(player.server);
-    }
-
-    public static UnifiedGridFluidRecovery get(MinecraftServer server) {
-        return server.overworld().getDataStorage().computeIfAbsent(UnifiedGridFluidRecovery::new,
-                UnifiedGridFluidRecovery::new, "rs_integration_unified_grid_fluid_recovery");
+    public static FluidRecoveryStore get(MinecraftServer server) {
+        return server.overworld().getDataStorage().computeIfAbsent(FluidRecoveryStore::new,
+                FluidRecoveryStore::new, "rs_integration_unified_grid_fluid_recovery");
     }
 
     void retain(UUID player, FluidStack fluid) {
@@ -145,24 +141,24 @@ public final class UnifiedGridFluidRecovery extends SavedData {
     }
 
     /** 登录或执行领取命令时最多发放 32 个物品；未发出的记录保留在世界存档。 */
-    public int claim(ServerPlayer player) {
-        Map<String, Bucket> byNetwork = pending.get(player.getUUID());
-        if (byNetwork == null || player.getInventory() == null) return 0;
+    int deliver(UUID owner, BooleanSupplier hasRoom, BiPredicate<CompoundTag, String> deliver) {
+        Map<String, Bucket> byNetwork = pending.get(owner);
+        if (byNetwork == null) return 0;
         int claimed = 0;
         int visited = 0;
         Iterator<Map.Entry<String, Bucket>> networks = byNetwork.entrySet().iterator();
         while (networks.hasNext() && claimed < MAX_CLAIM_PER_ACTION
                 && visited < MAX_VISITS_PER_ACTION
-                && player.getInventory().getFreeSlot() >= 0) {
+                && hasRoom.getAsBoolean()) {
             Map.Entry<String, Bucket> group = networks.next();
             Bucket bucket = group.getValue();
             int visits = Math.min(bucket.entries.size(), MAX_VISITS_PER_ACTION - visited);
             for (int index = 0; index < visits && claimed < MAX_CLAIM_PER_ACTION
-                    && player.getInventory().getFreeSlot() >= 0; index++, visited++) {
+                    && hasRoom.getAsBoolean(); index++) {
+                visited++;
                 CompoundTag entry = bucket.entries.peekFirst();
                 try {
-                    if (!player.getInventory().add(FluidRefundItem.create(
-                            entry.getCompound("fluid"), group.getKey()))) {
+                    if (!deliver.test(entry.getCompound("fluid").copy(), group.getKey())) {
                         break;
                     }
                 } catch (IllegalArgumentException invalid) {
@@ -177,14 +173,7 @@ public final class UnifiedGridFluidRecovery extends SavedData {
             }
             if (bucket.isEmpty()) networks.remove();
         }
-        if (byNetwork.isEmpty()) pending.remove(player.getUUID());
-        if (claimed > 0) {
-            player.getInventory().setChanged();
-            if (player.inventoryMenu != null) player.inventoryMenu.broadcastChanges();
-            if (player.containerMenu != null && player.containerMenu != player.inventoryMenu) {
-                player.containerMenu.broadcastChanges();
-            }
-        }
+        if (byNetwork.isEmpty()) pending.remove(owner);
         return claimed;
     }
 

@@ -1,8 +1,14 @@
-package com.huanghuang.rsintegration.mods.ironsspellbooks;
+package com.huanghuang.rsintegration.crafting.recovery;
 
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidTestFixtures;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
+import com.huanghuang.rsintegration.crafting.MaterialTransferAuditLedger;
+import com.huanghuang.rsintegration.crafting.NetworkOutputReception;
+import com.huanghuang.rsintegration.crafting.TaskOutputReception;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.storage.StorageOperationMode;
+import com.huanghuang.rsintegration.storage.StorageDiagnosticCode;
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
 import com.huanghuang.rsintegration.storage.StoragePermission;
 import com.huanghuang.rsintegration.storage.StorageSession;
@@ -12,6 +18,7 @@ import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.network.security.ISecurityManager;
 import com.refinedmods.refinedstorage.api.network.security.Permission;
 import com.refinedmods.refinedstorage.api.util.Action;
+import com.refinedmods.refinedstorage.api.storage.tracker.IStorageTracker;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerPlayer;
@@ -25,9 +32,12 @@ import net.minecraftforge.event.entity.player.PlayerInteractEvent;
 import net.minecraftforge.fluids.FluidStack;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
@@ -62,17 +72,17 @@ class FluidRefundItemTest extends BootstrapTest {
         when(network.insertFluid(any(), eq(400), eq(Action.PERFORM)))
                 .thenReturn(new FluidStack(Fluids.WATER, 400));
         try (MockedStatic<MaterialSources> materials = mockStatic(MaterialSources.class)) {
-            assertEquals(FluidRefundItem.RestoreResult.PARTIAL,
-                    FluidRefundItem.restore(player, voucher, network));
+            assertEquals(FluidVoucherRecovery.RestoreResult.PARTIAL,
+                    FluidVoucherRecovery.restore(player, voucher, network));
             assertEquals(1, voucher.getCount());
             assertEquals(400, voucher.getTag().getCompound("Fluid").getInt("Amount"));
-            assertEquals(FluidRefundItem.RestoreResult.NO_SPACE,
-                    FluidRefundItem.restore(player, voucher, network));
+            assertEquals(FluidVoucherRecovery.RestoreResult.NO_SPACE,
+                    FluidVoucherRecovery.restore(player, voucher, network));
             assertEquals(400, voucher.getTag().getCompound("Fluid").getInt("Amount"));
             when(network.insertFluid(any(), eq(400), eq(Action.PERFORM)))
                     .thenReturn(FluidStack.EMPTY);
-            assertEquals(FluidRefundItem.RestoreResult.STORED,
-                    FluidRefundItem.restore(player, voucher, network));
+            assertEquals(FluidVoucherRecovery.RestoreResult.STORED,
+                    FluidVoucherRecovery.restore(player, voucher, network));
         }
         assertTrue(voucher.isEmpty());
     }
@@ -87,8 +97,8 @@ class FluidRefundItemTest extends BootstrapTest {
         when(network.canRun()).thenReturn(true);
         when(network.insertFluid(any(), eq(250), eq(Action.PERFORM))).thenReturn(FluidStack.EMPTY);
         try (MockedStatic<MaterialSources> materials = mockStatic(MaterialSources.class)) {
-            assertEquals(FluidRefundItem.RestoreResult.STORED,
-                    FluidRefundItem.restore(player, voucher, network));
+            assertEquals(FluidVoucherRecovery.RestoreResult.STORED,
+                    FluidVoucherRecovery.restore(player, voucher, network));
         }
         assertTrue(voucher.isEmpty());
     }
@@ -102,8 +112,8 @@ class FluidRefundItemTest extends BootstrapTest {
         when(network.canRun()).thenReturn(true);
         when(network.getSecurityManager()).thenReturn(security);
         when(security.hasPermission(Permission.INSERT, player)).thenReturn(false);
-        assertEquals(FluidRefundItem.RestoreResult.NO_PERMISSION,
-                FluidRefundItem.restore(player, voucher, network));
+        assertEquals(FluidVoucherRecovery.RestoreResult.NO_PERMISSION,
+                FluidVoucherRecovery.restore(player, voucher, network));
         verify(network, never()).insertFluid(any(), anyInt(), any());
         assertEquals(250, voucher.getTag().getCompound("Fluid").getInt("Amount"));
     }
@@ -125,18 +135,18 @@ class FluidRefundItemTest extends BootstrapTest {
             return StorageOperationResult.inserted(StorageOperationMode.PERFORM, token,
                     token.copyWithCount(400));
         });
-        try (MockedStatic<InkFluidSupport> tokens = mockStatic(InkFluidSupport.class, CALLS_REAL_METHODS);
+        try (MockedStatic<FluidTokenItem> tokens = mockStatic(FluidTokenItem.class, CALLS_REAL_METHODS);
              MockedStatic<MaterialSources> materials = mockStatic(MaterialSources.class)) {
-            tokens.when(() -> InkFluidSupport.token(any(FluidStack.class))).thenAnswer(call ->
-                    InkFluidSupport.token(InkFluidTestFixtures.tokenItem(), call.getArgument(0)));
-            assertEquals(FluidRefundItem.RestoreResult.PARTIAL,
-                    FluidRefundItem.restoreEndpoint(player, voucher, endpoint));
+            tokens.when(() -> FluidTokenItem.token(any(FluidStack.class))).thenAnswer(call ->
+                    FluidTokenItem.token(InkFluidTestFixtures.tokenItem(), call.getArgument(0)));
+            assertEquals(FluidVoucherRecovery.RestoreResult.PARTIAL,
+                    FluidVoucherRecovery.restoreEndpoint(player, voucher, endpoint));
             assertEquals(400, voucher.getTag().getCompound("Fluid").getInt("Amount"));
             assertEquals("original", voucher.getTag().getCompound("Fluid").getCompound("Tag").getString("variant"));
             doAnswer(call -> StorageOperationResult.inserted(StorageOperationMode.PERFORM,
                     call.getArgument(1), ItemStack.EMPTY)).when(session).insert(eq(player), any(ItemStack.class), eq(false));
-            assertEquals(FluidRefundItem.RestoreResult.STORED,
-                    FluidRefundItem.restoreEndpoint(player, voucher, endpoint));
+            assertEquals(FluidVoucherRecovery.RestoreResult.STORED,
+                    FluidVoucherRecovery.restoreEndpoint(player, voucher, endpoint));
             assertTrue(voucher.isEmpty());
         }
     }
@@ -146,8 +156,8 @@ class FluidRefundItemTest extends BootstrapTest {
         ItemStack voucher = FluidRefundItem.create(InkFluidTestFixtures.refundItem(), raw(250), null);
         ServerPlayer player = mock(ServerPlayer.class);
         StorageSession session = mock(StorageSession.class);
-        assertEquals(FluidRefundItem.RestoreResult.NO_PERMISSION,
-                FluidRefundItem.restoreEndpoint(player, voucher, () -> session));
+        assertEquals(FluidVoucherRecovery.RestoreResult.NO_PERMISSION,
+                FluidVoucherRecovery.restoreEndpoint(player, voucher, () -> session));
         verify(session, never()).insert(eq(player), any(), eq(false));
         assertEquals(250, voucher.getTag().getCompound("Fluid").getInt("Amount"));
     }
@@ -181,5 +191,80 @@ class FluidRefundItemTest extends BootstrapTest {
 
     private static CompoundTag raw(int amount) {
         return new FluidStack(Fluids.WATER, amount).writeToNBT(new CompoundTag());
+    }
+
+    @Test
+    void ambiguousInsertLocksTheSavedVoucherAndRecordsOneAttemptAcrossRetries() {
+        ItemStack voucher = FluidRefundItem.create(InkFluidTestFixtures.refundItem(), raw(250), null);
+        ServerPlayer player = mock(ServerPlayer.class);
+        UUID owner = UUID.randomUUID();
+        when(player.getUUID()).thenReturn(owner);
+        when(player.getInventory()).thenReturn(mock(Inventory.class));
+        INetwork network = mock(INetwork.class);
+        when(network.canRun()).thenReturn(true);
+        when(network.insertFluid(any(), eq(250), eq(Action.PERFORM))).thenThrow(new IllegalStateException());
+        var ledger = new MaterialTransferAuditLedger();
+        try (var audits = mockStatic(MaterialTransferAuditLedger.class);
+             var materials = mockStatic(MaterialSources.class)) {
+            audits.when(() -> MaterialTransferAuditLedger.get(player.server)).thenReturn(ledger);
+            assertEquals(FluidVoucherRecovery.RestoreResult.UNKNOWN, FluidVoucherRecovery.restore(player, voucher, network));
+            var saved = ItemStack.of(voucher.save(new CompoundTag()));
+            assertEquals(FluidVoucherRecovery.RestoreResult.UNKNOWN, FluidVoucherRecovery.restore(player, saved, network));
+            assertEquals(1, ledger.pendingAttempts().size());
+            var attempt = ledger.pendingAttempt(saved.getTag().getUUID("RecoveryAttempt"));
+            assertEquals(owner, attempt.ownerId());
+            assertEquals(250, attempt.amount());
+            assertEquals("minecraft:water", attempt.resourceId().toString());
+            assertEquals(250, FluidRefundItem.rawFluid(saved).getInt("Amount"));
+            verify(network).insertFluid(any(), eq(250), eq(Action.PERFORM));
+        }
+    }
+
+    @Test
+    void rsTrackerCountsOnlyAcceptedFluidAndWaitingTasksCannotReceiveIt() {
+        var voucher = FluidRefundItem.create(InkFluidTestFixtures.refundItem(), raw(250), null);
+        var network = mock(INetwork.class);
+        var player = mock(ServerPlayer.class);
+        when(player.getInventory()).thenReturn(mock(Inventory.class));
+        when(network.canRun()).thenReturn(true);
+        IStorageTracker<FluidStack> tracker = mock(IStorageTracker.class);
+        when(network.getFluidStorageTracker()).thenReturn(tracker);
+        try (var waiting = mockStatic(TaskOutputReception.class); var materials = mockStatic(MaterialSources.class)) {
+            waiting.when(() -> TaskOutputReception.hasWaitingResources(network)).thenReturn(true);
+            when(network.insertFluid(any(), eq(250), eq(Action.PERFORM))).thenAnswer(call -> {
+                assertFalse(NetworkOutputReception.canReceive(network));
+                return new FluidStack(Fluids.WATER, 100);
+            });
+            assertEquals(FluidVoucherRecovery.RestoreResult.PARTIAL, FluidVoucherRecovery.restore(player, voucher, network));
+            verify(tracker).changed(eq(player), argThat(fluid -> fluid.getAmount() == 150));
+            assertTrue(NetworkOutputReception.canReceive(network));
+            assertEquals(100, FluidRefundItem.rawFluid(voucher).getInt("Amount"));
+        }
+    }
+
+    @Test
+    void bdIndeterminateReceiptCannotBeRetriedAgainstAnotherBackend() {
+        var voucher = FluidRefundItem.create(InkFluidTestFixtures.refundItem(), raw(90), null);
+        var player = mock(ServerPlayer.class);
+        when(player.getInventory()).thenReturn(mock(Inventory.class));
+        when(player.getUUID()).thenReturn(UUID.randomUUID());
+        var session = mock(StorageSession.class);
+        when(session.hasPermission(player, StoragePermission.INSERT)).thenReturn(true);
+        var token = InkFluidSupport.token(InkFluidTestFixtures.tokenItem(), new FluidStack(Fluids.WATER, 90));
+        when(session.insert(player, token, false)).thenReturn(
+                StorageOperationResult.indeterminateInsert(token, StorageDiagnosticCode.NATIVE_OPERATION_FAILED_AFTER_MUTATION));
+        var ledger = new MaterialTransferAuditLedger();
+        try (var tokens = mockStatic(FluidTokenItem.class);
+             var audits = mockStatic(MaterialTransferAuditLedger.class);
+             var materials = mockStatic(MaterialSources.class)) {
+            tokens.when(() -> FluidTokenItem.token(any())).thenReturn(token);
+            audits.when(() -> MaterialTransferAuditLedger.get(player.server)).thenReturn(ledger);
+            assertEquals(FluidVoucherRecovery.RestoreResult.UNKNOWN,
+                    FluidVoucherRecovery.restoreEndpoint(player, voucher, () -> session));
+            INetwork network = mock(INetwork.class);
+            assertEquals(FluidVoucherRecovery.RestoreResult.UNKNOWN, FluidVoucherRecovery.restore(player, voucher, network));
+            verify(network, never()).insertFluid(any(), anyInt(), any());
+            assertEquals(90, ledger.pendingAttempt(voucher.getTag().getUUID("RecoveryAttempt")).amount());
+        }
     }
 }

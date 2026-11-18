@@ -73,7 +73,7 @@ import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.crafting.graph.OutputProbability;
-import com.huanghuang.rsintegration.feature.unifiedgrid.UnifiedGridFluidRecovery;
+import com.huanghuang.rsintegration.crafting.recovery.FluidRecoveryStore;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.storage.StorageFluidKey;
 import com.huanghuang.rsintegration.storage.StorageFluidOperationResult;
@@ -1829,7 +1829,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             if (!identity.isEmpty()) {
                 fluidTag.put("Tag", identity);
             }
-            UnifiedGridFluidRecovery.get(
+            FluidRecoveryStore.get(
                     operationStartContext.player().server)
                     .retainRaw(
                             operationStartContext.player().getUUID(),
@@ -2538,8 +2538,8 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                     fluids.size());
             return;
         }
-        UnifiedGridFluidRecovery recovery =
-                UnifiedGridFluidRecovery.get(server);
+        FluidRecoveryStore recovery =
+                FluidRecoveryStore.get(server);
         for (List<FluidStack> fragments : fluids.values()) {
             for (FluidStack fluid : fragments) {
                 recovery.retainRaw(

@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.command;
 
+import com.huanghuang.rsintegration.crafting.recovery.FluidRecoveryDelivery;
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.feature.unifiedgrid.UnifiedGridFluidRecovery;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
@@ -20,7 +20,7 @@ public final class FluidRefundCommand {
                 .requires(source -> source.getEntity() instanceof ServerPlayer)
                 .executes(context -> {
                     ServerPlayer player = context.getSource().getPlayerOrException();
-                    int claimed = UnifiedGridFluidRecovery.get(player.server).claim(player);
+                    int claimed = FluidRecoveryDelivery.claim(player);
                     Component message = claimed == 0
                             ? Component.translatable("rsi.fluid_recovery.claim_empty")
                             : Component.translatable("rsi.fluid_recovery.claimed", claimed);

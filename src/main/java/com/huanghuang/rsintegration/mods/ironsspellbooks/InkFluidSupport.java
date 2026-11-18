@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.ironsspellbooks;
 
 import com.huanghuang.rsintegration.ModItems;
+import com.huanghuang.rsintegration.crafting.recovery.FluidTokenItem;
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
@@ -24,7 +25,7 @@ public final class InkFluidSupport {
     public static final int BOTTLE_AMOUNT = 250;
     private InkFluidSupport() {}
 
-    public static boolean isToken(ItemStack stack) { return stack.getItem() instanceof InkFluidItem; }
+    public static boolean isToken(ItemStack stack) { return FluidTokenItem.isToken(stack); }
 
     /** 原版物品数量只传一个字节，流体数量通过 NBT 保存，避免 250 mB 被截断。 */
     public static void writePacket(FriendlyByteBuf buffer, ItemStack stack) {
@@ -47,23 +48,15 @@ public final class InkFluidSupport {
     }
 
     public static FluidStack fluid(ItemStack stack) {
-        if (!isToken(stack) || stack.getTag() == null) return FluidStack.EMPTY;
-        FluidStack result = FluidStack.loadFluidStackFromNBT(stack.getTag());
-        result.setAmount(stack.getCount());
-        return result;
+        return FluidTokenItem.fluid(stack);
     }
 
     public static ItemStack token(FluidStack fluid) {
-        return token(ModItems.ALCHEMIST_INK_FLUID.get(), fluid);
+        return FluidTokenItem.token(fluid);
     }
 
     public static ItemStack token(Item item, FluidStack fluid) {
-        if (fluid.isEmpty()) return ItemStack.EMPTY;
-        ItemStack result = new ItemStack(item, fluid.getAmount());
-        FluidStack identity = fluid.copy();
-        identity.setAmount(1);
-        result.setTag(identity.writeToNBT(new CompoundTag()));
-        return result;
+        return FluidTokenItem.token(item, fluid);
     }
 
     /** 将公共流体身份映射为内部账本使用的显示/传输凭证。 */

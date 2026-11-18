@@ -5,7 +5,7 @@ import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidTestFixtures;
 import com.huanghuang.rsintegration.storage.*;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
-import com.huanghuang.rsintegration.feature.unifiedgrid.UnifiedGridFluidRecovery;
+import com.huanghuang.rsintegration.crafting.recovery.FluidRecoveryStore;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.MinecraftServer;
@@ -282,9 +282,9 @@ class ExtractionLedgerEndpointTest extends BootstrapTest {
         ItemStack remainder = fluid.copyWithCount(100);
         doReturn(StorageOperationResult.inserted(StorageOperationMode.PERFORM, fluid, remainder))
                 .when(session).insert(eq(player), argThat(InkFluidSupport::isToken), eq(false));
-        UnifiedGridFluidRecovery recovery = mock(UnifiedGridFluidRecovery.class);
-        try (MockedStatic<UnifiedGridFluidRecovery> savedData = mockStatic(UnifiedGridFluidRecovery.class)) {
-            savedData.when(() -> UnifiedGridFluidRecovery.get(player.server)).thenReturn(recovery);
+        FluidRecoveryStore recovery = mock(FluidRecoveryStore.class);
+        try (MockedStatic<FluidRecoveryStore> savedData = mockStatic(FluidRecoveryStore.class)) {
+            savedData.when(() -> FluidRecoveryStore.get(player.server)).thenReturn(recovery);
             ledger.refundCommittedToEndpoint(null, player);
             ledger.refundCommittedToEndpoint(null, player);
         }
@@ -308,9 +308,9 @@ class ExtractionLedgerEndpointTest extends BootstrapTest {
                 StorageOperationResult.extracted(StorageOperationMode.PERFORM, 250, List.of(fluid)));
         assertTrue(ledger.commitToEndpoint(null, player));
 
-        UnifiedGridFluidRecovery recovery = mock(UnifiedGridFluidRecovery.class);
-        try (MockedStatic<UnifiedGridFluidRecovery> savedData = mockStatic(UnifiedGridFluidRecovery.class)) {
-            savedData.when(() -> UnifiedGridFluidRecovery.get(player.server)).thenReturn(recovery);
+        FluidRecoveryStore recovery = mock(FluidRecoveryStore.class);
+        try (MockedStatic<FluidRecoveryStore> savedData = mockStatic(FluidRecoveryStore.class)) {
+            savedData.when(() -> FluidRecoveryStore.get(player.server)).thenReturn(recovery);
             ledger.refundCommittedToEndpoint(null, null);
         }
         ArgumentCaptor<CompoundTag> captured = ArgumentCaptor.forClass(CompoundTag.class);

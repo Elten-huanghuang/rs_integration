@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
-import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidItem;
+import com.huanghuang.rsintegration.crafting.recovery.FluidTokenItem;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidTestFixtures;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
@@ -228,7 +228,7 @@ class MaterialMatcherTest extends BootstrapTest {
 
     @Test
     void fluidTokenIdentityIgnoresSerializedAmountMetadata() {
-        InkFluidItem tokenItem = InkFluidTestFixtures.tokenItem();
+        FluidTokenItem tokenItem = InkFluidTestFixtures.tokenItem();
         ItemStack declared = InkFluidSupport.token(tokenItem,
                 new FluidStack(Fluids.WATER, 1000));
         ItemStack actual = declared.copy();

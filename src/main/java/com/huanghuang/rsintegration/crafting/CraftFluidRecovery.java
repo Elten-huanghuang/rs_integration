@@ -1,10 +1,9 @@
 package com.huanghuang.rsintegration.crafting;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 
-import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
-import com.huanghuang.rsintegration.mods.ironsspellbooks.FluidRefundItem;
-import com.huanghuang.rsintegration.feature.unifiedgrid.UnifiedGridFluidRecovery;
-import com.huanghuang.rsintegration.util.PlayerUtils;
+import com.huanghuang.rsintegration.crafting.recovery.FluidTokenItem;
+import com.huanghuang.rsintegration.crafting.recovery.FluidRecoveryDelivery;
+import com.huanghuang.rsintegration.crafting.recovery.FluidRecoveryStore;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
@@ -29,21 +28,14 @@ public final class CraftFluidRecovery {
     public static void retainToEndpoint(MinecraftServer server, UUID owner,
                                         @Nullable ServerPlayer player, ItemStack token,
                                         @Nullable CraftStorageEndpoint endpoint) {
-        if (!InkFluidSupport.isToken(token) || token.getTag() == null || token.getCount() <= 0) {
+        if (!FluidTokenItem.isToken(token) || token.getTag() == null || token.getCount() <= 0) {
             throw new IllegalArgumentException("流体退款缺少可恢复的身份或数量");
         }
         CompoundTag fluid = token.getTag().copy();
         fluid.putInt("Amount", token.getCount());
         String networkId = networkId(endpoint);
-        if (player != null && !player.hasDisconnected() && player.getInventory() != null
-                && player.getInventory().getFreeSlot() >= 0 && player.level() != null
-                && player.level().hasChunkAt(player.blockPosition())) {
-            PlayerUtils.safeGiveToStorage(
-                    player, FluidRefundItem.create(fluid, networkId), null);
-            player.displayClientMessage(Component.translatable("rsi.fluid_recovery.item_received"), true);
-            return;
-        }
-        boolean first = UnifiedGridFluidRecovery.get(server).retainRaw(owner, fluid, networkId);
+        if (FluidRecoveryDelivery.giveOnline(player, fluid, networkId)) return;
+        boolean first = FluidRecoveryStore.get(server).retainRaw(owner, fluid, networkId);
         if (first) {
             LOGGER.warn("[RSI] 流体退款开始暂存 owner={} network={}", owner, networkId);
         }

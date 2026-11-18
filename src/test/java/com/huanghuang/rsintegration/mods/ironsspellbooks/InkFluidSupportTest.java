@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.ironsspellbooks;
 
+import com.huanghuang.rsintegration.crafting.recovery.FluidTokenItem;
+
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.util.Action;
@@ -18,7 +20,7 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class InkFluidSupportTest extends BootstrapTest {
-    private static InkFluidItem TOKEN;
+    private static FluidTokenItem TOKEN;
 
     @BeforeAll
     static void createTokenItem() { TOKEN = InkFluidTestFixtures.tokenItem(); }

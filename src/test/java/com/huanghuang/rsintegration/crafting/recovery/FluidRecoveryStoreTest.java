@@ -1,6 +1,5 @@
-package com.huanghuang.rsintegration.feature.unifiedgrid;
+package com.huanghuang.rsintegration.crafting.recovery;
 
-import com.huanghuang.rsintegration.mods.ironsspellbooks.FluidRefundItem;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -27,15 +26,15 @@ import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-class UnifiedGridFluidRecoveryTest extends BootstrapTest {
+class FluidRecoveryStoreTest extends BootstrapTest {
     @Test
     void reloadKeepsOwnerAndRawFluidUntilClaimed() {
         UUID owner = UUID.randomUUID();
         UUID other = UUID.randomUUID();
-        UnifiedGridFluidRecovery original = new UnifiedGridFluidRecovery();
+        FluidRecoveryStore original = new FluidRecoveryStore();
         original.retainRaw(owner, water(1000), "v1|minecraft:overworld@1,2,3");
         original.retainRaw(other, water(200), null);
-        UnifiedGridFluidRecovery loaded = new UnifiedGridFluidRecovery(original.save(new CompoundTag()));
+        FluidRecoveryStore loaded = new FluidRecoveryStore(original.save(new CompoundTag()));
 
         ServerPlayer player = player(owner);
         Inventory inventory = player.getInventory();
@@ -43,7 +42,7 @@ class UnifiedGridFluidRecoveryTest extends BootstrapTest {
             items.when(() -> FluidRefundItem.create(any(CompoundTag.class),
                     eq("v1|minecraft:overworld@1,2,3")))
                     .thenReturn(new ItemStack(Items.PAPER));
-            assertEquals(1, loaded.claim(player));
+            assertEquals(1, FluidRecoveryDelivery.claim(loaded, player));
         }
         verify(inventory).add(any(ItemStack.class));
         ListTag pending = loaded.save(new CompoundTag()).getList("pending", Tag.TAG_COMPOUND);
@@ -55,12 +54,12 @@ class UnifiedGridFluidRecoveryTest extends BootstrapTest {
     @Test
     void missingFluidRegistryIsKeptAsRawDataForTheRefundItem() {
         UUID owner = UUID.randomUUID();
-        UnifiedGridFluidRecovery recovery = new UnifiedGridFluidRecovery();
+        FluidRecoveryStore recovery = new FluidRecoveryStore();
         CompoundTag missing = new CompoundTag();
         missing.putString("FluidName", "missing_mod:stored_fluid");
         missing.putInt("Amount", 250);
         recovery.retainRaw(owner, missing, null);
-        UnifiedGridFluidRecovery restarted = new UnifiedGridFluidRecovery(recovery.save(new CompoundTag()));
+        FluidRecoveryStore restarted = new FluidRecoveryStore(recovery.save(new CompoundTag()));
         assertEquals(missing, restarted.save(new CompoundTag())
                 .getList("pending", Tag.TAG_COMPOUND).getCompound(0).getCompound("fluid"));
     }
@@ -70,11 +69,11 @@ class UnifiedGridFluidRecoveryTest extends BootstrapTest {
         UUID owner = UUID.randomUUID();
         UUID refundId = UUID.randomUUID();
         CompoundTag fluid = water(750);
-        UnifiedGridFluidRecovery recovery = new UnifiedGridFluidRecovery();
+        FluidRecoveryStore recovery = new FluidRecoveryStore();
         assertTrue(recovery.retainRawOnce(owner, fluid, null, refundId));
         assertFalse(recovery.retainRawOnce(owner, fluid, null, refundId));
 
-        UnifiedGridFluidRecovery loaded = new UnifiedGridFluidRecovery(recovery.save(new CompoundTag()));
+        FluidRecoveryStore loaded = new FluidRecoveryStore(recovery.save(new CompoundTag()));
         assertFalse(loaded.retainRawOnce(owner, fluid, null, refundId));
         ListTag entries = loaded.save(new CompoundTag()).getList("pending", Tag.TAG_COMPOUND);
         assertEquals(1, entries.size());
@@ -84,7 +83,7 @@ class UnifiedGridFluidRecoveryTest extends BootstrapTest {
     @Test
     void batchRefundsMergeWithoutLosingAmountOrTags() {
         UUID owner = UUID.randomUUID();
-        UnifiedGridFluidRecovery recovery = new UnifiedGridFluidRecovery();
+        FluidRecoveryStore recovery = new FluidRecoveryStore();
         FluidStack tagged = new FluidStack(Fluids.WATER, 250);
         tagged.getOrCreateTag().putString("variant", "original");
         CompoundTag original = tagged.writeToNBT(new CompoundTag());
@@ -102,7 +101,7 @@ class UnifiedGridFluidRecoveryTest extends BootstrapTest {
     @Test
     void mergedAmountsSplitAtIntegerLimit() {
         UUID owner = UUID.randomUUID();
-        UnifiedGridFluidRecovery recovery = new UnifiedGridFluidRecovery();
+        FluidRecoveryStore recovery = new FluidRecoveryStore();
         recovery.retain(owner, new FluidStack(Fluids.WATER, Integer.MAX_VALUE - 100));
         recovery.retain(owner, new FluidStack(Fluids.WATER, 250));
         ListTag saved = recovery.save(new CompoundTag()).getList("pending", Tag.TAG_COMPOUND);
@@ -114,7 +113,7 @@ class UnifiedGridFluidRecoveryTest extends BootstrapTest {
     @Test
     void manualClaimIsBoundedAndLeavesRemainingRefundsInTheSave() {
         UUID owner = UUID.randomUUID();
-        UnifiedGridFluidRecovery recovery = new UnifiedGridFluidRecovery();
+        FluidRecoveryStore recovery = new FluidRecoveryStore();
         for (int i = 0; i < 40; i++) {
             CompoundTag distinct = water(100);
             distinct.putInt("variant", i);
@@ -123,7 +122,7 @@ class UnifiedGridFluidRecoveryTest extends BootstrapTest {
         try (MockedStatic<FluidRefundItem> items = mockStatic(FluidRefundItem.class)) {
             items.when(() -> FluidRefundItem.create(any(CompoundTag.class), isNull()))
                     .thenAnswer(ignored -> new ItemStack(Items.PAPER));
-            assertEquals(32, recovery.claim(player(owner)));
+            assertEquals(32, FluidRecoveryDelivery.claim(recovery, player(owner)));
         }
         assertEquals(8, recovery.save(new CompoundTag()).getList("pending", Tag.TAG_COMPOUND).size());
     }
@@ -131,11 +130,11 @@ class UnifiedGridFluidRecoveryTest extends BootstrapTest {
     @Test
     void fullInventoryKeepsAllPendingRefunds() {
         UUID owner = UUID.randomUUID();
-        UnifiedGridFluidRecovery recovery = new UnifiedGridFluidRecovery();
+        FluidRecoveryStore recovery = new FluidRecoveryStore();
         recovery.retain(owner, new FluidStack(Fluids.WATER, 1000));
         ServerPlayer player = player(owner);
         when(player.getInventory().getFreeSlot()).thenReturn(-1);
-        assertEquals(0, recovery.claim(player));
+        assertEquals(0, FluidRecoveryDelivery.claim(recovery, player));
         assertFalse(recovery.save(new CompoundTag()).getList("pending", Tag.TAG_COMPOUND).isEmpty());
     }
 
@@ -151,5 +150,28 @@ class UnifiedGridFluidRecoveryTest extends BootstrapTest {
 
     private static CompoundTag water(int amount) {
         return new FluidStack(Fluids.WATER, amount).writeToNBT(new CompoundTag());
+    }
+
+    @Test
+    void refusedDeliveryPreservesOwnedAndLegacyUnownedEntriesAcrossReload() {
+        CompoundTag legacy = new CompoundTag();
+        legacy.put("fluid", water(80));
+        ListTag entries = new ListTag();
+        entries.add(legacy);
+        CompoundTag save = new CompoundTag();
+        save.put("pending", entries);
+        var store = new FluidRecoveryStore(save);
+        UUID owner = UUID.randomUUID();
+        store.retainRaw(owner, water(100), null);
+        ServerPlayer player = player(owner);
+        when(player.getInventory().add(any(ItemStack.class))).thenReturn(false);
+        try (var items = mockStatic(FluidRefundItem.class)) {
+            items.when(() -> FluidRefundItem.create(any(), isNull())).thenReturn(new ItemStack(Items.PAPER));
+            assertEquals(0, FluidRecoveryDelivery.claim(store, player));
+            var loaded = new FluidRecoveryStore(store.save(new CompoundTag()));
+            when(player.getInventory().add(any(ItemStack.class))).thenReturn(true);
+            assertEquals(1, FluidRecoveryDelivery.claim(loaded, player));
+            assertEquals(entries, loaded.save(new CompoundTag()).getList("pending", Tag.TAG_COMPOUND));
+        }
     }
 }

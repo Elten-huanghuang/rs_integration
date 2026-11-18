@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.ironsspellbooks;
 
+import com.huanghuang.rsintegration.crafting.recovery.FluidTokenItem;
+
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.storage.StorageBackendId;
@@ -23,7 +25,7 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class IronAlchemistBatchDelegateTest extends BootstrapTest {
-    private static InkFluidItem TOKEN;
+    private static FluidTokenItem TOKEN;
 
     @BeforeAll
     static void createTokenItem() { TOKEN = InkFluidTestFixtures.tokenItem(); }

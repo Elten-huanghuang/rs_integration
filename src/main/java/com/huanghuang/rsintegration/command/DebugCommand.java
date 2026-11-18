@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.command;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 
+import com.huanghuang.rsintegration.crafting.recovery.FluidRecoveryDelivery;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.util.CuriosAccess;
 import com.huanghuang.rsintegration.util.Diagnostics;
@@ -25,7 +26,6 @@ import com.huanghuang.rsintegration.magic.MagicResourceKind;
 import com.huanghuang.rsintegration.magic.MagicResourceRouteCounters;
 import com.huanghuang.rsintegration.magic.MagicResourceTaskLedger;
 import com.huanghuang.rsintegration.crafting.MaterialTransferAuditLedger;
-import com.huanghuang.rsintegration.feature.unifiedgrid.UnifiedGridFluidRecovery;
 import com.huanghuang.rsintegration.mods.goety.magic.SoulPlanPreview;
 import com.huanghuang.rsintegration.magic.route.BackendResolution;
 import com.huanghuang.rsintegration.magic.route.Channel;
@@ -393,7 +393,7 @@ public final class DebugCommand {
             int claimed = 0;
             if (recipient != null) {
                 claimed = attempt.type() == MaterialTransferAuditLedger.ResourceType.FLUID
-                        ? UnifiedGridFluidRecovery.get(ctx.getSource().getServer()).claim(recipient)
+                        ? FluidRecoveryDelivery.claim(recipient)
                         : CraftItemRecovery.get(ctx.getSource().getServer()).claim(recipient);
             }
             message = recipient == null

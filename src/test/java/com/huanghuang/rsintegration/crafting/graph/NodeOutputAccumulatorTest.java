@@ -3,7 +3,7 @@ package com.huanghuang.rsintegration.crafting.graph;
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.api.execution.CollectedOutput;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
-import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidItem;
+import com.huanghuang.rsintegration.crafting.recovery.FluidTokenItem;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidTestFixtures;
 import net.minecraft.nbt.CompoundTag;
@@ -205,7 +205,7 @@ class NodeOutputAccumulatorTest extends BootstrapTest {
 
     @Test
     void publishesFluidTokenWhenOnlySerializedAmountMetadataDiffers() {
-        InkFluidItem tokenItem = InkFluidTestFixtures.tokenItem();
+        FluidTokenItem tokenItem = InkFluidTestFixtures.tokenItem();
         ItemStack declared = InkFluidSupport.token(tokenItem,
                 new FluidStack(Fluids.WATER, 1000));
         ItemStack actual = declared.copy();

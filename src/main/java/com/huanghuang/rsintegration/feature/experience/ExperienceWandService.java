@@ -2,7 +2,7 @@ package com.huanghuang.rsintegration.feature.experience;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
-import com.huanghuang.rsintegration.feature.unifiedgrid.UnifiedGridFluidRecovery;
+import com.huanghuang.rsintegration.crafting.recovery.FluidRecoveryStore;
 import com.huanghuang.rsintegration.storage.StorageCapability;
 import com.huanghuang.rsintegration.storage.StorageDiagnosticCode;
 import com.huanghuang.rsintegration.storage.StorageFluidKey;
@@ -153,7 +153,7 @@ public final class ExperienceWandService {
     }
 
     private static void retainRecovery(ServerPlayer player, StorageSession session, FluidStack stack) {
-        UnifiedGridFluidRecovery.get(player.server).retainRaw(player.getUUID(),
+        FluidRecoveryStore.get(player.server).retainRaw(player.getUUID(),
                 stack.writeToNBT(new CompoundTag()), session.reference().networkId());
     }
 

@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration;
 
+import com.huanghuang.rsintegration.crafting.recovery.FluidRecoveryDelivery;
 // Campfire (no GUI)
 import com.huanghuang.rsintegration.mods.sophisticatedbackpacks.SophisticatedBackpacksItems;
 import com.huanghuang.rsintegration.reflection.contract.ContractValidation;
@@ -8,7 +9,6 @@ import com.huanghuang.rsintegration.config.CraftingUiTheme;
 import com.huanghuang.rsintegration.config.RSStorageConfig;
 import com.huanghuang.rsintegration.storage.disk.UnifiedDiskEnabledCondition;
 import com.huanghuang.rsintegration.feature.unifiedgrid.UnifiedGridUpdatePacket;
-import com.huanghuang.rsintegration.feature.unifiedgrid.UnifiedGridFluidRecovery;
 import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.mods.IModIntegration;
@@ -926,7 +926,7 @@ public final class RSIntegrationMod {
                 }
                 sp.server.execute(() -> {
                     if (sp.hasDisconnected()) return;
-                    int claimed = UnifiedGridFluidRecovery.get(sp.server).claim(sp);
+                    int claimed = FluidRecoveryDelivery.claim(sp);
                     if (claimed > 0) {
                         sp.sendSystemMessage(Component.translatable(
                                 "rsi.fluid_recovery.claimed", claimed));

@@ -195,6 +195,7 @@
   "rsi.fluid_recovery.item_no_permission": "You cannot insert fluid into the selected RS / BD network",
   "rsi.fluid_recovery.item_invalid": "Fluid data is unavailable; the refund item remains",
   "rsi.fluid_recovery.item_unavailable": "Selected RS / BD network unavailable. Aim at a network block or carry a terminal and try again.",
+  "rsi.fluid_recovery.item_unknown": "The network may have received the fluid. This voucher is locked; ask an administrator to check the transfer audit.",
   "rsi.fluid_recovery.claimed": "Claimed %s fluid refund items",
   "rsi.fluid_recovery.claim_empty": "No fluid refunds to claim, or your inventory is full",
   "rsi.item_recovery.pending": "Crafting outputs and refunds are saved. Free some inventory space, then use /rsi_item_refund to claim them.",

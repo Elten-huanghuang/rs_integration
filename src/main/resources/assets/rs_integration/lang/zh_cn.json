@@ -195,6 +195,7 @@
   "rsi.fluid_recovery.item_no_permission": "你没有向所选 RS / BD 网络存入流体的权限",
   "rsi.fluid_recovery.item_invalid": "流体数据不可用，退款物品已保留",
   "rsi.fluid_recovery.item_unavailable": "所选 RS / BD 网络当前不可用；对准网络方块或携带无线终端后重试",
+  "rsi.fluid_recovery.item_unknown": "网络可能已收到流体，此凭证已锁定，请联系管理员核对转移审计记录",
   "rsi.fluid_recovery.claimed": "已领取 %s 个流体退款物品",
   "rsi.fluid_recovery.claim_empty": "没有可领取的流体退款，或背包已满",
   "rsi.item_recovery.pending": "合成产物与退款已暂存。请腾出背包空间后使用 /rsi_item_refund 领取。",

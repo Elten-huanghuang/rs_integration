@@ -18,7 +18,8 @@ import com.huanghuang.rsintegration.storage.StorageSnapshot;
 import com.huanghuang.rsintegration.storage.StorageSnapshotResult;
 import com.huanghuang.rsintegration.storage.StoredItem;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
-import com.huanghuang.rsintegration.feature.unifiedgrid.UnifiedGridFluidRecovery;
+import com.huanghuang.rsintegration.crafting.recovery.FluidRecoveryStore;
+import com.huanghuang.rsintegration.crafting.recovery.FluidRecoveryDelivery;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidTestFixtures;
 import com.huanghuang.rsintegration.util.PlayerUtils;
@@ -436,11 +437,11 @@ class RuntimeMaterialAccountTest extends BootstrapTest {
                         StorageOperationStatus.SUCCESS, 1000, 800, true, List.of(), List.of(),
                         FluidStack.EMPTY, StorageDiagnosticCode.NONE));
         MaterialTransferAuditLedger audit = new MaterialTransferAuditLedger();
-        UnifiedGridFluidRecovery recovery = mock(UnifiedGridFluidRecovery.class);
+        FluidRecoveryStore recovery = mock(FluidRecoveryStore.class);
         try (var ledgers = mockStatic(MaterialTransferAuditLedger.class);
-             var recoveries = mockStatic(UnifiedGridFluidRecovery.class)) {
+             var recoveries = mockStatic(FluidRecoveryStore.class)) {
             ledgers.when(() -> MaterialTransferAuditLedger.get(server)).thenReturn(audit);
-            recoveries.when(() -> UnifiedGridFluidRecovery.get(server)).thenReturn(recovery);
+            recoveries.when(() -> FluidRecoveryStore.get(server)).thenReturn(recovery);
             for (StorageFluidOperationResult receipt : invalid) {
                 doReturn(receipt).when(session).insertFluid(eq(player), any(), eq(false));
                 RuntimeMaterialAccount account = account();
@@ -463,9 +464,10 @@ class RuntimeMaterialAccountTest extends BootstrapTest {
         remainder.setAmount(300);
         doReturn(StorageFluidOperationResult.inserted(StorageOperationMode.PERFORM, input, remainder))
                 .when(session).insertFluid(eq(player), any(), eq(false));
-        UnifiedGridFluidRecovery recovery = mock(UnifiedGridFluidRecovery.class);
-        try (var recoveries = mockStatic(UnifiedGridFluidRecovery.class)) {
-            recoveries.when(() -> UnifiedGridFluidRecovery.get(server)).thenReturn(recovery);
+        FluidRecoveryStore recovery = mock(FluidRecoveryStore.class);
+        try (var recoveries = mockStatic(FluidRecoveryStore.class);
+             var deliveries = mockStatic(FluidRecoveryDelivery.class)) {
+            recoveries.when(() -> FluidRecoveryStore.get(server)).thenReturn(recovery);
             RuntimeMaterialAccount account = account();
             account.addFluid(input);
             account.close();
@@ -475,7 +477,7 @@ class RuntimeMaterialAccountTest extends BootstrapTest {
             verify(recovery).retainRaw(eq(player.getUUID()), saved.capture(), isNull());
             assertEquals(300, saved.getValue().getInt("Amount"));
             assertEquals(input.getTag(), saved.getValue().getCompound("Tag"));
-            verify(recovery).claim(player);
+            deliveries.verify(() -> FluidRecoveryDelivery.claim(player));
         }
     }
 

@@ -3,8 +3,8 @@ package com.huanghuang.rsintegration;
 import com.huanghuang.rsintegration.feature.foodorder.FoodOrderTerminalItem;
 import com.huanghuang.rsintegration.feature.experience.ResonantExperienceWandItem;
 import com.huanghuang.rsintegration.storage.disk.UnifiedDiskVisibility;
-import com.huanghuang.rsintegration.mods.ironsspellbooks.FluidRefundItem;
-import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidItem;
+import com.huanghuang.rsintegration.crafting.recovery.FluidRefundItem;
+import com.huanghuang.rsintegration.crafting.recovery.FluidTokenItem;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -42,7 +42,7 @@ public final class ModItems {
     public static RegistryObject<Item> RESONANT_MANA_POOL;
     public static RegistryObject<Item> RESONANT_SOURCE_TANK;
     public static final RegistryObject<Item> ALCHEMIST_INK_FLUID =
-            ITEMS.register("alchemist_ink_fluid", InkFluidItem::new);
+            ITEMS.register("alchemist_ink_fluid", FluidTokenItem::new);
     public static final RegistryObject<Item> FLUID_REFUND =
             ITEMS.register("fluid_refund", FluidRefundItem::new);
     public static final RegistryObject<Item> ORDER_TERMINAL =

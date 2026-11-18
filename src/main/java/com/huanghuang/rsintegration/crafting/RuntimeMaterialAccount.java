@@ -1,11 +1,12 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.huanghuang.rsintegration.crafting.recovery.FluidRecoveryDelivery;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.crafting.MaterialTransferAuditLedger.ResourceType;
-import com.huanghuang.rsintegration.feature.unifiedgrid.UnifiedGridFluidRecovery;
+import com.huanghuang.rsintegration.crafting.recovery.FluidRecoveryStore;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.storage.StorageOperationMode;
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
@@ -475,7 +476,7 @@ final class RuntimeMaterialAccount {
                     }
                     if (!stack.isEmpty()) {
                         try {
-                            UnifiedGridFluidRecovery recovery = UnifiedGridFluidRecovery.get(server);
+                            FluidRecoveryStore recovery = FluidRecoveryStore.get(server);
                             recovery.retainRaw(playerId, stack.writeToNBT(new CompoundTag()), null);
                             fluidRecoveryRetained = true;
                         } catch (RuntimeException | LinkageError failure) {
@@ -489,7 +490,7 @@ final class RuntimeMaterialAccount {
             }
             heldFluids.clear();
             if (online != null && itemRecoveryRetained) CraftItemRecovery.get(server).claim(online);
-            if (online != null && fluidRecoveryRetained) UnifiedGridFluidRecovery.get(server).claim(online);
+            if (online != null && fluidRecoveryRetained) FluidRecoveryDelivery.claim(online);
         }
     }
 }

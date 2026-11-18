@@ -1,5 +1,8 @@
 package com.huanghuang.rsintegration.mods.ironsspellbooks;
 
+import com.huanghuang.rsintegration.crafting.recovery.FluidTokenItem;
+
+import com.huanghuang.rsintegration.crafting.recovery.FluidRefundItem;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.material.EmptyFluid;
@@ -16,9 +19,9 @@ public final class InkFluidTestFixtures {
 
     private InkFluidTestFixtures() {}
 
-    public static synchronized InkFluidItem tokenItem() {
+    public static synchronized FluidTokenItem tokenItem() {
         Item existing = ForgeRegistries.ITEMS.getValue(ID);
-        if (existing instanceof InkFluidItem token) return token;
+        if (existing instanceof FluidTokenItem token) return token;
         ForgeRegistry<Item> registry = (ForgeRegistry<Item>) ForgeRegistries.ITEMS;
         boolean locked = registry.isLocked();
         registry.unfreeze();
@@ -26,7 +29,7 @@ public final class InkFluidTestFixtures {
             Method unfreeze = BuiltInRegistries.ITEM.getClass().getMethod("unfreeze");
             unfreeze.setAccessible(true);
             unfreeze.invoke(BuiltInRegistries.ITEM);
-            InkFluidItem token = new InkFluidItem();
+            FluidTokenItem token = new FluidTokenItem();
             registry.register(ID, token);
             return token;
         } catch (ReflectiveOperationException failure) {

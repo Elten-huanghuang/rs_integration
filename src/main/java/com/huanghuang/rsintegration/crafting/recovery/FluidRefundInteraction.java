@@ -1,8 +1,6 @@
-package com.huanghuang.rsintegration.mods.ironsspellbooks;
+package com.huanghuang.rsintegration.crafting.recovery;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
-import com.refinedmods.refinedstorage.api.network.INetwork;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.item.ItemStack;
@@ -21,10 +19,9 @@ public final class FluidRefundInteraction {
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
         ItemStack held = player.getItemInHand(event.getHand());
         if (!(held.getItem() instanceof FluidRefundItem)) return;
-        INetwork network = RSIntegrationNetwork.resolveNetworkStrict(
-                player.server, player.level().dimension(), event.getPos());
-        if (network == null) return;
-        FluidRefundItem.restoreFromBlockClick(player, held, network);
+        var result = FluidVoucherRecovery.atBlock(player, held, event.getPos());
+        if (result == null) return;
+        FluidRefundItem.showResult(player, result);
         event.setCanceled(true);
         event.setCancellationResult(InteractionResult.SUCCESS);
     }

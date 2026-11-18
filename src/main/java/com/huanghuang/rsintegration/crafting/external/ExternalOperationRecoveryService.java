@@ -34,7 +34,7 @@ import com.huanghuang.rsintegration.api.recipe.RecipeExecutionKind;
 import com.huanghuang.rsintegration.api.recipe.RecipeIntegration;
 import com.huanghuang.rsintegration.api.recipe.RecipeView;
 import com.huanghuang.rsintegration.crafting.CraftItemRecovery;
-import com.huanghuang.rsintegration.feature.unifiedgrid.UnifiedGridFluidRecovery;
+import com.huanghuang.rsintegration.crafting.recovery.FluidRecoveryStore;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
@@ -722,7 +722,7 @@ public final class ExternalOperationRecoveryService {
                 if (!identity.isEmpty()) {
                     fluidTag.put("Tag", identity);
                 }
-                UnifiedGridFluidRecovery.get(server).retainRaw(
+                FluidRecoveryStore.get(server).retainRaw(
                         entry.ownerId(), fluidTag, null);
                 remaining -= chunk;
             }

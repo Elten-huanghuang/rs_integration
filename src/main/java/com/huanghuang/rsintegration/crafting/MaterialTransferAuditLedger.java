@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.feature.unifiedgrid.UnifiedGridFluidRecovery;
+import com.huanghuang.rsintegration.crafting.recovery.FluidRecoveryStore;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -236,7 +236,7 @@ public final class MaterialTransferAuditLedger extends SavedData {
             return recovery.refundDecision(attempt.attemptId());
         }
         if (attempt.type() == ResourceType.FLUID) {
-            UnifiedGridFluidRecovery recovery = UnifiedGridFluidRecovery.get(server);
+            FluidRecoveryStore recovery = FluidRecoveryStore.get(server);
             if (recovery.hasLegacyRefund(attempt.attemptId())) {
                 throw new IllegalStateException("旧版流体退款只有去重记录，需人工核对原退款数量");
             }
@@ -253,7 +253,7 @@ public final class MaterialTransferAuditLedger extends SavedData {
         // 决定、分片进度和可领取余额在同一 SavedData 中保存，不能分别落盘。
         if (attempt.type() == ResourceType.ITEM) {
             if (!CraftItemRecovery.get(server).lockRefundDecision(decision)) return false;
-        } else if (!UnifiedGridFluidRecovery.get(server).lockRefundDecision(decision)) return false;
+        } else if (!FluidRecoveryStore.get(server).lockRefundDecision(decision)) return false;
         long remaining = refundAmount;
         int partIndex = 0;
         while (remaining > 0L) {
@@ -270,7 +270,7 @@ public final class MaterialTransferAuditLedger extends SavedData {
                 fluid.putString("FluidName", attempt.resourceId().toString());
                 fluid.putInt("Amount", amount);
                 if (!attempt.identity().isEmpty()) fluid.put("Tag", attempt.identity());
-                UnifiedGridFluidRecovery.get(server).retainRawOnce(attempt.ownerId(),
+                FluidRecoveryStore.get(server).retainRawOnce(attempt.ownerId(),
                         fluid, null, refundPartId);
             }
             remaining -= amount;
@@ -281,7 +281,7 @@ public final class MaterialTransferAuditLedger extends SavedData {
     /** 先从恢复队列还原首次决定，再按稳定分片 ID 补齐余额；领取过的分片不会重发。 */
     public void replayRefunds(MinecraftServer server) {
         List<Resolved> receipts = new ArrayList<>(CraftItemRecovery.get(server).refundDecisions());
-        receipts.addAll(UnifiedGridFluidRecovery.get(server).refundDecisions());
+        receipts.addAll(FluidRecoveryStore.get(server).refundDecisions());
         for (Resolved receipt : receipts) {
             UUID id = receipt.attempt().attemptId();
             Pending existing = pending.get(id);

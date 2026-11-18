@@ -4,9 +4,9 @@ import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.crafting.fluid.FluidContainerBucketSupport;
 import com.huanghuang.rsintegration.crafting.fluid.FluidContainerTransfer;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.AlchemistBottleSupport;
-import com.huanghuang.rsintegration.mods.ironsspellbooks.FluidRefundItem;
+import com.huanghuang.rsintegration.crafting.recovery.FluidRefundItem;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkBottleFluidHandler;
-import com.huanghuang.rsintegration.feature.unifiedgrid.UnifiedGridFluidRecovery;
+import com.huanghuang.rsintegration.crafting.recovery.FluidRecoveryStore;
 import com.wintercogs.beyonddimensions.api.storage.key.KeyAmount;
 import com.wintercogs.beyonddimensions.api.storage.key.impl.FluidStackKey;
 import com.wintercogs.beyonddimensions.common.menu.DimensionsNetMenu;
@@ -66,7 +66,7 @@ public final class BeyondDimensionsFluidInteraction {
             CompoundTag raw = result.recovery().writeToNBT(new CompoundTag());
             ItemStack voucher = FluidRefundItem.create(raw, null);
             if (!player.getInventory().add(voucher)) {
-                UnifiedGridFluidRecovery.get(player.server).retainRaw(player.getUUID(), raw, null);
+                FluidRecoveryStore.get(player.server).retainRaw(player.getUUID(), raw, null);
             }
         }
         player.containerMenu.setCarried(result.cursor());
