@@ -1433,9 +1433,6 @@ final class CraftPlanningApplicationService {
                         projectedOverrides, demandTree, precomputedPlan,
                         routedPlan == null ? PurePlanningCoverage.Probe.notChecked() : routedPlan.coverage(),
                         reusableCatalystOutputIds, targetUsesReusableCatalyst);
-        // 规划只需要可用的存储端点，不能再用 RS 原生网络做可用性判断。
-        boolean typedResolverAvailable = RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING.get()
-                && planningEndpoint != null;
         RSIntegrationMod.LOGGER.debug(
                 "[RSI-plan] planner route recipe={} action={} reason={} coverage={} nodes={} unresolved={} overrides={} mainThreadOnly={} catalystRoute={} targetCatalyst={}",
                 recipeId, routeDecision.action(), routeDecision.reason(), demandTree.status(), demandTree.visitedNodes(),
@@ -1462,11 +1459,17 @@ final class CraftPlanningApplicationService {
         boolean selectedPureResolver = routeDecision.action() == PlannerAction.USE_PURE_RESULT
                 || timedOutMissingRoute;
         boolean needsTypedResolver = routeDecision.action() == PlannerAction.RUN_TYPED;
-        if (needsTypedResolver && !typedResolverAvailable) {
+        if (needsTypedResolver && !RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING.get()) {
             sink.error(PlanOutcome.RUNTIME_UNAVAILABLE,
-                    IntegrationDiagnostic.error(planningEndpoint == null
-                            ? IntegrationDiagnosticCode.NETWORK_UNAVAILABLE
-                            : IntegrationDiagnosticCode.MULTIBLOCK_DISABLED));
+                    IntegrationDiagnostic.error(IntegrationDiagnosticCode.MULTIBLOCK_DISABLED));
+            return;
+        }
+        // 兼容规划也处理可复用催化剂等普通工作台配方，不一定涉及机器。
+        if (needsTypedResolver && planningEndpoint == null
+                && (!(recipe instanceof CraftingRecipe)
+                || recipeModType != null && recipeModType != ModType.GENERIC)) {
+            sink.error(PlanOutcome.RUNTIME_UNAVAILABLE,
+                    IntegrationDiagnostic.error(IntegrationDiagnosticCode.NETWORK_UNAVAILABLE));
             return;
         }
         if (needsTypedResolver
@@ -1623,6 +1626,12 @@ final class CraftPlanningApplicationService {
             planGraph = completedTyped.graph();
             missing.addAll(completedTyped.missing());
             resolutionSteps = ExecutionEquivalence.projectFlatSteps(planGraph);
+            if (planningEndpoint == null
+                    && resolutionSteps.stream().anyMatch(step -> step.modType() != ModType.GENERIC)) {
+                sink.error(PlanOutcome.RUNTIME_UNAVAILABLE,
+                        IntegrationDiagnostic.error(IntegrationDiagnosticCode.NETWORK_UNAVAILABLE));
+                return;
+            }
         }
         if (usedPurePlan && precomputedPlan.feasible()) {
             if (completedTyped != null && (!ItemStack.matches(completedTyped.output(), planTargetOutput)

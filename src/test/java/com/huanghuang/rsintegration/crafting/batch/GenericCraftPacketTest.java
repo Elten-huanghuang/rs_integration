@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.electronwill.nightconfig.core.CommentedConfig;
+import com.mojang.authlib.GameProfile;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
@@ -39,11 +40,17 @@ import com.huanghuang.rsintegration.crafting.planning.PureDemandTreeInspector;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.SelfAmplifyingRecipePolicy;
 import com.huanghuang.rsintegration.crafting.planning.PlanningSnapshot;
+import com.huanghuang.rsintegration.crafting.plan.IntegrationDiagnostic;
+import com.huanghuang.rsintegration.crafting.plan.IntegrationDiagnosticCode;
+import com.huanghuang.rsintegration.crafting.plan.PlanOutcome;
+import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import com.huanghuang.rsintegration.crafting.planning.PlanningPreferences;
 import com.huanghuang.rsintegration.crafting.plan.RecipeChoice;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.mods.embers.EreAlchemyRSModule;
 import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketRecipeWrapper;
+import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
+import com.huanghuang.rsintegration.network.binding.MachineFavoritesSavedData;
 import com.huanghuang.rsintegration.storage.StorageBackendId;
 import com.huanghuang.rsintegration.storage.StorageItemKey;
 import com.huanghuang.rsintegration.storage.StorageSession;
@@ -53,6 +60,9 @@ import com.huanghuang.rsintegration.storage.StoredItem;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import com.huanghuang.rsintegration.util.ModIds;
 import io.netty.buffer.Unpooled;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.NonNullList;
+import net.minecraft.core.RegistryAccess;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -61,16 +71,21 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraftforge.server.ServerLifecycleHooks;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.inventory.CraftingContainer;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.world.item.crafting.CraftingBookCategory;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.item.crafting.ShapelessRecipe;
 import net.minecraft.world.item.crafting.SmithingTransformRecipe;
+import net.minecraft.world.level.Level;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeAll;
+import org.mockito.ArgumentCaptor;
 import org.mockito.MockedStatic;
 import net.minecraftforge.fml.ModList;
 import net.minecraftforge.eventbus.api.IEventBus;
@@ -84,6 +99,8 @@ import java.util.HashMap;
 import java.util.ArrayList;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -94,8 +111,14 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anySet;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
@@ -276,6 +299,9 @@ class GenericCraftPacketTest extends BootstrapTest {
 
     @BeforeAll
     static void loadServerConfig() {
+        CommentedConfig common = CommentedConfig.inMemory();
+        RSIntegrationConfig.COMMON_SPEC.correct(common);
+        RSIntegrationConfig.COMMON_SPEC.setConfig(common);
         CommentedConfig config = CommentedConfig.inMemory();
         RSIntegrationConfig.SERVER_SPEC.correct(config);
         RSIntegrationConfig.SERVER_SPEC.setConfig(config);
@@ -967,6 +993,150 @@ class GenericCraftPacketTest extends BootstrapTest {
                 false, true, inspection, result, coverage, Set.of(), false).action());
         assertEquals(PlannerAction.RUN_TYPED, CraftPlanDecisionRules.completedRoute(snapshot,
                 false, true, inspection, null, coverage, Set.of(), false).action());
+    }
+
+    @Test
+    void previewsRecursiveCraftingWithOneReusableCatalystAndNoNetwork() throws Exception {
+        var alchemical = fuelRecipe("alchemical_coal", Items.COAL, Items.CHARCOAL);
+        var mobius = fuelRecipe("mobius_fuel", Items.CHARCOAL, Items.BLAZE_POWDER);
+        var aeternalis = fuelRecipe("aeternalis_fuel", Items.BLAZE_POWDER, Items.BLAZE_ROD);
+        List<ShapelessRecipe> recipes = List.of(alchemical, mobius, aeternalis);
+        RecipeManager manager = mock(RecipeManager.class);
+        doReturn(recipes).when(manager).getRecipes();
+        for (var recipe : recipes) doReturn(Optional.of(recipe)).when(manager).byKey(recipe.getId());
+
+        ServerPlayer player = mock(ServerPlayer.class);
+        UUID playerId = UUID.randomUUID();
+        Inventory inventory = new Inventory(player);
+        inventory.setItem(0, new ItemStack(Items.COAL, 64));
+        inventory.setItem(1, new ItemStack(Items.NETHER_STAR));
+        ServerLevel level = mock(ServerLevel.class);
+        MinecraftServer server = mock(MinecraftServer.class);
+        var serverField = ServerPlayer.class.getField("server");
+        serverField.setAccessible(true);
+        serverField.set(player, server);
+        when(player.getUUID()).thenReturn(playerId);
+        when(player.getGameProfile()).thenReturn(new GameProfile(playerId, "inventory_test"));
+        when(player.getInventory()).thenReturn(inventory);
+        when(player.getServer()).thenReturn(server);
+        when(player.level()).thenReturn(level);
+        when(player.serverLevel()).thenReturn(level);
+        when(player.blockPosition()).thenReturn(BlockPos.ZERO);
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        when(level.getServer()).thenReturn(server);
+        when(level.getRecipeManager()).thenReturn(manager);
+        when(level.registryAccess()).thenReturn(RegistryAccess.EMPTY);
+        when(server.isSameThread()).thenReturn(true);
+        var serverTasks = new LinkedBlockingQueue<Runnable>();
+        doAnswer(call -> {
+            serverTasks.add(call.getArgument(0));
+            return null;
+        }).when(server).execute(any(Runnable.class));
+
+        boolean previous = RSIntegrationConfig.REQUIRE_RS_NETWORK_FOR_RECIPE_TREE.get();
+        long generation = CraftPlanningRuntime.planRequests().begin(playerId);
+        var sink = mock(CraftPlanResultDispatcher.Sink.class);
+        try (var lifecycle = mockStatic(ServerLifecycleHooks.class);
+             var mods = mockStatic(ModList.class);
+             var bindings = mockStatic(AltarBindingRegistry.class);
+             var favorites = mockStatic(MachineFavoritesSavedData.class);
+             var ingredientSpecs = mockStatic(CraftPacketUtils.class, CALLS_REAL_METHODS)) {
+            lifecycle.when(ServerLifecycleHooks::getCurrentServer).thenReturn(server);
+            mods.when(ModList::get).thenReturn(mock(ModList.class));
+            favorites.when(() -> MachineFavoritesSavedData.get(player.server))
+                    .thenReturn(mock(MachineFavoritesSavedData.class));
+            for (var recipe : recipes) {
+                List<IngredientSpec> specs = recipe.getIngredients().stream()
+                        .map(ingredient -> new IngredientSpec(ingredient, 1,
+                                ingredient.test(new ItemStack(Items.NETHER_STAR))
+                                        ? DemandRole.CATALYST : DemandRole.CONSUMED))
+                        .toList();
+                ingredientSpecs.when(() -> CraftPacketUtils.extractCraftingIngredientSpecs(recipe)).thenReturn(specs);
+                ingredientSpecs.when(() -> CraftPacketUtils.extractIngredientSpecs(recipe)).thenReturn(specs);
+            }
+            RecipeIndex.warmUpBlocking(level);
+            assertTrue(RecipeIndex.reusableCatalystRecipeIds(level).contains(aeternalis.getId()));
+
+            RSIntegrationConfig.REQUIRE_RS_NETWORK_FOR_RECIPE_TREE.set(true);
+            assertEquals(IntegrationDiagnosticCode.NETWORK_UNAVAILABLE, CraftPlanStorageService
+                    .resolvePlanContext(player, null, null, ModType.GENERIC, null).failure());
+            RSIntegrationConfig.REQUIRE_RS_NETWORK_FOR_RECIPE_TREE.set(false);
+
+            CraftPlanningApplicationService.tryBuildPlan(player, aeternalis.getId(), Map.of(),
+                    null, null, 1, null, null, 1, generation, null, null, true, false,
+                    sink, null, Map.of(), null, PlanningPreferences.empty());
+            var queue = CraftPlanningRuntime.typedPreviewRequests();
+            for (int tick = 0; tick < 10 && queue.size() > 0; tick++) {
+                queue.run(1, System.nanoTime(), -1, request -> request.playerId().equals(playerId));
+            }
+            var callback = serverTasks.poll(5, TimeUnit.SECONDS);
+            verify(sink, never()).error(any(PlanOutcome.class), any(IntegrationDiagnostic.class));
+            assertNotNull(callback, "typed preview should reach response finalization");
+            callback.run();
+
+            var response = ArgumentCaptor.forClass(PlanResponse.class);
+            var snapshot = ArgumentCaptor.forClass(PlanningSnapshot.class);
+            verify(sink).success(response.capture(), snapshot.capture());
+            verifyNoMoreInteractions(sink);
+            PlanResponse plan = response.getValue();
+            assertEquals(PlanOutcome.READY, plan.outcome());
+            assertNull(plan.storageReference());
+            assertEquals(1L, plan.materials().entrySet().stream()
+                    .filter(entry -> entry.getKey().item() == Items.NETHER_STAR)
+                    .mapToLong(entry -> entry.getValue().needed()).sum());
+            CraftPlanningRuntime.planCache().retainForRequest(playerId, 1, snapshot.getValue());
+            var confirmation = CraftPlanningApplicationService.findValidatedExecutionPlan(player,
+                    aeternalis.getId(), Map.of(), 1, plan.targetResult(), ModType.GENERIC,
+                    null, null, null, Map.of(), 1);
+            assertFalse(confirmation.rejected());
+            assertNotNull(confirmation.entry());
+            CraftPlanGraph executionGraph = CraftTerminalSteps.composeEquivalentTerminalGraph(
+                    confirmation.entry().resolvedGraph(), CraftTerminalSteps.genericTerminalStep(aeternalis.getId(), 1),
+                    new ItemStack(Items.BLAZE_ROD), level);
+            Map<ResourceLocation, Integer> executions = new HashMap<>();
+            for (CraftNode node : executionGraph.nodes()) {
+                executions.merge(node.recipeId(), node.executions(), Integer::sum);
+                assertEquals(1, node.inputs().stream()
+                        .filter(input -> input.role() == DemandRole.CATALYST)
+                        .mapToLong(InputDemand::quantity).sum());
+                if (!node.recipeId().equals(aeternalis.getId())) {
+                    assertEquals(1, node.outputs().stream()
+                            .filter(output -> output.kind() == OutputKind.REMAINDER
+                                    && output.material().item() == Items.NETHER_STAR)
+                            .mapToLong(OutputDeclaration::quantity).sum());
+                }
+            }
+            assertEquals(Map.of(alchemical.getId(), 16, mobius.getId(), 4, aeternalis.getId(), 1), executions);
+            assertEquals(1, executionGraph.allocations().stream()
+                    .filter(allocation -> allocation.material().item() == Items.NETHER_STAR
+                            && allocation.source() instanceof MaterialSource.InitialPool)
+                    .mapToLong(allocation -> allocation.quantity()).sum());
+        } finally {
+            RSIntegrationConfig.REQUIRE_RS_NETWORK_FOR_RECIPE_TREE.set(previous);
+            CraftPlanningRuntime.removePlayer(playerId);
+            try (var mods = mockStatic(ModList.class)) {
+                mods.when(ModList::get).thenReturn(mock(ModList.class));
+                RecipeIndex.invalidate();
+            }
+        }
+    }
+
+    private static ShapelessRecipe fuelRecipe(String id, Item input, Item output) {
+        Ingredient fuel = Ingredient.of(input);
+        return new ShapelessRecipe(new ResourceLocation("projecte", id), "", CraftingBookCategory.MISC,
+                new ItemStack(output), NonNullList.of(Ingredient.EMPTY,
+                Ingredient.of(Items.NETHER_STAR), fuel, fuel, fuel, fuel)) {
+            @Override
+            public NonNullList<ItemStack> getRemainingItems(CraftingContainer container) {
+                NonNullList<ItemStack> remaining = NonNullList.withSize(container.getContainerSize(), ItemStack.EMPTY);
+                for (int slot = 0; slot < container.getContainerSize(); slot++) {
+                    if (container.getItem(slot).is(Items.NETHER_STAR)) {
+                        remaining.set(slot, container.getItem(slot).copyWithCount(1));
+                    }
+                }
+                return remaining;
+            }
+        };
     }
 
     @Test
