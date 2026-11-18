@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.network.binding;
 
+import com.huanghuang.rsintegration.crafting.DeepPlanningFixture;
 import com.huanghuang.rsintegration.machine.client.BindingSyncChunkAccumulator;
 import com.huanghuang.rsintegration.network.binding.BindingSyncCodec.Payload;
 import com.huanghuang.rsintegration.network.binding.MachineBindingService.PlayerEndpoint;
@@ -9,6 +10,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -26,6 +28,11 @@ import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.when;
 
 class MachineBindingSnapshotServiceTest extends BootstrapTest {
+    @BeforeAll
+    static void initializeMod() {
+        DeepPlanningFixture.initializeMod();
+    }
+
     private static final String RS_GRID = "refinedstorage:grid";
     private static final String BD_TERMINAL = "beyonddimensions:net_terminal_item";
     private static final ResourceLocation OVERWORLD = ResourceLocation.parse("minecraft:overworld");
@@ -94,6 +101,7 @@ class MachineBindingSnapshotServiceTest extends BootstrapTest {
             bindings.when(() -> MachineBindingService.collectPlayerEndpoints(player)).thenReturn(List.of());
             snapshots.send(player, ALL, false, sent::add);
             snapshots.send(player, BD_TERMINALS, false, sent::add);
+            snapshots.send(player, BD_TERMINALS, false, sent::add);
         }
 
         assertEquals(2, sent.size());
@@ -122,6 +130,38 @@ class MachineBindingSnapshotServiceTest extends BootstrapTest {
             snapshots.forgetPlayer(player.getUUID());
             snapshots.send(player, ALL, false, sent::add);
             assertEquals(4, sent.size());
+        }
+    }
+
+    @Test
+    void failedConversionKeepsLastSentFingerprintAndRetriesChangedBindings() {
+        var original = List.of(endpoint(RS_GRID, 1));
+        var changed = List.of(endpoint(BD_TERMINAL, 2));
+        var originalInfos = MachineBindingInfoFactory.fromEndpoints(original);
+        var changedInfos = MachineBindingInfoFactory.fromEndpoints(changed);
+        List<Payload> sent = new ArrayList<>();
+        try (var bindings = mockStatic(MachineBindingService.class);
+             var factory = mockStatic(MachineBindingInfoFactory.class)) {
+            bindings.when(() -> MachineBindingService.collectPlayerEndpoints(player)).thenReturn(original);
+            factory.when(() -> MachineBindingInfoFactory.fromEndpoints(original)).thenReturn(originalInfos);
+            factory.when(() -> MachineBindingInfoFactory.fromEndpoints(changed))
+                    .thenThrow(new IllegalStateException("模拟转换失败")).thenReturn(changedInfos);
+            snapshots.send(player, ALL, false, sent::add);
+            assertEquals(1, sent.size());
+            assertEquals(originalInfos, accept(sent.get(0)));
+            bindings.when(() -> MachineBindingService.collectPlayerEndpoints(player)).thenReturn(changed);
+            snapshots.send(player, ALL, false, sent::add);
+            assertEquals(1, sent.size(), "转换失败不能用空包覆盖客户端快照");
+
+            bindings.when(() -> MachineBindingService.collectPlayerEndpoints(player)).thenReturn(original);
+            snapshots.send(player, ALL, false, sent::add);
+            assertEquals(1, sent.size(), "上次成功发送的指纹仍然有效");
+            bindings.when(() -> MachineBindingService.collectPlayerEndpoints(player)).thenReturn(changed);
+            snapshots.send(player, ALL, false, sent::add);
+            snapshots.send(player, ALL, false, sent::add);
+            assertEquals(2, sent.size());
+            assertEquals(List.of(changed.get(0).endpointId()),
+                    accept(sent.get(1)).stream().map(BindingInfo::endpointId).toList());
         }
     }
 

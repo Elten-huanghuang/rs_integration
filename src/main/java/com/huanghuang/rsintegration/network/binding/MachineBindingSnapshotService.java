@@ -39,7 +39,13 @@ public final class MachineBindingSnapshotService {
         Stamp stamp = new Stamp(scope, fingerprint(endpoints));
         if (!force && stamp.equals(lastSent.get(playerId))) return;
 
-        List<BindingInfo> bindings = toBindingInfos(endpoints);
+        List<BindingInfo> bindings;
+        try {
+            bindings = MachineBindingInfoFactory.fromEndpoints(endpoints);
+        } catch (RuntimeException exception) {
+            RSIntegrationMod.LOGGER.debug("[RSI] Failed to convert binding snapshot for {}", playerId, exception);
+            return;
+        }
         long snapshotGeneration = generation.incrementAndGet();
         for (BindingSyncCodec.Payload chunk : BindingSyncCodec.chunks(bindings, snapshotGeneration)) {
             sender.accept(chunk);
@@ -53,15 +59,6 @@ public final class MachineBindingSnapshotService {
 
     public void clear() {
         lastSent.clear();
-    }
-
-    private static List<BindingInfo> toBindingInfos(List<PlayerEndpoint> endpoints) {
-        try {
-            return MachineBindingInfoFactory.fromEndpoints(endpoints);
-        } catch (Exception exception) {
-            RSIntegrationMod.LOGGER.debug("[RSI] Failed to collect player bindings", exception);
-            return List.of();
-        }
     }
 
     private static long fingerprint(List<PlayerEndpoint> endpoints) {
