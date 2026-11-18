@@ -1436,21 +1436,34 @@ public final class CraftingResolver {
             stack.resume(next);
             return;
         }
-        boolean seededCopy = false;
-        for (RecipeIndex.Entry entry : ctx.index.getOrDefault(output.getItem(), List.of())) {
-            ItemStack declared = CandidateEngine.outputForDemand(entry, ingredient, ctx);
-            if (declared.isEmpty()) continue;
-            int seed = selfConsumedPerBatch(entry, declared, ctx.level.registryAccess(), ctx);
-            if (seed > 0 && availableSeed >= seed
-                    && netGainPerBatch(entry, declared, ctx.level.registryAccess()) > 0) {
-                seededCopy = true;
-                break;
+        var candidates = entries.iterator();
+        // 复制预检也可能调用第三方配方，逐个推进才能在候选之间让出 tick。
+        class SeedProbe implements Runnable {
+            @Override
+            public void run() {
+                if (!candidates.hasNext() || ctx.timedOut()) {
+                    stack.resume(next);
+                    return;
+                }
+                RecipeIndex.Entry entry = candidates.next();
+                ItemStack declared = CandidateEngine.outputForDemand(entry, ingredient, ctx);
+                if (!declared.isEmpty()) {
+                    RegistryAccess access = ctx.level.registryAccess();
+                    int seed = selfConsumedPerBatch(entry, declared, access, ctx);
+                    if (seed > 0 && availableSeed >= seed && declaredOutputCount(entry, declared, access) > seed) {
+                        resolveSharedAmplification(ingredient, ctx, depth, edges, stack, next, target);
+                        return;
+                    }
+                }
+                stack.resume(this);
             }
         }
-        if (!seededCopy) {
-            stack.resume(next);
-            return;
-        }
+        stack.resume(new SeedProbe());
+    }
+
+    private static void resolveSharedAmplification(Ingredient ingredient, ResolutionContext ctx,
+                                                   int depth, EdgeTracker edges, PlanningStack stack,
+                                                   Runnable next, long target) {
         int missingCheckpoint = ctx.missingCount();
         boolean previousStrict = ctx.strictCandidatePass;
         ctx.beginUndo();
@@ -1495,6 +1508,11 @@ public final class CraftingResolver {
         }
         return List.copyOf(ordered);
     }
+        var entries = ctx.index.get(output.getItem());
+        if (entries == null || entries.isEmpty()) {
+            stack.resume(next);
+            return;
+        }
 
     static List<IngredientSpec> coalesceRootSpecs(List<IngredientSpec> specs) {
         return StepExecutor.coalesceSpecsForGraph(specs);

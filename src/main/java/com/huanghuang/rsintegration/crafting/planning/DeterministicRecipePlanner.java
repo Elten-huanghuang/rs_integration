@@ -86,8 +86,7 @@ final class DeterministicRecipePlanner {
         private final List<RouteChoice> choices = new ArrayList<>();
         private final Map<MaterialRef, RouteChoice> byMaterial = new HashMap<>();
         private SeededReachability reachability;
-        private Map<MaterialRef, Long> branchStock;
-        private Set<MaterialRef> stockedFamilies = Set.of();
+        private CompilationCache.StockFamilies inventory;
         private boolean started;
 
         private RouteSearch(CompilationCache base, Function<MaterialRef, List<RecipeNode>> order,
@@ -102,14 +101,18 @@ final class DeterministicRecipePlanner {
                          Set<MaterialRef> activeOutputs, int maxSteps, int maxStates, Runnable checkBudget) {
             try {
                 // 本游标每次返回时库存均由父帧恢复；分析只属于该帧，绝不进入公共结构缓存。
-                branchStock = stock;
-                stockedFamilies = base.stockFamilies(stock, checkBudget);
+                inventory = base.stockIndex(stock, checkBudget);
                 while (!started || advance(checkBudget)) {
                     started = true;
                     CompilationCache trial = new CompilationCache(base.graph, base.forced, base.preferences, 0);
                     trial.stockView = base.stockView;
                     trial.routes = this;
-                    Prepared prepared = trial.prepare(stock, roots, activeOutputs, maxSteps, maxStates, checkBudget);
+                    Prepared prepared;
+                    try {
+                        prepared = trial.prepare(stock, roots, activeOutputs, maxSteps, maxStates, checkBudget);
+                    } catch (NoSuppliedRoute ignored) {
+                        continue;
+                    }
                     if (choices.isEmpty() || !trial.sharedDependencyFound) return null;
                     if (prepared != null) return prepared;
                 }
@@ -133,23 +136,13 @@ final class DeterministicRecipePlanner {
                     budget.tick();
                     if (candidates.remove(candidate)) ordered.add(candidate);
                 }
-                // 复用有界局部种子探测，识别缺料、替代生产者及保证副产物。
-                // 只调整本帧顺序，不删除候选；数量、动态 NBT 和后续库存变化仍由实际搜索裁决。
                 List<RecipeNode> unavailable = new ArrayList<>();
                 List<RecipeNode> supplied = new ArrayList<>();
                 ResourceLocation preferred = base.preferences.preferredRecipe(material);
                 for (RecipeNode candidate : ordered) {
-                    boolean missingLeaf = false;
-                    for (IngredientRef input : candidate.inputs()) {
-                        budget.tick();
-                        MaterialRef dependency = input.alternatives().get(0);
-                        if (!stockedFamilies.contains(dependency)
-                                && ImmutableRecipeGraphProjector.candidates(base.graph, dependency, NbtMatchMode.ANY).isEmpty()
-                                && base.graph.coProductsByItem().getOrDefault(dependency.itemId(), Set.of()).isEmpty()) missingLeaf = true;
-                    }
-                    if (missingLeaf && !candidate.recipeId().equals(preferred)) unavailable.add(candidate);
-                    else supplied.add(candidate);
+                    if (!hasInsufficientRawInput(candidate, budget)) supplied.add(candidate);
                 }
+                if (supplied.isEmpty()) throw new NoSuppliedRoute();
                 // 直接叶子提示已留下唯一优先路线时，不为简单图支付整图传播费用。
                 if (supplied.size() > 1) {
                     // 结果只用于排序，并复用本请求初始库存的乐观种子闭包。
@@ -170,6 +163,32 @@ final class DeterministicRecipePlanner {
                 byMaterial.put(material, choice);
             }
             return choice.candidates.get(choice.cursor);
+        }
+
+        private boolean hasInsufficientRawInput(RecipeNode recipe, Budget budget) {
+            for (IngredientRef input : recipe.inputs()) {
+                budget.tick();
+                // 本游标仅接收 supported 的单材料端口。用整族库存作乐观上界，保留带状态的变体。
+                MaterialRef dependency = input.alternatives().get(0);
+                if (inventory.stock.getOrDefault(dependency, 0L) >= input.count()) continue;
+                long needed = input.count();
+                for (MaterialRef variant : inventory.positive.getOrDefault(dependency, Set.of())) {
+                    budget.tick();
+                    needed -= Math.min(needed, inventory.stock.get(variant));
+                    if (needed == 0L) break;
+                }
+                if (needed > 0L
+                        && base.graph.coProductsByItem().getOrDefault(dependency.itemId(), Set.of()).isEmpty()
+                        && ImmutableRecipeGraphProjector.candidates(base.graph, dependency, NbtMatchMode.ANY).isEmpty()) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /** 当前选定的上游路线无从供料，由游标改试下一条上游路线。 */
+        private static final class NoSuppliedRoute extends RuntimeException {
+            private NoSuppliedRoute() { super(null, null, false, false); }
         }
 
         private boolean advance(Runnable checkBudget) {

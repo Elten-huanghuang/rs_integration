@@ -136,7 +136,7 @@ public final class PureDemandTreeInspector {
                 case COVERED -> throw new IllegalStateException("covered demand reported as failure");
             };
             return new Result(status, walker.visitedNodes, walker.firstUnresolved,
-                    walker.catalystRouteAvailable);
+                    walker.catalystRouteAvailable, walker.coProductRouteAvailable);
         }
         return new Result(Status.COMPLETE, walker.visitedNodes, null,
                 walker.catalystRouteAvailable);
@@ -155,7 +155,12 @@ public final class PureDemandTreeInspector {
     }
 
     public record Result(Status status, int visitedNodes, @Nullable MaterialRef unresolved,
-                         boolean catalystRouteAvailable) {
+                         boolean catalystRouteAvailable, boolean coProductRouteAvailable) {
+        public Result(Status status, int visitedNodes, @Nullable MaterialRef unresolved,
+                      boolean catalystRouteAvailable) {
+            this(status, visitedNodes, unresolved, catalystRouteAvailable, false);
+        }
+
         public boolean complete() {
             return status == Status.COMPLETE;
         }
@@ -192,6 +197,7 @@ public final class PureDemandTreeInspector {
         private int visitedNodes;
         private boolean nodeLimitReached;
         private boolean catalystRouteAvailable;
+        private boolean coProductRouteAvailable;
         private MaterialRef firstUnresolved;
 
         private Walker(ImmutableRecipeGraph graph, Map<MaterialRef, Long> available,
@@ -383,8 +389,14 @@ public final class PureDemandTreeInspector {
                             return new IngredientFrame(input.withCount(scaledInputCount(input, batches)));
                         }
                         if (candidateCoverage == Coverage.COVERED) {
-                            long remainingOutput = batches * candidate.outputCount() - (catalyst ? 0L : count);
-                            if (remainingOutput > 0L) ledger.add(candidate.output(), remainingOutput);
+                            // 先扣除本端口已领用的主产物；同一批的其余保证产量供后续端口共用。
+                            for (var output : candidate.guaranteedOutputs().entrySet()) {
+                                long perBatch = output.getValue();
+                                if (batches > Long.MAX_VALUE / perBatch) return finish(Coverage.NODE_LIMIT);
+                                long produced = batches * perBatch;
+                                if (!catalyst && output.getKey().equals(candidate.output())) produced -= count;
+                                ledger.add(output.getKey(), produced);
+                            }
                             return finish(Coverage.COVERED);
                         }
                         if (candidateCoverage == Coverage.MISSING_MATERIALS) {
@@ -406,7 +418,7 @@ public final class PureDemandTreeInspector {
                     }
                     ledger.rollback(mark);
                     RecipeNode next = candidates.get(cursor++);
-                    batches = (count + next.outputCount() - 1L) / next.outputCount();
+                    batches = 1L + (count - 1L) / next.outputCount();
                     if (batches > 0L && !isUnseededReverseConversion(next, material, batches)) {
                         candidate = next;
                         inputs = PureDemandNormalizer.mergeEquivalent(next.inputs());
@@ -419,6 +431,15 @@ public final class PureDemandTreeInspector {
             @Override
             protected InspectionFrame finish(Coverage coverage) {
                 if (visitingAdded) visiting.remove(material);
+                if (coverage == Coverage.UNPROJECTED_DEPENDENCY && !coProductRouteAvailable) {
+                    for (MaterialRef output : graph.coProductsByItem().getOrDefault(material.itemId(), Set.of())) {
+                        if (budgetExpired()) return super.finish(Coverage.NODE_LIMIT);
+                        if (ImmutableRecipeGraphProjector.matchesAlternative(output, material, mode)) {
+                            coProductRouteAvailable = true;
+                            break;
+                        }
+                    }
+                }
                 return super.finish(coverage);
             }
         }

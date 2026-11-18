@@ -114,6 +114,45 @@ class RoutedPlanningTest extends BootstrapTest {
     }
 
     @Test
+    void guaranteedCoProductCoversTypedAlternativeInEitherRootOrder() {
+        var residue = new MaterialRef(id("residue"), "");
+        var ore = new MaterialRef(new ResourceLocation("minecraft:iron_ore"), "");
+        var smelt = new RecipeNode(id("smelt_with_residue"), IRON, 1,
+                List.of(new IngredientRef(List.of(ore), 1)), "generic", id("furnace"),
+                List.of(), false, false, Map.of(IRON, 1L, residue, 2L));
+        var plain = new RecipeNode(id("smelt_plain"), IRON, 1,
+                List.of(new IngredientRef(List.of(ore), 1)));
+        var main = new IngredientRef(List.of(IRON), 1);
+        for (boolean residueFirst : List.of(true, false)) {
+            for (int needed : List.of(2, 3)) {
+                var side = new IngredientRef(List.of(residue), needed);
+                var target = new RecipeNode(TARGET, RESULT, 1,
+                        residueFirst ? List.of(side, main) : List.of(main, side));
+                var graph = new ImmutableRecipeGraph(Map.of(RESULT, List.of(target),
+                        IRON, List.of(plain, smelt)));
+                for (var selection : List.of(Map.<ResourceLocation, ResourceLocation>of(),
+                        Map.of(IRON.itemId(), smelt.recipeId()), Map.of(IRON.itemId(), plain.recipeId()))) {
+                    var snapshot = new PlanningSnapshot(UUID.randomUUID(), 1, 1, TARGET,
+                            Map.of(new StackKey(Items.IRON_ORE, null), 1L),
+                            selection, graph, "network", "binding", false);
+                    var routed = compute(snapshot, routing(snapshot, Set.of(residue.itemId()), 512), 1);
+                    if (!selection.containsValue(plain.recipeId()) && needed == 2) {
+                        assertNotNull(routed.plan());
+                        assertEquals(PureRecipePlanner.Status.SUCCESS, routed.plan().status());
+                        assertNotNull(routed.plan().materialFlow());
+                        assertEquals(List.of(smelt.recipeId()), routed.plan().steps().stream()
+                                .map(PureRecipePlanner.PlannedStep::recipeId).toList());
+                        assertTrue(routed.plan().remaining().isEmpty());
+                    } else {
+                        assertTrue(routed.plan() == null || !routed.plan().feasible()
+                                && routed.coverage().status() == PurePlanningCoverage.Status.GAP);
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
     void missingRawMaterialStillUsesPurePlanner() {
         var snapshot = snapshot(0, false, false);
         var routed = compute(snapshot, routing(snapshot, Set.of(), 512), 1);

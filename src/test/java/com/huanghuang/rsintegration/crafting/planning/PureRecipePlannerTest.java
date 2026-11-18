@@ -22,6 +22,7 @@ import net.minecraft.world.item.crafting.SmithingTransformRecipe;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Arrays;
@@ -123,6 +124,67 @@ class PureRecipePlannerTest extends BootstrapTest {
         var alreadyHavePrimary = PureRecipePlanner.resolve(graph, Map.of(LOG, 1, PLANK, 1),
                 List.of(ingredient(STICK, 1), ingredient(PLANK, 1)), 10, 1000, 256);
         assertEquals(PureRecipePlanner.Status.UNRESOLVABLE, alreadyHavePrimary.status());
+    }
+
+    @Test
+    void nestedInputsCanUseGuaranteedCoProductFromLaterRoot() {
+        MaterialRef intermediate = material("nested_coproduct_intermediate");
+        MaterialRef target = material("nested_coproduct_target");
+        RecipeNode producer = joint("nested_coproduct", PLANK,
+                Map.of(PLANK, 1L, STICK, 1L), ingredient(LOG, 1));
+        RecipeNode makeIntermediate = recipe("nested_coproduct_input", intermediate, 1, ingredient(STICK, 1));
+        RecipeNode makeTarget = recipe("nested_coproduct_target", target, 1, ingredient(intermediate, 1));
+        var graph = new ImmutableRecipeGraph(Map.of(
+                PLANK, List.of(producer), intermediate, List.of(makeIntermediate), target, List.of(makeTarget)));
+        IngredientRef targetDemand = new IngredientRef(List.of(target), 1, NbtMatchMode.PARTIAL);
+
+        for (var roots : List.of(List.of(targetDemand, ingredient(PLANK, 1)),
+                List.of(ingredient(PLANK, 1), targetDemand))) {
+            var result = PureRecipePlanner.resolve(graph, Map.of(LOG, 1), roots, 16, 256, 0);
+            assertEquals(PureRecipePlanner.Status.SUCCESS, result.status(), result.toString());
+            assertEquals(List.of(producer.recipeId(), makeIntermediate.recipeId(), makeTarget.recipeId()),
+                    result.steps().stream().map(PureRecipePlanner.PlannedStep::recipeId).toList());
+            assertEquals(Map.of(), result.remaining());
+        }
+        var standalone = PureRecipePlanner.resolve(graph, Map.of(LOG, 1),
+                List.of(targetDemand), 16, 256, 0);
+        assertEquals(PureRecipePlanner.Status.UNRESOLVABLE, standalone.status());
+    }
+
+    @Test
+    void reverseConversionRemainsReachableThroughAnIndependentCoProduct() {
+        MaterialRef target = material("reverse_coproduct_target");
+        RecipeNode toPlank = recipe("reverse_coproduct_use", PLANK, 1, ingredient(STICK, 1));
+        RecipeNode toStick = recipe("reverse_coproduct_inverse", STICK, 1, ingredient(PLANK, 1));
+        RecipeNode independent = joint("reverse_coproduct_independent", target,
+                Map.of(target, 1L, STICK, 1L), ingredient(LOG, 1));
+        var graph = new ImmutableRecipeGraph(Map.of(
+                PLANK, List.of(toPlank), STICK, List.of(toStick), target, List.of(independent)));
+        var result = PureRecipePlanner.resolve(graph, Map.of(LOG, 1L),
+                List.of(new IngredientRef(List.of(PLANK), 1L, NbtMatchMode.PARTIAL),
+                        ingredient(target, 1)), 10, 1_000, 256);
+
+        assertEquals(PureRecipePlanner.Status.SUCCESS, result.status(), result.toString());
+        assertEquals(List.of(new PureRecipePlanner.PlannedStep(independent.recipeId(), 1),
+                new PureRecipePlanner.PlannedStep(toPlank.recipeId(), 1)), result.steps());
+        assertEquals(Map.of(), result.remaining());
+    }
+
+    @Test
+    void reverseConversionWithoutAFirstBatchDoesNotEnumerateLargerPartialBatches() {
+        MaterialRef otherSeed = material("unseeded_reverse_other");
+        RecipeNode first = recipe("unseeded_reverse_first", STICK, 1, ingredient(LOG, 1));
+        RecipeNode second = recipe("unseeded_reverse_second", STICK, 1, ingredient(otherSeed, 1));
+        var graph = new ImmutableRecipeGraph(Map.of(STICK, List.of(first, second),
+                LOG, List.of(recipe("unseeded_reverse_log", LOG, 1, ingredient(STICK, 1))),
+                otherSeed, List.of(recipe("unseeded_reverse_other_seed", otherSeed, 1, ingredient(STICK, 1)))));
+        var result = PureRecipePlanner.resolve(graph, Map.of(),
+                List.of(new IngredientRef(List.of(STICK), 10_000_000L, NbtMatchMode.PARTIAL)),
+                10, 100, 256);
+
+        assertEquals(PureRecipePlanner.Status.UNRESOLVABLE, result.status(), result.toString());
+        assertEquals(PureRecipePlanner.FailureReason.CYCLE, result.failureReason());
+        assertTrue(result.expandedStates() < 10, result.toString());
     }
 
     @Test
@@ -1318,6 +1380,47 @@ class PureRecipePlannerTest extends BootstrapTest {
         assertEquals(List.of(ingredient(iron, 6), ingredient(gold, 3)), result.missing());
         assertEquals(List.of(new PureRecipePlanner.PlannedStep(
                 id("assemble_missing_artifact"), 1)), result.steps());
+    }
+
+    @Test
+    void doesNotBlameStockedInputWhenLaterRootFails() {
+        MaterialRef raw = material("available_upstream_stock");
+        MaterialRef part = material("satisfied_upstream_part");
+        MaterialRef missing = material("unavailable_later_root");
+        RecipeNode makePart = recipe("make_satisfied_upstream_part", part, 1, ingredient(raw, 1));
+
+        var result = PureRecipePlanner.resolve(new ImmutableRecipeGraph(Map.of(part, List.of(makePart))),
+                Map.of(raw, 1_000L), List.of(ingredient(part, 1), ingredient(missing, 1)),
+                64, 1024, 0, Long.MAX_VALUE, System::nanoTime, Set.of(), Map.of(),
+                PlanningPreferences.empty(), false);
+
+        assertEquals(PureRecipePlanner.Status.UNRESOLVABLE, result.status());
+        assertEquals(List.of(ingredient(missing, 1)), result.missing());
+    }
+
+    @Test
+    void skipsUnavailableRecipeBeforeExploringIndependentStockChoices() {
+        MaterialRef part = material("part_with_missing_terminal_input");
+        MaterialRef missing = material("unavailable_terminal_input");
+        Map<MaterialRef, Long> stock = new HashMap<>();
+        List<IngredientRef> inputs = new ArrayList<>();
+        for (int slot = 0; slot < 10; slot++) {
+            MaterialRef first = material("stock_choice_" + slot + "_a");
+            MaterialRef second = material("stock_choice_" + slot + "_b");
+            stock.put(first, 64L);
+            stock.put(second, 64L);
+            inputs.add(new IngredientRef(List.of(first, second), 1));
+        }
+        inputs.add(ingredient(missing, 1));
+        RecipeNode recipe = recipe("part_with_missing_terminal_input", part, 1,
+                inputs.toArray(IngredientRef[]::new));
+
+        var result = PureRecipePlanner.resolve(new ImmutableRecipeGraph(Map.of(part, List.of(recipe))),
+                stock, List.of(ingredient(part, 1)), 64, 128, 0, Long.MAX_VALUE, System::nanoTime,
+                Set.of(), Map.of(), PlanningPreferences.empty(), false);
+
+        assertEquals(PureRecipePlanner.Status.UNRESOLVABLE, result.status(), result.toString());
+        assertEquals(List.of(ingredient(missing, 1)), result.missing());
     }
 
     @Test

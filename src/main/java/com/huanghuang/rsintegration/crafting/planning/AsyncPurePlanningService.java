@@ -145,25 +145,36 @@ public final class AsyncPurePlanningService {
             long inspectionNanos = System.nanoTime() - inspectionStarted;
             PlanningThreadContext.throwIfCancelled();
             long searchStarted = System.nanoTime();
-            boolean canSearch = forcedRecipesProjected && inspection.backgroundCompatible()
+            // 贪心检查可能先访问副产物，或先选到不产该副产物的配方。只在依赖图有对应
+            // 保证产量时试探，仍由求解器用原始库存、完整根列表和玩家选择重新验证。
+            boolean probeCoProduct = inspection.status() == PureDemandTreeInspector.Status.UNPROJECTED_DEPENDENCY
+                    && inspection.coProductRouteAvailable();
+            boolean canSearch = forcedRecipesProjected && (inspection.backgroundCompatible() || probeCoProduct)
                     && !snapshot.mainThreadOnly();
             var coverage = canSearch ? PurePlanningCoverage.unprojectedDependency(routingGraph,
                     snapshot.recipeId(), routing.incompatibleOutputs(), snapshot.forcedRecipes(),
                     snapshot.preferences(), Math.min(session.deadlineNanos(), System.nanoTime() + 100_000_000L))
                     : PurePlanningCoverage.Probe.notChecked();
-            boolean knownCoverageGap = coverage.status() == PurePlanningCoverage.Status.GAP;
+            boolean boundedProbe = probeCoProduct || coverage.status() == PurePlanningCoverage.Status.GAP;
             // 截止时间包含协作式等待。按 5ms/50ms 运行时，旧的 250ms 只给了约
             // 25ms 计算机会；仍保留状态上限，确保无解的纯图能及时交接给类型规划。
-            long searchDeadline = knownCoverageGap
+            long searchDeadline = boundedProbe
                     ? Math.min(session.deadlineNanos(), System.nanoTime() + COVERAGE_GAP_PROBE_NANOS)
                     : session.deadlineNanos();
-            PureRecipePlanner.Result plan = forcedRecipesProjected
-                    && inspection.backgroundCompatible()
-                    && !snapshot.mainThreadOnly()
+            PureRecipePlanner.Result plan = canSearch
                     ? computeInScope(snapshot, repeatCount, maxSteps,
-                            knownCoverageGap ? Math.min(maxSearchStates, COVERAGE_GAP_PROBE_STATES) : maxSearchStates,
+                            boundedProbe ? Math.min(maxSearchStates, COVERAGE_GAP_PROBE_STATES) : maxSearchStates,
                             maxMemoizedFailures, session, routingGraph,
                             routing.projectedAvailabilityFor(snapshot), searchDeadline) : null;
+            if (probeCoProduct && canSearch) {
+                if (plan.feasible() && plan.materialFlow() != null) {
+                    inspection = new PureDemandTreeInspector.Result(PureDemandTreeInspector.Status.COMPLETE,
+                            inspection.visitedNodes(), null, inspection.catalystRouteAvailable());
+                } else {
+                    // 类型配方仍可能供料，保留原检查结果并交回类型规划。
+                    plan = null;
+                }
+            }
             // 保留原始结果和覆盖证据，由调用方共用的路由规则决定是否需要类型解析。
             RoutedPlan result = new RoutedPlan(snapshot, routing, inspection, plan, forcedRecipesProjected, coverage);
             logSlowRoute(result, started, replayNanos, projectionNanos, inspectionNanos,
@@ -208,13 +219,14 @@ public final class AsyncPurePlanningService {
         if (elapsed < 1_000_000_000L && !reuse.equals("reused")) return;
         PureRecipePlanner.Result plan = result.plan();
         LOGGER.info(
-                "[RSI-plan] Planning summary request={} recipe={} wallMs={} route={} replayMs={} projectionMs={} inspectionMs={} searchMs={} recipes={} routeRecipes={} coverage={} status={} states={} backtracks={} memoHits={} (wall includes cooperative waits)",
+                "[RSI-plan] Planning summary request={} recipe={} wallMs={} route={} replayMs={} projectionMs={} inspectionMs={} searchMs={} recipes={} routeRecipes={} coverage={} uncovered={} status={} states={} backtracks={} memoHits={} (wall includes cooperative waits)",
                 result.snapshot().requestGeneration(), result.snapshot().recipeId(), elapsed / 1_000_000L,
                 reuse, replayNanos / 1_000_000L, projectionNanos / 1_000_000L,
                 inspectionNanos / 1_000_000L, searchNanos / 1_000_000L,
                 result.snapshot().recipeGraph().recipesById().size(),
                 result.routing().previousRoute() == null ? 0 : result.routing().previousRoute().recipes().size(),
-                result.coverage().status(), plan == null ? "not_run" : plan.status(),
+                result.coverage().status(), result.coverage().uncovered() == null ? null : result.coverage().uncovered().itemId(),
+                plan == null ? "not_run" : plan.status(),
                 plan == null ? 0 : plan.expandedStates(), plan == null ? 0 : plan.backtracks(),
                 plan == null ? 0 : plan.memoHits());
     }

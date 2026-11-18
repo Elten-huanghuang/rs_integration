@@ -38,6 +38,7 @@ import org.mockito.MockedStatic;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -76,6 +77,44 @@ class TypedSelfAmplificationTest extends BootstrapTest {
 
         assertFalse(edges.containsReverse(seed, seed));
         assertTrue(edges.containsReverse(seed, fuel));
+    }
+
+    @Test
+    void sharedSeedProbeYieldsBetweenCandidateRecipes() {
+        var probes = new AtomicInteger();
+        List<RecipeIndex.Entry> candidates = new ArrayList<>();
+        for (int i = 0; i < 32; i++) {
+            CraftingRecipe recipe = craftingRecipe("noncopy_" + i, Items.DIAMOND, 1, Items.COAL);
+            when(recipe.getResultItem(any())).thenAnswer(call -> {
+                probes.incrementAndGet();
+                return new ItemStack(Items.DIAMOND);
+            });
+            candidates.add(craftingEntry(recipe));
+        }
+        Level level = mock(Level.class);
+        when(level.registryAccess()).thenReturn(RegistryAccess.EMPTY);
+        Ingredient seed = Ingredient.of(Items.DIAMOND);
+        try (var index = mockStatic(RecipeIndex.class)) {
+            index.when(() -> RecipeIndex.reusableCatalystRoutes(level)).thenReturn(Map.of());
+            var context = new ResolutionContext(level, Map.of(Items.DIAMOND, candidates),
+                    Map.of(new StackKey(Items.DIAMOND, null), 1L), null, false, new ArrayList<>(),
+                    Long.MAX_VALUE, false);
+            context.pendingInputs.push(List.of(ScaledIngredientSpec.of(new IngredientSpec(seed, 1), 1)));
+            var stack = new PlanningStack();
+            var job = stack.<Boolean>start(done -> CraftingResolver.ensureIngredient(
+                    seed, 1, context, 0, new EdgeTracker(), null, null, stack, done));
+
+            boolean complete;
+            do {
+                int before = probes.get();
+                complete = job.advance(0L);
+                assertTrue(probes.get() - before <= 1);
+            } while (!complete);
+
+            assertTrue(job.result());
+            assertEquals(candidates.size(), probes.get());
+            assertTrue(context.graphNodes.isEmpty());
+        }
     }
 
     @Test

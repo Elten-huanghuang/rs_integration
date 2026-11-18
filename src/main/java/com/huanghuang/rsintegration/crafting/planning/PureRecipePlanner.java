@@ -785,6 +785,7 @@ public final class PureRecipePlanner {
             private boolean noRecipeBlocked;
             private List<MaterialRef> stockAlternatives;
             private Map<MaterialRef, Long> matchedStock;
+            private boolean assignedFromStock;
             private List<MaterialRef> wantedAlternatives;
             private List<RecipeNode> producers = List.of();
             private MaterialRef wanted;
@@ -819,6 +820,7 @@ public final class PureRecipePlanner {
             private PersistentTaskQueue<Task> use(DemandTask demand,
                                                   Map<MaterialRef, Long> materials,
                                                   Runnable restore) {
+                assignedFromStock = true;
                 if (!demand.supplyOnly()) {
                     flow.add(new MaterialUse(demand.consumer(), demand.port(),
                             demand.ingredient(), materials));
@@ -923,9 +925,14 @@ public final class PureRecipePlanner {
                         if (isNonProductiveBroadFamilyConversion(candidate, ingredient.alternatives(), scheduledBatches)) continue;
                         boolean broadFamily = ingredient.alternatives().size() > 1;
                         if (broadFamily && !reachability().canReach(candidate)) continue;
-                        // 整批需要逆向补料，不代表库存已有的部分批次也不可执行。
-                        if (!partialProduction && selfConsumed == 0 && batches > 1L) splittable.add(candidate);
-                        if (selfConsumed == 0 && isUnseededReverseConversion(candidate, wanted, scheduledBatches)) {
+                        boolean reverseBlocked = selfConsumed == 0
+                                && isUnseededReverseConversion(candidate, wanted, scheduledBatches);
+                        // 整批需要补料时保留已有库存能支持的拆批，连一批都无法启动时跳过数量枚举。
+                        if (!partialProduction && selfConsumed == 0 && batches > 1L
+                                && (!reverseBlocked || !isUnseededReverseConversion(candidate, wanted, 1L))) {
+                            splittable.add(candidate);
+                        }
+                        if (reverseBlocked) {
                             cycleBlocked = true;
                             continue;
                         }
@@ -980,9 +987,12 @@ public final class PureRecipePlanner {
                 }
                 PersistentTaskQueue<Task> deferred = deferForCoProduct(demand);
                 if (deferred != null) return deferred;
-                recordFailure(ingredient, pending,
-                        cycleBlocked && !noRecipeBlocked && !sawMissingInputFailure
-                                ? FailureReason.CYCLE : FailureReason.MISSING_INPUTS);
+                // 已从库存满足的需求只因后续任务失败而回溯，缺料应记录在实际失败的需求上。
+                if (!assignedFromStock) {
+                    recordFailure(ingredient, pending,
+                            cycleBlocked && !noRecipeBlocked && !sawMissingInputFailure
+                                    ? FailureReason.CYCLE : FailureReason.MISSING_INPUTS);
+                }
                 return null;
             }
 
@@ -1660,12 +1670,27 @@ public final class PureRecipePlanner {
             branch = branch.prepend(new CompleteRecipeTask(candidate.output(),
                     candidate.outputCount(), consumeCount, candidate.recipeId(),
                     batches, resolvingMaterial, node, candidate, demand));
+            DemandTask unavailable = null;
             for (int index = inputs.size() - 1; index >= 0; index--) {
                 IngredientRef input = inputs.get(index);
                 long scaled = scaledInputCount(input, batches);
-                branch = branch.prepend(new DemandTask(input.withCount(scaled), node, index));
+                DemandTask port = new DemandTask(input.withCount(scaled), node, index);
+                // 提前检查确定无法补充的缺料，避免枚举前面各个材料槽的库存组合。
+                if (unavailable == null && index > 0 && isUnavailableLeaf(port.ingredient())) {
+                    unavailable = port;
+                } else {
+                    branch = branch.prepend(port);
+                }
             }
-            return branch;
+            return unavailable == null ? branch : branch.prepend(unavailable);
+        }
+
+        private boolean isUnavailableLeaf(IngredientRef input) {
+            if (input.alternatives().size() != 1) return false;
+            MaterialRef material = input.alternatives().get(0);
+            return !graph.coProductsByItem().containsKey(material.itemId())
+                    && candidates(material, NbtMatchMode.ANY).isEmpty()
+                    && stockAcross(input) < input.count();
         }
 
         /**
@@ -1967,8 +1992,9 @@ public final class PureRecipePlanner {
 
         private boolean hasLocalSeed(MaterialRef material, NbtMatchMode mode,
                                      Set<MaterialRef> visiting, int[] remainingNodes) {
-            if (stockAcross(new IngredientRef(List.of(material), 1, mode,
-                    DemandRole.CONSUMED)) > 0) return true;
+            var seed = new IngredientRef(List.of(material), 1, mode, DemandRole.CONSUMED);
+            // 后续需求可能产出保证副产物，留给主搜索验证供料和执行顺序。
+            if (stockAcross(seed) > 0 || canReceiveCoProduct(seed)) return true;
             // Cycles and runtime-NBT outputs are left for the main
             // planner; this helper must never turn an uncertain route into a
             // false shortage.
@@ -2020,6 +2046,8 @@ public final class PureRecipePlanner {
                 if (input.role() == DemandRole.CATALYST) continue;
                 long required = scaledInputCount(input, batches);
                 if (required <= stockAcross(input)) continue;
+                // 其他待办配方可能提供保证副产物，不能仅凭主产物索引判定它只能反向取得。
+                if (canReceiveCoProduct(input)) continue;
                 boolean sawProducer = false;
                 boolean reverseOnly = true;
                 for (MaterialRef alternative : input.alternatives()) {
