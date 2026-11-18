@@ -1,10 +1,12 @@
 package com.huanghuang.rsintegration.network.machine.bd;
 
+import com.huanghuang.rsintegration.machine.MachineManualActions;
 import com.huanghuang.rsintegration.machine.bd.BeyondDimensionsMachineOperations;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraftforge.common.util.FakePlayer;
 import net.minecraftforge.network.NetworkEvent;
 
 import java.util.function.Supplier;
@@ -36,9 +38,11 @@ public final class BeyondDimensionsMachineCollectPacket {
                               Supplier<NetworkEvent.Context> supplier) {
         NetworkEvent.Context context = supplier.get();
         ServerPlayer player = context.getSender();
-        if (player != null) {
-            context.enqueueWork(() -> BeyondDimensionsMachineOperations.collect(
-                    player, packet.dim, packet.pos, packet.toNetwork));
+        if (player != null && !(player instanceof FakePlayer)) {
+            context.enqueueWork(() -> MachineManualActions.collect(
+                    player, packet.dim, packet.pos, packet.toNetwork,
+                    MachineManualActions.CollectionPolicy.BOUND_NETWORK,
+                    () -> BeyondDimensionsMachineOperations.resolveOutput(player, packet.dim, packet.pos)));
         }
         context.setPacketHandled(true);
     }

@@ -2,25 +2,17 @@ package com.huanghuang.rsintegration.machine.bd;
 
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
-import com.huanghuang.rsintegration.machine.FurnaceMachineAccess;
-import com.huanghuang.rsintegration.machine.MachineSlotType;
-import com.huanghuang.rsintegration.network.gui.MachineInteractionAccess;
-import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.network.binding.BindingStorage;
 import com.huanghuang.rsintegration.network.binding.MachineBindingService;
 import com.huanghuang.rsintegration.network.binding.MachineUnbindService;
 import com.huanghuang.rsintegration.network.binding.BindingInfo;
 import com.huanghuang.rsintegration.network.binding.MachineBindingInfoFactory;
 import com.huanghuang.rsintegration.storage.StorageBackendId;
-import com.huanghuang.rsintegration.storage.StorageOperationResult;
 import com.huanghuang.rsintegration.storage.StorageReference;
 import net.minecraft.core.BlockPos;
-import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.fml.ModList;
 import net.minecraftforge.registries.ForgeRegistries;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
@@ -34,6 +26,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.UnaryOperator;
 
 /** Server-side machine-center operations for BD-bound machines. */
 public final class BeyondDimensionsMachineOperations {
@@ -44,53 +37,11 @@ public final class BeyondDimensionsMachineOperations {
 
     private BeyondDimensionsMachineOperations() {}
 
-    public static void collect(ServerPlayer player, ResourceLocation dim, BlockPos pos,
-                                boolean toNetwork) {
-        ServerLevel level = resolveTarget(player, dim, pos);
-        if (level == null) return;
-        CraftStorageEndpoint endpoint = null;
-        if (toNetwork) {
-            endpoint = resolveEndpoint(player, dim, pos).orElse(null);
-            if (endpoint == null) {
-                player.sendSystemMessage(Component.translatable("rsi.generic.error.network_unavailable"));
-                return;
-            }
-        }
-
-        BlockEntity be = level.getBlockEntity(pos);
-        FurnaceMachineAccess.Result extraction =
-                FurnaceMachineAccess.extractOutput(be);
-        if (!extraction.success()) {
-            Component error = FurnaceMachineAccess.errorMessage(
-                    extraction.error());
-            if (error != null) player.sendSystemMessage(error);
-            return;
-        }
-        ItemStack output = extraction.stack();
-
-        if (toNetwork) {
-            StorageOperationResult result = endpoint.insert(player, output, false);
-            ItemStack remainder = result.remainder().orElse(output);
-            if (!remainder.isEmpty()) player.drop(remainder, false);
-        } else if (!player.getInventory().add(output)) {
-            player.drop(output, false);
-        }
-        player.sendSystemMessage(Component.translatable(
-                "rsi.machine.collected", output.getCount(), output.getHoverName()));
-    }
-
-    public static void insert(ServerPlayer player, ResourceLocation dim, BlockPos pos,
-                              MachineSlotType slot) {
-        ServerLevel level = resolveTarget(player, dim, pos);
-        if (level == null) return;
-        BlockEntity be = level.getBlockEntity(pos);
-        FurnaceMachineAccess.Result insertion =
-                FurnaceMachineAccess.insertCarried(player, be, slot);
-        if (!insertion.success()) {
-            Component error = FurnaceMachineAccess.errorMessage(
-                    insertion.error());
-            if (error != null) player.sendSystemMessage(error);
-        }
+    /** 只解析匹配该机器绑定的 BD 终端，并通过已有会话入库。 */
+    public static Optional<UnaryOperator<ItemStack>> resolveOutput(
+            ServerPlayer player, ResourceLocation dim, BlockPos pos) {
+        return resolveEndpoint(player, dim, pos).map(endpoint ->
+                output -> endpoint.insert(player, output, false).remainder().orElse(output));
     }
 
     public static void unbind(ServerPlayer player, ResourceLocation dim, BlockPos pos) {
@@ -130,17 +81,6 @@ public final class BeyondDimensionsMachineOperations {
                             chunk.bindings(), chunk.generation(),
                             chunk.chunkIndex(), chunk.totalChunks()));
         }
-    }
-
-    private static ServerLevel resolveTarget(ServerPlayer player, ResourceLocation dim, BlockPos pos) {
-        MachineInteractionAccess.Result result =
-                MachineInteractionAccess.resolve(
-                        player, dim, pos, true, true);
-        if (!result.success()) {
-            MachineInteractionAccess.sendError(player, result.error());
-            return null;
-        }
-        return result.target().level();
     }
 
     private static Optional<CraftStorageEndpoint> resolveEndpoint(ServerPlayer player,

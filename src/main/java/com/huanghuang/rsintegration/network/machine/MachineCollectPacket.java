@@ -1,20 +1,12 @@
 package com.huanghuang.rsintegration.network.machine;
 
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
-import net.minecraftforge.common.util.FakePlayer;
-
-import com.huanghuang.rsintegration.machine.FurnaceMachineAccess;
-import com.huanghuang.rsintegration.network.gui.MachineInteractionAccess;
-import com.huanghuang.rsintegration.util.InsertedStackDelta;
-import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
-import com.refinedmods.refinedstorage.api.network.INetwork;
+import com.huanghuang.rsintegration.machine.MachineManualActions;
+import com.huanghuang.rsintegration.storage.rs.RefinedStorageMachineOutput;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraftforge.common.util.FakePlayer;
 import net.minecraftforge.network.NetworkEvent;
 
 import java.util.function.Supplier;
@@ -52,56 +44,12 @@ public final class MachineCollectPacket {
     public static void handle(MachineCollectPacket packet, Supplier<NetworkEvent.Context> ctx) {
         NetworkEvent.Context context = ctx.get();
         ServerPlayer player = context.getSender();
-        if (player == null) {
-            context.setPacketHandled(true);
-            return;
+        if (player != null && !(player instanceof FakePlayer)) {
+            context.enqueueWork(() -> MachineManualActions.collect(
+                    player, packet.dim, packet.pos, packet.toRS,
+                    MachineManualActions.CollectionPolicy.CURRENT_NETWORK,
+                    () -> RefinedStorageMachineOutput.resolve(player)));
         }
-        if (player instanceof FakePlayer) {
-            context.setPacketHandled(true);
-            return;
-        }
-        context.enqueueWork(() -> {
-
-            MachineInteractionAccess.Result access =
-                    MachineInteractionAccess.resolve(
-                            player, packet.dim, packet.pos, true, true);
-            if (!access.success()) {
-                MachineInteractionAccess.sendError(player, access.error());
-                return;
-            }
-
-            BlockEntity be = access.target().blockEntity();
-            FurnaceMachineAccess.Result extraction =
-                    FurnaceMachineAccess.extractOutput(be);
-            if (!extraction.success()) {
-                Component error = FurnaceMachineAccess.errorMessage(
-                        extraction.error());
-                if (error != null) player.sendSystemMessage(error);
-                return;
-            }
-            ItemStack output = extraction.stack();
-
-            if (packet.toRS) {
-                INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
-                if (network != null) {
-                    ItemStack leftover = TrackedNetworkInsertion.insert(network, player, output);
-                    InsertedStackDelta.report(player, output, leftover);
-                    if (!leftover.isEmpty()) {
-                        player.drop(leftover, false);
-                    }
-                } else {
-                    player.drop(output, false);
-                }
-            } else {
-                if (!player.getInventory().add(output)) {
-                    player.drop(output, false);
-                }
-            }
-
-            player.sendSystemMessage(
-                Component.translatable("rsi.machine.collected", output.getCount(),
-                        Component.translatable(output.getDescriptionId())));
-        });
         context.setPacketHandled(true);
     }
 
