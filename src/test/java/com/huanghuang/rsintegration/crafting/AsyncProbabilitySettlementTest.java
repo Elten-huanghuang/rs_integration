@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.crafting.AsyncCraftChain.RetryPreparation;
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.api.execution.CollectedOutput;
 import com.huanghuang.rsintegration.api.recipe.OutputKind;
@@ -40,6 +41,7 @@ import com.huanghuang.rsintegration.recipe.RecipeOutputSpec;
 import com.huanghuang.rsintegration.mods.farmersdelight.CuttingBoardRecipeHandler;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.network.chat.Component;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.NonNullList;
 import net.minecraft.server.MinecraftServer;
@@ -69,6 +71,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BooleanSupplier;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static com.huanghuang.rsintegration.crafting.graph.OutputKind.PRIMARY;
@@ -286,12 +292,37 @@ class AsyncProbabilitySettlementTest extends BootstrapTest {
                 List.of(new RootDemand(Ingredient.of(Items.PAPER), 1, 0, paper.toStack(1),
                         List.of(new RootAllocation(new MaterialSource.ProducerOutput(port), paper, 1)))), List.of(), List.of(id));
         try (var resolver = mockStatic(CraftingResolver.class); var sources = mockStatic(MaterialSources.class)) {
-            resolver.when(() -> CraftingResolver.resolveSupplementalGraph(anyList(), anyMap(), any(), eq(player),
-                    isNull(), anyList(), anySet(), anyMap(), anyMap(), any())).thenAnswer(call -> {
-                assertTrue(call.getArgument(1, Map.class).isEmpty(), "根需求的纸不能用于补产");
+            var job = mock(CraftingResolver.TypedPreview.class);
+            when(job.advance(anyLong(), any())).thenReturn(false, false, true);
+            var allowed = new AtomicBoolean(true);
+            var budget = AsyncCraftChain.class.getDeclaredField("dispatchAllowed");
+            budget.setAccessible(true);
+            budget.set(chain, (BooleanSupplier) allowed::get);
+            when(job.graph()).thenAnswer(call -> {
+                allowed.set(false);
                 return supplement;
             });
-            assertFalse(chain.prepareRetryRound(id, player));
+            resolver.when(() -> CraftingResolver.startSupplementalGraph(anyList(), anyMap(), any(), eq(player),
+                    isNull(), anyList(), anySet(), anyMap(), anyMap(), any())).thenAnswer(call -> {
+                assertTrue(call.getArgument(1, Map.class).isEmpty(), "根需求的纸不能用于补产");
+                assertTrue(call.getArgument(6, Set.class).contains(node.recipeId()));
+                return job;
+            });
+            for (int tick = 0; tick < 2; tick++) {
+                assertEquals(RetryPreparation.PLANNING, chain.prepareRetryRound(id, player));
+                scheduler.releaseClaim(id);
+                assertEquals(List.of(id), scheduler.nodeOrder());
+                assertEquals(DagScheduler.NodeState.READY, scheduler.state(id));
+                verify(account, never()).ensure(anyMap(), anyList(), any());
+                scheduler.claim(id);
+            }
+            assertEquals(RetryPreparation.PLANNING, chain.prepareRetryRound(id, player));
+            verify(account, never()).ensure(anyMap(), anyList(), any());
+            assertEquals(List.of(id), scheduler.nodeOrder());
+            scheduler.releaseClaim(id);
+            allowed.set(true);
+            scheduler.claim(id);
+            assertEquals(RetryPreparation.WAITING_DEPENDENCIES, chain.prepareRetryRound(id, player));
             scheduler.releaseClaim(id);
             assertEquals(DagScheduler.NodeState.BLOCKED, scheduler.state(id));
             var extra = scheduler.claimReady(1).get(0);
@@ -300,7 +331,9 @@ class AsyncProbabilitySettlementTest extends BootstrapTest {
             broker.publishActual(produced, paper, paper.toStack(1));
             scheduler.succeed(extra);
             scheduler.claim(id);
-            assertTrue(chain.prepareRetryRound(id, player));
+            assertEquals(RetryPreparation.READY, chain.prepareRetryRound(id, player));
+            verify(job, times(1)).graph();
+            verify(account, times(1)).ensure(anyMap(), anyList(), eq(player));
             @SuppressWarnings("unchecked")
             var requests = (Map<NodeId, List<MaterialBroker.Request>>) field(chain, "graphRequests");
             assertEquals(List.of(new MaterialBroker.Request(produced, paper, 1)), requests.get(id));
@@ -332,6 +365,122 @@ class AsyncProbabilitySettlementTest extends BootstrapTest {
         chain.attachGraphAttempt(runtime, id).started();
         assertEquals(ConcurrentNodeExecutor.Observation.SUCCEEDED, runtime.observe(), runtime::failureReason);
         return chain.completeGraphNode(id, runtime);
+    }
+
+    private final class CompetingRetries {
+        final ServerPlayer player = mock(ServerPlayer.class);
+        final RuntimeMaterialAccount account = mock(RuntimeMaterialAccount.class);
+        final MaterialKey paper = MaterialKey.of(new ItemStack(Items.PAPER));
+        final MaterialSource.InitialPool pool = new MaterialSource.InitialPool(paper);
+        final AsyncCraftChain chain;
+        final DagScheduler scheduler;
+        final MaterialBroker broker;
+        final NodeId first = new NodeId(0), second = new NodeId(1);
+
+        CompetingRetries() throws Exception {
+            var server = mock(MinecraftServer.class);
+            when(server.getPlayerList()).thenReturn(mock(PlayerList.class));
+            when(player.serverLevel()).thenReturn(mock(ServerLevel.class));
+            when(player.getServer()).thenReturn(server);
+            List<CraftNode> nodes = new ArrayList<>();
+            List<RootDemand> roots = new ArrayList<>();
+            List<MaterialAllocation> allocations = new ArrayList<>();
+            for (var id : List.of(first, second)) {
+                var egg = MaterialKey.of(new ItemStack(Items.EGG));
+                var port = new OutputPortId(id, 0);
+                var slot = new InputPortId(id, 0);
+                var target = OutputDeclaration.item(port, egg, 2, PRIMARY, 0, 2,
+                        OutputProbability.probabilistic(0.35, 16, "egg"), false, null).withTargetProducing(true);
+                nodes.add(new CraftNode(id, ResourceLocation.parse("test:target_" + id.value()), ModType.GENERIC.id(),
+                        null, 1, List.of(), List.of(), false, null, null, List.of(new InputDemand(slot,
+                        Ingredient.of(Items.PAPER), 1, DemandRole.CONSUMED, paper.toStack(1))), List.of(target)));
+                allocations.add(new MaterialAllocation(new AllocationId(id.value()), slot, pool, paper, 1));
+                roots.add(new RootDemand(Ingredient.of(Items.EGG), 2, 0, egg.toStack(1),
+                        List.of(new RootAllocation(new MaterialSource.ProducerOutput(port), egg, 2))));
+            }
+            chain = new AsyncCraftChain(UUID.randomUUID(), server, null, new CraftPlanGraph(1, nodes, allocations,
+                    roots, List.of(), List.of(first, second)));
+            scheduler = (DagScheduler) field(chain, "graphScheduler");
+            broker = (MaterialBroker) field(chain, "graphMaterials");
+            var admissions = (NodeAdmissionCoordinator) field(chain, "graphAdmissions");
+            var accountField = AsyncCraftChain.class.getDeclaredField("materialAccount");
+            accountField.setAccessible(true);
+            accountField.set(chain, account);
+            for (var id : List.of(first, second)) {
+                scheduler.claim(id);
+                assertEquals(ConcurrentNodeExecutor.CompletionStatus.RETRY, attempt(chain, player, admissions, id,
+                        List.of(new MaterialBroker.Request(pool, paper, 1)), List.of()));
+                scheduler.releaseClaim(id);
+            }
+            assertEquals(0, broker.outstanding(pool, paper));
+        }
+
+        RetryPreparation slice(NodeId nodeId, int checks) throws Exception {
+            var budget = AsyncCraftChain.class.getDeclaredField("dispatchAllowed");
+            budget.setAccessible(true);
+            var remaining = new AtomicInteger(checks);
+            budget.set(chain, (BooleanSupplier) () -> remaining.getAndDecrement() > 0);
+            scheduler.claim(nodeId);
+            try {
+                return chain.prepareRetryRound(nodeId, player);
+            } finally {
+                scheduler.releaseClaim(nodeId);
+            }
+        }
+
+        RetryPreparation finishSearch(NodeId nodeId) throws Exception {
+            for (int tick = 0; tick < 100; tick++) {
+                var result = slice(nodeId, 10000);
+                if (result != RetryPreparation.PLANNING) return result;
+            }
+            throw new AssertionError("补料未在有限轮次内完成");
+        }
+    }
+
+    @Test
+    void competingSearchesRecheckTheSingleSurplusAndDoNotChargeTwice() throws Exception {
+        var f = new CompetingRetries();
+        f.chain.virtualInventory().add(f.paper.toStack(1));
+        var held = new AtomicInteger();
+        when(f.account.heldMaterials()).thenAnswer(call -> held.get() == 0 ? Map.of()
+                : Map.of(CraftingResolver.StackKey.of(f.paper.toStack(1), true), (long) held.get()));
+        doAnswer(call -> { held.addAndGet(call.getArgument(0, ItemStack.class).getCount()); return null; })
+                .when(f.account).add(any(ItemStack.class));
+        when(f.account.ensure(anyMap(), anyList(), eq(f.player))).thenAnswer(call ->
+                call.<Map<MaterialKey, Long>>getArgument(0).getOrDefault(f.paper, 0L) <= held.get());
+        try (var index = mockStatic(RecipeIndex.class); var sources = mockStatic(MaterialSources.class)) {
+            for (int tick = 0; tick < 2; tick++) {
+                for (var id : List.of(f.first, f.second)) assertEquals(RetryPreparation.PLANNING, f.slice(id, 2));
+            }
+            assertEquals(1, f.chain.virtualInventory().get(0).getCount());
+            verify(f.account, never()).ensure(anyMap(), anyList(), any());
+            assertEquals(RetryPreparation.READY, f.finishSearch(f.first));
+            assertEquals(RetryPreparation.READY, f.slice(f.first, 10000));
+            assertEquals(1, held.get());
+            assertTrue(f.chain.virtualInventory().isEmpty());
+            assertEquals(RetryPreparation.WAITING_MATERIALS, f.finishSearch(f.second));
+            verify(f.account).ensure(eq(Map.of(f.paper, 0L)), anyList(), eq(f.player));
+            verify(f.account).ensure(eq(Map.of(f.paper, 2L)), anyList(), eq(f.player));
+            verify(f.account, times(1)).add(any(ItemStack.class));
+            assertEquals(1, f.broker.outstanding(f.pool, f.paper));
+            assertEquals(List.of(f.first, f.second), f.scheduler.nodeOrder());
+        }
+    }
+
+    @Test
+    void cancellingSuspendedSearchDropsContinuationWithoutMaterialAdmission() throws Exception {
+        var f = new CompetingRetries();
+        try (var index = mockStatic(RecipeIndex.class); var sources = mockStatic(MaterialSources.class)) {
+            assertEquals(RetryPreparation.PLANNING, f.slice(f.first, 2));
+            f.chain.cancel("test", Component.literal("test"));
+            assertTrue(f.chain.isDone());
+            assertEquals(RetryPreparation.FAILED, f.chain.prepareRetryRound(f.first, f.player));
+            assertTrue(((Map<?, ?>) field(f.chain, "supplementalSearches")).isEmpty());
+            verify(f.account, never()).ensure(anyMap(), anyList(), any());
+            verify(f.account, never()).add(any(ItemStack.class));
+            assertEquals(0, f.broker.outstanding(f.pool, f.paper));
+            assertEquals(List.of(f.first, f.second), f.scheduler.nodeOrder());
+        }
     }
 
     @Test
@@ -398,7 +547,7 @@ class AsyncProbabilitySettlementTest extends BootstrapTest {
                     List.of(), List.of(egg.toStack(2), paper.toStack(1))));
             scheduler.releaseClaim(id);
             scheduler.claim(id);
-            assertTrue(chain.prepareRetryRound(id, player));
+            assertEquals(RetryPreparation.READY, chain.prepareRetryRound(id, player));
             assertEquals(returnsSecondByproduct ? ConcurrentNodeExecutor.CompletionStatus.SUCCEEDED
                             : ConcurrentNodeExecutor.CompletionStatus.FAILED, attempt(chain, player, admissions, id,
                     List.of(), returnsSecondByproduct ? List.of(paper.toStack(1)) : List.of()));
@@ -422,7 +571,7 @@ class AsyncProbabilitySettlementTest extends BootstrapTest {
                 singleNodeGraph(port.nodeId(), target).nodes().get(0)));
         for (int n = 1; n <= limit; n++) {
             scheduler.claim(port.nodeId());
-            assertTrue(chain.prepareRetryRound(port.nodeId(), player));
+            assertEquals(RetryPreparation.READY, chain.prepareRetryRound(port.nodeId(), player));
             var result = attempt(chain, player, admissions, port.nodeId(), List.of(),
                     n == 1 ? List.of(new ItemStack(Items.EGG)) : List.of());
             if (n < limit) {

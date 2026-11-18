@@ -48,6 +48,7 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Consumer;
 
 import static org.mockito.Mockito.mock;
@@ -321,6 +322,13 @@ public final class DeepPlanningFixture implements AutoCloseable {
         return CraftingResolver.startTypedPreview(demands, available(withStock), level,
                 nativeRoutes == null ? null : nativeRoutes.player, null,
                 missing, null, true, timeoutMs, null, Map.of(), PlanningPreferences.empty());
+    }
+
+    CraftingResolver.TypedPreview supplemental(Set<ResourceLocation> excluded, List<String> missing) {
+        var slots = demands.stream().map(s -> new IngredientSpec(s.ingredient(), Math.toIntExact(s.count()),
+                s.consumption())).toList();
+        return CraftingResolver.startSupplementalGraph(slots, available(true), level, null, null, missing,
+                excluded, Map.of(), Map.of(), null);
     }
 
     public CraftPlanGraph legacyTyped(int timeoutMs, List<String> missing) {

@@ -46,7 +46,7 @@ final class ResolutionContext {
 
     /** Resolve deadline from config (ms → ns), falling back to the configured default
      *  if the config spec is not yet loaded (should not happen at runtime). */
-    private static long resolveDeadlineNanos() {
+    static long resolveDeadlineNanos() {
         try {
             return System.nanoTime()
                     + RSIntegrationConfig.CRAFTING_RESOLVE_TIMEOUT_MS.get() * 1_000_000L;
@@ -514,7 +514,7 @@ final class ResolutionContext {
     }
 
     boolean timedOut() {
-        boolean expired = System.nanoTime() - deadlineNanos >= 0L;
+        boolean expired = deadlineNanos != Long.MAX_VALUE && System.nanoTime() - deadlineNanos >= 0L;
         if (expired && !timeoutReached) {
             timeoutReached = true;
             timeoutRootSlot = previewRootSlot;

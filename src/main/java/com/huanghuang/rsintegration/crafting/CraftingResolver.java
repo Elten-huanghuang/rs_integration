@@ -58,6 +58,7 @@ import javax.annotation.Nullable;
 import java.util.*;
 import java.util.function.Function;
 import java.util.function.Consumer;
+import java.util.function.BooleanSupplier;
 import java.util.stream.Collectors;
 import com.huanghuang.rsintegration.magic.MagicResourceCost;
 
@@ -541,13 +542,14 @@ public final class CraftingResolver {
     }
 
     /** 补做原料沿用同一规划器，并排除当前等待中的生产步骤以阻断跨轮次循环。 */
-    static CraftPlanGraph resolveSupplementalGraph(List<IngredientSpec> needed,
+    static TypedPreview startSupplementalGraph(List<IngredientSpec> needed,
             Map<StackKey, ? extends Number> available, Level level, ServerPlayer player, CraftStorageEndpoint storageEndpoint,
             List<String> missing, Set<ResourceLocation> excludedRecipes,
             Map<ResourceLocation, ResourceLocation> forcedRecipes, Map<String, ItemStack> materialLocks,
             ActiveRootRecipe activeRoot) {
-        return resolveGraphForSpecsWithTypes(needed, available, level, player, storageEndpoint, missing,
-                forcedRecipes, false, true, 50, activeRoot, materialLocks, excludedRecipes);
+        return startRootResolution(ingredientRootSpecs(needed), available, level, player, storageEndpoint,
+                missing, forcedRecipes, false, true, null, activeRoot, materialLocks, excludedRecipes,
+                PlanningPreferences.empty(), false);
     }
 
     private static CraftPlanGraph resolveGraphForSpecsWithTypes(
@@ -617,21 +619,21 @@ public final class CraftingResolver {
             @Nullable ServerPlayer player, @Nullable CraftStorageEndpoint storageEndpoint,
             @Nullable List<String> missingOut,
             @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides, boolean bestEffort,
-            boolean singleVariantRoots, int timeoutMs, @Nullable ActiveRootRecipe activeRoot,
+            boolean singleVariantRoots, @Nullable Integer timeoutMs, @Nullable ActiveRootRecipe activeRoot,
             Map<String, ItemStack> materialLocks, Set<ResourceLocation> excludedRecipes,
             PlanningPreferences preferences, boolean checkPreviewBudget) {
         Map<ResourceLocation, ResourceLocation> prefs = mergeForcedOverrides(level, forcedOverrides);
         Map<Item, List<RecipeIndex.Entry>> index = RecipeIndex.get(level);
-        ResolutionContext ctx = timeoutMs > 0
-                ? new ResolutionContext(level, index, availableKeyed,
-                        prefs, forcedOverrides, player, storageEndpoint, bestEffort, missingOut,
-                        ResolutionContext.deadlineAfterMillis(timeoutMs),
-                        shouldAbortOnTimeout(bestEffort))
-                : new ResolutionContext(level, index, availableKeyed,
-                        prefs, forcedOverrides, player, storageEndpoint, bestEffort, missingOut);
-        ctx.excludedRecipes = Set.copyOf(excludedRecipes);
+        // 补料由当前 tick 的共享预算逐帧推进；保留步数、深度和循环约束，没有跨轮的墙钟截止时间。
+        long deadline = timeoutMs == null ? Long.MAX_VALUE : timeoutMs > 0
+                ? ResolutionContext.deadlineAfterMillis(timeoutMs) : ResolutionContext.resolveDeadlineNanos();
+        ResolutionContext ctx = new ResolutionContext(level, index, availableKeyed, prefs, forcedOverrides,
+                player, storageEndpoint, bestEffort, missingOut, deadline,
+                timeoutMs != null && timeoutMs > 0 && shouldAbortOnTimeout(bestEffort));
         ctx.withMaterialLocks(materialLocks);
         ctx.withPreferences(preferences);
+        // 补料还要排除任务中未结束的配方，不能被空的持久偏好覆盖。
+        ctx.excludedRecipes = Set.copyOf(excludedRecipes);
         EdgeTracker edges = new EdgeTracker();
         Map<Integer, RootDemand> rootsByOrder = new TreeMap<>();
         var stack = new PlanningStack();
@@ -734,14 +736,22 @@ public final class CraftingResolver {
         }
 
         public boolean advance(long sliceNanos) {
+            return advance(sliceNanos, () -> true);
+        }
+
+        boolean advance(long sliceNanos, BooleanSupplier allowed) {
             long now = System.nanoTime();
-            if (suspendedAt != 0L) context.deadlineNanos += now - suspendedAt;
+            if (suspendedAt != 0L && context.deadlineNanos != Long.MAX_VALUE) context.deadlineNanos += now - suspendedAt;
             suspendedAt = 0L;
             // 实际机器状态可能在两个切片之间改变，不跨切片复用其可用性。
             context.beginCandidateSlice();
-            if (job.advance(sliceNanos)) return true;
+            if (job.advance(sliceNanos, allowed)) return true;
             suspendedAt = System.nanoTime();
             return false;
+        }
+
+        void cancel() {
+            job.cancel();
         }
 
         private CraftPlanGraph finishSynchronously() {

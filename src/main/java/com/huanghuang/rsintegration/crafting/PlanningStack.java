@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 /** 配方、槽位和候选各自保存继续位置，深度不再占用 Java 调用栈。 */
@@ -48,9 +49,14 @@ final class PlanningStack {
         }
 
         boolean advance(long sliceNanos) {
+            return advance(sliceNanos, () -> true);
+        }
+
+        boolean advance(long sliceNanos, BooleanSupplier allowed) {
             long started = System.nanoTime();
             try {
                 while (next != null) {
+                    if (!allowed.getAsBoolean()) return false;
                     Runnable action = next;
                     next = null;
                     action.run();
@@ -59,10 +65,14 @@ final class PlanningStack {
                 if (!done || !cleanup.isEmpty()) throw new IllegalStateException("规划帧未完成");
                 return true;
             } catch (RuntimeException | LinkageError failure) {
-                while (!cleanup.isEmpty()) leave();
-                next = null;
+                cancel();
                 throw failure;
             }
+        }
+
+        void cancel() {
+            next = null;
+            while (!cleanup.isEmpty()) leave();
         }
 
         T result() {

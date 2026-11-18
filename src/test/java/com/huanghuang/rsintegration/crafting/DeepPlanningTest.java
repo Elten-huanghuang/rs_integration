@@ -101,6 +101,28 @@ class DeepPlanningTest extends BootstrapTest {
     }
 
     @Test
+    void supplementalSlicesRespectUnfinishedRecipesAndYieldWithoutReportingShortages() {
+        try (var fixture = new DeepPlanningFixture(12, 1, false)) {
+            var missing = new ArrayList<String>();
+            var search = fixture.supplemental(Set.of(), missing);
+            assertFalse(search.advance(Long.MAX_VALUE, () -> false));
+            int ticks = 0;
+            while (!search.advance(0)) {
+                assertTrue(missing.isEmpty());
+                assertTrue(++ticks < 2000);
+            }
+            var graph = search.graph();
+            assertTrue(ticks > graph.nodes().size());
+            assertTrue(graph.unresolvedDemands().isEmpty());
+            var unfinished = graph.nodes().get(0).recipeId();
+            var blocked = fixture.supplemental(Set.of(unfinished), missing);
+            assertTrue(blocked.advance(Long.MAX_VALUE));
+            assertTrue(blocked.graph().rootDemands().stream().anyMatch(root -> root.unresolvedQuantity() > 0));
+            assertFalse(missing.isEmpty());
+        }
+    }
+
+    @Test
     void tinySlicesResumeTheSameSearchWithoutReplayingCandidates() {
         try (var fixture = new DeepPlanningFixture(512, 1, false, true)) {
             var expected = fixture.typed(true, true, 10_000, new ArrayList<>());

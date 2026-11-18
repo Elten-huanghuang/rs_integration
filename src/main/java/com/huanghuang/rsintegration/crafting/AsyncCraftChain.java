@@ -255,6 +255,7 @@ public final class AsyncCraftChain {
     private ConcurrentNodeExecutor graphExecutor;
     private final Map<NodeId, CraftNodeRuntime> nodeRuntimes = new HashMap<>();
     private final Map<NodeId, TargetNodeProduction> productionAttempts = new HashMap<>();
+    private final Map<NodeId, SupplementalSearch> supplementalSearches = new HashMap<>();
     /** 累计真实发布的产物；最终交付或取消清理不能使 HUD 的已完成数量倒退。 */
     private final Map<OutputPortId, Long> publishedOutputQuantities = new HashMap<>();
     private final Map<NodeId, String> graphFailureDetails = new HashMap<>();
@@ -1162,66 +1163,126 @@ public final class AsyncCraftChain {
                 .filter(output -> output.guaranteedMinimum() < output.quantity()).findFirst().orElse(null);
     }
 
-    boolean prepareRetryRound(NodeId nodeId, ServerPlayer player) {
+    enum RetryPreparation { READY, PLANNING, WAITING_DEPENDENCIES, WAITING_MATERIALS, FAILED }
+
+    private static final class SupplementalSearch {
+        final TargetNodeProduction.Round round;
+        final CraftingResolver.TypedPreview job;
+        final List<String> missing;
+        boolean solved;
+        CraftPlanGraph result;
+
+        SupplementalSearch(TargetNodeProduction.Round round, CraftingResolver.TypedPreview job, List<String> missing) {
+            this.round = round;
+            this.job = job;
+            this.missing = missing;
+        }
+    }
+
+    RetryPreparation prepareRetryRound(NodeId nodeId, ServerPlayer player) {
+        if (isDone()) return RetryPreparation.FAILED;
         var production = productionAttempts.get(nodeId);
-        if (production == null) return true;
+        if (production == null) return RetryPreparation.READY;
         var round = production.pending();
-        if (round == null) return true;
+        if (round == null) return RetryPreparation.READY;
         if (round.missing().isEmpty()) {
             graphRequests.put(nodeId, round.assigned());
             production.admittedRound();
-            return true;
+            return RetryPreparation.READY;
         }
-        CraftNode node = graphNodes.get(nodeId);
         if (materialAccount == null || materialAccount.uncertain()) {
             graphFailureDetails.put(nodeId, "补料账户不可用");
             graphFailureCodes.put(nodeId, CraftFailureCode.MATERIAL_EXTRACTION_FAILED);
-            return false;
+            return RetryPreparation.FAILED;
         }
-        // 公共库存不含任务已取得的下游份额；只有未被分配的任务余额可以参与补做。
-        Map<StackKey, Long> usable = new LinkedHashMap<>(MaterialSources.listAllAvailableFresh(player, storageEndpoint));
-        Map<MaterialKey, Long> surplus = new LinkedHashMap<>();
-        for (ItemStack stack : virtualInventory) {
-            if (stack.isEmpty()) continue;
-            usable.merge(StackKey.of(stack, true), (long) stack.getCount(), SaturatingLongMath::add);
-            surplus.merge(MaterialKey.of(stack), (long) stack.getCount(), SaturatingLongMath::add);
+        if (!dispatchAllowed.getAsBoolean()) return RetryPreparation.PLANNING;
+        var search = supplementalSearches.computeIfAbsent(nodeId,
+                ignored -> startSupplementalSearch(nodeId, round, player));
+        if (search.round != round) throw new IllegalStateException("补料会话不属于当前轮次");
+        if (!search.solved) {
+            long slice = RSIntegrationConfig.serverInt(RSIntegrationConfig.CRAFTING_PLANNING_SLICE_MS) * 1_000_000L;
+            search.solved = search.job.advance(slice, dispatchAllowed);
+            graphProgressWatchdog.markProgress();
+            if (!search.solved) return RetryPreparation.PLANNING;
         }
-        var protectedRoots = new HashMap<MaterialKey, Long>();
-        for (RootDemand root : graph.rootDemands()) for (RootAllocation a : root.allocations()) {
-            if (a.source() instanceof MaterialSource.InitialPool) protectedRoots.merge(a.material(), a.quantity(), Math::addExact);
-        }
-        Map<MaterialKey, Long> protectedHeld = new HashMap<>();
-        materialAccount.heldMaterials().forEach((key, amount) -> {
-            MaterialKey material = MaterialKey.of(key.toStack());
-            long held = Math.min(amount, SaturatingLongMath.add(protectedRoots.getOrDefault(material, 0L),
-                    graphMaterials.outstanding(new MaterialSource.InitialPool(material), material)));
-            protectedHeld.put(material, held);
-            if (amount > held) usable.merge(key, amount - held, SaturatingLongMath::add);
-        });
-        Set<ResourceLocation> excluded = new HashSet<>();
-        graphNodes.forEach((id, n) -> {
-            if (graphScheduler.state(id) != DagScheduler.NodeState.SUCCEEDED) excluded.add(n.recipeId());
-        });
-        List<String> missing = new ArrayList<>();
-        CraftPlanGraph supplement;
-        try {
-            supplement = CraftingResolver.resolveSupplementalGraph(
-                    MaterialLocks.narrowSpecs(node.recipeId(), round.missing(), supplementalMaterialLocks),
-                    usable, player.serverLevel(), player, storageEndpoint, missing, excluded,
-                    supplementalForcedRecipes, supplementalMaterialLocks, new CraftingResolver.ActiveRootRecipe(
-                            node.recipeId(), graphNodeTargetOutput(node)));
-        } catch (CraftingPlanningTimeoutException timeout) {
-            graphFailureDetails.put(nodeId, "补料规划超时");
-            graphFailureCodes.put(nodeId, CraftFailureCode.TIMEOUT);
-            return false;
-        }
-        if (!missing.isEmpty() || supplement.rootDemands().isEmpty()
+        if (!dispatchAllowed.getAsBoolean()) return RetryPreparation.PLANNING;
+        if (search.result == null) search.result = search.job.graph();
+        if (!dispatchAllowed.getAsBoolean()) return RetryPreparation.PLANNING;
+        CraftPlanGraph supplement = search.result;
+        if (!search.missing.isEmpty() || supplement.rootDemands().isEmpty()
                 || !supplement.unresolvedDemands().isEmpty()
                 || supplement.rootDemands().stream().anyMatch(r -> r.unresolvedQuantity() != 0)
                 || (long) graphNodes.size() + supplement.nodes().size() > RSIntegrationConfig.CRAFTING_MAX_STEPS.get()) {
             graphFailureDetails.put(nodeId, "补产缺少下一次尝试的材料");
             graphFailureCodes.put(nodeId, CraftFailureCode.PRODUCTION_TARGET_UNMET);
-            return false;
+            supplementalSearches.remove(nodeId);
+            return RetryPreparation.FAILED;
+        }
+        // 规划暂停期间，其他节点可能追加了同一配方；必须按当前未完成集合重新规划。
+        if (!supplement.nodes().isEmpty()) {
+            var excluded = unfinishedRecipes();
+            if (supplement.nodes().stream().anyMatch(n -> excluded.contains(n.recipeId()))) {
+                supplementalSearches.remove(nodeId);
+                return RetryPreparation.PLANNING;
+            }
+        }
+        var status = admitSupplement(nodeId, player, production, round, supplement);
+        if (status != RetryPreparation.PLANNING) supplementalSearches.remove(nodeId);
+        return status;
+    }
+
+    private Map<MaterialKey, Long> protectedHeld(Map<StackKey, Long> heldMaterials) {
+        var protectedRoots = new HashMap<MaterialKey, Long>();
+        for (RootDemand root : graph.rootDemands()) for (RootAllocation a : root.allocations()) {
+            if (a.source() instanceof MaterialSource.InitialPool) protectedRoots.merge(a.material(), a.quantity(), Math::addExact);
+        }
+        Map<MaterialKey, Long> protectedHeld = new HashMap<>();
+        heldMaterials.forEach((key, amount) -> {
+            MaterialKey material = MaterialKey.of(key.toStack());
+            long held = Math.min(amount, SaturatingLongMath.add(protectedRoots.getOrDefault(material, 0L),
+                    graphMaterials.outstanding(new MaterialSource.InitialPool(material), material)));
+            protectedHeld.put(material, held);
+        });
+        return protectedHeld;
+    }
+
+    private Set<ResourceLocation> unfinishedRecipes() {
+        Set<ResourceLocation> excluded = new HashSet<>();
+        graphNodes.forEach((id, n) -> {
+            if (graphScheduler.state(id) != DagScheduler.NodeState.SUCCEEDED) excluded.add(n.recipeId());
+        });
+        return excluded;
+    }
+
+    private SupplementalSearch startSupplementalSearch(NodeId nodeId, TargetNodeProduction.Round round,
+                                                       ServerPlayer player) {
+        CraftNode node = graphNodes.get(nodeId);
+        Map<StackKey, Long> usable = new LinkedHashMap<>(MaterialSources.listAllAvailableFresh(player, storageEndpoint));
+        for (ItemStack stack : virtualInventory) {
+            if (!stack.isEmpty()) usable.merge(StackKey.of(stack, true), (long) stack.getCount(), SaturatingLongMath::add);
+        }
+        var held = materialAccount.heldMaterials();
+        var protectedHeld = protectedHeld(held);
+        held.forEach((key, amount) -> {
+            long free = amount - protectedHeld.getOrDefault(MaterialKey.of(key.toStack()), 0L);
+            if (free > 0) usable.merge(key, free, SaturatingLongMath::add);
+        });
+        List<String> missing = new ArrayList<>();
+        var job = CraftingResolver.startSupplementalGraph(
+                MaterialLocks.narrowSpecs(node.recipeId(), round.missing(), supplementalMaterialLocks),
+                usable, player.serverLevel(), player, storageEndpoint, missing, unfinishedRecipes(),
+                supplementalForcedRecipes, supplementalMaterialLocks, new CraftingResolver.ActiveRootRecipe(
+                        node.recipeId(), graphNodeTargetOutput(node)));
+        return new SupplementalSearch(round, job, missing);
+    }
+
+    private RetryPreparation admitSupplement(NodeId nodeId, ServerPlayer player, TargetNodeProduction production,
+                                              TargetNodeProduction.Round round, CraftPlanGraph supplement) {
+        // 快照只用于搜索。准入必须重新读取余料和下游预留，不能用开始规划时的余额扣料。
+        var protectedHeld = protectedHeld(materialAccount.heldMaterials());
+        Map<MaterialKey, Long> surplus = new HashMap<>();
+        for (ItemStack stack : virtualInventory) {
+            if (!stack.isEmpty()) surplus.merge(MaterialKey.of(stack), (long) stack.getCount(), SaturatingLongMath::add);
         }
         int first = Math.addExact(graphNodes.keySet().stream().mapToInt(NodeId::value).max().orElse(-1), 1);
         supplement = SupplementalGraph.relocate(supplement, first);
@@ -1229,7 +1290,9 @@ public final class AsyncCraftChain {
         Map<MaterialKey, Long> required = new LinkedHashMap<>(extension.materials());
         required.replaceAll((key, amount) -> Math.addExact(amount - Math.min(amount, surplus.getOrDefault(key, 0L)),
                 protectedHeld.getOrDefault(key, 0L)));
-        if (!materialAccount.ensure(required, extension.reusable(), player)) return false;
+        // 从准入到发布不可切分；本 tick 已用尽则保留求解结果，下次重新核算准入。
+        if (!dispatchAllowed.getAsBoolean()) return RetryPreparation.PLANNING;
+        if (!materialAccount.ensure(required, extension.reusable(), player)) return RetryPreparation.WAITING_MATERIALS;
         // 只交接这次真正获配的余料。账户准入未成功时原物仍由终止恢复负责。
         var toTransfer = new HashMap<>(extension.materials());
         for (ItemStack stack : virtualInventory) {
@@ -1253,7 +1316,7 @@ public final class AsyncCraftChain {
         }
         graphRequests.put(nodeId, List.copyOf(requests));
         production.admittedRound();
-        return supplement.nodes().isEmpty();
+        return supplement.nodes().isEmpty() ? RetryPreparation.READY : RetryPreparation.WAITING_DEPENDENCIES;
     }
 
     private int nextGraphOperationSequence(NodeId nodeId) {
@@ -1475,9 +1538,13 @@ public final class AsyncCraftChain {
             return ConcurrentNodeExecutor.StartResult.started(new EarthHeartTaintWorker());
         }
 
-        if (!prepareRetryRound(nodeId, online)) {
-            return graphFailureCodes.containsKey(nodeId) ? ConcurrentNodeExecutor.StartResult.failed()
-                    : graphRetry(nodeId, "retry materials unavailable", List.of(), Reason.WAITING_MATERIALS);
+        switch (prepareRetryRound(nodeId, online)) {
+            case FAILED -> { return ConcurrentNodeExecutor.StartResult.failed(); }
+            case PLANNING, WAITING_DEPENDENCIES -> { return ConcurrentNodeExecutor.StartResult.retry(); }
+            case WAITING_MATERIALS -> {
+                return graphRetry(nodeId, "retry materials unavailable", List.of(), Reason.WAITING_MATERIALS);
+            }
+            case READY -> { }
         }
         if (productionAttempts.containsKey(nodeId)) step = step.withExecutions(1);
         if (step.modType() == ModType.GENERIC && !productionAttempts.containsKey(nodeId)) {
@@ -3735,6 +3802,8 @@ public final class AsyncCraftChain {
         Diagnostics.record(Diagnostics.Category.CHAIN_STATE,
                 "->BORTED policy=" + policy + " reason=" + reason + " atStep=" + currentStep() + "/" + stepsCount());
         state = State.ABORTED;
+        supplementalSearches.values().forEach(search -> search.job.cancel());
+        supplementalSearches.clear();
         terminalCause = cause;
         abortReason = reason;
 
