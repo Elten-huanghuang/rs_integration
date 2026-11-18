@@ -1,8 +1,12 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
+import net.minecraft.core.BlockPos;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.level.Level;
 
+import javax.annotation.Nullable;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -21,7 +25,19 @@ public record PlanningSnapshot(
         String bindingFingerprint,
         Set<ResourceLocation> bindingBlockedOutputIds,
         boolean mainThreadOnly,
-        PlanningPreferences preferences) {
+        PlanningPreferences preferences,
+        @Nullable BindingAnchor bindingAnchor) {
+
+    public PlanningSnapshot(UUID playerId, long requestGeneration, long recipeRevision,
+                            ResourceLocation recipeId, Map<StackKey, Long> availableItems,
+                            Map<ResourceLocation, ResourceLocation> forcedRecipes,
+                            ImmutableRecipeGraph recipeGraph, String networkFingerprint,
+                            String bindingFingerprint, Set<ResourceLocation> bindingBlockedOutputIds,
+                            boolean mainThreadOnly, PlanningPreferences preferences) {
+        this(playerId, requestGeneration, recipeRevision, recipeId, availableItems, forcedRecipes,
+                recipeGraph, networkFingerprint, bindingFingerprint, bindingBlockedOutputIds,
+                mainThreadOnly, preferences, null);
+    }
 
     public PlanningSnapshot(UUID playerId, long requestGeneration, long recipeRevision,
                             ResourceLocation recipeId, Map<StackKey, Long> availableItems,
@@ -58,4 +74,18 @@ public record PlanningSnapshot(
         preferences = preferences == null ? PlanningPreferences.empty() : preferences;
     }
 
+    public PlanningSnapshot withRecipeGraph(ImmutableRecipeGraph graph, Set<ResourceLocation> blockedOutputs) {
+        return new PlanningSnapshot(playerId, requestGeneration, recipeRevision, recipeId,
+                availableItems, forcedRecipes, graph, networkFingerprint, bindingFingerprint,
+                blockedOutputs, mainThreadOnly, preferences, bindingAnchor);
+    }
+
+    public PlanningSnapshot withBindingAnchor(ResourceKey<Level> dimension, @Nullable BlockPos position) {
+        return new PlanningSnapshot(playerId, requestGeneration, recipeRevision, recipeId, availableItems,
+                forcedRecipes, recipeGraph, networkFingerprint, bindingFingerprint, bindingBlockedOutputIds,
+                mainThreadOnly, preferences, new BindingAnchor(dimension, position == null ? null : position.immutable()));
+    }
+
+    /** 自动模式没有指定机器，不把玩家脚下方块当成某台机器。 */
+    public record BindingAnchor(ResourceKey<Level> dimension, @Nullable BlockPos position) {}
 }

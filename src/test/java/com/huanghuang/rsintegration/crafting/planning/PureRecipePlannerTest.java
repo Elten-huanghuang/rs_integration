@@ -290,6 +290,53 @@ class PureRecipePlannerTest extends BootstrapTest {
     }
 
     @Test
+    void splitsLargeOrderAtTheCapacityOfARecursiveInput() {
+        MaterialRef ore = material("capacity_ore");
+        MaterialRef dust = material("capacity_dust");
+        MaterialRef other = material("capacity_other");
+        RecipeNode mill = recipe("capacity_mill", dust, 3, ingredient(ore, 2));
+        RecipeNode press = recipe("capacity_press", LOG, 2, ingredient(dust, 3));
+        RecipeNode first = recipe("capacity_first", STICK, 1, ingredient(LOG, 1));
+        RecipeNode second = recipe("capacity_second", STICK, 1, ingredient(other, 1));
+        var graph = new ImmutableRecipeGraph(Map.of(
+                dust, List.of(mill), LOG, List.of(press), STICK, List.of(first, second)));
+        long firstCapacity = 617_283_947L;
+        long otherCapacity = 382_716_053L;
+
+        var result = PureRecipePlanner.resolve(graph, Map.of(ore, firstCapacity - 1, LOG, 1L, other, otherCapacity),
+                List.of(ingredient(STICK, firstCapacity + otherCapacity)), 30, 512, 128);
+
+        assertEquals(PureRecipePlanner.Status.SUCCESS, result.status(), result.toString());
+        assertEquals(firstCapacity, executions(result, first));
+        assertEquals(otherCapacity, executions(result, second));
+        assertEquals((firstCapacity - 1) / 2, executions(result, press));
+        assertEquals(executions(result, press), executions(result, mill));
+        assertEquals(Map.of(), result.remaining());
+    }
+
+    @Test
+    void duplicateStockAllocationsDoNotRepeatAnImpossibleSuffix() {
+        List<IngredientRef> roots = new ArrayList<>();
+        Map<MaterialRef, Long> stock = new LinkedHashMap<>();
+        for (int index = 0; index < 30; index++) {
+            MaterialRef present = material("duplicate_stock_" + index);
+            MaterialRef absent = material("absent_stock_" + index);
+            roots.add(new IngredientRef(List.of(present, absent), 1L, NbtMatchMode.ANY));
+            stock.put(present, 1L);
+        }
+        MaterialRef missing = material("duplicate_stock_missing");
+        roots.add(ingredient(missing, 1));
+
+        var result = PureRecipePlanner.resolve(new ImmutableRecipeGraph(Map.of()), stock,
+                roots, 64, 64, 0, Long.MAX_VALUE, System::nanoTime, Set.of(),
+                Map.of(), PlanningPreferences.empty(), false);
+
+        assertEquals(PureRecipePlanner.Status.UNRESOLVABLE, result.status(), result.toString());
+        assertEquals(List.of(ingredient(missing, 1)), result.missing());
+        assertEquals(31, result.expandedStates());
+    }
+
+    @Test
     void splitRoutesCanBacktrackForALaterDependentDemand() {
         MaterialRef other = material("other");
         MaterialRef finalItem = material("final");

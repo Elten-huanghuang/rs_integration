@@ -111,6 +111,9 @@ final class ResolutionContext {
     // Eliminates the O(N) scan of all 546+ inventory types inside countMatching.
     private final Map<Item, List<CachedStack>> inventoryIndex = new HashMap<>();
     private final Map<CraftingResolver.StackKey, CachedStack> stacksByKey = new HashMap<>();
+    // 同一请求会多次经过共享配方；只缓存不依赖搜索中模拟库存的配方数据。
+    final Map<RecipeIndex.Entry, List<IngredientSpec>> candidateScoringInputs = new HashMap<>();
+    final Map<RecipeIndex.Entry, Set<CraftingResolver.StackKey>> candidateCycleInputs = new HashMap<>();
     private long nextInventoryOrder;
 
     ResolutionContext(Level level,

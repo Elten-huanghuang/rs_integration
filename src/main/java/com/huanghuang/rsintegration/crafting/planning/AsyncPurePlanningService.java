@@ -24,6 +24,8 @@ import java.util.function.Consumer;
 /** Executes the value-only planner and hands its result back to the server executor. */
 public final class AsyncPurePlanningService {
     private static final Logger LOGGER = LogUtils.getLogger();
+    private static final long COVERAGE_GAP_PROBE_NANOS = 3_000_000_000L;
+    private static final int COVERAGE_GAP_PROBE_STATES = 4_096;
     private final AsyncPlanningCoordinator coordinator;
 
     public AsyncPurePlanningService(AsyncPlanningCoordinator coordinator) {
@@ -150,15 +152,16 @@ public final class AsyncPurePlanningService {
                     snapshot.preferences(), Math.min(session.deadlineNanos(), System.nanoTime() + 100_000_000L))
                     : PurePlanningCoverage.Probe.notChecked();
             boolean knownCoverageGap = coverage.status() == PurePlanningCoverage.Status.GAP;
-            // 存在类型配方缺口时，纯图只作短暂尝试。成功仍可复用；失败则尽快进入
-            // 类型解析，不能花完数十秒搜索后才发现纯图根本不能证明缺料。
-            long searchDeadline = knownCoverageGap ? Math.min(session.deadlineNanos(), System.nanoTime() + 250_000_000L)
+            // 截止时间包含协作式等待。按 5ms/50ms 运行时，旧的 250ms 只给了约
+            // 25ms 计算机会；仍保留状态上限，确保无解的纯图能及时交接给类型规划。
+            long searchDeadline = knownCoverageGap
+                    ? Math.min(session.deadlineNanos(), System.nanoTime() + COVERAGE_GAP_PROBE_NANOS)
                     : session.deadlineNanos();
             PureRecipePlanner.Result plan = forcedRecipesProjected
                     && inspection.backgroundCompatible()
                     && !snapshot.mainThreadOnly()
                     ? computeInScope(snapshot, repeatCount, maxSteps,
-                            knownCoverageGap ? Math.min(maxSearchStates, 512) : maxSearchStates,
+                            knownCoverageGap ? Math.min(maxSearchStates, COVERAGE_GAP_PROBE_STATES) : maxSearchStates,
                             maxMemoizedFailures, session, routingGraph,
                             routing.projectedAvailabilityFor(snapshot), searchDeadline) : null;
             // 保留原始结果和覆盖证据，由调用方共用的路由规则决定是否需要类型解析。

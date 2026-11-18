@@ -64,7 +64,7 @@ public final class PerformanceMonitor {
     private static final AtomicLong planningWorkerActive = new AtomicLong();
     private static final AtomicLong planningQueueDepth = new AtomicLong();
     public enum PlanningLatencyPhase {
-        PREPARATION, QUEUE_WAIT, HANDOFF_WAIT, TYPED_SLICE, TYPED_GRAPH, TYPED_ESTIMATE, TYPED_ASSEMBLY
+        PREPARATION, QUEUE_WAIT, HANDOFF_WAIT, BINDING_CAPTURE, TYPED_SLICE, TYPED_GRAPH, TYPED_ESTIMATE, TYPED_ASSEMBLY
     }
     private static final AtomicLongArray planningLatencyCalls =
             new AtomicLongArray(PlanningLatencyPhase.values().length);
@@ -365,6 +365,7 @@ public final class PerformanceMonitor {
              + " previewPrepare=" + planningLatencySummary(PlanningLatencyPhase.PREPARATION)
              + " queueWait=" + planningLatencySummary(PlanningLatencyPhase.QUEUE_WAIT)
              + " handoffWait=" + planningLatencySummary(PlanningLatencyPhase.HANDOFF_WAIT)
+             + " bindingCapture=" + planningLatencySummary(PlanningLatencyPhase.BINDING_CAPTURE)
              + " typedSlice=" + planningLatencySummary(PlanningLatencyPhase.TYPED_SLICE)
              + " typedGraph=" + planningLatencySummary(PlanningLatencyPhase.TYPED_GRAPH)
              + " typedEstimate=" + planningLatencySummary(PlanningLatencyPhase.TYPED_ESTIMATE)

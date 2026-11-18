@@ -15,7 +15,7 @@ import java.util.List;
 public final class RSIntegrationConfig {
     public static final int REPEAT_COUNT_DEFAULT = 1024;
     public static final int REPEAT_COUNT_ABSOLUTE_MAX = 1024;
-    public static final int SERVER_CONFIG_SCHEMA = 9;
+    public static final int SERVER_CONFIG_SCHEMA = 10;
     public static final int DEFAULT_CRAFTING_MAX_DEPTH = 1024;
     public static final List<String> DEFAULT_ANVIL_MEMORY_ADAPTERS = List.of(
             "minecraft_anvil", "goety_dark_anvil", "irons_spellbooks_arcane_anvil");
@@ -1331,7 +1331,7 @@ public final class RSIntegrationConfig {
                 .defineInRange("craftingPreviewInventoryPendingTicks", 1200, 1, Integer.MAX_VALUE);
         CRAFTING_TYPED_PREVIEW_TIMEOUT_MS = s
                 .comment("类型化预览执行预算（毫秒）",
-                        "服务端线程解析预览的硬性时间预算；超时终止预览，不当作缺料。")
+                        "跨 tick 累计求解时间，不包括排队；每 tick 仍受服务端预算限制。超时不当作缺料。")
                 .defineInRange("craftingTypedPreviewTimeoutMs",
                         DEFAULT_CRAFTING_TYPED_PREVIEW_TIMEOUT_MS,
                         CraftingPlanningConfig.MIN_TYPED_PREVIEW_TIMEOUT_MS,
@@ -1807,6 +1807,9 @@ public final class RSIntegrationConfig {
     }
 
     public static int migrateTypedPreviewTimeoutMs(int schema, int currentValue) {
+        if (schema < 10 && currentValue == 500) {
+            return DEFAULT_CRAFTING_TYPED_PREVIEW_TIMEOUT_MS;
+        }
         if (schema < 4 && currentValue == 50) {
             return DEFAULT_CRAFTING_TYPED_PREVIEW_TIMEOUT_MS;
         }

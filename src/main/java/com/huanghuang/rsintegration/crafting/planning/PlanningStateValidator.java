@@ -75,7 +75,7 @@ public final class PlanningStateValidator {
                 ? networkFingerprint(reference(currentEndpoint), currentAvailable)
                 : networkFingerprint(selectedReference, currentAvailable);
         return snapshot.networkFingerprint().equals(fingerprint)
-                && snapshot.bindingFingerprint().equals(bindingFingerprint(player, dimension, lookupPos));
+                && snapshot.bindingFingerprint().equals(currentBinding(player, snapshot, dimension, lookupPos));
     }
 
     /** Revalidates a preview snapshot for execution without tying it to a preview request generation. */
@@ -158,7 +158,7 @@ public final class PlanningStateValidator {
             return rejectState(snapshot, execution, "storage-changed",
                     networkIdentity(snapshot.networkFingerprint()), networkIdentity(fingerprint));
         }
-        String currentBinding = bindingFingerprint(player, dimension, lookupPos);
+        String currentBinding = currentBinding(player, snapshot, dimension, lookupPos);
         if (!snapshot.bindingFingerprint().equals(currentBinding)) {
             return rejectState(snapshot, execution, "binding-changed", snapshot.bindingFingerprint(), currentBinding);
         }
@@ -396,13 +396,25 @@ public final class PlanningStateValidator {
         }
     }
 
+    private static String currentBinding(ServerPlayer player, PlanningSnapshot snapshot,
+                                         ResourceKey<Level> dimension, BlockPos lookupPos) {
+        var anchor = snapshot.bindingAnchor();
+        return anchor == null ? bindingFingerprint(player, dimension, lookupPos)
+                : bindingFingerprint(player, anchor.dimension(), anchor.position());
+    }
+
     public static String bindingFingerprint(ServerPlayer player, ResourceKey<Level> dimension,
-                                            BlockPos pos) {
-        ServerLevel level = player.getServer().getLevel(dimension);
-        if (level == null || !level.hasChunkAt(pos)) return "missing";
-        var blockEntity = level.getBlockEntity(pos);
-        String type = blockEntity == null ? "none" : blockEntity.getType().toString();
-        var persisted = AltarBindingRegistry.findBindingEntry(player, dimension.location(), pos);
+                                            @Nullable BlockPos pos) {
+        String site = "auto";
+        if (pos != null) {
+            ServerLevel level = player.getServer().getLevel(dimension);
+            if (level == null || !level.hasChunkAt(pos)) return "missing";
+            var blockEntity = level.getBlockEntity(pos);
+            String type = blockEntity == null ? "none" : blockEntity.getType().toString();
+            var persisted = AltarBindingRegistry.findBindingEntry(player, dimension.location(), pos);
+            site = pos.asLong() + ":" + type + ':' + level.getBlockState(pos).getBlock() + ':'
+                    + (persisted == null ? "none" : persisted.blockKey());
+        }
         long blockedHash = 0x9E3779B97F4A7C15L;
         for (MachineFavoriteKey blocked : MachineFavoritesSavedData.get(player.server)
                 .getBlocked(player.getUUID())) {
@@ -410,10 +422,7 @@ public final class PlanningStateValidator {
             blockedHash = blockedHash * 31 + blocked.pos().asLong();
             blockedHash = blockedHash * 31 + blocked.blockKey().hashCode();
         }
-        return dimension.location() + ":" + pos.asLong() + ':' + type + ':'
-                + level.getBlockState(pos).getBlock() + ':'
-                + (persisted == null ? "none" : persisted.blockKey())
-                + ":blocked=" + Long.toHexString(blockedHash)
+        return dimension.location() + ":" + site + ":blocked=" + Long.toHexString(blockedHash)
                 + ":catalysts=" + Integer.toHexString(virtualCatalystMask(player));
     }
 

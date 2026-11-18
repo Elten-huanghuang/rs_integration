@@ -42,7 +42,8 @@ class PlanCacheTest extends BootstrapTest {
         assertNull(cache.findForReplan(new PlanCache.Key(key.playerId(), key.recipeId(), Map.of(), 1, "",
                 Map.of(), new PlanningPreferences(Map.of(), Map.of(), Set.of(key.recipeId())))));
         cache.invalidateSnapshot(original);
-        assertNull(cache.findForReplan(key));
+        assertSame(published, cache.findForReplan(key));
+        assertSame(published, cache.peekForRequest(key, 10));
     }
 
     @Test
@@ -88,7 +89,7 @@ class PlanCacheTest extends BootstrapTest {
         assertNull(cache.peekForRequest(new PlanCache.Key(key.playerId(), key.recipeId(), Map.of(), 1, "",
                 Map.of(), PlanningPreferences.empty(), key.recipeRevision() + 1), 10));
         cache.invalidateSnapshot(before);
-        assertNull(cache.peekForRequest(key, 10));
+        assertSame(before, cache.peekForRequest(key, 10).snapshot());
         assertNotNull(cache.peekForRequest(key, 20));
         cache.removePlayer(key.playerId());
         assertNull(cache.peekForRequest(key, 20));
@@ -98,8 +99,10 @@ class PlanCacheTest extends BootstrapTest {
     void publishedRequestsObeyExistingCountAndNodeBudgets() {
         PlanCache cache = new PlanCache(100, 2, 3);
         PlanCache.Key first = key("request_capacity_first");
-        PlanCache.Key second = key("request_capacity_second");
-        PlanCache.Key third = key("request_capacity_third");
+        PlanCache.Key second = new PlanCache.Key(first.playerId(),
+                new ResourceLocation("test", "request_capacity_second"), Map.of(), 1, "");
+        PlanCache.Key third = new PlanCache.Key(first.playerId(),
+                new ResourceLocation("test", "request_capacity_third"), Map.of(), 1, "");
         PlanningSnapshot firstSnapshot = snapshot(first);
         cache.put(first, plan(), firstSnapshot, 1);
         cache.retainForRequest(first.playerId(), 10, firstSnapshot);
@@ -109,16 +112,45 @@ class PlanCacheTest extends BootstrapTest {
         PlanningSnapshot thirdSnapshot = snapshot(third);
         cache.put(third, plan(), thirdSnapshot, 3);
         cache.retainForRequest(third.playerId(), 30, thirdSnapshot);
-        assertNull(cache.peekForRequest(first, 10));
+        assertNotNull(cache.peekForRequest(first, 10));
         assertNotNull(cache.peekForRequest(second, 20));
         assertNotNull(cache.peekForRequest(third, 30));
         cache.put(third, planWithGraph(3), thirdSnapshot, 4);
         cache.retainForRequest(third.playerId(), 40, thirdSnapshot);
+        assertNull(cache.peekForRequest(first, 10));
+        assertNotNull(cache.peekForRequest(second, 20));
+        assertNotNull(cache.peekForRequest(third, 30));
+        assertNotNull(cache.peekForRequest(third, 40));
+        cache.put(third, plan(), thirdSnapshot, 5);
+        cache.retainForRequest(third.playerId(), 50, thirdSnapshot);
         assertNull(cache.peekForRequest(second, 20));
         assertNull(cache.peekForRequest(third, 30));
         assertNotNull(cache.peekForRequest(third, 40));
         cache.clear();
         assertNull(cache.peekForRequest(third, 40));
+        assertNull(cache.peekForRequest(third, 50));
+    }
+
+    @Test
+    void currentWidePlanStaysConfirmableEvenWhenItExceedsTheHistoryBudget() {
+        PlanCache cache = new PlanCache(10, 1, 256);
+        PlanCache.Key first = key("wide");
+        var snapshot = snapshot(first);
+        PlanResponse wide = planWithGraph(1023);
+        cache.put(first, wide, snapshot, 1);
+        cache.retainForRequest(first.playerId(), 10, snapshot);
+        assertNull(cache.get(first, 2));
+        assertSame(wide, cache.publishedPlan(first.playerId(), 10));
+
+        PlanCache.Key other = key("other_player");
+        cache.put(other, planWithGraph(1023), snapshot(other), 2);
+        cache.retainForRequest(other.playerId(), 20, snapshot(other));
+        var entry = cache.peekForRequest(first, 10);
+        assertNotNull(entry);
+        assertSame(wide, entry.plan());
+        assertTrue(cache.consumeForRequest(first.playerId(), 10, entry));
+        assertFalse(cache.consumeForRequest(first.playerId(), 10, entry));
+        assertNotNull(cache.peekForRequest(other, 20));
     }
 
     @Test

@@ -45,6 +45,7 @@ public final class PureRecipePlanner {
     private static final int MAX_REPORTED_MISSING = 64;
     private static final int REACHABILITY_PRECHECK_MIN_CANDIDATES = 5;
     private static final int MAX_MATCHING_ITEM_INDEX_UNITS = 8_192;
+    private static final int PARTIAL_CAPACITY_PROBE_WORK = 64;
 
     private PureRecipePlanner() {}
 
@@ -766,6 +767,7 @@ public final class PureRecipePlanner {
             private boolean cycleBlocked;
             private boolean noRecipeBlocked;
             private List<MaterialRef> stockAlternatives;
+            private Map<MaterialRef, Long> matchedStock;
             private List<MaterialRef> wantedAlternatives;
             private List<RecipeNode> producers = List.of();
             private MaterialRef wanted;
@@ -837,7 +839,8 @@ public final class PureRecipePlanner {
                             || ingredient.alternatives().stream().anyMatch(material -> !material.nbt().isEmpty())) {
                         Map<MaterialRef, Long> previous = consumeMatchingVariants(ingredient, rest);
                         if (previous != null) {
-                            return use(demand, consumedAmounts(previous), () -> previous.forEach(Search.this::setStock));
+                            matchedStock = consumedAmounts(previous);
+                            return use(demand, matchedStock, () -> previous.forEach(Search.this::setStock));
                         }
                     }
                 }
@@ -846,6 +849,9 @@ public final class PureRecipePlanner {
                         MaterialRef alternative = stockAlternatives.get(stockCursor++);
                         long before = stock.getOrDefault(alternative, 0L);
                         if (before < ingredient.count()) continue;
+                        // 同一帧回退后库存和待办均相同，不再搜索相同的材料分配。
+                        if (matchedStock != null && matchedStock.size() == 1
+                                && matchedStock.containsKey(alternative)) continue;
                         setStock(alternative, before - ingredient.count());
                         return use(demand, Map.of(alternative, ingredient.count()),
                                 () -> setStock(alternative, before));
@@ -856,7 +862,11 @@ public final class PureRecipePlanner {
                     phase = DemandPhase.PRODUCTION;
                     Map<MaterialRef, Long> previous = catalyst ? null : consumeAcrossAlternatives(ingredient, rest);
                     if (previous != null) {
-                        return use(demand, consumedAmounts(previous), () -> previous.forEach(Search.this::setStock));
+                        Map<MaterialRef, Long> used = consumedAmounts(previous);
+                        if (!used.equals(matchedStock)) {
+                            return use(demand, used, () -> previous.forEach(Search.this::setStock));
+                        }
+                        previous.forEach(Search.this::setStock);
                     }
                 }
                 if (!ingredient.recursive()) return deferForCoProduct(demand);
@@ -991,6 +1001,7 @@ public final class PureRecipePlanner {
                 if (batchHints == null) {
                     long limit = fullBatches - 1L;
                     long stockedBatches = limit;
+                    int[] capacityWork = {PARTIAL_CAPACITY_PROBE_WORK};
                     for (IngredientRef input : normalizedInputs(recipe)) {
                         checkBudget();
                         long available = stockAcross(input);
@@ -999,18 +1010,17 @@ public final class PureRecipePlanner {
                         } else {
                             stockedBatches = Math.min(stockedBatches, available / input.count());
                         }
-                        boolean stockOnly = !input.recursive() || input.alternatives().stream().allMatch(
-                                material -> preferences.isNoRecipe(material)
-                                        || candidates(material, input.nbtMatchMode()).isEmpty());
-                        if (!stockOnly) continue;
+                        long capacity = supplyUpperBound(input, available, new HashSet<>(), capacityWork);
                         if (input.role() == DemandRole.CATALYST) {
-                            if (available < input.count()) limit = 0L;
-                        } else {
-                            limit = Math.min(limit, available / input.count());
+                            if (capacity < input.count()) limit = 0L;
+                        } else if (capacity != Long.MAX_VALUE) {
+                            limit = Math.min(limit, capacity / input.count());
                         }
+                        if (limit == 0L) break;
                     }
                     batchHints = new ArrayList<>();
                     // 即使输入还可递归生产，也优先尝试当前库存能直接支持的整块数量。
+                    stockedBatches = Math.min(stockedBatches, limit);
                     if (stockedBatches > 0L) batchHints.add(stockedBatches);
                     for (long count = limit; count > 0L; count /= 2L) {
                         if (!batchHints.contains(count)) batchHints.add(count);
@@ -1021,6 +1031,55 @@ public final class PureRecipePlanner {
                 if (batchHintCursor < batchHints.size()) return batchHints.get(batchHintCursor++);
                 while (batchCursor > 0L && batchHints.contains(batchCursor)) batchCursor--;
                 return Math.max(0L, batchCursor--);
+            }
+
+            /**
+             * 上界忽略各端口之间的库存竞争。只有固定的单产物链才传播数量；
+             * 可能由其他待办步骤提供的副产物、动态身份和环一律不给上界。
+             */
+            private long supplyUpperBound(IngredientRef input, long available,
+                                          Set<MaterialRef> visiting, int[] work) {
+                checkBudget();
+                if (work[0]-- <= 0) return Long.MAX_VALUE;
+                for (MaterialRef alternative : input.alternatives()) {
+                    checkBudget();
+                    if (work[0]-- <= 0
+                            || !graph.coProductsByItem().getOrDefault(alternative.itemId(), Set.of()).isEmpty()) {
+                        return Long.MAX_VALUE;
+                    }
+                }
+                if (!input.recursive()) return available;
+                if (!DeterministicRecipePlanner.supported(input)) {
+                    for (MaterialRef alternative : input.alternatives()) {
+                        checkBudget();
+                        if (!preferences.isNoRecipe(alternative)
+                                && !candidates(alternative, input.nbtMatchMode()).isEmpty()) return Long.MAX_VALUE;
+                    }
+                    return available;
+                }
+                MaterialRef material = input.alternatives().get(0);
+                if (preferences.isNoRecipe(material)) return available;
+                List<RecipeNode> sources = candidates(material, input.nbtMatchMode());
+                if (sources.isEmpty()) return available;
+                if (sources.size() != 1 || !visiting.add(material)) return Long.MAX_VALUE;
+                try {
+                    RecipeNode source = sources.get(0);
+                    if (!source.output().equals(material) || source.hasFluidOutputs()
+                            || source.dynamicIdentityTargetable() || source.guaranteedOutputs().size() != 1
+                            || "smithing".equals(source.modTypeId())) return Long.MAX_VALUE;
+                    long batches = Long.MAX_VALUE;
+                    for (IngredientRef dependency : normalizedInputs(source)) {
+                        checkBudget();
+                        if (dependency.role() != DemandRole.CONSUMED) continue;
+                        long cap = supplyUpperBound(dependency, stockAcross(dependency), visiting, work);
+                        if (cap != Long.MAX_VALUE) batches = Math.min(batches, cap / dependency.count());
+                        if (batches == 0L || work[0] <= 0) break;
+                    }
+                    return batches > (Long.MAX_VALUE - available) / source.outputCount()
+                            ? Long.MAX_VALUE : available + batches * source.outputCount();
+                } finally {
+                    visiting.remove(material);
+                }
             }
 
             /** 复杂边界由原搜索选择；边界内的连续确定性需求仍共享一次聚合。 */

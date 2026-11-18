@@ -411,6 +411,15 @@ tasks.register('deepPlanningBenchmark', JavaExec) {
     args providers.gradleProperty('deepPlanningDepth').getOrElse('default')
 }
 
+tasks.register('packPlanningReplay', JavaExec) {
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(17) }
+    dependsOn tasks.named('benchmarkClasspath')
+    classpath = files(tasks.named('benchmarkClasspath').flatMap { it.archiveFile })
+    mainClass = 'com.huanghuang.rsintegration.crafting.planning.PackPlanningReplay'
+    maxHeapSize = '2g'
+    args providers.gradleProperty('packPlanningPath').getOrElse(''), file('src/benchmark/scripts/pack-recipes.cjs')
+}
+
 tasks.register('diskLimitCheck', JavaExec) {
     javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(17) }
     dependsOn tasks.named('benchmarkClasspath')
