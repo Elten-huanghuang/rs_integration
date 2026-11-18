@@ -13,6 +13,7 @@ import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate.CraftObservati
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate.CraftPhase;
+import com.huanghuang.rsintegration.crafting.batch.OperationPoll;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate.PreparationState;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.graph.GraphConcurrencyPolicy;
@@ -140,7 +141,7 @@ class AetherworksMetalFormerBatchDelegateTest extends BootstrapTest {
             doReturn(new CraftObservation(CraftPhase.DONE)).when(second).observeCraft(level);
             doReturn(new ItemStack(Items.EMERALD)).when(first).collectResult(player);
             doReturn(new ItemStack(Items.EMERALD)).when(second).collectResult(player);
-            assertEquals(CraftPhase.DONE, group.observeCraft(level).phase());
+            assertEquals(CraftPhase.DONE, OperationPoll.poll(group, level).phase());
             assertEquals(2, group.collectAllResults(player).stream().mapToInt(ItemStack::getCount).sum());
             assertEquals(0, craftBudget.active());
             assertEquals(0, machines.size());

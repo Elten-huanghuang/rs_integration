@@ -875,7 +875,6 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     private boolean refillFuelWhileWorking(AbstractFurnaceBlockEntity current) {
         if (player == null || current == null || current.getItem(0).isEmpty()
                 || readLitTime(current) > 0) return true;
-        furnaceBE = current;
         int remainingOperations = Math.max(1, current.getItem(0).getCount());
         boolean ready = ensureFuel(player, remainingOperations);
         if (ready) {
@@ -1231,6 +1230,18 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
 
     // ── polling / collection ──────────────────────────────────────
 
+    @Override
+    public void advanceCraft(ServerLevel playerLevel) {
+        if (kind != MachineKind.FURNACE || furnaceBE == null || myPos == null) return;
+        ServerLevel level = resolveMachineLevel(playerLevel);
+        if (level == null || !level.hasChunkAt(myPos) || level.getBlockEntity(myPos) != furnaceBE
+                || furnaceBE.isRemoved()) return;
+        ItemStack output = furnaceBE.getItem(2);
+        if (output.isEmpty() || output.getCount() < output.getMaxStackSize()) {
+            refillFuelWhileWorking(furnaceBE);
+        }
+    }
+
     @NotNull
     @Override
     protected CraftObservation observeMachineCraft(@NotNull ServerLevel level, @NotNull BlockEntity be) {
@@ -1241,14 +1252,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
             if (current instanceof AbstractFurnaceAccessor timer && !current.getItem(0).isEmpty()) {
                 observedCycle = MachineCycleProgress.of(timer.rsi$getCookingProgress(), timer.rsi$getCookingTotalTime());
             }
-            // A machine can consume its initial fuel earlier than the estimate
-            // (augments and server-side recipe modifiers are common causes).
-            // Keep a queued input from silently stalling when the furnace goes
-            // dark between ticks.
             ItemStack output = current.getItem(2);
-            if (output.isEmpty() || output.getCount() < output.getMaxStackSize()) {
-                refillFuelWhileWorking(current);
-            }
             if (outputBatch != null) {
                 if (!output.isEmpty() && !matchesFurnaceOutput(output)) {
                     return failObservation("furnace output slot contains another item");

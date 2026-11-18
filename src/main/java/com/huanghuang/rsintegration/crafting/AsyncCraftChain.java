@@ -86,6 +86,7 @@ import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
 import com.huanghuang.rsintegration.ModVersionDelegateRegistry;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.OperationPoll;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
@@ -1013,8 +1014,7 @@ public final class AsyncCraftChain {
                 // Capture and observation are processed before timeout so an output
                 // produced on the deadline tick is never collected and then refunded.
                 boolean capturedOutput = hasCapturedOutput();
-                currentDelegate.transferOutputs(online.serverLevel());
-                IBatchDelegate.CraftObservation observation = currentDelegate.observeCraft(online.serverLevel());
+                IBatchDelegate.CraftObservation observation = OperationPoll.poll(currentDelegate, online.serverLevel());
                 if (observation.phase() == IBatchDelegate.CraftPhase.WORKING
                         && observation.completedWork() > flatObservedCompletedWork) {
                     flatObservedCompletedWork = observation.completedWork();
@@ -5107,8 +5107,7 @@ public final class AsyncCraftChain {
             }
         } else if (currentDelegate != null) {
             try {
-                currentDelegate.transferOutputs(server.overworld());
-                IBatchDelegate.CraftObservation observation = currentDelegate.observeCraft(server.overworld());
+                IBatchDelegate.CraftObservation observation = OperationPoll.poll(currentDelegate, server.overworld());
                 boolean capturedWorldOutput = OutputAccounting.hasCapturedExpectedProduction(
                         currentDelegate, capturedOutputSnapshot());
                 if (observation.phase() == IBatchDelegate.CraftPhase.DONE || capturedWorldOutput) {

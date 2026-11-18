@@ -29,6 +29,7 @@ import com.huanghuang.rsintegration.crafting.graph.OperationId;
 import com.huanghuang.rsintegration.crafting.graph.OperationBudget;
 import com.huanghuang.rsintegration.magic.MagicResourceTaskReservation;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.OperationPoll;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext.ReservedMaterial;
@@ -693,8 +694,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             currentTick = player.serverLevel().getGameTime();
         }
         dispatchQueuedOperations();
-        // Resource contention is transient. Accept the group and retry queued
-        // operations from observeCraft() instead of failing after admission.
+        // 资源争用可能只是暂时的；下一次推进时重试队列中的操作。
         started = true;
         return true;
     }
@@ -1022,23 +1022,23 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     }
 
     @Override
-    public CraftObservation observeCraft(ServerLevel level) {
-        if (!started && !draining) return new CraftObservation(CraftPhase.WAITING_FOR_START);
+    public void advanceCraft(ServerLevel level) {
+        if (!started && !draining) return;
         currentTick = level.getGameTime();
 
         // 搬运和观察都保留游标，不能因为外层只看到一个节点就整组越过时间预算。
-        if (transferStarted && !transferComplete) {
-            return new CraftObservation(CraftPhase.WORKING).withCompletedWork(workProgressSequence);
+        if (!transferComplete) {
+            return;
         }
         while (observationCursor < workers.size()) {
             if (!observationAllowed.getAsBoolean()) {
-                return new CraftObservation(CraftPhase.WORKING).withCompletedWork(workProgressSequence);
+                return;
             }
             WorkerSlot worker = workers.get(observationCursor++);
             if (!worker.running()) continue;
             CraftObservation observation;
             try {
-                observation = worker.delegate.observeCraft(level);
+                observation = OperationPoll.advanceAndObserve(worker.delegate, level);
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] Worker observation threw at {}",
                         worker.machine.pos(), e);
@@ -1097,11 +1097,19 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         } else {
             waitingSinceTick = -1;
         }
+        if (!operations.isComplete() && !(draining && operations.isDrained())
+                && observationAllowed.getAsBoolean()) reportWaitingWorkers(tick);
+    }
+
+    @Override
+    public CraftObservation observeCraft(ServerLevel level) {
+        if (!started && !draining) return new CraftObservation(CraftPhase.WAITING_FOR_START);
+        // 预算中断时保留整轮边界，即使最后一个运行中的单元已经结算。
+        if (transferStarted) return new CraftObservation(CraftPhase.WORKING).withCompletedWork(workProgressSequence);
         if (draining && operations.isDrained()) {
             return new CraftObservation(CraftPhase.FAILED, failureDetail);
         }
         if (operations.isComplete()) return new CraftObservation(CraftPhase.DONE);
-        if (observationAllowed.getAsBoolean()) reportWaitingWorkers(level.getGameTime());
         return new CraftObservation(CraftPhase.WORKING).withCompletedWork(workProgressSequence);
     }
 

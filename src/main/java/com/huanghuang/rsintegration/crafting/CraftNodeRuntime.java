@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.api.execution.CollectedOutput;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.util.PerformanceMonitor;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.OperationPoll;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.graph.ConcurrentNodeExecutor;
@@ -425,8 +426,7 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
             }
             IBatchDelegate.CraftObservation observation;
             try {
-                delegate.transferOutputs(observeLevel);
-                observation = delegate.observeCraft(observeLevel);
+                observation = OperationPoll.poll(delegate, observeLevel);
             } catch (Throwable error) {
                 // A broken optional-mod delegate must fail its node cleanly.  In
                 // particular, never let a null ServerLevel from a cross-dimension

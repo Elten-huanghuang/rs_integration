@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.OperationPoll;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry.BoundMachine;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
@@ -51,15 +52,13 @@ class ParallelCraftGroupTickBudgetTest extends BootstrapTest {
         Fixture fixture = new Fixture();
         fixture.delegates.get(0).onTransfer = () -> fixture.allowed.set(false);
 
-        fixture.group.transferOutputs(fixture.level);
-        assertEquals(IBatchDelegate.CraftPhase.WORKING, fixture.group.observeCraft(fixture.level).phase());
+        assertEquals(IBatchDelegate.CraftPhase.WORKING, OperationPoll.poll(fixture.group, fixture.level).phase());
         assertEquals(1, fixture.delegates.get(0).transfers);
         assertEquals(0, fixture.delegates.get(1).transfers);
         assertEquals(0, fixture.delegates.get(0).observations);
 
         fixture.allowed.set(true);
-        fixture.group.transferOutputs(fixture.level);
-        assertEquals(IBatchDelegate.CraftPhase.DONE, fixture.group.observeCraft(fixture.level).phase());
+        assertEquals(IBatchDelegate.CraftPhase.DONE, OperationPoll.poll(fixture.group, fixture.level).phase());
         fixture.verifyCompleted();
     }
 
@@ -67,16 +66,13 @@ class ParallelCraftGroupTickBudgetTest extends BootstrapTest {
     void observationResumesWithoutRepeatingTransfersCollectionOrCompletion() {
         Fixture fixture = new Fixture();
         fixture.delegates.get(0).onObserve = () -> fixture.allowed.set(false);
-        fixture.group.transferOutputs(fixture.level);
-
-        assertEquals(IBatchDelegate.CraftPhase.WORKING, fixture.group.observeCraft(fixture.level).phase());
+        assertEquals(IBatchDelegate.CraftPhase.WORKING, OperationPoll.poll(fixture.group, fixture.level).phase());
         assertEquals(1, fixture.group.getCompletedOperations());
         assertEquals(1, fixture.delegates.get(0).observations);
         assertEquals(0, fixture.delegates.get(1).observations);
 
         fixture.allowed.set(true);
-        fixture.group.transferOutputs(fixture.level);
-        assertEquals(IBatchDelegate.CraftPhase.DONE, fixture.group.observeCraft(fixture.level).phase());
+        assertEquals(IBatchDelegate.CraftPhase.DONE, OperationPoll.poll(fixture.group, fixture.level).phase());
         fixture.verifyCompleted();
     }
 
@@ -112,6 +108,7 @@ class ParallelCraftGroupTickBudgetTest extends BootstrapTest {
             assertTrue(group.drainSettledResults().isEmpty());
             for (SlotDelegate delegate : delegates) {
                 assertEquals(1, delegate.transfers);
+                assertEquals(1, delegate.advances);
                 assertEquals(1, delegate.observations);
                 assertEquals(1, delegate.collections);
                 assertEquals(1, delegate.completions);
@@ -123,6 +120,7 @@ class ParallelCraftGroupTickBudgetTest extends BootstrapTest {
         Runnable onTransfer = () -> {};
         Runnable onObserve = () -> {};
         int transfers;
+        int advances;
         int observations;
         int collections;
         int completions;
@@ -132,6 +130,8 @@ class ParallelCraftGroupTickBudgetTest extends BootstrapTest {
                                        ResourceLocation dimension, BlockPos position) { return true; }
         @Override
         public boolean startOperation(OperationStartContext context) { return true; }
+        @Override
+        public void advanceCraft(ServerLevel level) { advances++; }
         @Override
         public boolean isCraftComplete(ServerLevel level) {
             observations++;

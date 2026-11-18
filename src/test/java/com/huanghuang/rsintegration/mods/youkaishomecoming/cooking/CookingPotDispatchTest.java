@@ -11,6 +11,7 @@ import com.huanghuang.rsintegration.crafting.OperationExecutionKernel;
 import com.huanghuang.rsintegration.crafting.OperationResourceCoordinator;
 import com.huanghuang.rsintegration.crafting.batch.CountedOperationMaterials;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.OperationPoll;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
@@ -136,7 +137,7 @@ class CookingPotDispatchTest extends BootstrapTest {
                 assertNotNull(starts.get(0).operationId());
                 assertEquals(1, starts.get(0).inputSlots().get(0).getCount());
                 assertEquals(4, starts.get(0).inputSlots().get(1).getCount());
-                assertEquals(IBatchDelegate.CraftPhase.DONE, group.observeCraft(level).phase());
+                assertEquals(IBatchDelegate.CraftPhase.DONE, OperationPoll.poll(group, level).phase());
                 assertEquals(1, group.getCompletedOperations());
                 List<ItemStack> output = group.drainSettledResults();
                 assertEquals(1, output.size());

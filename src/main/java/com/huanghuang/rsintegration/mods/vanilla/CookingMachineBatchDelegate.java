@@ -92,6 +92,9 @@ public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
     @Override
     public void transferOutputs(ServerLevel level) { active().transferOutputs(level); }
 
+    @Override
+    public void advanceCraft(ServerLevel level) { active().advanceCraft(level); }
+
     private void configureChild() {
         if (!(delegate instanceof AbstractBatchDelegate child)) return;
         if (machineDim != null) child.setMachineDim(machineDim);

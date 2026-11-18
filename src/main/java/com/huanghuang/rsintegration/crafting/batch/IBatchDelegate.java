@@ -370,6 +370,9 @@ public interface IBatchDelegate {
     /** 搬运步骤：只交接真实抽出的资源，不推进机器阶段；执行链在观察之前调用。 */
     default void transferOutputs(@Nonnull ServerLevel level) {}
 
+    /** 执行需要主动驱动的机器动作；自行加工的机器无需推进。 */
+    default void advanceCraft(@Nonnull ServerLevel level) {}
+
     /**
      * Observe the physical craft lifecycle. Legacy delegates are considered
      * working after start and map their old completion predicate to DONE.

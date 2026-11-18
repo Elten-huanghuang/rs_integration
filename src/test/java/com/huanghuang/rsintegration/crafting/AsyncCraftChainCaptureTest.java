@@ -49,6 +49,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -206,6 +207,12 @@ class AsyncCraftChainCaptureTest extends BootstrapTest {
         fixture.chain.abortForServerStop();
         fixture.chain.abortForServerStop();
 
+        var order = inOrder(fixture.delegate);
+        ServerLevel level = fixture.player.serverLevel();
+        order.verify(fixture.delegate).transferOutputs(level);
+        order.verify(fixture.delegate).advanceCraft(level);
+        order.verify(fixture.delegate).observeCraft(level);
+        verify(fixture.delegate).advanceCraft(level);
         assertEquals(AsyncCraftChain.State.ABORTED, fixture.chain.state());
         if (capturedCount == 3) {
             verify(fixture.delegate).onBatchFinished(fixture.player);

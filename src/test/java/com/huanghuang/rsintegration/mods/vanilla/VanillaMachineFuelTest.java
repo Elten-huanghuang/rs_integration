@@ -10,6 +10,7 @@ import com.huanghuang.rsintegration.crafting.TaskOutputReception;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate.CraftPhase;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
+import com.huanghuang.rsintegration.crafting.batch.OperationPoll;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.storage.rs.RefinedStorageOutputReception;
@@ -144,6 +145,46 @@ class VanillaMachineFuelTest extends BootstrapTest {
                 eq((long) expectedFuel), eq(false));
         assertEquals(stock, snapshot.items().get(0).amount());
         assertEquals(1, snapshot.items().get(0).stack().getCount());
+    }
+
+    @Test
+    void runningFurnaceRefillsForRemainingInputOnlyWhenOutputHasRoom() {
+        stock(64);
+        assertTrue(start(11));
+        furnace.setItem(0, new ItemStack(Items.IRON_ORE, 2));
+        furnace.setItem(1, ItemStack.EMPTY);
+        furnace.setItem(2, new ItemStack(Items.IRON_INGOT, 64));
+        observe(1);
+        assertTrue(furnace.getItem(1).isEmpty());
+        furnace.setItem(2, ItemStack.EMPTY);
+        delegate.observeCraft(level);
+        delegate.observeCraft(level);
+        assertTrue(furnace.getItem(1).isEmpty(), "单独观察不应取煤");
+        observe(2);
+        assertTrue(furnace.getItem(1).is(Items.COAL));
+        assertEquals(1, furnace.getItem(1).getCount());
+        observe(3);
+        verify(endpoint).extractExact(eq(player), argThat(stack -> stack.is(Items.COAL)), eq(1L), eq(false));
+    }
+
+    @Test
+    void advancementDoesNotRefuelAnUnloadedOrReplacedFurnace() {
+        stock(64);
+        assertTrue(start(2));
+        furnace.setItem(1, ItemStack.EMPTY);
+        clearInvocations(endpoint);
+        when(level.hasChunkAt(POS)).thenReturn(false);
+        delegate.advanceCraft(level);
+        assertTrue(furnace.getItem(1).isEmpty());
+        var replacement = new TestFurnace();
+        replacement.setLevel(level);
+        replacement.setItem(0, new ItemStack(Items.IRON_ORE));
+        when(level.hasChunkAt(POS)).thenReturn(true);
+        when(level.getBlockEntity(POS)).thenReturn(replacement);
+        delegate.advanceCraft(level);
+        assertTrue(replacement.getItem(1).isEmpty());
+        assertTrue(furnace.getItem(1).isEmpty());
+        verifyNoInteractions(endpoint);
     }
 
     @Test
@@ -370,8 +411,7 @@ class VanillaMachineFuelTest extends BootstrapTest {
 
     private CraftPhase observe(long tick) {
         when(level.getGameTime()).thenReturn(tick);
-        delegate.transferOutputs(level);
-        return delegate.observeMachineCraft(level, furnace).phase();
+        return OperationPoll.poll(delegate, level).phase();
     }
 
     @Test

@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.OperationPoll;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.crafting.batch.CountedOperationMaterials;
 import com.huanghuang.rsintegration.crafting.batch.CountedOperationMaterials.Origin;
@@ -195,11 +196,12 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
     }
 
     @Test
-    void parallelObservationNeverTransfersButRuntimeTransfersBeforeObservation() {
+    void parallelObservationReadsGroupStateAndRuntimePollsWorkerInOrder() {
         List<String> calls = new ArrayList<>();
         ModType type = ModType.register("test_transfer_before_observe", new String[0], new String[0],
                 new String[0], () -> new BufferedDelegate() {
                     @Override public void transferOutputs(ServerLevel current) { calls.add("transfer"); }
+                    @Override public void advanceCraft(ServerLevel current) { calls.add("advance"); }
                     @Override public CraftObservation observeCraft(ServerLevel current) {
                         calls.add("observe");
                         return new CraftObservation(CraftPhase.WORKING);
@@ -211,11 +213,10 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
                 new ResourceLocation("test", "transfer_before_observe"), player, 1);
         startGroup(group);
         group.observeCraft(level);
-        assertEquals(List.of("observe"), calls);
-        calls.clear();
+        assertTrue(calls.isEmpty());
         tick.incrementAndGet();
         assertEquals(ConcurrentNodeExecutor.Observation.WORKING, runtime(group).observe());
-        assertEquals(List.of("transfer", "observe"), calls);
+        assertEquals(List.of("transfer", "advance", "observe"), calls);
         group.onBatchFailed(player, "test cleanup");
     }
 
@@ -1144,7 +1145,7 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
         IBatchDelegate.CraftObservation observation = null;
         for (int i = 0; i < expectedStarts + 1; i++) {
             tick.incrementAndGet();
-            observation = group.observeCraft(level);
+            observation = OperationPoll.poll(group, level);
             if (observation.phase() == IBatchDelegate.CraftPhase.DONE) break;
         }
         assertNotNull(observation);
