@@ -521,7 +521,7 @@ class GraphCatalystReturnTest extends BootstrapTest {
                 utils.when(() -> CraftPacketUtils.extractCraftingIngredientSpecs(recipe)).thenAnswer(call -> specs);
                 return FlatCraftExecutor.executeDetailed(List.of(step), player, inventory, ledger, false,
                         new FlatCraftExecutor.Context(level, CraftLogContext.create(player.getUUID(), RECIPE),
-                                List.of(step), null, mock(FlatCraftExecutor.Host.class), Map.of(), state)).status();
+                                step.recipeId(), null, mock(FlatCraftExecutor.Host.class), Map.of(), state)).status();
             }
         }
 

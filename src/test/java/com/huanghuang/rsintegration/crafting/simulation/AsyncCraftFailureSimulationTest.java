@@ -323,17 +323,9 @@ class AsyncCraftFailureSimulationTest extends BootstrapTest {
                         }
 
                         @Override
-                        public void settleCaptured(boolean deliverCaptured) {
-                            session.drainCapture();
-                        }
-
-                        @Override
-                        public void closeOperationScope() {
-                            session.close();
-                        }
-
-                        @Override
                         public void cleanupGraph() {
+                            session.drainCapture();
+                            session.close();
                             scheduler.stopScheduling();
                             for (NodeId running : List.copyOf(scheduler.runningNodes())) {
                                 if (terminal == Outcome.FAILED || terminal == Outcome.TIMED_OUT) {

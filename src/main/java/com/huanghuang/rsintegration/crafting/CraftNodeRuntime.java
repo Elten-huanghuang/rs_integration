@@ -27,6 +27,7 @@ import java.util.ArrayList;
 import net.minecraft.server.level.ServerLevel;
 import javax.annotation.Nullable;
 import java.util.List;
+import java.util.Map;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.function.BooleanSupplier;
@@ -56,7 +57,8 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     private NodeOutputAccumulator outputs;
     @Nullable
     private OutputPortId completionTargetPort;
-    private long completionTargetQuantity;
+    private ProbabilisticProduction production;
+    private Map<OutputPortId, Long> roundMinimums = Map.of();
     private boolean dispatched;
     private boolean resourcesClosed;
     private List<ItemStack> confirmedOutputs = List.of();
@@ -133,9 +135,10 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
                 ? outputs : null;
     }
 
-    void targetCompletion(OutputPortId port, long quantity) {
+    void targetCompletion(OutputPortId port, ProbabilisticProduction production, Map<OutputPortId, Long> minimums) {
         completionTargetPort = port;
-        completionTargetQuantity = Math.max(0L, quantity);
+        this.production = production;
+        roundMinimums = Map.copyOf(minimums);
     }
 
     private final List<CollectedOutput> deliveredReports = new ArrayList<>();
@@ -147,7 +150,7 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     }
 
     List<NodeOutputAccumulator.Publication> drainIncrementalOutputs() {
-        if (outputs == null) return List.of();
+        if (outputs == null && production == null) return List.of();
         List<ItemStack> actual = new ArrayList<>(drainSettledResults());
         if (delegate != null) actual.addAll(operation.drainHeld());
         if (!actual.isEmpty()) {
@@ -167,7 +170,16 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
             waitTicks = 0;
             progressObserved = true;
         }
-        return outputs.add(actual);
+        if (production != null) production.settle(List.of(), resources, observed);
+        if (outputs == null) {
+            if (virtualInventory != null) virtualInventory.addAll(actual);
+            return List.of();
+        }
+        var published = outputs.add(actual);
+        if (production != null) for (var publication : published) {
+            if (publication.port().equals(completionTargetPort)) production.published(publication.stack().getCount());
+        }
+        return published;
     }
 
     void prepareGraphPublications() {
@@ -204,13 +216,13 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
 
     /** 概率未命中不属于操作失败，数量目标由订单层继续补做。 */
     boolean operationOutputsComplete() {
-        return outputs == null || outputs.isComplete();
+        if (outputs == null) return true;
+        if (production == null) return outputs.isComplete();
+        return roundMinimums.entrySet().stream().allMatch(e -> outputs.publishedQuantity(e.getKey()) >= e.getValue());
     }
 
     boolean productionTargetComplete() {
-        return completionTargetPort == null || completionTargetQuantity <= 0L
-                || outputs != null
-                && outputs.publishedQuantity(completionTargetPort) >= completionTargetQuantity;
+        return production == null || production.complete() && (outputs == null || outputs.isComplete());
     }
 
     List<ItemStack> drainOutputSurplus() {
@@ -556,6 +568,10 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
 
     @Override
     public void cleanupFailure() {
+        cleanupFailure(failureReason != null ? failureReason : "node failure");
+    }
+
+    void cleanupFailure(String reason) {
         if (virtualInventory != null) {
             while (!queuedPublications.isEmpty()) {
                 virtualInventory.add(queuedPublications.removeFirst().stack());
@@ -573,8 +589,7 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
             runFailureCleanup(recoverReusable,
                     () -> releaseReusableMaterials(player),
                     () -> {
-                        operation.recover(null,
-                                failureReason != null ? failureReason : "node failure");
+                        operation.recover(null, reason);
                         failureRecoveredInputs = delegate.failureRecoveredInputs();
                         if (delegate instanceof AbstractBatchDelegate abstractDelegate) {
                             physicalFailureCleanupCompleted =

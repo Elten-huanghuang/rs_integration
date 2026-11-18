@@ -275,7 +275,8 @@ public final class CraftPacketUtils {
             };
             boolean crafted = FlatCraftExecutor.execute(steps, player, virtualInventory,
                     ledger, true, new FlatCraftExecutor.Context(
-                            player.serverLevel(), ctx, steps, null, host, Map.of()));
+                            player.serverLevel(), ctx, steps.isEmpty() ? null : steps.get(steps.size() - 1).recipeId(),
+                            null, host, Map.of()));
             if (!crafted) return false;
 
             if (!ledger.commitToEndpoint(endpoint, player)) {

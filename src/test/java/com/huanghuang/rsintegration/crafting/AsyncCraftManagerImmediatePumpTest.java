@@ -53,8 +53,6 @@ class AsyncCraftManagerImmediatePumpTest extends BootstrapTest {
         when(chain.getPlayerId()).thenReturn(UUID.randomUUID());
         when(chain.stepsCount()).thenReturn(2);
         when(chain.isDone()).thenAnswer(ignored -> done.get());
-        when(chain.canAdvanceImmediately(anyBoolean()))
-                .thenAnswer(ignored -> !done.get());
         doAnswer(ignored -> {
             done.set(true);
             return true;

@@ -251,13 +251,7 @@ public final class AsyncCraftManager {
             return chain.isDone();
         }
         int perChainLimit = configuredPerChainVanillaLimit();
-        int maxPasses = Math.max(2, chain.stepsCount() + 2);
-        boolean firstPass = true;
-        for (int pass = 0; pass < maxPasses && !chain.isDone(); pass++) {
-            if (!window.hasTime()) break;
-            int remaining = window.remainingVanillaOperations(
-                    chain.getCraftId(), perChainLimit);
-            if (!firstPass && !chain.canAdvanceImmediately(remaining > 0)) break;
+        if (!chain.isDone() && window.hasTime()) {
             VanillaCraftingTickBudget.ChainAllowance allowance =
                     window.allowance(chain.getCraftId(), perChainLimit);
             try {
@@ -278,7 +272,6 @@ public final class AsyncCraftManager {
                 window.markAdvanced(chain.getCraftId());
                 window.record(chain.getCraftId(), allowance.used());
             }
-            firstPass = false;
         }
         if (chain.isDone()) {
             activeChains.remove(chain.getCraftId());

@@ -72,7 +72,7 @@ class AsyncCraftChainMaterialAdmissionTest extends BootstrapTest {
             return Optional.of(subscription);
         });
         CraftStorageEndpoint endpoint = () -> session;
-        chain = new AsyncCraftChain(playerId, server, endpoint, List.of());
+        chain = new AsyncCraftChain(playerId, server, endpoint, TestCraftGraphs.empty());
         chain.enableMaterialAccount(new GlobalMaterialCoordinator());
         account = mock(RuntimeMaterialAccount.class);
         set("materialAccount", account);

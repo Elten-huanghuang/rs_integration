@@ -121,7 +121,7 @@ final class GraphPreparationFixture implements AutoCloseable {
         }
         step = new CraftingResolver.ResolutionStep(RECIPE, type, null,
                 List.of(), List.of(), false, executions);
-        chain = new AsyncCraftChain(UUID.randomUUID(), server, null, List.of(step));
+        chain = new AsyncCraftChain(UUID.randomUUID(), server, null, TestCraftGraphs.terminal(step));
         Method method = AsyncCraftChain.class.getDeclaredMethod("prepareGraphNode",
                 NodeId.class, CraftingResolver.ResolutionStep.class, ServerPlayer.class);
         method.setAccessible(true);

@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.crafting.batch.ProductionEvidence;
+import com.huanghuang.rsintegration.crafting.batch.CraftExecutionPolicy;
+import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.OperationLifecycle;
 import com.huanghuang.rsintegration.crafting.batch.MachineOperation;
 import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
@@ -13,6 +15,15 @@ import com.huanghuang.rsintegration.api.recipe.OutputKind;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.graph.CraftNode;
+import com.huanghuang.rsintegration.crafting.graph.AllocationId;
+import com.huanghuang.rsintegration.crafting.graph.ConcurrentNodeExecutor;
+import com.huanghuang.rsintegration.crafting.graph.DagScheduler;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.crafting.graph.InputDemand;
+import com.huanghuang.rsintegration.crafting.graph.InputPortId;
+import com.huanghuang.rsintegration.crafting.graph.MaterialAllocation;
+import com.huanghuang.rsintegration.crafting.graph.MaterialBroker;
+import com.huanghuang.rsintegration.crafting.graph.NodeAdmissionCoordinator;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.crafting.graph.MaterialSource;
@@ -61,6 +72,7 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static com.huanghuang.rsintegration.crafting.graph.OutputKind.PRIMARY;
+import static com.huanghuang.rsintegration.crafting.graph.OutputKind.SECONDARY;
 
 class AsyncProbabilitySettlementTest extends BootstrapTest {
     @BeforeAll
@@ -116,14 +128,13 @@ class AsyncProbabilitySettlementTest extends BootstrapTest {
                     .filter(node -> node.recipeId().equals(cutting.getId())).findFirst().orElseThrow();
             assertEquals(0L, intermediate.outputs().get(0).guaranteedMinimum());
             assertTrue(intermediate.outputs().get(0).targetProducing());
-            assertTrue(AsyncCraftChain.requiresAdaptiveProduction(graph));
             AsyncCraftChain adaptive = new AsyncCraftChain(UUID.randomUUID(),
                     mock(MinecraftServer.class), null, graph);
-            assertFalse(adaptive.isGraphExecution());
+            assertTrue(adaptive.isGraphExecution());
             try {
                 InitialMaterialPlan admission = (InitialMaterialPlan) field(adaptive, "initialMaterialPlan");
                 assertEquals(InitialMaterialPlan.from(graph).materials(), admission.materials());
-                assertFalse(admission.materials().isEmpty(), "切换串行执行后仍须预取初始原料");
+                assertFalse(admission.materials().isEmpty(), "概率节点仍须按图预取初始原料");
             } catch (Exception failure) {
                 throw new AssertionError(failure);
             }
@@ -175,7 +186,6 @@ class AsyncProbabilitySettlementTest extends BootstrapTest {
 
     @Test
     void probabilityGraphUsesAdaptiveInputsAndFixedAttemptsKeepTheirOwnCompletionRule() throws Exception {
-        Fixture fixture = fixture(null, 1);
         NodeId nodeId = new NodeId(0);
         MaterialKey egg = MaterialKey.of(new ItemStack(Items.EGG));
         OutputDeclaration output = OutputDeclaration.item(new OutputPortId(nodeId, 0),
@@ -185,11 +195,9 @@ class AsyncProbabilitySettlementTest extends BootstrapTest {
         CraftPlanGraph targeted = singleNodeGraph(nodeId, output.withTargetProducing(true));
 
         assertNull(ExecutionEquivalence.projectFlatSteps(fixed).get(0).productionTarget());
-        assertFalse(AsyncCraftChain.requiresAdaptiveProduction(fixed));
-        assertTrue(AsyncCraftChain.requiresAdaptiveProduction(targeted));
         AsyncCraftChain chain = new AsyncCraftChain(UUID.randomUUID(),
-                fixture.player.getServer(), null, targeted);
-        assertFalse(chain.isGraphExecution());
+                mock(MinecraftServer.class), null, targeted);
+        assertTrue(chain.isGraphExecution());
         assertEquals(3L, ExecutionEquivalence.projectFlatSteps(targeted).get(0)
                 .productionTarget().quantity());
     }
@@ -206,7 +214,7 @@ class AsyncProbabilitySettlementTest extends BootstrapTest {
         when(delegate.publishesDeclaredGraphOutputs()).thenReturn(true);
         CraftNodeRuntime runtime = new CraftNodeRuntime(node, "test:random", delegate, null, null);
         runtime.attachOutputs(new NodeOutputAccumulator(List.of(output)));
-        runtime.targetCompletion(port, 2L);
+        runtime.targetCompletion(port, new ProbabilisticProduction(ProductionTarget.of(new ItemStack(Items.EGG), 2), 16), Map.of());
 
         assertTrue(runtime.operationOutputsComplete());
         assertFalse(runtime.productionTargetComplete());
@@ -220,255 +228,9 @@ class AsyncProbabilitySettlementTest extends BootstrapTest {
                 ModType.GENERIC.id(), new ResourceLocation("test", "random"), 3,
                 List.of(), List.of(), false, null, null, List.of(), List.of(output));
         return new CraftPlanGraph(1, List.of(node), List.of(),
-                List.of(new RootDemand(Ingredient.of(Items.EGG), 3L, 0L, new ItemStack(Items.EGG),
+                List.of(new RootDemand(Ingredient.of(output.material().toStack(1)), 3L, 0L, output.material().toStack(1),
                         List.of(new RootAllocation(new MaterialSource.ProducerOutput(output.id()),
                                 output.material(), 3L)))), List.of(), List.of(nodeId));
-    }
-
-    @Test
-    void flatChainWaitsThroughMissesAndKeepsRealOutputsUntilTargetIsMet() throws Exception {
-        Fixture fixture = fixture(ProductionTarget.of(new ItemStack(Items.EGG), 3), 1);
-        ProbabilisticProduction progress = new ProbabilisticProduction(fixture.step.productionTarget(), 16);
-        targets(fixture.chain).put(fixture.step, progress);
-        progress.started();
-        settle(fixture, List.of());
-        assertEquals(0, field(fixture.chain, "currentStepIdx"));
-        assertEquals(1, field(fixture.chain, "stepRemaining"));
-        progress.started();
-        settle(fixture, List.of(new ItemStack(Items.EGG)));
-        assertEquals(0, field(fixture.chain, "currentStepIdx"));
-        assertEquals(1, inventory(fixture.chain).get(0).getCount());
-        progress.started();
-        settle(fixture, List.of(new ItemStack(Items.EGG, 2)));
-        assertEquals(1, field(fixture.chain, "currentStepIdx"));
-        assertEquals(3, inventory(fixture.chain).get(0).getCount());
-        assertTrue(progress.complete());
-    }
-
-    @Test
-    void directAttemptWithoutRecursiveTargetStillCompletesOnAMiss() throws Exception {
-        Fixture fixture = fixture(null, 1);
-        settle(fixture, List.of());
-        assertEquals(1, field(fixture.chain, "currentStepIdx"));
-        assertTrue(inventory(fixture.chain).isEmpty());
-    }
-
-    @Test
-    void fluidProductionTargetUsesResourceContractInsteadOfMaterial()
-            throws Exception {
-        IntegrationResourceKey water =
-                IntegrationResourceKey.fluid(
-                        new FluidStack(Fluids.WATER, 1));
-        Fixture fixture = fixture(
-                ProductionTarget.of(water, 750L), 1);
-        Recipe<?> recipe = mock(Recipe.class);
-        RecipeManager recipes = mock(RecipeManager.class);
-        when(fixture.player.getServer().getRecipeManager())
-                .thenReturn(recipes);
-        doReturn(Optional.of(recipe))
-                .when(recipes)
-                .byKey(fixture.step.recipeId());
-        ModRecipeHandler handler = mock(ModRecipeHandler.class);
-        when(handler.requiresTargetedProduction(recipe, water))
-                .thenReturn(true);
-
-        try (MockedStatic<ModRecipeHandlers> handlers =
-                     mockStatic(ModRecipeHandlers.class)) {
-            handlers.when(() -> ModRecipeHandlers.claimFor(recipe))
-                    .thenReturn(new ModRecipeHandlers.Claim(
-                            handler, List.of(handler)));
-            Method requires = AsyncCraftChain.class
-                    .getDeclaredMethod(
-                            "requiresTargetedProduction",
-                            CraftingResolver.ResolutionStep.class
-                    );
-            requires.setAccessible(true);
-
-            assertEquals(true,
-                    requires.invoke(fixture.chain, fixture.step));
-        }
-    }
-
-    @Test
-    void flatChainAdvancesFluidProgressFromReportedResources()
-            throws Exception {
-        FluidStack water = new FluidStack(Fluids.WATER, 1);
-        IntegrationResourceKey resource =
-                IntegrationResourceKey.fluid(water);
-        Fixture fixture = fixture(
-                ProductionTarget.of(resource, 750L), 1);
-        ProbabilisticProduction progress =
-                new ProbabilisticProduction(
-                        fixture.step.productionTarget(), 16);
-        targets(fixture.chain).put(fixture.step, progress);
-
-        progress.started();
-        settle(fixture, List.of(), List.of(
-                new CollectedOutput(
-                        resource,
-                        500L,
-                        OutputKind.PRIMARY,
-                        new ResourceLocation("test", "water")
-                )
-        ));
-        assertEquals(0, field(fixture.chain, "currentStepIdx"));
-        assertEquals(500L, progress.produced());
-
-        progress.started();
-        settle(fixture, List.of(), List.of(
-                new CollectedOutput(
-                        resource,
-                        250L,
-                        OutputKind.PRIMARY,
-                        new ResourceLocation("test", "water")
-                )
-        ));
-        assertEquals(1, field(fixture.chain, "currentStepIdx"));
-        assertTrue(progress.complete());
-    }
-
-    @Test
-    void flatChainAdvancesFluidProgressFromObservedProduction()
-            throws Exception {
-        IntegrationResourceKey water =
-                IntegrationResourceKey.fluid(
-                        new FluidStack(Fluids.WATER, 1));
-        Fixture fixture = fixture(
-                ProductionTarget.of(water, 250L), 1);
-        ProbabilisticProduction progress =
-                new ProbabilisticProduction(
-                        fixture.step.productionTarget(), 16);
-        targets(fixture.chain).put(fixture.step, progress);
-
-        progress.started();
-        settle(
-                fixture,
-                List.of(),
-                List.of(),
-                List.of(new CollectedOutput(
-                        water,
-                        250L,
-                        OutputKind.PRIMARY,
-                        new ResourceLocation("test", "water")
-                ))
-        );
-
-        assertEquals(1, field(fixture.chain, "currentStepIdx"));
-        assertEquals(250L, progress.produced());
-        assertTrue(progress.complete());
-    }
-
-    @Test
-    void supplementalPlanIsInsertedBeforeTheWaitingStepWithoutLosingProductionProgress() throws Exception {
-        Fixture fixture = fixture(ProductionTarget.of(new ItemStack(Items.EGG), 3), 1);
-        ProbabilisticProduction progress = new ProbabilisticProduction(fixture.step.productionTarget(), 16);
-        progress.started();
-        progress.settle(List.of(new ItemStack(Items.EGG)));
-        inventory(fixture.chain).add(new ItemStack(Items.EGG));
-        targets(fixture.chain).put(fixture.step, progress);
-        Recipe<?> recipe = mock(Recipe.class);
-        RecipeManager recipes = mock(RecipeManager.class);
-        when(fixture.player.getServer().getRecipeManager()).thenReturn(recipes);
-        doReturn(Optional.of(recipe)).when(recipes).byKey(fixture.step.recipeId());
-        ModRecipeHandler handler = mock(ModRecipeHandler.class);
-        List<IngredientSpec> needed = List.of(new IngredientSpec(Ingredient.of(Items.PAPER), 1));
-        when(handler.getIngredients(recipe)).thenReturn(needed);
-        NodeId nodeId = new NodeId(0);
-        OutputPortId port = new OutputPortId(nodeId, 0);
-        MaterialKey paper = MaterialKey.of(new ItemStack(Items.PAPER));
-        CraftNode producer = new CraftNode(nodeId, new ResourceLocation("test", "paper"),
-                ModType.GENERIC.id(), new ResourceLocation("minecraft", "crafting"), 1,
-                List.of(), List.of(), false, null, null, List.of(),
-                List.of(OutputDeclaration.item(port, paper, 1, PRIMARY)));
-        CraftPlanGraph graph = new CraftPlanGraph(1, List.of(producer), List.of(),
-                List.of(new RootDemand(Ingredient.of(Items.PAPER), 1, 0, new ItemStack(Items.PAPER),
-                        List.of(new RootAllocation(new MaterialSource.ProducerOutput(port), paper, 1)))),
-                List.of(), List.of(nodeId));
-        try (MockedStatic<ModRecipeHandlers> handlers = mockStatic(ModRecipeHandlers.class);
-             MockedStatic<MaterialSources> sources = mockStatic(MaterialSources.class);
-             MockedStatic<CraftingResolver> resolver = mockStatic(CraftingResolver.class)) {
-            handlers.when(() -> ModRecipeHandlers.claimFor(recipe))
-                    .thenReturn(new ModRecipeHandlers.Claim(handler, List.of(handler)));
-            sources.when(() -> MaterialSources.listAllAvailable(fixture.player, (CraftStorageEndpoint) null))
-                    .thenReturn(Map.of());
-            resolver.when(() -> CraftingResolver.resolveSupplementalGraph(anyList(), anyMap(), any(),
-                    eq(fixture.player), isNull(), anyList(), anySet(), anyMap(), anyMap(), any()))
-                    .thenReturn(graph);
-            Method prepare = AsyncCraftChain.class.getDeclaredMethod("prepareProbabilityInputs",
-                    CraftingResolver.ResolutionStep.class, ProbabilisticProduction.class, ServerPlayer.class);
-            prepare.setAccessible(true);
-            assertEquals(false, prepare.invoke(fixture.chain, fixture.step, progress, fixture.player));
-        }
-        @SuppressWarnings("unchecked")
-        List<CraftingResolver.ResolutionStep> steps = (List<CraftingResolver.ResolutionStep>) field(fixture.chain, "steps");
-        assertEquals(producer.recipeId(), steps.get(0).recipeId());
-        assertSame(fixture.step, steps.get(1));
-        assertSame(progress, targets(fixture.chain).get(steps.get(1)));
-        assertEquals(1, progress.produced());
-        assertEquals(1, inventory(fixture.chain).get(0).getCount());
-        assertEquals(0, field(fixture.chain, "stepRemaining"));
-    }
-
-    private Fixture fixture(ProductionTarget target, int executions) throws Exception {
-        UUID owner = UUID.randomUUID();
-        MinecraftServer server = mock(MinecraftServer.class);
-        PlayerList players = mock(PlayerList.class);
-        ServerPlayer player = mock(ServerPlayer.class);
-        when(server.getPlayerList()).thenReturn(players);
-        when(players.getPlayer(owner)).thenReturn(player);
-        when(player.serverLevel()).thenReturn(mock(ServerLevel.class));
-        when(player.getServer()).thenReturn(server);
-        // 没有目标产物时，进度显示仍会查询配方；此测试的虚构配方应正常返回空。
-        when(server.getRecipeManager()).thenReturn(mock(RecipeManager.class));
-        CraftingResolver.ResolutionStep step = new CraftingResolver.ResolutionStep(
-                new ResourceLocation("test", "random"), ModType.GENERIC,
-                new ResourceLocation("test", "random"), List.of(), List.of(), false,
-                executions, null, null, target);
-        AsyncCraftChain chain = new AsyncCraftChain(owner, server, null, List.of(step));
-        set(chain, "state", AsyncCraftChain.State.EXECUTING);
-        set(chain, "stepRemaining", executions);
-        return new Fixture(chain, step, player);
-    }
-
-    private void settle(Fixture fixture, List<ItemStack> outputs) throws Exception {
-        settle(fixture, outputs, List.of(), List.of());
-    }
-
-    private void settle(
-            Fixture fixture,
-            List<ItemStack> outputs,
-            List<CollectedOutput> reported
-    ) throws Exception {
-        settle(fixture, outputs, reported, List.of());
-    }
-
-    private void settle(
-            Fixture fixture,
-            List<ItemStack> outputs,
-            List<CollectedOutput> reported,
-            List<CollectedOutput> observed
-    ) throws Exception {
-        IBatchDelegate delegate = mock(IBatchDelegate.class, withSettings().extraInterfaces(ProductionEvidence.class).defaultAnswer(CALLS_REAL_METHODS));
-        when(delegate.machineOperation()).thenReturn(mock(MachineOperation.class));
-        when(delegate.machineOperation().observe(any())).thenReturn(new MachineOperation.CraftObservation(MachineOperation.CraftPhase.DONE));
-        when(delegate.validateExecutionContext(fixture.player)).thenReturn(true);
-        when(delegate.outputSource()).thenReturn(p -> OperationOutputSource.Handoff.physical(outputs, null));
-        when(ProductionEvidence.from(delegate).takeDelivered()).thenReturn(reported);
-        when(ProductionEvidence.from(delegate).takeObserved()).thenReturn(observed);
-        set(fixture.chain, "currentDelegate", delegate);
-        set(fixture.chain, "flatLifecycle", new OperationLifecycle(delegate));
-        assertFalse(fixture.chain.tick());
-        assertEquals(AsyncCraftChain.State.EXECUTING, fixture.chain.state());
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<CraftingResolver.ResolutionStep, ProbabilisticProduction> targets(AsyncCraftChain chain) throws Exception {
-        return (Map<CraftingResolver.ResolutionStep, ProbabilisticProduction>) field(chain, "probabilityTargets");
-    }
-
-    @SuppressWarnings("unchecked")
-    private List<ItemStack> inventory(AsyncCraftChain chain) throws Exception {
-        return (List<ItemStack>) field(chain, "virtualInventory");
     }
 
     private Object field(Object target, String name) throws Exception {
@@ -477,11 +239,202 @@ class AsyncProbabilitySettlementTest extends BootstrapTest {
         return field.get(target);
     }
 
-    private void set(Object target, String name, Object value) throws Exception {
-        Field field = target.getClass().getDeclaredField(name);
-        field.setAccessible(true);
-        field.set(target, value);
+    @Test
+    void retryConsumesItsSupplementalProducerNotAnotherInitialAllocation() throws Exception {
+        NodeId id = new NodeId(0);
+        OutputPortId port = new OutputPortId(id, 0);
+        InputPortId input = new InputPortId(id, 0);
+        MaterialKey paper = MaterialKey.of(new ItemStack(Items.PAPER));
+        MaterialKey egg = MaterialKey.of(new ItemStack(Items.EGG));
+        var initial = new MaterialSource.InitialPool(paper);
+        var target = OutputDeclaration.item(port, egg, 2, PRIMARY, 0, 2,
+                OutputProbability.probabilistic(0.35, 16, "egg"), false, null).withTargetProducing(true);
+        var node = new CraftNode(id, new ResourceLocation("test", "eggs"), ModType.GENERIC.id(), null, 1,
+                List.of(), List.of(), false, null, null, List.of(new InputDemand(input, Ingredient.of(Items.PAPER),
+                1, DemandRole.CONSUMED, paper.toStack(1))), List.of(target));
+        var graph = new CraftPlanGraph(1, List.of(node),
+                List.of(new MaterialAllocation(new AllocationId(0), input, initial, paper, 1)),
+                List.of(new RootDemand(Ingredient.of(Items.EGG), 2, 0, egg.toStack(1),
+                                List.of(new RootAllocation(new MaterialSource.ProducerOutput(port), egg, 2))),
+                        new RootDemand(Ingredient.of(Items.PAPER), 1, 0, paper.toStack(1),
+                                List.of(new RootAllocation(initial, paper, 1)))), List.of(), List.of(id));
+        MinecraftServer server = mock(MinecraftServer.class);
+        when(server.getPlayerList()).thenReturn(mock(PlayerList.class));
+        var chain = new AsyncCraftChain(UUID.randomUUID(), server, null, graph);
+        ServerPlayer player = mock(ServerPlayer.class);
+        when(player.getServer()).thenReturn(server);
+        when(player.serverLevel()).thenReturn(mock(ServerLevel.class));
+        var scheduler = (DagScheduler) field(chain, "graphScheduler");
+        var broker = (MaterialBroker) field(chain, "graphMaterials");
+        var admissions = (NodeAdmissionCoordinator) field(chain, "graphAdmissions");
+        var account = mock(RuntimeMaterialAccount.class);
+        var accountField = AsyncCraftChain.class.getDeclaredField("materialAccount");
+        accountField.setAccessible(true);
+        accountField.set(chain, account);
+        when(account.heldMaterials()).thenReturn(Map.of(CraftingResolver.StackKey.of(paper.toStack(1), true), 1L));
+        when(account.ensure(anyMap(), anyList(), eq(player))).thenReturn(true);
+        scheduler.claim(id);
+        assertEquals(ConcurrentNodeExecutor.CompletionStatus.RETRY, attempt(chain, player, admissions, id,
+                List.of(new MaterialBroker.Request(initial, paper, 1)), List.of()));
+        assertEquals(0L, broker.available(initial, paper));
+        scheduler.releaseClaim(id);
+        scheduler.claim(id);
+        var producer = new CraftNode(id, new ResourceLocation("test", "paper"), ModType.GENERIC.id(), null,
+                1, List.of(), List.of(), false, null, null, List.of(),
+                List.of(OutputDeclaration.item(port, paper, 1, PRIMARY)));
+        var supplement = new CraftPlanGraph(1, List.of(producer), List.of(),
+                List.of(new RootDemand(Ingredient.of(Items.PAPER), 1, 0, paper.toStack(1),
+                        List.of(new RootAllocation(new MaterialSource.ProducerOutput(port), paper, 1)))), List.of(), List.of(id));
+        try (var resolver = mockStatic(CraftingResolver.class); var sources = mockStatic(MaterialSources.class)) {
+            resolver.when(() -> CraftingResolver.resolveSupplementalGraph(anyList(), anyMap(), any(), eq(player),
+                    isNull(), anyList(), anySet(), anyMap(), anyMap(), any())).thenAnswer(call -> {
+                assertTrue(call.getArgument(1, Map.class).isEmpty(), "根需求的纸不能用于补产");
+                return supplement;
+            });
+            assertFalse(chain.prepareRetryRound(id, player));
+            scheduler.releaseClaim(id);
+            assertEquals(DagScheduler.NodeState.BLOCKED, scheduler.state(id));
+            var extra = scheduler.claimReady(1).get(0);
+            assertNotEquals(id, extra);
+            var produced = new MaterialSource.ProducerOutput(new OutputPortId(extra, 0));
+            broker.publishActual(produced, paper, paper.toStack(1));
+            scheduler.succeed(extra);
+            scheduler.claim(id);
+            assertTrue(chain.prepareRetryRound(id, player));
+            @SuppressWarnings("unchecked")
+            var requests = (Map<NodeId, List<MaterialBroker.Request>>) field(chain, "graphRequests");
+            assertEquals(List.of(new MaterialBroker.Request(produced, paper, 1)), requests.get(id));
+            assertEquals(ConcurrentNodeExecutor.CompletionStatus.SUCCEEDED,
+                    attempt(chain, player, admissions, id, requests.get(id), List.of(egg.toStack(2))));
+            scheduler.succeed(id);
+            assertTrue(scheduler.allSucceeded());
+            assertEquals(2L, chain.outputProgress().completed());
+            assertEquals(0L, broker.outstanding(produced, paper));
+            assertEquals(2, broker.drainAvailableProducerAssets().stream().mapToInt(ItemStack::getCount).sum());
+            assertTrue(broker.drainAvailableProducerAssets().isEmpty());
+        }
     }
 
-    private record Fixture(AsyncCraftChain chain, CraftingResolver.ResolutionStep step, ServerPlayer player) {}
+    private ConcurrentNodeExecutor.CompletionStatus attempt(AsyncCraftChain chain, ServerPlayer player,
+            NodeAdmissionCoordinator admissions, NodeId id, List<MaterialBroker.Request> requests, List<ItemStack> outputs) {
+        var admission = admissions.tryAdmitClaimed(new NodeAdmissionCoordinator.Candidate(id, requests));
+        assertNotNull(admission);
+        admissions.commit(admission);
+        var delegate = mock(IBatchDelegate.class);
+        var machine = mock(MachineOperation.class);
+        when(delegate.machineOperation()).thenReturn(machine);
+        when(delegate.outputSource()).thenReturn(p -> OperationOutputSource.Handoff.physical(outputs, null));
+        when(machine.observe(any())).thenReturn(new MachineOperation.CraftObservation(MachineOperation.CraftPhase.DONE));
+        when(delegate.publishesDeclaredGraphOutputs()).thenReturn(true);
+        when(delegate.validateExecutionContext(player)).thenReturn(true);
+        var runtime = new CraftNodeRuntime(id, "target", delegate, null, admission, null);
+        runtime.setChainContext(chain.virtualInventory(), player);
+        chain.attachGraphAttempt(runtime, id).started();
+        assertEquals(ConcurrentNodeExecutor.Observation.SUCCEEDED, runtime.observe(), runtime::failureReason);
+        return chain.completeGraphNode(id, runtime);
+    }
+
+    @Test
+    void machineReceivesTheDeclaredFluidIdentityNotItsDisplayItem() {
+        var water = IntegrationResourceKey.fluid(new FluidStack(Fluids.WATER, 1));
+        var id = new NodeId(0);
+        var declaration = new OutputDeclaration(new OutputPortId(id, 0), MaterialKey.of(new ItemStack(Items.PAPER)),
+                3, PRIMARY, 0, 3, OutputProbability.probabilistic(0.5, 16, "water"), false, null, water, true);
+        var chain = new AsyncCraftChain(UUID.randomUUID(), mock(MinecraftServer.class), null,
+                singleNodeGraph(id, declaration));
+        var delegate = mock(AbstractBatchDelegate.class);
+        chain.configureNodeTarget(id, delegate);
+        verify(delegate).setTargetResource(water);
+    }
+
+    @Test
+    void observedAndDeliveredFluidCountTowardsTargetWithoutMintingPhysicalTokens() {
+        var water = IntegrationResourceKey.fluid(new FluidStack(Fluids.WATER, 1));
+        var progress = new ProbabilisticProduction(ProductionTarget.of(water, 750), 2);
+        IBatchDelegate delegate = mock(IBatchDelegate.class, withSettings().extraInterfaces(ProductionEvidence.class));
+        when(delegate.machineOperation()).thenReturn(mock(MachineOperation.class));
+        var evidence = ProductionEvidence.from(delegate);
+        when(evidence.takeDelivered()).thenReturn(List.of(new CollectedOutput(water, 500,
+                OutputKind.PRIMARY, new ResourceLocation("test", "water"))), List.of());
+        when(evidence.takeObserved()).thenReturn(List.of(), List.of(new CollectedOutput(water, 250,
+                OutputKind.PRIMARY, new ResourceLocation("test", "water"))));
+        var runtime = new CraftNodeRuntime(new NodeId(0), "fluid", delegate, null, null);
+        runtime.targetCompletion(new OutputPortId(new NodeId(0), 0), progress, Map.of());
+        progress.started();
+        assertTrue(runtime.drainIncrementalOutputs().isEmpty());
+        assertEquals(500, progress.produced());
+        assertFalse(runtime.productionTargetComplete());
+        progress.started();
+        assertTrue(runtime.drainIncrementalOutputs().isEmpty());
+        assertTrue(runtime.productionTargetComplete());
+        assertEquals(1, runtime.drainDeliveredReports().size());
+        assertFalse(progress.hasAttemptBudget());
+    }
+
+    @Test
+    void earlyHitStillOwesGuaranteedByproductsAndAMissingRoundFails() throws Exception {
+        NodeId id = new NodeId(0);
+        var egg = MaterialKey.of(new ItemStack(Items.EGG));
+        var paper = MaterialKey.of(new ItemStack(Items.PAPER));
+        var target = OutputDeclaration.item(new OutputPortId(id, 0), egg, 2, PRIMARY, 0, 2,
+                OutputProbability.probabilistic(0.5, 16, "egg"), false, null).withTargetProducing(true);
+        var side = OutputDeclaration.item(new OutputPortId(id, 1), paper, 2, SECONDARY);
+        var node = new CraftNode(id, new ResourceLocation("test", "side"), ModType.GENERIC.id(), null,
+                2, List.of(), List.of(), false, null, null, List.of(), List.of(target, side));
+        var graph = new CraftPlanGraph(1, List.of(node), List.of(), List.of(new RootDemand(Ingredient.of(Items.EGG),
+                2, 0, egg.toStack(1), List.of(new RootAllocation(new MaterialSource.ProducerOutput(target.id()), egg, 2)))),
+                List.of(), List.of(id));
+        var server = mock(MinecraftServer.class);
+        when(server.getPlayerList()).thenReturn(mock(PlayerList.class));
+        var player = mock(ServerPlayer.class);
+        when(player.getServer()).thenReturn(server);
+        when(player.serverLevel()).thenReturn(mock(ServerLevel.class));
+        for (boolean returnsSecondByproduct : List.of(true, false)) {
+            var chain = new AsyncCraftChain(UUID.randomUUID(), server, null, graph);
+            var scheduler = (DagScheduler) field(chain, "graphScheduler");
+            var admissions = (NodeAdmissionCoordinator) field(chain, "graphAdmissions");
+            scheduler.claim(id);
+            assertEquals(ConcurrentNodeExecutor.CompletionStatus.RETRY, attempt(chain, player, admissions, id,
+                    List.of(), List.of(egg.toStack(2), paper.toStack(1))));
+            scheduler.releaseClaim(id);
+            scheduler.claim(id);
+            assertTrue(chain.prepareRetryRound(id, player));
+            assertEquals(returnsSecondByproduct ? ConcurrentNodeExecutor.CompletionStatus.SUCCEEDED
+                            : ConcurrentNodeExecutor.CompletionStatus.FAILED, attempt(chain, player, admissions, id,
+                    List.of(), returnsSecondByproduct ? List.of(paper.toStack(1)) : List.of()));
+        }
+    }
+
+    @Test
+    void repeatedMissesFailAtTheAttemptLimitWithoutPublishingNominalOutput() throws Exception {
+        OutputPortId port = new OutputPortId(new NodeId(0), 0);
+        var target = OutputDeclaration.item(port, MaterialKey.of(new ItemStack(Items.EGG)), 3, PRIMARY,
+                0, 3, OutputProbability.probabilistic(0.35, 16, "egg"), false, null).withTargetProducing(true);
+        var server = mock(MinecraftServer.class);
+        when(server.getPlayerList()).thenReturn(mock(PlayerList.class));
+        var player = mock(ServerPlayer.class);
+        when(player.getServer()).thenReturn(server);
+        when(player.serverLevel()).thenReturn(mock(ServerLevel.class));
+        var chain = new AsyncCraftChain(UUID.randomUUID(), server, null, singleNodeGraph(port.nodeId(), target));
+        var scheduler = (DagScheduler) field(chain, "graphScheduler");
+        var admissions = (NodeAdmissionCoordinator) field(chain, "graphAdmissions");
+        int limit = CraftExecutionPolicy.probabilityAttemptLimit(ExecutionEquivalence.projectStep(
+                singleNodeGraph(port.nodeId(), target).nodes().get(0)));
+        for (int n = 1; n <= limit; n++) {
+            scheduler.claim(port.nodeId());
+            assertTrue(chain.prepareRetryRound(port.nodeId(), player));
+            var result = attempt(chain, player, admissions, port.nodeId(), List.of(),
+                    n == 1 ? List.of(new ItemStack(Items.EGG)) : List.of());
+            if (n < limit) {
+                assertEquals(ConcurrentNodeExecutor.CompletionStatus.RETRY, result);
+                scheduler.releaseClaim(port.nodeId());
+            } else {
+                assertEquals(ConcurrentNodeExecutor.CompletionStatus.FAILED, result);
+                scheduler.fail(port.nodeId());
+            }
+        }
+        assertTrue(scheduler.isStopping());
+        assertEquals(1L, chain.outputProgress().completed());
+    }
+
 }

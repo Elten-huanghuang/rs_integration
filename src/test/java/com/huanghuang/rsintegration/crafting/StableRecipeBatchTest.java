@@ -200,7 +200,7 @@ class StableRecipeBatchTest extends BootstrapTest {
         FlatCraftExecutor.Host host = mock(FlatCraftExecutor.Host.class);
         FlatCraftExecutor.Context context = new FlatCraftExecutor.Context(
                 fixture.level(), CraftLogContext.create(UUID.randomUUID(), tier2),
-                List.of(firstStep, secondStep), target, host, Map.of());
+                secondStep.recipeId(), target, host, Map.of());
         List<ItemStack> inventory = new ArrayList<>(
                 List.of(new ItemStack(Items.COBBLESTONE, 729)));
 
@@ -235,7 +235,7 @@ class StableRecipeBatchTest extends BootstrapTest {
                 List.of(), List.of(), false, 1);
         FlatCraftExecutor.Context context = new FlatCraftExecutor.Context(
                 fixture.level(), CraftLogContext.create(UUID.randomUUID(), recipeId),
-                List.of(genericStep, machineStep), null,
+                machineStep.recipeId(), null,
                 mock(FlatCraftExecutor.Host.class), Map.of());
         List<ItemStack> inventory = new ArrayList<>(
                 List.of(new ItemStack(Items.COBBLESTONE, 243)));
@@ -382,7 +382,7 @@ class StableRecipeBatchTest extends BootstrapTest {
         FlatCraftExecutor.Host host = mock(FlatCraftExecutor.Host.class);
         FlatCraftExecutor.Context context = new FlatCraftExecutor.Context(
                 fixture.level(), CraftLogContext.create(UUID.randomUUID(), recipeId),
-                List.of(step), null, host, Map.of());
+                step.recipeId(), null, host, Map.of());
 
         try (ExtractionLedger ledger = ExtractionLedger.external()) {
             assertTrue(FlatCraftExecutor.execute(
@@ -409,7 +409,7 @@ class StableRecipeBatchTest extends BootstrapTest {
                 List.of(), List.of(), false, 1024);
         FlatCraftExecutor.Context context = new FlatCraftExecutor.Context(
                 fixture.level(), CraftLogContext.create(UUID.randomUUID(), recipeId),
-                List.of(step), null, mock(FlatCraftExecutor.Host.class), Map.of());
+                step.recipeId(), null, mock(FlatCraftExecutor.Host.class), Map.of());
 
         try (ExtractionLedger ledger = ExtractionLedger.external()) {
             ledger.setStorageEndpoint(endpoint);
@@ -553,7 +553,7 @@ class StableRecipeBatchTest extends BootstrapTest {
         FlatCraftExecutor.Host host = mock(FlatCraftExecutor.Host.class);
         FlatCraftExecutor.Context context = new FlatCraftExecutor.Context(
                 fixture.level(), CraftLogContext.create(UUID.randomUUID(), recipeId),
-                List.of(step), null, host, Map.of());
+                step.recipeId(), null, host, Map.of());
         return StableRecipeBatch.tryExecuteDetailed(
                 fixture.level(), step, fixture.player(), inventory, ledger, context);
     }

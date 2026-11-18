@@ -206,47 +206,13 @@ class AsyncCraftDisplayTargetTest extends BootstrapTest {
     }
 
     @Test
-    void flatRecipeWithFourOutputsPerOperationShowsEightOfSixtyFourAfterTwoOperations() throws Exception {
-        var step = new CraftingResolver.ResolutionStep(new ResourceLocation("test", "batch"), ModType.GENERIC,
-                new ResourceLocation("test", "machine"), List.of(), List.of(), false, 16, null,
-                new ItemStack(Items.DIAMOND, 4), null);
-        MinecraftServer server = server();
-        Recipe<?> recipe = mock(Recipe.class);
-        RecipeManager recipes = server.getRecipeManager();
-        doReturn(Optional.of(recipe)).when(recipes).byKey(step.recipeId());
-        try (MockedStatic<ModRecipeHandlers> handlers = mockStatic(ModRecipeHandlers.class)) {
-            handlers.when(() -> ModRecipeHandlers.tryGetResultItem(recipe, RegistryAccess.EMPTY))
-                    .thenReturn(new ItemStack(Items.DIAMOND, 4));
-            AsyncCraftChain chain = chain(server, List.of(step));
-            assertEquals(new CraftOutputProgress(0L, 64L), chain.outputProgress());
-            Field remaining = AsyncCraftChain.class.getDeclaredField("stepRemaining");
-            remaining.setAccessible(true);
-            remaining.setInt(chain, 14);
-            assertEquals(new CraftOutputProgress(8L, 64L), chain.nextStatusSnapshot().outputProgress());
-        }
-    }
-
-    @Test
-    void probabilisticOutputProgressCountsRealHitsAndSurvivesCancellation() throws Exception {
-        ProductionTarget target = ProductionTarget.of(new ItemStack(Items.EGG), 64L);
-        var step = step(ModType.GENERIC, new ItemStack(Items.EGG), target);
-        AsyncCraftChain chain = chain(server(), List.of(step));
-        ProbabilisticProduction production = new ProbabilisticProduction(target, 100);
-        Field progress = AsyncCraftChain.class.getDeclaredField("probabilityTargets");
-        progress.setAccessible(true);
-        @SuppressWarnings("unchecked")
-        Map<CraftingResolver.ResolutionStep, ProbabilisticProduction> targets =
-                (Map<CraftingResolver.ResolutionStep, ProbabilisticProduction>) progress.get(chain);
-        targets.put(step, production);
-        production.started();
-        production.settle(List.of());
-        assertEquals(new CraftOutputProgress(0L, 64L), chain.outputProgress());
-        production.settle(List.of(new ItemStack(Items.EGG, 2)));
-        assertEquals(new CraftOutputProgress(2L, 64L), chain.outputProgress());
-        Field state = AsyncCraftChain.class.getDeclaredField("state");
-        state.setAccessible(true);
-        state.set(chain, AsyncCraftChain.State.ABORTED);
-        assertEquals(new CraftOutputProgress(2L, 64L), chain.nextStatusSnapshot().outputProgress());
+    void publishedQuantitySurvivesCancellation() throws Exception {
+        AsyncCraftChain chain = new AsyncCraftChain(UUID.randomUUID(), server(), null, graph(64, 16));
+        Method publish = AsyncCraftChain.class.getDeclaredMethod("recordPublishedOutput", OutputPortId.class, ItemStack.class);
+        publish.setAccessible(true);
+        publish.invoke(chain, new OutputPortId(new NodeId(0), 1), new ItemStack(Items.GOLD_INGOT, 8));
+        chain.abortOffline("中止测试");
+        assertEquals(new CraftOutputProgress(8L, 64L), chain.nextStatusSnapshot().outputProgress());
     }
 
     private static MinecraftServer server() {
@@ -263,7 +229,7 @@ class AsyncCraftDisplayTargetTest extends BootstrapTest {
     }
 
     private static AsyncCraftChain chain(MinecraftServer server, List<CraftingResolver.ResolutionStep> steps) {
-        return new AsyncCraftChain(UUID.randomUUID(), server, null, steps);
+        return new AsyncCraftChain(UUID.randomUUID(), server, null, steps.isEmpty() ? TestCraftGraphs.empty() : TestCraftGraphs.terminal(steps.get(0)));
     }
 
     private static CraftingResolver.ResolutionStep step(ModType type, ItemStack syntheticOutput,

@@ -90,12 +90,12 @@ class GraphLedgerRecoveryContractTest extends BootstrapTest {
     enum FailurePoint {
         BEFORE_RESERVATION,
         AFTER_RESERVATION,
-        AFTER_COMMIT,
-        PARTIAL_EXTRACTION
+        AFTER_COMMIT
     }
 
-    @Test
-    void privateDelegateKeepsProducerInputsInTaskAccountUntilFinalRefund() throws Exception {
+    @ParameterizedTest
+    @EnumSource(FailurePoint.class)
+    void privateDelegateKeepsProducerInputsInTaskAccountUntilFinalRefund(FailurePoint failurePoint) throws Exception {
         Fixture fixture = new Fixture();
         PlayerList players = mock(PlayerList.class);
         when(fixture.player.server.getPlayerList()).thenReturn(players);
@@ -115,13 +115,17 @@ class GraphLedgerRecoveryContractTest extends BootstrapTest {
         MachineOperation machine = delegate.machineOperation();
         when(delegate.machineOperation().start(any())).thenAnswer(call -> {
             assertTrue(fixture.stock.isEmpty(), "图内产物不能短暂进入公共库存供其他任务取走");
+            assertEquals(MaterialBroker.ReservationState.SETTLED, fixture.broker.state(fixture.admission.materialToken()));
+            if (failurePoint == FailurePoint.BEFORE_RESERVATION) return false;
             assertEquals(5, privateLedger.reserveFromEndpoint(IRON, 5, fixture.endpoint, fixture.player).getCount());
             assertEquals(2, privateLedger.reserveFromEndpoint(GOLD, 2, fixture.endpoint, fixture.player).getCount());
+            if (failurePoint == FailurePoint.AFTER_RESERVATION) return false;
             assertTrue(privateLedger.commitToEndpoint(fixture.endpoint, fixture.player));
             return false;
         });
         doAnswer(call -> {
-            privateLedger.refundCommittedToEndpoint(fixture.endpoint, fixture.player);
+            if (privateLedger.isCommitted()) privateLedger.refundCommittedToEndpoint(fixture.endpoint, fixture.player);
+            else privateLedger.rollback(fixture.player);
             return null;
         }).when(machine).recover(isNull(), anyString());
         fixture.dispatchPrivate(delegate, account.access.newLedger());
@@ -133,89 +137,14 @@ class GraphLedgerRecoveryContractTest extends BootstrapTest {
     }
 
     @Test
-    @SuppressWarnings("unchecked")
-    void flatPrivateDelegateReceivesIntermediatesWithoutPublishingThemToNetwork() throws Exception {
+    void missingTaskAccountRejectsDispatchBeforeTouchingMaterials() throws Exception {
         Fixture fixture = new Fixture();
-        fixture.chain.enableMaterialAccount(new GlobalMaterialCoordinator());
-        RuntimeMaterialAccount account = (RuntimeMaterialAccount) field(fixture.chain, "materialAccount");
-        List<ItemStack> virtual = (List<ItemStack>) field(fixture.chain, "virtualInventory");
-        virtual.add(tagged("first", 2));
-        Method transfer = AsyncCraftChain.class.getDeclaredMethod("materializePrivateLedgerFlatInputs", ServerPlayer.class);
-        transfer.setAccessible(true);
-        transfer.invoke(fixture.chain, fixture.player);
-        assertTrue(virtual.isEmpty());
-        assertEquals(2L, account.count(MaterialKey.of(tagged("first", 1))));
-        assertAmounts(List.of(gold(2)), fixture.stock);
-    }
-
-    @ParameterizedTest
-    @EnumSource(FailurePoint.class)
-    void privateLedgerStartFailureDoesNotRefundExternalizedProducerClaimsTwice(
-            FailurePoint failurePoint) throws Exception {
-        Fixture fixture = new Fixture();
-        ExtractionLedger privateLedger = ExtractionLedger.external();
-        ExtractionLedger nodeLedger = ExtractionLedger.external();
         IBatchDelegate delegate = mock(IBatchDelegate.class);
-        when(delegate.machineOperation()).thenReturn(mock(MachineOperation.class));
-        MachineOperation machine = delegate.machineOperation();
-        when(delegate.machineOperation().start(any())).thenAnswer(call -> {
-            OperationStartContext context = call.getArgument(0);
-            assertEquals(OperationStartContext.MaterialOwnership.DELEGATE_EXTRACTED,
-                    context.materialOwnership());
-            assertSame(nodeLedger, context.ledger());
-            assertEquals(MaterialBroker.ReservationState.SETTLED,
-                    fixture.broker.state(fixture.admission.materialToken()));
-            assertEquals(0, fixture.broker.heldBy(CONSUMER));
-            assertAmounts(List.of(tagged("first", 2), tagged("second", 3), gold(2)),
-                    fixture.stock);
-            if (failurePoint == FailurePoint.BEFORE_RESERVATION) return false;
-
-            assertEquals(5, privateLedger.reserveFromEndpoint(
-                    IRON, 5, fixture.endpoint, fixture.player).getCount());
-            assertEquals(2, privateLedger.reserveFromEndpoint(
-                    GOLD, 2, fixture.endpoint, fixture.player).getCount());
-            if (failurePoint == FailurePoint.AFTER_RESERVATION) return false;
-            if (failurePoint == FailurePoint.PARTIAL_EXTRACTION) fixture.extractionLimit = 2;
-
-            assertEquals(failurePoint == FailurePoint.AFTER_COMMIT,
-                    privateLedger.commit(null, fixture.player));
-            assertEquals(failurePoint == FailurePoint.AFTER_COMMIT
-                            ? ExtractionLedger.State.COMMITTED : ExtractionLedger.State.ROLLED_BACK,
-                    privateLedger.state());
-            return false;
-        });
-        doAnswer(call -> {
-            if (privateLedger.isCommitted()) privateLedger.refundCommitted(null, fixture.player);
-            else privateLedger.rollback(fixture.player);
-            privateLedger.close();
-            return null;
-        }).when(machine).recover(isNull(), anyString());
-
-        CraftNodeRuntime runtime = fixture.dispatchPrivate(delegate, nodeLedger);
-        assertEquals("delegate rejected private-ledger graph dispatch", runtime.failureReason());
-        assertEquals(OperationExecutionKernel.TerminalClass.IN_FLIGHT, runtime.operationTerminalClass());
-        assertTrue(nodeLedger.isCommitted());
-        assertEquals(0, nodeLedger.size());
-        if (failurePoint == FailurePoint.AFTER_COMMIT) assertTrue(fixture.stock.isEmpty());
-
-        fixture.cleanupTwice();
-        privateLedger.refundCommitted(null, fixture.player);
-        privateLedger.close();
-
-        assertEquals(ExtractionLedger.State.ROLLED_BACK, privateLedger.state());
-        assertEquals(MaterialBroker.ReservationState.SETTLED,
-                fixture.broker.state(fixture.admission.materialToken()));
-        assertAmounts(List.of(tagged("first", 2), tagged("second", 3), gold(2)), fixture.stock);
-        assertAmounts(List.of(tagged("first", 1)), fixture.broker.drainAvailableProducerAssets());
-        assertTrue(fixture.broker.drainAvailableProducerAssets().isEmpty());
-        assertEquals(0, fixture.broker.available(fixture.initialSource, fixture.goldKey));
-        assertEquals(0, fixture.broker.heldBy(CONSUMER));
-        verify(delegate.machineOperation()).recover(isNull(), anyString());
-        verify(fixture.session, times(switch (failurePoint) {
-            case BEFORE_RESERVATION, AFTER_RESERVATION -> 0;
-            case AFTER_COMMIT -> 2;
-            case PARTIAL_EXTRACTION -> 1;
-        })).extractMatching(eq(fixture.player), any(), anyLong(), eq(false));
+        fixture.invokeDispatch(delegate, ExtractionLedger.external());
+        assertTrue(fixture.runtimes.isEmpty());
+        assertEquals(MaterialBroker.ReservationState.RESERVED, fixture.broker.state(fixture.admission.materialToken()));
+        assertAmounts(List.of(gold(2)), fixture.stock);
+        verifyNoInteractions(delegate);
     }
 
     @ParameterizedTest
@@ -344,6 +273,13 @@ class GraphLedgerRecoveryContractTest extends BootstrapTest {
 
         CraftNodeRuntime dispatchPrivate(IBatchDelegate delegate, ExtractionLedger nodeLedger)
                 throws Exception {
+            invokeDispatch(delegate, nodeLedger);
+            CraftNodeRuntime runtime = runtimes.get(CONSUMER);
+            assertNotNull(runtime);
+            return runtime;
+        }
+
+        void invokeDispatch(IBatchDelegate delegate, ExtractionLedger nodeLedger) throws Exception {
             // 通过真实派发入口检查交接顺序，不在测试里复制 materialize/settle。
             Class<?> preparedType = Arrays.stream(AsyncCraftChain.class.getDeclaredClasses())
                     .filter(type -> type.getSimpleName().equals("PreparedGraphNode")).findFirst().orElseThrow();
@@ -360,9 +296,6 @@ class GraphLedgerRecoveryContractTest extends BootstrapTest {
                     NodeAdmissionCoordinator.Admission.class, ExtractionLedger.class);
             dispatch.setAccessible(true);
             dispatch.invoke(chain, CONSUMER, prepared, delegate, player, admission, nodeLedger);
-            CraftNodeRuntime runtime = runtimes.get(CONSUMER);
-            assertNotNull(runtime, "派发应进入真实 runtime，而非因资源不足提前返回");
-            return runtime;
         }
 
         void cleanupTwice() throws Exception {

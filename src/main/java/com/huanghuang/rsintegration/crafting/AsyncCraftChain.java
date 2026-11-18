@@ -1,7 +1,5 @@
 package com.huanghuang.rsintegration.crafting;
 
-import com.huanghuang.rsintegration.crafting.batch.ProductionEvidence;
-import com.huanghuang.rsintegration.crafting.batch.MachineOperation;
 import com.huanghuang.rsintegration.crafting.progress.CraftMaterialView;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
@@ -10,7 +8,6 @@ import com.huanghuang.rsintegration.crafting.progress.CraftOutputProgress;
 import com.huanghuang.rsintegration.crafting.progress.MachineCycleProgress;
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot.WaitingInput;
 import com.huanghuang.rsintegration.api.execution.CollectedOutput;
-import com.huanghuang.rsintegration.api.recipe.ProductionCompletionPolicy;
 import com.huanghuang.rsintegration.api.execution.CancelReason;
 import com.huanghuang.rsintegration.feature.ftbquests.ExternalItemProgressBridge;
 import com.huanghuang.rsintegration.crafting.batch.CraftExecutionPolicy;
@@ -19,7 +16,6 @@ import com.huanghuang.rsintegration.mods.embers.EreAlchemyDelegateMode;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCatalog;
 import com.huanghuang.rsintegration.mods.pmmo.PmmoSalvageCatalog;
-import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.mods.embers.KnownCodeSavedData;
 import com.huanghuang.rsintegration.util.LogSampler;
@@ -29,10 +25,7 @@ import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.crafting.plan.MagicResourceCostCatalog;
 import com.huanghuang.rsintegration.magic.MagicResourceCost;
 import com.huanghuang.rsintegration.magic.MagicResourceTaskReservation;
-import java.util.function.IntFunction;
-import java.util.function.IntUnaryOperator;
 import java.util.LinkedHashMap;
-import java.util.stream.Collectors;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -52,7 +45,6 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.graph.CraftNode;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.graph.ConcurrentNodeExecutor;
-import com.huanghuang.rsintegration.crafting.graph.CraftPlanValidator;
 import com.huanghuang.rsintegration.crafting.graph.DagScheduler;
 import com.huanghuang.rsintegration.crafting.graph.InputDemand;
 import com.huanghuang.rsintegration.crafting.graph.MaterialAllocation;
@@ -73,18 +65,17 @@ import com.huanghuang.rsintegration.crafting.graph.OutputKind;
 import com.huanghuang.rsintegration.crafting.graph.OutputPortId;
 import com.huanghuang.rsintegration.crafting.graph.RootAllocation;
 import com.huanghuang.rsintegration.crafting.graph.RootDemand;
+import com.huanghuang.rsintegration.crafting.graph.SupplementalGraph;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
 import com.huanghuang.rsintegration.ModVersionDelegateRegistry;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
-import com.huanghuang.rsintegration.crafting.batch.OperationLifecycle;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.crafting.batch.CountedOperationMaterials;
 import com.huanghuang.rsintegration.crafting.batch.CountedOperationMaterials.Origin;
 import com.huanghuang.rsintegration.crafting.batch.CountedOperationMaterials.Pool;
-import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
@@ -126,7 +117,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
-import java.util.IdentityHashMap;
 import java.util.Set;
 import java.util.HashSet;
 import java.util.function.Predicate;
@@ -170,7 +160,6 @@ public final class AsyncCraftChain {
     public enum State {
         PENDING,        // Created, not yet started
         EXECUTING,      // Running vanilla or mod steps
-        WAITING_MOD,    // Waiting for multi-block craft to complete
         WAITING_PLAYER_TRANSFORMATION, // Waiting for inventory tick to taint Earth Heart
         COMPLETING,     // Final commit + flush in progress
         COMPLETED,      // Successfully finished
@@ -183,8 +172,7 @@ public final class AsyncCraftChain {
     /** 当前合成链固定使用的存储端点。 */
     @Nullable
     private final CraftStorageEndpoint storageEndpoint;
-    private final List<CraftingResolver.ResolutionStep> steps;
-    @Nullable private InitialMaterialPlan initialMaterialPlan;
+    private final InitialMaterialPlan initialMaterialPlan;
     @Nullable private RuntimeMaterialAccount materialAccount;
     private final MaterialSourceSelection materialSources = MaterialSourceSelection.current();
     @Nullable private GlobalMaterialCoordinator materialCoordinator;
@@ -219,23 +207,6 @@ public final class AsyncCraftChain {
     private ExtractionLedger ledger = materialAccess.newLedger();
     private final CraftLogContext ctx;
 
-    private int currentStepIdx;
-    private IBatchDelegate currentDelegate;
-    private OperationLifecycle flatLifecycle;
-
-    private OperationLifecycle flatOperation() {
-        if (flatLifecycle == null) flatLifecycle = new OperationLifecycle(currentDelegate);
-        return flatLifecycle;
-    }
-    private int waitTicks;
-    private int drainingTicks;
-    private int flatObservedCompletedOperations;
-    private long flatObservedProductionSequence;
-    private long flatObservedCapturedCount;
-    private long flatObservedCompletedWork;
-    private int stepRemaining;
-    private int flatGroupSequence;
-    private final Map<CraftingResolver.ResolutionStep, ProbabilisticProduction> probabilityTargets = new IdentityHashMap<>();
     private Map<ResourceLocation, ResourceLocation> supplementalForcedRecipes = Map.of();
     private Map<String, ItemStack> supplementalMaterialLocks = Map.of();
     private State state = State.PENDING;
@@ -251,22 +222,7 @@ public final class AsyncCraftChain {
     private TerminationCoordinator.Cause terminalCause;
     private final TerminalListeners terminalListeners;
     private final TerminationService terminationService = new TerminationService();
-    private int machineCount = 1;
-    private boolean waitingForMachineLease;
-    private List<MachineLeaseRegistry.MachineKey> flatWaitingMachines = List.of();
     private final MachineWaitNotifier machineWaitNotifier = new MachineWaitNotifier();
-    private int machineLeaseWaitTicks;
-    @Nullable
-    private Component machineWaitMessage;
-    @Nullable
-    private String machineWaitDetail;
-    @Nullable
-    private Component machineStartFailureMessage;
-    @Nullable
-    private String machineStartFailureDetail;
-    private String machineStartFailureLabel = "";
-    @Nullable
-    private String materialReservationFailureDetail;
     private int dropsThisChain;
     private boolean dropThrottleTripped;
     private static final int MAX_DROPS_PER_CHAIN = 20;
@@ -293,28 +249,14 @@ public final class AsyncCraftChain {
                                      @Nullable ResourceLocation dimension,
                                      @Nullable BlockPos position) {}
 
-    /** Active execution session for the current flat physical-machine step. */
-    @Nullable
-    private OperationExecutionKernel.Session flatOperationSession;
-
-    /** Legacy capture handle for delegates that do not own a physical machine. */
-    @Nullable
-    private CraftOutputInterceptor.CaptureHandle captureHandle;
-
-    @Nullable
     private final CraftPlanGraph graph;
-    @Nullable
     private final DagScheduler graphScheduler;
-    private final boolean useGraphExecution;
-    @Nullable
-    private NodeId currentGraphNode;
     @Nullable
     private ConcurrentNodeExecutor graphExecutor;
     private final Map<NodeId, CraftNodeRuntime> nodeRuntimes = new HashMap<>();
-    private final Map<NodeId, ProductionAttemptState> productionAttempts = new HashMap<>();
+    private final Map<NodeId, TargetNodeProduction> productionAttempts = new HashMap<>();
     /** 累计真实发布的产物；最终交付或取消清理不能使 HUD 的已完成数量倒退。 */
     private final Map<OutputPortId, Long> publishedOutputQuantities = new HashMap<>();
-    private long settledFinalOutputQuantity;
     private final Map<NodeId, String> graphFailureDetails = new HashMap<>();
     private final Map<NodeId, CraftFailureCode> graphFailureCodes = new HashMap<>();
     /** Prevents an unavailable machine/material from being rescanned every tick. */
@@ -369,40 +311,6 @@ public final class AsyncCraftChain {
     @Nullable
     private TerminationCoordinator.Report terminationReport;
 
-    private static final class ProductionAttemptState {
-        private final NodeOutputAccumulator outputs;
-        private final OutputPortId targetPort;
-        private final long targetQuantity;
-        private final int maxAttempts;
-        private int attempts;
-
-        private ProductionAttemptState(NodeOutputAccumulator outputs,
-                                       OutputPortId targetPort,
-                                       long targetQuantity, int maxAttempts) {
-            this.outputs = outputs;
-            this.targetPort = targetPort;
-            this.targetQuantity = Math.max(1L, targetQuantity);
-            this.maxAttempts = Math.max(1, maxAttempts);
-        }
-
-        boolean canAttempt() {
-            return ProductionCompletionPolicy.TARGET_QUANTITY.canAttempt(
-                    targetQuantity, outputs.publishedQuantity(targetPort), attempts, maxAttempts);
-        }
-
-        void started() {
-            if (!canAttempt()) {
-                throw new IllegalStateException("production attempt budget exhausted");
-            }
-            attempts++;
-        }
-
-        boolean complete() {
-            return ProductionCompletionPolicy.TARGET_QUANTITY.isComplete(
-                    targetQuantity, outputs.publishedQuantity(targetPort), attempts, maxAttempts);
-        }
-    }
-
     /**
      * 一个已准入 GENERIC 图节点的跨 tick 执行租约。
      *
@@ -456,31 +364,6 @@ public final class AsyncCraftChain {
         materialAdmissionStartedTick = server.getTickCount();
         nextMaterialAdmissionTick = materialAdmissionStartedTick;
         bindMaterialStorageChanges();
-    }
-
-    @Nullable
-    private InitialMaterialPlan legacyInitialMaterialPlan(ServerPlayer player) {
-        List<InitialMaterialPlan.Step> plan = new ArrayList<>();
-        for (CraftingResolver.ResolutionStep step : steps) {
-            Recipe<?> recipe = recipeForStep(step);
-            ItemStack output = step.syntheticOutput();
-            List<IngredientSpec> inputs;
-            if (recipe != null) {
-                inputs = CraftPacketUtils.extractIngredientSpecs(recipe);
-                if (output == null || output.isEmpty()) {
-                    output = ModRecipeHandlers.tryGetResultItem(recipe, player.serverLevel().registryAccess());
-                }
-            } else if (step.syntheticInput() != null && !step.syntheticInput().isEmpty()) {
-                inputs = List.of(new IngredientSpec(Ingredient.of(step.syntheticInput()), 1));
-            } else {
-                throw new IllegalStateException("旧合成入口无法确定初始材料，请提供 CraftPlanGraph: " + step.recipeId());
-            }
-            if (inputs == null) throw new IllegalStateException("无法确定初始材料: " + step.recipeId());
-            plan.add(new InitialMaterialPlan.Step(
-                    MaterialLocks.narrowSpecs(step.recipeId(), inputs, supplementalMaterialLocks),
-                    output == null ? ItemStack.EMPTY : output, step.executions()));
-        }
-        return InitialMaterialPlan.fromSteps(plan, MaterialSources.listAllAvailableFresh(player, storageEndpoint));
     }
 
     private void releaseMaterialAccount() {
@@ -554,7 +437,7 @@ public final class AsyncCraftChain {
     }
 
     private void refreshMaterialWakeKeys() {
-        if (materialAccount == null || initialMaterialPlan == null) {
+        if (materialAccount == null) {
             materialWakeKeys = Set.of();
             fluidWakeKeys = Set.of();
             return;
@@ -597,20 +480,17 @@ public final class AsyncCraftChain {
         materialStorageChanged = false;
         nextMaterialAdmissionTick = tick + (materialStorageSubscription == null
                 ? MATERIAL_ADMISSION_POLL_TICKS : SUBSCRIBED_MATERIAL_FALLBACK_TICKS);
-        if (initialMaterialPlan == null) initialMaterialPlan = legacyInitialMaterialPlan(player);
         refreshMaterialWakeKeys();
-        boolean admitted = false;
-        if (initialMaterialPlan != null) {
-            materialAdmissionInProgress = true;
-            try {
-                admitted = materialAccount.ensure(
-                        initialMaterialPlan.materials(), initialMaterialPlan.reusable(), player);
-            } finally {
-                materialAdmissionInProgress = false;
-                // 本次提取和回滚产生的库存通知不能唤醒自己的下一次准入。
-                materialStorageChanged = false;
-                materialInventoryRevision = player.getInventory().getTimesChanged();
-            }
+        boolean admitted;
+        materialAdmissionInProgress = true;
+        try {
+            admitted = materialAccount.ensure(
+                    initialMaterialPlan.materials(), initialMaterialPlan.reusable(), player);
+        } finally {
+            materialAdmissionInProgress = false;
+            // 本次提取和回滚产生的库存通知不能唤醒自己的下一次准入。
+            materialStorageChanged = false;
+            materialInventoryRevision = player.getInventory().getTimesChanged();
         }
         if (admitted) {
             initialMaterialsReady = true;
@@ -633,40 +513,17 @@ public final class AsyncCraftChain {
     }
 
     public AsyncCraftChain(UUID playerId, MinecraftServer server,
-                           @Nullable CraftStorageEndpoint storageEndpoint,
-                           List<CraftingResolver.ResolutionStep> steps) {
-        this(UUID.randomUUID(), playerId, server, storageEndpoint, steps, null);
-    }
-
-    public AsyncCraftChain(UUID playerId, MinecraftServer server,
-                           @Nullable CraftStorageEndpoint storageEndpoint,
-                           CraftPlanGraph graph) {
-        this(UUID.randomUUID(), playerId, server, storageEndpoint,
-                ExecutionEquivalence.projectFlatSteps(graph), graph);
-    }
-
-    AsyncCraftChain(UUID craftId, UUID playerId, MinecraftServer server,
-                    @Nullable CraftStorageEndpoint storageEndpoint,
-                    List<CraftingResolver.ResolutionStep> steps) {
-        this(craftId, playerId, server, storageEndpoint, steps, null);
-    }
-
-    private AsyncCraftChain(UUID craftId, UUID playerId, MinecraftServer server,
-                            @Nullable CraftStorageEndpoint storageEndpoint,
-                            List<CraftingResolver.ResolutionStep> steps,
-                            @Nullable CraftPlanGraph graph) {
+                           @Nullable CraftStorageEndpoint storageEndpoint, CraftPlanGraph graph) {
+        UUID craftId = UUID.randomUUID();
         this.craftId = Objects.requireNonNull(craftId, "craftId");
         this.progressPublisher = new CraftProgressPublisher(craftId);
         this.playerId = playerId;
         this.server = server;
         this.storageEndpoint = storageEndpoint;
-        this.steps = new ArrayList<>(steps);
-        this.initialMaterialPlan = graph != null || steps.isEmpty() ? InitialMaterialPlan.from(graph) : null;
-        if (graph != null) {
-            CraftPlanValidator.validate(graph);
-        }
-        ResourceLocation primaryRecipe = steps.isEmpty() ? new ResourceLocation("rsintegration", "empty_chain")
-                : steps.get(0).recipeId();
+        this.graph = Objects.requireNonNull(graph, "graph");
+        this.initialMaterialPlan = InitialMaterialPlan.from(graph);
+        ResourceLocation primaryRecipe = graph.nodes().isEmpty() ? new ResourceLocation("rsintegration", "empty_chain")
+                : graph.nodes().get(0).recipeId();
         this.ctx = CraftLogContext.create(playerId, primaryRecipe);
         this.terminalListeners = new TerminalListeners(
                 error -> RSIntegrationMod.LOGGER.error(ctx.format("onDone callback threw"), error),
@@ -691,49 +548,20 @@ public final class AsyncCraftChain {
         catch (Exception e) { globalTimeoutSeconds = 900; }
         this.graphProgressWatchdog = new ProgressWatchdog(
                 Math.max(1, globalTimeoutSeconds) * 20);
-        if (graph != null && !requiresAdaptiveProduction(graph)) {
-            this.graph = graph;
-            this.graphScheduler = new DagScheduler(graph, graphMaterialWakeIndex::unsubscribe);
-            this.graphMaterials = new MaterialBroker();
-            this.graphAdmissions = new NodeAdmissionCoordinator(graphScheduler, graphMaterials);
-            initialiseGraphMaterialFlow(graph);
-            logGraphNodeMappings(graph);
-            this.useGraphExecution = true;
-            RSIntegrationMod.LOGGER.debug(ctx.format(
-                    "Using graph execution: nodes={} terminalEmbedded=true"),
-                    graph.topologicalOrder().size());
-        } else {
-            this.graph = null;
-            this.graphScheduler = null;
-            this.graphMaterials = null;
-            this.graphAdmissions = null;
-            this.useGraphExecution = false;
-        }
+        this.graphScheduler = new DagScheduler(graph, graphMaterialWakeIndex::unsubscribe);
+        this.graphMaterials = new MaterialBroker();
+        this.graphAdmissions = new NodeAdmissionCoordinator(graphScheduler, graphMaterials);
+        initialiseGraphMaterialFlow(graph);
+        logGraphNodeMappings(graph);
         this.magicResourceTaskReservation =
                 this.storageEndpoint == null
                         || CraftStorageEndpoints.isRefinedStorage(this.storageEndpoint)
                 ? MagicResourceTaskReservation.reserve(server, craftId, magicCostsForPlan())
                 : null;
-        RSIntegrationMod.LOGGER.debug(ctx.format("Chain created: {} steps"), steps.size());
-        if (RSIntegrationMod.LOGGER.isDebugEnabled()) {
-            StringBuilder sb = new StringBuilder(ctx.format("Steps: ["));
-                for (int i = 0; i < steps.size(); i++) {
-                    if (i > 0) sb.append(", ");
-                    sb.append(steps.get(i).recipeId());
-                }
-                sb.append("]");
-                RSIntegrationMod.LOGGER.debug(sb.toString());
-        }
-    }
-
-    /** 数量目标可能需要追加原料子计划，使用能够动态插入步骤的串行执行器。 */
-    static boolean requiresAdaptiveProduction(CraftPlanGraph plan) {
-        return plan.nodes().stream().flatMap(node -> node.outputs().stream())
-                .anyMatch(output -> output.targetProducing()
-                        && output.requiresTargetedProduction());
     }
 
     private void initialiseGraphMaterialFlow(CraftPlanGraph plan) {
+        int orderOffset = graphScheduler.nodeOrder().size() - plan.topologicalOrder().size();
         for (CraftNode node : plan.nodes()) graphNodes.put(node.id(), node);
         Map<InitialLotKey, Long> initial = new LinkedHashMap<>();
         for (MaterialAllocation allocation : plan.allocations()) {
@@ -757,14 +585,22 @@ public final class AsyncCraftChain {
                         .add(root.ingredient());
             }
         }
-        graphRootOutputIngredients.replaceAll((port, ingredients) -> List.copyOf(ingredients));
-        // 图内需求在构造后只读，避免每次就绪检查和预留都重新复制列表。
-        graphRequests.replaceAll((nodeId, requests) -> List.copyOf(requests));
+        for (CraftNode node : plan.nodes()) {
+            OutputDeclaration target = targetPort(node);
+            if (target != null) {
+                var production = new TargetNodeProduction(node, target,
+                        CraftExecutionPolicy.probabilityAttemptLimit(graphStep(node.id())), plan.allocations());
+                productionAttempts.put(node.id(), production);
+                var first = production.next();
+                graphRequests.put(node.id(), first.assigned());
+                if (first.missing().isEmpty()) production.admittedRound();
+            }
+        }
         for (int index = 0; index < plan.topologicalOrder().size(); index++) {
             NodeId nodeId = plan.topologicalOrder().get(index);
             if (graphScheduler.state(nodeId) != DagScheduler.NodeState.BLOCKED) continue;
             for (MaterialBroker.Request request : graphRequests.getOrDefault(nodeId, List.of())) {
-                graphMaterialWakeIndex.subscribe(request.source(), nodeId, index);
+                graphMaterialWakeIndex.subscribe(request.source(), nodeId, orderOffset + index);
             }
         }
         if (graphMaterials != null) {
@@ -867,51 +703,8 @@ public final class AsyncCraftChain {
             if (!declared.isEmpty()) return declared;
         }
         // 仅补展示信息，不改 targetOutput 的运行时配方选择与产物路由语义。
-        return steps.isEmpty() ? ItemStack.EMPTY : displayOutput(steps.get(steps.size() - 1));
-    }
-
-    /**
-     * True for the step that produces the chain's primary (final) output -i.e.
-     * the last step, whose recipe matches the recipe id the player clicked.
-     * {@link #targetOutput} only applies to this step; intermediate steps craft
-     * their own generic outputs and must not inherit the final target.
-     */
-    private boolean isPrimaryStep(int stepIdx) {
-        return stepIdx == steps.size() - 1;
-    }
-
-    /**
-     * Apply {@link #targetOutput} to a delegate, but only for the
-     * {@linkplain #isPrimaryStep primary step}.
-     */
-    private void applyTargetOutput(AbstractBatchDelegate abd) {
-        CraftingResolver.ResolutionStep step =
-                steps.get(currentStepIdx);
-        ProductionTarget productionTarget =
-                step.productionTarget();
-        if (productionTarget != null) {
-            ItemStack display = productionTarget.displayStack();
-            IntegrationResourceKey resource =
-                    productionTarget.resource();
-            if (!display.isEmpty()
-                    && resource.kind()
-                    == IntegrationResourceKey.ResourceKind.ITEM) {
-                abd.setTargetOutput(display);
-            }
-            abd.setTargetResource(resource);
-            return;
-        }
-        ItemStack planned = step.syntheticOutput();
-        if (planned != null && !planned.isEmpty()) {
-            abd.setTargetOutput(planned);
-            abd.setTargetResource(IntegrationResourceKey.item(planned));
-        } else if (targetOutput != null && isPrimaryStep(currentStepIdx)) {
-            abd.setTargetOutput(targetOutput);
-            abd.setTargetResource(targetResource);
-        } else if (isPrimaryStep(currentStepIdx)
-                && targetResource != null) {
-            abd.setTargetResource(targetResource);
-        }
+        List<NodeId> order = graph.topologicalOrder();
+        return order.isEmpty() ? ItemStack.EMPTY : displayOutput(graphNodes.get(order.get(order.size() - 1)));
     }
 
     //  player resolution
@@ -969,403 +762,12 @@ public final class AsyncCraftChain {
         // Dynamic player lookup -null means player disconnected
         ServerPlayer online = resolvePlayer();
 
-        // Use graph scheduler when available -serial mode by default
-        if (useGraphExecution) {
-            if (online == null) {
-                abortSilently("Player disconnected");
-                return true;
-            }
-            if (storageEndpoint != null && !storageEndpoint.isAvailable()) {
-                abortSilently("Storage endpoint removed or network invalidated");
-                return true;
-            }
-            return tickGraph(online, vanillaAllowance);
-        }
-
-        // First tick transition
-        if (state == State.PENDING) {
-            RSIntegrationMod.LOGGER.debug(ctx.format("PENDING ->EXECUTING"));
-            state = State.EXECUTING;
-            Diagnostics.record(Diagnostics.Category.CHAIN_STATE, "PENDING->XECUTING steps=" + steps.size());
-            sendStartedPacket(online);
-            sendProgressSnapshot(online, buildProgressSnapshot(false));
-        }
-        if (online == null) {
-            abortSilently("Player disconnected");
+        if (online == null || storageEndpoint != null && !storageEndpoint.isAvailable()) {
+            abortSilently(online == null ? "Player disconnected" : "Storage endpoint removed or network invalidated");
             return true;
         }
-
-        // Re-validate network each tick -RS controller may have been removed
-        if (storageEndpoint != null && !storageEndpoint.isAvailable()) {
-            abortSilently("Storage endpoint removed or network invalidated");
-            return true;
-        }
-
-        // Waiting on an async multi-block craft
-        if (currentDelegate != null) {
-            waitTicks++;
-            try {
-                // Capture and observation are processed before timeout so an output
-                // produced on the deadline tick is never collected and then refunded.
-                boolean capturedOutput = hasCapturedOutput();
-                MachineOperation.CraftObservation observation = flatOperation().poll(online.serverLevel());
-                if (observation.phase() == MachineOperation.CraftPhase.WORKING
-                        && observation.completedWork() > flatObservedCompletedWork) {
-                    flatObservedCompletedWork = observation.completedWork();
-                    waitTicks = 0;
-                    executionClock.markProgress();
-                }
-                if (currentDelegate instanceof ParallelCraftGroup group && group.isDraining()) {
-                    drainingTicks++;
-                } else {
-                    drainingTicks = 0;
-                }
-                if (currentDelegate instanceof ParallelCraftGroup group) {
-                    if (group.isWaitingForLeasedMachine()) waitTicks = 0;
-                    long productionSequence = group.getProductionSequence();
-                    if (productionSequence > flatObservedProductionSequence) {
-                        flatObservedProductionSequence = productionSequence;
-                        waitTicks = 0;
-                        executionClock.markProgress();
-                    }
-                    int completed = group.getCompletedOperations();
-                    if (completed > flatObservedCompletedOperations) {
-                        flatObservedCompletedOperations = completed;
-                        waitTicks = 0;
-                        executionClock.markProgress();
-                    }
-                    List<ItemStack> settled = group.drainSettledResults();
-                    if (!settled.isEmpty()) {
-                        recordSettledFinalOutputs(settled, List.of(), List.of());
-                        reportCraftedPrimaryOutputs(online, settled,
-                                currentDelegate.getExpectedProduction(),
-                                currentStepOutputPrototype());
-                        for (ItemStack result : settled) addToVirtualInventory(result);
-                        snapshotCommittedVirtual();
-                        waitTicks = 0;
-                    }
-                    List<ItemStack> queuedMaterials = group.drainQueuedMaterialsForRecovery();
-                    if (!queuedMaterials.isEmpty()) {
-                        for (ItemStack material : queuedMaterials) addToVirtualInventory(material);
-                        snapshotCommittedVirtual();
-                    }
-                }
-                if (observation.phase() == MachineOperation.CraftPhase.FAILED) {
-                    if (currentDelegate.failureConsumesInputs(observation)) {
-                        var actualResults = flatOperation().collect(online, Math.max(1, machineCount), this::disarmOutputCapture).stacks();
-                        recordReportedResources(currentDelegate);
-                        closeFlatOperationScope();
-                        reportCraftedPrimaryOutputs(online, actualResults,
-                                currentDelegate.getExpectedProduction(),
-                                currentStepOutputPrototype());
-                        for (ItemStack result : actualResults) addToVirtualInventory(result);
-                        snapshotCommittedVirtual();
-                        ledger.reset();
-                        Component failureMessage = currentDelegate.craftFailureMessage(observation);
-                        if (failureMessage == null) {
-                            failureMessage = Component.translatable(
-                                    "rsi.async.abort.machine_craft_failed", observation.detail());
-                        }
-                        try {
-                            flatOperation().cleanup(online);
-                            currentDelegate.releaseReusableMaterials(online);
-                        } catch (Exception cleanupFailure) {
-                            RSIntegrationMod.LOGGER.error(ctx.format(
-                                    "Consumed-failure delegate cleanup failed"), cleanupFailure);
-                        }
-                        currentDelegate = null;
-                        abortWithoutRefund("Machine craft consumed inputs but failed: "
-                                + observation.detail(), failureMessage,
-                                CraftFailureCode.UNKNOWN);
-                        return true;
-                    }
-                    Component failureMessage = currentDelegate.craftFailureMessage(observation);
-                    abort("Machine craft failed: " + observation.detail(),
-                            failureMessage != null ? failureMessage : Component.translatable(
-                                    "rsi.async.abort.machine_craft_failed", observation.detail()),
-                            CraftFailureCode.UNKNOWN);
-                    return true;
-                }
-                List<ItemStack> capturedSnapshot = capturedOutputSnapshot();
-                long capturedCount = capturedSnapshot.stream().mapToLong(ItemStack::getCount).sum();
-                if (capturedCount > flatObservedCapturedCount) {
-                    flatObservedCapturedCount = capturedCount;
-                    waitTicks = 0;
-                    executionClock.markProgress();
-                }
-                // 捕获会取消原生掉落实体，只有整批产物到齐才能代替机器完成信号。
-                boolean capturedWorldOutput = capturedOutput
-                        && OutputAccounting.hasCapturedExpectedProduction(currentDelegate, capturedSnapshot);
-                if (observation.phase() == MachineOperation.CraftPhase.DONE || capturedWorldOutput) {
-                    if (!currentDelegate.validateExecutionContext(online)) {
-                        abort("Execution context changed before output publication",
-                                Component.translatable("rsi.async.abort.execution_context"));
-                        return true;
-                    }
-                    var collectedOutputs = flatOperation().collect(online, Math.max(1, machineCount), this::disarmOutputCapture);
-                    List<CollectedOutput> reported =
-                            recordReportedResources(currentDelegate);
-                    List<CollectedOutput> observed =
-                            recordObservedProduction(currentDelegate);
-                    closeFlatOperationScope();
-                    List<ItemStack> actualResults = collectedOutputs.stacks();
-                    recordSettledFinalOutputs(actualResults, reported, observed);
-                    for (ItemStack result : actualResults) addToVirtualInventory(result);
-                    String resourceFailure =
-                            ProductionEvidence.from(currentDelegate).deliveryFailure();
-                    if (resourceFailure != null) {
-                        snapshotCommittedVirtual();
-                        ledger.reset();
-                        abortWithoutRefund(
-                                "Direct resource delivery failed: "
-                                        + resourceFailure,
-                                Component.literal(resourceFailure),
-                                CraftFailureCode.OUTPUT_MISSING
-                        );
-                        return true;
-                    }
-                    ProbabilisticProduction probability = probabilityTargets.get(steps.get(currentStepIdx));
-                    if (probability != null) {
-                        probability.settle(
-                                actualResults, reported, observed);
-                    }
-
-                    IBatchDelegate.ExpectedProduction expected = currentDelegate.getExpectedProduction();
-                    int actualCount = countMatchingProduction(actualResults, expected);
-                    reportCraftedPrimaryOutputs(online, actualResults, expected,
-                            currentStepOutputPrototype());
-                    if (collectedOutputs.settlement() != null
-                            && !collectedOutputs.settlement().complete()) {
-                        snapshotCommittedVirtual();
-                        ledger.reset();
-                        abortWithoutRefund("Structured output settlement failed: "
-                                        + describeOutputSettlement(collectedOutputs.settlement()),
-                                Component.translatable("rsi.async.error.output_extracted",
-                                        expectedStructuredOutputCount(collectedOutputs.settlement()),
-                                        actualStructuredOutputCount(collectedOutputs.settlement())),
-                                CraftFailureCode.OUTPUT_MISSING);
-                        return true;
-                    }
-                    if (collectedOutputs.settlement() == null
-                            && expected != null && expected.count() > actualCount) {
-                        RSIntegrationMod.LOGGER.warn(ctx.format(
-                                "Craft output partially extracted: recipe={} delegate={} expected={} actual={}"),
-                                steps.get(currentStepIdx).recipeId(), currentDelegate.getClass().getSimpleName(),
-                                expected.count(), actualCount);
-                        // Current inputs were consumed. Preserve real residual output
-                        // plus earlier settled intermediates, but never refund this step.
-                        snapshotCommittedVirtual();
-                        ledger.reset();
-                        abortWithoutRefund("Craft output was externally extracted (expected "
-                                + expected.count() + ", collected " + actualCount + ")",
-                                Component.translatable("rsi.async.error.output_extracted",
-                                        expected.count(), actualCount),
-                                CraftFailureCode.OUTPUT_MISSING);
-                        return true;
-                    }
-
-                    // World-output delegates use a separate capture declaration and
-                    // may opt out of count comparison while still failing closed.
-                    ItemStack expectedWorld = currentDelegate.getExpectedOutput();
-                    if (collectedOutputs.settlement() == null && expected == null
-                            && expectedWorld != null && !expectedWorld.isEmpty()
-                            && !OutputAccounting.permitsEmptyResult(currentDelegate.outputContract())
-                            && actualResults.isEmpty()) {
-                        snapshotCommittedVirtual();
-                        ledger.reset();
-                        abortWithoutRefund("Expected craft output was not captured: "
-                                + steps.get(currentStepIdx).recipeId(),
-                                Component.translatable("rsi.async.abort.output_not_captured",
-                                        steps.get(currentStepIdx).recipeId().toString()),
-                                CraftFailureCode.OUTPUT_MISSING);
-                        return true;
-                    }
-
-                    boolean parallelGroup = currentDelegate instanceof ParallelCraftGroup;
-                    if (parallelGroup) {
-                        ParallelCraftGroup group = (ParallelCraftGroup) currentDelegate;
-                        if (group.getCompletedOperations() != group.getTotalOperations()) {
-                            abort("Parallel group completed with missing operations",
-                                    Component.translatable("rsi.async.abort.parallel_incomplete"));
-                            return true;
-                        }
-                        machineCount = group.getTotalOperations();
-                    }
-                    try {
-                        flatOperation().cleanup(online);
-                        currentDelegate.releaseReusableMaterials(online);
-                    } catch (Exception fe) {
-                        RSIntegrationMod.LOGGER.error(ctx.format("cleanup error"), fe);
-                    }
-                    currentDelegate = null;
-                    waitTicks = 0;
-                    executionClock.markProgress();
-                    flatObservedCompletedOperations = 0;
-                    flatObservedProductionSequence = 0;
-                    flatObservedCapturedCount = 0;
-                    ledger.reset();
-                    stepRemaining = probability == null
-                            ? remainingAfterFlatBatch(stepRemaining, machineCount)
-                            : probability.complete() ? 0 : 1;
-                    if (stepRemaining <= 0) currentStepIdx++;
-                    state = State.EXECUTING;
-                    snapshotCommittedVirtual();
-                    RSIntegrationMod.LOGGER.debug(ctx.format("WAITING_MOD ->EXECUTING (remaining={})"), stepRemaining);
-                    return false;
-                }
-
-                int timeoutTicks = RSIntegrationConfig.MULTIBLOCK_CRAFT_TIMEOUT_SECONDS.get() * 20;
-                if (waitTicks > timeoutTicks) {
-                    if (currentDelegate instanceof ParallelCraftGroup group && group.isDraining()) {
-                        // Keep draining beyond the normal no-progress timeout, but retain
-                        // a hard upper bound so a permanently stuck machine cannot pin
-                        // the chain and its reservations forever.
-                        int drainLimit = Math.max(timeoutTicks * 4, 20 * 60);
-                        if (drainingTicks > drainLimit) {
-                            abort("Timeout draining in-flight parallel crafts",
-                                    Component.translatable("rsi.async.abort.parallel_drain_timeout"));
-                            return true;
-                        }
-                        RSIntegrationMod.LOGGER.warn(ctx.format(
-                                "Parallel group still draining after {} ticks (hard limit {})"),
-                                drainingTicks, drainLimit);
-                        waitTicks = 0;
-                        return false;
-                    }
-                    abort("Timeout waiting for craft completion",
-                            Component.translatable("rsi.async.abort.craft_timeout"));
-                    return true;
-                }
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.error(ctx.format("Error polling craft completion"), e);
-                abort("Internal error during craft polling",
-                        Component.translatable("rsi.async.abort.poll_error"));
-                return true;
-            }
-            maybeSendProgress(online, false);
-            return false;
-        }
-
-        // All done
-        if (currentStepIdx >= steps.size()) {
-            state = State.COMPLETING;
-            return finish(online);
-        }
-
-        // Execute next step(s)
-        CraftingResolver.ResolutionStep step = steps.get(currentStepIdx);
-        if (isEarthHeartTaintStep(step)) {
-            if (!startEarthHeartTaint(online, step.executions())) return true;
-            return false;
-        }
-        if (step.modType() == ModType.GENERIC) {
-            int granted = vanillaAllowance.claimUpTo(vanillaAllowance.remaining());
-            if (granted <= 0) {
-                waitingForVanillaBudget = true;
-                maybeSendProgress(online, false);
-                return false;
-            }
-            currentStepIdx = executeVanillaBatch(currentStepIdx, online, granted);
-            if (state == State.ABORTED) return true;
-            waitingForVanillaBudget = currentStepIdx < steps.size()
-                    && steps.get(currentStepIdx).modType() == ModType.GENERIC;
-            if (!ledger.isCommitted() && !commitLedger(ledger, online)) {
-                abort("Commit failed after vanilla batch",
-                        Component.translatable("rsi.async.abort.vanilla_commit_failed"));
-                return true;
-            }
-            ledger.reset();
-            // Settled boundary: batch inputs committed, products in virtualInventory.
-            snapshotCommittedVirtual();
-        } else {
-            ProbabilisticProduction probability = probabilityTarget(step, online);
-            if (probability != null) {
-                if (!probability.canAttempt()) {
-                    abort("Probabilistic production attempt limit reached: " + step.recipeId(),
-                            Component.translatable("rsi.async.probability.limit", probability.produced(),
-                                    probability.target().quantity(), probability.attempts()),
-                            CraftFailureCode.PRODUCTION_TARGET_UNMET);
-                    return true;
-                }
-                if (!prepareProbabilityInputs(step, probability, online)) {
-                    maybeSendProgress(online, false);
-                    return state == State.ABORTED;
-                }
-                // 一轮一试，避免达到目标后仍在途消耗额外材料。
-                stepRemaining = 1;
-            }
-            if (stepRemaining <= 0) {
-                stepRemaining = step.executions();
-                machineCount = 1;
-            }
-            flatLifecycle = null;
-            currentDelegate = startModStep(step, online);
-            flatObservedCompletedWork = 0L;
-            flatObservedCompletedOperations = 0;
-            flatObservedProductionSequence = 0;
-            flatObservedCapturedCount = 0;
-            if (currentDelegate == null) {
-                if (waitingForMachineLease) {
-                    // 已知占用方仍在运行时只排队，不消耗本单的无进展窗口。
-                    if (hasLeasedMachine(flatWaitingMachines, machineLeases)) {
-                        machineLeaseWaitTicks = 0;
-                    } else {
-                        machineLeaseWaitTicks++;
-                    }
-                    machineWaitNotifier.notifyWait(online, machineWaitMessage);
-                    int timeoutTicks = RSIntegrationConfig.MULTIBLOCK_CRAFT_TIMEOUT_SECONDS.get() * 20;
-                    if (machineLeaseWaitTicks > timeoutTicks) {
-                        abort("Timeout waiting for an available multi-block machine: "
-                                        + step.recipeId()
-                                        + (machineWaitDetail == null ? "" : " (" + machineWaitDetail + ")"),
-                                machineWaitMessage == null
-                                        ? Component.translatable("rsi.async.abort.machine_wait_timeout",
-                                                step.recipeId().toString())
-                                        : Component.translatable("rsi.async.abort.machine_wait_reason",
-                                                step.recipeId().toString(), machineWaitMessage),
-                                CraftFailureCode.MACHINE_BUSY);
-                        return true;
-                    }
-                    maybeSendProgress(online, false);
-                    return false;
-                }
-                abort(machineStartFailureDetail != null
-                                ? machineStartFailureDetail
-                                : materialReservationFailureDetail != null
-                                ? materialReservationFailureDetail
-                                : "Failed to start multi-block craft: " + step.recipeId(),
-                        machineStartFailureMessage != null
-                                ? machineStartFailureMessage
-                                : Component.translatable("rsi.async.abort.machine_start_failed",
-                                        step.recipeId().toString()),
-                        machineStartFailureDetail != null
-                                ? CraftFailureCode.START_REJECTED
-                                : CraftFailureCode.MATERIAL_EXTRACTION_FAILED);
-                machineStartFailureMessage = null;
-                return true;
-            }
-            waitingForMachineLease = false;
-            if (probability != null) probability.started();
-            machineLeaseWaitTicks = 0;
-            machineStartFailureMessage = null;
-            state = State.WAITING_MOD;
-            // Settled boundary: step's inputs are committed and any materials
-            // pulled from virtualInventory have been removed by pre-reserve. If
-            // the physical craft later times out, the product isn't here yet, so
-            // rolling back to this baseline delivers only the truly-owed items.
-            snapshotCommittedVirtual();
-            Diagnostics.record(Diagnostics.Category.CHAIN_STATE,
-                    "EXECUTING->AITING_MOD step=" + step.recipeId(),
-                    step.recipeId(), step.modType());
-            RSIntegrationMod.LOGGER.debug(ctx.format("EXECUTING ->WAITING_MOD for step {}"),
-                    step.recipeId());
-            waitTicks = 0;
-        }
-        maybeSendProgress(online, false);
-        return false;
+        return tickGraph(online, vanillaAllowance);
     }
-
-    //  graph-backed tick (multi-node parallel)
 
     private boolean tickGraph(ServerPlayer online,
                               VanillaCraftingTickBudget.ChainAllowance vanillaAllowance) {
@@ -1440,7 +842,7 @@ public final class AsyncCraftChain {
         }
 
         // All nodes succeeded -deliver
-        if (graphScheduler.allSucceeded()) {
+        if (graphNodes.isEmpty() || graphScheduler.allSucceeded()) {
             state = State.COMPLETING;
             return finish(online);
         }
@@ -1488,7 +890,6 @@ public final class AsyncCraftChain {
                 break;
             }
 
-            int idx = stepIndex(vanillaNode);
             CraftingResolver.ResolutionStep step = graphStep(vanillaNode);
             int executions = Math.max(1, step.executions());
             ServerLevel overworld = server.overworld();
@@ -1502,7 +903,6 @@ public final class AsyncCraftChain {
                 waitingForVanillaBudget = true;
                 break;
             }
-            currentStepIdx = idx;
             GraphVanillaJob job = beginGraphVanillaJob(
                     vanillaNode, step, admission, executions, online);
             if (job == null) break;
@@ -1522,7 +922,6 @@ public final class AsyncCraftChain {
                 waitingForVanillaBudget = true;
                 return false;
             }
-            currentStepIdx = stepIndex(job.nodeId);
             if (!runGraphVanillaSlice(job, granted, online)) return false;
         }
         return true;
@@ -1640,7 +1039,7 @@ public final class AsyncCraftChain {
         CraftingResolver.ResolutionStep slice = job.step.withExecutions(executions);
         OperationExecutionKernel.StartAction run = () -> executeVanillaStepsInlineDetailed(
                 List.of(slice), online, job.inventory, job.executionLedger, false,
-                job.catalystState).status() == FlatCraftExecutor.Status.SUCCESS
+                job.catalystState, isGraphTerminalNode(job.nodeId) ? slice.recipeId() : null).status() == FlatCraftExecutor.Status.SUCCESS
                 && commitLedger(job.executionLedger, online);
         return job.operation.startAttempted() ? run.start() : job.operation.tryStart(run);
     }
@@ -1664,7 +1063,6 @@ public final class AsyncCraftChain {
         snapshotCommittedVirtual();
         graphScheduler.succeed(job.nodeId);
         graphProgressWatchdog.markProgress();
-        currentStepIdx = stepIndex(job.nodeId) + 1;
         return true;
     }
 
@@ -1729,14 +1127,14 @@ public final class AsyncCraftChain {
     }
 
     @Nullable
-    private Recipe<?> recipeForStep(CraftingResolver.ResolutionStep step) {
-        if (server == null) return null;
+    private Recipe<?> recipeForNode(CraftNode step) {
+        if (server == null || server.getRecipeManager() == null) return null;
         Recipe<?> recipe = server.getRecipeManager().byKey(step.recipeId()).orElse(null);
         if (recipe == null) recipe = FluidContainerCatalog.byId(step.recipeId());
-        if (recipe == null && step.modType().id().startsWith("irons_spellbooks")) {
+        if (recipe == null && step.modTypeId().startsWith("irons_spellbooks")) {
             recipe = IronSpellBooksRecipeCatalog.byId(server.overworld(), step.recipeId());
         }
-        if (recipe == null && "pmmo_salvage".equals(step.modType().id())) {
+        if (recipe == null && "pmmo_salvage".equals(step.modTypeId())) {
             recipe = PmmoSalvageCatalog.byId(step.recipeId());
         }
         if (recipe == null && "rs_integration".equals(step.recipeId().getNamespace())
@@ -1746,106 +1144,121 @@ public final class AsyncCraftChain {
         return recipe;
     }
 
-    private boolean requiresTargetedProduction(CraftingResolver.ResolutionStep step) {
-        if (step.productionTarget() == null) return false;
-        Recipe<?> recipe = recipeForStep(step);
-        ModRecipeHandler handler = recipe == null ? null : ModRecipeHandlers.claimFor(recipe).winner();
-        if (handler == null) return false;
-        ProductionTarget target = step.productionTarget();
-        if (target.resource() != null) {
-            return handler.requiresTargetedProduction(
-                    recipe, target.resource());
-        }
-        return target.material() != null
-                && handler.requiresTargetedProduction(
-                recipe, target.material().toStack(1));
-    }
-
     @Nullable
-    private ProductionAttemptState attachGraphAttempt(
-            CraftNodeRuntime runtime, NodeId nodeId,
-            CraftingResolver.ResolutionStep step) {
+    ProbabilisticProduction attachGraphAttempt(CraftNodeRuntime runtime, NodeId nodeId) {
         CraftNode node = graphNodes.get(nodeId);
         if (node == null) return null;
-        if (!requiresTargetedProduction(step) || step.productionTarget() == null) {
+        var state = productionAttempts.get(nodeId);
+        if (state == null) {
             runtime.attachOutputs(new NodeOutputAccumulator(node.outputs()));
             return null;
         }
-        OutputPortId targetPort = node.outputs().stream()
-                .filter(output -> output.kind() == OutputKind.PRIMARY
-                        || output.kind() == OutputKind.DYNAMIC)
-                .map(OutputDeclaration::id)
-                .findFirst().orElse(null);
-        if (targetPort == null) {
-            runtime.attachOutputs(new NodeOutputAccumulator(node.outputs()));
-            return null;
-        }
-        ProductionAttemptState state = productionAttempts.computeIfAbsent(nodeId,
-                ignored -> new ProductionAttemptState(
-                        new NodeOutputAccumulator(node.outputs()), targetPort,
-                        step.productionTarget().quantity(),
-                        CraftExecutionPolicy.probabilityAttemptLimit(step)));
-        runtime.attachOutputs(state.outputs);
-        runtime.targetCompletion(state.targetPort, state.targetQuantity);
-        return state;
+        state.attach(runtime);
+        return state.progress;
     }
 
-    private boolean ensureRetryMaterials(NodeId nodeId, ServerPlayer online) {
-        ProductionAttemptState attempt = productionAttempts.get(nodeId);
-        List<MaterialBroker.Request> requests = graphRequests.getOrDefault(nodeId, List.of());
-        if (attempt == null || attempt.attempts <= 0 || graphMaterials == null
-                || requests.isEmpty()) {
+    private static OutputDeclaration targetPort(CraftNode node) {
+        return node.outputs().stream().filter(OutputDeclaration::targetProducing)
+                .filter(output -> output.guaranteedMinimum() < output.quantity()).findFirst().orElse(null);
+    }
+
+    boolean prepareRetryRound(NodeId nodeId, ServerPlayer player) {
+        var production = productionAttempts.get(nodeId);
+        if (production == null) return true;
+        var round = production.pending();
+        if (round == null) return true;
+        if (round.missing().isEmpty()) {
+            graphRequests.put(nodeId, round.assigned());
+            production.admittedRound();
             return true;
         }
-        List<MaterialBroker.Request> shortages = graphMaterials.shortages(requests);
-        if (shortages.isEmpty()) return true;
-        if (shortages.stream().anyMatch(request ->
-                !(request.source() instanceof MaterialSource.InitialPool))) {
+        CraftNode node = graphNodes.get(nodeId);
+        if (materialAccount == null || materialAccount.uncertain()) {
+            graphFailureDetails.put(nodeId, "补料账户不可用");
+            graphFailureCodes.put(nodeId, CraftFailureCode.MATERIAL_EXTRACTION_FAILED);
             return false;
         }
-
-        Map<MaterialKey, Long> needed = new LinkedHashMap<>();
-        for (MaterialBroker.Request request : shortages) {
-            needed.merge(request.material(), request.quantity(), SaturatingLongMath::add);
-        }
-        Map<StackKey, Long> available =
-                new LinkedHashMap<>(materialAccess.available(online, storageEndpoint));
+        // 公共库存不含任务已取得的下游份额；只有未被分配的任务余额可以参与补做。
+        Map<StackKey, Long> usable = new LinkedHashMap<>(MaterialSources.listAllAvailableFresh(player, storageEndpoint));
+        Map<MaterialKey, Long> surplus = new LinkedHashMap<>();
         for (ItemStack stack : virtualInventory) {
-            if (stack == null || stack.isEmpty()) continue;
-            available.merge(StackKey.of(stack, true), (long) stack.getCount(),
-                    SaturatingLongMath::add);
+            if (stack.isEmpty()) continue;
+            usable.merge(StackKey.of(stack, true), (long) stack.getCount(), SaturatingLongMath::add);
+            surplus.merge(MaterialKey.of(stack), (long) stack.getCount(), SaturatingLongMath::add);
         }
-        Map<MaterialSource, Long> published = new LinkedHashMap<>();
-        for (Map.Entry<MaterialKey, Long> entry : needed.entrySet()) {
-            long physicallyAvailable = available.entrySet().stream()
-                    .filter(candidate -> MaterialMatcher.matchesExact(
-                            entry.getKey(), candidate.getKey().toStack()))
-                    .mapToLong(Map.Entry::getValue)
-                    .reduce(0L, SaturatingLongMath::add);
-            List<MaterialBroker.Request> materialShortages = shortages.stream()
-                    .filter(request -> request.material().equals(entry.getKey()))
-                    .toList();
-            long represented = materialShortages.stream()
-                    .map(MaterialBroker.Request::source)
-                    .distinct()
-                    .mapToLong(source -> graphMaterials.outstanding(source, entry.getKey()))
-                    .reduce(0L, SaturatingLongMath::add);
-            long free = Math.max(0L, physicallyAvailable - represented);
-            for (MaterialBroker.Request request : materialShortages) {
-                long alreadyPlanned = published.getOrDefault(request.source(), 0L);
-                long quantity = Math.min(request.quantity(),
-                        Math.max(0L, free - alreadyPlanned));
-                if (quantity <= 0L) continue;
-                graphMaterials.publish(request.source(), request.material(), quantity);
-                published.merge(request.source(), quantity, SaturatingLongMath::add);
+        var protectedRoots = new HashMap<MaterialKey, Long>();
+        for (RootDemand root : graph.rootDemands()) for (RootAllocation a : root.allocations()) {
+            if (a.source() instanceof MaterialSource.InitialPool) protectedRoots.merge(a.material(), a.quantity(), Math::addExact);
+        }
+        Map<MaterialKey, Long> protectedHeld = new HashMap<>();
+        materialAccount.heldMaterials().forEach((key, amount) -> {
+            MaterialKey material = MaterialKey.of(key.toStack());
+            long held = Math.min(amount, SaturatingLongMath.add(protectedRoots.getOrDefault(material, 0L),
+                    graphMaterials.outstanding(new MaterialSource.InitialPool(material), material)));
+            protectedHeld.put(material, held);
+            if (amount > held) usable.merge(key, amount - held, SaturatingLongMath::add);
+        });
+        Set<ResourceLocation> excluded = new HashSet<>();
+        graphNodes.forEach((id, n) -> {
+            if (graphScheduler.state(id) != DagScheduler.NodeState.SUCCEEDED) excluded.add(n.recipeId());
+        });
+        List<String> missing = new ArrayList<>();
+        CraftPlanGraph supplement;
+        try {
+            supplement = CraftingResolver.resolveSupplementalGraph(
+                    MaterialLocks.narrowSpecs(node.recipeId(), round.missing(), supplementalMaterialLocks),
+                    usable, player.serverLevel(), player, storageEndpoint, missing, excluded,
+                    supplementalForcedRecipes, supplementalMaterialLocks, new CraftingResolver.ActiveRootRecipe(
+                            node.recipeId(), graphNodeTargetOutput(node)));
+        } catch (CraftingPlanningTimeoutException timeout) {
+            graphFailureDetails.put(nodeId, "补料规划超时");
+            graphFailureCodes.put(nodeId, CraftFailureCode.TIMEOUT);
+            return false;
+        }
+        if (!missing.isEmpty() || supplement.rootDemands().isEmpty()
+                || !supplement.unresolvedDemands().isEmpty()
+                || supplement.rootDemands().stream().anyMatch(r -> r.unresolvedQuantity() != 0)
+                || (long) graphNodes.size() + supplement.nodes().size() > RSIntegrationConfig.CRAFTING_MAX_STEPS.get()) {
+            graphFailureDetails.put(nodeId, "补产缺少下一次尝试的材料");
+            graphFailureCodes.put(nodeId, CraftFailureCode.PRODUCTION_TARGET_UNMET);
+            return false;
+        }
+        int first = Math.addExact(graphNodes.keySet().stream().mapToInt(NodeId::value).max().orElse(-1), 1);
+        supplement = SupplementalGraph.relocate(supplement, first);
+        InitialMaterialPlan extension = InitialMaterialPlan.from(supplement);
+        Map<MaterialKey, Long> required = new LinkedHashMap<>(extension.materials());
+        required.replaceAll((key, amount) -> Math.addExact(amount - Math.min(amount, surplus.getOrDefault(key, 0L)),
+                protectedHeld.getOrDefault(key, 0L)));
+        if (!materialAccount.ensure(required, extension.reusable(), player)) return false;
+        // 只交接这次真正获配的余料。账户准入未成功时原物仍由终止恢复负责。
+        var toTransfer = new HashMap<>(extension.materials());
+        for (ItemStack stack : virtualInventory) {
+            if (stack.isEmpty()) continue;
+            MaterialKey key = MaterialKey.of(stack);
+            long remaining = toTransfer.getOrDefault(key, 0L);
+            int take = (int) Math.min(remaining, stack.getCount());
+            if (take > 0) {
+                materialAccount.add(stack.split(take));
+                toTransfer.put(key, remaining - take);
             }
         }
-        return graphMaterials.shortages(requests).isEmpty();
+        virtualInventory.removeIf(ItemStack::isEmpty);
+        snapshotCommittedVirtual();
+        graphScheduler.appendForRetry(nodeId, supplement);
+        initialiseGraphMaterialFlow(supplement);
+        List<MaterialBroker.Request> requests = new ArrayList<>(round.assigned());
+        for (RootDemand root : supplement.rootDemands()) for (RootAllocation a : root.allocations()) {
+            requests.add(new MaterialBroker.Request(a.source(), a.material(), a.quantity()));
+            if (a.source() instanceof MaterialSource.InitialPool) graphMaterials.publish(a.source(), a.material(), a.quantity());
+        }
+        graphRequests.put(nodeId, List.copyOf(requests));
+        production.admittedRound();
+        return supplement.nodes().isEmpty();
     }
 
     private int nextGraphOperationSequence(NodeId nodeId) {
-        ProductionAttemptState attempt = productionAttempts.get(nodeId);
-        return attempt == null ? 0 : attempt.attempts;
+        TargetNodeProduction attempt = productionAttempts.get(nodeId);
+        return attempt == null ? 0 : attempt.progress.attempts();
     }
 
     private UUID publicOperationId(OperationId operationId) {
@@ -1857,111 +1270,6 @@ public final class AsyncCraftChain {
     }
 
     @Nullable
-    private ProbabilisticProduction probabilityTarget(CraftingResolver.ResolutionStep step, ServerPlayer player) {
-        ProbabilisticProduction existing = probabilityTargets.get(step);
-        if (existing != null || !requiresTargetedProduction(step)) return existing;
-        int limit = CraftExecutionPolicy.probabilityAttemptLimit(step);
-        ProbabilisticProduction progress = new ProbabilisticProduction(step.productionTarget(), Math.max(1, limit));
-        probabilityTargets.put(step, progress);
-        player.sendSystemMessage(Component.translatable("rsi.async.probability.started",
-                step.productionTarget().displayStack().getHoverName(),
-                step.productionTarget().quantity(), limit));
-        return progress;
-    }
-
-    /** 缺少下一次投入时插入原料子计划；已有真实产物始终留在本任务账本中。 */
-    private boolean prepareProbabilityInputs(CraftingResolver.ResolutionStep step,
-                                              ProbabilisticProduction progress, ServerPlayer player) {
-        Recipe<?> recipe = recipeForStep(step);
-        ModRecipeHandler handler = recipe == null ? null : ModRecipeHandlers.claimFor(recipe).winner();
-        List<IngredientSpec> inputs = handler == null ? null : handler.getIngredients(recipe);
-        if (inputs == null) {
-            abort("Probabilistic recipe has no material contract: " + step.recipeId(),
-                    Component.translatable("rsi.async.probability.materials", progress.remaining()),
-                    CraftFailureCode.PRODUCTION_TARGET_UNMET);
-            return false;
-        }
-        // 空物品合同允许纯流体或无物品投入配方，由委托校验其余输入。
-        if (inputs.isEmpty()) return true;
-        inputs = MaterialLocks.narrowSpecs(step.recipeId(), inputs, supplementalMaterialLocks);
-        MaterialSources.invalidateFor(player, storageEndpoint);
-        Map<StackKey, Long> available =
-                new LinkedHashMap<>(materialAccess.available(player, storageEndpoint));
-        for (ItemStack stack : virtualInventory) {
-            available.merge(StackKey.of(stack, true), (long) stack.getCount(),
-                    MaterialSources::saturatedAdd);
-        }
-        // 先保护后续步骤的投入，也保护已经收集的当前目标，补做不能把它们再拆掉。
-        List<IngredientSpec> protectedInputs = new ArrayList<>();
-        Set<ResourceLocation> excluded = new HashSet<>();
-        for (int i = currentStepIdx; i < steps.size(); i++) {
-            CraftingResolver.ResolutionStep pending = steps.get(i);
-            excluded.add(pending.recipeId());
-            if (i == currentStepIdx) continue;
-            Recipe<?> pendingRecipe = recipeForStep(pending);
-            if (pendingRecipe == null) continue;
-            List<IngredientSpec> pendingInputs = CraftPacketUtils.extractIngredientSpecs(pendingRecipe);
-            if (pendingInputs == null) continue;
-            for (IngredientSpec input : MaterialLocks.narrowSpecs(pending.recipeId(),
-                    pendingInputs, supplementalMaterialLocks)) {
-                if (!input.isEmpty()) protectedInputs.add(new IngredientSpec(
-                        input.ingredient(),
-                        CraftPacketUtils.requiredCount(input, pending.executions()),
-                        input.consumption()));
-            }
-        }
-        Map<StackKey, Long> usable =
-                SupplementalMaterialPlan.afterProtecting(available, protectedInputs);
-        SupplementalMaterialPlan.protectProduced(available, usable, progress.target(), progress.produced());
-        // 材料已齐时直接开始下一试，避免每次轮询重建递归图。
-        if (SupplementalMaterialPlan.hasInputs(usable, inputs)) return true;
-        List<String> missing = new ArrayList<>();
-        CraftPlanGraph supplemental;
-        try {
-            supplemental = CraftingResolver.resolveSupplementalGraph(inputs, usable,
-                    player.serverLevel(), player, storageEndpoint, missing, excluded,
-                    supplementalForcedRecipes, supplementalMaterialLocks,
-                    new CraftingResolver.ActiveRootRecipe(
-                            step.recipeId(),
-                            progress.target().displayStack()));
-        } catch (CraftingPlanningTimeoutException timeout) {
-            abort("Probabilistic supplemental planning timed out: " + step.recipeId(),
-                    Component.translatable("rsi.async.probability.planning_timeout", progress.remaining()),
-                    CraftFailureCode.TIMEOUT);
-            return false;
-        }
-        if (!missing.isEmpty() || supplemental.rootDemands().stream().anyMatch(root -> root.unresolvedQuantity() > 0)) {
-            abort("Probabilistic supplemental materials unavailable: " + step.recipeId(),
-                    Component.translatable("rsi.async.probability.materials", progress.remaining()),
-                    CraftFailureCode.PRODUCTION_TARGET_UNMET);
-            return false;
-        }
-        List<CraftingResolver.ResolutionStep> additional = ExecutionEquivalence.projectFlatSteps(supplemental);
-        if (additional.isEmpty()) return true;
-        if ((long) steps.size() + additional.size() > RSIntegrationConfig.CRAFTING_MAX_STEPS.get()) {
-            abort("Probabilistic supplemental step limit reached", Component.translatable(
-                    "rsi.async.probability.materials", progress.remaining()),
-                    CraftFailureCode.PRODUCTION_TARGET_UNMET);
-            return false;
-        }
-        if (materialAccount != null) {
-            InitialMaterialPlan extension = InitialMaterialPlan.from(supplemental);
-            Map<MaterialKey, Long> required = new LinkedHashMap<>(extension.materials());
-            for (ItemStack stack : virtualInventory) {
-                required.computeIfPresent(MaterialKey.of(stack),
-                        (key, count) -> Math.max(0L, count - stack.getCount()));
-            }
-            if (!materialAccount.ensure(required, extension.reusable(), player)) return false;
-        }
-        steps.addAll(currentStepIdx, additional);
-        stepRemaining = 0;
-        RSIntegrationMod.LOGGER.info(ctx.format(
-                "Supplemental probability inputs: recipe={} attempts={} produced={} target={} addedSteps={}"),
-                step.recipeId(), progress.attempts(), progress.produced(), progress.target().quantity(), additional.size());
-        return false;
-    }
-
-    @Nullable
     private NodeId findReadyVanillaNode() {
         int now = server.getTickCount();
         return graphScheduler.claimFirstReady(nodeId -> isVanillaGraphNode(nodeId)
@@ -1970,7 +1278,7 @@ public final class AsyncCraftChain {
 
     private boolean isVanillaGraphNode(NodeId nodeId) {
         CraftingResolver.ResolutionStep step = graphStep(nodeId);
-        return step.modType() == ModType.GENERIC
+        return !productionAttempts.containsKey(nodeId) && step.modType() == ModType.GENERIC
                 && !step.recipeId().equals(CraftingResolver.TAINT_EARTH_HEART_STEP);
     }
 
@@ -1979,7 +1287,7 @@ public final class AsyncCraftChain {
         // 大地之心污染虽然不是 GENERIC 普通批处理，但也不能交给
         // settleReadyVanillaNodes 的批处理路径；把它交给图执行器，
         // 由 startAdmittedGraphNode 的同步污染分支处理。
-        return step.modType() != ModType.GENERIC
+        return productionAttempts.containsKey(nodeId) || step.modType() != ModType.GENERIC
                 || isEarthHeartTaintStep(step);
     }
 
@@ -2167,7 +1475,12 @@ public final class AsyncCraftChain {
             return ConcurrentNodeExecutor.StartResult.started(new EarthHeartTaintWorker());
         }
 
-        if (step.modType() == ModType.GENERIC) {
+        if (!prepareRetryRound(nodeId, online)) {
+            return graphFailureCodes.containsKey(nodeId) ? ConcurrentNodeExecutor.StartResult.failed()
+                    : graphRetry(nodeId, "retry materials unavailable", List.of(), Reason.WAITING_MATERIALS);
+        }
+        if (productionAttempts.containsKey(nodeId)) step = step.withExecutions(1);
+        if (step.modType() == ModType.GENERIC && !productionAttempts.containsKey(nodeId)) {
             graphFailureDetails.put(nodeId,
                     "synchronous generic node reached concurrent graph dispatcher");
             graphFailureCodes.put(nodeId, CraftFailureCode.INTERNAL_ERROR);
@@ -2192,11 +1505,6 @@ public final class AsyncCraftChain {
             return ConcurrentNodeExecutor.StartResult.failed();
         }
         PreparedGraphNode prepared = preparation.prepared();
-        if (!ensureRetryMaterials(nodeId, online)) {
-            releasePreparationQuietly(prepared.delegate());
-            return graphRetry(nodeId, "retry materials unavailable",
-                    graphRequests.getOrDefault(nodeId, List.of()), Reason.WAITING_MATERIALS);
-        }
         NodeAdmissionCoordinator.Candidate candidate = new NodeAdmissionCoordinator.Candidate(
                 nodeId, graphRequests.getOrDefault(nodeId, List.of()));
         NodeAdmissionCoordinator.Admission admission = graphAdmissions.tryAdmitClaimed(candidate);
@@ -2422,18 +1730,7 @@ public final class AsyncCraftChain {
             try {
                 if (delegate instanceof AbstractBatchDelegate abd) {
                     abd.setMachineServer(server);
-                    ItemStack nodeTarget = graphNodeTargetOutput(graphNodes.get(nodeId));
-                    if (!nodeTarget.isEmpty()) {
-                        abd.setTargetOutput(nodeTarget);
-                        abd.setTargetResource(
-                                IntegrationResourceKey.item(nodeTarget));
-                    } else if (targetOutput != null && isGraphTerminalNode(nodeId)) {
-                        abd.setTargetOutput(targetOutput);
-                        abd.setTargetResource(targetResource);
-                    } else if (isGraphTerminalNode(nodeId)
-                            && targetResource != null) {
-                        abd.setTargetResource(targetResource);
-                    }
+                    configureNodeTarget(nodeId, abd);
                 }
             } catch (RuntimeException exception) {
                 releasePreparationQuietly(delegate);
@@ -2509,18 +1806,7 @@ public final class AsyncCraftChain {
                     if (candidate instanceof AbstractBatchDelegate abd) {
                         abd.setMachineDim(machine.dim());
                         abd.setMachineServer(server);
-                        ItemStack nodeTarget = graphNodeTargetOutput(graphNodes.get(nodeId));
-                        if (!nodeTarget.isEmpty()) {
-                            abd.setTargetOutput(nodeTarget);
-                            abd.setTargetResource(
-                                    IntegrationResourceKey.item(nodeTarget));
-                        } else if (targetOutput != null && isGraphTerminalNode(nodeId)) {
-                            abd.setTargetOutput(targetOutput);
-                            abd.setTargetResource(targetResource);
-                        } else if (isGraphTerminalNode(nodeId)
-                                && targetResource != null) {
-                            abd.setTargetResource(targetResource);
-                        }
+                        configureNodeTarget(nodeId, abd);
                     }
                     if (eligible.isEmpty()) {
                         delegate = candidate;
@@ -2596,26 +1882,31 @@ public final class AsyncCraftChain {
                 new PreparedGraphNode(step, delegate, eligible, operationCost, operationGroup));
     }
 
-    /** Exact per-execution output used to configure runtime-derived graph recipes. */
+    void configureNodeTarget(NodeId id, AbstractBatchDelegate delegate) {
+        OutputDeclaration output = nodeTargetDeclaration(graphNodes.get(id));
+        if (output != null) {
+            ItemStack display = ProductionTarget.of(output.resource(), 1L).displayStack();
+            if (!display.isEmpty()) delegate.setTargetOutput(display);
+            delegate.setTargetResource(output.resource());
+        } else if (isGraphTerminalNode(id)) {
+            if (targetOutput != null) delegate.setTargetOutput(targetOutput);
+            if (targetResource != null) delegate.setTargetResource(targetResource);
+        }
+    }
+
+    @Nullable
+    private static OutputDeclaration nodeTargetDeclaration(@Nullable CraftNode node) {
+        if (node == null) return null;
+        OutputDeclaration targeted = targetPort(node);
+        if (targeted != null) return targeted;
+        return node.outputs().stream().filter(output -> output.kind() == OutputKind.PRIMARY
+                || output.kind() == OutputKind.DYNAMIC).findFirst().orElse(null);
+    }
+
+    /** 展示栈仅用于配方选择，不能用它推导流体目标的资源类型。 */
     static ItemStack graphNodeTargetOutput(@Nullable CraftNode node) {
-        if (node == null) return ItemStack.EMPTY;
-        return node.outputs().stream()
-                .filter(output -> output.kind() == OutputKind.PRIMARY
-                        || output.kind() == OutputKind.DYNAMIC)
-                .findFirst()
-                .map(output -> ProductionTarget.of(
-                                output.resource(),
-                                Math.max(
-                                        1L,
-                                        output.quantity()
-                                                / Math.max(
-                                                1,
-                                                node.executions()
-                                        )
-                                )
-                        )
-                        .displayStack())
-                .orElse(ItemStack.EMPTY);
+        OutputDeclaration output = nodeTargetDeclaration(node);
+        return output == null ? ItemStack.EMPTY : ProductionTarget.of(output.resource(), 1L).displayStack();
     }
 
     static boolean shouldUseGraphOperationGroup(int executions, int availableOperations) {
@@ -2737,21 +2028,22 @@ public final class AsyncCraftChain {
         group.setDispatchAllowed(() -> dispatchAllowed.getAsBoolean());
         attachMagicReservation(group);
         ItemStack nodeTarget = graphNodeTargetOutput(graphNodes.get(nodeId));
-        IntegrationResourceKey resource = step.productionTarget() == null ? null : step.productionTarget().resource();
+        OutputDeclaration declaration = nodeTargetDeclaration(graphNodes.get(nodeId));
+        IntegrationResourceKey resource = declaration == null ? null : declaration.resource();
         ItemStack display = !nodeTarget.isEmpty() ? nodeTarget
                 : step.productionTarget() != null ? step.productionTarget().displayStack()
                 : step.syntheticOutput() != null ? step.syntheticOutput()
-                : (useGraphExecution ? isGraphTerminalNode(nodeId) : isPrimaryStep(currentStepIdx))
+                : isGraphTerminalNode(nodeId)
                         && targetOutput != null ? targetOutput : ItemStack.EMPTY;
         if (!display.isEmpty()) {
             group.setTargetOutput(display);
             if (resource == null) resource = IntegrationResourceKey.item(display);
         }
-        if (resource == null && (useGraphExecution ? isGraphTerminalNode(nodeId) : isPrimaryStep(currentStepIdx))) {
+        if (resource == null && isGraphTerminalNode(nodeId)) {
             resource = targetResource;
         }
         if (resource != null) group.setTargetResource(resource);
-        if (useGraphExecution && prepared.delegate() instanceof CrockPotBatchDelegate crockPot
+        if (prepared.delegate() instanceof CrockPotBatchDelegate crockPot
                 && crockPot.usesPlannedCategoryMaterials()) {
             List<IngredientSpec> layout = new ArrayList<>();
             List<InputDemand> inputs = new ArrayList<>(graphNodes.get(nodeId).inputs());
@@ -2803,7 +2095,7 @@ public final class AsyncCraftChain {
             if (!commitLedger(nodeLedger, online)) return GraphDispatchResult.retry("node ledger commit did not complete", Reason.MATERIAL_EXTRACTION_FAILED);
             CraftNodeRuntime runtime = new CraftNodeRuntime(nodeId, prepared.step().recipeId().toString(),
                     group, nodeLedger, admission, null);
-            ProductionAttemptState attempt = attachGraphAttempt(runtime, nodeId, prepared.step());
+            ProbabilisticProduction attempt = attachGraphAttempt(runtime, nodeId);
             runtime.setChainContext(virtualInventory, online);
             graphAdmissions.commit(admission);
             nodeRuntimes.put(nodeId, runtime);
@@ -2893,6 +2185,7 @@ public final class AsyncCraftChain {
             NodeId nodeId, PreparedGraphNode prepared, IBatchDelegate delegate,
             ServerPlayer online, NodeAdmissionCoordinator.Admission admission,
             ExtractionLedger nodeLedger) {
+        if (materialAccount == null) return GraphDispatchResult.fatal("私有取料必须使用任务账户");
         List<MachineLeaseRegistry.MachineKey> machineScope = List.of(
                 new MachineLeaseRegistry.MachineKey(prepared.machine().dim(),
                         prepared.machine().pos(), prepared.step().modType().id()));
@@ -2911,8 +2204,7 @@ public final class AsyncCraftChain {
         CraftNodeRuntime runtime = new CraftNodeRuntime(nodeId,
                 prepared.step().recipeId().toString(), delegate, nodeLedger,
                 admission, operationSession);
-        ProductionAttemptState attempt =
-                attachGraphAttempt(runtime, nodeId, prepared.step());
+        ProbabilisticProduction attempt = attachGraphAttempt(runtime, nodeId);
         runtime.setChainContext(virtualInventory, online);
         graphAdmissions.commit(admission);
         runtime.markDispatched();
@@ -2929,39 +2221,17 @@ public final class AsyncCraftChain {
 
     /**
      * 私有账本委托通过统一取料入口领取中间产物，因此先将图内产物交给任务账户。
-     * 未启用账户的旧入口仍交给外部存储。交接后立即结清 broker 领取记录，
+     * 交接后立即结清 broker 领取记录，
      * 由委托账本负责实物恢复，避免失败时 broker 再次退回同一份材料。
      */
     private void materializePrivateLedgerGraphInputs(
             NodeAdmissionCoordinator.Admission admission, ServerPlayer online) {
-        if (graphMaterials == null) return;
         MaterialBroker.Checkout checkout = graphMaterials.checkout(admission.materialToken());
-        for (ItemStack producer : checkout.producerStacks()) {
-            if (producer.isEmpty()) continue;
-            if (materialAccount != null) {
-                materialAccount.add(producer);
-                continue;
-            }
-            ItemStack leftover = producer.copy();
-            try {
-                leftover = insertIntoStorage(online, producer);
-            } catch (RuntimeException exception) {
-                RSIntegrationMod.LOGGER.warn(ctx.format(
-                        "Producer material transfer to RS failed for private-ledger node {}"),
-                        admission.nodeId(), exception);
-            }
-            if (!leftover.isEmpty()) {
-                PlayerUtils.safeGiveToStorage(online, leftover, storageEndpoint);
-            }
-        }
-        // 旧入口仍会写入外部存储；清除缓存，让同 tick 的委托能看到新产物。
-        if (online != null) {
-            MaterialSources.invalidateFor(online);
-        }
+        for (ItemStack producer : checkout.producerStacks()) materialAccount.add(producer);
         graphAdmissions.settleMaterialOnce(admission);
     }
 
-    private void publishIncrementalGraphOutputs(NodeId nodeId, ConcurrentNodeExecutor.Worker worker) {
+    void publishIncrementalGraphOutputs(NodeId nodeId, ConcurrentNodeExecutor.Worker worker) {
         if (!(worker instanceof CraftNodeRuntime runtime) || graphMaterials == null) return;
         runtime.prepareGraphPublications();
         reportedResources.addAll(runtime.drainDeliveredReports());
@@ -3020,7 +2290,7 @@ public final class AsyncCraftChain {
         RSIntegrationMod.LOGGER.warn(ctx.format("Graph node {} runtime failed: {}"), nodeId, detail);
     }
 
-    private ConcurrentNodeExecutor.CompletionStatus completeGraphNode(
+    ConcurrentNodeExecutor.CompletionStatus completeGraphNode(
             NodeId nodeId, ConcurrentNodeExecutor.Worker worker) {
         if (!(worker instanceof CraftNodeRuntime runtime) || graphAdmissions == null
                 || graphMaterials == null) {
@@ -3040,10 +2310,11 @@ public final class AsyncCraftChain {
             runtime.markResourcesClosed();
             if (completion == OperationExecutionKernel.CompletionResult.OUTPUT_SHORTAGE
                     || !runtime.productionTargetComplete()) {
-                ProductionAttemptState attempt = productionAttempts.get(nodeId);
+                TargetNodeProduction attempt = productionAttempts.get(nodeId);
                 boolean targetUnmet = completion == OperationExecutionKernel.CompletionResult.SUCCEEDED
-                        && attempt != null && !attempt.complete();
-                if (targetUnmet && attempt.canAttempt()) {
+                        && attempt != null && !runtime.productionTargetComplete();
+                if (targetUnmet && attempt.progress.hasAttemptBudget()) {
+                    attempt.next();
                     for (ItemStack stack : runtime.drainOutputSurplus()) {
                         addToVirtualInventory(stack);
                     }
@@ -3052,16 +2323,17 @@ public final class AsyncCraftChain {
                     graphProgressWatchdog.markProgress();
                     RSIntegrationMod.LOGGER.debug(ctx.format(
                             "Graph node {} retrying targeted production: attempts={}/{} published={}/{}"),
-                            nodeId, attempt.attempts, attempt.maxAttempts,
-                            attempt.outputs.publishedQuantity(attempt.targetPort),
-                            attempt.targetQuantity);
+                            nodeId, attempt.progress.attempts(), attempt.progress.maxAttempts(),
+                            attempt.progress.produced(),
+                            attempt.progress.target().quantity());
                     return ConcurrentNodeExecutor.CompletionStatus.RETRY;
                 }
-                String detail = targetUnmet
-                        ? "production target unmet after " + attempt.attempts
-                        + " operations: " + attempt.outputs.publishedQuantity(attempt.targetPort)
-                        + "/" + attempt.targetQuantity : runtime.outputShortageDetail();
-                CraftFailureCode code = targetUnmet
+                boolean shortTarget = targetUnmet && !attempt.progress.complete();
+                String detail = shortTarget
+                        ? "production target unmet after " + attempt.progress.attempts()
+                        + " operations: " + attempt.progress.produced()
+                        + "/" + attempt.progress.target().quantity() : runtime.outputShortageDetail();
+                CraftFailureCode code = shortTarget
                         ? CraftFailureCode.PRODUCTION_TARGET_UNMET : CraftFailureCode.OUTPUT_MISSING;
                 runtime.markCompletionFailed(detail, code);
                 graphFailureDetails.put(nodeId, detail);
@@ -3191,33 +2463,29 @@ public final class AsyncCraftChain {
         }
     }
 
-    /** 两种调度器只提供材料池；分配、整单预留及 worker 工具归属共用此入口。 */
+    /** 图预留负责分配来源和数量，各机器只领取自己的投入和工具。 */
     @Nullable
     private GraphNodeMaterials reserveCountedOperationMaterials(
             ParallelCraftGroup group, ServerPlayer online, ExtractionLedger targetLedger,
-            @Nullable MaterialBroker.ReservationToken graphToken) {
+            MaterialBroker.ReservationToken graphToken) {
         MaterialPlan plan = group.materialPlan();
         if (plan.delegateExtracted()) return null;
         int mark = targetLedger.reservationMark();
-        List<ItemStack> virtualBefore = StackCopies.excludingEmpty(virtualInventory);
         boolean prepared = false;
         try {
             group.configureMaterialReservation(targetLedger, online);
-            MaterialBroker.Checkout checkout = graphToken == null || graphMaterials == null
-                    ? new MaterialBroker.Checkout(List.of()) : graphMaterials.checkout(graphToken);
+            MaterialBroker.Checkout checkout = graphMaterials.checkout(graphToken);
             Pool planned = new Pool().add(Origin.PRODUCER, checkout.producerStacks())
                     .add(Origin.INITIAL, checkout.initialStacks());
             Pool available = new Pool();
-            if (graphToken == null) available.add(Origin.VIRTUAL, virtualInventory);
-            boolean needsAvailable = graphToken == null
-                    || !plan.supplementalEntries().isEmpty()
+            boolean needsAvailable = !plan.supplementalEntries().isEmpty()
                     || group.getChildCount() > 1 && !plan.reusableEntries().isEmpty();
             if (needsAvailable) {
                 for (Map.Entry<StackKey, Long> entry : materialAccess.available(online, storageEndpoint).entrySet()) {
                     available.add(Origin.INITIAL, entry.getKey().toStack(), entry.getValue());
                 }
             }
-            if (graphToken != null) available.subtract(Origin.INITIAL, checkout.initialStacks());
+            available.subtract(Origin.INITIAL, checkout.initialStacks());
             CountedOperationMaterials.Builder builder = new CountedOperationMaterials.Builder(
                     group.getMaterialOperations(), group.getChildCount());
             for (MaterialPlan.Entry declared : plan.entries()) {
@@ -3228,7 +2496,7 @@ public final class AsyncCraftChain {
                             MaterialLocks.narrow(group.recipeId(), spec.ingredient(), supplementalMaterialLocks),
                             spec.count(), spec.consumption()), declared.allocation(), declared.inputSlot());
                 }
-                boolean graphOwned = graphToken != null && entry.allocation() == MaterialPlan.Allocation.GRAPH;
+                boolean graphOwned = entry.allocation() == MaterialPlan.Allocation.GRAPH;
                 if (graphOwned && entry.reusable()) builder.addGraphReusable(entry, planned, available);
                 else builder.add(entry, graphOwned ? planned : available);
             }
@@ -3243,32 +2511,21 @@ public final class AsyncCraftChain {
                         : targetLedger.tokenSince(reusableMark));
             }
             if (!reserveCountedInitial(counted.materials(Origin.INITIAL, 0, group.getMaterialOperations()), targetLedger, online)) return null;
-            for (ItemStack stack : counted.materials(Origin.VIRTUAL, 0, group.getMaterialOperations())) {
-                if (!takeExactMatching(virtualInventory, stack, stack.getCount())) return null;
-            }
-            for (int worker = 0; worker < group.getChildCount(); worker++) {
-                for (ItemStack stack : counted.reusableMaterials(Origin.VIRTUAL, worker)) {
-                    if (!takeExactMatching(virtualInventory, stack, stack.getCount())) return null;
-                }
-            }
-            if (graphToken != null) {
-                boolean accountFluids = materialAccount != null && group.usesTaskFluidInputs();
-                releaseUnusedGraphMaterials(graphToken,
-                        planned.remaining(Origin.INITIAL).stream()
-                                .filter(stack -> !accountFluids || !InkFluidSupport.isToken(stack)).toList(),
-                        planned.remaining(Origin.PRODUCER).stream()
-                                .filter(stack -> !accountFluids || !InkFluidSupport.isToken(stack)).toList());
-            }
+            boolean accountFluids = materialAccount != null && group.usesTaskFluidInputs();
+            releaseUnusedGraphMaterials(graphToken,
+                    planned.remaining(Origin.INITIAL).stream()
+                            .filter(stack -> !accountFluids || !InkFluidSupport.isToken(stack)).toList(),
+                    planned.remaining(Origin.PRODUCER).stream()
+                            .filter(stack -> !accountFluids || !InkFluidSupport.isToken(stack)).toList());
             group.setCountedOperationMaterials(counted);
             prepared = true;
             return new GraphNodeMaterials(reusableTokens);
         } catch (IllegalArgumentException unavailable) {
-            materialReservationFailureDetail = "Counted material reservation unavailable: " + unavailable.getMessage();
+            RSIntegrationMod.LOGGER.debug(ctx.format("图节点材料尚未齐备"), unavailable);
             return null;
         } finally {
             if (!prepared) {
                 targetLedger.cancelReservationsSince(mark);
-                restoreVirtualSnapshot(virtualBefore);
             }
         }
     }
@@ -3296,9 +2553,9 @@ public final class AsyncCraftChain {
         graphMaterials.releaseUnusedReservedFragments(
                 materialToken, unusedInitial, unusedProducer);
         RSIntegrationMod.LOGGER.warn(ctx.format(
-                "[RSI-Graph] Released unused planned materials node={} recipe={} "
+                "[RSI-Graph] Released unused planned materials reservation={} "
                         + "initial={} producer={}"),
-                currentStepIdx, currentRecipeForLogging(),
+                materialToken,
                 describeStacksForLogging(unusedInitial),
                 describeStacksForLogging(unusedProducer));
     }
@@ -3322,12 +2579,6 @@ public final class AsyncCraftChain {
     private static List<ItemStack> consumedFragments(
             List<ItemStack> before, List<ItemStack> after) {
         return MaterialReservationPlanner.consumedFragments(before, after);
-    }
-
-    private String currentRecipeForLogging() {
-        return steps.isEmpty() ? "unknown"
-                : steps.get(Math.min(Math.max(0, currentStepIdx), steps.size() - 1))
-                .recipeId().toString();
     }
 
     private static String describeStackForLogging(ItemStack stack) {
@@ -3428,13 +2679,6 @@ public final class AsyncCraftChain {
                 && graph.topologicalOrder().get(graph.topologicalOrder().size() - 1).equals(nodeId);
     }
 
-    private int stepIndex(NodeId nodeId) {
-        for (int i = 0; i < graph.topologicalOrder().size(); i++) {
-            if (graph.topologicalOrder().get(i).equals(nodeId)) return i;
-        }
-        throw new IllegalArgumentException("Unknown graph node " + nodeId);
-    }
-
     private final class EarthHeartTaintWorker implements ConcurrentNodeExecutor.Worker {
         @Override
         public ConcurrentNodeExecutor.Observation observe() {
@@ -3464,19 +2708,6 @@ public final class AsyncCraftChain {
     public boolean isDone() { return state == State.COMPLETED || state == State.ABORTED; }
     public boolean isAborted() { return state == State.ABORTED; }
     public State state() { return state; }
-    /**
-     * 当前 tick 内是否还能继续推进纯工作台步骤。
-     * 真实机器等待、玩家交互等待和最终结算仍保持原有的 tick 边界。
-     */
-    boolean canAdvanceImmediately(boolean vanillaBudgetAvailable) {
-        if (isDone() || useGraphExecution || waitingForMachineLease) return false;
-        if (waitingForInitialMaterials) return false;
-        if (state == State.PENDING) return true;
-        if (state != State.EXECUTING) return false;
-        if (currentStepIdx >= steps.size()) return true;
-        if (vanillaBudgetAvailable) return true;
-        return steps.get(currentStepIdx).modType() != ModType.GENERIC;
-    }
     public String abortReason() { return abortReason; }
     @Nullable public TerminationCoordinator.Report terminationReport() { return terminationReport; }
     /** @return the stable identity of this craft run */
@@ -3493,9 +2724,9 @@ public final class AsyncCraftChain {
         return storageEndpoint == null || storageEndpoint.session() == null
                 ? null : storageEndpoint.session().reference();
     }
-    public int currentStep() { return currentStepIdx; }
-    public int stepsCount() { return steps.size(); }
-    public boolean isGraphExecution() { return useGraphExecution; }
+    public int currentStep() { return (int) graphScheduler.countSucceeded(); }
+    public int stepsCount() { return graphNodes.size(); }
+    public boolean isGraphExecution() { return true; }
 
     /**
      * Build the current server-authoritative progress view for a status request.
@@ -3515,45 +2746,36 @@ public final class AsyncCraftChain {
         var view = new CraftMaterialView.Builder();
         view.held(virtualInventory);
         for (GraphVanillaJob job : graphVanillaJobs.values()) view.held(job.inventory);
-        if (useGraphExecution && graph != null && graphMaterials != null) {
-            graphMaterials.visitMonitorMaterials((material, available, toExtract) ->
-                    view.add(material, available, 0, 0, 0, toExtract, 0, false));
-            for (CraftNode node : graph.nodes()) {
-                CraftNodeRuntime runtime = nodeRuntimes.get(node.id());
-                int running = runtime == null ? 0 : runtime.runningOperations();
-                for (OutputDeclaration output : node.outputs()) {
-                    boolean uncertain = output.dynamicIdentity() || !output.probability().isGuaranteed()
-                            || output.minimumQuantity() != output.maximumQuantity()
-                            || output.quantity() % node.executions() != 0;
-                    long produced = publishedOutputQuantities.getOrDefault(output.id(), 0L);
-                    long remaining = Math.max(0L, output.quantity() - produced);
-                    long crafting = uncertain ? 0 : Math.min(remaining,
-                            SaturatingLongMath.multiply(output.quantity() / node.executions(), running));
-                    long scheduled = uncertain ? 0 : remaining - crafting;
-                    view.add(output.material(), 0, 0, crafting, scheduled, 0, produced, uncertain);
-                }
-                if (runtime != null && runtime.delegate() instanceof ParallelCraftGroup group) {
-                    if (!group.appendMonitorMaterials(view)) view.incomplete();
-                } else if (running > 0 && !graphVanillaJobs.containsKey(node.id())) {
-                    // 尚未提供只读持料快照的适配器，不能将缺少的信息显示成确定的零。
-                    view.incomplete();
-                }
+        graphMaterials.visitMonitorMaterials((material, available, toExtract) ->
+                view.add(material, available, 0, 0, 0, toExtract, 0, false));
+        for (CraftNode node : graphNodes.values()) {
+            CraftNodeRuntime runtime = nodeRuntimes.get(node.id());
+            int running = runtime == null ? 0 : runtime.runningOperations();
+            for (OutputDeclaration output : node.outputs()) {
+                boolean uncertain = output.dynamicIdentity() || !output.probability().isGuaranteed()
+                        || output.minimumQuantity() != output.maximumQuantity()
+                        || output.quantity() % node.executions() != 0;
+                long produced = publishedOutputQuantities.getOrDefault(output.id(), 0L);
+                long remaining = Math.max(0L, output.quantity() - produced);
+                long crafting = uncertain ? 0 : Math.min(remaining,
+                        SaturatingLongMath.multiply(output.quantity() / node.executions(), running));
+                long scheduled = uncertain ? 0 : remaining - crafting;
+                view.add(output.material(), 0, 0, crafting, scheduled, 0, produced, uncertain);
             }
-        } else {
-            // 旧 flat 路径没有完整材料图；保留真实持料，明确标记明细不完整。
-            view.incomplete();
-            if (currentDelegate instanceof ParallelCraftGroup group) group.appendMonitorMaterials(view);
+            if (runtime != null && runtime.delegate() instanceof ParallelCraftGroup group) {
+                if (!group.appendMonitorMaterials(view)) view.incomplete();
+            } else if (running > 0 && !graphVanillaJobs.containsKey(node.id())) {
+                // 尚未提供只读持料快照的适配器，不能将缺少的信息显示成确定的零。
+                view.incomplete();
+            }
         }
         return view.build();
     }
 
     private CraftProgressSnapshot buildProgressSnapshot(boolean terminal) {
-        int total = useGraphExecution && graph != null
-                ? graph.topologicalOrder().size() : steps.size();
-        int completed = useGraphExecution && graphScheduler != null
-                ? (int) graphScheduler.countSucceeded() : currentStepIdx;
-        int running = graphExecutor != null ? graphExecutor.runningCount()
-                : (currentDelegate != null ? 1 : 0);
+        int total = stepsCount();
+        int completed = currentStep();
+        int running = (graphExecutor == null ? 0 : graphExecutor.runningCount()) + graphVanillaJobs.size();
         CraftProgressSnapshot.Result progressResult = progressResult(terminal);
         CraftProgressSnapshot.Reason progressReason = progressReason(progressResult);
         int sequence = terminal ? CraftProgressSnapshot.TERMINAL_SEQUENCE : ++progressSequence;
@@ -3569,62 +2791,13 @@ public final class AsyncCraftChain {
         publishedOutputQuantities.merge(port, (long) stack.getCount(), SaturatingLongMath::add);
     }
 
-    private void recordSettledFinalOutputs(List<ItemStack> outputs, List<CollectedOutput> reported,
-                                          List<CollectedOutput> observed) {
-        if (currentStepIdx != steps.size() - 1) return;
-        ItemStack target = displayTarget();
-        if (target.isEmpty()) return;
-        MaterialKey material = MaterialKey.of(target);
-        for (ItemStack output : outputs) {
-            if (MaterialMatcher.matchesOutputDeclaration(material, output)) {
-                settledFinalOutputQuantity = SaturatingLongMath.add(settledFinalOutputQuantity, output.getCount());
-            }
-        }
-        IntegrationResourceKey fluid = InkFluidSupport.resource(target);
-        if (fluid == null) return;
-        ProductionTarget requested = ProductionTarget.of(fluid, 1L);
-        for (CollectedOutput output : reported) {
-            if (requested.matchesFluid(output)) {
-                settledFinalOutputQuantity = SaturatingLongMath.add(settledFinalOutputQuantity, output.amount());
-            }
-        }
-        for (CollectedOutput output : observed) {
-            if (requested.matchesFluid(output)) {
-                settledFinalOutputQuantity = SaturatingLongMath.add(settledFinalOutputQuantity, output.amount());
-            }
-        }
-    }
-
     public CraftOutputProgress outputProgress() {
-        if (useGraphExecution && graph != null) {
+        if (productionAttempts.isEmpty()) {
             return CraftOutputProgress.fromGraph(graph, displayTarget(), publishedOutputQuantities);
         }
-        if (steps.isEmpty()) return CraftOutputProgress.UNKNOWN;
-        int finalStepIndex = steps.size() - 1;
-        CraftingResolver.ResolutionStep step = steps.get(finalStepIndex);
-        if (step.productionTarget() != null) {
-            ProbabilisticProduction production = probabilityTargets.get(step);
-            long completed = Math.max(settledFinalOutputQuantity, production != null ? production.produced() : 0L);
-            if (state == State.COMPLETED) completed = Math.max(completed, step.productionTarget().quantity());
-            return new CraftOutputProgress(completed, step.productionTarget().quantity());
-        }
-        // syntheticOutput 仅保存身份（数量固定为 1），每次产量必须读真实配方。
-        Recipe<?> recipe = recipeForStep(step);
-        ItemStack output = recipe == null || server.overworld() == null ? ItemStack.EMPTY
-                : ModRecipeHandlers.tryGetResultItem(recipe, server.overworld().registryAccess());
-        if (output.isEmpty()) return CraftOutputProgress.UNKNOWN;
-        int totalOperations = Math.max(1, step.executions());
-        int completedOperations = state == State.COMPLETED || currentStepIdx > finalStepIndex
-                ? totalOperations : 0;
-        if (currentStepIdx == finalStepIndex && stepRemaining > 0) {
-            completedOperations = currentDelegate instanceof ParallelCraftGroup group
-                    ? completedFlatWindowOperations(totalOperations, stepRemaining, group.getCompletedOperations())
-                    : completedFlatOperations(totalOperations, stepRemaining);
-        }
-        return new CraftOutputProgress(
-                Math.max(settledFinalOutputQuantity,
-                        SaturatingLongMath.multiply(completedOperations, output.getCount())),
-                SaturatingLongMath.multiply(totalOperations, output.getCount()));
+        Map<OutputPortId, Long> quantities = new HashMap<>(publishedOutputQuantities);
+        productionAttempts.values().forEach(attempt -> quantities.put(attempt.targetPort, attempt.progress.produced()));
+        return CraftOutputProgress.fromGraph(graph, displayTarget(), quantities);
     }
 
     private CraftProgressSnapshot.Result progressResult(boolean terminal) {
@@ -3639,8 +2812,7 @@ public final class AsyncCraftChain {
             return CraftProgressSnapshot.Result.STOPPING;
         }
         if (waitingForInitialMaterials) return CraftProgressSnapshot.Result.WAITING;
-        if (state == State.WAITING_MOD || state == State.WAITING_PLAYER_TRANSFORMATION
-                || waitingForMachineLease) {
+        if (state == State.WAITING_PLAYER_TRANSFORMATION) {
             return CraftProgressSnapshot.Result.WAITING;
         }
         return CraftProgressSnapshot.Result.RUNNING;
@@ -3665,18 +2837,12 @@ public final class AsyncCraftChain {
             return CraftProgressSnapshot.Reason.UNKNOWN;
         }
         if (waitingForInitialMaterials) return CraftProgressSnapshot.Reason.WAITING_MATERIALS;
-        if ((state == State.WAITING_MOD && currentDelegate != null) || waitingForMachineLease) {
-            return CraftProgressSnapshot.Reason.MACHINE_BUSY;
-        }
         return CraftProgressSnapshot.Reason.NONE;
     }
 
     private List<CraftProgressSnapshot.NodeProgress> buildNodeProgress() {
-        if (!useGraphExecution || graph == null || graphScheduler == null) {
-            return buildFlatNodeProgress();
-        }
         int maximum = CraftProgressSnapshot.MAX_NODE_DETAILS;
-        List<NodeId> order = graph.topologicalOrder();
+        List<NodeId> order = graphScheduler.nodeOrder();
         if (order.size() <= maximum) {
             List<CraftProgressSnapshot.NodeProgress> result = new ArrayList<>(order.size());
             for (NodeId nodeId : order) result.add(buildGraphNodeProgress(nodeId));
@@ -3706,7 +2872,7 @@ public final class AsyncCraftChain {
                                       int maximum,
                                       Predicate<NodeId> predicate) {
         if (result.size() >= maximum) return;
-        for (NodeId nodeId : graph.topologicalOrder()) {
+        for (NodeId nodeId : graphScheduler.nodeOrder()) {
             if (result.size() >= maximum) return;
             if (!predicate.test(nodeId) || !selected.add(nodeId.value())) continue;
             result.add(buildGraphNodeProgress(nodeId));
@@ -3757,56 +2923,7 @@ public final class AsyncCraftChain {
                         ? producer.outputPort().nodeId().value() : -1)).toList();
     }
 
-    private List<CraftProgressSnapshot.NodeProgress> buildFlatNodeProgress() {
-        List<CraftProgressSnapshot.NodeProgress> result = new ArrayList<>(steps.size());
-        for (int i = 0; i < steps.size(); i++) {
-            CraftingResolver.ResolutionStep step = steps.get(i);
-            CraftProgressSnapshot.NodeState nodeState;
-            if (i < currentStepIdx || state == State.COMPLETED) {
-                nodeState = CraftProgressSnapshot.NodeState.SUCCEEDED;
-            } else if (i > currentStepIdx) {
-                nodeState = CraftProgressSnapshot.NodeState.BLOCKED;
-            } else if (state == State.ABORTED) {
-                nodeState = CraftProgressSnapshot.NodeState.FAILED;
-            } else if (currentDelegate != null || stepRemaining > 0 || state == State.WAITING_MOD
-                    || state == State.WAITING_PLAYER_TRANSFORMATION) {
-                nodeState = CraftProgressSnapshot.NodeState.RUNNING;
-            } else {
-                nodeState = CraftProgressSnapshot.NodeState.READY;
-            }
-            int totalOps = Math.max(1, step.executions());
-            int completedOps = i < currentStepIdx || state == State.COMPLETED ? totalOps : 0;
-            if (i == currentStepIdx && stepRemaining > 0) {
-                completedOps = completedFlatOperations(totalOps, stepRemaining);
-            }
-            int runningOps = i == currentStepIdx && currentDelegate != null
-                    ? Math.min(totalOps, currentDelegate instanceof ParallelCraftGroup group
-                            ? group.getRunningOperations() : 1) : 0;
-            if (i == currentStepIdx && currentDelegate instanceof ParallelCraftGroup group) {
-                completedOps = completedFlatWindowOperations(
-                        totalOps, stepRemaining, group.getCompletedOperations());
-            }
-            String detail = i == currentStepIdx ? abortReason : "";
-            CraftProgressSnapshot.Reason nodeReason = i == currentStepIdx
-                    ? failureCode.progressReason() : CraftProgressSnapshot.Reason.NONE;
-            result.add(new CraftProgressSnapshot.NodeProgress(i, nodeState,
-                    step.recipeId().toString(), step.modType().id(), displayOutput(step),
-                    completedOps, totalOps, runningOps, i == currentStepIdx ? flatMachineLabel() : "",
-                    nodeReason, detail,
-                    i == currentStepIdx && currentDelegate instanceof ParallelCraftGroup group
-                            && group.isDraining(), List.of(), false,
-                    i == currentStepIdx && currentDelegate != null ? currentDelegate.monitorCycleProgress()
-                            : MachineCycleProgress.UNKNOWN));
-        }
-        return List.copyOf(result);
-    }
-
-    static int completedFlatOperations(int totalOperations, int remainingOperations) {
-        int total = Math.max(1, totalOperations);
-        return Math.max(0, Math.min(total, total - Math.max(0, remainingOperations)));
-    }
-
-    private static ItemStack displayOutput(@Nullable CraftNode node) {
+    private ItemStack displayOutput(@Nullable CraftNode node) {
         if (node == null) return ItemStack.EMPTY;
         return node.outputs().stream()
                 .filter(output -> output.kind() == OutputKind.PRIMARY
@@ -3814,30 +2931,12 @@ public final class AsyncCraftChain {
                 .findFirst()
                 .map(output -> output.material().toStack(SaturatingLongMath.clampToInt(
                         Math.max(1L, output.quantity() / Math.max(1, node.executions())))))
-                .orElseGet(() -> node.syntheticOutput() == null
-                        ? ItemStack.EMPTY : node.syntheticOutput().copy());
-    }
-
-    private ItemStack displayOutput(CraftingResolver.ResolutionStep step) {
-        if (step.productionTarget() != null) {
-            // 展示材料身份即可，避免把整单需求量当作普通物品堆叠数量发送。
-            return step.productionTarget().displayStack();
-        }
-        if (step.syntheticOutput() != null && !step.syntheticOutput().isEmpty()) {
-            return step.syntheticOutput().copy();
-        }
-        Recipe<?> recipe = recipeForStep(step);
-        return recipe == null || server.overworld() == null ? ItemStack.EMPTY : ModRecipeHandlers.tryGetResultItem(
-                recipe, server.overworld().registryAccess());
-    }
-
-    private String flatMachineLabel() {
-        if (currentDelegate instanceof ParallelCraftGroup group) return group.machineLabel();
-        MachineLeaseRegistry.Lease lease = flatOperationSession == null
-                ? null : flatOperationSession.machineLease();
-        if (lease == null) return machineStartFailureLabel;
-        MachineLeaseRegistry.MachineKey machine = lease.machine();
-        return machine.dimension() + "@" + machine.position().toShortString();
+                .orElseGet(() -> {
+                    if (node.syntheticOutput() != null) return node.syntheticOutput().copy();
+                    Recipe<?> recipe = recipeForNode(node);
+                    return recipe == null || server.overworld() == null ? ItemStack.EMPTY
+                            : ModRecipeHandlers.tryGetResultItem(recipe, server.overworld().registryAccess());
+                });
     }
 
     private static CraftProgressSnapshot.NodeState progressNodeState(
@@ -3996,7 +3095,6 @@ public final class AsyncCraftChain {
             return !startEarthHeartTaint(player, taintRemaining, earthHeartTaintNodeId);
         }
         earthHeartTaintNodeId = null;
-        currentStepIdx++;
         state = State.EXECUTING;
         // Tainted heart is back in virtualInventory and this taint step is done -
         // settled boundary owed to the player on any later abort.
@@ -4020,149 +3118,22 @@ public final class AsyncCraftChain {
 
     //  vanilla batch execution
 
-    /** Execute one bounded slice of consecutive vanilla steps. */
-    private int executeVanillaBatch(int startIdx, ServerPlayer online, int operationBudget) {
-        ServerLevel level = server.overworld();
-        boolean pureChain = steps.stream().allMatch(step ->
-                step.modType() == ModType.GENERIC
-                        && !step.recipeId().equals(CraftingResolver.TAINT_EARTH_HEART_STEP));
-        VanillaBatchSlice slice = BatchDispatchPlanner.planVanillaBatchSlice(
-                steps, startIdx, stepRemaining, operationBudget,
-                step -> pureChain && level != null && StableRecipeBatch.isEligible(
-                        level, step, targetOutput, supplementalMaterialLocks));
-        if (!slice.steps().isEmpty()) {
-            FlatCraftExecutor.ExecutionResult result =
-                    executeVanillaStepsInlineDetailed(slice.steps(), online,
-                            virtualInventory, ledger, true);
-            if (result.status() == FlatCraftExecutor.Status.DEFERRED) {
-                vanillaBatchDeferredTicks++;
-                waitingForVanillaBudget = true;
-                int retryLimit = configuredStableBatchRetryTicks();
-                RSIntegrationMod.LOGGER.debug(ctx.format(
-                        "Vanilla batch deferred ({}/{}): {}"),
-                        vanillaBatchDeferredTicks, retryLimit,
-                        result.detail());
-                if (vanillaBatchDeferredTicks >= retryLimit) {
-                    abort("Vanilla batch deferred without progress: "
-                                    + result.detail(),
-                            Component.translatable(
-                                    "rsi.async.abort.stable_batch_deferred",
-                                    retryLimit / 20));
-                }
-                return startIdx;
-            }
-            vanillaBatchDeferredTicks = 0;
-            if (result.status() == FlatCraftExecutor.Status.FAILURE) {
-                if (state != State.ABORTED) {
-                    abort("Vanilla batch execution failed: " + result.detail(),
-                            Component.translatable("rsi.generic.error.auto_craft_failed"));
-                }
-                return startIdx;
-            }
-        }
-        stepRemaining = slice.remainingExecutions();
-        if (!slice.steps().isEmpty()) executionClock.markProgress();
-        return slice.nextStepIndex();
-    }
-
-    static int flatDispatchWindow(int remainingOperations, int dispatchLimit) {
-        return BatchDispatchPlanner.flatDispatchWindow(remainingOperations, dispatchLimit);
-    }
-
-    static int remainingAfterFlatBatch(int remainingOperations, int completedOperations) {
-        return BatchDispatchPlanner.remainingAfterFlatBatch(remainingOperations, completedOperations);
-    }
-
-    static int completedFlatWindowOperations(int totalOperations, int remainingOperations,
-                                              int completedInWindow) {
-        return BatchDispatchPlanner.completedFlatWindowOperations(
-                totalOperations, remainingOperations, completedInWindow);
-    }
-
-    static VanillaBatchSlice planVanillaBatchSlice(
-            List<CraftingResolver.ResolutionStep> sourceSteps,
-            int startIdx, int currentRemaining, int operationBudget) {
-        return BatchDispatchPlanner.planVanillaBatchSlice(
-                sourceSteps, startIdx, currentRemaining, operationBudget);
-    }
-
-    record VanillaBatchSlice(
-            List<CraftingResolver.ResolutionStep> steps,
-            int nextStepIndex,
-            int remainingExecutions) {}
-
     boolean isWaitingForVanillaBudget() {
         return waitingForVanillaBudget;
-    }
-
-    private static int configuredOperationsPerDispatch() {
-        return BatchDispatchPlanner.configuredOperationsPerDispatch();
-    }
-
-    private static int configuredStableBatchRetryTicks() {
-        try {
-            return Math.max(1,
-                    RSIntegrationConfig.CRAFTING_STABLE_BATCH_RETRY_SECONDS.get()) * 20;
-        } catch (Exception ignored) {
-            return RSIntegrationConfig.DEFAULT_CRAFTING_STABLE_BATCH_RETRY_SECONDS * 20;
-        }
-    }
-
-    /**
-     * Execute vanilla crafting steps inline, using the chain's virtual inventory
-     * and ledger so intermediate outputs feed forward across the entire chain.
-     */
-    private boolean executeVanillaStepsInline(List<CraftingResolver.ResolutionStep> vanillaSteps,
-                                              ServerPlayer online) {
-        return executeVanillaStepsInlineExtracted(vanillaSteps, online,
-                virtualInventory, ledger, true);
-    }
-
-    private boolean executeVanillaStepsInline(List<CraftingResolver.ResolutionStep> vanillaSteps,
-                                              ServerPlayer online,
-                                              List<ItemStack> workingInventory) {
-        return executeVanillaStepsInlineExtracted(vanillaSteps, online,
-                workingInventory, ledger, true);
-    }
-
-    private boolean executeVanillaStepsInline(List<CraftingResolver.ResolutionStep> vanillaSteps,
-                                              ServerPlayer online,
-                                              List<ItemStack> workingInventory,
-                                              ExtractionLedger executionLedger,
-                                              boolean allowPhysicalFallback) {
-        return executeVanillaStepsInlineExtracted(vanillaSteps, online,
-                workingInventory, executionLedger, allowPhysicalFallback);
-    }
-
-    private boolean executeVanillaStepsInlineExtracted(
-            List<CraftingResolver.ResolutionStep> vanillaSteps,
-            ServerPlayer online, List<ItemStack> workingInventory,
-            ExtractionLedger executionLedger, boolean allowPhysicalFallback) {
-        return executeVanillaStepsInlineDetailed(
-                vanillaSteps, online, workingInventory, executionLedger,
-                allowPhysicalFallback).status() == FlatCraftExecutor.Status.SUCCESS;
-    }
-
-    private FlatCraftExecutor.ExecutionResult executeVanillaStepsInlineDetailed(
-            List<CraftingResolver.ResolutionStep> vanillaSteps,
-            ServerPlayer online, List<ItemStack> workingInventory,
-            ExtractionLedger executionLedger, boolean allowPhysicalFallback) {
-        return executeVanillaStepsInlineDetailed(vanillaSteps, online, workingInventory,
-                executionLedger, allowPhysicalFallback, null);
     }
 
     private FlatCraftExecutor.ExecutionResult executeVanillaStepsInlineDetailed(
             List<CraftingResolver.ResolutionStep> vanillaSteps,
             ServerPlayer online, List<ItemStack> workingInventory,
             ExtractionLedger executionLedger, boolean allowPhysicalFallback,
-            @Nullable CraftingCatalystState catalystState) {
+            @Nullable CraftingCatalystState catalystState, @Nullable ResourceLocation terminalRecipe) {
         ServerLevel overworld = server.overworld();
         if (overworld == null) {
             return FlatCraftExecutor.ExecutionResult.failure("overworld unavailable");
         }
         return FlatCraftExecutor.executeDetailed(vanillaSteps, online, workingInventory,
                 executionLedger, allowPhysicalFallback,
-                new FlatCraftExecutor.Context(overworld, ctx, steps, targetOutput,
+                new FlatCraftExecutor.Context(overworld, ctx, terminalRecipe, targetOutput,
                         new FlatCraftExecutor.Host() {
                             @Override
                             public ItemStack reserve(ExtractionLedger ledger,
@@ -4199,49 +3170,6 @@ public final class AsyncCraftChain {
 
     //  multi-block step execution
 
-    private IBatchDelegate startModStep(CraftingResolver.ResolutionStep step, ServerPlayer online) {
-        machineStartFailureMessage = null;
-        machineStartFailureDetail = null;
-        machineStartFailureLabel = "";
-        materialReservationFailureDetail = null;
-        NodeId identity = new NodeId(flatGroupSequence);
-        PreparationResult preparation = prepareGraphNode(identity,
-                step.withExecutions(Math.max(1, stepRemaining)), online);
-        flatWaitingMachines = graphWaitingMachines.remove(identity);
-        if (flatWaitingMachines == null) flatWaitingMachines = List.of();
-        if (preparation.state() == PreparationState.RETRY) {
-            waitingForMachineLease = true;
-            machineWaitDetail = preparation.detail();
-            machineWaitMessage = preparation.userMessage();
-            return null;
-        }
-        if (preparation.state() != PreparationState.READY || preparation.prepared() == null) {
-            machineStartFailureDetail = preparation.detail();
-            machineStartFailureMessage = preparation.userMessage();
-            return null;
-        }
-        PreparedGraphNode prepared = preparation.prepared();
-        Component storageFailure = prepared.delegate().validateOutputStorage(online);
-        if (storageFailure != null) {
-            releasePreparationQuietly(prepared.delegate());
-            machineStartFailureMessage = storageFailure;
-            return null;
-        }
-        ParallelCraftGroup group = createExecutionGroup(prepared, identity, online);
-        if (!validatePreparedDelegate(group, online, step.recipeId(), null, BlockPos.ZERO)) {
-            waitingForMachineLease = true;
-            machineWaitDetail = "execution worker temporarily unavailable";
-            return null;
-        }
-        flatGroupSequence = Math.addExact(flatGroupSequence, 1);
-        group.setOperationKernel(operationKernel, craftId, identity, craftOperationBudget);
-        machineCount = group.getTotalOperations();
-        waitingForMachineLease = false;
-        return startExecutionGroup(group, step, online);
-    }
-
-    //  generic (no-machine) delegate: shared-ledger pre-reserve flow
-
     static int genericBatchLimit(IBatchDelegate delegate, int remainingOperations,
                                  int configuredLimit) {
         int delegateLimit = Math.max(1,
@@ -4269,222 +3197,8 @@ public final class AsyncCraftChain {
                 : Component.literal(step.recipeId().toString());
     }
 
-    private IBatchDelegate startExecutionGroup(ParallelCraftGroup group,
-                                                CraftingResolver.ResolutionStep step, ServerPlayer online) {
-        boolean startInvoked = false;
-        flatLifecycle = new OperationLifecycle(group);
-        try {
-            OperationStartContext context;
-            if (shouldUsePrivateLedgerGraphDispatch(group, group.materialPlan())
-                    || group.materialPlan().delegateExtracted()) {
-                materializePrivateLedgerFlatInputs(online);
-                context = OperationStartContext.delegateExtracted(online, ledger);
-            } else {
-                GraphNodeMaterials reserved = reserveCountedOperationMaterials(group, online, ledger, null);
-                if (reserved == null) {
-                    group.releasePreparationResources();
-                    return null;
-                }
-                group.setReusableReservationTokens(reserved.reusableTokens());
-                if (!group.validateExecutionContext(online) || !commitLedger(ledger, online)) {
-                    group.releasePreparationResources();
-                    return null;
-                }
-                context = OperationStartContext.chainReserved(online, ledger,
-                        MaterialPlan.none(), List.of(), InputBufferPlan.none());
-            }
-            startInvoked = true;
-            if (!flatLifecycle.start(context)) flatLifecycle.recover(online, "execution group rejected start");
-            return group;
-        } catch (RuntimeException exception) {
-            RSIntegrationMod.LOGGER.error(ctx.format("Execution group failed for {}"), step.recipeId(), exception);
-            flatLifecycle.recover(online, "execution group start threw");
-            return startInvoked || ledger.isCommitted() ? group : null;
-        }
-    }
-
-    /** 私有账本只能读取真实库存；即使交接中断，也不能再次补发已交付的中间产物。 */
-    private void materializePrivateLedgerFlatInputs(ServerPlayer online) {
-        try {
-            for (int index = 0; index < virtualInventory.size(); index++) {
-                if (materialAccount != null) {
-                    materialAccount.add(virtualInventory.get(index));
-                    virtualInventory.set(index, ItemStack.EMPTY);
-                    continue;
-                }
-                ItemStack remainder = insertIntoStorage(online, virtualInventory.get(index));
-                // safeGiveToPlayer 会接管剩余物（包括持久恢复队列）；返回 false 也不能再次退款。
-                virtualInventory.set(index, ItemStack.EMPTY);
-                if (!remainder.isEmpty() && !safeGiveToPlayer(online, remainder)) {
-                    throw new IllegalStateException("private ledger input handoff incomplete");
-                }
-            }
-        } finally {
-            // 一次压缩和快照，避免逐项 remove(0) 与复制整个剩余库存的平方开销。
-            virtualInventory.removeIf(ItemStack::isEmpty);
-            snapshotCommittedVirtual();
-            MaterialSources.invalidateFor(online, storageEndpoint);
-        }
-    }
-
-    private void restoreVirtualSnapshot(List<ItemStack> snapshot) {
-        virtualInventory.clear();
-        virtualInventory.addAll(StackCopies.excludingEmpty(snapshot));
-    }
-
-    record FlatMaterialBatch(int executions, List<ItemStack> materials) {}
-
-    static FlatMaterialBatch reserveFlatMaterialBatch(
-            int preparedBatch, IntUnaryOperator prepare,
-            IntFunction<List<ItemStack>> reserve) {
-        MaterialReservationPlanner.FlatMaterialBatch result =
-                MaterialReservationPlanner.reserveFlatMaterialBatch(preparedBatch, prepare, reserve);
-        return new FlatMaterialBatch(result.executions(), result.materials());
-    }
-
-    //  output capture (magnet protection)
-
-    /**
-     * Arm {@link CraftOutputInterceptor} only for delegates that explicitly
-     * declare a world-spawned output. Slot-based machines must be collected from
-     * their output slot and therefore leave {@link IBatchDelegate#getExpectedOutput()}
-     * null.
-     */
-    private void armOutputCapture(IBatchDelegate delegate, ServerPlayer online) {
-        // Slot-based machines expose no expected world output. Arming a broad
-        // position-only capture for them can consume unrelated newborn entities
-        // (for example an ingredient remainder ejected above the machine), then
-        // suppress collectResult() because the captured list is non-empty.
-        ItemStack expected = delegate.getExpectedOutput();
-        if (expected == null || expected.isEmpty()) return;
-
-        AABB region = delegate.getOutputCaptureRegion();
-        if (region == null) return;
-        BlockPos pos = delegate.getMachinePos();
-        if (pos == null) return;
-
-        ResourceLocation dimLoc = (delegate instanceof AbstractBatchDelegate abd) ? abd.getMachineDim() : null;
-        ResourceKey<Level> dim = dimLoc != null
-                ? ResourceKey.create(Registries.DIMENSION, dimLoc)
-                : online.level().dimension();
-
-        if (captureHandle == null) {
-            this.captureHandle = CraftOutputInterceptor.arm(dim, region, expected,
-                    delegate.allowsOverlappingOutputCaptureOrigins());
-        }
-    }
-
-    private boolean hasCapturedOutput() {
-        return (flatOperationSession != null && flatOperationSession.hasCaptured())
-                || (captureHandle != null && captureHandle.hasCaptured());
-    }
-
-    private List<ItemStack> capturedOutputSnapshot() {
-        List<ItemStack> captured = new ArrayList<>();
-        if (flatOperationSession != null) captured.addAll(flatOperationSession.capturedSnapshot());
-        if (captureHandle != null) captured.addAll(captureHandle.snapshot());
-        return List.copyOf(captured);
-    }
-
-    private boolean acquireFlatOperationScope(IBatchDelegate delegate, BoundMachine machine,
-                                              CraftingResolver.ResolutionStep step) {
-        if (flatOperationSession != null) return false;
-        ItemStack expected = delegate.getExpectedOutput();
-        AABB region = delegate.getOutputCaptureRegion();
-        OperationResourceCoordinator.CaptureRequest capture = expected != null && !expected.isEmpty()
-                && region != null
-                ? new OperationResourceCoordinator.CaptureRequest(machine.dim(), region, expected,
-                        delegate.allowsOverlappingOutputCaptureOrigins())
-                : null;
-        BlockPos operationMachinePos = delegate.getOperationMachinePos(machine.pos());
-        MachineLeaseRegistry.MachineKey key = new MachineLeaseRegistry.MachineKey(
-                machine.dim(), operationMachinePos, step.modType().id());
-        flatOperationSession = operationKernel.tryPrepare(
-                new OperationId(craftId, new NodeId(Math.max(0, currentStepIdx)), 0),
-                craftOperationBudget, key, capture);
-        return flatOperationSession != null;
-    }
-
-    private void closeFlatOperationScope() {
-        OperationExecutionKernel.Session session = flatOperationSession;
-        flatOperationSession = null;
-        if (session != null) session.close();
-    }
-
-    /** Tear down the active capture zone and return whatever it grabbed. */
-    private List<ItemStack> disarmOutputCapture() {
-        List<ItemStack> captured = new ArrayList<>();
-        OperationExecutionKernel.Session session = flatOperationSession;
-        if (session != null) captured.addAll(session.drainCapture());
-        CraftOutputInterceptor.CaptureHandle handle = captureHandle;
-        captureHandle = null;
-        if (handle != null) captured.addAll(handle.drainAndClose());
-        return List.copyOf(captured);
-    }
-
-    /**
-     * On abort, hand any already-captured product to the player / network rather
-     * than let the cancelled entity vanish. Rare (output usually means success),
-     * but avoids item loss in a timeout/spawn race.
-     */
-    private void recoverCapturedOutputs(ServerPlayer online) {
-        for (ItemStack s : disarmOutputCapture()) {
-            if (s.isEmpty()) continue;
-            if (online != null) {
-                recordFinalDelivery(
-                        s, safeGiveToPlayer(online, s));
-            } else {
-                boolean handled = insertOrDropAtSpawn(s);
-                recordFinalDelivery(
-                        s, handled && !InkFluidSupport.isToken(s));
-            }
-        }
-    }
-
-    private List<CollectedOutput> recordReportedResources(
-            IBatchDelegate delegate
-    ) {
-        if (delegate == null) return List.of();
-        List<CollectedOutput> recorded = new ArrayList<>();
-        for (CollectedOutput output : ProductionEvidence.from(delegate).takeDelivered()) {
-            if (output == null || output.amount() <= 0L) continue;
-            reportedResources.add(output);
-            recorded.add(output);
-        }
-        return List.copyOf(recorded);
-    }
-
-    private List<CollectedOutput> recordObservedProduction(
-            IBatchDelegate delegate
-    ) {
-        if (delegate == null) return List.of();
-        List<CollectedOutput> observed = new ArrayList<>();
-        for (CollectedOutput output
-                : ProductionEvidence.from(delegate).takeObserved()) {
-            if (output == null || output.amount() <= 0L) continue;
-            observed.add(output);
-        }
-        return List.copyOf(observed);
-    }
-
     public List<CollectedOutput> reportedResources() {
         return List.copyOf(reportedResources);
-    }
-
-    private static String describeOutputSettlement(OutputAccounting.Settlement settlement) {
-        return settlement.ports().stream()
-                .filter(port -> !port.complete())
-                .map(port -> port.port().portId() + " expected=" + port.expected()
-                        + " actual=" + port.actual())
-                .collect(Collectors.joining(", "));
-    }
-
-    private static long expectedStructuredOutputCount(OutputAccounting.Settlement settlement) {
-        return settlement.ports().stream().mapToLong(OutputAccounting.PortSettlement::expected).sum();
-    }
-
-    private static long actualStructuredOutputCount(OutputAccounting.Settlement settlement) {
-        return settlement.ports().stream().mapToLong(OutputAccounting.PortSettlement::actual).sum();
     }
 
     static int countMatchingProduction(List<ItemStack> results,
@@ -4499,16 +3213,6 @@ public final class AsyncCraftChain {
             }
         }
         return count;
-    }
-
-    private static void reportCraftedPrimaryOutputs(
-            @Nullable ServerPlayer player, List<ItemStack> results,
-            @Nullable IBatchDelegate.ExpectedProduction expected,
-            @Nullable ItemStack expectedOutput) {
-        if (player == null) return;
-        for (ItemStack output : selectCraftedPrimaryOutputs(results, expected, expectedOutput)) {
-            ExternalItemProgressBridge.enqueueCrafted(player, output);
-        }
     }
 
     static List<ItemStack> selectCraftedPrimaryOutputs(
@@ -4533,30 +3237,6 @@ public final class AsyncCraftChain {
             }
         }
         return List.copyOf(selected);
-    }
-
-    private ItemStack currentStepOutputPrototype() {
-        if (currentDelegate != null) {
-            IBatchDelegate.ExpectedProduction expected = currentDelegate.getExpectedProduction();
-            if (expected != null && expected.item() != null && !expected.item().isEmpty()) {
-                return expected.item();
-            }
-            ItemStack expectedOutput = currentDelegate.getExpectedOutput();
-            if (expectedOutput != null && !expectedOutput.isEmpty()) return expectedOutput;
-        }
-        if (targetOutput != null && !targetOutput.isEmpty()
-                && currentStepIdx == steps.size() - 1) {
-            return targetOutput;
-        }
-        if (currentStepIdx < 0 || currentStepIdx >= steps.size()) return ItemStack.EMPTY;
-        ItemStack plannedOutput = steps.get(currentStepIdx).syntheticOutput();
-        if (plannedOutput != null && !plannedOutput.isEmpty()) return plannedOutput;
-        ServerLevel level = server.overworld();
-        if (level == null) return ItemStack.EMPTY;
-        Recipe<?> recipe = level.getRecipeManager()
-                .byKey(steps.get(currentStepIdx).recipeId()).orElse(null);
-        return recipe == null ? ItemStack.EMPTY
-                : ModRecipeHandlers.tryGetResultItem(recipe, level.registryAccess());
     }
 
     static boolean isPrimaryGraphPublication(
@@ -4727,7 +3407,7 @@ public final class AsyncCraftChain {
         if (server.overworld() == null) return List.of();
         List<MagicResourceCost> costs = new ArrayList<>();
         RecipeManager recipes = server.overworld().getRecipeManager();
-        for (CraftingResolver.ResolutionStep step : steps) {
+        for (CraftNode step : graphNodes.values()) {
             Recipe<?> recipe = recipes.byKey(step.recipeId()).orElse(null);
             for (MagicResourceCost cost : MagicResourceCostCatalog.costsFor(recipe)) {
                 long total = cost.totalFor(step.executions());
@@ -4754,14 +3434,14 @@ public final class AsyncCraftChain {
 
     private boolean finish(ServerPlayer online) {
         if (!dispatchAllowed.getAsBoolean()) return false;
-        if (!finalSettlementPrepared && useGraphExecution && graphMaterials != null) {
+        if (!finalSettlementPrepared) {
             for (ItemStack stack : graphMaterials.drainAvailableProducerAssets()) {
                 addToVirtualInventory(stack);
             }
         }
         if (!finalSettlementPrepared && !commitLedger(ledger, online)) {
             RSIntegrationMod.LOGGER.warn(ctx.format("Commit failed for player {} after {} steps"),
-                    online.getName().getString(), steps.size());
+                    online.getName().getString(), stepsCount());
             online.sendSystemMessage(Component.translatable("rsi.async.error.commit_failed"));
             abort("Final commit failed",
                     Component.translatable("rsi.async.abort.final_commit_failed"));
@@ -4829,9 +3509,9 @@ public final class AsyncCraftChain {
         }
 
         state = State.COMPLETED;
-        Diagnostics.record(Diagnostics.Category.CHAIN_STATE, "->OMPLETED steps=" + steps.size());
+        Diagnostics.record(Diagnostics.Category.CHAIN_STATE, "->OMPLETED steps=" + stepsCount());
         RSIntegrationMod.LOGGER.info(ctx.format("COMPLETED for player {}: {} steps"),
-                online.getName().getString(), steps.size());
+                online.getName().getString(), stepsCount());
         if (online != null) {
             ItemStack completedOutput = displayTarget();
             online.sendSystemMessage(CraftPacketUtils.craftCompletedMessage(
@@ -4945,14 +3625,9 @@ public final class AsyncCraftChain {
         terminalListeners.add(callback);
     }
 
-    /** How many machines produced output this chain run (1 for single machine, N for parallel). */
-    public int getMachineCount() {
-        return machineCount;
-    }
-
     private int totalExecutionsForNotification() {
         long total = 0;
-        for (var step : steps) {
+        for (var step : graphNodes.values()) {
             total += Math.max(1, step.executions());
             if (total >= Integer.MAX_VALUE) return Integer.MAX_VALUE;
         }
@@ -5005,6 +3680,7 @@ public final class AsyncCraftChain {
     }
 
     public void abortForServerStop() {
+        if (isDone()) return;
         if (graphExecutor != null) {
             BooleanSupplier previousAllowance = dispatchAllowed;
             try {
@@ -5015,58 +3691,9 @@ public final class AsyncCraftChain {
             } finally {
                 dispatchAllowed = previousAllowance;
             }
-        } else if (currentDelegate != null) {
-            try {
-                MachineOperation.CraftObservation observation = flatOperation().poll(server.overworld());
-                boolean capturedWorldOutput = OutputAccounting.hasCapturedExpectedProduction(
-                        currentDelegate, capturedOutputSnapshot());
-                if (observation.phase() == MachineOperation.CraftPhase.DONE || capturedWorldOutput) {
-                    collectCompletedDelegateForShutdown(resolvePlayer());
-                }
-            } catch (RuntimeException exception) {
-                RSIntegrationMod.LOGGER.error(ctx.format("Flat server-stop observation failed"), exception);
-            }
         }
         terminate("Server stopping", Component.literal("Server stopping"),
                 TerminationService.Policy.SILENT_REFUND, TerminationCoordinator.Cause.SERVER_STOP);
-    }
-
-    /**
-     * Settle a craft that already finished when the server began stopping.
-     *
-     * <p>Must run even when the owning player is offline. Bailing out on a null
-     * player used to leave the delegate un-settled, so {@link #terminate} then
-     * treated a <em>completed</em> craft as a failure: the ledger refunded the
-     * consumed inputs while the finished product stayed in the machine — the
-     * same material on both sides of the restart. The product is collected into
-     * the virtual inventory here and delivered by the normal recovery path,
-     * which already handles a null player.</p>
-     */
-    private void collectCompletedDelegateForShutdown(@Nullable ServerPlayer player) {
-        if (currentDelegate == null) return;
-        List<ItemStack> collected = flatOperation().collectForShutdown(player, Math.max(1, machineCount),
-                this::disarmOutputCapture);
-        for (ItemStack result : collected) {
-            if (result != null && !result.isEmpty()) addToVirtualInventory(result);
-        }
-        if (player == null) {
-            RSIntegrationMod.LOGGER.warn(ctx.format(
-                    "Server stop: owner offline for a completed craft; settling it so inputs are not refunded twice"));
-        }
-        if (flatOperationSession != null && flatOperationSession.startAttempted()
-                && !flatOperationSession.settled()) {
-            flatOperationSession.settle(() -> {
-                if (ledger.isCommitted()) ledger.settleAllCommitted();
-            });
-        } else if (ledger.isCommitted()) ledger.settleAllCommitted();
-        snapshotCommittedVirtual();
-        IBatchDelegate completed = currentDelegate;
-        currentDelegate = null;
-        try {
-            flatOperation().cleanup(player);
-        } finally {
-            completed.releaseReusableMaterials(player);
-        }
     }
 
     private void abortSilently(String reason) {
@@ -5106,61 +3733,10 @@ public final class AsyncCraftChain {
         RSIntegrationMod.LOGGER.warn(ctx.format("Aborting chain (state={}, policy={}) for {}: {}"),
                 state, policy, online != null ? online.getName().getString() : playerId, reason);
         Diagnostics.record(Diagnostics.Category.CHAIN_STATE,
-                "->BORTED policy=" + policy + " reason=" + reason + " atStep=" + currentStepIdx + "/" + steps.size());
+                "->BORTED policy=" + policy + " reason=" + reason + " atStep=" + currentStep() + "/" + stepsCount());
         state = State.ABORTED;
         terminalCause = cause;
         abortReason = reason;
-
-        // Delegate cleanup - works even when player is offline.
-        boolean flatPhysicalCleanupRequired = flatOperationSession != null
-                && flatOperationSession.machineLease() != null
-                || currentDelegate instanceof ParallelCraftGroup;
-        boolean flatFailureRefundSafe = !flatPhysicalCleanupRequired;
-        List<ItemStack> flatFailureRecoveredInputs = null;
-        OperationExecutionKernel.TerminalClass flatTerminalClass = flatOperationSession == null
-                ? null : flatOperationSession.terminalClass();
-        if (currentDelegate != null) {
-            try {
-                for (ItemStack output : flatOperation().retireHolding()) {
-                    addToVirtualInventory(output);
-                    committedVirtual.add(output.copy());
-                }
-                CancelReason cancelReason = cancellationReason(cause);
-                if (cancelReason != null) {
-                    currentDelegate.prepareCancellation(online, cancelReason);
-                }
-                flatOperation().recover(online, reason);
-                flatFailureRecoveredInputs = currentDelegate.failureRecoveredInputs();
-                if (flatPhysicalCleanupRequired
-                        && currentDelegate instanceof AbstractBatchDelegate delegate) {
-                    flatFailureRefundSafe = delegate.physicalFailureCleanupCompleted();
-                } else if (flatPhysicalCleanupRequired
-                        && currentDelegate instanceof ParallelCraftGroup group) {
-                    flatFailureRefundSafe = group.physicalFailureCleanupCompleted();
-                }
-                if (currentDelegate instanceof ParallelCraftGroup group) {
-                    flatTerminalClass = group.failureTerminalClass();
-                    group.refundQueuedBulkMaterials(online);
-                    for (ItemStack result : group.drainSettledResults()) addToVirtualInventory(result);
-                    for (ItemStack material : group.drainQueuedMaterialsForRecovery()) {
-                        addToVirtualInventory(material);
-                    }
-                    for (ItemStack material : group.drainRecoveredVirtualInputs()) addToVirtualInventory(material);
-                    snapshotCommittedVirtual();
-                }
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.error(ctx.format("Error in recover"), e);
-            }
-            currentDelegate = null;
-        }
-
-        if (flatTerminalClass == OperationExecutionKernel.TerminalClass.IN_FLIGHT
-                && flatFailureRecoveredInputs != null && ledger.isCommitted()) {
-            ledger.retainCommittedRefunds(flatFailureRecoveredInputs);
-            flatFailureRefundSafe = true;
-        }
-        boolean refundFlatCommitted = shouldRefundFlatCommitted(
-                flatTerminalClass, flatFailureRefundSafe);
 
         if (graphExecutor != null) {
             // 暂停前已收取的产物必须先入账，不能按尚在机器里的投入退款。
@@ -5174,32 +3750,19 @@ public final class AsyncCraftChain {
         terminationReport = terminationService.terminate(craftId, cause, reason, policy,
                 new TerminationService.Actions() {
                     @Override public void classify(TerminationService.Session session) {
-                        if (flatOperationSession != null) {
-                            session.classify(switch (flatOperationSession.terminalClass()) {
-                                case PRE_START -> TerminationCoordinator.OperationState.PRE_START;
-                                case IN_FLIGHT -> TerminationCoordinator.OperationState.IN_FLIGHT;
-                                case SETTLED -> TerminationCoordinator.OperationState.SETTLED;
-                            });
-                        }
                         for (CraftNodeRuntime runtime : nodeRuntimes.values()) {
                             runtime.classifyTermination(session.coordinator());
                         }
                     }
-                    @Override public void settleCaptured(boolean deliver) {
-                        if (deliver) recoverCapturedOutputs(online); else disarmOutputCapture();
-                    }
-                    @Override public void closeOperationScope() { closeFlatOperationScope(); }
                     @Override public void cleanupGraph() { cleanupGraphNodes(online, reason); }
                     @Override public void recoverGraphSurplus() {
-                        if (useGraphExecution && graphMaterials != null) {
-                            for (ItemStack stack : graphMaterials.drainAvailableProducerAssets()) {
-                                addToVirtualInventory(stack);
-                            }
-                            snapshotCommittedVirtual();
+                        for (ItemStack stack : graphMaterials.drainAvailableProducerAssets()) {
+                            addToVirtualInventory(stack);
                         }
+                        snapshotCommittedVirtual();
                     }
                     @Override public void refundLedger() {
-                        refundOrRollbackLedger(online, refundFlatCommitted);
+                        refundOrRollbackLedger(online, true);
                     }
                     @Override public void deliverSettledAssets() { recoverCommittedVirtual(online); }
                     @Override public void closeLedger() { ledger.close(); }
@@ -5294,8 +3857,16 @@ public final class AsyncCraftChain {
                 RSIntegrationMod.LOGGER.error(ctx.format("Error recovering captured output from graph node {}"),
                         runtime.describe(), e);
             }
+            CancelReason cancel = terminalCause == null ? null : cancellationReason(terminalCause);
+            if (cancel != null && runtime.hasDelegate()) {
+                try {
+                    runtime.delegate().prepareCancellation(player, cancel);
+                } catch (RuntimeException | LinkageError e) {
+                    RSIntegrationMod.LOGGER.error(ctx.format("通知图节点取消失败：{}"), runtime.describe(), e);
+                }
+            }
             try {
-                runtime.cleanupFailure();
+                runtime.cleanupFailure(reason);
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error(ctx.format("Error in graph node delegate cleanup {}"),
                         runtime.describe(), e);
@@ -5416,20 +3987,12 @@ public final class AsyncCraftChain {
     }
 
     private void sendStartedPacket(ServerPlayer online) {
-        int total = useGraphExecution && graph != null
-                ? graph.topologicalOrder().size() : steps.size();
+        int total = stepsCount();
         BatchCraftNetworkHandler.CHANNEL.sendTo(
-                new CraftStartedPacket(craftId, total, useGraphExecution, displayTarget(), outputProgress(),
+                new CraftStartedPacket(craftId, total, true, displayTarget(), outputProgress(),
                         confirmedPreviewRequestId),
                 online.connection.connection,
                 NetworkDirection.PLAY_TO_CLIENT);
-    }
-
-    static boolean shouldRefundFlatCommitted(
-            @Nullable OperationExecutionKernel.TerminalClass terminalClass,
-            boolean physicalCleanupCompleted) {
-        return terminalClass != OperationExecutionKernel.TerminalClass.IN_FLIGHT
-                || physicalCleanupCompleted;
     }
 
     private void refundOrRollbackLedger(@Nullable ServerPlayer player,

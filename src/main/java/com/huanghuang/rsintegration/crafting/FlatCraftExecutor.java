@@ -68,21 +68,21 @@ final class FlatCraftExecutor {
     }
 
     record Context(ServerLevel level, CraftLogContext logContext,
-                   List<CraftingResolver.ResolutionStep> chainSteps,
+                   @Nullable ResourceLocation terminalRecipe,
                    @Nullable ItemStack targetOutput, Host host,
                    Map<String, ItemStack> materialLocks,
                    @Nullable CraftingCatalystState catalystState) {
         Context(ServerLevel level, CraftLogContext logContext,
-                List<CraftingResolver.ResolutionStep> chainSteps,
+                @Nullable ResourceLocation terminalRecipe,
                 @Nullable ItemStack targetOutput, Host host,
                 Map<String, ItemStack> materialLocks) {
-            this(level, logContext, chainSteps, targetOutput, host, materialLocks, null);
+            this(level, logContext, terminalRecipe, targetOutput, host, materialLocks, null);
         }
 
         Context(ServerLevel level, CraftLogContext logContext,
-                List<CraftingResolver.ResolutionStep> chainSteps,
+                @Nullable ResourceLocation terminalRecipe,
                 @Nullable ItemStack targetOutput, Host host) {
-            this(level, logContext, chainSteps, targetOutput, host, Map.of());
+            this(level, logContext, terminalRecipe, targetOutput, host, Map.of());
         }
     }
 
@@ -244,9 +244,7 @@ final class FlatCraftExecutor {
                                                CraftingRecipe recipe,
                                                RegistryAccess registryAccess,
                                                Context context) {
-        List<CraftingResolver.ResolutionStep> chainSteps = context.chainSteps();
-        if (chainSteps.isEmpty()
-                || !chainSteps.get(chainSteps.size() - 1).recipeId().equals(stepId)) {
+        if (!stepId.equals(context.terminalRecipe())) {
             return ItemStack.EMPTY;
         }
         ItemStack target = context.targetOutput();

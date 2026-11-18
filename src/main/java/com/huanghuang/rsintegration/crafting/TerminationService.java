@@ -6,17 +6,15 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /** Runs an idempotent, audited termination transaction over chain-owned cleanup callbacks. */
 public final class TerminationService {
     public enum Policy {
-        REFUND_AND_DELIVER(true, true, false),
-        SILENT_REFUND(true, true, true),
-        NO_REFUND(false, false, false);
+        REFUND_AND_DELIVER(true, false),
+        SILENT_REFUND(true, true),
+        NO_REFUND(false, false);
 
         private final boolean refundLedger;
-        private final boolean deliverCaptured;
         private final boolean silent;
 
-        Policy(boolean refundLedger, boolean deliverCaptured, boolean silent) {
+        Policy(boolean refundLedger, boolean silent) {
             this.refundLedger = refundLedger;
-            this.deliverCaptured = deliverCaptured;
             this.silent = silent;
         }
 
@@ -25,8 +23,6 @@ public final class TerminationService {
 
     public interface Actions {
         void classify(Session session);
-        void settleCaptured(boolean deliverCaptured);
-        void closeOperationScope();
         void cleanupGraph();
         void recoverGraphSurplus();
         void refundLedger();
@@ -44,8 +40,6 @@ public final class TerminationService {
                                                    String reason, Policy policy, Actions actions) {
         Session session = begin(craftId, cause, reason);
         actions.classify(session);
-        session.step("flat-capture", () -> actions.settleCaptured(policy.deliverCaptured));
-        session.step("flat-operation-scope", actions::closeOperationScope);
         session.step("graph-runtime-cleanup", actions::cleanupGraph);
         session.step("graph-surplus-recovery", actions::recoverGraphSurplus);
         if (policy.refundLedger) session.step("ledger-refund", actions::refundLedger);

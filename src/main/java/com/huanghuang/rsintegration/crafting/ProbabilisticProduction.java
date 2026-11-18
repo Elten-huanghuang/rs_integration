@@ -30,14 +30,15 @@ final class ProbabilisticProduction {
         return ProductionCompletionPolicy.TARGET_QUANTITY.isComplete(
                 target.quantity(), produced, attempts, maxAttempts);
     }
-    boolean canAttempt() {
-        return ProductionCompletionPolicy.TARGET_QUANTITY.canAttempt(
-                target.quantity(), produced, attempts, maxAttempts);
-    }
+    boolean hasAttemptBudget() { return attempts < maxAttempts; }
 
     void started() {
-        if (!canAttempt()) throw new IllegalStateException("probabilistic attempt budget exhausted");
+        if (!hasAttemptBudget()) throw new IllegalStateException("probabilistic attempt budget exhausted");
         attempts++;
+    }
+
+    void published(long quantity) {
+        produced = SaturatingLongMath.add(produced, quantity);
     }
 
     void settle(List<ItemStack> outputs) {

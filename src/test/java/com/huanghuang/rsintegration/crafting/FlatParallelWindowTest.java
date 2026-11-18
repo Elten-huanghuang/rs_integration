@@ -27,12 +27,9 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class FlatParallelWindowTest extends BootstrapTest {
     @Test
-    void bothGraphAndFlatGroupsReceiveSelectedStorageBeforeChildPreparation() throws IOException {
-        List<String> flat = calls(AsyncCraftChain.class, "startModStep");
-        List<String> graph = calls(AsyncCraftChain.class, "dispatchPreparedGraphNode");
-        for (List<String> methodCalls : List.of(flat, graph)) {
-            assertTrue(methodCalls.stream().anyMatch(call -> call.contains("#createExecutionGroup")));
-        }
+    void graphGroupsReceiveSelectedStorageBeforeChildPreparation() throws IOException {
+        assertTrue(calls(AsyncCraftChain.class, "dispatchPreparedGraphNode").stream()
+                .anyMatch(call -> call.contains("#createExecutionGroup")));
         assertTrue(calls(AsyncCraftChain.class, "createExecutionGroup").stream()
                 .anyMatch(call -> call.contains("ParallelCraftGroup#<init>") && call.contains("CraftStorageEndpoint;")));
         Class<?> group = com.huanghuang.rsintegration.crafting.loadbalancer.ParallelCraftGroup.class;
@@ -45,8 +42,8 @@ class FlatParallelWindowTest extends BootstrapTest {
     }
 
     @Test
-    void flatAndGraphUseTheSamePreparedMachineCapacity() throws IOException {
-        assertTrue(calls(AsyncCraftChain.class, "startModStep").stream()
+    void graphUsesPreparedMachineCapacity() throws IOException {
+        assertTrue(calls(AsyncCraftChain.class, "startAdmittedGraphNode").stream()
                 .anyMatch(call -> call.contains("#prepareGraphNode")));
         assertTrue(calls(ParallelCraftGroup.class, "startNext").stream()
                 .anyMatch(call -> call.contains("IBatchDelegate#preferredParallelBatchSize")));
@@ -58,9 +55,6 @@ class FlatParallelWindowTest extends BootstrapTest {
         assertEquals(64, MachineDispatchPlanner.combinedParallelDispatchLimit(32, List.of(64)));
         assertEquals(256, MachineDispatchPlanner.combinedParallelDispatchLimit(
                 32, List.of(64, 64, 64, 64)));
-        assertEquals(128, AsyncCraftChain.flatDispatchWindow(128,
-                MachineDispatchPlanner.combinedParallelDispatchLimit(
-                        32, List.of(64, 64, 64, 64))));
     }
 
     @Test
@@ -100,51 +94,6 @@ class FlatParallelWindowTest extends BootstrapTest {
         return calls;
     }
     @Test
-    void smallAndLargeOrdersUseBoundedWindowsInsteadOfDisablingParallelism() {
-        assertEquals(0, AsyncCraftChain.flatDispatchWindow(0, 32));
-        assertEquals(1, AsyncCraftChain.flatDispatchWindow(1, 32));
-        assertEquals(2, AsyncCraftChain.flatDispatchWindow(2, 32));
-        assertEquals(32, AsyncCraftChain.flatDispatchWindow(32, 32));
-        assertEquals(32, AsyncCraftChain.flatDispatchWindow(33, 32));
-        assertEquals(32, AsyncCraftChain.flatDispatchWindow(100, 32));
-        assertEquals(256, AsyncCraftChain.flatDispatchWindow(Integer.MAX_VALUE, 256));
-        assertEquals(1, AsyncCraftChain.flatDispatchWindow(100, 1));
-    }
-
-    @Test
-    void oneHundredOperationsFinishInFourWindowsWithoutDroppingTheRemainder() {
-        int remaining = 100;
-        List<Integer> windows = new ArrayList<>();
-        while (remaining > 0) {
-            int window = AsyncCraftChain.flatDispatchWindow(remaining, 32);
-            windows.add(window);
-            remaining = AsyncCraftChain.remainingAfterFlatBatch(remaining, window);
-        }
-        assertEquals(List.of(32, 32, 32, 4), windows);
-    }
-
-    @Test
-    void progressAccumulatesPreviousWindowsWithoutReplacingTheOrderTotal() {
-        assertEquals(0, AsyncCraftChain.completedFlatWindowOperations(100, 100, 0));
-        assertEquals(32, AsyncCraftChain.completedFlatWindowOperations(100, 100, 32));
-        assertEquals(32, AsyncCraftChain.completedFlatWindowOperations(100, 68, 0));
-        assertEquals(37, AsyncCraftChain.completedFlatWindowOperations(100, 68, 5));
-        assertEquals(100, AsyncCraftChain.completedFlatWindowOperations(100, 4, 4));
-        assertEquals(Integer.MAX_VALUE, AsyncCraftChain.completedFlatWindowOperations(
-                Integer.MAX_VALUE, 1, Integer.MAX_VALUE));
-    }
-
-    @Test
-    void completionCannotSilentlyOverrunOrDropAnUnfinishedWindow() {
-        assertEquals(68, AsyncCraftChain.remainingAfterFlatBatch(100, 32));
-        assertEquals(1, AsyncCraftChain.remainingAfterFlatBatch(33, 32));
-        assertThrows(IllegalArgumentException.class,
-                () -> AsyncCraftChain.remainingAfterFlatBatch(4, 32));
-        assertThrows(IllegalArgumentException.class,
-                () -> AsyncCraftChain.remainingAfterFlatBatch(4, 0));
-    }
-
-    @Test
     void realQueueAndKernelRunTwoSameTypeMachinesInEveryWindow() {
         for (String type : List.of("vanilla_furnace", "vanilla_blast_furnace", "vanilla_smoker",
                 "ironfurnaces_furnace", "botania_mana_pool")) {
@@ -164,7 +113,7 @@ class FlatParallelWindowTest extends BootstrapTest {
         int remaining = total;
         int completed = 0;
         while (remaining > 0) {
-            int window = AsyncCraftChain.flatDispatchWindow(remaining, 32);
+            int window = Math.min(remaining, 32);
             OperationQueue queue = new OperationQueue(window);
             while (!queue.isComplete()) {
                 List<OperationExecutionKernel.Session> active = new ArrayList<>();
@@ -193,8 +142,8 @@ class FlatParallelWindowTest extends BootstrapTest {
                 assertEquals(0, machines.size());
             }
             completed += queue.completedOperations();
-            remaining = AsyncCraftChain.remainingAfterFlatBatch(remaining, queue.completedOperations());
-            assertEquals(completed, AsyncCraftChain.completedFlatWindowOperations(total, remaining, 0));
+            remaining -= queue.completedOperations();
+            assertEquals(completed, total - remaining);
         }
         assertEquals(total, completed);
         assertEquals(0, craft.active());

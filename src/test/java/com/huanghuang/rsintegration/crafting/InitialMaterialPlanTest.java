@@ -60,18 +60,4 @@ class InitialMaterialPlanTest extends BootstrapTest {
         assertEquals(Map.of(iron, (long) Integer.MAX_VALUE + 3), InitialMaterialPlan.from(graph).materials());
     }
 
-    @Test
-    void legacyStepsSubtractIntermediateProductsAndReuseCatalysts() {
-        IngredientSpec iron = new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 2);
-        IngredientSpec diamond = new IngredientSpec(Ingredient.of(Items.DIAMOND), 1);
-        IngredientSpec tool = new IngredientSpec(Ingredient.of(Items.SHEARS), 1,
-                InputConsumption.catalyst());
-        var plan = InitialMaterialPlan.fromSteps(List.of(
-                new InitialMaterialPlan.Step(List.of(iron, tool), new ItemStack(Items.DIAMOND), 2),
-                new InitialMaterialPlan.Step(List.of(diamond, tool), new ItemStack(Items.EMERALD), 2)),
-                Map.of(new CraftingResolver.StackKey(Items.IRON_INGOT, null), 4L,
-                        new CraftingResolver.StackKey(Items.SHEARS, null), 1L));
-        assertEquals(Map.of(MaterialKey.of(new ItemStack(Items.IRON_INGOT)), 4L,
-                MaterialKey.of(new ItemStack(Items.SHEARS)), 1L), plan.materials());
-    }
 }

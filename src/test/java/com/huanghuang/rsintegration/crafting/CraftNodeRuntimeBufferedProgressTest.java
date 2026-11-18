@@ -490,41 +490,6 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
     }
 
     @Test
-    @SuppressWarnings("unchecked")
-    void flatReservationUsesTheSameCountedEntryForVirtualAndStoredVariants() throws Exception {
-        ParallelCraftGroup group = createGroup(50_000_000);
-        AsyncCraftChain chain = new AsyncCraftChain(UUID.randomUUID(), player.getServer(), null, List.of());
-        Field inventoryField = AsyncCraftChain.class.getDeclaredField("virtualInventory");
-        inventoryField.setAccessible(true);
-        List<ItemStack> virtual = (List<ItemStack>) inventoryField.get(chain);
-        ItemStack intermediate = new ItemStack(Items.IRON_INGOT, 7_000_000);
-        intermediate.getOrCreateTag().putString("source", "intermediate");
-        virtual.add(intermediate);
-        ExtractionLedger ledger = mock(ExtractionLedger.class);
-        when(ledger.reserveExactAcrossNetworkAndInventory(any(ItemStack.class), anyInt(), isNull(), eq(player)))
-                .thenAnswer(call -> ((ItemStack) call.getArgument(0)).copyWithCount(call.getArgument(1)));
-        Method reserve = AsyncCraftChain.class.getDeclaredMethod("reserveCountedOperationMaterials",
-                ParallelCraftGroup.class, ServerPlayer.class,
-                ExtractionLedger.class, MaterialBroker.ReservationToken.class);
-        reserve.setAccessible(true);
-        try (MockedStatic<MaterialSources> sources = mockStatic(MaterialSources.class)) {
-            sources.when(() -> MaterialSources.listAllAvailable(player, null))
-                    .thenReturn(Map.of(new StackKey(Items.IRON_INGOT, null), 43_000_000L));
-            assertNotNull(reserve.invoke(chain, group, player, ledger, null));
-        }
-        assertTrue(group.usesCountedOperationMaterials());
-        assertTrue(virtual.stream().allMatch(ItemStack::isEmpty));
-        verify(ledger).reserveExactAcrossNetworkAndInventory(any(ItemStack.class), eq(43_000_000), isNull(), eq(player));
-        assertTrue(group.machineOperation().start(OperationStartContext.chainReserved(
-                player, ledger, MaterialPlan.none(), List.of(), InputBufferPlan.none())));
-        group.stopDispatch();
-        List<ItemStack> refunded = group.drainQueuedMaterialsForRecovery();
-        assertEquals(7_000_000 - 64, refunded.stream().mapToInt(ItemStack::getCount).sum());
-        assertEquals("intermediate", refunded.get(0).getTag().getString("source"));
-        group.machineOperation().recover(player, "flat cancellation");
-    }
-
-    @Test
     void optionalWindowRestrictsOnlyTheNativeBatchAndKeepsTheOrderQuantity() {
         RSIntegrationConfig.CRAFTING_EXECUTION_WINDOW.set(8);
         ParallelCraftGroup group = createGroup(50_000_000);
@@ -565,7 +530,7 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
         var broker = new MaterialBroker();
         broker.publish(producer, key, 1);
         var token = broker.reserve(new NodeId(1), List.of(new MaterialBroker.Request(producer, key, 1)));
-        var chain = new AsyncCraftChain(UUID.randomUUID(), player.getServer(), null, List.of());
+        var chain = new AsyncCraftChain(UUID.randomUUID(), player.getServer(), null, TestCraftGraphs.empty());
         var field = AsyncCraftChain.class.getDeclaredField("graphMaterials");
         field.setAccessible(true);
         field.set(chain, broker);
@@ -599,7 +564,7 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
         var source = new MaterialSource.InitialPool(iron);
         broker.publish(source, iron, operations);
         var token = broker.reserve(new NodeId(0), List.of(new MaterialBroker.Request(source, iron, operations)));
-        AsyncCraftChain chain = new AsyncCraftChain(UUID.randomUUID(), player.getServer(), null, List.of());
+        AsyncCraftChain chain = new AsyncCraftChain(UUID.randomUUID(), player.getServer(), null, TestCraftGraphs.empty());
         Field materials = AsyncCraftChain.class.getDeclaredField("graphMaterials");
         materials.setAccessible(true);
         materials.set(chain, broker);
@@ -1175,7 +1140,7 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
     @Test
     void queueTimeDoesNotConsumeLaterMaterialRetryWindow() throws Exception {
         AsyncCraftChain chain = new AsyncCraftChain(
-                UUID.randomUUID(), player.getServer(), null, List.of());
+                UUID.randomUUID(), player.getServer(), null, TestCraftGraphs.empty());
         String machineBusy = "所有已绑定机器都在忙碌、未加载或不可用";
         assertEquals(ConcurrentNodeExecutor.StartStatus.RETRY, retry(chain, machineBusy, Reason.MACHINE_BUSY));
         tick.set(1000);

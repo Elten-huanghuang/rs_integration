@@ -1,6 +1,13 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.huanghuang.rsintegration.api.execution.CancelReason;
+
 import com.huanghuang.rsintegration.crafting.batch.OperationLifecycle;
+import com.huanghuang.rsintegration.crafting.graph.CaptureLeaseRegistry;
+import com.huanghuang.rsintegration.crafting.graph.ConcurrentNodeExecutor;
+import com.huanghuang.rsintegration.crafting.graph.DagScheduler;
+import com.huanghuang.rsintegration.crafting.graph.NodeId;
+import com.huanghuang.rsintegration.crafting.graph.NodeOutputAccumulator;
 import com.huanghuang.rsintegration.crafting.batch.MachineOperation;
 import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.electronwill.nightconfig.core.CommentedConfig;
@@ -37,6 +44,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
@@ -126,7 +134,7 @@ class AsyncCraftChainCaptureTest extends BootstrapTest {
     }
 
     @Test
-    void flatMachineWorkRenewsTimeoutButRepeatedOrRegressedProgressDoesNot() throws Exception {
+    void machineWorkRenewsTimeoutButRepeatedOrRegressedProgressDoesNot() throws Exception {
         Fixture fixture = fixture();
         AtomicLong work = new AtomicLong();
         when(fixture.delegate.machineOperation().observe(fixture.player.serverLevel())).thenAnswer(call ->
@@ -134,51 +142,51 @@ class AsyncCraftChainCaptureTest extends BootstrapTest {
                         .withCompletedWork(work.get()));
         int timeoutTicks = RSIntegrationConfig.MULTIBLOCK_CRAFT_TIMEOUT_SECONDS.get() * 20;
         for (int progress = 1; progress <= 3; progress++) {
-            set(fixture.chain, "waitTicks", timeoutTicks);
+            set(fixture.runtime, "waitTicks", timeoutTicks);
             work.set(progress);
             assertFalse(fixture.chain.tick());
-            assertEquals(0, field(fixture.chain, "waitTicks"));
+            assertEquals(0, field(fixture.runtime, "waitTicks"));
             verify(fixture.delegate.machineOperation(), never()).cleanup(any());
         }
         work.set(1L);
         assertFalse(fixture.chain.tick());
-        assertEquals(1, field(fixture.chain, "waitTicks"));
+        assertEquals(1, field(fixture.runtime, "waitTicks"));
         work.set(3L);
-        set(fixture.chain, "waitTicks", timeoutTicks);
+        set(fixture.runtime, "waitTicks", timeoutTicks);
         assertTrue(fixture.chain.tick());
         assertEquals(AsyncCraftChain.State.ABORTED, fixture.chain.state());
         verify(fixture.delegate.machineOperation(), never()).cleanup(any());
     }
 
     @Test
-    void incrementalFlatCaptureRenewsTheIdleTimeoutUntilTheWholeBatchArrives() throws Exception {
+    void incrementalCaptureRenewsTheIdleTimeoutUntilTheWholeBatchArrives() throws Exception {
         Fixture fixture = fixture();
         int timeoutTicks = RSIntegrationConfig.MULTIBLOCK_CRAFT_TIMEOUT_SECONDS.get() * 20;
         for (int count = 1; count < 3; count++) {
-            set(fixture.chain, "waitTicks", timeoutTicks);
+            set(fixture.runtime, "waitTicks", timeoutTicks);
             fixture.captured.add(new ItemStack(Items.DIAMOND));
 
             assertFalse(fixture.chain.tick());
             assertEquals(AsyncCraftChain.State.EXECUTING, fixture.chain.state());
-            assertEquals(0, field(fixture.chain, "waitTicks"));
+            assertEquals(0, field(fixture.runtime, "waitTicks"));
             verify(fixture.delegate.machineOperation(), never()).cleanup(any());
             verify(fixture.capture, never()).drainAndClose();
         }
         assertFalse(fixture.chain.tick());
-        assertEquals(1, field(fixture.chain, "waitTicks"));
+        assertEquals(1, field(fixture.runtime, "waitTicks"));
 
         fixture.captured.add(new ItemStack(Items.DIAMOND));
-        assertFalse(fixture.chain.tick());
+        assertTrue(fixture.chain.tick());
         verify(fixture.delegate.machineOperation()).cleanup(fixture.player);
         verify(fixture.capture).drainAndClose();
     }
 
     @Test
-    void incrementalParallelWorkerCaptureRenewsFlatTimeoutBeforeTheBatchCompletes() throws Exception {
-        Fixture fixture = fixture();
+    void incrementalParallelWorkerCaptureRenewsTimeoutBeforeTheBatchCompletes() throws Exception {
         ParallelCraftGroup group = mock(ParallelCraftGroup.class);
         when(group.machineOperation()).thenReturn(mock(MachineOperation.class));
         when(group.outputSource()).thenReturn(mock(OperationOutputSource.class));
+        Fixture fixture = fixture(group);
         when(group.machineOperation().observe(fixture.player.serverLevel())).thenReturn(
                 new MachineOperation.CraftObservation(MachineOperation.CraftPhase.WORKING));
         when(group.getTotalOperations()).thenReturn(1024);
@@ -186,18 +194,17 @@ class AsyncCraftChainCaptureTest extends BootstrapTest {
         when(group.getExpectedOutput()).thenReturn(new ItemStack(Items.DIAMOND));
         AtomicLong production = new AtomicLong();
         when(group.getProductionSequence()).thenAnswer(call -> production.get());
-        set(fixture.chain, "currentDelegate", group);
 
         int timeoutTicks = RSIntegrationConfig.MULTIBLOCK_CRAFT_TIMEOUT_SECONDS.get() * 20;
         for (int output = 0; output < 63; output++) {
-            set(fixture.chain, "waitTicks", timeoutTicks);
+            set(fixture.runtime, "waitTicks", timeoutTicks);
             production.incrementAndGet();
             assertFalse(fixture.chain.tick());
-            assertEquals(0, field(fixture.chain, "waitTicks"));
+            assertEquals(0, field(fixture.runtime, "waitTicks"));
             assertEquals(0, group.getCompletedOperations());
         }
         assertFalse(fixture.chain.tick());
-        assertEquals(1, field(fixture.chain, "waitTicks"));
+        assertEquals(1, field(fixture.runtime, "waitTicks"));
         verify(group.machineOperation(), never()).cleanup(any());
     }
 
@@ -207,6 +214,8 @@ class AsyncCraftChainCaptureTest extends BootstrapTest {
             int capturedCount) throws Exception {
         Fixture fixture = fixture();
         fixture.captured.add(new ItemStack(Items.DIAMOND, capturedCount));
+        if (capturedCount == 2) doThrow(new IllegalStateException("拒绝取消通知"))
+                .when(fixture.delegate).prepareCancellation(isNull(), eq(CancelReason.SERVER_STOP));
 
         fixture.chain.abortForServerStop();
         fixture.chain.abortForServerStop();
@@ -222,6 +231,7 @@ class AsyncCraftChainCaptureTest extends BootstrapTest {
             verify(fixture.delegate.machineOperation()).cleanup(fixture.player);
             verify(fixture.delegate.machineOperation(), never()).recover(any(), anyString());
         } else {
+            verify(fixture.delegate).prepareCancellation(isNull(), eq(CancelReason.SERVER_STOP));
             verify(fixture.delegate.machineOperation(), never()).cleanup(any());
             verify(fixture.delegate.machineOperation()).recover(isNull(), eq("Server stopping"));
         }
@@ -236,9 +246,9 @@ class AsyncCraftChainCaptureTest extends BootstrapTest {
         try (var reception = TaskOutputReception.open()) {
             var key = TaskOutputReception.resource(new ItemStack(Items.STICK));
             reception.prepare(List.of()).collect(key, 2);
-            Field lifecycle = AsyncCraftChain.class.getDeclaredField("flatLifecycle");
+            Field lifecycle = CraftNodeRuntime.class.getDeclaredField("operation");
             lifecycle.setAccessible(true);
-            lifecycle.set(fixture.chain, new OperationLifecycle(fixture.delegate, reception));
+            lifecycle.set(fixture.runtime, new OperationLifecycle(fixture.delegate, reception));
             var machine = fixture.delegate.machineOperation();
             doThrow(new IllegalStateException("清理失败")).when(machine).cleanup(fixture.player);
             fixture.chain.abortForServerStop();
@@ -249,6 +259,11 @@ class AsyncCraftChainCaptureTest extends BootstrapTest {
     }
 
     private static Fixture fixture() throws Exception {
+        return fixture(mock(IBatchDelegate.class));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Fixture fixture(IBatchDelegate delegate) throws Exception {
         UUID owner = UUID.randomUUID();
         MinecraftServer server = mock(MinecraftServer.class);
         RecipeManager recipes = mock(RecipeManager.class);
@@ -283,7 +298,6 @@ class AsyncCraftChainCaptureTest extends BootstrapTest {
             captured.clear();
             return drained;
         });
-        IBatchDelegate delegate = mock(IBatchDelegate.class);
         when(delegate.machineOperation()).thenReturn(mock(MachineOperation.class));
         when(delegate.machineOperation().observe(level)).thenReturn(
                 new MachineOperation.CraftObservation(MachineOperation.CraftPhase.WORKING));
@@ -297,12 +311,21 @@ class AsyncCraftChainCaptureTest extends BootstrapTest {
         CraftingResolver.ResolutionStep step = new CraftingResolver.ResolutionStep(
                 new ResourceLocation("test", "batch"), ModType.GENERIC,
                 new ResourceLocation("test", "batch"), List.of(), List.of(), false, 3);
-        AsyncCraftChain chain = new AsyncCraftChain(owner, server, endpoint, List.of(step));
+        AsyncCraftChain chain = new AsyncCraftChain(owner, server, endpoint, TestCraftGraphs.terminal(step));
         set(chain, "state", AsyncCraftChain.State.EXECUTING);
-        set(chain, "stepRemaining", 3);
-        set(chain, "currentDelegate", delegate);
-        set(chain, "captureHandle", capture);
-        return new Fixture(chain, delegate, player, capture, captured, returned);
+        NodeId id = new NodeId(0);
+        var runtime = new CraftNodeRuntime(id, "batch", delegate, null, null);
+        runtime.setChainContext(chain.virtualInventory(), player);
+        when(delegate.publishesDeclaredGraphOutputs()).thenReturn(true);
+        runtime.attachOutputs(new NodeOutputAccumulator(List.of()));
+        runtime.attachCapture(new CaptureSession(mock(CaptureLeaseRegistry.class), null, capture));
+        ((Map<NodeId, CraftNodeRuntime>) field(chain, "nodeRuntimes")).put(id, runtime);
+        var scheduler = (DagScheduler) field(chain, "graphScheduler");
+        var executor = new ConcurrentNodeExecutor(scheduler, n -> ConcurrentNodeExecutor.StartResult.started(runtime),
+                1, n -> false, chain::publishIncrementalGraphOutputs, chain::completeGraphNode, 1, 1);
+        set(chain, "graphExecutor", executor);
+        executor.tick();
+        return new Fixture(chain, runtime, delegate, player, capture, captured, returned);
     }
 
     private static Object field(Object target, String name) throws Exception {
@@ -317,7 +340,7 @@ class AsyncCraftChainCaptureTest extends BootstrapTest {
         field.set(target, value);
     }
 
-    private record Fixture(AsyncCraftChain chain, IBatchDelegate delegate, ServerPlayer player,
+    private record Fixture(AsyncCraftChain chain, CraftNodeRuntime runtime, IBatchDelegate delegate, ServerPlayer player,
                            CraftOutputInterceptor.CaptureHandle capture,
                            List<ItemStack> captured, List<ItemStack> returned) {}
 }

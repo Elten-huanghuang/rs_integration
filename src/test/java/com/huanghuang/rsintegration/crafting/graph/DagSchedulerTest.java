@@ -20,6 +20,45 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DagSchedulerTest extends BootstrapTest {
     @Test
+    void retryWaitsForRelocatedProducersWithoutResettingRunningSiblings() {
+        CraftPlanGraph original = forkJoinGraph();
+        DagScheduler scheduler = new DagScheduler(original);
+        List<NodeId> running = scheduler.claimReady(2);
+        NodeId target = running.get(0);
+        CraftPlanGraph supplement = SupplementalGraph.relocate(original, 3);
+        scheduler.appendForRetry(target, supplement);
+        scheduler.releaseClaim(target);
+        scheduler.refreshBlocked(id -> id.equals(target));
+        assertEquals(DagScheduler.NodeState.BLOCKED, scheduler.state(target));
+        assertEquals(DagScheduler.NodeState.RUNNING, scheduler.state(running.get(1)));
+        List<NodeId> leaves = scheduler.claimReady(2);
+        assertEquals(List.of(new NodeId(3), new NodeId(4)), leaves);
+        leaves.forEach(scheduler::succeed);
+        NodeId producer = scheduler.claimReady(1).get(0);
+        assertEquals(new NodeId(5), producer);
+        assertEquals(new MaterialSource.ProducerOutput(new OutputPortId(producer, 0)),
+                supplement.rootDemands().get(0).allocations().get(0).source());
+        scheduler.succeed(producer);
+        assertEquals(List.of(target), scheduler.claimReady(1));
+        assertEquals(3, scheduler.countSucceeded());
+        assertFalse(scheduler.allSucceeded());
+    }
+
+    @Test
+    void retryRejectsIdCollisionAndCannotAppendAfterStop() {
+        CraftPlanGraph graph = forkJoinGraph();
+        DagScheduler scheduler = new DagScheduler(graph);
+        NodeId target = scheduler.claimReady(1).get(0);
+        var before = scheduler.stateSnapshot();
+        assertThrows(IllegalArgumentException.class, () -> scheduler.appendForRetry(target, graph));
+        assertEquals(before, scheduler.stateSnapshot());
+        scheduler.stopScheduling();
+        assertThrows(IllegalStateException.class, () -> scheduler.appendForRetry(target,
+                SupplementalGraph.relocate(graph, 3)));
+        assertEquals(graph.topologicalOrder(), scheduler.nodeOrder());
+    }
+
+    @Test
     void selectiveRefreshOnlyChecksBlockedCandidatesAndNeverRepeatsReadyNodes() {
         DagScheduler scheduler = new DagScheduler(forkJoinGraph());
         BitSet candidates = new BitSet();

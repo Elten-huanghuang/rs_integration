@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.graph;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -25,7 +26,8 @@ public final class DagScheduler {
         CANCELLED
     }
 
-    private final CraftPlanGraph graph;
+    private final List<NodeId> order = new ArrayList<>();
+    private final Map<NodeId, Set<NodeId>> retryDependencies = new HashMap<>();
     private final Consumer<NodeId> nodeBecameReady;
     private final Map<NodeId, NodeState> states = new HashMap<>();
     private final Map<NodeId, Set<NodeId>> dependencies = new HashMap<>();
@@ -48,9 +50,40 @@ public final class DagScheduler {
 
     /** 节点首次从 BLOCKED 转为 READY 时调用监听器。 */
     public DagScheduler(CraftPlanGraph graph, Consumer<NodeId> nodeBecameReady) {
-        this.graph = Objects.requireNonNull(graph, "graph");
         this.nodeBecameReady = Objects.requireNonNull(nodeBecameReady, "nodeBecameReady");
         CraftPlanValidator.validate(graph);
+        register(graph);
+    }
+
+    /** 追加节点享有与初始节点相同的调度和停服语义；既有节点的位置和在途操作不变。 */
+    public void appendForRetry(NodeId consumer, CraftPlanGraph graph) {
+        requireState(consumer, NodeState.RUNNING);
+        if (stopping) throw new IllegalStateException("停止后不能追加补料");
+        CraftPlanValidator.validate(graph);
+        if (graph.topologicalOrder().stream().anyMatch(states::containsKey)) {
+            throw new IllegalArgumentException("补料节点号与任务冲突");
+        }
+        Set<NodeId> producers = new LinkedHashSet<>();
+        for (RootDemand root : graph.rootDemands()) {
+            for (RootAllocation allocation : root.allocations()) {
+                if (allocation.source() instanceof MaterialSource.ProducerOutput source) {
+                    producers.add(source.outputPort().nodeId());
+                }
+            }
+        }
+        register(graph);
+        if (!producers.isEmpty()) {
+            retryDependencies.put(consumer, producers);
+            for (NodeId producer : producers) {
+                dependents.computeIfAbsent(producer, ignored -> new LinkedHashSet<>()).add(consumer);
+            }
+        }
+    }
+
+    public List<NodeId> nodeOrder() { return Collections.unmodifiableList(order); }
+
+    private void register(CraftPlanGraph graph) {
+        order.addAll(graph.topologicalOrder());
         for (NodeId nodeId : graph.topologicalOrder()) {
             Set<NodeId> nodeDependencies = new HashSet<>(graph.dependenciesOf(nodeId));
             dependencies.put(nodeId, nodeDependencies);
@@ -122,6 +155,10 @@ public final class DagScheduler {
             states.put(nodeId, NodeState.CANCELLED);
             return;
         }
+        if (!retryDependenciesMet(nodeId)) {
+            states.put(nodeId, NodeState.BLOCKED);
+            return;
+        }
         states.put(nodeId, NodeState.READY);
         ready.add(nodeId);
     }
@@ -141,7 +178,7 @@ public final class DagScheduler {
             if (states.get(dependent) != NodeState.BLOCKED) continue;
             boolean allSucceeded = dependencies.getOrDefault(dependent, Set.of()).stream()
                     .allMatch(dependency -> states.get(dependency) == NodeState.SUCCEEDED);
-            if (allSucceeded && readiness.test(dependent)) {
+            if (retryDependenciesMet(dependent) && allSucceeded && readiness.test(dependent)) {
                 markReady(dependent);
             }
         }
@@ -151,7 +188,7 @@ public final class DagScheduler {
     public void refreshBlocked(Predicate<NodeId> readiness) {
         Objects.requireNonNull(readiness, "readiness");
         if (stopping) return;
-        for (NodeId nodeId : graph.topologicalOrder()) {
+        for (NodeId nodeId : order) {
             refreshBlockedNode(nodeId, readiness);
         }
     }
@@ -161,7 +198,6 @@ public final class DagScheduler {
         Objects.requireNonNull(candidates, "candidates");
         Objects.requireNonNull(readiness, "readiness");
         if (stopping) return;
-        List<NodeId> order = graph.topologicalOrder();
         if (candidates.length() > order.size()) {
             throw new IllegalArgumentException("candidate position exceeds graph order");
         }
@@ -173,15 +209,21 @@ public final class DagScheduler {
 
     private void refreshBlockedNode(NodeId nodeId, Predicate<NodeId> readiness) {
         if (states.get(nodeId) != NodeState.BLOCKED) return;
-        if (readiness.test(nodeId)) {
+        if (retryDependenciesMet(nodeId) && readiness.test(nodeId)) {
             markReady(nodeId);
         }
     }
 
     private void markReady(NodeId nodeId) {
+        retryDependencies.remove(nodeId);
         states.put(nodeId, NodeState.READY);
         ready.add(nodeId);
         nodeBecameReady.accept(nodeId);
+    }
+
+    private boolean retryDependenciesMet(NodeId nodeId) {
+        return retryDependencies.getOrDefault(nodeId, Set.of()).stream()
+                .allMatch(id -> states.get(id) == NodeState.SUCCEEDED);
     }
 
     public void fail(NodeId nodeId) {
