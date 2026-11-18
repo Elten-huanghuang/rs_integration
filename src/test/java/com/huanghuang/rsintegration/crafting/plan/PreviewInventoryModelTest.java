@@ -81,6 +81,19 @@ class PreviewInventoryModelTest extends BootstrapTest {
     }
 
     @Test
+    void exhaustedSearchCannotTurnReadyWhenItsKnownInputsArrive() {
+        var iron = new ItemStack(Items.IRON_INGOT);
+        var source = plan(List.of(initial(iron, 2)), List.of(), Map.of());
+        var response = new PlanResponse(false, "", iron, List.of(), source.materials(), List.of(),
+                "test:budget", null, null, 0, 0, 0, List.of(), 1, null, null, null, 0, false, false,
+                false, null, Set.of(), Map.of(), null, source.graph(), false, List.of(), Map.of(), null,
+                List.of(), PlanOutcome.BUDGET_EXHAUSTED, List.of());
+        var model = new PreviewInventoryModel(response);
+        model.update(IngredientKey.of(iron), 2);
+        assertEquals(PreviewInventoryModel.Status.REPLAN, model.status());
+    }
+
+    @Test
     void longAmountsAndSharedDemandDoNotOverflow() {
         ItemStack iron = new ItemStack(Items.IRON_INGOT);
         var model = new PreviewInventoryModel(plan(List.of(initial(iron, Long.MAX_VALUE - 1), initial(iron, 5)), List.of(), Map.of()));

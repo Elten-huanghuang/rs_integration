@@ -19,6 +19,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.ObjLongConsumer;
 
 /**
  * Client-safe, server-authored material-flow DAG carried alongside the legacy
@@ -138,6 +139,20 @@ public record PlanGraphView(
     public NodeView node(int nodeId) {
         for (NodeView node : nodes) if (node.nodeId() == nodeId) return node;
         return null;
+    }
+
+    /** 只枚举外部承担的数量，生产者的输出不再计入初始库存。 */
+    public void visitExternalDemand(ObjLongConsumer<ItemStack> accept) {
+        for (EdgeView edge : edges) {
+            if (edge.source().initial()) accept.accept(edge.material(), edge.quantity());
+        }
+        for (RootView root : roots) {
+            for (RootEdgeView edge : root.allocations()) {
+                if (edge.source().initial()) accept.accept(edge.material(), edge.quantity());
+            }
+            if (root.unresolvedQuantity() > 0) accept.accept(root.display(), root.unresolvedQuantity());
+        }
+        for (UnresolvedView input : unresolved) accept.accept(input.display(), input.quantity());
     }
 
     /** 卡片和递归树共用已经通过服务端可用性检查的候选，不改动执行节点或材料边。 */

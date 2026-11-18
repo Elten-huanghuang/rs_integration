@@ -5,7 +5,7 @@ import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.MaterialMatcher;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
-import com.huanghuang.rsintegration.crafting.tree.PlanTreeModel;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
@@ -31,9 +31,10 @@ public final class PlanMaterialBill {
                                    int repeatCount,
                                    @Nullable PlanGraphView graph,
                                    boolean hasMissing) {
+        Map<IngredientKey, Long> traceDemand = graph == null ? traceDemand(steps) : Map.of();
         Map<IngredientKey, PlanResponse.Availability> netMaterials = graph == null
-                ? buildLegacyNetMaterials(neededCounts, itemSources, itemAvailable, stackAvailable,
-                        targetOutput, steps, repeatCount)
+                ? buildTraceNetMaterials(neededCounts, itemSources, itemAvailable, stackAvailable,
+                        targetOutput, steps, traceDemand)
                 : buildGraphNetMaterials(graph, itemAvailable, stackAvailable);
         boolean feasible = !hasMissing
                 && netMaterials.values().stream().allMatch(PlanResponse.Availability::isEnough);
@@ -47,12 +48,7 @@ public final class PlanMaterialBill {
         }
 
         Map<IngredientKey, PlanResponse.Availability> displayMaterials = graph == null
-                ? buildDisplayMaterials(netMaterials, itemSources, itemAvailable, stackAvailable,
-                        targetOutput, steps, repeatCount, null)
-                // A graph is already the server-authoritative material-flow view.  Do not
-                // rebuild its bill through PlanTreeModel: the visual tree intentionally folds
-                // shared producer nodes, so its gross traversal is not a complete external
-                // leaf-material list and can expose intermediate outputs as materials.
+                ? buildDisplayMaterials(netMaterials, itemSources, itemAvailable, stackAvailable, traceDemand)
                 : new LinkedHashMap<>(netMaterials);
         return new Result(feasible, displayMaterials, leftovers);
     }
@@ -101,18 +97,16 @@ public final class PlanMaterialBill {
         return materials;
     }
 
-    private static Map<IngredientKey, PlanResponse.Availability> buildLegacyNetMaterials(
+    private static Map<IngredientKey, PlanResponse.Availability> buildTraceNetMaterials(
             Map<Item, ? extends Number> neededCounts,
             Map<Item, Ingredient> itemSources,
             Map<Item, ? extends Number> itemAvailable,
             Map<StackKey, ? extends Number> stackAvailable,
             ItemStack targetOutput,
             List<PlanStep> steps,
-            int repeatCount) {
+            Map<IngredientKey, Long> gross) {
         Map<IngredientKey, PlanResponse.Availability> materials = buildNetMaterials(
                 neededCounts, itemSources, itemAvailable, stackAvailable);
-        Map<IngredientKey, Long> gross = buildGrossDemand(
-                targetOutput, steps, repeatCount, null);
         Set<Item> nbtItems = new HashSet<>();
         for (IngredientKey key : gross.keySet()) {
             Ingredient source = itemSources.get(key.item());
@@ -168,21 +162,20 @@ public final class PlanMaterialBill {
         return countOf(counts, item);
     }
 
-    private static Map<IngredientKey, Long> buildGrossDemand(ItemStack targetOutput,
-                                                                  List<PlanStep> steps,
-                                                                  int repeatCount,
-                                                                  @Nullable PlanGraphView graph) {
-        String recipeId = "";
-        if (graph == null) {
-            int terminal = terminalStepIndex(targetOutput, steps);
-            if (terminal >= 0) recipeId = steps.get(terminal).recipeId().toString();
+    /** 每个已知操作只计一次；同一操作的催化剂槽相加，不同操作只需保留峰值。 */
+    private static Map<IngredientKey, Long> traceDemand(List<PlanStep> steps) {
+        Map<IngredientKey, Long> consumed = new LinkedHashMap<>();
+        Map<IngredientKey, Long> peak = new LinkedHashMap<>();
+        for (PlanStep step : steps) {
+            Map<IngredientKey, Long> reusable = new LinkedHashMap<>();
+            for (int slot = 0; slot < step.inputs().size(); slot++) {
+                mergeDemand(step.inputRole(slot) == DemandRole.CATALYST ? reusable : consumed,
+                        step.inputs().get(slot), step.totalInputCount(slot, step.batches()));
+            }
+            reusable.forEach((key, quantity) -> peak.merge(key, quantity, Math::max));
         }
-        PlanResponse treeSource = new PlanResponse(true, "", targetOutput, steps,
-                Collections.emptyMap(), Collections.emptyList(), recipeId,
-                null, null, 0, 0, 0, Collections.emptyList(), repeatCount,
-                null, null, null, 0, false, false, false, null,
-                Collections.emptySet(), Collections.emptyMap(), null, graph);
-        return PlanTreeModel.grossDemandByKey(PlanTreeModel.from(treeSource));
+        peak.forEach((key, quantity) -> consumed.merge(key, quantity, SaturatingLongMath::add));
+        return consumed;
     }
 
     private static int terminalStepIndex(ItemStack targetOutput, List<PlanStep> steps) {
@@ -205,21 +198,7 @@ public final class PlanMaterialBill {
             Map<Item, ? extends Number> itemAvailable,
             Map<StackKey, ? extends Number> stackAvailable) {
         Map<IngredientKey, Long> needed = new LinkedHashMap<>();
-        for (PlanGraphView.EdgeView edge : graph.edges()) {
-            if (edge.source().initial()) {
-                mergeDemand(needed, edge.material(), edge.quantity());
-            }
-        }
-        for (PlanGraphView.RootView root : graph.roots()) {
-            for (PlanGraphView.RootEdgeView edge : root.allocations()) {
-                if (edge.source().initial()) {
-                    mergeDemand(needed, edge.material(), edge.quantity());
-                }
-            }
-        }
-        for (PlanGraphView.UnresolvedView unresolved : graph.unresolved()) {
-            mergeDemand(needed, unresolved.display(), unresolved.quantity());
-        }
+        graph.visitExternalDemand((stack, count) -> mergeDemand(needed, stack, count));
 
         Map<IngredientKey, PlanResponse.Availability> result = new LinkedHashMap<>();
         for (Map.Entry<IngredientKey, Long> entry : needed.entrySet()) {
@@ -245,29 +224,12 @@ public final class PlanMaterialBill {
             Map<Item, Ingredient> itemSources,
             Map<Item, ? extends Number> itemAvailable,
             Map<StackKey, ? extends Number> stackAvailable,
-            ItemStack targetOutput,
-            List<PlanStep> steps,
-            int repeatCount,
-            @Nullable PlanGraphView graph) {
-        Map<IngredientKey, Long> grossDemand =
-                buildGrossDemand(targetOutput, steps, repeatCount, graph);
+            Map<IngredientKey, Long> grossDemand) {
 
         Map<IngredientKey, PlanResponse.Availability> displayMaterials = new LinkedHashMap<>();
         for (Map.Entry<IngredientKey, Long> entry : grossDemand.entrySet()) {
             IngredientKey key = entry.getKey();
             ItemStack display = key.stack(1);
-            // Graph allocations preserve the concrete NBT selected by the
-            // planner. Do not fall back to itemSources here: that map is keyed
-            // only by Item, so four strict enchanted-book demands would all be
-            // measured against the first book's enchantment.
-            if (graph != null) {
-                PlanResponse.Availability graphAvailability = netMaterials.get(key);
-                if (graphAvailability != null) {
-                    displayMaterials.put(key, new PlanResponse.Availability(
-                            entry.getValue(), graphAvailability.available()));
-                    continue;
-                }
-            }
             Ingredient source = itemSources.get(key.item());
             boolean nbtStrict = source != null && IngredientMatcher.requiresNbt(source);
             long have;
@@ -279,7 +241,8 @@ public final class PlanMaterialBill {
                 have = countAvailable(itemAvailable, key.item());
                 materialKey = IngredientKey.of(new ItemStack(key.item()));
             } else if (source != null) {
-                have = countNbtMatching(source, stackAvailable);
+                have = display.hasTag() ? countExactStack(display, stackAvailable)
+                        : countNbtMatching(source, stackAvailable);
             } else {
                 have = display.hasTag()
                         ? countExactStack(display, stackAvailable)
@@ -288,7 +251,7 @@ public final class PlanMaterialBill {
             PlanResponse.Availability availability =
                     new PlanResponse.Availability(entry.getValue(), have);
             displayMaterials.merge(materialKey, availability, (left, right) ->
-                    new PlanResponse.Availability(left.needed() + right.needed(),
+                    new PlanResponse.Availability(SaturatingLongMath.add(left.needed(), right.needed()),
                             Math.max(left.available(), right.available())));
         }
         // Keep gross demand for tree nodes without treating planned production

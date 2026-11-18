@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.tree;
 
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
+import com.huanghuang.rsintegration.crafting.plan.PlanMaterialBill;
 import com.huanghuang.rsintegration.crafting.plan.PlanStep;
 import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
 import com.huanghuang.rsintegration.crafting.plan.ParallelPlan;
@@ -23,7 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PlanTreeProductionDisplayTest extends BootstrapTest {
     @Test
-    void fullGraphReachabilityDoesNotUseDisplayDepthOrTheJavaCallStack() {
+    void truncationPreservesRootAllocationsAndTheFullMaterialBill() {
         int count = 50000;
         List<PlanGraphView.NodeView> nodes = new ArrayList<>();
         List<PlanGraphView.EdgeView> edges = new ArrayList<>();
@@ -47,6 +48,9 @@ class PlanTreeProductionDisplayTest extends BootstrapTest {
                 List.of(), order);
         PlanTreeModel model = PlanTreeModel.from(response(graph), 8, 256);
         assertTrue(model.truncated());
+        assertEquals(List.of(count - 1),
+                model.root.children.stream().map(child -> child.graphNodeId).toList(),
+                "显示深度之外的祖先不能变成根的直接供应者");
         Deque<PlanTreeNode> pending = new ArrayDeque<>();
         pending.add(model.root);
         int displayed = 0;
@@ -59,6 +63,10 @@ class PlanTreeProductionDisplayTest extends BootstrapTest {
         }
         assertTrue(displayed <= 256);
         assertEquals(50001, graph.nodes().size(), "显示裁剪不改变完整执行图");
+        var bill = PlanMaterialBill.summarize(Map.of(), Map.of(), Map.of(), Map.of(), previous,
+                List.of(), 1, graph, false);
+        assertEquals(Map.of(IngredientKey.of(new ItemStack(Items.IRON_ORE)),
+                new PlanResponse.Availability(1, 0)), bill.materials());
     }
 
     @Test

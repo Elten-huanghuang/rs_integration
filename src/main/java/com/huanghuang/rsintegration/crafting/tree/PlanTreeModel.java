@@ -12,9 +12,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Deque;
 
 import javax.annotation.Nullable;
 import java.util.HashMap;
@@ -308,51 +306,6 @@ public final class PlanTreeModel {
             applyAvailability(missing, plan, missingRef.display());
             root.children.add(missing);
         }
-        // The graph node list is the complete execution manifest. The legacy flat step list may
-        // contain only the terminal operation, so it cannot recover omitted intermediate nodes.
-        Set<ResourceLocation> renderedRecipes = new HashSet<>();
-        collectRenderedRecipeIds(root, renderedRecipes);
-        Set<Integer> rootReachableNodes = new HashSet<>();
-        for (PlanGraphView.RootView demand : graph.roots()) {
-            for (PlanGraphView.RootEdgeView edge : demand.allocations()) {
-                collectReachableProducerNodes(edge.source(), index, rootReachableNodes);
-            }
-        }
-        for (Integer nodeId : graph.topologicalOrder()) {
-            PlanGraphView.NodeView graphNode = index.node(nodeId);
-            if (graphNode == null || !rootReachableNodes.contains(nodeId)
-                    || renderedRecipes.contains(graphNode.recipeId())) continue;
-            PlanStep step = index.stepFor(graphNode);
-            PlanGraphView.OutputView output = graphNode.outputs().stream().findFirst().orElse(null);
-            ItemStack display = output != null && !output.display().isEmpty()
-                    ? output.display().copyWithCount(1)
-                    : graphNode.primaryOutput().copyWithCount(1);
-            if (display.isEmpty()) continue;
-            if (!budget.tryClaimNode(1)) {
-                root.viewTruncated = true;
-                break;
-            }
-            long quantity = output != null ? output.quantity()
-                    : Math.max(1, display.getCount() * graphNode.executions());
-            PlanTreeNode omitted = new PlanTreeNode(IngredientKey.of(display), display,
-                    quantity, 1, step, nodeId);
-            omitted.productionAmount = quantity;
-            omitted.limited = step.alternatives().size() > maxTreeCandidates();
-            applyAvailability(omitted, plan, display);
-            expandedProducers.add(nodeId);
-            for (GraphReference edge : mergeConsumerEdges(index, nodeId)) {
-                PlanTreeNode child = buildGraphReference(edge.source(), edge.material(), edge.quantity(),
-                        edge.role(), 2, index, new HashSet<>(Set.of(nodeId)),
-                        expandedProducers, plan, budget);
-                if (child == null) {
-                    omitted.viewTruncated = true;
-                    break;
-                }
-                omitted.children.add(child);
-            }
-            root.children.add(omitted);
-            renderedRecipes.add(graphNode.recipeId());
-        }
         mergeEquivalentProducedChildren(root, index);
         collapseRepeatedStages(root, index);
         rebaseDepths(root, 0);
@@ -362,23 +315,6 @@ public final class PlanTreeModel {
     private static void collectRenderedRecipeIds(PlanTreeNode node, Set<ResourceLocation> ids) {
         if (node.step != null) ids.add(node.step.recipeId());
         for (PlanTreeNode child : node.children) collectRenderedRecipeIds(child, ids);
-    }
-
-    private static void collectReachableProducerNodes(PlanGraphView.SourceView source,
-                                                       GraphViewIndex index,
-                                                       Set<Integer> reachable) {
-        if (source == null || source.initial() || !reachable.add(source.producerNodeId())) return;
-        // 完整执行图不受显示深度限制，不能借用 Java 调用栈遍历。
-        Deque<Integer> pending = new ArrayDeque<>();
-        pending.push(source.producerNodeId());
-        while (!pending.isEmpty()) {
-            for (PlanGraphView.EdgeView edge : index.edgesFor(pending.pop())) {
-                PlanGraphView.SourceView upstream = edge.source();
-                if (upstream != null && !upstream.initial() && reachable.add(upstream.producerNodeId())) {
-                    pending.push(upstream.producerNodeId());
-                }
-            }
-        }
     }
 
     private static PlanTreeNode buildGraphReference(PlanGraphView.SourceView source,
