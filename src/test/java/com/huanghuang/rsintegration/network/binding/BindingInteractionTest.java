@@ -145,18 +145,43 @@ class BindingInteractionTest extends BootstrapTest {
     }
 
     @Test
+    void legacyImportIsExplicitAndRepeatedQueriesLeaveBothStoresUntouched() {
+        var tag = connector.getOrCreateTag();
+        tag.putString("aec_bound_dim", Level.OVERWORLD.location().toString());
+        tag.putInt("aec_bound_x", MACHINE.getX());
+        tag.putInt("aec_bound_y", MACHINE.getY());
+        tag.putInt("aec_bound_z", MACHINE.getZ());
+        tag.putString("aec_bound_block", "stone");
+        var legacy = tag.copy();
+        assertFalse(BindingStorage.removeBinding(null, connector, Level.OVERWORLD.location(), MACHINE));
+        assertTrue(BindingStorage.getBindings(player.server, connector).isEmpty());
+        assertEquals(legacy, connector.getTag());
+        MachineBindingService.prepareHeldBook(player, connector);
+        var book = MachineBindingService.bookId(connector);
+        var endpoints = data.endpoints(book);
+        assertEquals(1, endpoints.size());
+        assertFalse(connector.getTag().contains("aec_bound_x"));
+        data.setDirty(false);
+        MachineBindingService.prepareHeldBook(player, connector);
+        assertEquals(book, MachineBindingService.bookId(connector));
+        assertEquals(endpoints, data.endpoints(book));
+        assertEquals(1, BindingStorage.getBindings(player.server, connector).size());
+        assertFalse(data.isDirty());
+    }
+
+    @Test
     void remotePermissionProbeWhileSneakingCannotUnbindTheMachine() {
         BindingEventHandler.handleExplicitBind(player, MACHINE, InteractionHand.MAIN_HAND);
         assertBound();
         MachineEndpointId endpoint = MachineBindingService.endpointId(
-                connector, Level.OVERWORLD.location(), MACHINE);
+                player.server, connector, Level.OVERWORLD.location(), MACHINE);
         clearInvocations(player);
 
         BindingEventHandler.onRightClickBlock(new MachineInteractionCheckEvent(player, MACHINE));
 
         assertBound();
         assertEquals(endpoint, MachineBindingService.endpointId(
-                connector, Level.OVERWORLD.location(), MACHINE));
+                player.server, connector, Level.OVERWORLD.location(), MACHINE));
         verify(player, never()).displayClientMessage(any(), anyBoolean());
     }
 
@@ -175,7 +200,7 @@ class BindingInteractionTest extends BootstrapTest {
         assertBound();
         UUID book = MachineBindingService.bookId(connector);
         BindingEventHandler.handleExplicitBind(player, MACHINE, InteractionHand.MAIN_HAND);
-        assertFalse(BindingStorage.hasBinding(connector, Level.OVERWORLD.location(), MACHINE));
+        assertFalse(BindingStorage.hasBinding(player.server, connector, Level.OVERWORLD.location(), MACHINE));
         assertEquals(0, data.size(book));
 
         BindingEventHandler.handleExplicitBind(player, MACHINE, InteractionHand.MAIN_HAND);
@@ -186,7 +211,7 @@ class BindingInteractionTest extends BootstrapTest {
     }
 
     private void assertBound() {
-        assertTrue(BindingStorage.hasBinding(connector, Level.OVERWORLD.location(), MACHINE));
+        assertTrue(BindingStorage.hasBinding(player.server, connector, Level.OVERWORLD.location(), MACHINE));
         assertNotNull(MachineBindingService.bookId(connector));
         assertEquals(1, data.size(MachineBindingService.bookId(connector)));
     }

@@ -148,7 +148,7 @@ public final class BeyondDimensionsMachineOperations {
                                                                     BlockPos pos) {
         for (ItemStack stack : connectorStacks(player)) {
             if (!BD_TERMINAL.equals(ForgeRegistries.ITEMS.getKey(stack.getItem()))) continue;
-            if (!BindingStorage.hasBinding(stack, dim, pos)) continue;
+            if (!BindingStorage.hasBinding(player.server, stack, dim, pos)) continue;
             int networkId = readNetworkId(stack);
             if (networkId < 0) continue;
             Optional<CraftStorageEndpoint> endpoint = CraftStorageEndpoints.resolve(

@@ -208,7 +208,7 @@ public final class NearbyBindingService {
 
         private static void collect(List<ItemStack> stacks, ServerLevel level, Set<BlockPos> result) {
             for (ItemStack stack : stacks) {
-                for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
+                for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(level.getServer(), stack)) {
                     if (entry.dim().equals(level.dimension().location())) result.add(entry.pos());
                 }
             }

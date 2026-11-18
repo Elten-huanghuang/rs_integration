@@ -12,15 +12,7 @@ import java.util.UUID;
 
 /** Client-side read-only lookup for server-synchronized machine bindings. */
 public final class ClientBindingLookup {
-    private static boolean registered;
-
     private ClientBindingLookup() {}
-
-    public static void register() {
-        if (registered) return;
-        registered = true;
-        MachineBindingService.installClientBindingView(ClientBindingLookup::getView);
-    }
 
     public static List<BindingStorage.BindingEntry> getBindings(ItemStack stack) {
         UUID bookId = MachineBindingService.bookId(stack);
@@ -35,7 +27,4 @@ public final class ClientBindingLookup {
         return false;
     }
 
-    private static List<BindingStorage.BindingEntry> getView(ItemStack stack) {
-        return getBindings(stack);
-    }
 }

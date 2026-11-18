@@ -48,6 +48,7 @@ class TlmAltarBindingTest extends BootstrapTest {
             ModIds.TOUHOU_LITTLE_MAID, "altar/craft_hakurei_gohei");
     private static final String BLOCK_KEY = "touhou_little_maid||block.touhou_little_maid.altar";
 
+    private MockedStatic<MachineBindingSavedData> saved;
     private ServerPlayer player;
     private MinecraftServer server;
     private ServerLevel level;
@@ -80,6 +81,11 @@ class TlmAltarBindingTest extends BootstrapTest {
         loading.when(ModList::get).thenReturn(mods);
 
         server = mock(MinecraftServer.class);
+        when(server.isSameThread()).thenReturn(true);
+        var index = new MachineBindingSavedData();
+        saved = mockStatic(MachineBindingSavedData.class);
+        saved.when(() -> MachineBindingSavedData.get(server)).thenReturn(index);
+        saved.when(() -> MachineBindingSavedData.peek(server)).thenReturn(index);
         level = mock(ServerLevel.class);
         when(server.getLevel(Level.OVERWORLD)).thenReturn(level);
         when(level.dimension()).thenReturn(Level.OVERWORLD);
@@ -100,8 +106,8 @@ class TlmAltarBindingTest extends BootstrapTest {
         connector.getOrCreateTag().putInt("NodeX", DISK_DRIVE.getX());
         connector.getOrCreateTag().putInt("NodeY", DISK_DRIVE.getY());
         connector.getOrCreateTag().putInt("NodeZ", DISK_DRIVE.getZ());
-        BindingStorage.addBinding(connector, Level.OVERWORLD.location(), ALTAR,
-                BLOCK_KEY, "touhou_little_maid:altar", null);
+        BindingStorage.addBinding(server, connector, Level.OVERWORLD.location(), ALTAR,
+                BLOCK_KEY, "touhou_little_maid:altar", null, player.getUUID());
         inventory.items.set(2, connector);
 
         Block altarBlock = mock(Block.class);
@@ -131,6 +137,7 @@ class TlmAltarBindingTest extends BootstrapTest {
     void tearDown() {
         AltarBindingRegistry.unbindAll(Level.OVERWORLD, ALTAR);
         AltarBindingRegistry.invalidateScanCache();
+        saved.close();
         loading.close();
     }
 
@@ -152,8 +159,8 @@ class TlmAltarBindingTest extends BootstrapTest {
         ResourceLocation fleshRecipe = new ResourceLocation(ModIds.CTHULHU_CREATURES, "altar_netherite_upgrade");
         String fleshKey = ModIds.ID_CTHULHU_FLESH_ALTAR + "||block.cthulhu_creatures.flesh_altar";
         ItemStack connector = player.getInventory().items.get(2);
-        BindingStorage.addBinding(connector, Level.OVERWORLD.location(), fleshPos,
-                fleshKey, CthulhuCreaturesRSModule.BLOCK_ID, new ItemStack(Items.STONE));
+        BindingStorage.addBinding(server, connector, Level.OVERWORLD.location(), fleshPos,
+                fleshKey, CthulhuCreaturesRSModule.BLOCK_ID, new ItemStack(Items.STONE), player.getUUID());
         Block block = mock(Block.class);
         when(block.getDescriptionId()).thenReturn("block.cthulhu_creatures.flesh_altar");
         BlockState state = mock(BlockState.class);

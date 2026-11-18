@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.network.binding;
 
+import com.huanghuang.rsintegration.machine.client.ClientBindingLookup;
 import com.huanghuang.rsintegration.util.TextBuilder;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.resources.language.I18n;
@@ -19,7 +20,7 @@ public final class BindingTooltipHandler {
 
     @SubscribeEvent
     public static void onItemTooltip(ItemTooltipEvent event) {
-        List<BindingStorage.BindingEntry> bindings = BindingStorage.getBindings(event.getItemStack());
+        List<BindingStorage.BindingEntry> bindings = ClientBindingLookup.getBindings(event.getItemStack());
         if (bindings.isEmpty()) return;
 
         if (Screen.hasShiftDown()) {

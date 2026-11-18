@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.network.binding;
 
+import net.minecraftforge.event.TickEvent;
 
 import java.lang.reflect.Method;
 
@@ -141,6 +142,7 @@ public final class BindingEventHandler {
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
         if (!player.isShiftKeyDown() && !EXPLICIT_BIND_REQUEST.get()) return;
 
+        MachineBindingService.prepareHeldBook(player, player.getItemInHand(event.getHand()));
         Block block = event.getLevel().getBlockState(event.getPos()).getBlock();
         if (CauldronAccess.isTarget(block)) return;
         String className = block.getClass().getName();
@@ -277,16 +279,16 @@ public final class BindingEventHandler {
             // Migrate bindings created before a multi-block part was taught to
             // resolve to its root. This prevents duplicate part/core entries.
             if (!clickedPos.equals(bindingPos)
-                    && BindingStorage.hasBinding(held, dim, clickedPos)) {
-                BindingStorage.removeBinding(held, dim, clickedPos);
+                    && BindingStorage.hasBinding(player.server, held, dim, clickedPos)) {
+                BindingStorage.removeBinding(player.server, held, dim, clickedPos);
                 AltarBindingRegistry.unbind(
                         player.getUUID(), event.getLevel().dimension(), clickedPos,
                         bindingType);
                 MachineFavoritesSavedData.get(player.server).removeAt(
                         player.getUUID(), dim, clickedPos);
             }
-            if (BindingStorage.hasBinding(held, dim, bindingPos)) {
-                BindingStorage.removeBinding(held, dim, bindingPos);
+            if (BindingStorage.hasBinding(player.server, held, dim, bindingPos)) {
+                BindingStorage.removeBinding(player.server, held, dim, bindingPos);
                 AltarBindingRegistry.unbind(player.getUUID(), event.getLevel().dimension(),
                         bindingPos, bindingType);
                 MachineFavoritesSavedData.get(player.server).removeAt(
@@ -302,7 +304,7 @@ public final class BindingEventHandler {
                 if (binding.isPresent()) {
                     AltarBindingRegistry.bind(player.getUUID(), event.getLevel().dimension(),
                             bindingPos, binding.get());
-                    BindingStorage.addBinding(held, dim, bindingPos, blockKey, blockRegKey,
+                    BindingStorage.addBinding(player.server, held, dim, bindingPos, blockKey, blockRegKey,
                             displayStack, player.getUUID());
                     AltarBindingRegistry.invalidateScanCache();
                     RSIntegrationNetwork.invalidateNetworkResolution(player.getUUID());
@@ -386,7 +388,7 @@ public final class BindingEventHandler {
         String blockKey = "mana_pool||" + block.getDescriptionId();
         ItemStack displayStack = new ItemStack(block.asItem());
         AltarBindingRegistry.bind(player.getUUID(), level.dimension(), pos, binding);
-        BindingStorage.addBinding(held, level.dimension().location(), pos,
+        BindingStorage.addBinding(player.server, held, level.dimension().location(), pos,
                 blockKey, blockId.toString(), displayStack, player.getUUID());
         AltarBindingRegistry.invalidateScanCache();
         RSIntegrationNetwork.invalidateNetworkResolution(player.getUUID());
@@ -395,11 +397,10 @@ public final class BindingEventHandler {
     private static void removeResonantMachineBinding(ServerPlayer player, Level level,
                                                       ItemStack held, BlockPos pos,
                                                       ResourceLocation bindingType) {
-        if (!isBotaniaManaPoolBinding(pos, level) || !BindingStorage.hasBinding(
-                held, level.dimension().location(), pos)) {
+        if (!isBotaniaManaPoolBinding(pos, level) || !BindingStorage.hasBinding(player.server, held, level.dimension().location(), pos)) {
             return;
         }
-        BindingStorage.removeBinding(held, level.dimension().location(), pos);
+        BindingStorage.removeBinding(player.server, held, level.dimension().location(), pos);
         AltarBindingRegistry.unbind(player.getUUID(), level.dimension(), pos, bindingType);
         MachineFavoritesSavedData.get(player.server).removeAt(
                 player.getUUID(), level.dimension().location(), pos);
@@ -509,12 +510,11 @@ public final class BindingEventHandler {
 
         synchronized (BINDING_LOCK) {
             if (knownPlayerBindings.contains(pos)
-                    || BindingStorage.hasBinding(connector, dim, pos)
+                    || BindingStorage.hasBinding(player.server, connector, dim, pos)
                     || AltarBindingRegistry.isBound(level.dimension(), pos, player)) {
                 return NearbyBindResult.ALREADY_BOUND;
             }
-            if (!BindingStorage.addBinding(
-                    connector, dim, pos, blockKey, blockRegKey, displayStack,
+            if (!BindingStorage.addBinding(player.server, connector, dim, pos, blockKey, blockRegKey, displayStack,
                     player.getUUID())) {
                 return NearbyBindResult.ALREADY_BOUND;
             }
@@ -1039,6 +1039,18 @@ public final class BindingEventHandler {
 
     static void sendBindingRefresh(ServerPlayer player) {
         MachineBindingSyncBridge.send(player);
+    }
+
+    @SubscribeEvent
+    public static void prepareBindingsOnLogin(PlayerEvent.PlayerLoggedInEvent event) {
+        if (event.getEntity() instanceof ServerPlayer player) MachineBindingService.prepareHeldBooks(player);
+    }
+
+    @SubscribeEvent
+    public static void prepareCarriedBindings(TickEvent.PlayerTickEvent event) {
+        if (event.phase == TickEvent.Phase.START && event.player instanceof ServerPlayer player) {
+            MachineBindingService.prepareHeldBooks(player);
+        }
     }
 
     @SubscribeEvent

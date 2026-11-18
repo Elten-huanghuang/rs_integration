@@ -981,7 +981,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
                         outer:
                         for (ItemStack stack : allStacks) {
                             if (stack.isEmpty()) continue;
-                            for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
+                            for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(player.server, stack)) {
                                 if (entry.blockKey() != null && entry.blockKey().contains("hephaestus_forge")) {
                                     foundDim = entry.dim();
                                     foundPos = entry.pos();

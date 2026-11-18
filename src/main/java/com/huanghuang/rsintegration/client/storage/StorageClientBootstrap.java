@@ -14,7 +14,7 @@ public final class StorageClientBootstrap {
     private StorageClientBootstrap() {}
 
     public static void register() {
-        ClientBindingLookup.register();
+
         RSIKeyBindings.registerKeyMappings();
         StorageSearchClient.register();
         MinecraftForge.EVENT_BUS.register(

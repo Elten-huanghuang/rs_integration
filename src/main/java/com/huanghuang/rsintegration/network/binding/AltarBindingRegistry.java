@@ -174,7 +174,7 @@ public final class AltarBindingRegistry {
         int[] removed = {0};
         forEachInventoryGroup(player, stacks -> {
             for (ItemStack stack : stacks) {
-                if (!stack.isEmpty() && BindingStorage.removeBinding(stack, dim, pos)) {
+                if (!stack.isEmpty() && BindingStorage.removeBinding(player.server, stack, dim, pos)) {
                     removed[0]++;
                 }
             }
@@ -228,7 +228,7 @@ public final class AltarBindingRegistry {
         boolean[] rebuilt = {false};
         forEachInventoryGroup(player, stacks -> {
             for (ItemStack stack : stacks) {
-                if (stack.isEmpty() || !BindingStorage.hasBinding(stack, dimLoc, altarPos)) continue;
+                if (stack.isEmpty() || !BindingStorage.hasBinding(player.server, stack, dimLoc, altarPos)) continue;
                 for (IBindingHook hook : HOOKS.values()) {
                     if (!hook.matches(stack)) continue;
                     hook.createBinding(stack).ifPresent(binding -> {
@@ -248,7 +248,7 @@ public final class AltarBindingRegistry {
         return findInInventory(player, stacks -> {
             for (ItemStack stack : stacks) {
                 if (stack.isEmpty()) continue;
-                for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
+                for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(player.server, stack)) {
                     if (entry.dim().equals(dim) && entry.pos().equals(pos)) return entry;
                 }
             }
@@ -476,7 +476,7 @@ public final class AltarBindingRegistry {
                                             Map<String, Set<String>> blockKeysByType) {
         for (ItemStack stack : stacks) {
             if (stack.isEmpty()) continue;
-            for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
+            for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(player.server, stack)) {
                 if (isAutomationBlocked(blocked, entry)) continue;
                 ModType entryType = ModType.fromBlockKey(entry.blockKey());
                 if (entryType == null || !isExecutableBinding(
@@ -611,16 +611,16 @@ public final class AltarBindingRegistry {
         int[] removed = {0};
         forEachInventoryGroup(player, stacks -> {
             for (ItemStack stack : stacks) {
-                if (cleanupBindingEntry(stack, dim, pos)) removed[0]++;
+                if (cleanupBindingEntry(player, stack, dim, pos)) removed[0]++;
             }
         });
         return removed[0];
     }
 
-    private static boolean cleanupBindingEntry(ItemStack stack, ResourceLocation dim, BlockPos pos) {
+    private static boolean cleanupBindingEntry(ServerPlayer player, ItemStack stack, ResourceLocation dim, BlockPos pos) {
         if (stack.isEmpty()) return false;
-        if (BindingStorage.hasBinding(stack, dim, pos)) {
-            BindingStorage.removeBinding(stack, dim, pos);
+        if (BindingStorage.hasBinding(player.server, stack, dim, pos)) {
+            BindingStorage.removeBinding(player.server, stack, dim, pos);
             RSIntegrationMod.LOGGER.debug("[RSI-Bind] Removed stale NBT binding: dim={} pos={}", dim, pos);
             return true;
         }
@@ -770,7 +770,7 @@ public final class AltarBindingRegistry {
         Set<MachineFavoriteKey> blocked = blockedMachines(player);
         for (ItemStack stack : stacks) {
             if (stack.isEmpty()) continue;
-            for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
+            for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(player.server, stack)) {
                 ModType entryType = ModType.fromBlockKey(entry.blockKey());
                 if (isAutomationBlocked(blocked, entry)) continue;
                 if (!isCompatibleMachineType(type, entryType)
@@ -811,7 +811,7 @@ public final class AltarBindingRegistry {
 
         for (ItemStack stack : stacks) {
             if (stack.isEmpty()) continue;
-            for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
+            for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(player.server, stack)) {
                 if (isAutomationBlocked(blocked, entry)) continue;
                 ModType entryType = ModType.fromBlockKey(entry.blockKey());
                 boolean externalRecipeBinding =
@@ -876,7 +876,7 @@ public final class AltarBindingRegistry {
         forEachInventoryGroup(player, stacks -> {
             for (ItemStack stack : stacks) {
                 if (stack.isEmpty()) continue;
-                for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
+                for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(player.server, stack)) {
                     ModType entryType = ModType.fromBlockKey(entry.blockKey());
                     boolean sameFamily = type.equals(entryType)
                             || entry.blockKey() != null

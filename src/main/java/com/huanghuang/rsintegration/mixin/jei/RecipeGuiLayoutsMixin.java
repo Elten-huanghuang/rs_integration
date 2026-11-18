@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mixin.jei;
 
+import com.huanghuang.rsintegration.machine.client.ClientBindingLookup;
 import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.feature.ftbquests.QuestSubmissionRequestPacket;
@@ -1860,7 +1861,7 @@ public class RecipeGuiLayoutsMixin {
 
         var inv = player.getInventory();
         for (ItemStack stack : inv.items) {
-            for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
+            for (BindingStorage.BindingEntry entry : ClientBindingLookup.getBindings(stack)) {
                 if (debug) allBlockKeys.add(entry.blockKey());
                 if (rsi$bindingMatchesFilter(
                         entry, filter, recipeType, externalProcessId)
@@ -1869,7 +1870,7 @@ public class RecipeGuiLayoutsMixin {
             }
         }
         for (ItemStack stack : inv.offhand) {
-            for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
+            for (BindingStorage.BindingEntry entry : ClientBindingLookup.getBindings(stack)) {
                 if (debug) allBlockKeys.add(entry.blockKey());
                 if (rsi$bindingMatchesFilter(
                         entry, filter, recipeType, externalProcessId)
@@ -1879,7 +1880,7 @@ public class RecipeGuiLayoutsMixin {
         }
 
         for (ItemStack stack : CuriosAccess.stacks(player)) {
-            for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
+            for (BindingStorage.BindingEntry entry : ClientBindingLookup.getBindings(stack)) {
                 if (debug) allBlockKeys.add(entry.blockKey());
                 if (rsi$bindingMatchesFilter(
                         entry, filter, recipeType, externalProcessId)

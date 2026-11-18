@@ -804,7 +804,7 @@ public final class DebugCommand {
             if (stack.isEmpty()) continue;
             var rl = ForgeRegistries.ITEMS.getKey(stack.getItem());
             String itemId = rl != null ? rl.toString() : "unknown";
-            List<BindingStorage.BindingEntry> entries = BindingStorage.getBindings(stack);
+            List<BindingStorage.BindingEntry> entries = BindingStorage.getBindings(player.server, stack);
             if (entries.isEmpty()) continue;
             for (var entry : entries) {
                 totalBindings++;

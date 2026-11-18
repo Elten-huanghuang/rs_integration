@@ -35,7 +35,7 @@ public final class BindingBackendResolver {
                     .getKey(stack.getItem());
             if (itemId == null || !"beyonddimensions".equals(itemId.getNamespace())
                     || !"net_terminal_item".equals(itemId.getPath())) continue;
-            if (BindingStorage.hasBinding(stack, dim, pos)) return true;
+            if (ClientBindingLookup.hasBinding(stack, dim, pos)) return true;
         }
         return false;
     }

@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.network.binding;
 
+import com.huanghuang.rsintegration.machine.client.ClientBindingLookup;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.feature.goety.brewing.CauldronAccess;
@@ -72,10 +73,10 @@ public final class BindingHintOverlay {
         // Check the exact root first, then the clicked position and a small
         // neighboring fallback so the HUD flips immediately after binding.
         var dimension = mc.level.dimension().location();
-        boolean bound = BindingStorage.hasBinding(held, dimension, target)
-                || BindingStorage.hasBinding(held, dimension, hit.getBlockPos());
+        boolean bound = ClientBindingLookup.hasBinding(held, dimension, target)
+                || ClientBindingLookup.hasBinding(held, dimension, hit.getBlockPos());
         if (!bound) {
-            for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(held)) {
+            for (BindingStorage.BindingEntry entry : ClientBindingLookup.getBindings(held)) {
                 if (!dimension.equals(entry.dim())) continue;
                 // A multiblock may expose a different visible part on the
                 // client than the one that was hit when it was bound. Resolve

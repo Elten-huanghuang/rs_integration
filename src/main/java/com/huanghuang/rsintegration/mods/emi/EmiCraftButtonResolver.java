@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mods.emi;
 
+import com.huanghuang.rsintegration.machine.client.ClientBindingLookup;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.feature.ftbquests.QuestSubmissionRequestPacket;
@@ -328,7 +329,7 @@ final class EmiCraftButtonResolver {
     private static BindingStorage.BindingEntry findBinding(
             ItemStack stack, String filter, Object recipe,
             @Nullable Recipe<?> backingRecipe, @Nullable ModType recipeType) {
-        for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
+        for (BindingStorage.BindingEntry entry : ClientBindingLookup.getBindings(stack)) {
             if (bindingMatchesFilter(entry, filter)
                     && bindingMatchesRecipe(entry, filter, recipe)
                     && bindingMatchesMachine(entry, recipe, backingRecipe, recipeType)) {

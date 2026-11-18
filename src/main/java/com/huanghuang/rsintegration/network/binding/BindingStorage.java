@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.network.binding;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import net.minecraft.SharedConstants;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -120,12 +121,8 @@ public final class BindingStorage {
         }
     }
 
-    /**
-     * 服务端从权威索引读取，客户端从同步缓存读取；只有旧物品或尚未同步时
-     * 才回退到物品 NBT。该路径不会修改物品。
-     */
-    public static List<BindingEntry> getBindings(ItemStack stack) {
-        return MachineBindingService.getBindings(stack);
+    public static List<BindingEntry> getBindings(MinecraftServer server, ItemStack stack) {
+        return MachineBindingService.getBindings(server, stack);
     }
 
     /** 仅供无服务端上下文的兼容路径和客户端首次同步前回退使用。 */
@@ -173,114 +170,19 @@ public final class BindingStorage {
         return new BindingEntry(dim, pos, blockKey, null, null);
     }
 
-    /** 有服务端上下文时写入权威索引；仅无服务端的兼容环境才追加旧 NBT 列表。 */
-    public static boolean addBinding(ItemStack stack, ResourceLocation dim, BlockPos pos,
+    public static boolean addBinding(MinecraftServer server, ItemStack stack, ResourceLocation dim, BlockPos pos,
                                      String blockKey, @Nullable String blockRegKey,
-                                     @Nullable ItemStack displayStack) {
-        return addBinding(stack, dim, pos, blockKey, blockRegKey, displayStack, null);
+                                     @Nullable ItemStack displayStack, @Nullable UUID ownerId) {
+        return MachineBindingService.addBinding(server, stack, dim, pos, blockKey, blockRegKey, displayStack, ownerId);
     }
 
-    /** 生产路径应传入当前玩家，以便服务端索引记录终端所有权。 */
-    public static boolean addBinding(ItemStack stack, ResourceLocation dim, BlockPos pos,
-                                     String blockKey, @Nullable String blockRegKey,
-                                     @Nullable ItemStack displayStack,
-                                     @Nullable UUID ownerId) {
-        return MachineBindingService.addBinding(
-                stack, dim, pos, blockKey, blockRegKey, displayStack, ownerId);
+    public static boolean removeBinding(MinecraftServer server, ItemStack stack, ResourceLocation dim, BlockPos pos) {
+        return MachineBindingService.removeBinding(server, stack, dim, pos);
     }
 
-    static boolean addLegacyBinding(ItemStack stack, ResourceLocation dim, BlockPos pos,
-                                    String blockKey, @Nullable String blockRegKey,
-                                    @Nullable ItemStack displayStack) {
-        CompoundTag oldTag = stack.getTag();
-        CompoundTag tag = oldTag != null ? oldTag.copy() : new CompoundTag();
-        migrateFromLegacy(tag);
-        ListTag list = tag.getList(KEY_BINDINGS, Tag.TAG_COMPOUND);
-        for (int i = 0; i < list.size(); i++) {
-            CompoundTag entryTag = list.getCompound(i);
-            if (dim.toString().equals(entryTag.getString("dim"))
-                    && pos.getX() == entryTag.getInt("x")
-                    && pos.getY() == entryTag.getInt("y")
-                    && pos.getZ() == entryTag.getInt("z")) {
-                return false;
-            }
-        }
-        BindingEntry entry = new BindingEntry(dim, pos, blockKey, blockRegKey, displayStack);
-        list.add(entry.toTag());
-        tag.put(KEY_BINDINGS, list);
-        stack.setTag(tag);
-        RSIntegrationMod.LOGGER.debug("[RSI-Bind] addBinding: item={} dim={} pos={} blockKey={} regKey={} totalBindings={}",
-                stack.getItem(), dim, pos, blockKey, blockRegKey, list.size());
-        return true;
-    }
-
-    /** Copy-on-write: same as {@link #addBinding} — clone, mutate, swap. */
-    public static boolean removeBinding(ItemStack stack, ResourceLocation dim, BlockPos pos) {
-        return MachineBindingService.removeBinding(stack, dim, pos);
-    }
-
-    static boolean removeLegacyBinding(ItemStack stack, ResourceLocation dim, BlockPos pos) {
-        CompoundTag oldTag = stack.getTag();
-        if (oldTag == null) return false;
-        if (!oldTag.contains(KEY_BINDINGS, Tag.TAG_LIST) && !oldTag.contains("aec_bound_x")) return false;
-        CompoundTag tag = oldTag.copy();
-        migrateFromLegacy(tag);
-        ListTag list = tag.getList(KEY_BINDINGS, Tag.TAG_COMPOUND);
-        for (int i = 0; i < list.size(); i++) {
-            CompoundTag entryTag = list.getCompound(i);
-            if (dim.toString().equals(entryTag.getString("dim"))
-                    && pos.getX() == entryTag.getInt("x")
-                    && pos.getY() == entryTag.getInt("y")
-                    && pos.getZ() == entryTag.getInt("z")) {
-                list.remove(i);
-                tag.put(KEY_BINDINGS, list);
-                stack.setTag(tag);
-                RSIntegrationMod.LOGGER.debug("[RSI-Bind] removeBinding: item={} dim={} pos={} remaining={}",
-                        stack.getItem(), dim, pos, list.size());
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /** Copy-on-write replacement for one binding's machine identity. */
-    public static boolean replaceBindingBlockKey(ItemStack stack, ResourceLocation dim, BlockPos pos,
-                                                 String expectedBlockKey, String replacementBlockKey) {
-        return MachineBindingService.replaceBindingBlockKey(
-                stack, dim, pos, expectedBlockKey, replacementBlockKey);
-    }
-
-    static boolean replaceLegacyBindingBlockKey(ItemStack stack, ResourceLocation dim, BlockPos pos,
-                                                String expectedBlockKey,
-                                                String replacementBlockKey) {
-        CompoundTag oldTag = stack.getTag();
-        if (oldTag == null || expectedBlockKey.equals(replacementBlockKey)) return false;
-        CompoundTag tag = oldTag.copy();
-        if (!tag.contains(KEY_BINDINGS, Tag.TAG_LIST) && tag.contains("aec_bound_x")) {
-            if (!dim.toString().equals(tag.getString("aec_bound_dim"))
-                    || pos.getX() != tag.getInt("aec_bound_x")
-                    || pos.getY() != tag.getInt("aec_bound_y")
-                    || pos.getZ() != tag.getInt("aec_bound_z")
-                    || !expectedBlockKey.equals(tag.getString("aec_bound_block"))) {
-                return false;
-            }
-            migrateFromLegacy(tag);
-        }
-        ListTag list = tag.getList(KEY_BINDINGS, Tag.TAG_COMPOUND);
-        for (int i = 0; i < list.size(); i++) {
-            CompoundTag entryTag = list.getCompound(i);
-            if (dim.toString().equals(entryTag.getString("dim"))
-                    && pos.getX() == entryTag.getInt("x")
-                    && pos.getY() == entryTag.getInt("y")
-                    && pos.getZ() == entryTag.getInt("z")
-                    && expectedBlockKey.equals(entryTag.getString("block"))) {
-                entryTag.putString("block", replacementBlockKey);
-                tag.put(KEY_BINDINGS, list);
-                stack.setTag(tag);
-                return true;
-            }
-        }
-        return false;
+    public static boolean replaceBindingBlockKey(MinecraftServer server, ItemStack stack, ResourceLocation dim,
+                                                 BlockPos pos, String expectedBlockKey, String replacementBlockKey) {
+        return MachineBindingService.replaceBindingBlockKey(server, stack, dim, pos, expectedBlockKey, replacementBlockKey);
     }
 
     public static String replaceBlockKeyPrefix(String blockKey, String replacementPrefix) {
@@ -288,77 +190,7 @@ public final class BindingStorage {
         return separator < 0 ? blockKey : replacementPrefix + blockKey.substring(separator);
     }
 
-    public static boolean hasBinding(ItemStack stack, ResourceLocation dim, BlockPos pos) {
-        return MachineBindingService.hasBinding(stack, dim, pos);
-    }
-
-    static boolean hasLegacyBinding(ItemStack stack, ResourceLocation dim, BlockPos pos) {
-        if (!stack.hasTag()) return false;
-        CompoundTag tag = stack.getTag();
-        if (tag == null) return false;
-        if (tag.contains(KEY_BINDINGS, Tag.TAG_LIST)) {
-            ListTag list = tag.getList(KEY_BINDINGS, Tag.TAG_COMPOUND);
-            for (int i = 0; i < list.size(); i++) {
-                CompoundTag entryTag = list.getCompound(i);
-                if (dim.toString().equals(entryTag.getString("dim"))
-                        && pos.getX() == entryTag.getInt("x")
-                        && pos.getY() == entryTag.getInt("y")
-                        && pos.getZ() == entryTag.getInt("z")) {
-                    return true;
-                }
-            }
-            return false;
-        }
-        // Legacy format fallback (matches getBindings behaviour)
-        if (tag.contains("aec_bound_x")) {
-            return dim.toString().equals(tag.getString("aec_bound_dim"))
-                    && pos.getX() == tag.getInt("aec_bound_x")
-                    && pos.getY() == tag.getInt("aec_bound_y")
-                    && pos.getZ() == tag.getInt("aec_bound_z");
-        }
-        return false;
-    }
-
-    public static boolean hasAnyBinding(ItemStack stack) {
-        return MachineBindingService.hasAnyBinding(stack);
-    }
-
-    static boolean hasAnyLegacyBinding(ItemStack stack) {
-        if (!stack.hasTag()) return false;
-        CompoundTag tag = stack.getTag();
-        if (tag == null) return false;
-        return tag.contains(KEY_BINDINGS, Tag.TAG_LIST) && !tag.getList(KEY_BINDINGS, Tag.TAG_COMPOUND).isEmpty();
-    }
-
-    private static void migrateFromLegacy(CompoundTag tag) {
-        if (!tag.contains("aec_bound_x")) return;
-        String dimStr = tag.getString("aec_bound_dim");
-        ResourceLocation dim = ResourceLocation.tryParse(dimStr);
-        if (dim == null) {
-            RSIntegrationMod.LOGGER.warn(
-                    "[RSI] BindingStorage: corrupt legacy dimension '{}' — binding dropped", dimStr);
-            tag.remove("aec_bound_dim");
-            tag.remove("aec_bound_x");
-            tag.remove("aec_bound_y");
-            tag.remove("aec_bound_z");
-            tag.remove("aec_bound_block");
-            return;
-        }
-        BlockPos pos = new BlockPos(
-                tag.getInt("aec_bound_x"),
-                tag.getInt("aec_bound_y"),
-                tag.getInt("aec_bound_z"));
-        String blockKey = tag.getString("aec_bound_block");
-
-        tag.remove("aec_bound_dim");
-        tag.remove("aec_bound_x");
-        tag.remove("aec_bound_y");
-        tag.remove("aec_bound_z");
-        tag.remove("aec_bound_block");
-
-        ListTag list = tag.getList(KEY_BINDINGS, Tag.TAG_COMPOUND);
-        BindingEntry entry = new BindingEntry(dim, pos, blockKey, null, null);
-        list.add(entry.toTag());
-        tag.put(KEY_BINDINGS, list);
+    public static boolean hasBinding(MinecraftServer server, ItemStack stack, ResourceLocation dim, BlockPos pos) {
+        return getBindings(server, stack).stream().anyMatch(e -> e.dim().equals(dim) && e.pos().equals(pos));
     }
 }

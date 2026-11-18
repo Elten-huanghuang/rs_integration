@@ -1,6 +1,5 @@
 package com.huanghuang.rsintegration.network.binding;
 
-import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.util.CuriosAccess;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -9,7 +8,6 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.server.ServerLifecycleHooks;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -27,61 +25,18 @@ import java.util.UUID;
 public final class MachineBindingService {
     public static final String KEY_BOOK_ID = "rsi_binding_book_id";
 
-    @FunctionalInterface
-    public interface ClientBindingView {
-        List<BindingStorage.BindingEntry> get(ItemStack stack);
-    }
-
-    @Nullable
-    private static volatile ClientBindingView clientBindingView;
-
     private MachineBindingService() {}
 
-    public static void installClientBindingView(@Nullable ClientBindingView view) {
-        clientBindingView = view;
+    static List<BindingStorage.BindingEntry> getBindings(MinecraftServer server, ItemStack stack) {
+        UUID id = bookId(stack);
+        MachineBindingSavedData data = id == null || server == null ? null : MachineBindingSavedData.peek(server);
+        return data == null ? List.of() : data.bindings(id);
     }
 
-    static List<BindingStorage.BindingEntry> getBindings(ItemStack stack) {
-        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
-        if (server != null) {
-            UUID bookId = bookId(stack);
-            MachineBindingSavedData data = MachineBindingSavedData.peek(server);
-            if (bookId != null && data != null) {
-                return data.bindings(bookId);
-            }
-
-            if (server.isSameThread()) {
-                data = MachineBindingSavedData.get(server);
-                if (bookId != null) {
-                    if (!BindingStorage.readLegacyBindings(stack).isEmpty()) {
-                        bookId = ensureBook(stack, server, null);
-                    }
-                    return data.bindings(bookId);
-                }
-                if (!BindingStorage.readLegacyBindings(stack).isEmpty()) {
-                    UUID migratedBookId = ensureBook(stack, server, null);
-                    return data.bindings(migratedBookId);
-                }
-            }
-        }
-
-        ClientBindingView view = clientBindingView;
-        return view != null ? view.get(stack) : BindingStorage.readLegacyBindings(stack);
-    }
-
-    static boolean addBinding(ItemStack stack, ResourceLocation dim, BlockPos pos,
+    static boolean addBinding(MinecraftServer server, ItemStack stack, ResourceLocation dim, BlockPos pos,
                               String blockKey, @Nullable String blockRegKey,
                               @Nullable ItemStack displayStack, @Nullable UUID ownerId) {
-        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
-        if (server == null) {
-            return BindingStorage.addLegacyBinding(
-                    stack, dim, pos, blockKey, blockRegKey, displayStack);
-        }
-        if (!server.isSameThread()) {
-            RSIntegrationMod.LOGGER.error(
-                    "[RSI-Bind] Refused off-thread binding mutation at {} {}", dim, pos);
-            return false;
-        }
+        if (server == null || !server.isSameThread()) return false;
 
         UUID bookId = ensureBook(stack, server, ownerId);
         return MachineBindingSavedData.get(server).put(
@@ -91,10 +46,8 @@ public final class MachineBindingService {
                         copyDisplay(displayStack)));
     }
 
-    static boolean removeBinding(ItemStack stack, ResourceLocation dim, BlockPos pos) {
-        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
-        if (server == null) return BindingStorage.removeLegacyBinding(stack, dim, pos);
-        if (!server.isSameThread()) return false;
+    static boolean removeBinding(MinecraftServer server, ItemStack stack, ResourceLocation dim, BlockPos pos) {
+        if (server == null || !server.isSameThread()) return false;
         UUID bookId = bookId(stack);
         return bookId != null && MachineBindingSavedData.get(server)
                 .remove(bookId, dim, pos);
@@ -106,14 +59,9 @@ public final class MachineBindingService {
         return MachineBindingSavedData.get(server).removeEverywhere(dim, pos);
     }
 
-    static boolean replaceBindingBlockKey(ItemStack stack, ResourceLocation dim, BlockPos pos,
+    static boolean replaceBindingBlockKey(MinecraftServer server, ItemStack stack, ResourceLocation dim, BlockPos pos,
                                           String expectedBlockKey, String replacementBlockKey) {
-        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
-        if (server == null) {
-            return BindingStorage.replaceLegacyBindingBlockKey(
-                    stack, dim, pos, expectedBlockKey, replacementBlockKey);
-        }
-        if (!server.isSameThread()) return false;
+        if (server == null || !server.isSameThread()) return false;
         UUID bookId = bookId(stack);
         if (bookId == null) return false;
 
@@ -127,17 +75,6 @@ public final class MachineBindingService {
             return data.put(bookId, MachineEndpointId.create(), replacement);
         }
         return false;
-    }
-
-    static boolean hasBinding(ItemStack stack, ResourceLocation dim, BlockPos pos) {
-        for (BindingStorage.BindingEntry entry : getBindings(stack)) {
-            if (entry.dim().equals(dim) && entry.pos().equals(pos)) return true;
-        }
-        return false;
-    }
-
-    static boolean hasAnyBinding(ItemStack stack) {
-        return !getBindings(stack).isEmpty();
     }
 
     /** 改名只能作用于玩家当前携带的绑定，不能凭客户端提供的 UUID 修改其它终端。 */
@@ -161,13 +98,14 @@ public final class MachineBindingService {
         }
 
         MinecraftServer server = player.server;
-        MachineBindingSavedData data = MachineBindingSavedData.get(server);
+        MachineBindingSavedData data = MachineBindingSavedData.peek(server);
+        if (data == null) return List.of();
         Map<UUID, ResourceLocation> books = new LinkedHashMap<>();
-        collectBooks(player.getInventory().items, player, server, data, books);
-        collectBooks(player.getInventory().offhand, player, server, data, books);
-        collectBooks(player.getInventory().armor, player, server, data, books);
+        collectBooks(player.getInventory().items, books);
+        collectBooks(player.getInventory().offhand, books);
+        collectBooks(player.getInventory().armor, books);
         for (ItemStack curio : CuriosAccess.stacks(player)) {
-            collectBook(curio, player, server, data, books);
+            collectBook(curio, books);
         }
 
         if (books.isEmpty()) return List.of();
@@ -190,38 +128,45 @@ public final class MachineBindingService {
     }
 
     @Nullable
-    public static MachineEndpointId endpointId(ItemStack stack, ResourceLocation dim, BlockPos pos) {
-        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+    public static MachineEndpointId endpointId(MinecraftServer server, ItemStack stack, ResourceLocation dim, BlockPos pos) {
         UUID bookId = bookId(stack);
         if (server == null || bookId == null) return null;
         MachineBindingSavedData data = MachineBindingSavedData.peek(server);
-        if (data == null && server.isSameThread()) {
-            data = MachineBindingSavedData.get(server);
-        }
         return data == null ? null : data.endpointId(bookId, dim, pos);
     }
 
-    private static void collectBooks(List<ItemStack> stacks, ServerPlayer player,
-                                     MinecraftServer server, MachineBindingSavedData data,
+    private static void collectBooks(List<ItemStack> stacks,
                                      Map<UUID, ResourceLocation> books) {
         for (ItemStack stack : stacks) {
-            collectBook(stack, player, server, data, books);
+            collectBook(stack, books);
         }
     }
 
-    private static void collectBook(ItemStack stack, ServerPlayer player,
-                                    MinecraftServer server, MachineBindingSavedData data,
+    private static void collectBook(ItemStack stack,
                                     Map<UUID, ResourceLocation> books) {
         if (stack == null || stack.isEmpty()) return;
         UUID bookId = bookId(stack);
-        if (!BindingStorage.readLegacyBindings(stack).isEmpty()) {
-            bookId = ensureBook(stack, server, player.getUUID());
-        }
         if (bookId == null) return;
-
-        data.claimOwner(bookId, player.getUUID());
         ResourceLocation itemId = BuiltInRegistries.ITEM.getKey(stack.getItem());
         if (itemId != null) books.putIfAbsent(bookId, itemId);
+    }
+
+    public static void prepareHeldBooks(ServerPlayer player) {
+        if (player.server == null || !player.server.isSameThread()) return;
+        AltarBindingRegistry.forEachInventoryGroup(player, stacks -> {
+            for (ItemStack stack : stacks) prepareHeldBook(player, stack);
+        });
+    }
+
+    public static void prepareHeldBook(ServerPlayer player, ItemStack stack) {
+        if (stack == null || stack.isEmpty() || !stack.hasTag()
+                || player.server == null || !player.server.isSameThread()) return;
+        CompoundTag tag = stack.getTag();
+        if (tag.contains(BindingStorage.KEY_BINDINGS) || tag.contains("aec_bound_x")) {
+            if (!BindingStorage.readLegacyBindings(stack).isEmpty()) ensureBook(stack, player.server, player.getUUID());
+        } else if (bookId(stack) != null) {
+            MachineBindingSavedData.get(player.server).claimOwner(bookId(stack), player.getUUID());
+        }
     }
 
     private static UUID ensureBook(ItemStack stack, MinecraftServer server,
@@ -230,15 +175,13 @@ public final class MachineBindingService {
         MachineBindingSavedData data = MachineBindingSavedData.get(server);
         List<BindingStorage.BindingEntry> legacy = BindingStorage.readLegacyBindings(stack);
 
-        UUID bookId = existing;
-        if (bookId == null) {
-            bookId = UUID.randomUUID();
-            for (BindingStorage.BindingEntry entry : legacy) {
+        UUID bookId = existing == null ? UUID.randomUUID() : existing;
+        for (BindingStorage.BindingEntry entry : legacy) {
+            if (data.endpointId(bookId, entry.dim(), entry.pos()) == null) {
                 data.put(bookId, ownerId, MachineEndpointId.create(), entry);
             }
-        } else if (ownerId != null) {
-            data.claimOwner(bookId, ownerId);
         }
+        if (ownerId != null) data.claimOwner(bookId, ownerId);
 
         if (existing == null || !legacy.isEmpty()) {
             CompoundTag oldTag = stack.getTag();

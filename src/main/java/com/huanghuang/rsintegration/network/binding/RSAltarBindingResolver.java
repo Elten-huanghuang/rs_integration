@@ -66,7 +66,7 @@ public final class RSAltarBindingResolver {
             if (result[0] != null) return;
             for (ItemStack stack : stacks) {
                 if (stack.isEmpty()) continue;
-                for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
+                for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(player.server, stack)) {
                     ResourceKey<Level> altarDim = ResourceKey.create(
                             Registries.DIMENSION, entry.dim());
                     List<AltarBinding> bindings = AltarBindingRegistry.bindingsFor(

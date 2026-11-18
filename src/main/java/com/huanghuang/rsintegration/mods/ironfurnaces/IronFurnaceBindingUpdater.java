@@ -63,17 +63,17 @@ public final class IronFurnaceBindingUpdater {
                                                 String replacementPrefix) {
         boolean changed = false;
         for (ItemStack stack : player.getInventory().items) {
-            changed |= updateStack(stack, dimension, pos, replacementPrefix);
+            changed |= updateStack(player, stack, dimension, pos, replacementPrefix);
         }
         for (ItemStack stack : player.getInventory().offhand) {
-            changed |= updateStack(stack, dimension, pos, replacementPrefix);
+            changed |= updateStack(player, stack, dimension, pos, replacementPrefix);
         }
         for (ItemStack stack : player.getInventory().armor) {
-            changed |= updateStack(stack, dimension, pos, replacementPrefix);
+            changed |= updateStack(player, stack, dimension, pos, replacementPrefix);
         }
         try {
             for (ItemStack curio : CuriosAccess.stacks(player)) {
-                changed |= updateStack(curio, dimension, pos, replacementPrefix);
+                changed |= updateStack(player, curio, dimension, pos, replacementPrefix);
             }
         } catch (Exception exception) {
             RSIntegrationMod.LOGGER.debug("[RSI-IronFurnaces] Curios binding migration failed", exception);
@@ -81,16 +81,15 @@ public final class IronFurnaceBindingUpdater {
         return changed;
     }
 
-    private static boolean updateStack(ItemStack stack, ResourceLocation dimension,
+    private static boolean updateStack(ServerPlayer player, ItemStack stack, ResourceLocation dimension,
                                        BlockPos pos, String replacementPrefix) {
         if (stack.isEmpty()) return false;
         boolean changed = false;
-        for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(stack)) {
+        for (BindingStorage.BindingEntry entry : BindingStorage.getBindings(player.server, stack)) {
             if (!dimension.equals(entry.dim()) || !pos.equals(entry.pos())
                     || !isIronFurnaceBlockKey(entry.blockKey())) continue;
             String replacement = BindingStorage.replaceBlockKeyPrefix(entry.blockKey(), replacementPrefix);
-            changed |= BindingStorage.replaceBindingBlockKey(
-                    stack, dimension, pos, entry.blockKey(), replacement);
+            changed |= BindingStorage.replaceBindingBlockKey(player.server, stack, dimension, pos, entry.blockKey(), replacement);
         }
         return changed;
     }
