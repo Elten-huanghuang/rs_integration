@@ -4,7 +4,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.crafting.RecipeIndex;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import java.util.Arrays;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.item.ItemEntity;
@@ -943,7 +943,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         // between poll ticks and whose isCrafting transition was not observed.
         ItemStack expected = getExpectedOutput();
         if (expected == null || expected.isEmpty()) {
-            expected = RecipeIndex.tryGetResultItem(recipe, level.registryAccess());
+            expected = ModRecipeHandlers.tryGetUncachedResultItem(recipe, level.registryAccess());
         }
         if (!expected.isEmpty()) {
             final ItemStack expectedOutput = expected;
@@ -961,8 +961,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public ItemStack collectResult(ServerPlayer player) {
-        ItemStack expected = RecipeIndex
-                .tryGetResultItem(recipe, player.serverLevel().registryAccess());
+        ItemStack expected = ModRecipeHandlers.tryGetUncachedResultItem(recipe, player.serverLevel().registryAccess());
         if (expected.isEmpty()) return ItemStack.EMPTY;
 
         // 1. Scan for ItemEntity spawned by altar's craft() method
@@ -1141,7 +1140,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         // spawned result before the graph publishes it.
         ItemStack expected = findRecipeOutput(recipe);
         if (expected.isEmpty()) {
-            expected = RecipeIndex.tryGetResultItem(recipe, myLevel.registryAccess());
+            expected = ModRecipeHandlers.tryGetUncachedResultItem(recipe, myLevel.registryAccess());
         }
         if (isRuntimeNbtOutput(recipe)) expected.setTag(null);
         return expected.isEmpty() ? null : expected;

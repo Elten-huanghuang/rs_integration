@@ -1537,7 +1537,7 @@ final class CraftPlanningApplicationService {
                         stepId);
                 continue;
             }
-            ItemStack output = RecipeIndex.tryGetResultItem(
+            ItemStack output = ModRecipeHandlers.tryGetUncachedResultItem(
                     stepRecipe, player.serverLevel().registryAccess());
             output = SlashBladeRecipeHandler.planningOutput(stepRecipe, output);
             if ((stepRecipe instanceof SmithingTransformRecipe

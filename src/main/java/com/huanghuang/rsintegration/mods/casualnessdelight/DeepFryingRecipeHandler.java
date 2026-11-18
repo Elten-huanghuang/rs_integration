@@ -46,7 +46,7 @@ public final class DeepFryingRecipeHandler extends AbstractRecipeHandler {
         // 这个重载，直接调用它才能拿到真实产物，避免规划误报“不支持机器”。
         ItemStack direct = readDirectResult(recipe);
         if (!direct.isEmpty()) return direct;
-        return ModRecipeHandlers.tryGetResultItem(recipe, access);
+        return ModRecipeHandlers.probeResultItem(recipe, access);
     }
 
     static ItemStack readDirectResult(Object recipe) {

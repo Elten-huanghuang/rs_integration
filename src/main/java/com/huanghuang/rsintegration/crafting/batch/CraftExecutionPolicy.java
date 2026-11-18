@@ -5,7 +5,7 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.crafting.RecipeIndex;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.crafting.SelfAmplifyingRecipePolicy;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import net.minecraft.core.RegistryAccess;
@@ -66,7 +66,7 @@ public final class CraftExecutionPolicy {
     }
 
     static boolean isSelfAmplifyingRecipe(Recipe<?> recipe, RegistryAccess access) {
-        ItemStack output = RecipeIndex.tryGetResultItem(recipe, access);
+        ItemStack output = ModRecipeHandlers.tryGetUncachedResultItem(recipe, access);
         if (output.isEmpty()) return false;
         List<IngredientSpec> specs = recipe instanceof CraftingRecipe crafting
                 ? CraftPacketUtils.extractCraftingIngredientSpecs(crafting)

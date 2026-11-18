@@ -73,7 +73,7 @@ public final class BossesDelightRecipeHandler extends AbstractRecipeHandler {
 
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
-        return ModRecipeHandlers.tryGetResultItem(recipe, access);
+        return ModRecipeHandlers.probeResultItem(recipe, access);
     }
 
     @Nullable

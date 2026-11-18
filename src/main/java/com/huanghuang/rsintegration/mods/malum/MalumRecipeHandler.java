@@ -75,10 +75,6 @@ public final class MalumRecipeHandler extends AbstractRecipeHandler {
 
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
-        // NOTE: must NOT call RecipeIndex.tryGetResultItem here — for Malum recipes
-        // that method dispatches straight back to this handler, causing infinite
-        // recursion / StackOverflowError. All resolution is done inline below.
-
         // Malum's ILodestoneRecipe base exposes generic result methods that may return
         // a one-item display stack. Concrete recipes such as SpiritInfusionRecipe keep
         // the authoritative stack (including its batch count) in an output field, so
