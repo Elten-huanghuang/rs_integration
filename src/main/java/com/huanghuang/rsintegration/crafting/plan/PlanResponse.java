@@ -9,6 +9,8 @@ import com.huanghuang.rsintegration.storage.StorageReference;
 
 import javax.annotation.Nullable;
 import java.util.Collections;
+import java.util.AbstractList;
+import java.util.HashMap;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -59,6 +61,11 @@ public record PlanResponse(
         List<IntegrationDiagnostic> diagnostics
 ) {
     public PlanResponse {
+        if (steps instanceof GraphCards cards) {
+            if (cards.graph != graph) throw new IllegalArgumentException("卡片投影与预览图不符");
+        } else {
+            steps = graph == null || graph.nodes().isEmpty() ? List.copyOf(steps) : new GraphCards(graph, steps);
+        }
         machineCandidates = machineCandidates == null ? List.of() : List.copyOf(machineCandidates);
         stepIssues = stepIssues == null ? Map.of()
                 : Collections.unmodifiableMap(new LinkedHashMap<>(stepIssues));
@@ -66,6 +73,36 @@ public record PlanResponse(
         diagnostics = diagnostics == null ? List.of() : List.copyOf(diagnostics);
         if (outcome == null) {
             outcome = PlanOutcome.infer(success, materials, missing, executionBlocked);
+        }
+    }
+
+    /** 图内卡片按拓扑顺序投影；图外目标、额外阶段或无图轨迹才独立传输。 */
+    public List<PlanStep> standaloneSteps() {
+        return steps instanceof GraphCards cards ? cards.extra : steps;
+    }
+
+    private static final class GraphCards extends AbstractList<PlanStep> {
+        private final PlanGraphView graph;
+        private final List<PlanGraphView.NodeView> ordered;
+        private final List<PlanStep> extra;
+
+        private GraphCards(PlanGraphView graph, List<PlanStep> extra) {
+            this.graph = graph;
+            Map<Integer, PlanGraphView.NodeView> byId = new HashMap<>();
+            for (var node : graph.nodes()) byId.put(node.nodeId(), node);
+            ordered = graph.topologicalOrder().stream().map(id -> {
+                var node = byId.remove(id);
+                if (node == null) throw new IllegalArgumentException("拓扑顺序包含重复或不存在的节点：" + id);
+                return node;
+            }).toList();
+            if (!byId.isEmpty() || ordered.size() != graph.nodes().size())
+                throw new IllegalArgumentException("拓扑顺序与预览节点不符");
+            this.extra = List.copyOf(extra);
+        }
+
+        @Override public int size() { return ordered.size() + extra.size(); }
+        @Override public PlanStep get(int i) {
+            return i < ordered.size() ? ordered.get(i).asPlanStep() : extra.get(i - ordered.size());
         }
     }
 

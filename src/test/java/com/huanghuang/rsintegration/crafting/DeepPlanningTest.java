@@ -166,8 +166,9 @@ class DeepPlanningTest extends BootstrapTest {
             int estimateTicks = 1;
             while (!estimates.advance(0L)) estimateTicks++;
             assertEquals(nodes, estimateTicks);
-            assertEquals(nodes, estimates.result().size());
-            assertEquals(nodes, estimates.displayResult().size());
+            var nodeEstimates = estimates.result();
+            assertEquals(nodes, nodeEstimates.size());
+            for (var node : graph.nodes()) assertTrue(nodeEstimates.containsKey(node.id().value()));
             // 每种路由只建立一次探针，实际余烬类型也可能已由其他测试注册。
             assertTrue(fixture.probeCalls() >= routeCount - 1 && fixture.probeCalls() <= routeCount);
             var tree = roundTrip(fixture, graph);

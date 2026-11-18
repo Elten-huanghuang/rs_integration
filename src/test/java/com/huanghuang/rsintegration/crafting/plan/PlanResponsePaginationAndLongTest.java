@@ -64,7 +64,8 @@ class PlanResponsePaginationAndLongTest extends BootstrapTest {
         PlanResponse decoded = packet.plan();
 
         assertEquals(REQUEST_ID, packet.requestId());
-        assertEquals(batches, decoded.steps().get(0).batches());
+        assertEquals(List.of(4L, batches), decoded.steps().stream().map(PlanStep::batches).toList());
+        assertEquals(batches, decoded.standaloneSteps().get(0).batches());
         assertEquals(availability, decoded.materials().get(materialKey));
         assertEquals(8_000_000_011L, decoded.leftovers().get(materialKey));
         PlanGraphView decodedGraph = decoded.graph();

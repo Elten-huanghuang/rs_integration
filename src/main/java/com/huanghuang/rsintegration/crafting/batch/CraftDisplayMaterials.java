@@ -112,7 +112,8 @@ final class CraftDisplayMaterials {
                 enriched.add(step);
                 continue;
             }
-            ItemStack output = ModRecipeHandlers.tryGetResultItem(primary.recipe(), access);
+            ItemStack output = step.syntheticOutput() != null ? step.syntheticOutput()
+                    : ModRecipeHandlers.tryGetResultItem(primary.recipe(), access);
             List<RecipeIndex.Entry> sameItem = output.isEmpty()
                     ? null : recipeIndex.get(output.getItem());
             if (sameItem == null || sameItem.size() < 2) {

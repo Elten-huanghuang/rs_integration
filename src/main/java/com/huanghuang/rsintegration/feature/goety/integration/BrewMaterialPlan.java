@@ -65,14 +65,13 @@ public final class BrewMaterialPlan {
                 RSIntegrationConfig.CRAFTING_TYPED_PREVIEW_TIMEOUT_MS.get(),
                 null, effectiveLocks, preferences);
         var view = PlanGraphView.from(graph);
-        var steps = view.nodes().stream().map(node -> node.asPlanStep()).toList();
         Map<Item, Long> itemAvailable = new LinkedHashMap<>();
         available.forEach((key, count) ->
                 itemAvailable.merge(key.toStack().getItem(), count, SaturatingLongMath::add));
         var bill = PlanMaterialBill.summarize(Map.of(), Map.of(), itemAvailable,
-                available, output, steps, 1, view, !missing.isEmpty());
+                available, output, List.of(), 1, view, !missing.isEmpty());
         return new PlanResponse(bill.feasible(), output.getHoverName().getString(), output,
-                steps, bill.materials(), missing.stream().distinct().toList(), targetId.toString(),
+                List.of(), bill.materials(), missing.stream().distinct().toList(), targetId.toString(),
                 null, null, 0, 0, 0, List.of(), 1,
                 null, null, null, 0L, false, false, false, null, Set.of(),
                 bill.leftovers(), null, view, !bill.feasible());

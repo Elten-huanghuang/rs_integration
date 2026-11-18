@@ -56,11 +56,6 @@ public final class ParallelPlanEstimator {
         return new Request(player, available).estimateStep(step);
     }
 
-    @Nullable
-    public static ParallelPlan forDisplay(Map<DisplayKey, ParallelPlan> plans, PlanStep step) {
-        return step.modType() == null ? null : plans.get(new DisplayKey(step.recipeId(), step.modType().id()));
-    }
-
     /** 只在同一份预览内复用无上下文探针结果及燃料库存；执行端仍独立重验。 */
     public static final class Request {
         private final ServerPlayer player;
@@ -87,7 +82,6 @@ public final class ParallelPlanEstimator {
         public final class GraphEstimate {
             private final Iterator<CraftNode> nodes;
             private final Map<Integer, ParallelPlan> plans = new HashMap<>();
-            private final Map<DisplayKey, List<ParallelPlan>> displayPlans = new HashMap<>();
 
             private GraphEstimate(List<CraftNode> nodes) {
                 this.nodes = nodes.iterator();
@@ -100,9 +94,6 @@ public final class ParallelPlanEstimator {
                     ParallelPlan plan = estimateNode(node);
                     if (plan != null) {
                         plans.put(node.id().value(), plan);
-                        displayPlans.computeIfAbsent(
-                                new DisplayKey(node.recipeId(), node.modTypeId()), ignored -> new ArrayList<>())
-                                .add(plan);
                     }
                     if (System.nanoTime() - start >= budgetNanos) break;
                 }
@@ -114,15 +105,6 @@ public final class ParallelPlanEstimator {
                 return Map.copyOf(plans);
             }
 
-            public Map<DisplayKey, ParallelPlan> displayResult() {
-                if (nodes.hasNext()) throw new IllegalStateException("并行估算尚未完成");
-                Map<DisplayKey, ParallelPlan> result = new HashMap<>();
-                displayPlans.forEach((key, values) -> {
-                    ParallelPlan merged = values.size() == 1 ? values.get(0) : ParallelPlan.mergeForDisplay(values);
-                    if (merged != null) result.put(key, merged);
-                });
-                return Map.copyOf(result);
-            }
         }
 
         @Nullable
@@ -200,7 +182,6 @@ public final class ParallelPlanEstimator {
         }
     }
 
-    public record DisplayKey(ResourceLocation recipeId, String modTypeId) {}
 
     private record ProbeKey(ModType type, boolean inference) {}
 

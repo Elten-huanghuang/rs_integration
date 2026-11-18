@@ -10,7 +10,6 @@ import com.huanghuang.rsintegration.crafting.AsyncCraftChain;
 import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponsePublisher;
-import com.huanghuang.rsintegration.crafting.plan.PlanStep;
 import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
 import com.huanghuang.rsintegration.crafting.plan.IntegrationDiagnostic;
 import com.huanghuang.rsintegration.crafting.plan.IntegrationDiagnosticCode;
@@ -102,13 +101,10 @@ public final class ApothSpawnerUpgradeService {
         PENDING.put(player.getUUID(), new PendingPlan(dimension, pos, Map.copyOf(selected),
                 now + PREVIEW_TTL_MS));
         PlanGraphView graphView = graph == null ? null : PlanGraphView.from(graph);
-        List<PlanStep> steps = graphView == null ? List.of() : graphView.nodes().stream()
-                .map(PlanGraphView.NodeView::asPlanStep)
-                .toList();
         boolean ok = graph == null || graph.unresolvedDemands().isEmpty();
         ItemStack target = new ItemStack(Items.SPAWNER);
         PlanResponse response = new PlanResponse(ok, target.getHoverName().getString(), target,
-                steps, Map.of(), missing, ApothSpawnerPlanTarget.ID.toString(), null,
+                List.of(), Map.of(), missing, ApothSpawnerPlanTarget.ID.toString(), null,
                 dimension.toString(), pos.getX(), pos.getY(), pos.getZ(), List.of(), 1,
                 null, null, null, 0L, false, false, false, null, Set.of(),
                 Map.<IngredientKey, Long>of(), null, graphView);

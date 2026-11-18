@@ -313,7 +313,9 @@ class PlanMaterialBillTest extends BootstrapTest {
                 null, null, null, 0, false, false, false, null, Set.of(),
                 Map.of(), null, graph);
         PlanTreeModel model = PlanTreeModel.from(plan);
-        assertEquals(4, model.root.children.get(0).children.size());
+        assertEquals(4, model.root.children.size());
+        assertEquals(books.stream().map(IngredientKey::of).toList(),
+                model.root.children.stream().map(child -> child.key).toList());
     }
 
     @Test

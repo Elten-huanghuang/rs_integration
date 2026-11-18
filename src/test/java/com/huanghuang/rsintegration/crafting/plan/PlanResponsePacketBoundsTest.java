@@ -5,6 +5,7 @@ import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.DecoderException;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import org.junit.jupiter.api.Test;
 
@@ -152,6 +153,33 @@ class PlanResponsePacketBoundsTest extends BootstrapTest {
     }
 
     @Test
+    void graphGridRejectsMoreThanNineSlotsAndAnUnknownInput() {
+        for (int size : List.of(10, 1)) {
+            FriendlyByteBuf buf = buffer();
+            try {
+                buf.writeVarInt(1);
+                buf.writeVarInt(1);
+                buf.writeVarInt(0);
+                buf.writeResourceLocation(ResourceLocation.parse("test:grid"));
+                buf.writeUtf("generic");
+                buf.writeVarInt(1);
+                buf.writeItem(ItemStack.EMPTY);
+                for (int i = 0; i < 4; i++) buf.writeVarInt(0);
+                buf.writeBoolean(false);
+                buf.writeVarInt(0);
+                buf.writeByte(3);
+                buf.writeByte(3);
+                buf.writeByte(size);
+                buf.writeVarInt(1);
+                buf.writeVarInt(1);
+                assertThrows(DecoderException.class, () -> PlanResponsePacket.readGraph(buf));
+            } finally {
+                buf.release();
+            }
+        }
+    }
+
+    @Test
     void truncatedGraphFailsInsteadOfReturningPartialView() {
         FriendlyByteBuf buf = buffer();
         buf.writeVarInt(1);
@@ -223,7 +251,7 @@ class PlanResponsePacketBoundsTest extends BootstrapTest {
     private static void writeNodeHeader(FriendlyByteBuf buf) {
         buf.writeVarInt(1);
         buf.writeVarInt(0);
-        buf.writeResourceLocation(net.minecraft.resources.ResourceLocation.parse("test:node"));
+        buf.writeResourceLocation(ResourceLocation.parse("test:node"));
         buf.writeUtf("generic", 128);
         buf.writeVarInt(1);
         buf.writeItem(ItemStack.EMPTY);

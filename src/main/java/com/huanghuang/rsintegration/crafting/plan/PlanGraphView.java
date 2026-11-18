@@ -156,15 +156,10 @@ public record PlanGraphView(
     }
 
     /** 卡片和递归树共用已经通过服务端可用性检查的候选，不改动执行节点或材料边。 */
-    public PlanGraphView withRecipeAlternatives(List<PlanStep> steps) {
-        Map<ResourceLocation, PlanStep> byRecipe = new LinkedHashMap<>();
-        for (PlanStep step : steps) byRecipe.putIfAbsent(step.recipeId(), step);
+    public PlanGraphView withNodePresentations(Map<Integer, PlanStep> byNode) {
         List<NodeView> enriched = nodes.stream().map(node -> {
-            PlanStep step = byRecipe.get(node.recipeId());
-            if (step == null) return node;
-            return new NodeView(node.nodeId(), node.recipeId(), node.modTypeId(),
-                    node.executions(), node.primaryOutput(), step.alternatives(),
-                    step.alternativeModTypes(), node.inputs(), node.outputs(), node.parallelPlan());
+            PlanStep step = byNode.get(node.nodeId());
+            return step == null ? node : node.withPresentation(step);
         }).toList();
         return new PlanGraphView(version, enriched, edges, roots, unresolved,
                 topologicalOrder, magicCosts, recipeOptions);
@@ -183,7 +178,14 @@ public record PlanGraphView(
                            List<ResourceLocation> alternativeIds,
                            List<String> alternativeModTypeIds,
                            List<InputView> inputs, List<OutputView> outputs,
-                           @Nullable ParallelPlan parallelPlan) {
+                           @Nullable ParallelPlan parallelPlan, Grid grid) {
+        public NodeView(int nodeId, ResourceLocation recipeId, String modTypeId,
+                        int executions, ItemStack primaryOutput,
+                        List<ResourceLocation> alternativeIds, List<String> alternativeModTypeIds,
+                        List<InputView> inputs, List<OutputView> outputs, @Nullable ParallelPlan parallelPlan) {
+            this(nodeId, recipeId, modTypeId, executions, primaryOutput, alternativeIds,
+                    alternativeModTypeIds, inputs, outputs, parallelPlan, Grid.NONE);
+        }
         public NodeView(int nodeId, ResourceLocation recipeId, String modTypeId,
                         int executions, ItemStack primaryOutput,
                         List<ResourceLocation> alternativeIds,
@@ -206,65 +208,93 @@ public record PlanGraphView(
             alternativeModTypeIds = List.copyOf(alternativeModTypeIds);
             inputs = List.copyOf(inputs);
             outputs = List.copyOf(outputs);
+            grid.validate(inputs, executions);
+        }
+
+        public NodeView withPresentation(PlanStep step) {
+            if (!recipeId.equals(step.recipeId())) throw new IllegalArgumentException("配方与节点不符");
+            return new NodeView(nodeId, recipeId, modTypeId, executions, primaryOutput,
+                    step.alternatives(), step.alternativeModTypes(), inputs, outputs, parallelPlan,
+                    Grid.bind(step, inputs, executions));
         }
 
         public PlanStep asPlanStep() {
-            return asPlanStep(null);
-        }
-
-        /** 只从展示模板恢复九宫格槽位，物品状态、数量和批次仍以图节点为准。 */
-        public PlanStep asPlanStep(@Nullable PlanStep presentation) {
             int runCount = Math.max(1, executions);
             List<ItemStack> displayInputs = inputs.stream()
                     .map(input -> input.display().copyWithCount(
                             SaturatingLongMath.clampToInt(input.perExecutionQuantity(runCount))))
                     .toList();
             List<DemandRole> inputRoles = inputs.stream().map(InputView::role).toList();
-            int width = 0;
-            int height = 0;
-            if (presentation != null && recipeId.equals(presentation.recipeId())
-                    && presentation.recipeWidth() > 0 && presentation.recipeHeight() > 0) {
-                List<ItemStack> grid = restoreGrid(presentation, displayInputs, inputRoles);
-                if (grid != null) {
-                    displayInputs = grid;
-                    inputRoles = presentation.inputRoles();
-                    width = presentation.recipeWidth();
-                    height = presentation.recipeHeight();
-                }
+            if (!grid.slots().isEmpty()) {
+                displayInputs = grid.slots().stream().map(slot -> slot.count() == 0 ? ItemStack.EMPTY
+                        : inputs.get(slot.input()).display().copyWithCount(slot.count())).toList();
+                inputRoles = grid.slots().stream().map(slot -> slot.count() == 0 ? DemandRole.CONSUMED
+                        : inputs.get(slot.input()).role()).toList();
             }
             return new PlanStep(recipeId, primaryOutput.copy(), runCount,
-                    displayInputs, alternativeIds, ModType.byId(modTypeId), 0,
-                    !alternativeIds.isEmpty(), width, height, alternativeModTypeIds, inputRoles,
+                    displayInputs, alternativeIds, ModType.byId(modTypeId), grid.depth(),
+                    !alternativeIds.isEmpty(), grid.width(), grid.height(), alternativeModTypeIds, inputRoles,
                     false, parallelPlan);
         }
+    }
 
-        @Nullable
-        private static List<ItemStack> restoreGrid(PlanStep presentation,
-                                                    List<ItemStack> actualInputs,
-                                                    List<DemandRole> actualRoles) {
-            long[] remaining = actualInputs.stream().mapToLong(ItemStack::getCount).toArray();
-            List<ItemStack> grid = new ArrayList<>();
+    /** 槽位只引用本节点的输入及其份额；物品、NBT 和角色不在展示协议中重复存储。 */
+    public record GridSlot(int input, int count) {}
+
+    public record Grid(int width, int height, int depth, List<GridSlot> slots) {
+        static final Grid NONE = new Grid(0, 0, 0, List.of());
+
+        public Grid {
+            slots = List.copyOf(slots);
+            if (depth < 0 || width < 0 || height < 0 || width > 3 || height > 3
+                    || (width == 0) != (height == 0) || slots.size() > width * height
+                    || slots.isEmpty() != (width == 0)) throw new IllegalArgumentException("预览网格尺寸无效");
+        }
+
+        private void validate(List<InputView> inputs, int executions) {
+            if (slots.isEmpty()) return;
+            long[] remaining = quantities(inputs, executions);
+            for (GridSlot slot : slots) {
+                if (slot.count == 0 && slot.input == -1) continue;
+                if (slot.input < 0 || slot.input >= remaining.length || slot.count <= 0
+                        || (remaining[slot.input] -= slot.count) < 0)
+                    throw new IllegalArgumentException("预览网格引用无效");
+            }
+            for (long count : remaining) if (count != 0) throw new IllegalArgumentException("预览网格数量不符");
+        }
+
+        private static long[] quantities(List<InputView> inputs, int executions) {
+            return inputs.stream().mapToLong(input -> input.perExecutionQuantity(Math.max(1, executions))).toArray();
+        }
+
+        private static Grid bind(PlanStep presentation, List<InputView> inputs, int executions) {
+            Grid linear = presentation.depth() == 0 ? NONE : new Grid(0, 0, presentation.depth(), List.of());
+            int width = presentation.recipeWidth(), height = presentation.recipeHeight();
+            if (width < 1 || height < 1 || width > 3 || height > 3 || presentation.inputs().isEmpty()
+                    || presentation.inputs().size() > width * height) return linear;
+            long[] remaining = quantities(inputs, executions);
+            List<GridSlot> slots = new ArrayList<>();
             for (int slot = 0; slot < presentation.inputs().size(); slot++) {
                 ItemStack template = presentation.inputs().get(slot);
                 if (template.isEmpty()) {
-                    grid.add(ItemStack.EMPTY);
+                    slots.add(new GridSlot(-1, 0));
                     continue;
                 }
                 int matched = -1;
-                for (int i = 0; i < actualInputs.size(); i++) {
+                for (int i = 0; i < inputs.size(); i++) {
                     if (remaining[i] >= template.getCount()
-                            && actualRoles.get(i) == presentation.inputRole(slot)
-                            && ItemStack.isSameItemSameTags(template, actualInputs.get(i))) {
+                            && inputs.get(i).role() == presentation.inputRole(slot)
+                            && ItemStack.isSameItemSameTags(template, inputs.get(i).display())) {
                         matched = i;
                         break;
                     }
                 }
-                if (matched < 0) return null;
-                grid.add(actualInputs.get(matched).copyWithCount(template.getCount()));
+                if (matched < 0) return linear;
+                slots.add(new GridSlot(matched, template.getCount()));
                 remaining[matched] -= template.getCount();
             }
-            for (long count : remaining) if (count != 0L) return null;
-            return List.copyOf(grid);
+            for (long count : remaining) if (count != 0L) return linear;
+            return new Grid(width, height, presentation.depth(), slots);
         }
     }
 

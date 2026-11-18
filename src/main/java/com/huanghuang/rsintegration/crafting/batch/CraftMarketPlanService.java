@@ -115,7 +115,7 @@ final class CraftMarketPlanService {
                 ? List.of() : List.of(IntegrationDiagnostic.error(outcome.diagnostic()));
         PlanResponseDraft draft = new PlanResponseDraft(
                 feasible, ItemStackUtils.registryId(targetOutput), targetOutput,
-                steps, materials, List.of(), recipeId.toString(), modType.id(),
+                List.of(), materials, List.of(), recipeId.toString(), modType.id(),
                 dimension != null ? dimension.toString() : null,
                 position != null ? position.getX() : 0,
                 position != null ? position.getY() : 0,

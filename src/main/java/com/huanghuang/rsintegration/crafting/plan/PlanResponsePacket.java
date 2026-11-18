@@ -130,8 +130,8 @@ public final class PlanResponsePacket {
         buf.writeUtf(plan.targetName(), MAX_TARGET_NAME_LENGTH);
         InkFluidSupport.writePacket(buf, plan.targetResult());
         // Steps
-        buf.writeVarInt(plan.steps().size());
-        for (PlanStep step : plan.steps()) {
+        buf.writeVarInt(plan.standaloneSteps().size());
+        for (PlanStep step : plan.standaloneSteps()) {
             buf.writeResourceLocation(step.recipeId());
             InkFluidSupport.writePacket(buf, step.output());
             buf.writeVarLong(step.batches());
@@ -577,6 +577,15 @@ public final class PlanResponsePacket {
                 buf.writeVarInt(output.kindOrdinal());
             }
             writeParallelPlan(buf, node.parallelPlan());
+            var grid = node.grid();
+            buf.writeVarInt(grid.depth());
+            buf.writeByte(grid.width());
+            buf.writeByte(grid.height());
+            buf.writeByte(grid.slots().size());
+            for (var slot : grid.slots()) {
+                buf.writeVarInt(slot.input() + 1);
+                buf.writeVarInt(slot.count());
+            }
         }
         buf.writeVarInt(graph.edges().size());
         for (PlanGraphView.EdgeView edge : graph.edges()) {
@@ -657,9 +666,20 @@ public final class PlanResponsePacket {
                         InkFluidSupport.readPacket(buf), readNonNegativeVarLong(buf, "output quantity"),
                         readNonNegativeVarInt(buf, "output kind ordinal")));
             }
-            nodes.add(new PlanGraphView.NodeView(nodeId, recipe, modType, executions,
-                    primary, alternativeIds, alternativeModTypes, inputs, outputs,
-                    readParallelPlan(buf)));
+            ParallelPlan parallel = readParallelPlan(buf);
+            int depth = readNonNegativeVarInt(buf, "grid depth");
+            int width = buf.readUnsignedByte(), height = buf.readUnsignedByte(), size = buf.readUnsignedByte();
+            if (size > 9) throw new DecoderException("预览网格超过九格");
+            List<PlanGraphView.GridSlot> slots = new ArrayList<>(size);
+            for (int j = 0; j < size; j++) slots.add(new PlanGraphView.GridSlot(
+                    readNonNegativeVarInt(buf, "grid input") - 1, readNonNegativeVarInt(buf, "grid count")));
+            try {
+                nodes.add(new PlanGraphView.NodeView(nodeId, recipe, modType, executions,
+                        primary, alternativeIds, alternativeModTypes, inputs, outputs, parallel,
+                        new PlanGraphView.Grid(width, height, depth, slots)));
+            } catch (IllegalArgumentException invalid) {
+                throw new DecoderException("预览节点网格无效", invalid);
+            }
         }
         List<PlanGraphView.EdgeView> edges = new ArrayList<>();
         for (int i = 0, n = readBoundedCount(buf); i < n; i++) {

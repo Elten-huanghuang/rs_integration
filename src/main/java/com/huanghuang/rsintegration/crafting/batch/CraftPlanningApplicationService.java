@@ -501,8 +501,7 @@ final class CraftPlanningApplicationService {
 
     private record CompletedTypedPreview(CraftPlanGraph graph, List<String> missing,
                                          ItemStack output, List<TypedRootKey> roots,
-                                         Map<Integer, ParallelPlan> parallelPlans,
-                                         Map<ParallelPlanEstimator.DisplayKey, ParallelPlan> displayPlans) {}
+                                         Map<Integer, ParallelPlan> parallelPlans) {}
 
     private record TypedRootKey(Class<?> predicateType, Object predicate, long count,
                                 InputConsumption consumption) {}
@@ -668,7 +667,7 @@ final class CraftPlanningApplicationService {
                     long start = System.nanoTime();
                     try {
                         completed.accept(new CompletedTypedPreview(graph, missing, output, roots,
-                                parallelPlans, estimates.displayResult()));
+                                parallelPlans));
                     } finally {
                         PerformanceMonitor.recordPlanningLatency(
                                 PerformanceMonitor.PlanningLatencyPhase.TYPED_ASSEMBLY, System.nanoTime() - start);
@@ -1651,7 +1650,7 @@ final class CraftPlanningApplicationService {
                                 baseItem, clickedOutput, requestId, previewGeneration, precomputedPlan, currentSnapshot,
                                 true, reuseValidatedSnapshot, sink, planStorageReference, materialLocks, routedPlan,
                                 safePreferences, new CompletedTypedPreview(graph, List.of(), planTargetOutput,
-                                        roots, work.result(), work.displayResult())), sink);
+                                        roots, work.result())), sink);
                 return;
             }
             resolutionSteps = ExecutionEquivalence.projectFlatSteps(planGraph);
@@ -1696,18 +1695,6 @@ final class CraftPlanningApplicationService {
             resolutionSteps = CraftDisplayMaterials.attachIndexedAlternatives(
                     resolutionSteps, recipeIndex, player.serverLevel().registryAccess());
         }
-        Map<ResourceLocation, ModType> modTypeByRecipe = new HashMap<>();
-        Map<ResourceLocation, Integer> recipeWidths = new HashMap<>();
-        Map<ResourceLocation, Integer> recipeHeights = new HashMap<>();
-        Map<ResourceLocation, ResolutionStep> stepByRecipe = new HashMap<>();
-        if (resolutionSteps != null) {
-            for (ResolutionStep rs : resolutionSteps) {
-                if (rs.modType() != ModType.GENERIC) {
-                    modTypeByRecipe.putIfAbsent(rs.recipeId(), rs.modType());
-                }
-                stepByRecipe.putIfAbsent(rs.recipeId(), rs);
-            }
-        }
 
         // Compute itemAvailable early — needed for ingredient matching in both
         // PlanStep display and material calculation.
@@ -1727,25 +1714,20 @@ final class CraftPlanningApplicationService {
                     itemAvailable.size(), totalItems);
         }
 
-        // Aggregate every run of a recipe into one step, keeping first-seen order.
-        // Quantity reaches us two ways: the target's ingredients are pre-expanded
-        // ×repeatCount (many entries, executions=1 each) and deeper intermediates use
-        // inner batching (one entry, executions=N). Summing executions per recipe
-        // captures both; counting bare occurrences would drop inner-batched runs and
-        // under-scale that sub-recipe — both its tree children (amount = inputCount ×
-        // parent.batches) and its material draw. Distinct recipes keep first-seen
-        // order; hierarchy comes from the depth pass below (item graph, not list
-        // position), and each recipe maps to one output item → one depth, so folding
-        // duplicates never crosses depth boundaries.
+        // 有图时按投影的拓扑顺序逐节点构建展示属性；没有原生配方模板的节点仍由图直接展示。
         List<PlanStep> steps = new ArrayList<>();
-
-        List<CraftPreviewSteps.PreviewStep> mergedSteps = CraftPreviewSteps.merge(resolutionSteps,
-                id -> CraftRecipeResolver.resolve(player.serverLevel(), id), player.serverLevel().registryAccess());
-        for (CraftPreviewSteps.PreviewStep previewStep : mergedSteps) {
+        Map<Integer, Integer> templateIndices = new LinkedHashMap<>();
+        List<CraftPreviewSteps.PreviewStep> mergedSteps = planGraph == null
+                ? CraftPreviewSteps.merge(resolutionSteps, id -> CraftRecipeResolver.resolve(player.serverLevel(), id),
+                        player.serverLevel().registryAccess())
+                : resolutionSteps.stream().map(rs -> new CraftPreviewSteps.PreviewStep(rs, rs.executions())).toList();
+        for (int ordinal = 0; ordinal < mergedSteps.size(); ordinal++) {
+            CraftPreviewSteps.PreviewStep previewStep = mergedSteps.get(ordinal);
             ResolutionStep mergedRs = previewStep.step();
             ResourceLocation stepId = mergedRs.recipeId();
             int batches = previewStep.batches();
             if (mergedRs != null && mergedRs.syntheticInput() != null && mergedRs.syntheticOutput() != null) {
+                if (planGraph != null) templateIndices.put(planGraph.topologicalOrder().get(ordinal).value(), steps.size());
                 steps.add(new PlanStep(stepId, mergedRs.syntheticOutput().copy(), batches,
                         List.of(mergedRs.syntheticInput().copy()), Collections.emptyList(), mergedRs.modType(),
                         0, false, 0, 0, Collections.emptyList()));
@@ -1765,8 +1747,7 @@ final class CraftPlanningApplicationService {
                     && mergedRs.syntheticOutput() != null) {
                 output = mergedRs.syntheticOutput().copy();
             }
-            ModType stepModType = mergedRs != null ? mergedRs.modType()
-                    : modTypeByRecipe.get(stepId);
+            ModType stepModType = mergedRs.modType();
             output = CraftMachineBindingSupport.routeRecipeOutput(stepModType, output);
             if (output.isEmpty()) {
                 RSIntegrationMod.debug("[RSI-Generic] Plan step output empty: {} ({})",
@@ -1857,10 +1838,7 @@ final class CraftPlanningApplicationService {
             // recursive plan that may craft those inputs.
             List<ResourceLocation> alternatives = new ArrayList<>();
             List<String> alternativeModTypes = new ArrayList<>();
-            ResolutionStep rs = stepByRecipe.get(stepId);
-            RSIntegrationMod.debug("[RSI-OR] buildStep {}: stepByRecipe has rs={} alternatives={}",
-                    stepId, rs != null,
-                    rs != null ? rs.alternativeIds().size() : -1);
+            ResolutionStep rs = mergedRs;
             if (rs != null && !rs.alternativeIds().isEmpty()) {
                 for (int i = 0; i < rs.alternativeIds().size(); i++) {
                     ResourceLocation altId = rs.alternativeIds().get(i);
@@ -1892,8 +1870,7 @@ final class CraftPlanningApplicationService {
             if (alternatives.isEmpty()) { alternatives = Collections.emptyList(); alternativeModTypes = Collections.emptyList(); }
 
             ModType mt = stepModType;
-            recipeWidths.put(stepId, recipeW);
-            recipeHeights.put(stepId, recipeH);
+            if (planGraph != null) templateIndices.put(planGraph.topologicalOrder().get(ordinal).value(), steps.size());
             steps.add(new PlanStep(stepId, output, batches, inputs, alternatives, mt,
                     0, !alternatives.isEmpty(), recipeW, recipeH, alternativeModTypes,
                     inputRoles));
@@ -1960,7 +1937,8 @@ final class CraftPlanningApplicationService {
             }
         }
 
-        // ── Add the target recipe itself as the last step so its grid is visible ──
+        int firstStandalone = planGraph == null ? 0 : steps.size();
+        // 图外的终端与额外阶段单列；已嵌入的终端从节点投影生成。
         // Components, not Strings: a dedicated server cannot resolve rsi.* keys.
         List<Component> modWarnings = new ArrayList<>();
         if (timedOutMissingRoute) {
@@ -2262,11 +2240,13 @@ final class CraftPlanningApplicationService {
 
         CraftPlanGraph displayGraph = planGraph != null ? planGraph : cacheInputGraph;
         boolean reuseTypedEstimates = completedTyped != null && displayGraph == completedTyped.graph();
-        var parallelEstimates = reuseTypedEstimates ? null : new ParallelPlanEstimator.Request(player, itemAvailable);
+        var parallelEstimates = new ParallelPlanEstimator.Request(player, itemAvailable);
+        Map<Integer, PlanStep> nodeTemplates = new HashMap<>();
+        for (var entry : templateIndices.entrySet()) nodeTemplates.put(entry.getKey(), steps.get(entry.getValue()));
         PlanGraphView planGraphView = displayGraph != null
                 ? PlanGraphView.from(displayGraph, reuseTypedEstimates
                         ? completedTyped.parallelPlans() : parallelEstimates.estimate(displayGraph))
-                        .withRecipeAlternatives(steps)
+                        .withNodePresentations(nodeTemplates)
                 : null;
         if (planGraphView != null) {
             planGraphView = CraftDisplayMaterials.attachMaterialRecipeOptions(
@@ -2490,10 +2470,8 @@ final class CraftPlanningApplicationService {
 
         // 单层配方没有 CraftPlanGraph，但仍要让递归树显示会并行到几台机器、
         // 每台分多少、需要多少燃料/催化剂/耐久工具。
-        List<PlanStep> displaySteps = steps.stream()
-                .map(step -> step.withParallelPlan(reuseTypedEstimates
-                        ? ParallelPlanEstimator.forDisplay(completedTyped.displayPlans(), step)
-                        : parallelEstimates.estimateStep(step)))
+        List<PlanStep> displaySteps = steps.subList(firstStandalone, steps.size()).stream()
+                .map(step -> step.withParallelPlan(parallelEstimates.estimateStep(step)))
                 .toList();
 
         PlanResponseDraft responseDraft = new PlanResponseDraft(
@@ -2532,7 +2510,7 @@ final class CraftPlanningApplicationService {
                 diagnostics
         );
 
-        int responseStepCount = displaySteps.size();
+        int responseStepCount = displaySteps.size() + (planGraphView == null ? 0 : planGraphView.nodes().size());
         int responseGraphNodes = planGraphView != null ? planGraphView.nodes().size() : 0;
         boolean responseFeasible = feasible;
         CraftPlanGraph resolvedGraphForCache =

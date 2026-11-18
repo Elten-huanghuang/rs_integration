@@ -13,7 +13,6 @@ import com.huanghuang.rsintegration.crafting.AsyncCraftManager;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponsePublisher;
-import com.huanghuang.rsintegration.crafting.plan.PlanStep;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.storage.StorageRestockSupport;
 import com.refinedmods.refinedstorage.api.network.INetwork;
@@ -55,14 +54,11 @@ public final class FtbQuestSubmissionService {
                     Component.translatable("rsi.plan.failure.planning_timeout"));
             return;
         }
-        List<PlanStep> steps = questPlan.graphView().nodes().stream()
-                .map(node -> node.asPlanStep())
-                .toList();
         ItemStack target = snapshot.icon().isEmpty()
                 ? snapshot.requirements().get(0).displayStack().copyWithCount(1)
                 : snapshot.icon().copyWithCount(1);
         PlanResponse plan = new PlanResponse(questPlan.feasible(), snapshot.title(), target,
-                steps, questPlan.materials(), questPlan.missing(),
+                List.of(), questPlan.materials(), questPlan.missing(),
                 QuestSubmissionTargetIds.of(questId).toString(),
                 "ftb_quest_submission", null, 0, 0, 0,
                 List.of(), Math.max(1, Math.min(repeatCount, 1024)), null, null, null, 0L,
@@ -71,7 +67,7 @@ public final class FtbQuestSubmissionService {
         RSIntegrationMod.LOGGER.info(
                 "[RSI-FTBQuests] Preview ready player={} quest={} feasible={} steps={} missing={}",
                 player.getGameProfile().getName(), Long.toHexString(questId),
-                questPlan.feasible(), steps.size(), questPlan.missing().size());
+                questPlan.feasible(), plan.steps().size(), questPlan.missing().size());
         PlanResponsePublisher.send(player, plan, 0L);
     }
 

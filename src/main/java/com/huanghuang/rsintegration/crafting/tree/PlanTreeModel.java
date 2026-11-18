@@ -69,7 +69,6 @@ public final class PlanTreeModel {
     private static PlanTreeModel from(PlanResponse plan, TreeLimits limits) {
         BuildBudget budget = new BuildBudget(limits);
         PlanTreeModel model = plan.graph() != null
-                && (!plan.graph().nodes().isEmpty() || !plan.graph().roots().isEmpty())
                 ? fromGraph(plan, budget)
                 : fromLegacySteps(plan, budget);
         // 兄弟合并、根下补挂都会改变"哪一处展开过成本"的结果，只能在整棵树建完之后再统一标记。
@@ -250,15 +249,30 @@ public final class PlanTreeModel {
 
     private static PlanTreeModel fromGraph(PlanResponse plan, BuildBudget budget) {
         PlanGraphView graph = plan.graph();
-        GraphViewIndex index = GraphViewIndex.from(graph, plan.steps());
+        GraphViewIndex index = GraphViewIndex.from(graph);
 
         ItemStack target = plan.targetResult();
         PlanStep targetStep = null;
         if (plan.recipeId() != null) {
-            for (PlanStep step : plan.steps()) {
-                if (plan.recipeId().equals(step.recipeId().toString())) {
+            for (PlanStep step : plan.standaloneSteps()) {
+                if (plan.recipeId().equals(step.recipeId().toString())
+                        && ItemStack.isSameItemSameTags(target, step.output())) {
                     targetStep = step;
                     break;
+                }
+            }
+            if (targetStep == null) {
+                for (var demand : graph.roots()) {
+                    for (var allocation : demand.allocations()) {
+                        if (allocation.source().initial()) continue;
+                        var producer = index.node(allocation.source().producerNodeId());
+                        if (producer != null && plan.recipeId().equals(producer.recipeId().toString())
+                                && ItemStack.isSameItemSameTags(target, producer.primaryOutput())) {
+                            targetStep = producer.asPlanStep();
+                            break;
+                        }
+                    }
+                    if (targetStep != null) break;
                 }
             }
         }
@@ -462,7 +476,8 @@ public final class PlanTreeModel {
                                    String modType, IngredientKey output,
                                    int outputKindOrdinal,
                                    DemandRole demandRole,
-                                   List<InputVisualKey> inputs) implements VisualKey {}
+                                   List<InputVisualKey> inputs, int width, int height,
+                                   List<ResourceLocation> alternatives, List<String> routes) implements VisualKey {}
 
     private record InputVisualKey(IngredientKey material, int count, DemandRole role) {}
 
@@ -474,7 +489,8 @@ public final class PlanTreeModel {
             inputs.add(new InputVisualKey(IngredientKey.of(input), input.getCount(), step.inputRole(i)));
         }
         return new VisualRecipeKey(step.recipeId(), step.modType() == null ? "" : step.modType().id(),
-                node.key, node.outputKindOrdinal, node.demandRole, inputs);
+                node.key, node.outputKindOrdinal, node.demandRole, inputs, step.recipeWidth(), step.recipeHeight(),
+                step.alternatives(), step.alternativeModTypes());
     }
 
     /** 连续复制阶段只显示一个配方，种子回流边留在原始执行图中。 */
@@ -566,27 +582,22 @@ public final class PlanTreeModel {
         private final Map<Integer, List<PlanGraphView.EdgeView>> edgesByConsumer;
         private final Map<Integer, List<PlanGraphView.UnresolvedView>> unresolvedByConsumer;
         private final Map<ConsumerPortKey, DemandRole> inputRoles;
-        private final Map<ResourceLocation, PlanStep> presentations;
 
         private GraphViewIndex(Map<Integer, PlanGraphView.NodeView> nodes,
                                Map<Integer, List<PlanGraphView.EdgeView>> edgesByConsumer,
                                Map<Integer, List<PlanGraphView.UnresolvedView>> unresolvedByConsumer,
-                               Map<ConsumerPortKey, DemandRole> inputRoles,
-                               Map<ResourceLocation, PlanStep> presentations) {
+                               Map<ConsumerPortKey, DemandRole> inputRoles) {
             this.nodes = nodes;
             this.edgesByConsumer = edgesByConsumer;
             this.unresolvedByConsumer = unresolvedByConsumer;
             this.inputRoles = inputRoles;
-            this.presentations = presentations;
         }
 
-        static GraphViewIndex from(PlanGraphView graph, List<PlanStep> steps) {
+        static GraphViewIndex from(PlanGraphView graph) {
             Map<Integer, PlanGraphView.NodeView> nodes = new HashMap<>();
             Map<Integer, List<PlanGraphView.EdgeView>> edgesByConsumer = new HashMap<>();
             Map<Integer, List<PlanGraphView.UnresolvedView>> unresolvedByConsumer = new HashMap<>();
             Map<ConsumerPortKey, DemandRole> inputRoles = new HashMap<>();
-            Map<ResourceLocation, PlanStep> presentations = new LinkedHashMap<>();
-            for (PlanStep step : steps) presentations.putIfAbsent(step.recipeId(), step);
             for (PlanGraphView.NodeView node : graph.nodes()) {
                 nodes.put(node.nodeId(), node);
                 for (PlanGraphView.InputView input : node.inputs()) {
@@ -602,11 +613,11 @@ public final class PlanTreeModel {
                         ignored -> new ArrayList<>()).add(unresolved);
             }
             return new GraphViewIndex(nodes, edgesByConsumer, unresolvedByConsumer,
-                    inputRoles, presentations);
+                    inputRoles);
         }
 
         PlanStep stepFor(PlanGraphView.NodeView node) {
-            return node.asPlanStep(presentations.get(node.recipeId()));
+            return node.asPlanStep();
         }
 
         @Nullable

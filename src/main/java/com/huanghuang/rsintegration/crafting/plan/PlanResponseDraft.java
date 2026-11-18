@@ -254,7 +254,7 @@ public record PlanResponseDraft(
                                 input.roleOrdinal())).toList(),
                         node.outputs().stream().map(output -> new PlanGraphView.OutputView(
                                 output.portIndex(), output.display().copy(), output.quantity(),
-                                output.kindOrdinal())).toList(), node.parallelPlan()))
+                                output.kindOrdinal())).toList(), node.parallelPlan(), node.grid()))
                 .toList();
         List<PlanGraphView.EdgeView> edges = source.edges().stream()
                 .map(edge -> new PlanGraphView.EdgeView(edge.consumerNodeId(),

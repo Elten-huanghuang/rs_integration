@@ -34,7 +34,7 @@ class PlanGraphRecipePresentationTest extends BootstrapTest {
                         18, DemandRole.CONSUMED.ordinal())),
                 List.of(new PlanGraphView.OutputView(0, new ItemStack(Items.IRON_INGOT), 2, 0)));
 
-        PlanStep displayed = node.asPlanStep(template);
+        PlanStep displayed = node.withPresentation(template).asPlanStep();
 
         assertEquals(3, displayed.recipeWidth());
         assertEquals(3, displayed.recipeHeight());
@@ -56,7 +56,7 @@ class PlanGraphRecipePresentationTest extends BootstrapTest {
         PlanGraphView original = new PlanGraphView(1, List.of(node), List.of(),
                 List.of(), List.of(), List.of(0));
 
-        PlanGraphView enriched = original.withRecipeAlternatives(List.of(template));
+        PlanGraphView enriched = original.withNodePresentations(Map.of(0, template));
 
         assertEquals(List.of(cutting), enriched.nodes().get(0).asPlanStep().alternatives());
         assertEquals(List.of("farmersdelight_cutting_board"),
@@ -78,7 +78,7 @@ class PlanGraphRecipePresentationTest extends BootstrapTest {
                 Collections.nCopies(9, new ItemStack(Items.IRON_NUGGET)),
                 List.of(), null, 0, false, 3, 3);
 
-        PlanStep displayed = node.asPlanStep(template);
+        PlanStep displayed = node.withPresentation(template).asPlanStep();
 
         assertEquals(actual.getTag(), displayed.inputs().get(0).getTag());
         assertEquals(9, displayed.inputs().get(0).getCount());
@@ -160,9 +160,9 @@ class PlanGraphRecipePresentationTest extends BootstrapTest {
                 List.of(new PlanGraphView.RootView(ingot, 2, 0, List.of(
                         new PlanGraphView.RootEdgeView(
                                 new PlanGraphView.SourceView(false, 0, 0), ingot, 2)))),
-                List.of(), List.of(0)).withRecipeAlternatives(List.of(compression));
+                List.of(), List.of(0)).withNodePresentations(Map.of(0, compression));
         PlanResponse decoded = PlanResponsePacket.decodePayload(PlanResponsePacket.encodePayload(
-                response(graph, List.of(compression, terminal), terminal), 8)).plan();
+                response(graph, List.of(terminal), terminal), 8)).plan();
 
         PlanTreeNode producer = PlanTreeModel.from(decoded).findByKey(IngredientKey.of(ingot));
 
@@ -173,6 +173,37 @@ class PlanGraphRecipePresentationTest extends BootstrapTest {
         assertEquals(2, producer.step.batches());
         assertEquals(List.of(alternative), producer.step.alternatives());
         assertTrue(RecipeCandidateRules.canSelect(producer, alternative));
+        assertEquals(List.of(id, terminal.recipeId()), decoded.steps().stream().map(PlanStep::recipeId).toList());
+        assertEquals(1, decoded.standaloneSteps().size());
+    }
+
+    @Test
+    void sameRecipeKeepsDistinctOptionsAndGridInCardsAndTreeAfterRoundTrip() {
+        ResourceLocation id = new ResourceLocation("test:same"), alt = new ResourceLocation("test:alternate");
+        ItemStack ore = new ItemStack(Items.IRON_ORE), ingot = new ItemStack(Items.IRON_INGOT);
+        var input = List.of(new PlanGraphView.InputView(0, ore, 1, 0));
+        var output = List.of(new PlanGraphView.OutputView(0, ingot, 1, 0));
+        var nodes = List.of(new PlanGraphView.NodeView(41, id, "generic", 1, ingot, input, output),
+                new PlanGraphView.NodeView(7, id, "generic", 1, ingot, input, output));
+        var graph = new PlanGraphView(1, nodes, List.of(), List.of(new PlanGraphView.RootView(ingot, 2, 0,
+                List.of(new PlanGraphView.RootEdgeView(new PlanGraphView.SourceView(false, 7, 0), ingot, 1),
+                        new PlanGraphView.RootEdgeView(new PlanGraphView.SourceView(false, 41, 0), ingot, 1)))),
+                List.of(), List.of(7, 41)).withNodePresentations(Map.of(7, new PlanStep(id, ingot, 1,
+                        List.of(ItemStack.EMPTY, ore), List.of(alt), null, 2, true, 2, 1)));
+        PlanStep terminal = new PlanStep(new ResourceLocation("test:terminal"), new ItemStack(Items.DIAMOND),
+                1, List.of(ingot));
+        var plan = PlanResponsePacket.decodePayload(PlanResponsePacket.encodePayload(
+                response(graph, List.of(terminal), terminal), 42)).plan().withInventoryChangeNotice();
+        assertEquals(3, plan.steps().size());
+        assertEquals(1, plan.standaloneSteps().size());
+        var children = PlanTreeModel.from(plan).root.children;
+        assertEquals(List.of(7, 41), children.stream().map(child -> child.graphNodeId).toList());
+        for (int i = 0; i < 2; i++) {
+            assertEquals(i == 0 ? List.of(alt) : List.of(), children.get(i).step.alternatives());
+            assertEquals(i == 0 ? 2 : 0, plan.steps().get(i).recipeWidth());
+            assertEquals(children.get(i).step.recipeWidth(), plan.steps().get(i).recipeWidth());
+            assertEquals(children.get(i).step.alternatives(), plan.steps().get(i).alternatives());
+        }
     }
 
     private static PlanResponse response(PlanGraphView graph, List<PlanStep> steps,
