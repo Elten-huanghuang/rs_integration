@@ -2,7 +2,7 @@ package com.huanghuang.rsintegration.feature.sidepanel;
 
 
 
-import com.huanghuang.rsintegration.network.packet.NetworkHandler;import com.huanghuang.rsintegration.feature.sidepanel.model.PanelDataModel;
+import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.huanghuang.rsintegration.client.input.GuiNavStack;
 import com.huanghuang.rsintegration.machine.client.data.BindingCache;
 import com.huanghuang.rsintegration.network.machine.OpenBoundMachineGuiPacket;
@@ -113,7 +113,7 @@ final class SidePanelMouseHandler {
 
         SearchController.onSearchBlur();
 
-        if (!RSSidePanelClient.networkAvailable) return;
+        if (!RSSidePanelClient.dataModel.networkAvailable()) return;
 
         // Scrollbar
         int scrollX = RSSidePanelClient.panelX + RSSidePanelClient.SCROLLBAR_X;
@@ -142,8 +142,8 @@ final class SidePanelMouseHandler {
         if (Screen.hasControlDown()
                 && (btn == GLFW.GLFW_MOUSE_BUTTON_LEFT || btn == GLFW.GLFW_MOUSE_BUTTON_RIGHT)) {
             int dIdx = (RSSidePanelClient.scrollRow + row) * RSSidePanelClient.COLUMNS + col;
-            if (dIdx >= 0 && dIdx < RSSidePanelClient.displayList.size()) {
-                PanelStack ps = RSSidePanelClient.displayList.get(dIdx);
+            if (dIdx >= 0 && dIdx < RSSidePanelClient.displayList().size()) {
+                PanelStack ps = RSSidePanelClient.displayList().get(dIdx);
                 if (ps != null && !ps.zeroed && !ps.getStack().isEmpty()) {
                     RSSidePanelClient.gridDragging = true;
                     RSSidePanelClient.gridDragKeys.clear();
@@ -162,8 +162,8 @@ final class SidePanelMouseHandler {
             int guiIconY = iy + 10;
             if (mx >= guiIconX && mx < guiIconX + 8 && my >= guiIconY && my < guiIconY + 8) {
                 int dIdx = (RSSidePanelClient.scrollRow + row) * RSSidePanelClient.COLUMNS + col;
-                if (dIdx >= 0 && dIdx < RSSidePanelClient.displayList.size()) {
-                    PanelStack ps = RSSidePanelClient.displayList.get(dIdx);
+                if (dIdx >= 0 && dIdx < RSSidePanelClient.displayList().size()) {
+                    PanelStack ps = RSSidePanelClient.displayList().get(dIdx);
                     if (ps != null) {
                         String itemKey = RSSidePanelClient.keyOf(ps.getStack());
                         var info = BindingCache.getInstance().getBinding(itemKey);
@@ -191,6 +191,8 @@ final class SidePanelMouseHandler {
     }
 
     private static void handleInsert(ItemStack carried, int btn, Minecraft mc) {
+        if (btn != GLFW.GLFW_MOUSE_BUTTON_LEFT && btn != GLFW.GLFW_MOUSE_BUTTON_RIGHT) return;
+        ItemStack inserted = carried.copy();
         if (btn == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
             RSSidePanelNetworkHandler.sendInsert(carried, false);
             mc.player.containerMenu.setCarried(ItemStack.EMPTY);
@@ -201,29 +203,14 @@ final class SidePanelMouseHandler {
                 mc.player.containerMenu.setCarried(ItemStack.EMPTY);
             }
         }
-        int insertCount = btn == GLFW.GLFW_MOUSE_BUTTON_RIGHT ? 1 : carried.getCount();
-        String ck = RSSidePanelClient.keyOf(carried);
-        if (!ck.isEmpty() && insertCount > 0) {
-            UUID existingId = null;
-            for (PanelStack p : RSSidePanelClient.panels) {
-                if (p.searchKey().equals(ck)) { existingId = p.getId(); break; }
-            }
-            if (existingId != null) {
-                PanelStack cur = RSSidePanelClient.getById(existingId);
-                if (cur != null) {
-                    cur.grow(insertCount);
-                    cur.timestamp = System.currentTimeMillis();
-                    RSSidePanelClient.recordSlotAnim(existingId, insertCount);
-                    RSSidePanelClient.dataModel.markDirty();
-                }
-            }
-        }
+        RSSidePanelClient.dataModel.predictInsert(inserted,
+                btn == GLFW.GLFW_MOUSE_BUTTON_RIGHT ? 1 : inserted.getCount(), System.currentTimeMillis());
     }
 
     private static void handleExtract(int col, int row, int btn) {
         int dIdx = (RSSidePanelClient.scrollRow + row) * RSSidePanelClient.COLUMNS + col;
-        if (dIdx < 0 || dIdx >= RSSidePanelClient.displayList.size()) return;
-        PanelStack clickedPs = RSSidePanelClient.displayList.get(dIdx);
+        if (dIdx < 0 || dIdx >= RSSidePanelClient.displayList().size()) return;
+        PanelStack clickedPs = RSSidePanelClient.displayList().get(dIdx);
         if (clickedPs == null || clickedPs.zeroed || clickedPs.getStack().isEmpty()) return;
 
         ItemStack clickedItem = clickedPs.getStack();
@@ -245,22 +232,7 @@ final class SidePanelMouseHandler {
     }
 
     static void predictExtraction(long operationId, PanelStack clickedPs, int extractCount) {
-        RSSidePanelClient.pendingOperationStacks.put(operationId, clickedPs.getId());
-
-        if (extractCount > 0) {
-            UUID pk = clickedPs.getId();
-            RSSidePanelClient.pendingExtractions.put(pk,
-                    new PanelDataModel.PendingExtraction(clickedPs.getStack(), clickedPs.timestamp, clickedPs.craftable));
-            RSSidePanelClient.recordSlotAnim(pk, -extractCount);
-            int remaining = clickedPs.getCount() - extractCount;
-            if (remaining <= 0) {
-                clickedPs.setCount(0);
-            } else {
-                clickedPs.setCount(remaining);
-            }
-            clickedPs.timestamp = System.currentTimeMillis();
-            RSSidePanelClient.dataModel.markDirty();
-        }
+        RSSidePanelClient.dataModel.predictExtraction(operationId, clickedPs.getId(), extractCount, System.currentTimeMillis());
     }
 
     // ── Mouse release ─────────────────────────────────────────────
@@ -311,43 +283,21 @@ final class SidePanelMouseHandler {
         if (RSSidePanelClient.gridDragKeys.size() > 1 || RSSidePanelClient.gridDragCrossedSlots) {
             List<ItemStack> dragItems = new ArrayList<>();
             for (UUID key : RSSidePanelClient.gridDragKeys) {
-                PanelStack ps = RSSidePanelClient.getById(key);
-                if (ps != null && !ps.getStack().isEmpty()) dragItems.add(ps.getStack());
+                PanelStack ps = RSSidePanelClient.dataModel.getById(key);
+                if (ps != null && ps.getCount() > 0) dragItems.add(ps.getStack());
             }
             if (!dragItems.isEmpty()) {
                 long operationId = RSSidePanelNetworkHandler.sendDragDistribute(dragItems);
-                RSSidePanelClient.pendingOperationStacks.put(operationId,
-                        RSSidePanelClient.gridDragKeys.iterator().next());
-                for (UUID key : RSSidePanelClient.gridDragKeys) {
-                    PanelStack ps = RSSidePanelClient.getById(key);
-                    if (ps != null && ps.getCount() > 0) {
-                        RSSidePanelClient.pendingExtractions.put(key,
-                                new PanelDataModel.PendingExtraction(ps.getStack(), ps.timestamp, ps.craftable));
-                        RSSidePanelClient.recordSlotAnim(key, -1);
-                        int remaining = ps.getCount() - 1;
-                        if (remaining <= 0) ps.setCount(0);
-                        else ps.setCount(remaining);
-                        ps.timestamp = System.currentTimeMillis();
-                    }
-                }
-                        RSSidePanelClient.dataModel.markDirty();
+                RSSidePanelClient.dataModel.predictDistribution(operationId, RSSidePanelClient.gridDragKeys, System.currentTimeMillis());
             }
         } else if (!RSSidePanelClient.gridDragKeys.isEmpty()) {
             UUID key = RSSidePanelClient.gridDragKeys.iterator().next();
-            PanelStack ps = RSSidePanelClient.getById(key);
+            PanelStack ps = RSSidePanelClient.dataModel.getById(key);
             if (ps != null) {
                 int extractCount = Math.min(ps.getStack().getMaxStackSize(), ps.getCount());
                 long operationId = RSSidePanelNetworkHandler.sendClick(ps.getStack(),
                         RSSidePanelClickPacket.ACTION_EXTRACT_MAX, false, ps.getId());
-                RSSidePanelClient.pendingOperationStacks.put(operationId, key);
-                RSSidePanelClient.pendingExtractions.put(key,
-                        new PanelDataModel.PendingExtraction(ps.getStack(), ps.timestamp, ps.craftable));
-                RSSidePanelClient.recordSlotAnim(key, -extractCount);
-                int remaining = ps.getCount() - extractCount;
-                if (remaining <= 0) ps.setCount(0);
-                else ps.setCount(remaining);
-                ps.timestamp = System.currentTimeMillis();
-                RSSidePanelClient.dataModel.markDirty();
+                predictExtraction(operationId, ps, extractCount);
             }
         }
     }
@@ -390,8 +340,8 @@ final class SidePanelMouseHandler {
             int row = ((int) my - itemTop) / RSSidePanelClient.SLOT_SIZE;
             if (col >= 0 && col < RSSidePanelClient.COLUMNS && row >= 0 && row < RSSidePanelClient.visibleRows) {
                 int dIdx = (RSSidePanelClient.scrollRow + row) * RSSidePanelClient.COLUMNS + col;
-                if (dIdx >= 0 && dIdx < RSSidePanelClient.displayList.size()) {
-                    PanelStack ps = RSSidePanelClient.displayList.get(dIdx);
+                if (dIdx >= 0 && dIdx < RSSidePanelClient.displayList().size()) {
+                    PanelStack ps = RSSidePanelClient.displayList().get(dIdx);
                     if (ps != null && !ps.getStack().isEmpty()) {
                         UUID k = ps.getId();
                         if (!RSSidePanelClient.gridDragKeys.contains(k))

@@ -32,7 +32,6 @@ import com.huanghuang.rsintegration.feature.sidepanel.client.SidePanelInputHandl
 import com.huanghuang.rsintegration.feature.sidepanel.client.SidePanelJeiBridge;
 import com.huanghuang.rsintegration.feature.sidepanel.client.SidePanelPreferences;
 import com.huanghuang.rsintegration.feature.sidepanel.client.SidePanelRenderer;
-import com.huanghuang.rsintegration.feature.sidepanel.model.PanelDataModel;
 import java.util.*;
 
 import static com.huanghuang.rsintegration.RSIntegrationMod.*;
@@ -69,8 +68,6 @@ public final class RSSidePanelClient {
     static boolean panelHidden = true;
     static boolean panelScreenBound; // auto-close when screen closes
     static int panelX = 100, panelY = 100;
-    static boolean networkAvailable;
-    static String networkName = "";
     static int viewType;
     static int sortMode;
     static boolean sortAsc = true;
@@ -86,30 +83,20 @@ public final class RSSidePanelClient {
 
     // ── Core data ────────────────────────────────────────────────
     static final PanelDataModel dataModel = new PanelDataModel();
-    static final List<PanelStack> panels = dataModel.getPanelsRaw();
-    static final Map<UUID, Integer> idToIndex = dataModel.getIdToIndex();
-    static final List<PanelStack> displayList = dataModel.getDisplayList();
-    static final Map<UUID, PanelDataModel.PendingExtraction> pendingExtractions =
-            dataModel.getPendingExtractions();
-    /** Pending operations that received no delta yet and have requested one confirmation sync. */
-    static final Set<UUID> pendingSyncRetries = new HashSet<>();
-    static final Map<Long, UUID> pendingOperationStacks = new HashMap<>();
-    static long nextOperationId = 1L;
-    static long nextOperationId() {
-        long id = nextOperationId++;
-        if (nextOperationId <= 0 || nextOperationId > 0x7FFF_FFFF_FFFF_FFFFL) nextOperationId = 1L;
-        return id;
-    }
+    private static final DisplayListManager display = new DisplayListManager();
 
+    static List<PanelStack> displayList() {
+        return display.project(dataModel, SearchController.searchText, viewType, sortMode, sortAsc, canSort());
+    }
 
     /** Clear per-server panel state on client logout so items/pending
      *  extractions from a previous server don't briefly show after switching. */
     public static void clearOnLogout() {
         dataModel.clear();
-        pendingOperationStacks.clear();
-        pendingSyncRetries.clear();
-        networkAvailable = false;
-        networkName = "";
+        display.clear();
+        gridDragging = false;
+        gridDragKeys.clear();
+        hoveredSlotIndex = -1;
         SyncHandler.clearOnLogout();
         ClientSyncedConfig.reset();
     }
@@ -128,13 +115,6 @@ public final class RSSidePanelClient {
     // Set while the side panel is rendering its own tooltips, so
     // the RenderTooltipEvent.Pre interceptor knows to let them
     // through instead of cancelling them as foreign.
-
-    // ── Animation / delta ────────────────────────────────────────
-    static final Map<UUID, PanelDataModel.SlotAnim> slotAnims =
-            dataModel.getSlotAnims();
-    static final Set<UUID> deltaBatch = dataModel.getDeltaBatch();
-
-    // ── Inner types ──────────────────────────────────────────────
 
     private RSSidePanelClient() {}
 
@@ -284,22 +264,22 @@ public final class RSSidePanelClient {
         pose.pushPose();
         pose.translate(0, 0, 400.0F);
 
+        var displayList = displayList();
         if (panelHidden) {
             SidePanelRenderer.renderCollapsedBar(g, panelX, panelY,
-                    networkAvailable, networkName,
+                    dataModel.networkAvailable(), dataModel.networkName(),
                     dataModel.getTotalSlotCount());
             hoveredSideButton = -1;
             hoveredSlotIndex = -1;
         } else {
-            DisplayListManager.ensureDisplayReady();
             var result = SidePanelRenderer.renderPanel(g, panelX, panelY,
                     visibleRows, scrollRow,
-                    networkAvailable, networkName,
+                    dataModel.networkAvailable(), dataModel.networkName(),
                     dataModel.getTotalSlotCount(),
                     SearchController.searchWidget, SearchController.searchText, SearchController.searchFocused,
                     viewType, sortAsc, sortMode, SearchController.searchMode, gridSize,
                     lastMouseX, lastMouseY,
-                    displayList, slotAnims,
+                    displayList, dataModel::animation,
                     gridDragging, gridDragKeys);
             hoveredSideButton = result.hoveredSideButton;
             hoveredSlotIndex = result.hoveredSlotIndex;
@@ -409,6 +389,7 @@ public final class RSSidePanelClient {
     // ── JEI item lookup ──────────────────────────────────────────
 
     static void showJeiForHoveredItem(boolean usage) {
+        var displayList = displayList();
         if (hoveredSlotIndex < 0 || hoveredSlotIndex >= displayList.size()) return;
         SidePanelJeiBridge.showJeiForItem(usage, displayList.get(hoveredSlotIndex).getStack());
     }
@@ -437,14 +418,6 @@ public final class RSSidePanelClient {
 
     // ── Data helpers ─────────────────────────────────────────────
 
-    static PanelStack getById(UUID id) {
-        return dataModel.getById(id);
-    }
-
-    static void removePanel(UUID id) {
-        dataModel.removePanel(id);
-    }
-
     static void updateScrollFromMouse(double my) {
         scrollRow = SidePanelInputHandler.updateScrollFromMouse(my, panelY,
                 visibleRows, getTotalRows(), scrollRow);
@@ -466,7 +439,6 @@ public final class RSSidePanelClient {
             SidePanelJeiBridge.clearFilter();
         }
         savePanelPreferences();
-        dataModel.markDirty();
     }
 
     static void clampScroll() {
@@ -474,12 +446,7 @@ public final class RSSidePanelClient {
     }
 
     static int getTotalRows() {
-        DisplayListManager.ensureDisplayReady();
-        return (int) Math.ceil(displayList.size() / (double) COLUMNS);
-    }
-
-    static void recordSlotAnim(UUID id, int delta) {
-        dataModel.recordSlotAnim(id, delta);
+        return (int) Math.ceil(displayList().size() / (double) COLUMNS);
     }
 
     // ═════════════════════════════════════════════════════════════

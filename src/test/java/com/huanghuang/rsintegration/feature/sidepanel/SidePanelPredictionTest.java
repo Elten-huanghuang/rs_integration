@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.feature.sidepanel;
 
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import com.electronwill.nightconfig.core.CommentedConfig;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.AfterEach;
@@ -19,12 +21,14 @@ class SidePanelPredictionTest extends BootstrapTest {
 
     @BeforeEach
     void start() {
+        RSIntegrationConfig.SERVER_SPEC.setConfig(CommentedConfig.inMemory());
         fullSync(8);
     }
 
     @AfterEach
     void end() {
         RSSidePanelClient.clearOnLogout();
+        RSIntegrationConfig.SERVER_SPEC.setConfig(null);
     }
 
     private void fullSync(int count) {
@@ -42,14 +46,35 @@ class SidePanelPredictionTest extends BootstrapTest {
     }
 
     private void timeout() {
-        SidePanelTickManager.timeoutStaleExtractions(System.currentTimeMillis() + 10_000, 2_000,
-                requests::incrementAndGet);
+        if (RSSidePanelClient.dataModel.tick(20, System.currentTimeMillis() + 10_000, 2_000)) requests.incrementAndGet();
     }
 
     private void acknowledge(boolean success) {
         SyncHandler.onOperationResult(new RSSidePanelOperationResultPacket(17, success, id, success ? 2 : 0,
                 success ? RSSidePanelOperationResultPacket.ErrorCode.NONE
                         : RSSidePanelOperationResultPacket.ErrorCode.CURSOR_FULL));
+    }
+
+    private RSSidePanelSyncPacket chunk(long generation, int index, UUID slot, int count) {
+        return new RSSidePanelSyncPacket(List.of(slot), List.of(new ItemStack(Items.STONE, count)),
+                List.of(1L), List.of(false), 2, true, "test", index, 2, generation);
+    }
+
+    @Test void reorderedChunksAndLogoutDoNotApplyAnOldGeneration() {
+        UUID second = UUID.randomUUID();
+        SyncHandler.onSyncReceived(chunk(4, 1, second, 10));
+        SyncHandler.onSyncReceived(chunk(3, 0, id, 99));
+        assertEquals(8, entry().getCount());
+        SyncHandler.onSyncReceived(chunk(4, 0, id, 12));
+        assertEquals(12, entry().getCount());
+        assertEquals(10, RSSidePanelClient.dataModel.getById(second).getCount());
+        SyncHandler.onSyncReceived(chunk(5, 1, second, 33));
+        RSSidePanelClient.clearOnLogout();
+        SyncHandler.onSyncReceived(chunk(1, 0, id, 7));
+        assertNull(entry());
+        SyncHandler.onSyncReceived(chunk(1, 1, second, 8));
+        assertEquals(7, entry().getCount());
+        assertEquals(8, RSSidePanelClient.dataModel.getById(second).getCount());
     }
 
     @Test

@@ -45,7 +45,7 @@ final class SearchController {
             searchWidget.setResponder(t -> {
                 searchText = t;
                 searchChangedSinceBlur = true;
-                RSSidePanelClient.dataModel.markDirty();
+
             });
         }
         return searchWidget;
@@ -146,10 +146,9 @@ final class SearchController {
 
         if (key == GLFW.GLFW_KEY_ESCAPE) { onSearchBlur(); return; }
         if (key == GLFW.GLFW_KEY_ENTER || key == GLFW.GLFW_KEY_KP_ENTER) {
-            if ((searchMode % 2) == 1 && RSSidePanelClient.networkAvailable) {
-                DisplayListManager.ensureDisplayReady();
-                if (!RSSidePanelClient.displayList.isEmpty()) {
-                    var first = RSSidePanelClient.displayList.get(0);
+            if ((searchMode % 2) == 1 && RSSidePanelClient.dataModel.networkAvailable()) {
+                if (!RSSidePanelClient.displayList().isEmpty()) {
+                    var first = RSSidePanelClient.displayList().get(0);
                     RSSidePanelNetworkHandler.sendClick(first.getStack(),
                             RSSidePanelClickPacket.ACTION_EXTRACT_ONE, false, first.getId());
                 }
@@ -227,7 +226,7 @@ final class SearchController {
             searchText = result.newSearchText;
             if (searchWidget != null) searchWidget.setValue(result.newSearchText);
             historyIndex = -1;
-            RSSidePanelClient.dataModel.markDirty();
+
         }
     }
 }

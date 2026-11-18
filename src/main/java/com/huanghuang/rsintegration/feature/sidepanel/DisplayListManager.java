@@ -1,6 +1,5 @@
 package com.huanghuang.rsintegration.feature.sidepanel;
 
-import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.util.PinyinUtil;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
@@ -21,33 +20,32 @@ import java.util.List;
  */
 final class DisplayListManager {
 
-    private DisplayListManager() {}
+    private long revision = -1;
+    private Options lastOptions;
+    private List<PanelStack> projection = List.of();
 
-    static void ensureDisplayReady() {
-        if (!RSSidePanelClient.dataModel.isDirty()) return;
-        rebuildDisplayList();
+    private record Options(String search, int view, int sort, boolean ascending, boolean canSort) {}
+
+    List<PanelStack> project(PanelDataModel model, String search, int view, int sort, boolean ascending, boolean canSort) {
+        Options options = new Options(search, view, sort, ascending, canSort);
+        if (revision != model.revision() || !options.equals(lastOptions)) {
+            List<PanelStack> list = refilter(model.entries(), search, view);
+            if (canSort) resort(list, sort, ascending);
+            projection = List.copyOf(list);
+            revision = model.revision();
+            lastOptions = options;
+        }
+        return projection;
     }
 
-    static void rebuildDisplayList() {
-        List<PanelStack> list = refilter(RSSidePanelClient.panels);
-        resort(list);
-        if (list.isEmpty() && !RSSidePanelClient.panels.isEmpty()) {
-            int zeroedCnt = 0, craftableCnt = 0;
-            for (PanelStack ps : RSSidePanelClient.panels) {
-                if (ps.zeroed) zeroedCnt++;
-                if (ps.craftable) craftableCnt++;
-            }
-            RSIntegrationMod.LOGGER.warn("[RSI] rebuildDisplayList: panels={} display=0 zeroed={} craftable={} viewType={} search='{}'",
-                    RSSidePanelClient.panels.size(), zeroedCnt, craftableCnt,
-                    RSSidePanelClient.viewType, SearchController.searchText);
-        }
-        RSSidePanelClient.dataModel.setDisplayList(list);
+    void clear() {
+        revision = -1;
+        projection = List.of();
     }
 
     @SuppressWarnings("resource")
-    static List<PanelStack> refilter(List<PanelStack> source) {
+    static List<PanelStack> refilter(List<PanelStack> source, String searchText, int viewType) {
         List<PanelStack> list = new ArrayList<>(source);
-        String searchText = SearchController.searchText;
 
         if (!searchText.isEmpty()) {
             String query = searchText.trim();
@@ -94,17 +92,14 @@ final class DisplayListManager {
             }
         }
 
-        if (RSSidePanelClient.viewType != 0) {
-            list.removeIf(ps -> RSSidePanelClient.viewType == 1 ? ps.craftable : !ps.craftable);
+        if (viewType != 0) {
+            list.removeIf(ps -> viewType == 1 ? ps.craftable : !ps.craftable);
         }
         return list;
     }
 
     // Reversed .thenComparing order with null-safe comparators to fix sort stability
-    static void resort(List<PanelStack> list) {
-        if (!RSSidePanelClient.canSort()) return;
-        int sm = RSSidePanelClient.sortMode;
-        boolean asc = RSSidePanelClient.sortAsc;
+    private static void resort(List<PanelStack> list, int sm, boolean asc) {
 
         // 基础名称比较器（兜底用）
         Comparator<PanelStack> nameCmp = Comparator.comparing(PanelStack::getName);

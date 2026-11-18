@@ -4,7 +4,6 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.*;
 
@@ -25,11 +24,12 @@ final class SyncHandler {
     private static long assemblingGeneration = -1L;
 
     static void onSyncReceived(RSSidePanelSyncPacket packet) {
+        if (packet.generation > 0 && packet.generation < Math.max(appliedGeneration, assemblingGeneration)) return;
         if (packet.isChunked()) {
             handleChunked(packet);
             return;
         }
-        if (packet.generation > 0 && packet.generation < appliedGeneration) return;
+        clearAssembly();
         applySync(packet.ids, packet.items, packet.timestamps, packet.craftableFlags,
                 packet.totalSlotCount, packet.networkAvailable, packet.networkName);
         if (packet.generation > 0) appliedGeneration = packet.generation;
@@ -38,8 +38,13 @@ final class SyncHandler {
     /** Clear the chunked-sync accumulator on client logout so a stale partial
      *  sync from a previous server can't bleed into the next one. */
     public static void clearOnLogout() {
-        chunkAccum.clear();
+        clearAssembly();
         appliedGeneration = -1L;
+    }
+
+    private static void clearAssembly() {
+        chunkAccum.clear();
+        expectedChunks = 0;
         assemblingGeneration = -1L;
         lastChunkTime = 0;
     }
@@ -55,7 +60,8 @@ final class SyncHandler {
         }
         lastChunkTime = now;
 
-        if (packet.chunkIndex == 0) {
+        if (packet.chunkIndex < 0 || packet.chunkIndex >= packet.totalChunks) return;
+        if (assemblingGeneration != packet.generation || expectedChunks == 0) {
             if (packet.generation > 0 && packet.generation < appliedGeneration) return;
             chunkAccum.clear();
             expectedChunks = packet.totalChunks;
@@ -90,8 +96,7 @@ final class SyncHandler {
                     chunkAccum.get(0).networkName);
             if (assemblingGeneration > 0) appliedGeneration = assemblingGeneration;
 
-            chunkAccum.clear();
-            expectedChunks = 0;
+            clearAssembly();
         }
     }
 
@@ -99,24 +104,6 @@ final class SyncHandler {
                                   List<Long> timestamps, List<Boolean> flags,
                                   int totalSlotCount, boolean networkAvailable,
                                   String networkName) {
-        int prevSize = RSSidePanelClient.panels.size();
-        boolean wasAvailable = RSSidePanelClient.networkAvailable;
-        if (SidePanelSyncPolicy.shouldRetainCurrentEntries(prevSize, items.size(), networkAvailable)) {
-            RSSidePanelClient.networkAvailable = false;
-            RSSidePanelClient.networkName = networkName;
-            RSSidePanelClient.dataModel.markDirty();
-            LOGGER.debug(
-                    "[RSI] Network temporarily unavailable; retaining {} cached panel entries and retrying",
-                    prevSize);
-            return;
-        }
-        if (items.isEmpty() && prevSize > 0) {
-            LOGGER.debug("[RSI] Applying empty sync and clearing {} panel entries. networkAvailable was {}, now {}",
-                    prevSize, wasAvailable, networkAvailable);
-        }
-        RSSidePanelClient.pendingOperationStacks.clear();
-        RSSidePanelClient.pendingSyncRetries.clear();
-
         List<PanelStack> newPanels = new ArrayList<>();
         for (int i = 0; i < items.size(); i++) {
             ItemStack s = items.get(i);
@@ -127,58 +114,19 @@ final class SyncHandler {
             newPanels.add(new PanelStack(id, s, ts, cf));
         }
 
-        RSSidePanelClient.networkAvailable = networkAvailable;
-        RSSidePanelClient.networkName = networkName;
-        RSSidePanelClient.dataModel.updatePanels(
-                newPanels, totalSlotCount);
+        RSSidePanelClient.dataModel.fullSync(newPanels, totalSlotCount, networkAvailable, networkName);
         RSSidePanelClient.clampScroll();
 
     }
 
     static void onDeltaReceived(UUID id, ItemStack stack, long timestamp, boolean craftable) {
-        if (stack == null || stack.getItem() == null || id == null) return;
-
-        LOGGER.debug("[RSI-Delta] Client received: id={} item={} count={} craftable={}",
-                id, ForgeRegistries.ITEMS.getKey(stack.getItem()), stack.getCount(), craftable);
-
-        RSSidePanelClient.pendingExtractions.remove(id);
-        RSSidePanelClient.pendingSyncRetries.remove(id);
-        RSSidePanelClient.pendingOperationStacks.values().removeIf(id::equals);
-
-        int count = stack.getCount();
-        PanelStack existing = RSSidePanelClient.dataModel.getById(id);
-        String newKey = count > 0 ? RSSidePanelClient.keyOf(stack) : null;
-        PanelStack mergeTarget = existing;
-        if (mergeTarget == null && newKey != null) {
-            for (PanelStack panel : RSSidePanelClient.dataModel.getPanels()) {
-                if (panel.searchKey().equals(newKey)) {
-                    mergeTarget = panel;
-                    break;
-                }
-            }
-        }
-        int oldCount = mergeTarget != null ? mergeTarget.getCount() : 0;
-
-        if (count <= 0 && existing == null) {
-            LOGGER.debug("[RSI] Delta zero for unknown UUID {} (item={} key={}) — searchKey matching",
-                    id, stack.getHoverName().getString(), RSSidePanelClient.keyOf(stack));
-        }
-        if (count > 0 && existing == null && mergeTarget == null
-                && RSSidePanelClient.dataModel.size()
-                >= RSIntegrationConfig.RS_SIDE_PANEL_MAX_SLOTS.get()) {
-            return;
-        }
-
-        UUID animId = RSSidePanelClient.dataModel.applyDelta(
-                id, stack, timestamp, craftable);
-        if (animId == null) return;
-        int delta = count - oldCount;
-        if (delta != 0) RSSidePanelClient.recordSlotAnim(animId, delta);
+        RSSidePanelClient.dataModel.applyDelta(id, stack, timestamp, craftable,
+                RSIntegrationConfig.RS_SIDE_PANEL_MAX_SLOTS.get(), System.currentTimeMillis());
     }
 
     static void onOperationResult(RSSidePanelOperationResultPacket packet) {
         long opId = packet.operationId();
-        UUID trackedStackId = RSSidePanelClient.pendingOperationStacks.remove(opId);
+        UUID trackedStackId = RSSidePanelClient.dataModel.acknowledge(opId);
 
         if (!packet.success()) {
             LOGGER.debug("[RSI] Operation {} failed: code={}", opId, packet.errorCode());

@@ -11,6 +11,8 @@ import net.minecraft.world.item.TooltipFlag;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.feature.sidepanel.PanelStack;
+import com.huanghuang.rsintegration.feature.sidepanel.PanelDataModel.SlotAnim;
+import java.util.function.Function;
 import com.huanghuang.rsintegration.feature.sidepanel.RSSidePanelClient;
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
@@ -75,7 +77,7 @@ public final class SidePanelRenderer {
                                                  int sortMode, int searchMode, int gridSize,
                                                  int mouseX, int mouseY,
                                                  List<PanelStack> displayList,
-                                                 Map<UUID, ? extends SlotAnimProvider> slotAnims,
+                                                 Function<UUID, SlotAnim> slotAnims,
                                                  boolean gridDragging,
                                                  Set<UUID> gridDragKeys) {
 
@@ -154,10 +156,10 @@ public final class SidePanelRenderer {
 
                 // Animation overlay
                 if (slotAnims != null) {
-                    SlotAnimProvider anim = slotAnims.get(ps.getId());
-                    if (anim != null && !anim.expired()) {
-                        float fade = anim.fade();
-                        int animColor = anim.deltaValue() < 0
+                    SlotAnim anim = slotAnims.apply(ps.getId());
+                    if (anim != null) {
+                        float fade = Math.max(0F, 1F - (System.currentTimeMillis() - anim.started()) / (float) SlotAnim.DURATION_MS);
+                        int animColor = anim.delta() < 0
                                 ? ((int) (fade * 0x50) << 24) | 0xFF4444
                                 : ((int) (fade * 0x50) << 24) | 0x44FF44;
                         g.fill(ix - 1, iy - 1, ix + 17, iy + 17, animColor);
@@ -505,18 +507,4 @@ public final class SidePanelRenderer {
         }
     }
 
-    // ── Animation provider interface ─────────────────────────────
-
-    /**
-     * Interface for slot animations so the renderer does not depend on
-     * {@code PanelDataModel.SlotAnim} directly.
-     */
-    public interface SlotAnimProvider {
-        /** The signed delta value (positive = added, negative = removed). */
-        int deltaValue();
-        /** Whether the animation duration has elapsed. */
-        boolean expired();
-        /** Opacity fade factor (1.0 → 0.0). */
-        float fade();
-    }
 }

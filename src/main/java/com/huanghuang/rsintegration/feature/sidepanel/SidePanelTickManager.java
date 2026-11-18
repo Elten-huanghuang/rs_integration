@@ -1,6 +1,5 @@
 package com.huanghuang.rsintegration.feature.sidepanel;
 
-import com.huanghuang.rsintegration.feature.sidepanel.model.PanelDataModel;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 
 import net.minecraft.client.Minecraft;
@@ -63,64 +62,18 @@ final class SidePanelTickManager {
             }
         }
 
-        // Flush batched deltas once per tick
-        if (RSSidePanelClient.dataModel.isDeltaBatchDirty()) {
-            RSSidePanelClient.dataModel.flushDeltaBatch();
-        }
-
-        // Clean expired slot animations
-        if (!RSSidePanelClient.slotAnims.isEmpty() && RSSidePanelClient.tickCounter % 10 == 0) {
-            RSSidePanelClient.slotAnims.values().removeIf(a -> a.expired());
-        }
-
         if (SearchController.searchMode >= 2 && RSSidePanelClient.tickCounter % 5 == 0)
             SearchController.pullJeiFilter();
 
         // Periodic full sync
         int syncInterval = SidePanelSyncPolicy.requestInterval(
                 RSIntegrationConfig.SIDE_PANEL_SYNC_INTERVAL.get(),
-                RSSidePanelClient.networkAvailable);
-        if (RSSidePanelClient.tickCounter % syncInterval == 0
-                && !RSSidePanelClient.panelHidden) {
+                RSSidePanelClient.dataModel.networkAvailable());
+        boolean confirmation = RSSidePanelClient.dataModel.tick(RSSidePanelClient.tickCounter,
+                System.currentTimeMillis(), RSIntegrationConfig.SIDE_PANEL_EXTRACTION_TIMEOUT.get());
+        if (confirmation || (RSSidePanelClient.tickCounter % syncInterval == 0 && !RSSidePanelClient.panelHidden)) {
             RSSidePanelNetworkHandler.sendRequestSync();
         }
-
-        // Timeout stale pending extractions (2s)
-        if (!RSSidePanelClient.pendingExtractions.isEmpty() && RSSidePanelClient.tickCounter % 20 == 0) {
-            timeoutStaleExtractions(System.currentTimeMillis(), RSIntegrationConfig.SIDE_PANEL_EXTRACTION_TIMEOUT.get(),
-                    RSSidePanelNetworkHandler::sendRequestSync);
-        }
-
-        // Zeroed items are removed immediately in SyncHandler.onDeltaReceived()
-        // (matching RS GridViewImpl.postChange). No delayed cleanup needed.
     }
 
-    static void timeoutStaleExtractions(long now, int extractionTimeout, Runnable requestSync) {
-        var it = RSSidePanelClient.pendingExtractions.entrySet().iterator();
-        while (it.hasNext()) {
-            var pe = it.next();
-            if (now - pe.getValue().createdAt > extractionTimeout) {
-                if (!RSSidePanelClient.pendingSyncRetries.remove(pe.getKey())) {
-                    RSSidePanelClient.pendingSyncRetries.add(pe.getKey());
-                    requestSync.run();
-                    continue;
-                }
-                PanelDataModel.PendingExtraction p = pe.getValue();
-                if (p.previousStack.getCount() > 0) {
-                    PanelStack ps = RSSidePanelClient.getById(pe.getKey());
-                    if (ps != null) {
-                        int oldCount = ps.getCount();
-                        ps.setCount(p.previousStack.getCount());
-                        ps.timestamp = p.timestamp;
-                        ps.craftable = p.craftable;
-                        RSSidePanelClient.recordSlotAnim(pe.getKey(), p.previousStack.getCount() - oldCount);
-                    }
-                } else {
-                    RSSidePanelClient.removePanel(pe.getKey());
-                }
-                it.remove();
-                RSSidePanelClient.dataModel.markDirty();
-            }
-        }
-    }
 }

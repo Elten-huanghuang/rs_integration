@@ -11,18 +11,14 @@ import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.UUID;
 
-/** Mirrors RS native {@code ItemGridStack}.  The wrapped {@link #stack}
- *  always holds count ≥ 1 (for rendering), while {@link #getCount()}
- *  delegates to the {@link #zeroed} flag — exactly matching RS's
- *  {@code getQuantity() / setQuantity() / setZeroed()} pattern. */
+/** 侧栏条目的只读投影。预测归零时仍保留可渲染的物品。 */
 public final class PanelStack {
 
     private final UUID id;
-    final ItemStack stack;       // count is NEVER set to 0 — matches RS final stack
-    public long timestamp;
-    public boolean craftable;
-    public boolean zeroed;
-    public long zeroedAt;
+    private final ItemStack stack;
+    public final long timestamp;
+    public final boolean craftable;
+    public final boolean zeroed;
 
     private String cachedName;
     private String cachedModId;
@@ -30,11 +26,13 @@ public final class PanelStack {
     private String cachedSearchKey;
 
     public PanelStack(UUID id, ItemStack stack, long timestamp, boolean craftable) {
+        this(id, stack.copy(), timestamp, craftable, false);
+    }
+
+    private PanelStack(UUID id, ItemStack stack, long timestamp, boolean craftable, boolean zeroed) {
         this.id = id;
-        this.stack = stack.copy();
-        if (this.stack.getCount() <= 0 && !this.stack.isEmpty()) {
-            this.stack.setCount(1); // ensure renderable
-        }
+        this.stack = stack;
+        this.zeroed = zeroed;
         this.timestamp = timestamp;
         this.craftable = craftable;
     }
@@ -44,27 +42,13 @@ public final class PanelStack {
     /** Matches RS {@code IGridStack.getQuantity()}: returns 0 when zeroed. */
     public int getCount()        { return zeroed ? 0 : stack.getCount(); }
 
-    /** Matches RS {@code IGridStack.setQuantity(int)}:
-     *  ≤0 → set zeroed (keep stack count intact for rendering);
-     *  >0 → update stack count, clear zeroed. */
-    public void setCount(int c) {
-        if (c <= 0) {
-            zeroed = true;
-            zeroedAt = System.currentTimeMillis();
-        } else {
-            zeroed = false;
-            zeroedAt = 0;
-            stack.setCount(c);
-        }
-    }
-
-    public void grow(int delta) {
-        int cur = getCount();
-        setCount(cur + delta);
+    PanelStack withQuantity(int count, long timestamp, boolean craftable) {
+        return new PanelStack(id, count > 0 ? stack.copyWithCount(count) : stack,
+                timestamp, craftable, count <= 0);
     }
 
     /** Always returns a renderable stack (count ≥ 1). */
-    public ItemStack getStack()  { return stack; }
+    public ItemStack getStack()  { return stack.copy(); }
 
     public String getName() {
         if (cachedName == null) cachedName = stack.getHoverName().getString();
