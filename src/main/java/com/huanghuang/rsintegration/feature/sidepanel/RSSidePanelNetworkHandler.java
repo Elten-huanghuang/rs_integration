@@ -18,7 +18,7 @@ import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.world.item.ItemStack;
 import com.huanghuang.rsintegration.crafting.batch.CraftCancelPacket;
 import com.huanghuang.rsintegration.crafting.batch.CraftStatusRequestPacket;
-import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
+import com.huanghuang.rsintegration.crafting.batch.CraftRequestCoordinator;
 import com.huanghuang.rsintegration.crafting.PreviewRateLimiter;
 import com.huanghuang.rsintegration.mods.embers.EreAlchemyLock;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
@@ -623,7 +623,7 @@ public final class RSSidePanelNetworkHandler {
             SidePanelRequestRateLimiter.onPlayerLogout(pid);
             CraftCancelPacket.onPlayerLogout(pid);
             CraftStatusRequestPacket.onPlayerLogout(pid);
-            GenericCraftPacket.onPlayerLogout(pid);
+            CraftRequestCoordinator.onPlayerLogout(pid);
         }
     }
 

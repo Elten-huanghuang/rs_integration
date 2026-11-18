@@ -221,8 +221,8 @@ class ConfirmedPreviewTransportTest extends BootstrapTest {
             }
         }
 
-        GenericCraftPacket.ExecutionPlanLookup confirm(GenericCraftPacketCodec.WireData confirmation) {
-            return GenericCraftPacket.findValidatedExecutionPlan(player, recipe,
+        CraftPlanningApplicationService.ExecutionPlanLookup confirm(GenericCraftPacketCodec.WireData confirmation) {
+            return CraftPlanningApplicationService.findValidatedExecutionPlan(player, recipe,
                     confirmation.forcedRecipes(), confirmation.repeatCount(), confirmation.targetOutput(),
                     null, null, null, null, confirmation.materialLocks(),
                     confirmation.confirmedPreviewRequestId());

@@ -145,7 +145,7 @@ class ConfirmedPreviewExecutionTest extends BootstrapTest {
                     fixture.player, type, fixture.recipe)).thenReturn(List.of(altar));
             restock.when(() -> StorageRestockSupport.resolve(fixture.player)).thenReturn(Optional.empty());
 
-            GenericCraftPacket.tryResolveTypedGraphOnly(fixture.player, fixture.recipe, Map.of(),
+            CraftExecutionRequestService.tryResolveTypedGraphOnly(fixture.player, fixture.recipe, Map.of(),
                     null, null, 1, false, null, target, OutputDestination.RS_NETWORK,
                     MachineSelectionMode.AUTO, null, Map.of());
 
@@ -183,8 +183,8 @@ class ConfirmedPreviewExecutionTest extends BootstrapTest {
             cache.retainForRequest(player.getUUID(), request, snapshot);
         }
 
-        GenericCraftPacket.ExecutionPlanLookup confirm(long request) {
-            return GenericCraftPacket.findValidatedExecutionPlan(player, recipe, Map.of(), 1,
+        CraftPlanningApplicationService.ExecutionPlanLookup confirm(long request) {
+            return CraftPlanningApplicationService.findValidatedExecutionPlan(player, recipe, Map.of(), 1,
                     new ItemStack(Items.DIAMOND), null, null, null, null, Map.of(), request);
         }
     }

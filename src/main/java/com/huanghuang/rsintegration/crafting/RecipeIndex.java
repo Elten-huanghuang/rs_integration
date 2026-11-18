@@ -9,7 +9,7 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketRecipeWrapper;
 import com.huanghuang.rsintegration.mods.apotheosis.ApotheosisGemCuttingCatalog;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCatalog;
-import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
+import com.huanghuang.rsintegration.crafting.batch.CraftPlanningRuntime;
 import com.huanghuang.rsintegration.crafting.external.ExternalIntegrationRuntime;
 import com.huanghuang.rsintegration.crafting.fluid.FluidContainerCatalog;
 import com.huanghuang.rsintegration.crafting.fluid.FluidContainerRecipe;
@@ -1225,7 +1225,7 @@ public final class RecipeIndex {
         VanillaBrewingCatalog.invalidate();
         RecipeIndexDiagnostics.reset();
         ImmutableRecipeGraphProjector.clearCache();
-        GenericCraftPacket.clearPlanCache();
+        CraftPlanningRuntime.clearPlanCache();
     }
 
     // ── result-item extraction (formerly in ModRecipeIndex) ─────

@@ -92,7 +92,7 @@ import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.external.ExternalIntegrationRuntime;
 import com.huanghuang.rsintegration.crafting.external.ExternalOperationRecoveryService;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
-import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
+import com.huanghuang.rsintegration.crafting.batch.CraftRequestCoordinator;
 import com.huanghuang.rsintegration.network.craftingstation.CraftingStationModePacket;
 import com.huanghuang.rsintegration.network.craftingstation.StonecutterRecipeSelectPacket;
 import com.huanghuang.rsintegration.network.craftingstation.CraftingStationJeiTransferPacket;
@@ -352,7 +352,7 @@ public final class RSIntegrationMod {
             }
             if (e.getConfig().getType() == ModConfig.Type.SERVER) {
                 migrateServerConfig(e.getConfig());
-                GenericCraftPacket.reloadPlanningConfig();
+                CraftRequestCoordinator.reloadPlanningConfig();
             }
         });
         MOD_BUS.addListener((ModConfigEvent.Reloading e) -> {
@@ -366,7 +366,7 @@ public final class RSIntegrationMod {
                 }
             }
             if (e.getConfig().getType() == ModConfig.Type.SERVER) {
-                GenericCraftPacket.reloadPlanningConfig();
+                CraftRequestCoordinator.reloadPlanningConfig();
             }
             ExternalItemProgressBridge.refreshEnabled();
             broadcastConfigSync();
@@ -941,8 +941,7 @@ public final class RSIntegrationMod {
                 AsyncCraftManager.getInstance().cancelAllForPlayer(sp.getUUID());
                 AutoEatRateLimiter.onPlayerLogout(sp.getUUID());
                 AutoEatEngine.onPlayerLogout(sp.getUUID());
-                GenericCraftPacket
-                        .onPlayerLogout(sp.getUUID());
+                CraftRequestCoordinator.onPlayerLogout(sp.getUUID());
                 VillagerTradeLockService
                         .remove(sp.getUUID());
                 RSIIntegrationServices.clearPlayer(
@@ -977,8 +976,7 @@ public final class RSIntegrationMod {
                     MagicResourceTaskLedger.get(e.getServer()).tick(e.getServer());
                 }
                 AutoEatEngine.tick(e.getServer());
-                GenericCraftPacket
-                        .tickWarmUpRequests(e.getServer());
+                CraftRequestCoordinator.tickWarmUpRequests(e.getServer());
             }
         });
         // Cross-dimension: unpin the old dimension's IStorageCache listener
@@ -995,7 +993,7 @@ public final class RSIntegrationMod {
         // Server shutdown: abort all active async craft chains so committed
         // materials are refunded rather than silently lost.
         MinecraftForge.EVENT_BUS.addListener((ServerStoppingEvent e) -> {
-            GenericCraftPacket.cancelAllPlanning();
+            CraftRequestCoordinator.cancelAllPlanning();
             RecipeIndex.invalidate();
             AsyncCraftManager.abortAll();
             CraftOutputInterceptor.clearAll();

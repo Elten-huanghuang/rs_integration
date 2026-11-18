@@ -2,8 +2,9 @@ package com.huanghuang.rsintegration.crafting.planning;
 
 
 
-import com.huanghuang.rsintegration.network.packet.NetworkHandler;import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
-import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
+import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
+import com.huanghuang.rsintegration.crafting.batch.CraftRequestCoordinator;
+import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.resources.ResourceLocation;
@@ -134,7 +135,7 @@ public final class PlanningProgressServer {
                                PlanningProgressSnapshot.Phase phase, Component detail) {
         if (player == null) return;
         PlanningRequestKey key = new PlanningRequestKey(player.getUUID(), generation);
-        GenericCraftPacket.finishPlanning(player.getUUID(), generation);
+        CraftRequestCoordinator.finishPlanning(player.getUUID(), generation);
         Active active = ACTIVE.get(key);
         if (active == null || active.generation != generation) return;
         active.update(state, phase, detail);

@@ -129,9 +129,9 @@ class MalumConfirmedPreviewTest extends BootstrapTest {
         }
     }
 
-    private static GenericCraftPacket.ExecutionPlanLookup confirm(
+    private static CraftPlanningApplicationService.ExecutionPlanLookup confirm(
             ServerPlayer player, ModType type, GenericCraftPacketCodec.WireData packet) {
-        return GenericCraftPacket.findValidatedExecutionPlan(player, packet.recipeId(), packet.forcedRecipes(),
+        return CraftPlanningApplicationService.findValidatedExecutionPlan(player, packet.recipeId(), packet.forcedRecipes(),
                 packet.repeatCount(), packet.targetOutput(), type, packet.dimension(), packet.position(),
                 packet.storageReference(), packet.materialLocks(), packet.confirmedPreviewRequestId());
     }

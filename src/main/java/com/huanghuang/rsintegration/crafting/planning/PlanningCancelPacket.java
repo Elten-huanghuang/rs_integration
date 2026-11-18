@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
-import com.huanghuang.rsintegration.crafting.batch.GenericCraftPacket;
+import com.huanghuang.rsintegration.crafting.batch.CraftRequestCoordinator;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraftforge.network.NetworkEvent;
 
@@ -16,7 +16,7 @@ public record PlanningCancelPacket(long requestId) {
         NetworkEvent.Context context = supplier.get();
         context.enqueueWork(() -> {
             if (context.getSender() != null && packet.requestId > 0L) {
-                GenericCraftPacket.cancelPlanning(context.getSender(), packet.requestId);
+                CraftRequestCoordinator.cancelPlanning(context.getSender(), packet.requestId);
             }
         });
         context.setPacketHandled(true);

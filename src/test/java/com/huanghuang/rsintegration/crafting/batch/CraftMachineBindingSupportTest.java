@@ -94,9 +94,9 @@ class CraftMachineBindingSupportTest extends BootstrapTest {
 
     @Test
     void cachedExecutionTypeAlsoPrefersTheSpecificSibling() {
-        assertSame(SPECIFIC, GenericCraftPacket.modTypeForCachedExecution(
+        assertSame(SPECIFIC, CraftPlanningApplicationService.modTypeForCachedExecution(
                 COARSE, SPECIFIC));
-        assertSame(ModType.GENERIC, GenericCraftPacket.modTypeForCachedExecution(
+        assertSame(ModType.GENERIC, CraftPlanningApplicationService.modTypeForCachedExecution(
                 null, null));
     }
 
@@ -218,7 +218,7 @@ class CraftMachineBindingSupportTest extends BootstrapTest {
     @Test
     void cachedExecutionTypeAlsoRefinesTheVanillaFamily() {
         assertEquals(VANILLA_STONECUTTER,
-                GenericCraftPacket.modTypeForCachedExecution(
+                CraftPlanningApplicationService.modTypeForCachedExecution(
                         VANILLA_FURNACE, VANILLA_STONECUTTER));
     }
 
@@ -366,8 +366,8 @@ class CraftMachineBindingSupportTest extends BootstrapTest {
                     ModType.EXTERNAL_INTEGRATION.id()
             )).thenReturn(true);
 
-            GenericCraftPacket.BindingAwareGraph filtered =
-                    GenericCraftPacket.consumerBindingAwareGraph(
+            CraftPlanningApplicationService.BindingAwareGraph filtered =
+                    CraftPlanningApplicationService.consumerBindingAwareGraph(
                             player, graph);
 
             assertTrue(filtered.graph().recipesByOutput().isEmpty());

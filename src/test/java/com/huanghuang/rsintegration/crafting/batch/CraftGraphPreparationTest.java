@@ -34,7 +34,7 @@ class CraftGraphPreparationTest extends BootstrapTest {
         List<RecipeNode> runtimeChecked = new ArrayList<>();
         List<RecipeNode> machineChecked = new ArrayList<>();
 
-        var filtered = GenericCraftPacket.filterRecipeGraph(graph,
+        var filtered = CraftPlanningApplicationService.filterRecipeGraph(graph,
                 candidate -> { runtimeChecked.add(candidate); return true; },
                 candidate -> { machineChecked.add(candidate); return true; });
 
@@ -60,7 +60,7 @@ class CraftGraphPreparationTest extends BootstrapTest {
                 mixed, List.of(first, rejected, last), kept, List.of(unchanged),
                 runtimeBlocked, List.of(unavailable), machineBlocked, List.of(unbound)));
 
-        var filtered = GenericCraftPacket.filterRecipeGraph(graph,
+        var filtered = CraftPlanningApplicationService.filterRecipeGraph(graph,
                 candidate -> candidate != unavailable,
                 candidate -> candidate != rejected && candidate != unbound);
 

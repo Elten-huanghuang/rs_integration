@@ -34,6 +34,10 @@ public final class CraftPlanningRuntime {
         return PLAN_CACHE;
     }
 
+    public static void clearPlanCache() {
+        PLAN_CACHE.clear();
+    }
+
     /** 仅供库存订阅恢复已发布结果，执行仍必须通过独立的确认与取料流程。 */
     @Nullable
     public static PlanResponse publishedPlan(UUID playerId, long requestId) {

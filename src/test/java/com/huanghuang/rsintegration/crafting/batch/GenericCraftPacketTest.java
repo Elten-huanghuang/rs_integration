@@ -123,8 +123,8 @@ class GenericCraftPacketTest extends BootstrapTest {
 
     @Test
     void directRecursiveTerminalPlanCountsAsASelectedPlanner() {
-        assertTrue(GenericCraftPacket.hasSelectedCraftingPlanner(false, true, false));
-        assertFalse(GenericCraftPacket.hasSelectedCraftingPlanner(false, false, false));
+        assertTrue(CraftPlanningApplicationService.hasSelectedCraftingPlanner(false, true, false));
+        assertFalse(CraftPlanningApplicationService.hasSelectedCraftingPlanner(false, false, false));
     }
 
     @Test
@@ -173,7 +173,7 @@ class GenericCraftPacketTest extends BootstrapTest {
             materials.when(() -> CraftPacketUtils.applyPlanningIngredientContext(
                     recipe, player, List.of(input))).thenReturn(List.of(input, catalyst));
 
-            ImmutableRecipeGraph scoped = GenericCraftPacket.scopedBindingAwareGraph(
+            ImmutableRecipeGraph scoped = CraftPlanningApplicationService.scopedBindingAwareGraph(
                     player, shared, recipeId).graph();
 
             assertEquals(2, scoped.recipesById().get(recipeId).inputs().size());
@@ -191,7 +191,7 @@ class GenericCraftPacketTest extends BootstrapTest {
             materials.when(() -> CraftPacketUtils.applyPlanningIngredientContext(recipe, player, List.of(input)))
                     .thenReturn(List.of(input, new IngredientSpec(Ingredient.of(Items.IRON_PICKAXE),
                             1, DemandRole.DURABILITY)));
-            assertTrue(GenericCraftPacket.scopedBindingAwareGraph(player, shared, recipeId)
+            assertTrue(CraftPlanningApplicationService.scopedBindingAwareGraph(player, shared, recipeId)
                     .requiresTypedPlanning(), "不能用缺少无法投影输入的旧节点发布假可行计划");
         }
     }
@@ -200,7 +200,7 @@ class GenericCraftPacketTest extends BootstrapTest {
     void claimedHandlerTypeOverridesLegacyRecipeClassification() {
         assertEquals(
                 ModType.EXTERNAL_INTEGRATION,
-                GenericCraftPacket.modTypeForCachedExecution(
+                CraftPlanningApplicationService.modTypeForCachedExecution(
                         ModType.EXTERNAL_INTEGRATION,
                         ModType.byId("vanilla_furnace"))
         );
@@ -226,7 +226,7 @@ class GenericCraftPacketTest extends BootstrapTest {
         when(modList.isLoaded("sophisticatedbackpacks")).thenReturn(false);
         try (MockedStatic<ModList> mods = mockStatic(ModList.class)) {
             mods.when(ModList::get).thenReturn(modList);
-            Map<StackKey, Long> refreshed = GenericCraftPacket.refreshMissingAvailability(
+            Map<StackKey, Long> refreshed = CraftExecutionRequestService.refreshMissingAvailability(
                     player, endpoint, List.of(Items.BRICK.getDescriptionId()),
                     immutableAvailable);
 
@@ -267,7 +267,7 @@ class GenericCraftPacketTest extends BootstrapTest {
         when(modList.isLoaded("sophisticatedbackpacks")).thenReturn(false);
         try (MockedStatic<ModList> mods = mockStatic(ModList.class)) {
             mods.when(ModList::get).thenReturn(modList);
-            assertNull(GenericCraftPacket.refreshMissingAvailability(
+            assertNull(CraftExecutionRequestService.refreshMissingAvailability(
                     player, endpoint, List.of(Items.BRICK.getDescriptionId()),
                     copyGuard));
         }
@@ -730,8 +730,8 @@ class GenericCraftPacketTest extends BootstrapTest {
 
     @Test
     void typedResolverUsesPlanningLifetimeNotPerTickExecutionSlice() {
-        assertEquals(2_000, GenericCraftPacket.typedResolverBudgetMs(2_000));
-        assertEquals(1, GenericCraftPacket.typedResolverBudgetMs(0));
+        assertEquals(2_000, CraftExecutionRequestService.typedResolverBudgetMs(2_000));
+        assertEquals(1, CraftExecutionRequestService.typedResolverBudgetMs(0));
     }
 
     @Test
@@ -1266,13 +1266,13 @@ class GenericCraftPacketTest extends BootstrapTest {
         var crafting = new ImmutableRecipeGraph.RecipeNode(
                 new ResourceLocation("test", "crafting"), output, 1, List.of(input));
 
-        var withAlternative = GenericCraftPacket.filterRecipeGraph(
+        var withAlternative = CraftPlanningApplicationService.filterRecipeGraph(
                 new ImmutableRecipeGraph(Map.of(output, List.of(unbound, crafting))),
                 node -> !"test_machine".equals(node.modTypeId()));
         assertEquals(List.of(crafting), withAlternative.graph().recipesByOutput().get(output));
         assertTrue(withAlternative.blockedOutputIds().isEmpty());
 
-        var onlyUnbound = GenericCraftPacket.filterRecipeGraph(
+        var onlyUnbound = CraftPlanningApplicationService.filterRecipeGraph(
                 new ImmutableRecipeGraph(Map.of(output, List.of(unbound))), node -> false);
         assertFalse(onlyUnbound.graph().recipesByOutput().containsKey(output));
         assertEquals(java.util.Set.of(output.itemId()), onlyUnbound.blockedOutputIds());
@@ -1292,7 +1292,7 @@ class GenericCraftPacketTest extends BootstrapTest {
                 new ResourceLocation("test", "virtual"), output, 1, List.of(input),
                 "test_virtual", new ResourceLocation("test", "virtual"));
 
-        var filtered = GenericCraftPacket.filterRecipeGraph(
+        var filtered = CraftPlanningApplicationService.filterRecipeGraph(
                 new ImmutableRecipeGraph(Map.of(output, List.of(unavailableVirtual))),
                 node -> false, node -> false);
 
@@ -1314,7 +1314,7 @@ class GenericCraftPacketTest extends BootstrapTest {
         AtomicInteger runtimeChecks = new AtomicInteger();
         AtomicInteger machineChecks = new AtomicInteger();
 
-        var filtered = GenericCraftPacket.filterRecipeGraph(
+        var filtered = CraftPlanningApplicationService.filterRecipeGraph(
                 new ImmutableRecipeGraph(Map.of(output, List.of(runtimeRejected, usable))),
                 node -> {
                     runtimeChecks.incrementAndGet();

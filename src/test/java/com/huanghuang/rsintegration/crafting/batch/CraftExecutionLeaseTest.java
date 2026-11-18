@@ -114,14 +114,14 @@ class CraftExecutionLeaseTest extends BootstrapTest {
         PlanCache.Entry entry = entry(output, null, Map.of());
         ServerPlayer player = player();
 
-        assertFalse(GenericCraftPacket.matchesExecutionLease(
+        assertFalse(CraftPlanningApplicationService.matchesExecutionLease(
                 entry, player, recipeId, Map.of(), 2, output, type));
-        assertFalse(GenericCraftPacket.matchesExecutionLease(
+        assertFalse(CraftPlanningApplicationService.matchesExecutionLease(
                 entry, player, recipeId, Map.of(), 1, output, ModType.GENERIC));
-        assertFalse(GenericCraftPacket.matchesExecutionLease(
+        assertFalse(CraftPlanningApplicationService.matchesExecutionLease(
                 entry, player, new ResourceLocation("test", "other"), Map.of(), 1, output, type));
         when(player.getUUID()).thenReturn(UUID.randomUUID());
-        assertFalse(GenericCraftPacket.matchesExecutionLease(
+        assertFalse(CraftPlanningApplicationService.matchesExecutionLease(
                 entry, player, recipeId, Map.of(), 1, output, type));
     }
 
@@ -131,7 +131,7 @@ class CraftExecutionLeaseTest extends BootstrapTest {
         PlanCache.Entry forced = entry(output, null, Map.of(
                 new ResourceLocation("minecraft", "glass"), new ResourceLocation("test", "chosen")));
         assertFalse(matches(forced, output));
-        assertFalse(GenericCraftPacket.matchesExecutionLease(
+        assertFalse(CraftPlanningApplicationService.matchesExecutionLease(
                 entry(output, null, Map.of()), player(), recipeId,
                 Map.of("invalid key", "test:chosen"), 1, output, type));
     }
@@ -165,7 +165,7 @@ class CraftExecutionLeaseTest extends BootstrapTest {
                     player, snapshot, plan, Level.OVERWORLD, BlockPos.ZERO, null))
                     .thenReturn(stateValid);
 
-            var result = GenericCraftPacket.findValidatedExecutionPlan(
+            var result = CraftPlanningApplicationService.findValidatedExecutionPlan(
                     player, recipeId, Map.of(), 1, output, type,
                     Level.OVERWORLD.location(), BlockPos.ZERO, null, Map.of(), 0L);
             assertEquals(!stateValid, result.rejected());
@@ -182,7 +182,7 @@ class CraftExecutionLeaseTest extends BootstrapTest {
     }
 
     private boolean matches(PlanCache.Entry entry, ItemStack target) {
-        return GenericCraftPacket.matchesExecutionLease(
+        return CraftPlanningApplicationService.matchesExecutionLease(
                 entry, player(), recipeId, Map.of(), 1, target, type);
     }
 

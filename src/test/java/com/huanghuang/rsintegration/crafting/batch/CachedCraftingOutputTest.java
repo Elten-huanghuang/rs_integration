@@ -30,7 +30,7 @@ class CachedCraftingOutputTest extends BootstrapTest {
                 .thenReturn(new ItemStack(Items.DIAMOND));
         ModRecipeHandlers.register(handler);
 
-        ItemStack result = GenericCraftPacket.resolveCachedRecipeOutput(
+        ItemStack result = CraftExecutionRequestService.resolveCachedRecipeOutput(
                 recipe, RegistryAccess.EMPTY, null);
 
         assertEquals(Items.DIAMOND, result.getItem());

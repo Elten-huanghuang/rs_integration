@@ -259,7 +259,7 @@ final class CraftPureExecutionPlanner {
                         RSIntegrationMod.LOGGER.info(
                                 "[RSI-exec] typed {} route recipe={} reason={} coverage={}",
                                 planKind, recipeId, decision.reason(), completed.coverage().status());
-                        CraftPlanningApplicationService.tryResolveTypedGraphOnly(
+                        CraftExecutionRequestService.tryResolveTypedGraphOnly(
                                 player, recipeId, forcedRecipes, dimension, position,
                                 repeatCount, inferMode, baseItem, targetOutput,
                                 outputDestination, machineSelectionMode,
