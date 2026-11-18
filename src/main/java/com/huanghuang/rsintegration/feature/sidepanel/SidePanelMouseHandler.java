@@ -241,6 +241,10 @@ final class SidePanelMouseHandler {
         }
         long operationId = RSSidePanelNetworkHandler.sendClick(clickedItem, action,
                 Screen.hasShiftDown(), clickedPs.getId());
+        predictExtraction(operationId, clickedPs, extractCount);
+    }
+
+    static void predictExtraction(long operationId, PanelStack clickedPs, int extractCount) {
         RSSidePanelClient.pendingOperationStacks.put(operationId, clickedPs.getId());
 
         if (extractCount > 0) {

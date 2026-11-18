@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.feature.sidepanel;
 
-import com.huanghuang.rsintegration.RSIntegrationMod;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.registries.ForgeRegistries;
@@ -12,6 +13,7 @@ import java.util.*;
  */
 final class SyncHandler {
 
+    private static final Logger LOGGER = LogManager.getLogger("RS Integration");
     private SyncHandler() {}
 
     // ── Chunked sync accumulator (§13.5 N-1) ─────────────────────────
@@ -63,7 +65,7 @@ final class SyncHandler {
         if (packet.totalChunks != expectedChunks) return;
 
         chunkAccum.put(packet.chunkIndex, packet);
-        RSIntegrationMod.LOGGER.trace("[RSI] Chunk {}/{} received", packet.chunkIndex + 1, expectedChunks);
+        LOGGER.trace("[RSI] Chunk {}/{} received", packet.chunkIndex + 1, expectedChunks);
 
         if (chunkAccum.size() == expectedChunks) {
             List<UUID> allIds = new ArrayList<>();
@@ -79,7 +81,7 @@ final class SyncHandler {
                 allFlags.addAll(chunk.craftableFlags);
             }
 
-            RSIntegrationMod.LOGGER.debug("[RSI] All {} chunks received — applying merged sync ({} items)",
+            LOGGER.debug("[RSI] All {} chunks received — applying merged sync ({} items)",
                     expectedChunks, allItems.size());
 
             applySync(allIds, allItems, allTimestamps, allFlags,
@@ -103,13 +105,13 @@ final class SyncHandler {
             RSSidePanelClient.networkAvailable = false;
             RSSidePanelClient.networkName = networkName;
             RSSidePanelClient.dataModel.markDirty();
-            RSIntegrationMod.LOGGER.debug(
+            LOGGER.debug(
                     "[RSI] Network temporarily unavailable; retaining {} cached panel entries and retrying",
                     prevSize);
             return;
         }
         if (items.isEmpty() && prevSize > 0) {
-            RSIntegrationMod.LOGGER.debug("[RSI] Applying empty sync and clearing {} panel entries. networkAvailable was {}, now {}",
+            LOGGER.debug("[RSI] Applying empty sync and clearing {} panel entries. networkAvailable was {}, now {}",
                     prevSize, wasAvailable, networkAvailable);
         }
         RSSidePanelClient.pendingOperationStacks.clear();
@@ -136,7 +138,7 @@ final class SyncHandler {
     static void onDeltaReceived(UUID id, ItemStack stack, long timestamp, boolean craftable) {
         if (stack == null || stack.getItem() == null || id == null) return;
 
-        RSIntegrationMod.LOGGER.debug("[RSI-Delta] Client received: id={} item={} count={} craftable={}",
+        LOGGER.debug("[RSI-Delta] Client received: id={} item={} count={} craftable={}",
                 id, ForgeRegistries.ITEMS.getKey(stack.getItem()), stack.getCount(), craftable);
 
         RSSidePanelClient.pendingExtractions.remove(id);
@@ -158,7 +160,7 @@ final class SyncHandler {
         int oldCount = mergeTarget != null ? mergeTarget.getCount() : 0;
 
         if (count <= 0 && existing == null) {
-            RSIntegrationMod.LOGGER.debug("[RSI] Delta zero for unknown UUID {} (item={} key={}) — searchKey matching",
+            LOGGER.debug("[RSI] Delta zero for unknown UUID {} (item={} key={}) — searchKey matching",
                     id, stack.getHoverName().getString(), RSSidePanelClient.keyOf(stack));
         }
         if (count > 0 && existing == null && mergeTarget == null
@@ -179,18 +181,18 @@ final class SyncHandler {
         UUID trackedStackId = RSSidePanelClient.pendingOperationStacks.remove(opId);
 
         if (!packet.success()) {
-            RSIntegrationMod.LOGGER.debug("[RSI] Operation {} failed: code={}", opId, packet.errorCode());
+            LOGGER.debug("[RSI] Operation {} failed: code={}", opId, packet.errorCode());
             // Keep the pending extraction until an authoritative delta/full sync
             // arrives. Removing it here would discard the rollback snapshot even
             // though failed operations normally produce no storage delta.
         } else {
-            RSIntegrationMod.LOGGER.debug("[RSI] Operation {} succeeded: count={}", opId, packet.actualCount());
+            LOGGER.debug("[RSI] Operation {} succeeded: count={}", opId, packet.actualCount());
         }
 
         UUID packetStackId = packet.stackId();
         if (trackedStackId != null && packetStackId != null
                 && !trackedStackId.equals(packetStackId)) {
-            RSIntegrationMod.LOGGER.warn("[RSI] Operation {} stack mismatch: tracked={}, acknowledged={}",
+            LOGGER.warn("[RSI] Operation {} stack mismatch: tracked={}, acknowledged={}",
                     opId, trackedStackId, packetStackId);
         }
     }

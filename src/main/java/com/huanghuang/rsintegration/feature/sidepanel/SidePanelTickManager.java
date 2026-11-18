@@ -87,23 +87,22 @@ final class SidePanelTickManager {
 
         // Timeout stale pending extractions (2s)
         if (!RSSidePanelClient.pendingExtractions.isEmpty() && RSSidePanelClient.tickCounter % 20 == 0) {
-            timeoutStaleExtractions();
+            timeoutStaleExtractions(System.currentTimeMillis(), RSIntegrationConfig.SIDE_PANEL_EXTRACTION_TIMEOUT.get(),
+                    RSSidePanelNetworkHandler::sendRequestSync);
         }
 
         // Zeroed items are removed immediately in SyncHandler.onDeltaReceived()
         // (matching RS GridViewImpl.postChange). No delayed cleanup needed.
     }
 
-    private static void timeoutStaleExtractions() {
-        long now = System.currentTimeMillis();
+    static void timeoutStaleExtractions(long now, int extractionTimeout, Runnable requestSync) {
         var it = RSSidePanelClient.pendingExtractions.entrySet().iterator();
         while (it.hasNext()) {
             var pe = it.next();
-            int extractionTimeout = RSIntegrationConfig.SIDE_PANEL_EXTRACTION_TIMEOUT.get();
             if (now - pe.getValue().createdAt > extractionTimeout) {
                 if (!RSSidePanelClient.pendingSyncRetries.remove(pe.getKey())) {
                     RSSidePanelClient.pendingSyncRetries.add(pe.getKey());
-                    RSSidePanelNetworkHandler.sendRequestSync();
+                    requestSync.run();
                     continue;
                 }
                 PanelDataModel.PendingExtraction p = pe.getValue();

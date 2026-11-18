@@ -414,14 +414,14 @@ public final class RSSidePanelClient {
     }
 
     // ── Preference persistence ───────────────────────────────────
-    private static final Path PANEL_PREFS_PATH =
-            FMLPaths.CONFIGDIR.get()
-                    .resolve("rs_integration").resolve("side_panel.json");
+    private static Path panelPrefsPath() {
+        return FMLPaths.CONFIGDIR.get().resolve("rs_integration").resolve("side_panel.json");
+    }
 
     static void loadPanelPreferences() {
         if (prefsLoaded) return;
         prefsLoaded = true;
-        var data = SidePanelPreferences.load(PANEL_PREFS_PATH);
+        var data = SidePanelPreferences.load(panelPrefsPath());
         sortMode   = data.sortMode;
         sortAsc    = data.sortAsc;
         SearchController.searchMode = data.searchMode;
@@ -431,7 +431,7 @@ public final class RSSidePanelClient {
 
     static void savePanelPreferences() {
         if (!prefsLoaded) return;
-        SidePanelPreferences.save(PANEL_PREFS_PATH,
+        SidePanelPreferences.save(panelPrefsPath(),
                 new SidePanelPreferences.Data(sortMode, sortAsc, SearchController.searchMode, gridSize, viewType));
     }
 
