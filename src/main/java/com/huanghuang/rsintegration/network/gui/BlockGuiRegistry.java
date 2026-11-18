@@ -169,7 +169,8 @@ public final class BlockGuiRegistry {
     }
 
     private static boolean menuOpened(ServerPlayer player, AbstractContainerMenu previous) {
-        return player.containerMenu != previous && player.containerMenu != player.inventoryMenu;
+        return player.containerMenu != null && player.containerMenu != previous
+                && player.containerMenu != player.inventoryMenu;
     }
 
     private static boolean openWithoutBlockEntity(ServerPlayer player, ResourceKey<Level> dim, BlockPos pos) {
@@ -213,7 +214,8 @@ public final class BlockGuiRegistry {
         } finally {
             player.setItemInHand(InteractionHand.MAIN_HAND, saved);
         }
-        if (result.consumesAction() && menuOpened(player, previous)) {
+        // 第三方方块可能已经打开菜单却返回 PASS，此时不能再次尝试打开。
+        if (menuOpened(player, previous)) {
             RSIntegrationMod.LOGGER.debug("[RSI-MachineGUI] Opened via Block.use() for {} at {}",
                     state.getBlock(), pos);
             return true;
