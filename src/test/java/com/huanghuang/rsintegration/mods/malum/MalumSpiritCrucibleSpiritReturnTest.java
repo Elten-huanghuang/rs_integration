@@ -14,11 +14,9 @@ import net.minecraftforge.items.ItemStackHandler;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -50,8 +48,8 @@ class MalumSpiritCrucibleSpiritReturnTest extends BootstrapTest {
         CraftStorageEndpoint endpoint = acceptingEndpoint(player, returned);
         delegate.setStorageEndpoint(endpoint);
 
-        delegate.onBatchFinished(player);
-        delegate.onBatchFinished(player);
+        delegate.machineOperation().cleanup(player);
+        delegate.machineOperation().cleanup(player);
         delegate.releaseReusableMaterials(player);
 
         assertEquals(2, returned.size());
@@ -78,14 +76,14 @@ class MalumSpiritCrucibleSpiritReturnTest extends BootstrapTest {
         delegate.setStorageEndpoint(endpoint);
         set(delegate, "catalystReturnEndpoint", endpoint);
 
-        delegate.onBatchFinished(null);
+        delegate.machineOperation().cleanup(null);
 
         assertEquals(2, spirits.getStackInSlot(1).getCount());
         assertTrue(ItemStack.isSameItemSameTags(remaining, spirits.getStackInSlot(1)));
         verifyNoInteractions(endpoint);
 
-        delegate.onBatchFinished(player);
-        delegate.onBatchFinished(player);
+        delegate.machineOperation().cleanup(player);
+        delegate.machineOperation().cleanup(player);
 
         assertEquals(1, returned.size());
         assertEquals(2, returned.get(0).getCount());

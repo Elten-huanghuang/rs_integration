@@ -1,23 +1,16 @@
 package com.huanghuang.rsintegration.mods.aetherworks;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
-import java.lang.reflect.Field;
-
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
-import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.DrivenMachineDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
-import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.huanghuang.rsintegration.reflection.probes.AetherworksReflection;
 import com.huanghuang.rsintegration.mods.aetherworks.AetherworksRecipeHandler;
-import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -32,13 +25,12 @@ import net.minecraftforge.items.ItemHandlerHelper;
 import net.sirplop.aetherworks.blockentity.AetheriumAnvilBlockEntity;
 import net.sirplop.aetherworks.blockentity.IForge;
 import org.jetbrains.annotations.NotNull;
-
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
 /** Batch delegate for Aetherworks Aetherium Anvil (Forge Anvil). */
-public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
+public final class AetherworksBatchDelegate extends DrivenMachineDelegate {
     private static final AetherworksRecipeHandler RECIPE_HANDLER = new AetherworksRecipeHandler();
 
     // Instance state
@@ -202,7 +194,7 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
+    protected boolean advanceNativeCycle(ServerLevel level, BlockEntity be) {
         if (!materialsPlaced || AetherworksReflection.anvilBEClass == null) return false;
 
         if (!AetherworksReflection.anvilBEClass.isInstance(be)) {
@@ -321,8 +313,11 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
         }
     }
 
-    @Override
-    public ItemStack collectResult(ServerPlayer player) {
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.single(this::takeResult, outputContract());
+    }
+
+    private ItemStack takeResult(ServerPlayer player) {
         if (craftTimedOut || anvilBE == null) return ItemStack.EMPTY;
 
         Object inv = Reflect.getField(anvilBE, "inventory").orElse(null);
@@ -395,7 +390,7 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@NotNull ServerPlayer player) {
+    public void cleanup(@NotNull ServerPlayer player) {
         materialsPlaced = false;
         recordedInputItem = null;
         placedInput = ItemStack.EMPTY;

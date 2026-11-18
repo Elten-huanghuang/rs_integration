@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mods.arsnouveau;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -24,7 +24,6 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -244,9 +243,11 @@ public final class ArsScribesTableBatchDelegate extends AbstractBatchDelegate {
                 && level != null && level.getGameTime() >= startTick;
     }
 
-    @Nonnull
-    @Override
-    public ItemStack collectResult(@Nonnull ServerPlayer player) {
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.single(this::takeResult, outputContract());
+    }
+
+    private ItemStack takeResult(@Nonnull ServerPlayer player) {
         if (level == null || machinePos == null) return ItemStack.EMPTY;
         for (ItemEntity entity : level.getEntitiesOfClass(
                 ItemEntity.class, outputRegion(machinePos), this::isOwnedOutput)) {
@@ -312,7 +313,7 @@ public final class ArsScribesTableBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@Nullable ServerPlayer player) {
+    public void cleanup(@Nullable ServerPlayer player) {
         if (!markTerminalCleanup()) return;
         paidExperience = 0;
         resetLocalState();

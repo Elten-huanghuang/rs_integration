@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mods.cthulhucreatures;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -24,7 +24,6 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.level.block.entity.BlockEntity;
-
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -255,7 +254,16 @@ public final class FleshAltarBatchDelegate extends AbstractBatchDelegate {
                 result.getCount(), OutputContract.Kind.PRIMARY, OutputContract.Source.SLOT)));
     }
 
-    @Override public ItemStack collectResult(ServerPlayer player) {
+    @Override public OperationOutputSource outputSource() {
+        return player -> {
+            List<ItemStack> stacks = takeResults(player);
+            var ports = stacks.isEmpty() ? List.<OutputAccounting.CollectedOutput>of() : List.of(
+                    new OutputAccounting.CollectedOutput(PRIMARY_PORT, OutputContract.Source.SLOT, stacks.get(0)));
+            return new OperationOutputSource.Handoff(stacks, ports);
+        };
+    }
+
+    private ItemStack takeResult(ServerPlayer player) {
         if (!started || !level.hasChunkAt(pos) || level.getBlockEntity(pos) != machine) return ItemStack.EMPTY;
         ItemStack visible = inventory.getItem(2);
         if (!ItemStack.isSameItemSameTags(visible, result) || visible.getCount() < expectedCount()) return ItemStack.EMPTY;
@@ -265,8 +273,8 @@ public final class FleshAltarBatchDelegate extends AbstractBatchDelegate {
         return collected;
     }
 
-    @Override public List<ItemStack> collectAllResults(ServerPlayer player) {
-        ItemStack primary = collectResult(player);
+    private List<ItemStack> takeResults(ServerPlayer player) {
+        ItemStack primary = takeResult(player);
         if (primary.isEmpty()) return List.of();
         List<ItemStack> outputs = new ArrayList<>();
         outputs.add(primary);
@@ -280,13 +288,8 @@ public final class FleshAltarBatchDelegate extends AbstractBatchDelegate {
         return outputs;
     }
 
-    @Override public boolean collectsPhysicalSecondaryOutputs() { return true; }
 
-    @Override public List<OutputAccounting.CollectedOutput> collectStructuredResults(ServerPlayer player) {
-        ItemStack collected = collectResult(player);
-        return collected.isEmpty() ? List.of() : List.of(new OutputAccounting.CollectedOutput(
-                PRIMARY_PORT, OutputContract.Source.SLOT, collected));
-    }
+
 
     @Override protected void clearMachineState(BlockEntity be, @Nullable ServerPlayer player) {
         List<ItemStack> recovered = new ArrayList<>();
@@ -310,7 +313,7 @@ public final class FleshAltarBatchDelegate extends AbstractBatchDelegate {
         resetState();
     }
 
-    @Override public void onBatchFinished(@Nullable ServerPlayer player) {
+    @Override public void cleanup(@Nullable ServerPlayer player) {
         if (!markTerminalCleanup()) return;
         started = false;
         placed = List.of();

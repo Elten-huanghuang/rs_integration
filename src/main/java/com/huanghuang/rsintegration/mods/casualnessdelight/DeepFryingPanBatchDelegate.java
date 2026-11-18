@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mods.casualnessdelight;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
@@ -11,7 +11,6 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
-import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
@@ -24,21 +23,17 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.AABB;
 import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
-
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
 
 /**
  * 随意乐事炸锅委托。
@@ -275,15 +270,13 @@ public final class DeepFryingPanBatchDelegate extends AbstractBatchDelegate {
         return craftStarted && observedCooking && getStoredStack(be).isEmpty();
     }
 
-    @Override
-    public ItemStack collectResult(ServerPlayer player) {
-        // 炸锅原生通过世界掉落产出，捕获器负责消费实体；这里不能重复取槽。
-        return ItemStack.EMPTY;
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.single(this::takeResult, outputContract());
     }
 
-    @Override
-    public List<OutputAccounting.CollectedOutput> collectStructuredResults(ServerPlayer player) {
-        return List.of();
+    private ItemStack takeResult(ServerPlayer player) {
+        // 炸锅原生通过世界掉落产出，捕获器负责消费实体；这里不能重复取槽。
+        return ItemStack.EMPTY;
     }
 
     @Override
@@ -345,7 +338,7 @@ public final class DeepFryingPanBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@Nullable ServerPlayer player) {
+    public void cleanup(@Nullable ServerPlayer player) {
         if (!markTerminalCleanup()) return;
         forceMachineChunk(myLevel, myPos, false);
         resetOperationState();

@@ -1,12 +1,14 @@
 package com.huanghuang.rsintegration.crafting.loadbalancer;
 
+import com.huanghuang.rsintegration.crafting.batch.MachineOperation;
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
-import com.huanghuang.rsintegration.crafting.batch.OperationPoll;
+import com.huanghuang.rsintegration.crafting.batch.OperationLifecycle;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry.BoundMachine;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
@@ -22,11 +24,9 @@ import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -52,13 +52,13 @@ class ParallelCraftGroupTickBudgetTest extends BootstrapTest {
         Fixture fixture = new Fixture();
         fixture.delegates.get(0).onTransfer = () -> fixture.allowed.set(false);
 
-        assertEquals(IBatchDelegate.CraftPhase.WORKING, OperationPoll.poll(fixture.group, fixture.level).phase());
+        assertEquals(MachineOperation.CraftPhase.WORKING, new OperationLifecycle(fixture.group).poll(fixture.level).phase());
         assertEquals(1, fixture.delegates.get(0).transfers);
         assertEquals(0, fixture.delegates.get(1).transfers);
         assertEquals(0, fixture.delegates.get(0).observations);
 
         fixture.allowed.set(true);
-        assertEquals(IBatchDelegate.CraftPhase.DONE, OperationPoll.poll(fixture.group, fixture.level).phase());
+        assertEquals(MachineOperation.CraftPhase.DONE, new OperationLifecycle(fixture.group).poll(fixture.level).phase());
         fixture.verifyCompleted();
     }
 
@@ -66,13 +66,13 @@ class ParallelCraftGroupTickBudgetTest extends BootstrapTest {
     void observationResumesWithoutRepeatingTransfersCollectionOrCompletion() {
         Fixture fixture = new Fixture();
         fixture.delegates.get(0).onObserve = () -> fixture.allowed.set(false);
-        assertEquals(IBatchDelegate.CraftPhase.WORKING, OperationPoll.poll(fixture.group, fixture.level).phase());
+        assertEquals(MachineOperation.CraftPhase.WORKING, new OperationLifecycle(fixture.group).poll(fixture.level).phase());
         assertEquals(1, fixture.group.getCompletedOperations());
         assertEquals(1, fixture.delegates.get(0).observations);
         assertEquals(0, fixture.delegates.get(1).observations);
 
         fixture.allowed.set(true);
-        assertEquals(IBatchDelegate.CraftPhase.DONE, OperationPoll.poll(fixture.group, fixture.level).phase());
+        assertEquals(MachineOperation.CraftPhase.DONE, new OperationLifecycle(fixture.group).poll(fixture.level).phase());
         fixture.verifyCompleted();
     }
 
@@ -95,7 +95,7 @@ class ParallelCraftGroupTickBudgetTest extends BootstrapTest {
                         delegates.add(delegate);
                         return delegate;
                     });
-            assertTrue(group.startOperation(OperationStartContext.delegateExtracted(
+            assertTrue(group.machineOperation().start(OperationStartContext.delegateExtracted(
                     player, ExtractionLedger.external())));
             assertEquals(2, group.getRunningOperations());
             group.setObservationAllowed(allowed::get);
@@ -116,7 +116,9 @@ class ParallelCraftGroupTickBudgetTest extends BootstrapTest {
         }
     }
 
-    private static final class SlotDelegate implements IBatchDelegate {
+    private static final class SlotDelegate implements IBatchDelegate, MachineOperation {
+        @Override public MachineOperation machineOperation() { return this; }
+
         Runnable onTransfer = () -> {};
         Runnable onObserve = () -> {};
         int transfers;
@@ -129,29 +131,25 @@ class ParallelCraftGroupTickBudgetTest extends BootstrapTest {
         public boolean validateAndInit(ServerPlayer player, ResourceLocation recipe,
                                        ResourceLocation dimension, BlockPos position) { return true; }
         @Override
-        public boolean startOperation(OperationStartContext context) { return true; }
+        public boolean start(OperationStartContext context) { return true; }
         @Override
-        public void advanceCraft(ServerLevel level) { advances++; }
+        public void advance(ServerLevel level) { advances++; }
         @Override
-        public boolean isCraftComplete(ServerLevel level) {
+        public CraftObservation observe(ServerLevel level) {
             observations++;
             onObserve.run();
-            return true;
+            return new CraftObservation(true ? CraftPhase.DONE : CraftPhase.WORKING);
         }
-        @Override
-        public void transferOutputs(ServerLevel level) {
+        private void transferAvailable(ServerLevel level) {
             transfers++;
             onTransfer.run();
         }
+        @Override public OperationOutputSource outputSource() { return OperationOutputSource.incremental(this::transferAvailable, OperationOutputSource.single(player -> { collections++;
+            return new ItemStack(Items.DIAMOND); }, outputContract())); }
         @Override
-        public ItemStack collectResult(ServerPlayer player) {
-            collections++;
-            return new ItemStack(Items.DIAMOND);
-        }
+        public void cleanup(ServerPlayer player) { completions++; }
         @Override
-        public void onBatchFinished(ServerPlayer player) { completions++; }
-        @Override
-        public void onBatchFailed(ServerPlayer player, String reason) {}
+        public void recover(ServerPlayer player, String reason) {}
         @Override
         public BlockPos getMachinePos() { return BlockPos.ZERO; }
     }

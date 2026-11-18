@@ -29,12 +29,10 @@ import net.minecraftforge.items.ItemStackHandler;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeAll;
 import org.mockito.MockedStatic;
-
 import java.lang.reflect.Method;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -121,8 +119,8 @@ class GoetyBatchDelegateTest extends BootstrapTest {
                 new GoetyBatchDelegate.PlacedPedestal(consumed, material.copy()),
                 new GoetyBatchDelegate.PlacedPedestal(replaced, material.copy()))));
 
-        delegate.onBatchFailed(null, "offline");
-        delegate.onBatchFailed(null, "repeat");
+        delegate.machineOperation().recover(null, "offline");
+        delegate.machineOperation().recover(null, "repeat");
 
         List<ItemStack> recovered = delegate.failureRecoveredInputs();
         assertEquals(2, recovered.size());
@@ -154,7 +152,7 @@ class GoetyBatchDelegateTest extends BootstrapTest {
         set(delegate, "filledPedestals", List.of(
                 new GoetyBatchDelegate.PlacedPedestal(stale, tagged(1))));
 
-        delegate.onBatchFailed(null, "offline");
+        delegate.machineOperation().recover(null, "offline");
 
         assertTrue(delegate.failureRecoveredInputs().isEmpty());
         assertEquals(1, stale.inventory.getStackInSlot(0).getCount());
@@ -174,7 +172,7 @@ class GoetyBatchDelegateTest extends BootstrapTest {
         inputs.add(tagged(2));
         when(level.getBlockEntity(BlockPos.ZERO)).thenReturn(null);
 
-        delegate.onBatchFailed(null, "missing");
+        delegate.machineOperation().recover(null, "missing");
 
         assertEquals(2, delegate.failureRecoveredInputs().get(0).getCount());
     }
@@ -202,7 +200,7 @@ class GoetyBatchDelegateTest extends BootstrapTest {
             assertEquals(Items.PAPER, ((ItemStack) extract.invoke(delegate, ingredient)).getItem());
         }
 
-        delegate.onBatchFailed(null, "not committed");
+        delegate.machineOperation().recover(null, "not committed");
 
         assertTrue(delegate.failureRecoveredInputs().isEmpty());
     }
@@ -224,7 +222,7 @@ class GoetyBatchDelegateTest extends BootstrapTest {
         set(delegate, "brazierRecipeObj", brazier.recipe);
         delegate.rememberBrazierPlacement(List.of(tagged(3), tagged(1), tagged(1)));
 
-        delegate.onBatchFailed(null, "offline");
+        delegate.machineOperation().recover(null, "offline");
 
         assertEquals(1, delegate.failureRecoveredInputs().size());
         assertEquals(2, delegate.failureRecoveredInputs().get(0).getCount());

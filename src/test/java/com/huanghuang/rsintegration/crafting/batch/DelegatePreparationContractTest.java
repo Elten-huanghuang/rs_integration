@@ -7,9 +7,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import org.junit.jupiter.api.Test;
-
 import java.lang.reflect.Modifier;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -19,7 +17,7 @@ class DelegatePreparationContractTest {
     @Test
     void publicOperationEntryCannotBeBypassedBySubclasses() throws Exception {
         assertTrue(Modifier.isFinal(AbstractBatchDelegate.class
-                .getMethod("startOperation", OperationStartContext.class)
+                .getMethod("start", OperationStartContext.class)
                 .getModifiers()));
     }
 
@@ -103,14 +101,14 @@ class DelegatePreparationContractTest {
     void repeatOnBatchFailedIsIgnored() {
         CountingDelegate delegate = new CountingDelegate();
 
-        // markTerminalCleanup is the gate onBatchFailed consults; assert it
+        // markTerminalCleanup is the gate recover consults; assert it
         // directly so the test needs no Minecraft/logger bootstrap.
         assertTrue(delegate.claimTerminal(), "first settle must win");
         assertFalse(delegate.claimTerminal(), "second settle must be rejected");
         assertFalse(delegate.claimTerminal(), "third settle must be rejected");
     }
 
-    /** Machine-less delegate: onBatchFailed routes to clearMissingMachineState. */
+    /** Machine-less delegate: recover routes to clearMissingMachineState. */
     private static class CountingDelegate extends AbstractBatchDelegate {
         int missingStateCleanups;
 
@@ -143,13 +141,17 @@ class DelegatePreparationContractTest {
         }
 
         @Override protected boolean startOperationImpl(OperationStartContext context) { return false; }
-        @Override public ItemStack collectResult(ServerPlayer player) { return ItemStack.EMPTY; }
-        @Override public void onBatchFinished(ServerPlayer player) {}
-        // Non-null so onBatchFailed does not short-circuit on the virtual-delegate path.
+        @Override public OperationOutputSource outputSource() {
+            return OperationOutputSource.single(player -> ItemStack.EMPTY, outputContract());
+        }
+        @Override public void cleanup(ServerPlayer player) {}
+        // Non-null so recover does not short-circuit on the virtual-delegate path.
         @Override public BlockPos getMachinePos() { return BlockPos.ZERO; }
     }
 
-    private static class StubDelegate implements IBatchDelegate {
+    private static class StubDelegate implements IBatchDelegate, MachineOperation {
+        @Override public MachineOperation machineOperation() { return this; }
+
         private final boolean valid;
 
         StubDelegate(boolean valid) {
@@ -162,11 +164,13 @@ class DelegatePreparationContractTest {
             return valid;
         }
 
-        @Override public boolean startOperation(OperationStartContext context) { return false; }
-        @Override public boolean isCraftComplete(ServerLevel level) { return false; }
-        @Override public ItemStack collectResult(ServerPlayer player) { return ItemStack.EMPTY; }
-        @Override public void onBatchFailed(ServerPlayer player, String reason) {}
-        @Override public void onBatchFinished(ServerPlayer player) {}
+        @Override public boolean start(OperationStartContext context) { return false; }
+        @Override public CraftObservation observe(ServerLevel level) { return new CraftObservation(false ? CraftPhase.DONE : CraftPhase.WORKING); }
+        @Override public OperationOutputSource outputSource() {
+            return OperationOutputSource.single(player -> ItemStack.EMPTY, outputContract());
+        }
+        @Override public void recover(ServerPlayer player, String reason) {}
+        @Override public void cleanup(ServerPlayer player) {}
         @Override public BlockPos getMachinePos() { return BlockPos.ZERO; }
     }
 }

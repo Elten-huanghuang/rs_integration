@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mods.immortalersdelight;
 
+import com.huanghuang.rsintegration.crafting.batch.MachineOperation;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
@@ -13,11 +14,9 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.items.ItemStackHandler;
 import org.junit.jupiter.api.Test;
-
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -63,21 +62,21 @@ class EnchantalCoolerBatchDelegateTest extends BootstrapTest {
     void leavesOutputsInTheMachineUntilAllTenOperationsFinish() throws Exception {
         try (CoolerFixture fixture = new CoolerFixture(10)) {
             fixture.inventory.setStackInSlot(0, new ItemStack(Items.APPLE, 10));
-            assertEquals(IBatchDelegate.CraftPhase.WORKING, fixture.observe().phase());
+            assertEquals(MachineOperation.CraftPhase.WORKING, fixture.observe().phase());
             for (int operation = 1; operation <= 10; operation++) {
                 fixture.inventory.extractItem(0, 1, false);
                 fixture.inventory.setStackInSlot(5, new ItemStack(Items.DIAMOND, operation));
                 // 原生冷却器每轮结束都会把计时清零，下一轮尚有输入时不能结束整批。
                 fixture.machine.cookingTotalTime = 0;
 
-                assertEquals(operation == 10 ? IBatchDelegate.CraftPhase.DONE
-                        : IBatchDelegate.CraftPhase.WORKING, fixture.observe().phase());
+                assertEquals(operation == 10 ? MachineOperation.CraftPhase.DONE
+                        : MachineOperation.CraftPhase.WORKING, fixture.observe().phase());
                 assertEquals(operation, fixture.inventory.getStackInSlot(5).getCount(),
                         "观察进度不得提前取走输出");
             }
-            List<ItemStack> results = fixture.delegate.collectAllResults(fixture.player);
+            List<ItemStack> results = fixture.delegate.outputSource().collectFinal(fixture.player).stacks();
             assertEquals(10, results.stream().mapToInt(ItemStack::getCount).sum());
-            assertTrue(fixture.delegate.collectAllResults(fixture.player).isEmpty());
+            assertTrue(fixture.delegate.outputSource().collectFinal(fixture.player).stacks().isEmpty());
         }
     }
 
@@ -87,10 +86,10 @@ class EnchantalCoolerBatchDelegateTest extends BootstrapTest {
             fixture.inventory.setStackInSlot(0, new ItemStack(Items.APPLE, 9));
             fixture.inventory.setStackInSlot(5, new ItemStack(Items.DIAMOND));
             for (int observation = 0; observation < 20; observation++) {
-                assertEquals(IBatchDelegate.CraftPhase.WORKING, fixture.observe().phase());
+                assertEquals(MachineOperation.CraftPhase.WORKING, fixture.observe().phase());
             }
             assertEquals(1, fixture.inventory.getStackInSlot(5).getCount());
-            assertEquals(1, fixture.delegate.collectAllResults(fixture.player)
+            assertEquals(1, fixture.delegate.outputSource().collectFinal(fixture.player).stacks()
                     .stream().mapToInt(ItemStack::getCount).sum());
         }
     }
@@ -101,9 +100,9 @@ class EnchantalCoolerBatchDelegateTest extends BootstrapTest {
             ItemStack output = new ItemStack(Items.DIAMOND, 2);
             output.getOrCreateTag().putInt("production", 7);
             fixture.inventory.setStackInSlot(5, output);
-            assertEquals(IBatchDelegate.CraftPhase.DONE, fixture.observe().phase());
+            assertEquals(MachineOperation.CraftPhase.DONE, fixture.observe().phase());
             List<OutputAccounting.CollectedOutput> outputs =
-                    fixture.delegate.collectStructuredResults(fixture.player);
+                    fixture.delegate.outputSource().collectFinal(fixture.player).ports();
             assertEquals(1, outputs.size());
             assertEquals(2, outputs.get(0).stack().getCount());
             assertEquals(7, outputs.get(0).stack().getTag().getInt("production"));
@@ -119,9 +118,9 @@ class EnchantalCoolerBatchDelegateTest extends BootstrapTest {
             fixture.observe();
             fixture.machine.cookingTotalTime = 0;
             fixture.inventory.setStackInSlot(5, new ItemStack(Items.DIAMOND));
-            assertEquals(IBatchDelegate.CraftPhase.DONE, fixture.observe().phase());
+            assertEquals(MachineOperation.CraftPhase.DONE, fixture.observe().phase());
             List<OutputAccounting.CollectedOutput> outputs =
-                    fixture.delegate.collectStructuredResults(fixture.player);
+                    fixture.delegate.outputSource().collectFinal(fixture.player).ports();
             assertEquals(1, outputs.get(0).stack().getCount());
             OutputContract contract = new OutputContract(List.of(new OutputContract.Port(
                     "immortalers_delight:cooler:output", 5, new ItemStack(Items.DIAMOND),
@@ -168,7 +167,7 @@ class EnchantalCoolerBatchDelegateTest extends BootstrapTest {
                     .when(delegate).getExpectedProduction();
         }
 
-        private IBatchDelegate.CraftObservation observe() {
+        private MachineOperation.CraftObservation observe() {
             return delegate.observeMachineCraft(level, machine);
         }
 

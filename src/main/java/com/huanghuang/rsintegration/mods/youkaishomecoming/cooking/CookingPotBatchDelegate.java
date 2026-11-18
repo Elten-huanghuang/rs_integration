@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mods.youkaishomecoming.cooking;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -17,7 +17,6 @@ import com.huanghuang.rsintegration.mods.youkaishomecoming.YoukaiRegistryIds;
 import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
 import com.huanghuang.rsintegration.util.Reflect;
 import dev.xkmc.youkaishomecoming.content.block.food.PotFoodBlock;
-import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
@@ -44,14 +43,12 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.AABB;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 /** Base batch delegate for Youkais Homecoming cooking pots. Subclasses: SmallPot, ShortPot, LargePot. */
 public class CookingPotBatchDelegate extends AbstractBatchDelegate {
@@ -608,8 +605,11 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         return total > 0 && progress >= total;
     }
 
-    @Override
-    public ItemStack collectResult(ServerPlayer player) {
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.single(this::takeResult, outputContract());
+    }
+
+    private ItemStack takeResult(ServerPlayer player) {
         craftDone = true;
 
         ItemStack expected = getRecipeResult(recipe);
@@ -773,8 +773,8 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@NotNull ServerPlayer player) {
-        // 不做清空：原生的 finishRecipe() 已逐份消耗食材，collectResult() 也已取走成品，
+    public void cleanup(@NotNull ServerPlayer player) {
+        // 不做清空：原生的 finishRecipe() 已逐份消耗食材，takeResult() 也已取走成品，
         // 锅里的盛装容器与恢复出来的空锅要留在世界里给玩家复用。
         //
         // 批量路径下若还有"铺了但没被吃掉"的余料，也不要在这里退：
@@ -1088,7 +1088,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             returnOrStrand(detached, stranded);
         }
         detachedRecoveredInputs.clear();
-        // 正常完成路径不会调用 clearMachineState/onBatchFailed，这里清空即可：
+        // 正常完成路径不会调用 clearMachineState/recover，这里清空即可：
         // 残留快照若跨操作留存，下一次失败会重复上报上一次的材料。
         placedInputs.clear();
         plannedOperations = 1;

@@ -1,13 +1,12 @@
 package com.huanghuang.rsintegration.mods.botania;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.mods.common.MachineWaterSupply;
-import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -41,6 +40,10 @@ public final class PetalApothecaryBatchDelegate extends AbstractBatchDelegate {
  @Override public boolean startPreparedOperation(@Nonnull ServerPlayer p,@Nonnull List<ItemStack>m,@Nonnull ExtractionLedger l){useSharedLedger(l);return start(p,m);}
  private boolean start(ServerPlayer player,List<ItemStack>m){entitiesBefore=BotaniaDelegateSupport.snapshot(level,new AABB(pos).inflate(1.5));if(!(level.getBlockEntity(pos) instanceof PetalApothecaryBlockEntity be))return false;if(be.getFluid()==PetalApothecary.State.LAVA)return false;if(be.getFluid()==PetalApothecary.State.EMPTY&&!MachineWaterSupply.fillProperty(materialAccess(), "botania_petal_apothecary",1000,storageEndpoint(),player,()->{be.setFluid(PetalApothecary.State.WATER,false);be.setChanged();return be.getFluid()==PetalApothecary.State.WATER;}))return false;for(ItemStack s:m){ItemEntity e=new ItemEntity(level,pos.getX()+.5,pos.getY()+1.1,pos.getZ()+.5,s.copy());e.setDeltaMovement(0,0,0);BotaniaDelegateSupport.protectOperationInput(e);level.addFreshEntity(e);be.collideEntityItem(e);}started=true;startTick=level.getGameTime();markCraftStarted();return true;}
  @Override protected boolean isMachineCraftFinished(@Nonnull ServerLevel l,@Nonnull BlockEntity be){return started&&l.getEntitiesOfClass(ItemEntity.class,new AABB(pos).inflate(1.5),e->BotaniaDelegateSupport.isNew(e,entitiesBefore)&&e.isAlive()&&!e.getItem().isEmpty()&&ItemStack.isSameItem(e.getItem(),expected)&&l.getGameTime()>=startTick).stream().findAny().isPresent();}
- @Override public ItemStack collectResult(@Nonnull ServerPlayer p){for(ItemEntity e:level.getEntitiesOfClass(ItemEntity.class,new AABB(pos).inflate(1.5),x->BotaniaDelegateSupport.isNew(x,entitiesBefore)&&x.isAlive()&&ItemStack.isSameItem(x.getItem(),expected))){ItemStack s=e.getItem().copy();e.discard();return s;}return ItemStack.EMPTY;}
- @Override public ItemStack getExpectedOutput(){return expected.isEmpty()?null:expected;}@Override public AABB getOutputCaptureRegion(){return new AABB(pos).inflate(1.5);}@Override public BlockPos getMachinePos(){return pos;}@Override public void onBatchFinished(@Nonnull ServerPlayer p){resetState();}
+ @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.single(this::takeResult, outputContract());
+    }
+
+    private ItemStack takeResult(@Nonnull ServerPlayer p) {for(ItemEntity e:level.getEntitiesOfClass(ItemEntity.class,new AABB(pos).inflate(1.5),x->BotaniaDelegateSupport.isNew(x,entitiesBefore)&&x.isAlive()&&ItemStack.isSameItem(x.getItem(),expected))){ItemStack s=e.getItem().copy();e.discard();return s;}return ItemStack.EMPTY;}
+ @Override public ItemStack getExpectedOutput(){return expected.isEmpty()?null:expected;}@Override public AABB getOutputCaptureRegion(){return new AABB(pos).inflate(1.5);}@Override public BlockPos getMachinePos(){return pos;}@Override public void cleanup(@Nonnull ServerPlayer p){resetState();}
 }

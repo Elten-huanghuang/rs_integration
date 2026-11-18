@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mods.botania;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -27,7 +27,6 @@ import vazkii.botania.xplat.XplatAbstractions;
 import java.util.HashSet;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -277,14 +276,11 @@ public final class ElvenTradeBatchDelegate extends AbstractBatchDelegate {
                         ItemStack.isSameItemSameTags(wanted, entity.getItem())));
     }
 
-    @Override
-    public ItemStack collectResult(@Nonnull ServerPlayer player) {
-        List<ItemStack> all = collectAllResults(player);
-        return all.isEmpty() ? ItemStack.EMPTY : all.get(0);
+    @Override public OperationOutputSource outputSource() {
+        return player -> OperationOutputSource.Handoff.physical(takeResults(player), outputContract());
     }
 
-    @Override
-    public List<ItemStack> collectAllResults(@Nonnull ServerPlayer player) {
+    private List<ItemStack> takeResults(@Nonnull ServerPlayer player) {
         List<ItemStack> results = new ArrayList<>();
         for (ItemEntity entity : outputs()) {
             results.add(entity.getItem().copy());
@@ -293,10 +289,8 @@ public final class ElvenTradeBatchDelegate extends AbstractBatchDelegate {
         return results;
     }
 
-    @Override
-    public boolean collectsPhysicalSecondaryOutputs() {
-        return true;
-    }
+
+
 
     @Override
     public ExpectedProduction getExpectedProduction() {
@@ -394,7 +388,7 @@ public final class ElvenTradeBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@Nullable ServerPlayer player) {
+    public void cleanup(@Nullable ServerPlayer player) {
         if (!markTerminalCleanup()) return;
         resetLocalState();
         resetState();

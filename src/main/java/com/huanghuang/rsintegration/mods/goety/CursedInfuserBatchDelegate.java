@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mods.goety;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
@@ -11,7 +11,6 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
-import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraft.core.BlockPos;
@@ -25,7 +24,6 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.AABB;
 import java.util.Arrays;
 import java.util.ArrayList;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.HashSet;
@@ -216,11 +214,8 @@ public final class CursedInfuserBatchDelegate extends AbstractBatchDelegate {
                 OutputContract.Kind.PRIMARY, OutputContract.Source.WORLD)));
     }
 
-    @Override
-    public List<OutputAccounting.CollectedOutput> collectStructuredResults(
-            @Nonnull ServerPlayer player) {
-        // Cursed infusers publish entities; the orchestration capture owns this port.
-        return List.of();
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.single(this::takeResult, outputContract());
     }
 
     @Override
@@ -356,8 +351,7 @@ public final class CursedInfuserBatchDelegate extends AbstractBatchDelegate {
         return GoetyInfuserMachineSupport.kindOf(level.getBlockEntity(pos)) == machineKind;
     }
 
-    @Override
-    public ItemStack collectResult(ServerPlayer player) {
+    private ItemStack takeResult(ServerPlayer player) {
         return ItemStack.EMPTY;
     }
 
@@ -398,7 +392,7 @@ public final class CursedInfuserBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@Nullable ServerPlayer player) {
+    public void cleanup(@Nullable ServerPlayer player) {
         if (!markTerminalCleanup()) return;
         clearLocalState();
     }

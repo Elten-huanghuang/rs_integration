@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.huanghuang.rsintegration.crafting.batch.MachineOperation;
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.ModType;
@@ -33,11 +35,9 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
-
 import java.util.List;
 import java.util.ArrayList;
 import java.util.UUID;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -71,10 +71,11 @@ class CraftProgressRuntimeTest extends BootstrapTest {
     @Test
     void completedOptionalWorldOutputDoesNotWaitForeverForAnEntityThatMayNeverExist() {
         IBatchDelegate delegate = mock(IBatchDelegate.class);
-        when(delegate.observeCraft(level)).thenReturn(
-                new IBatchDelegate.CraftObservation(IBatchDelegate.CraftPhase.DONE));
+        when(delegate.machineOperation()).thenReturn(mock(MachineOperation.class));
+        when(delegate.machineOperation().observe(level)).thenReturn(
+                new MachineOperation.CraftObservation(MachineOperation.CraftPhase.DONE));
         when(delegate.validateExecutionContext(player)).thenReturn(true);
-        when(delegate.collectAllResults(player)).thenReturn(List.of());
+        when(delegate.outputSource()).thenReturn(p -> OperationOutputSource.Handoff.physical(List.of(), null));
         when(delegate.outputContract()).thenReturn(new OutputContract(List.of(
                 new OutputContract.Port("random", null, new ItemStack(Items.DIAMOND), 0,
                         OutputContract.Kind.PRIMARY, OutputContract.Source.WORLD, 0, 1,
@@ -95,10 +96,9 @@ class CraftProgressRuntimeTest extends BootstrapTest {
         ItemStack catalyst = new ItemStack(Items.STICK);
         catalyst.getOrCreateTag().putString("owner", "original");
         List<String> calls = new ArrayList<>();
-        StubDelegate delegate = new StubDelegate(IBatchDelegate.CraftPhase.DONE, "") {
-            @Override
-            public ItemStack collectResult(ServerPlayer player) {
-                return new ItemStack(Items.DIAMOND, 4);
+        StubDelegate delegate = new StubDelegate(MachineOperation.CraftPhase.DONE, "") {
+            @Override public OperationOutputSource outputSource() {
+                return OperationOutputSource.single(player -> new ItemStack(Items.DIAMOND, 4), outputContract());
             }
 
             @Override
@@ -108,7 +108,7 @@ class CraftProgressRuntimeTest extends BootstrapTest {
             }
 
             @Override
-            public void onBatchFinished(ServerPlayer player) {
+            public void cleanup(ServerPlayer player) {
                 calls.add("finish");
             }
 
@@ -141,10 +141,9 @@ class CraftProgressRuntimeTest extends BootstrapTest {
     @Test
     void reusableCollectionFailureStillCleansTheMachineAndPreservesItsActualOutput() {
         NodeId node = new NodeId(18);
-        StubDelegate delegate = new StubDelegate(IBatchDelegate.CraftPhase.DONE, "") {
-            @Override
-            public ItemStack collectResult(ServerPlayer player) {
-                return new ItemStack(Items.DIAMOND);
+        StubDelegate delegate = new StubDelegate(MachineOperation.CraftPhase.DONE, "") {
+            @Override public OperationOutputSource outputSource() {
+                return OperationOutputSource.single(player -> new ItemStack(Items.DIAMOND), outputContract());
             }
 
             @Override
@@ -163,8 +162,9 @@ class CraftProgressRuntimeTest extends BootstrapTest {
         runtime.cleanupFailure();
         runtime.cleanupFailure();
 
-        assertEquals(1, delegate.failureCleanups);
-        assertEquals(0, delegate.finishCleanups);
+        // 已取得成品，催化剂访问失败不能转回输入退款路径。
+        assertEquals(0, delegate.failureCleanups);
+        assertEquals(1, delegate.finishCleanups);
         assertEquals(1, runtime.drainIncrementalOutputs().get(0).stack().getCount());
         assertTrue(runtime.drainIncrementalOutputs().isEmpty());
     }
@@ -172,10 +172,9 @@ class CraftProgressRuntimeTest extends BootstrapTest {
     @Test
     void failureAfterPartialPublicationRecoversOnlyUnpublishedPhysicalFragmentsOnce() {
         NodeId node = new NodeId(19);
-        StubDelegate delegate = new StubDelegate(IBatchDelegate.CraftPhase.DONE, "") {
-            @Override
-            public List<ItemStack> collectAllResults(ServerPlayer player) {
-                return List.of(new ItemStack(Items.DIAMOND, 4), new ItemStack(Items.DIAMOND, 2));
+        StubDelegate delegate = new StubDelegate(MachineOperation.CraftPhase.DONE, "") {
+            @Override public OperationOutputSource outputSource() {
+                return player -> OperationOutputSource.Handoff.physical(List.of(new ItemStack(Items.DIAMOND, 4), new ItemStack(Items.DIAMOND, 2)), outputContract());
             }
         };
         List<ItemStack> recovered = new ArrayList<>();
@@ -203,7 +202,7 @@ class CraftProgressRuntimeTest extends BootstrapTest {
 
     @Test
     void graphStillRejectsAnUnrecoveredCatalyst() {
-        StubDelegate delegate = new StubDelegate(IBatchDelegate.CraftPhase.DONE, "");
+        StubDelegate delegate = new StubDelegate(MachineOperation.CraftPhase.DONE, "");
         NodeId node = new NodeId(21);
         CraftNodeRuntime runtime = new CraftNodeRuntime(
                 node, "test:missing-catalyst", delegate, null, null);
@@ -222,7 +221,7 @@ class CraftProgressRuntimeTest extends BootstrapTest {
 
     @Test
     void ordinaryRuntimeReportsOneRunningOperationThenCompletion() {
-        StubDelegate delegate = new StubDelegate(IBatchDelegate.CraftPhase.DONE, "");
+        StubDelegate delegate = new StubDelegate(MachineOperation.CraftPhase.DONE, "");
         CraftNodeRuntime runtime = new CraftNodeRuntime(
                 new NodeId(4), "test:ordinary", delegate, null, null);
         runtime.setChainContext(new ArrayList<>(), player);
@@ -239,7 +238,7 @@ class CraftProgressRuntimeTest extends BootstrapTest {
 
     @Test
     void observationSlicesCountElapsedWorldTicksInsteadOfOnlyPollingCalls() {
-        StubDelegate delegate = new StubDelegate(IBatchDelegate.CraftPhase.WORKING, "");
+        StubDelegate delegate = new StubDelegate(MachineOperation.CraftPhase.WORKING, "");
         CraftNodeRuntime runtime = new CraftNodeRuntime(new NodeId(4), "test:waiting", delegate, null, null);
         runtime.setChainContext(new ArrayList<>(), player);
         when(level.getGameTime()).thenReturn(100L);
@@ -257,7 +256,7 @@ class CraftProgressRuntimeTest extends BootstrapTest {
 
     @Test
     void failedAndStoppedRuntimeReportsDetailAndDrainingWithoutCompleting() {
-        StubDelegate delegate = new StubDelegate(IBatchDelegate.CraftPhase.FAILED, "machine jammed");
+        StubDelegate delegate = new StubDelegate(MachineOperation.CraftPhase.FAILED, "machine jammed");
         CraftNodeRuntime runtime = new CraftNodeRuntime(
                 new NodeId(5), "test:failing", delegate, null, null);
         runtime.setChainContext(new ArrayList<>(), player);
@@ -275,7 +274,7 @@ class CraftProgressRuntimeTest extends BootstrapTest {
 
     @Test
     void bufferedRuntimeReportsLogicalOperationsInsteadOfPhysicalWorkerCount() {
-        StubDelegate delegate = new StubDelegate(IBatchDelegate.CraftPhase.DONE, "");
+        StubDelegate delegate = new StubDelegate(MachineOperation.CraftPhase.DONE, "");
         CraftNodeRuntime runtime = new CraftNodeRuntime(
                 new NodeId(14), "test:buffered", delegate, null, null);
         runtime.setLogicalOperations(6);
@@ -290,7 +289,7 @@ class CraftProgressRuntimeTest extends BootstrapTest {
 
     @Test
     void missingWorldContextFailsBeforeCallingDelegate() {
-        StubDelegate delegate = new StubDelegate(IBatchDelegate.CraftPhase.DONE, "");
+        StubDelegate delegate = new StubDelegate(MachineOperation.CraftPhase.DONE, "");
         CraftNodeRuntime runtime = new CraftNodeRuntime(
                 new NodeId(10), "test:missing-world", delegate, null, null);
 
@@ -341,7 +340,7 @@ class CraftProgressRuntimeTest extends BootstrapTest {
 
     @Test
     void completionFailureKeepsOutputShortageDetail() {
-        StubDelegate delegate = new StubDelegate(IBatchDelegate.CraftPhase.DONE, "");
+        StubDelegate delegate = new StubDelegate(MachineOperation.CraftPhase.DONE, "");
         NodeId node = new NodeId(6);
         CraftNodeRuntime runtime = new CraftNodeRuntime(node, "test:shortage", delegate, null, null);
         runtime.setChainContext(new ArrayList<>(), player);
@@ -360,7 +359,7 @@ class CraftProgressRuntimeTest extends BootstrapTest {
 
     @Test
     void worldStateMutationDoesNotRequireDisplayOnlyGraphOutput() {
-        StubDelegate delegate = new StubDelegate(IBatchDelegate.CraftPhase.DONE, "") {
+        StubDelegate delegate = new StubDelegate(MachineOperation.CraftPhase.DONE, "") {
             @Override
             public boolean publishesDeclaredGraphOutputs() {
                 return false;
@@ -381,7 +380,7 @@ class CraftProgressRuntimeTest extends BootstrapTest {
     @Test
     void worldCaptureRuntimeDoesNotTrustDoneBeforePhysicalOutputArrives() {
         NodeId node = new NodeId(7);
-        StubDelegate delegate = new StubDelegate(IBatchDelegate.CraftPhase.DONE, "");
+        StubDelegate delegate = new StubDelegate(MachineOperation.CraftPhase.DONE, "");
         OperationExecutionKernel kernel = new OperationExecutionKernel(
                 new OperationResourceCoordinator(new MachineLeaseRegistry(),
                         new CaptureLeaseRegistry(), new OperationBudget(1, 2)));
@@ -407,7 +406,7 @@ class CraftProgressRuntimeTest extends BootstrapTest {
     @Test
     void slotCollectingRuntimeCanFinishWhileDefensiveWorldCaptureIsEmpty() {
         NodeId node = new NodeId(8);
-        StubDelegate delegate = new StubDelegate(IBatchDelegate.CraftPhase.DONE, "") {
+        StubDelegate delegate = new StubDelegate(MachineOperation.CraftPhase.DONE, "") {
             @Override
             public boolean canCollectResultWithoutWorldCapture() {
                 return true;
@@ -438,7 +437,7 @@ class CraftProgressRuntimeTest extends BootstrapTest {
     @Test
     void capturedBatchWithWrongNbtStillReachesOutputValidation() {
         NodeId node = new NodeId(15);
-        StubDelegate delegate = bufferedDelegate(2, IBatchDelegate.CraftPhase.WORKING);
+        StubDelegate delegate = bufferedDelegate(2, MachineOperation.CraftPhase.WORKING);
         List<ItemStack> captured = new ArrayList<>();
         CaptureSession capture = capture(captured);
         CraftNodeRuntime runtime = new CraftNodeRuntime(
@@ -470,7 +469,7 @@ class CraftProgressRuntimeTest extends BootstrapTest {
             "3, WORKING, false"
     })
     void bufferedWorldCaptureWaitsForEveryOutputBeforeCleaningTheMachine(
-            int operations, IBatchDelegate.CraftPhase phase, boolean declaredOutputs) {
+            int operations, MachineOperation.CraftPhase phase, boolean declaredOutputs) {
         NodeId node = new NodeId(16);
         StubDelegate delegate = bufferedDelegate(operations, phase);
         List<ItemStack> captured = new ArrayList<>();
@@ -512,7 +511,7 @@ class CraftProgressRuntimeTest extends BootstrapTest {
         }
     }
 
-    private static StubDelegate bufferedDelegate(int operations, IBatchDelegate.CraftPhase phase) {
+    private static StubDelegate bufferedDelegate(int operations, MachineOperation.CraftPhase phase) {
         return new StubDelegate(phase, "") {
             @Override
             public ExpectedProduction getExpectedProduction() {
@@ -571,7 +570,9 @@ class CraftProgressRuntimeTest extends BootstrapTest {
                 List.of(), List.of(), false, executions);
     }
 
-    private static class StubDelegate implements IBatchDelegate {
+    private static class StubDelegate implements IBatchDelegate, MachineOperation {
+        @Override public MachineOperation machineOperation() { return this; }
+
         private final CraftPhase phase;
         private final String detail;
         private int failureCleanups;
@@ -591,25 +592,20 @@ class CraftProgressRuntimeTest extends BootstrapTest {
         }
 
         @Override
-        public boolean startOperation(OperationStartContext context) {
+        public boolean start(OperationStartContext context) {
             return true;
         }
 
-        @Override
-        public boolean isCraftComplete(ServerLevel level) {
-            return phase == CraftPhase.DONE;
-        }
 
         @Override
-        public CraftObservation observeCraft(ServerLevel level) {
+        public CraftObservation observe(ServerLevel level) {
             observedLevel = level;
             observationCalls++;
             return new CraftObservation(phase, detail);
         }
 
-        @Override
-        public ItemStack collectResult(ServerPlayer player) {
-            return ItemStack.EMPTY;
+        @Override public OperationOutputSource outputSource() {
+            return OperationOutputSource.single(player -> ItemStack.EMPTY, outputContract());
         }
 
         @Override
@@ -618,12 +614,12 @@ class CraftProgressRuntimeTest extends BootstrapTest {
         }
 
         @Override
-        public void onBatchFailed(ServerPlayer player, String reason) {
+        public void recover(ServerPlayer player, String reason) {
             failureCleanups++;
         }
 
         @Override
-        public void onBatchFinished(ServerPlayer player) {
+        public void cleanup(ServerPlayer player) {
             finishCleanups++;
         }
 

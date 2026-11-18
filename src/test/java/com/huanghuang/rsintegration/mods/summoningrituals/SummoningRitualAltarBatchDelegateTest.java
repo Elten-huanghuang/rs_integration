@@ -1,10 +1,11 @@
 package com.huanghuang.rsintegration.mods.summoningrituals;
 
+import com.huanghuang.rsintegration.crafting.batch.MachineOperation;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate.CraftPhase;
+import com.huanghuang.rsintegration.crafting.batch.MachineOperation.CraftPhase;
 import com.huanghuang.rsintegration.storage.StorageOperationMode;
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
@@ -28,11 +29,9 @@ import net.minecraftforge.items.ItemStackHandler;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
-
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -61,10 +60,10 @@ class SummoningRitualAltarBatchDelegateTest extends BootstrapTest {
         Fixture fixture = new Fixture();
         assertTrue(fixture.start());
 
-        assertEquals(CraftPhase.DONE, fixture.delegate.observeCraft(fixture.level).phase());
-        assertTrue(fixture.delegate.isCraftComplete(fixture.level));
-        assertTrue(fixture.delegate.collectResult(fixture.player).isEmpty());
-        fixture.delegate.onBatchFinished(fixture.player);
+        assertEquals(CraftPhase.DONE, fixture.delegate.machineOperation().observe(fixture.level).phase());
+        assertTrue((fixture.delegate.machineOperation().observe(fixture.level).phase() == MachineOperation.CraftPhase.DONE));
+        assertTrue(fixture.delegate.outputSource().collectFinal(fixture.player).stacks().isEmpty());
+        fixture.delegate.machineOperation().cleanup(fixture.player);
 
         assertEquals(Items.DIAMOND, fixture.inventory.getStackInSlot(0).getItem());
         assertEquals(Items.STICK, fixture.inventory.getStackInSlot(2).getItem());
@@ -81,7 +80,7 @@ class SummoningRitualAltarBatchDelegateTest extends BootstrapTest {
 
         assertTrue(fixture.start(List.of(
                 new ItemStack(Items.STICK), new ItemStack(Items.DIAMOND, 6))));
-        fixture.delegate.onBatchFinished(fixture.player);
+        fixture.delegate.machineOperation().cleanup(fixture.player);
 
         assertEquals(6, SummoningRitualInventoryOps.stackInSlot(fixture.inventory, 0).getCount());
         assertEquals(1, fixture.inventory.getStackInSlot(2).getCount());
@@ -96,7 +95,7 @@ class SummoningRitualAltarBatchDelegateTest extends BootstrapTest {
         fixture.delegate.prepareGraphBatch(6);
 
         assertTrue(fixture.start(List.of(new ItemStack(Items.DIAMOND, 4))));
-        fixture.delegate.onBatchFinished(fixture.player);
+        fixture.delegate.machineOperation().cleanup(fixture.player);
 
         assertEquals(6, SummoningRitualInventoryOps.stackInSlot(inventory, 0).getCount());
         assertEquals(1, inventory.getStackInSlot(2).getCount());
@@ -112,7 +111,7 @@ class SummoningRitualAltarBatchDelegateTest extends BootstrapTest {
         fixture.delegate.prepareGraphBatch(6);
         assertTrue(fixture.start(List.of(new ItemStack(Items.DIAMOND, 4))));
 
-        fixture.delegate.onBatchFailed(fixture.player, "cancelled before completion");
+        fixture.delegate.machineOperation().recover(fixture.player, "cancelled before completion");
 
         assertEquals(2, SummoningRitualInventoryOps.stackInSlot(inventory, 0).getCount());
         assertEquals(1, inventory.getStackInSlot(2).getCount());
@@ -125,9 +124,9 @@ class SummoningRitualAltarBatchDelegateTest extends BootstrapTest {
         assertTrue(fixture.start());
         fixture.hideItemCapability();
 
-        assertEquals(CraftPhase.DONE, fixture.delegate.observeCraft(fixture.level).phase());
-        assertTrue(fixture.delegate.isCraftComplete(fixture.level));
-        fixture.delegate.onBatchFinished(fixture.player);
+        assertEquals(CraftPhase.DONE, fixture.delegate.machineOperation().observe(fixture.level).phase());
+        assertTrue((fixture.delegate.machineOperation().observe(fixture.level).phase() == MachineOperation.CraftPhase.DONE));
+        fixture.delegate.machineOperation().cleanup(fixture.player);
 
         assertEquals(1, fixture.inventory.getStackInSlot(0).getCount());
         assertEquals(1, fixture.inventory.getStackInSlot(2).getCount());
@@ -142,8 +141,8 @@ class SummoningRitualAltarBatchDelegateTest extends BootstrapTest {
         fixture.inventory.setStackInSlot(0, ItemStack.EMPTY);
         fixture.inventory.setStackInSlot(2, ItemStack.EMPTY);
 
-        assertEquals(CraftPhase.DONE, fixture.delegate.observeCraft(fixture.level).phase());
-        assertTrue(fixture.delegate.collectResult(fixture.player).isEmpty());
+        assertEquals(CraftPhase.DONE, fixture.delegate.machineOperation().observe(fixture.level).phase());
+        assertTrue(fixture.delegate.outputSource().collectFinal(fixture.player).stacks().isEmpty());
         assertFalse(fixture.delegate.publishesDeclaredGraphOutputs());
         verify(fixture.altar, times(1)).getCapability(ForgeCapabilities.ITEM_HANDLER);
     }
@@ -154,7 +153,7 @@ class SummoningRitualAltarBatchDelegateTest extends BootstrapTest {
         fixture.hideItemCapability();
 
         assertFalse(fixture.start());
-        assertEquals(CraftPhase.FAILED, fixture.delegate.observeCraft(fixture.level).phase());
+        assertEquals(CraftPhase.FAILED, fixture.delegate.machineOperation().observe(fixture.level).phase());
         assertTrue(fixture.inventory.getStackInSlot(0).isEmpty());
         assertTrue(fixture.inventory.getStackInSlot(2).isEmpty());
     }
@@ -165,8 +164,8 @@ class SummoningRitualAltarBatchDelegateTest extends BootstrapTest {
 
         assertFalse(fixture.delegate.startPreparedOperation(fixture.player,
                 List.of(new ItemStack(Items.STICK)), ExtractionLedger.external()));
-        assertEquals(CraftPhase.FAILED, fixture.delegate.observeCraft(fixture.level).phase());
-        assertFalse(fixture.delegate.isCraftComplete(fixture.level));
+        assertEquals(CraftPhase.FAILED, fixture.delegate.machineOperation().observe(fixture.level).phase());
+        assertFalse((fixture.delegate.machineOperation().observe(fixture.level).phase() == MachineOperation.CraftPhase.DONE));
     }
 
     @Test
@@ -178,9 +177,9 @@ class SummoningRitualAltarBatchDelegateTest extends BootstrapTest {
                 .thenReturn(fixture.itemCapability);
         when(fixture.level.getBlockEntity(BlockPos.ZERO)).thenReturn(replacement);
 
-        assertEquals(CraftPhase.FAILED, fixture.delegate.observeCraft(fixture.level).phase());
-        assertFalse(fixture.delegate.isCraftComplete(fixture.level));
-        fixture.delegate.onBatchFailed(fixture.player, "altar replaced");
+        assertEquals(CraftPhase.FAILED, fixture.delegate.machineOperation().observe(fixture.level).phase());
+        assertFalse((fixture.delegate.machineOperation().observe(fixture.level).phase() == MachineOperation.CraftPhase.DONE));
+        fixture.delegate.machineOperation().recover(fixture.player, "altar replaced");
 
         assertEquals(1, fixture.inventory.getStackInSlot(0).getCount());
         assertEquals(1, fixture.inventory.getStackInSlot(2).getCount());
@@ -191,13 +190,13 @@ class SummoningRitualAltarBatchDelegateTest extends BootstrapTest {
         Fixture fixture = new Fixture();
         assertTrue(fixture.start());
 
-        fixture.delegate.onBatchFailed(fixture.player, "cancelled before completion");
+        fixture.delegate.machineOperation().recover(fixture.player, "cancelled before completion");
 
         assertTrue(fixture.inventory.getStackInSlot(0).isEmpty());
         assertTrue(fixture.inventory.getStackInSlot(2).isEmpty());
         assertEquals(2, fixture.delegate.failureRecoveredInputs().size());
         assertTrue(fixture.delegate.physicalFailureCleanupCompleted());
-        assertFalse(fixture.delegate.isCraftComplete(fixture.level));
+        assertFalse((fixture.delegate.machineOperation().observe(fixture.level).phase() == MachineOperation.CraftPhase.DONE));
     }
 
     @Test
@@ -205,12 +204,12 @@ class SummoningRitualAltarBatchDelegateTest extends BootstrapTest {
         Fixture missing = new Fixture();
         assertTrue(missing.start());
         when(missing.level.getBlockEntity(BlockPos.ZERO)).thenReturn(null);
-        assertEquals(CraftPhase.FAILED, missing.delegate.observeCraft(missing.level).phase());
+        assertEquals(CraftPhase.FAILED, missing.delegate.machineOperation().observe(missing.level).phase());
 
         Fixture removed = new Fixture();
         assertTrue(removed.start());
         when(removed.altar.isRemoved()).thenReturn(true);
-        assertEquals(CraftPhase.FAILED, removed.delegate.observeCraft(removed.level).phase());
+        assertEquals(CraftPhase.FAILED, removed.delegate.machineOperation().observe(removed.level).phase());
     }
 
     @Test
@@ -219,8 +218,8 @@ class SummoningRitualAltarBatchDelegateTest extends BootstrapTest {
         assertTrue(fixture.start());
         when(fixture.level.hasChunkAt(BlockPos.ZERO)).thenReturn(false);
 
-        assertEquals(CraftPhase.FAILED, fixture.delegate.observeCraft(fixture.level).phase());
-        assertFalse(fixture.delegate.isCraftComplete(fixture.level));
+        assertEquals(CraftPhase.FAILED, fixture.delegate.machineOperation().observe(fixture.level).phase());
+        assertFalse((fixture.delegate.machineOperation().observe(fixture.level).phase() == MachineOperation.CraftPhase.DONE));
     }
 
     @Test
@@ -268,7 +267,7 @@ class SummoningRitualAltarBatchDelegateTest extends BootstrapTest {
                 List.of(new IngredientSpec(Ingredient.of(Items.DIAMOND), 1)));
 
         assertTrue(next.start(List.of(new ItemStack(Items.BONE))));
-        assertEquals(CraftPhase.DONE, next.delegate.observeCraft(next.level).phase());
+        assertEquals(CraftPhase.DONE, next.delegate.machineOperation().observe(next.level).phase());
 
         assertEquals(1, countItem(next.recycled, Items.STICK));
         assertTrue(inventory.getStackInSlot(0).is(Items.DIAMOND));
@@ -329,7 +328,7 @@ class SummoningRitualAltarBatchDelegateTest extends BootstrapTest {
         InteractiveInventory inventory = new InteractiveInventory();
         Fixture first = new Fixture(inventory);
         assertTrue(first.start());
-        first.delegate.onBatchFinished(first.player);
+        first.delegate.machineOperation().cleanup(first.player);
         assertEquals(1, inventory.getStackInSlot(0).getCount());
         assertTrue(inventory.getStackInSlot(2).is(Items.STICK));
         return inventory;

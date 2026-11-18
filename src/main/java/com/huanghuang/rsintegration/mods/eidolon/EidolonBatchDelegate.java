@@ -1,24 +1,18 @@
 package com.huanghuang.rsintegration.mods.eidolon;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.batch.InstantBatchDelegate;
 import java.util.Arrays;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.phys.AABB;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.util.ChunkUtils;
-
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.reflection.probes.EidolonReflection;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import net.minecraft.core.BlockPos;
@@ -34,11 +28,9 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
-
 import net.minecraftforge.fluids.capability.IFluidHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
 import org.jetbrains.annotations.NotNull;
-
 import javax.annotation.Nullable;
 import java.lang.reflect.Constructor;
 import java.util.ArrayList;
@@ -79,7 +71,7 @@ public final class EidolonBatchDelegate extends InstantBatchDelegate {
     private boolean isWorktable;         // true = worktable mode, no BE interaction
     private boolean isRitual;            // true = brazier ritual mode
     private Object brazier;              // BrazierTileEntity (null except ritual mode)
-    private ItemStack pendingResult;      // Stored result for collectResult()
+    private ItemStack pendingResult;      // Stored result for takeResult()
     private boolean craftCompleted;       // Flag set after instant craft
     private final List<ItemStack> pendingRemainders = new ArrayList<>();
     private final List<RitualInputSlot> installedRitualInputs = new ArrayList<>();
@@ -1110,18 +1102,11 @@ public final class EidolonBatchDelegate extends InstantBatchDelegate {
         return craftCompleted;
     }
 
-    @Override
-    public ItemStack collectResult(ServerPlayer player) {
-        if (isRitual) return collectRitualResult(player);
-        ItemStack result = pendingResult.copy();
-        pendingResult = ItemStack.EMPTY;
-        craftCompleted = false;
-        returnPendingRemainders(player);
-        return result;
+    @Override public OperationOutputSource outputSource() {
+        return player -> OperationOutputSource.Handoff.physical(takeResults(player), outputContract());
     }
 
-    @Override
-    public List<ItemStack> collectAllResults(ServerPlayer player) {
+    private List<ItemStack> takeResults(ServerPlayer player) {
         if (isRitual) {
             ItemStack result = collectRitualResult(player);
             return result.isEmpty() ? List.of() : List.of(result);
@@ -1164,13 +1149,10 @@ public final class EidolonBatchDelegate extends InstantBatchDelegate {
                 }
             }
         }
-        // Priority 2: Fall back to recipe result
-        ItemStack result = pendingResult.copy();
+        // 配方栈只标识待捕获的实体；实体已被捕获或取走时没有第二份实物。
         pendingResult = ItemStack.EMPTY;
         craftCompleted = false;
-        RSIntegrationMod.LOGGER.debug("[RSI-Batch-Eidolon] Collected ritual result from recipe: {}",
-                result.isEmpty() ? "EMPTY" : result.getHoverName().getString());
-        return result;
+        return ItemStack.EMPTY;
     }
 
     @Override
@@ -1203,7 +1185,7 @@ public final class EidolonBatchDelegate extends InstantBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@NotNull ServerPlayer player) {
+    public void cleanup(@NotNull ServerPlayer player) {
         if (isRitual) cleanupBrazier();
         // Eidolon has consumed the ritual requirements by this point. Forget the
         // bookkeeping without touching any provider that a player may have reused.

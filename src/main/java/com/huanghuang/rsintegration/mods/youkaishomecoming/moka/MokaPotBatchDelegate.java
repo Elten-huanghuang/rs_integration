@@ -1,15 +1,13 @@
 package com.huanghuang.rsintegration.mods.youkaishomecoming.moka;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.mods.common.MachineWaterSupply;
-
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import java.util.Arrays;
 import java.lang.reflect.Modifier;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -18,7 +16,6 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
-import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
@@ -26,7 +23,6 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.common.IdleInventoryEvacuator;
 import com.huanghuang.rsintegration.mods.youkaishomecoming.YoukaisHomecomingRecipeHandler;
 import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
-import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
@@ -44,7 +40,6 @@ import net.minecraft.world.level.block.state.properties.BooleanProperty;
 import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
 import org.jetbrains.annotations.NotNull;
-
 import javax.annotation.Nullable;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -414,8 +409,11 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
         return matchesExpectedOutput(output) && output.getCount() >= expectedOutputCount();
     }
 
-    @Override
-    public ItemStack collectResult(ServerPlayer player) {
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.single(this::takeResult, outputContract());
+    }
+
+    private ItemStack takeResult(ServerPlayer player) {
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null) return ItemStack.EMPTY;
 
@@ -429,13 +427,6 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public List<OutputAccounting.CollectedOutput> collectStructuredResults(ServerPlayer player) {
-        ItemStack result = collectResult(player);
-        return result.isEmpty() ? List.of() : List.of(new OutputAccounting.CollectedOutput(
-                "youkaishomecoming:moka:output", OutputContract.Source.SLOT, result));
-    }
-
-    @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         recordFailureRecoveredInputs(clearAndRefund());
         forceChunkLoad(false);
@@ -445,7 +436,7 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@NotNull ServerPlayer player) {
+    public void cleanup(@NotNull ServerPlayer player) {
         forceChunkLoad(false);
         clearAndRefund();
         craftDone = false;

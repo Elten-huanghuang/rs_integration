@@ -3,7 +3,7 @@ package com.huanghuang.rsintegration.mods.embers;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
-import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate.CraftPhase;
+import com.huanghuang.rsintegration.crafting.batch.MachineOperation.CraftPhase;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate.PreparationResult;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate.PreparationState;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
@@ -32,10 +32,8 @@ import net.minecraftforge.fluids.capability.IFluidHandler;
 import net.minecraftforge.fluids.capability.templates.FluidTank;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
-
 import java.util.List;
 import java.util.Optional;
-
 import static com.huanghuang.rsintegration.mods.embers.EmbersBoilingRecipeHandlerTest.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -76,12 +74,12 @@ class EmbersMiniBoilerBatchDelegateTest extends BootstrapTest {
             fixture.process(40);
             assertEquals(160, fixture.input.getFluidAmount());
             assertEquals(CraftPhase.WORKING, fixture.delegate.observeMachineCraft(fixture.level, fixture.machine).phase());
-            assertTrue(fixture.delegate.collectAllResults(fixture.player).isEmpty());
+            assertTrue(fixture.delegate.outputSource().collectFinal(fixture.player).stacks().isEmpty());
             fixture.process(10000);
             assertTrue(fixture.input.isEmpty());
             assertEquals(CraftPhase.DONE, fixture.delegate.observeMachineCraft(fixture.level, fixture.machine).phase());
-            assertEquals(1000, fixture.delegate.collectResult(fixture.player).getCount());
-            assertTrue(fixture.delegate.collectAllResults(fixture.player).isEmpty());
+            assertEquals(1000, fixture.delegate.outputSource().collectFinal(fixture.player).stacks().get(0).getCount());
+            assertTrue(fixture.delegate.outputSource().collectFinal(fixture.player).stacks().isEmpty());
             verify(fixture.machine, never()).boil(anyDouble());
         }
     }
@@ -97,7 +95,7 @@ class EmbersMiniBoilerBatchDelegateTest extends BootstrapTest {
             assertEquals(1000, fixture.input.getFluidAmount());
             fixture.process(10000);
             assertEquals(CraftPhase.DONE, fixture.delegate.observeMachineCraft(fixture.level, fixture.machine).phase());
-            assertEquals(1000, fixture.delegate.collectResult(fixture.player).getCount());
+            assertEquals(1000, fixture.delegate.outputSource().collectFinal(fixture.player).stacks().get(0).getCount());
         }
     }
 
@@ -115,7 +113,7 @@ class EmbersMiniBoilerBatchDelegateTest extends BootstrapTest {
             assertEquals(100, fixture.input.getFluidAmount());
             fixture.process(10000);
             assertEquals(CraftPhase.DONE, fixture.delegate.observeMachineCraft(fixture.level, fixture.machine).phase());
-            assertEquals(500, fixture.delegate.collectResult(fixture.player).getCount());
+            assertEquals(500, fixture.delegate.outputSource().collectFinal(fixture.player).stacks().get(0).getCount());
         }
     }
 
@@ -134,7 +132,7 @@ class EmbersMiniBoilerBatchDelegateTest extends BootstrapTest {
             assertEquals(34, fixture.input.getFluidAmount());
             fixture.process(10000);
             assertEquals(CraftPhase.DONE, fixture.delegate.observeMachineCraft(fixture.level, fixture.machine).phase());
-            assertEquals(170, fixture.delegate.collectResult(fixture.player).getCount());
+            assertEquals(170, fixture.delegate.outputSource().collectFinal(fixture.player).stacks().get(0).getCount());
         }
     }
 
@@ -201,18 +199,18 @@ class EmbersMiniBoilerBatchDelegateTest extends BootstrapTest {
             assertEquals(1, fixture.input.getFluidAmount());
             assertSame(fixture.recipe, fixture.machine.cachedRecipe);
             assertEquals(CraftPhase.WORKING, fixture.delegate.observeMachineCraft(fixture.level, fixture.machine).phase());
-            assertTrue(fixture.delegate.collectAllResults(fixture.player).isEmpty());
+            assertTrue(fixture.delegate.outputSource().collectFinal(fixture.player).stacks().isEmpty());
             verify(fixture.machine, never()).boil(anyDouble());
 
             // 原生余热事件负责触发 process；任务只观察真实的输入消耗和气体产物。
             FluidStack gas = fixture.recipe.process(new FluidHandlerContext(fixture.input), 1000);
             fixture.output.setFluid(gas);
             assertEquals(CraftPhase.DONE, fixture.delegate.observeMachineCraft(fixture.level, fixture.machine).phase());
-            List<ItemStack> collected = fixture.delegate.collectAllResults(fixture.player);
+            List<ItemStack> collected = fixture.delegate.outputSource().collectFinal(fixture.player).stacks();
             assertEquals(1, collected.size());
             assertEquals(5, InkFluidSupport.fluid(collected.get(0)).getAmount());
             assertTrue(fixture.output.isEmpty());
-            assertTrue(fixture.delegate.collectAllResults(fixture.player).isEmpty());
+            assertTrue(fixture.delegate.outputSource().collectFinal(fixture.player).stacks().isEmpty());
         }
     }
 

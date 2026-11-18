@@ -1,22 +1,17 @@
 package com.huanghuang.rsintegration.mods.forbidden;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.util.CuriosAccess;
 import java.util.Map;
 import java.lang.reflect.InvocationTargetException;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
-
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.binding.BindingStorage;
 import com.huanghuang.rsintegration.reflection.probes.FAReflection;
-import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.huanghuang.rsintegration.util.Reflect;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -24,7 +19,6 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
@@ -33,17 +27,13 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraftforge.items.ItemHandlerHelper;
 import org.jetbrains.annotations.NotNull;
-
 import javax.annotation.Nullable;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Optional;
-import java.util.Set;
 
 /** Batch delegate for Forbidden & Arcanus Hephaestus Forge rituals. */
 public final class FaBatchDelegate extends AbstractBatchDelegate {
@@ -758,8 +748,11 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
         return !tierUpgradeRitual;
     }
 
-    @Override
-    public ItemStack collectResult(ServerPlayer player) {
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.single(this::takeResult, outputContract());
+    }
+
+    private ItemStack takeResult(ServerPlayer player) {
         try {
             Object result = FaRitualHelper.invoke(ritual, "result");
             if (result != null && FAReflection.createItemResultClass.isInstance(result)) {
@@ -811,7 +804,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@NotNull ServerPlayer player) {
+    public void cleanup(@NotNull ServerPlayer player) {
         clearFilledPedestals();
         try {
             int mainSlot = FaRitualHelper.getMainSlot();

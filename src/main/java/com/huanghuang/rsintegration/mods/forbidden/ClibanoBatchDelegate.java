@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mods.forbidden;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
@@ -11,7 +11,6 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
-import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.mixin.forbidden.ClibanoMainBlockEntityAccessor;
@@ -39,7 +38,6 @@ import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemStackHandler;
 import org.jetbrains.annotations.NotNull;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -332,9 +330,11 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
         return workingObservation();
     }
 
-    @Nonnull
-    @Override
-    public List<ItemStack> collectAllResults(@Nonnull ServerPlayer player) {
+    @Override public OperationOutputSource outputSource() {
+        return player -> OperationOutputSource.Handoff.physical(takeResults(player), outputContract());
+    }
+
+    private List<ItemStack> takeResults(@Nonnull ServerPlayer player) {
         if (resultsCollected || level == null || pos == null) return List.of();
         resultsCollected = true;
         BlockEntity raw = level.getBlockEntity(pos);
@@ -359,29 +359,8 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
         return List.copyOf(results);
     }
 
-    @Nonnull
-    @Override
-    public ItemStack collectResult(@Nonnull ServerPlayer player) {
-        List<ItemStack> results = collectAllResults(player);
-        return results.isEmpty() ? ItemStack.EMPTY : results.get(0);
-    }
 
-    @Nonnull
-    @Override
-    public List<OutputAccounting.CollectedOutput> collectStructuredResults(
-            @Nonnull ServerPlayer player) {
-        return collectAllResults(player).stream()
-                .filter(stack -> !stack.isEmpty())
-                .map(stack -> new OutputAccounting.CollectedOutput(
-                        "forbidden_arcanus:clibano:output",
-                        OutputContract.Source.SLOT, stack))
-                .toList();
-    }
 
-    @Override
-    public boolean collectsPhysicalSecondaryOutputs() {
-        return true;
-    }
 
     @Nullable
     @Override
@@ -418,7 +397,7 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@NotNull ServerPlayer player) {
+    public void cleanup(@NotNull ServerPlayer player) {
         forceChunkLoad(false);
         if (level != null && pos != null) {
             BlockEntity raw = level.getBlockEntity(pos);

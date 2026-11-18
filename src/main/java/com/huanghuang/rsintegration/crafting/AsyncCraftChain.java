@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.huanghuang.rsintegration.crafting.batch.ProductionEvidence;
+import com.huanghuang.rsintegration.crafting.batch.MachineOperation;
 import com.huanghuang.rsintegration.crafting.progress.CraftMaterialView;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
@@ -10,13 +12,7 @@ import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot.Wait
 import com.huanghuang.rsintegration.api.execution.CollectedOutput;
 import com.huanghuang.rsintegration.api.recipe.ProductionCompletionPolicy;
 import com.huanghuang.rsintegration.api.execution.CancelReason;
-
-
-import com.huanghuang.rsintegration.network.packet.NetworkHandler;import java.lang.reflect.Field;
-import java.lang.reflect.Method;
-
 import com.huanghuang.rsintegration.feature.ftbquests.ExternalItemProgressBridge;
-import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.CraftExecutionPolicy;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.embers.EreAlchemyDelegateMode;
@@ -33,20 +29,15 @@ import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.crafting.plan.MagicResourceCostCatalog;
 import com.huanghuang.rsintegration.magic.MagicResourceCost;
 import com.huanghuang.rsintegration.magic.MagicResourceTaskReservation;
-import java.util.Arrays;
 import java.util.function.IntFunction;
 import java.util.function.IntUnaryOperator;
 import java.util.LinkedHashMap;
-import java.util.Locale;
 import java.util.stream.Collectors;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import com.huanghuang.rsintegration.crafting.external.ExternalIntegrationRuntime;
-import com.huanghuang.rsintegration.crafting.batch.CraftProgressPacket;
-import com.huanghuang.rsintegration.crafting.batch.CraftProgressDeltaPacket;
 import com.huanghuang.rsintegration.crafting.batch.CraftProgressPublisher;
 import com.huanghuang.rsintegration.crafting.progress.CraftExecutionClock;
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot.Reason;
@@ -86,7 +77,7 @@ import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
 import com.huanghuang.rsintegration.ModVersionDelegateRegistry;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
-import com.huanghuang.rsintegration.crafting.batch.OperationPoll;
+import com.huanghuang.rsintegration.crafting.batch.OperationLifecycle;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
@@ -94,7 +85,6 @@ import com.huanghuang.rsintegration.crafting.batch.CountedOperationMaterials;
 import com.huanghuang.rsintegration.crafting.batch.CountedOperationMaterials.Origin;
 import com.huanghuang.rsintegration.crafting.batch.CountedOperationMaterials.Pool;
 import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
-import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
@@ -108,7 +98,6 @@ import com.huanghuang.rsintegration.network.ProtectionChecker;
 import com.huanghuang.rsintegration.util.CraftLogContext;
 import com.huanghuang.rsintegration.util.Diagnostics;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
-import com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler;
 import com.huanghuang.rsintegration.mods.vanilla.brewing.VanillaBrewingCatalog;
 import com.huanghuang.rsintegration.crafting.fluid.FluidContainerCatalog;
 import com.huanghuang.rsintegration.util.PlayerUtils;
@@ -128,7 +117,6 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.registries.ForgeRegistries;
-
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.BitSet;
@@ -233,6 +221,12 @@ public final class AsyncCraftChain {
 
     private int currentStepIdx;
     private IBatchDelegate currentDelegate;
+    private OperationLifecycle flatLifecycle;
+
+    private OperationLifecycle flatOperation() {
+        if (flatLifecycle == null) flatLifecycle = new OperationLifecycle(currentDelegate);
+        return flatLifecycle;
+    }
     private int waitTicks;
     private int drainingTicks;
     private int flatObservedCompletedOperations;
@@ -1014,8 +1008,8 @@ public final class AsyncCraftChain {
                 // Capture and observation are processed before timeout so an output
                 // produced on the deadline tick is never collected and then refunded.
                 boolean capturedOutput = hasCapturedOutput();
-                IBatchDelegate.CraftObservation observation = OperationPoll.poll(currentDelegate, online.serverLevel());
-                if (observation.phase() == IBatchDelegate.CraftPhase.WORKING
+                MachineOperation.CraftObservation observation = flatOperation().poll(online.serverLevel());
+                if (observation.phase() == MachineOperation.CraftPhase.WORKING
                         && observation.completedWork() > flatObservedCompletedWork) {
                     flatObservedCompletedWork = observation.completedWork();
                     waitTicks = 0;
@@ -1056,15 +1050,11 @@ public final class AsyncCraftChain {
                         snapshotCommittedVirtual();
                     }
                 }
-                if (observation.phase() == IBatchDelegate.CraftPhase.FAILED) {
+                if (observation.phase() == MachineOperation.CraftPhase.FAILED) {
                     if (currentDelegate.failureConsumesInputs(observation)) {
-                        ItemStack expectedWorldOutput = currentDelegate.getExpectedOutput();
-                        List<ItemStack> actualResults = new ArrayList<>(OutputAccounting.mergeLegacyOutputs(
-                                disarmOutputCapture(), currentDelegate.collectAllResults(online),
-                                expectedWorldOutput));
+                        var actualResults = flatOperation().collect(online, Math.max(1, machineCount), this::disarmOutputCapture).stacks();
                         recordReportedResources(currentDelegate);
                         closeFlatOperationScope();
-                        actualResults.removeIf(stack -> stack == null || stack.isEmpty());
                         reportCraftedPrimaryOutputs(online, actualResults,
                                 currentDelegate.getExpectedProduction(),
                                 currentStepOutputPrototype());
@@ -1077,7 +1067,7 @@ public final class AsyncCraftChain {
                                     "rsi.async.abort.machine_craft_failed", observation.detail());
                         }
                         try {
-                            currentDelegate.onBatchFinished(online);
+                            flatOperation().cleanup(online);
                             currentDelegate.releaseReusableMaterials(online);
                         } catch (Exception cleanupFailure) {
                             RSIntegrationMod.LOGGER.error(ctx.format(
@@ -1106,14 +1096,13 @@ public final class AsyncCraftChain {
                 // 捕获会取消原生掉落实体，只有整批产物到齐才能代替机器完成信号。
                 boolean capturedWorldOutput = capturedOutput
                         && OutputAccounting.hasCapturedExpectedProduction(currentDelegate, capturedSnapshot);
-                if (observation.phase() == IBatchDelegate.CraftPhase.DONE || capturedWorldOutput) {
+                if (observation.phase() == MachineOperation.CraftPhase.DONE || capturedWorldOutput) {
                     if (!currentDelegate.validateExecutionContext(online)) {
                         abort("Execution context changed before output publication",
                                 Component.translatable("rsi.async.abort.execution_context"));
                         return true;
                     }
-                    OutputCollection collectedOutputs = collectOutputsForSettlement(
-                            currentDelegate, online, disarmOutputCapture());
+                    var collectedOutputs = flatOperation().collect(online, Math.max(1, machineCount), this::disarmOutputCapture);
                     List<CollectedOutput> reported =
                             recordReportedResources(currentDelegate);
                     List<CollectedOutput> observed =
@@ -1123,7 +1112,7 @@ public final class AsyncCraftChain {
                     recordSettledFinalOutputs(actualResults, reported, observed);
                     for (ItemStack result : actualResults) addToVirtualInventory(result);
                     String resourceFailure =
-                            currentDelegate.reportedResourceFailure();
+                            ProductionEvidence.from(currentDelegate).deliveryFailure();
                     if (resourceFailure != null) {
                         snapshotCommittedVirtual();
                         ledger.reset();
@@ -1192,21 +1181,6 @@ public final class AsyncCraftChain {
                         return true;
                     }
 
-                    if (currentDelegate instanceof GenericBatchDelegate gbd) {
-                        for (ItemStack secondary : gbd.getPendingSecondary()) addToVirtualInventory(secondary);
-                    } else if (!currentDelegate.collectsPhysicalSecondaryOutputs()
-                            && !(currentDelegate instanceof ParallelCraftGroup)) {
-                        ServerLevel overworld = server.overworld();
-                        if (overworld == null) return true;
-                        Recipe<?> mbRecipe = overworld.getRecipeManager()
-                                .byKey(steps.get(currentStepIdx).recipeId()).orElse(null);
-                        if (mbRecipe != null) {
-                            for (ItemStack secondary : ModRecipeHandlers.tryGetSecondaryOutputs(
-                                    mbRecipe, overworld.registryAccess())) {
-                                addToVirtualInventory(secondary.copy());
-                            }
-                        }
-                    }
                     boolean parallelGroup = currentDelegate instanceof ParallelCraftGroup;
                     if (parallelGroup) {
                         ParallelCraftGroup group = (ParallelCraftGroup) currentDelegate;
@@ -1218,10 +1192,10 @@ public final class AsyncCraftChain {
                         machineCount = group.getTotalOperations();
                     }
                     try {
-                        currentDelegate.onBatchFinished(online);
+                        flatOperation().cleanup(online);
                         currentDelegate.releaseReusableMaterials(online);
                     } catch (Exception fe) {
-                        RSIntegrationMod.LOGGER.error(ctx.format("onBatchFinished error"), fe);
+                        RSIntegrationMod.LOGGER.error(ctx.format("cleanup error"), fe);
                     }
                     currentDelegate = null;
                     waitTicks = 0;
@@ -1324,6 +1298,7 @@ public final class AsyncCraftChain {
                 stepRemaining = step.executions();
                 machineCount = 1;
             }
+            flatLifecycle = null;
             currentDelegate = startModStep(step, online);
             flatObservedCompletedWork = 0L;
             flatObservedCompletedOperations = 0;
@@ -2837,7 +2812,7 @@ public final class AsyncCraftChain {
             if (group.usesTaskFluidInputs() && materialAccount != null) {
                 materializeTaskFluidGraphInputs(admission.materialToken());
             }
-            if (!group.startOperation(OperationStartContext.chainReserved(online, nodeLedger,
+            if (!runtime.start(OperationStartContext.chainReserved(online, nodeLedger,
                     MaterialPlan.none(), List.of(), InputBufferPlan.none()))) {
                 runtime.markStartFailed("execution group rejected graph dispatch");
             } else if (attempt != null) attempt.started();
@@ -2945,7 +2920,7 @@ public final class AsyncCraftChain {
         materializePrivateLedgerGraphInputs(admission, online);
         attachMagicReservation(delegate);
 
-        boolean accepted = operationSession.tryStart(() -> delegate.startOperation(
+        boolean accepted = operationSession.tryStart(() -> runtime.start(
                 OperationStartContext.delegateExtracted(online, nodeLedger)));
         if (!accepted) runtime.markStartFailed("delegate rejected private-ledger graph dispatch");
         else if (attempt != null) attempt.started();
@@ -4297,6 +4272,7 @@ public final class AsyncCraftChain {
     private IBatchDelegate startExecutionGroup(ParallelCraftGroup group,
                                                 CraftingResolver.ResolutionStep step, ServerPlayer online) {
         boolean startInvoked = false;
+        flatLifecycle = new OperationLifecycle(group);
         try {
             OperationStartContext context;
             if (shouldUsePrivateLedgerGraphDispatch(group, group.materialPlan())
@@ -4318,11 +4294,11 @@ public final class AsyncCraftChain {
                         MaterialPlan.none(), List.of(), InputBufferPlan.none());
             }
             startInvoked = true;
-            if (!group.startOperation(context)) group.onBatchFailed(online, "execution group rejected start");
+            if (!flatLifecycle.start(context)) flatLifecycle.recover(online, "execution group rejected start");
             return group;
         } catch (RuntimeException exception) {
             RSIntegrationMod.LOGGER.error(ctx.format("Execution group failed for {}"), step.recipeId(), exception);
-            group.onBatchFailed(online, "execution group start threw");
+            flatLifecycle.recover(online, "execution group start threw");
             return startInvoked || ledger.isCommitted() ? group : null;
         }
     }
@@ -4465,57 +4441,12 @@ public final class AsyncCraftChain {
         }
     }
 
-    private record OutputCollection(List<ItemStack> stacks,
-                                    @Nullable OutputAccounting.Settlement settlement) {
-        private OutputCollection {
-            stacks = List.copyOf(stacks);
-        }
-    }
-
-    private OutputCollection collectOutputsForSettlement(IBatchDelegate delegate,
-                                                          ServerPlayer player,
-                                                          List<ItemStack> capturedWorldOutputs) {
-        OutputContract contract = delegate.outputContract();
-        if (delegate.outputReception() != null) {
-            List<ItemStack> actual = new ArrayList<>(delegate.collectAllResults(player));
-            actual.addAll(capturedWorldOutputs);
-            delegate.closeOutputReception();
-            actual.addAll(delegate.drainReceivedOutputs());
-            return new OutputCollection(List.copyOf(actual), contract == null || contract.ports().isEmpty()
-                    ? null : OutputAccounting.assess(contract, Math.max(1, machineCount),
-                    OutputAccounting.attributeReceived(contract, Math.max(1, machineCount), actual)));
-        }
-        if (contract == null || contract.ports().isEmpty()) {
-            ItemStack expectedWorldOutput = delegate.getExpectedOutput();
-            List<ItemStack> collectedResults = delegate.collectAllResults(player);
-            List<ItemStack> legacy = OutputAccounting.mergeLegacyOutputs(
-                    capturedWorldOutputs, collectedResults, expectedWorldOutput);
-            return new OutputCollection(legacy, null);
-        }
-
-        List<OutputAccounting.CollectedOutput> structured = new ArrayList<>(
-                capturedWorldOutputRecords(contract, capturedWorldOutputs));
-        List<OutputAccounting.CollectedOutput> collected = delegate.collectStructuredResults(player);
-        if (collected != null) {
-            for (OutputAccounting.CollectedOutput output : collected) {
-                if (output != null) structured.add(output);
-            }
-        }
-        List<ItemStack> stacks = structured.stream()
-                .map(OutputAccounting.CollectedOutput::stack)
-                .filter(stack -> stack != null && !stack.isEmpty())
-                .map(ItemStack::copy)
-                .toList();
-        return new OutputCollection(stacks, OutputAccounting.assess(
-                contract, Math.max(1, machineCount), structured));
-    }
-
     private List<CollectedOutput> recordReportedResources(
             IBatchDelegate delegate
     ) {
         if (delegate == null) return List.of();
         List<CollectedOutput> recorded = new ArrayList<>();
-        for (CollectedOutput output : delegate.drainReportedResources()) {
+        for (CollectedOutput output : ProductionEvidence.from(delegate).takeDelivered()) {
             if (output == null || output.amount() <= 0L) continue;
             reportedResources.add(output);
             recorded.add(output);
@@ -4529,7 +4460,7 @@ public final class AsyncCraftChain {
         if (delegate == null) return List.of();
         List<CollectedOutput> observed = new ArrayList<>();
         for (CollectedOutput output
-                : delegate.drainObservedProduction()) {
+                : ProductionEvidence.from(delegate).takeObserved()) {
             if (output == null || output.amount() <= 0L) continue;
             observed.add(output);
         }
@@ -4538,27 +4469,6 @@ public final class AsyncCraftChain {
 
     public List<CollectedOutput> reportedResources() {
         return List.copyOf(reportedResources);
-    }
-
-    static List<OutputAccounting.CollectedOutput> capturedWorldOutputRecords(
-            OutputContract contract, List<ItemStack> captured) {
-        if (captured == null || captured.isEmpty()) return List.of();
-        OutputContract safeContract = contract == null ? OutputContract.none() : contract;
-        List<OutputAccounting.CollectedOutput> outputs = new ArrayList<>();
-        int unknownIndex = 0;
-        for (ItemStack stack : captured) {
-            if (stack == null || stack.isEmpty()) continue;
-            List<OutputContract.Port> matches = safeContract.ports().stream()
-                    .filter(port -> port.source() == OutputContract.Source.WORLD)
-                    .filter(port -> MaterialMatcher.matchesOutputDeclaration(
-                            MaterialKey.of(port.prototype()), stack))
-                    .toList();
-            String portId = matches.size() == 1
-                    ? matches.get(0).portId() : "unmatched:world:" + unknownIndex++;
-            outputs.add(new OutputAccounting.CollectedOutput(
-                    portId, OutputContract.Source.WORLD, stack));
-        }
-        return List.copyOf(outputs);
     }
 
     private static String describeOutputSettlement(OutputAccounting.Settlement settlement) {
@@ -5107,10 +5017,10 @@ public final class AsyncCraftChain {
             }
         } else if (currentDelegate != null) {
             try {
-                IBatchDelegate.CraftObservation observation = OperationPoll.poll(currentDelegate, server.overworld());
+                MachineOperation.CraftObservation observation = flatOperation().poll(server.overworld());
                 boolean capturedWorldOutput = OutputAccounting.hasCapturedExpectedProduction(
                         currentDelegate, capturedOutputSnapshot());
-                if (observation.phase() == IBatchDelegate.CraftPhase.DONE || capturedWorldOutput) {
+                if (observation.phase() == MachineOperation.CraftPhase.DONE || capturedWorldOutput) {
                     collectCompletedDelegateForShutdown(resolvePlayer());
                 }
             } catch (RuntimeException exception) {
@@ -5134,28 +5044,29 @@ public final class AsyncCraftChain {
      */
     private void collectCompletedDelegateForShutdown(@Nullable ServerPlayer player) {
         if (currentDelegate == null) return;
-        List<ItemStack> captured = disarmOutputCapture();
-        ItemStack expectedWorldOutput = currentDelegate.getExpectedOutput();
-        List<ItemStack> collected = player == null
-                ? List.of() : currentDelegate.collectAllResults(player);
-        for (ItemStack result : OutputAccounting.mergeLegacyOutputs(
-                captured, collected, expectedWorldOutput)) {
+        List<ItemStack> collected = flatOperation().collectForShutdown(player, Math.max(1, machineCount),
+                this::disarmOutputCapture);
+        for (ItemStack result : collected) {
             if (result != null && !result.isEmpty()) addToVirtualInventory(result);
         }
         if (player == null) {
             RSIntegrationMod.LOGGER.warn(ctx.format(
                     "Server stop: owner offline for a completed craft; settling it so inputs are not refunded twice"));
         }
-        currentDelegate.onBatchFinished(player);
-        currentDelegate.releaseReusableMaterials(player);
         if (flatOperationSession != null && flatOperationSession.startAttempted()
                 && !flatOperationSession.settled()) {
             flatOperationSession.settle(() -> {
                 if (ledger.isCommitted()) ledger.settleAllCommitted();
             });
-        }
+        } else if (ledger.isCommitted()) ledger.settleAllCommitted();
         snapshotCommittedVirtual();
+        IBatchDelegate completed = currentDelegate;
         currentDelegate = null;
+        try {
+            flatOperation().cleanup(player);
+        } finally {
+            completed.releaseReusableMaterials(player);
+        }
     }
 
     private void abortSilently(String reason) {
@@ -5210,13 +5121,15 @@ public final class AsyncCraftChain {
                 ? null : flatOperationSession.terminalClass();
         if (currentDelegate != null) {
             try {
-                currentDelegate.closeOutputReception();
-                for (ItemStack output : currentDelegate.drainReceivedOutputs()) addToVirtualInventory(output);
+                for (ItemStack output : flatOperation().retireHolding()) {
+                    addToVirtualInventory(output);
+                    committedVirtual.add(output.copy());
+                }
                 CancelReason cancelReason = cancellationReason(cause);
                 if (cancelReason != null) {
                     currentDelegate.prepareCancellation(online, cancelReason);
                 }
-                currentDelegate.onBatchFailed(online, reason);
+                flatOperation().recover(online, reason);
                 flatFailureRecoveredInputs = currentDelegate.failureRecoveredInputs();
                 if (flatPhysicalCleanupRequired
                         && currentDelegate instanceof AbstractBatchDelegate delegate) {
@@ -5236,7 +5149,7 @@ public final class AsyncCraftChain {
                     snapshotCommittedVirtual();
                 }
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.error(ctx.format("Error in onBatchFailed"), e);
+                RSIntegrationMod.LOGGER.error(ctx.format("Error in recover"), e);
             }
             currentDelegate = null;
         }

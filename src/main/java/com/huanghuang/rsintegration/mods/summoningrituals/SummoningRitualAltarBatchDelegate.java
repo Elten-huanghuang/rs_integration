@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mods.summoningrituals;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
@@ -29,7 +29,6 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.items.IItemHandler;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -358,9 +357,11 @@ public final class SummoningRitualAltarBatchDelegate extends AbstractBatchDelega
         return prepared && blockEntity == preparationAltar;
     }
 
-    @Nonnull
-    @Override
-    public ItemStack collectResult(@Nonnull ServerPlayer player) {
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.single(this::takeResult, outputContract());
+    }
+
+    private ItemStack takeResult(@Nonnull ServerPlayer player) {
         return ItemStack.EMPTY;
     }
 
@@ -383,7 +384,7 @@ public final class SummoningRitualAltarBatchDelegate extends AbstractBatchDelega
     }
 
     @Override
-    public void onBatchFinished(@Nullable ServerPlayer player) {
+    public void cleanup(@Nullable ServerPlayer player) {
         if (!markTerminalCleanup()) return;
         // 成功仅表示物品已投放；不回收，也不干预祭坛后续的仪式。
         inserted.clear();

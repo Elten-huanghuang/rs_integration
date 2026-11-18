@@ -6,10 +6,8 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import org.junit.jupiter.api.Test;
-
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
-
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -54,13 +52,12 @@ class StorageEndpointSelectionTest {
             return true;
         }
 
-        @Override
-        public ItemStack collectResult(ServerPlayer player) {
-            return ItemStack.EMPTY;
+        @Override public OperationOutputSource outputSource() {
+            return OperationOutputSource.single(player -> ItemStack.EMPTY, outputContract());
         }
 
         @Override
-        public void onBatchFinished(ServerPlayer player) {
+        public void cleanup(ServerPlayer player) {
         }
 
         @Override

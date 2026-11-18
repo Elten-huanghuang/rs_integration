@@ -1,9 +1,8 @@
 package com.huanghuang.rsintegration.mods.vanilla.brewing;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.crafting.progress.MachineCycleProgress;
-
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -13,9 +12,7 @@ import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.PhysicalInputRecovery;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mixin.minecraft.BrewingStandAccessor;
-import com.huanghuang.rsintegration.util.ChunkUtils;
 import net.minecraft.core.BlockPos;
-import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -24,7 +21,6 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BrewingStandBlockEntity;
 import org.jetbrains.annotations.NotNull;
 import net.minecraft.world.item.Items;
-
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
@@ -209,8 +205,11 @@ public final class BrewingStandBatchDelegate extends AbstractBatchDelegate {
         return true;
     }
 
-    @Override
-    public List<ItemStack> collectAllResults(ServerPlayer player) {
+    @Override public OperationOutputSource outputSource() {
+        return player -> OperationOutputSource.Handoff.physical(takeResults(player), outputContract());
+    }
+
+    private List<ItemStack> takeResults(ServerPlayer player) {
         if (stand == null || !isMachineCraftFinished(level, stand)) return List.of();
         List<ItemStack> results = new ArrayList<>();
         ItemStack brewed = recipe.output();
@@ -226,12 +225,8 @@ public final class BrewingStandBatchDelegate extends AbstractBatchDelegate {
         return results;
     }
 
-    @Override public ItemStack collectResult(ServerPlayer player) {
-        List<ItemStack> results = collectAllResults(player);
-        return results.isEmpty() ? ItemStack.EMPTY : results.get(0);
-    }
 
-    @Override public boolean collectsPhysicalSecondaryOutputs() { return true; }
+
 
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
@@ -255,7 +250,7 @@ public final class BrewingStandBatchDelegate extends AbstractBatchDelegate {
         resetState();
     }
 
-    @Override public void onBatchFinished(@NotNull ServerPlayer player) { resetState(); }
+    @Override public void cleanup(@NotNull ServerPlayer player) { resetState(); }
     @Override public BlockPos getMachinePos() { return pos; }
 
     @Override

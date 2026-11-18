@@ -1,14 +1,12 @@
 package com.huanghuang.rsintegration.mods.crockpot;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
-
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.MachineSlotOwnershipPolicy;
 import net.minecraftforge.registries.ForgeRegistries;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
@@ -35,14 +33,12 @@ import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.common.ForgeHooks;
 import net.minecraftforge.items.ItemHandlerHelper;
 import org.jetbrains.annotations.NotNull;
-
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Arrays;
-
 import static com.huanghuang.rsintegration.mods.crockpot.CrockPotInventory.getBlockPotLevel;
 import static com.huanghuang.rsintegration.mods.crockpot.CrockPotInventory.getItemHandler;
 
@@ -362,8 +358,11 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
         return workingObservation();
     }
 
-    @Override
-    public ItemStack collectResult(ServerPlayer player) {
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.single(this::takeResult, outputContract());
+    }
+
+    private ItemStack takeResult(ServerPlayer player) {
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null) return ItemStack.EMPTY;
 
@@ -390,7 +389,7 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@NotNull ServerPlayer player) {
+    public void cleanup(@NotNull ServerPlayer player) {
         if (!markTerminalCleanup()) return;
         forceChunkLoad(false);
         clearMachineSlotsAndRefund(false);

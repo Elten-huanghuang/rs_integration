@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mods.crockpot;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -15,7 +15,6 @@ import com.huanghuang.rsintegration.mods.crockpot.ParrotFeedingRecipeHandler;
 import com.huanghuang.rsintegration.reflection.probes.CrockPotReflection;
 import com.mojang.datafixers.util.Pair;
 import net.minecraft.core.BlockPos;
-import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -30,7 +29,6 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.AABB;
 import java.util.ArrayDeque;
 import net.minecraft.core.RegistryAccess;
-
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
 import java.util.List;
@@ -217,8 +215,11 @@ public final class BirdcageBatchDelegate extends AbstractBatchDelegate {
         return !current.getEntitiesOfClass(ItemEntity.class, outputRegion(), this::isExpectedNewOutput).isEmpty();
     }
 
-    @Override
-    public ItemStack collectResult(ServerPlayer player) {
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.single(this::takeResult, outputContract());
+    }
+
+    private ItemStack takeResult(ServerPlayer player) {
         if (level == null || level.getGameTime() <= outputReadyAt) return ItemStack.EMPTY;
         for (ItemEntity entity : level.getEntitiesOfClass(ItemEntity.class, outputRegion(), this::isExpectedNewOutput)) {
             ItemStack result = entity.getItem().copy();
@@ -308,7 +309,7 @@ public final class BirdcageBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(ServerPlayer player) {
+    public void cleanup(ServerPlayer player) {
         if (!markTerminalCleanup()) return;
         resetState();
     }

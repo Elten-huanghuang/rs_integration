@@ -1,7 +1,5 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
-import com.huanghuang.rsintegration.crafting.TaskOutputReception;
-
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.crafting.MaterialMatcher;
 import com.huanghuang.rsintegration.crafting.progress.MachineCycleProgress;
@@ -9,7 +7,6 @@ import java.util.ArrayList;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.item.ItemStack;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
@@ -21,10 +18,8 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.AABB;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.HashSet;
@@ -38,8 +33,8 @@ import java.util.function.Supplier;
  *
  * <p>Provides template methods with lifecycle guards that subclasses must not override:</p>
  * <ul>
- *   <li>{@link #isCraftComplete(ServerLevel)} — {@code final}, with {@code isLoaded} guard</li>
- *   <li>{@link #onBatchFailed(ServerPlayer, String)} — {@code final}, with shared-ledger guard</li>
+ *   <li>{@link #observe(ServerLevel)} — {@code final}, with {@code isLoaded} guard</li>
+ *   <li>{@link #recover(ServerPlayer, String)} — {@code final}, with shared-ledger guard</li>
  * </ul>
  *
  * <p>Subclasses override the hook methods instead:</p>
@@ -51,7 +46,9 @@ import java.util.function.Supplier;
  * <p>{@link #warnOnce(String, String, Object...)} provides tick-safe rate-limited logging
  * via a {@link HashSet} of seen state keys, cleared on {@link #resetState()}.</p>
  */
-public abstract class AbstractBatchDelegate implements IBatchDelegate {
+public abstract class AbstractBatchDelegate implements IBatchDelegate, MachineOperation {
+    @Override public MachineOperation machineOperation() { return this; }
+
     private MaterialAccess materialAccess = MaterialAccess.EXTERNAL;
 
     public final void setMaterialAccess(MaterialAccess access) {
@@ -65,48 +62,6 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
         CraftStorageEndpoint endpoint = storageEndpoint();
         if (endpoint == null || player == null) return stack.copy();
         return materialAccess.refund(player, endpoint, stack).remainder().orElse(stack);
-    }
-
-    @Nullable private TaskOutputReception.Session outputReception;
-    @Nullable protected TaskOutputReception.Batch outputBatch;
-
-    @Override
-    @Nullable public TaskOutputReception.Session outputReception() { return outputReception; }
-
-    /** 可供受控执行入口注入上下文；包装 delegate 应将它转发给实际执行器。 */
-    public void setOutputReception(@Nullable TaskOutputReception.Session reception) {
-        if (outputReception != null && outputReception != reception) {
-            throw new IllegalStateException("不能替换已有收货上下文");
-        }
-        outputReception = reception;
-    }
-
-    protected final void prepareOutputBatch(List<TaskOutputReception.Demand> demands) {
-        if (outputReception != null) {
-            if (supportsNetworkOutputReception() && storageEndpoint != null
-                    && storageEndpoint.session() != null) {
-                storageEndpoint.session().bindOutputReception(outputReception);
-            }
-            outputBatch = outputReception.prepare(demands);
-        }
-    }
-
-    /** 独立审核机器安全结束条件后才启用网络收货，不自动扩展到全部本地账本使用者。 */
-    protected boolean supportsNetworkOutputReception() { return false; }
-
-    protected final void activateOutputBatch() {
-        if (outputBatch != null) outputBatch.activate();
-    }
-
-    protected final void finishOutputBatch() {
-        if (outputBatch != null) outputBatch.close();
-    }
-
-    /** 调用前必须已实际取出；超额实物也由统一持有层保留。 */
-    protected final void receiveDirectOutput(ItemStack actual, List<ItemStack> legacyResults) {
-        if (actual == null || actual.isEmpty()) return;
-        if (outputBatch == null) legacyResults.add(actual.copy());
-        else outputBatch.collect(TaskOutputReception.resource(actual), actual.getCount());
     }
 
     protected ExtractionLedger ledger;
@@ -124,8 +79,8 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
     protected MagicResourceTaskReservation magicResourceTaskReservation;
 
     /**
-     * Set by the first terminal callback ({@code onBatchFailed} or
-     * {@code onBatchFinished}). Deliberately NOT cleared by {@link #resetState()}:
+     * Set by the first terminal callback ({@code recover} or
+     * {@code cleanup}). Deliberately NOT cleared by {@link #resetState()}:
      * a delegate instance owns exactly one operation, so the flag must outlive
      * the state reset that its own cleanup performs.
      */
@@ -178,20 +133,10 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
     }
 
     @Override
-    public final boolean startOperation(@Nonnull OperationStartContext context) {
+    public final boolean start(@Nonnull OperationStartContext context) {
         Objects.requireNonNull(context, "context");
         if (context.repeatedOperationPlan() != null) return false;
-        if (supportsOutputReception() && outputReception() == null) {
-            setOutputReception(TaskOutputReception.open());
-        }
-        boolean accepted = false;
-        try {
-            accepted = startOperationImpl(context);
-            return accepted;
-        } finally {
-            // 同步产出已被接收时，失败只能关闭资格，不能销毁已持有资源。
-            if (!accepted) closeOutputReception();
-        }
+        return startOperationImpl(context);
     }
 
     /**
@@ -249,27 +194,9 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
 
     // ── Template methods (final — subclasses override hooks instead) ──
 
-    /**
-     * Completion check with chunk-unload guard.
-     * Subclasses must NOT override this; override {@link #isMachineCraftFinished} instead.
-     */
-    @Override
-    public final boolean isCraftComplete(ServerLevel playerLevel) {
-        BlockPos pos = getMachinePos();
-        // Virtual delegate (e.g. GenericBatchDelegate for CUSTOM_GUI recipes)
-        // has no physical machine — skip chunk-load and BE checks.
-        if (pos == null) return isMachineCraftFinished(null, null);
-        ServerLevel level = resolveMachineLevel(playerLevel);
-        if (level == null) return false;
-        if (!level.hasChunkAt(pos)) return false;
-        BlockEntity be = level.getBlockEntity(pos);
-        if (be == null || be.isRemoved()) return false;
-        return isMachineCraftFinished(level, be);
-    }
-
     @Nonnull
     @Override
-    public final CraftObservation observeCraft(@Nonnull ServerLevel playerLevel) {
+    public final CraftObservation observe(@Nonnull ServerLevel playerLevel) {
         observedCycle = MachineCycleProgress.UNKNOWN;
         BlockPos pos = getMachinePos();
         if (pos == null) {
@@ -332,7 +259,7 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
     }
 
     /**
-     * Machine-specific completion check. Called by {@link #isCraftComplete(ServerLevel)}
+     * Machine-specific completion check. Called by {@link #observe(ServerLevel)}
      * after the chunk-load and null/removed guards. Both {@code level} and {@code be}
      * are guaranteed non-null and loaded.
      */
@@ -353,15 +280,14 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
      * {@code refundToRS} checks.
      */
     @Override
-    public final void onBatchFailed(@Nullable ServerPlayer player, String reason) {
-        closeOutputReception();
+    public final void recover(@Nullable ServerPlayer player, String reason) {
         // Exactly-once. A second call would be actively harmful, not merely
         // redundant: clearMachineState ends in resetState(), which clears
         // usingSharedLedger, so the repeat would see the shared-ledger guard
         // disarmed and refund physical items the chain ledger already covered.
         if (!markTerminalCleanup()) {
             RSIntegrationMod.LOGGER.warn(
-                    "[RSI-Delegate] {} received a repeat terminal callback (onBatchFailed: {}); ignoring. "
+                    "[RSI-Delegate] {} received a repeat terminal callback (recover: {}); ignoring. "
                             + "A delegate instance owns exactly one operation and must be discarded after it settles.",
                     getClass().getSimpleName(), reason);
             return;
@@ -449,9 +375,11 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
         this.usingSharedLedger = true;
     }
 
+    protected void onStorageEndpointChanged() {}
+
     /** Attach the chain-selected storage backend before private-ledger starts. */
     public final void setStorageEndpoint(@Nullable CraftStorageEndpoint endpoint) {
-        if (storageEndpoint != endpoint && outputReception != null) outputReception.unbindNetwork();
+        if (storageEndpoint != endpoint) onStorageEndpointChanged();
         this.storageEndpoint = endpoint;
     }
 
@@ -523,7 +451,7 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
     }
 
     /**
-     * Machine-specific cleanup. Called by {@link #onBatchFailed(ServerPlayer, String)}
+     * Machine-specific cleanup. Called by {@link #recover(ServerPlayer, String)}
      * after the shared-ledger and chunk-load guards.
      */
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
@@ -590,8 +518,8 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
      * Marks this delegate's operation as terminally settled and reports whether
      * the caller is the first to do so.
      *
-     * <p>{@code onBatchFailed} is guarded centrally because it is {@code final}.
-     * {@code onBatchFinished} is implemented per subclass, so a subclass whose
+     * <p>{@code recover} is guarded centrally because it is {@code final}.
+     * {@code cleanup} is implemented per subclass, so a subclass whose
      * completion path is not naturally idempotent should gate on this:
      * {@code if (!markTerminalCleanup()) return;}</p>
      */
@@ -709,9 +637,8 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
         forcedChunkOwner = null;
     }
 
-    /** Call at end of onBatchFailed and onBatchFinished — resets all shared state. */
+    /** Call at end of recover and cleanup — resets all shared state. */
     protected void resetState() {
-        closeOutputReception();
         releaseMachineChunk();
         if (ledger != null) {
             ledger.close();

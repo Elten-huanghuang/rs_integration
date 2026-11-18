@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mods.apotheosis;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -11,7 +11,6 @@ import com.huanghuang.rsintegration.crafting.batch.InstantBatchDelegate;
 import dev.shadowsoffire.apotheosis.adventure.socket.gem.GemInstance;
 import dev.shadowsoffire.apotheosis.adventure.socket.gem.cutting.GemCuttingMenu;
 import net.minecraft.core.BlockPos;
-import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -22,7 +21,6 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.registries.ForgeRegistries;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -178,13 +176,10 @@ public final class ApotheosisGemCuttingBatchDelegate extends InstantBatchDelegat
     @Override protected CraftObservation observeMissingMachineCraft(@Nonnull ServerLevel level, @Nonnull BlockPos pos) {
         return done ? doneObservation() : workingObservation();
     }
-    @Override public @Nonnull ItemStack collectResult(@Nonnull ServerPlayer player) {
-        if (results.isEmpty()) return ItemStack.EMPTY;
-        ItemStack collected = results.remove(0).copy();
-        done = results.isEmpty();
-        return collected;
+    @Override public OperationOutputSource outputSource() {
+        return player -> OperationOutputSource.Handoff.physical(takeResults(player), outputContract());
     }
-    @Override public @Nonnull List<ItemStack> collectAllResults(@Nonnull ServerPlayer player) {
+    private List<ItemStack> takeResults(@Nonnull ServerPlayer player) {
         List<ItemStack> output = results.stream().map(ItemStack::copy).toList();
         results.clear();
         done = false;
@@ -198,7 +193,7 @@ public final class ApotheosisGemCuttingBatchDelegate extends InstantBatchDelegat
     @Override protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         clearMenu(); results.clear(); done = false; resetInstantBatch(); resetState();
     }
-    @Override public void onBatchFinished(@Nonnull ServerPlayer player) {
+    @Override public void cleanup(@Nonnull ServerPlayer player) {
         clearMenu(); results.clear(); done = false; resetInstantBatch(); resetState();
     }
     @Override public @Nonnull BlockPos getMachinePos() { return pos; }

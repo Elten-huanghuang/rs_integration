@@ -1,10 +1,7 @@
 package com.huanghuang.rsintegration.mods.arsnouveau;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -14,12 +11,9 @@ import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.OperationInputRecovery;
 import com.huanghuang.rsintegration.crafting.batch.OperationInputRecovery.Input;
-import com.huanghuang.rsintegration.reflection.probes.ArsNouveauReflection;
-import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.util.Reflect;
 import net.minecraft.core.BlockPos;
-import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -30,7 +24,6 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -363,9 +356,11 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
         return false;
     }
 
-    @Nonnull
-    @Override
-    public ItemStack collectResult(@Nonnull ServerPlayer player) {
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.single(this::takeResult, outputContract());
+    }
+
+    private ItemStack takeResult(@Nonnull ServerPlayer player) {
         ServerLevel level = getLevel();
         if (level == null) return ItemStack.EMPTY;
 
@@ -375,8 +370,6 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
         }
 
         ItemStack result = container.removeItem(0, 64);
-        if (activeInput != null) activeInput.release();
-        activeInput = null;
         be.setChanged();
 
         // Clear pedestal items if any
@@ -414,7 +407,9 @@ public final class ArsImbuementBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@Nonnull ServerPlayer player) {
+    public void cleanup(@Nonnull ServerPlayer player) {
+        if (activeInput != null) activeInput.release();
+        activeInput = null;
         RSIntegrationMod.LOGGER.debug("[RSI-ArsImbuement] Batch finished successfully");
         // Reusable pedestal catalysts are returned by releaseReusableMaterials.
     }

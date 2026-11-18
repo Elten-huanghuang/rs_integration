@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.huanghuang.rsintegration.crafting.batch.MachineOperation;
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
@@ -39,7 +41,6 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import org.mockito.MockedStatic;
-
 import java.io.PrintWriter;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
@@ -55,7 +56,6 @@ import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BooleanSupplier;
-
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.when;
@@ -161,11 +161,11 @@ public final class CraftingTickPerformanceProbe extends BootstrapTest {
                                     delegates.add(delegate);
                                     return delegate;
                                 });
-                        check(group.startOperation(OperationStartContext.delegateExtracted(
+                        check(group.machineOperation().start(OperationStartContext.delegateExtracted(
                                 player, ExtractionLedger.external())));
                         while (group.getRunningOperations() < count) {
                             tick.incrementAndGet();
-                            group.observeCraft(level);
+                            group.machineOperation().observe(level);
                         }
                         if (complete) {
                             for (SlotDelegate delegate : delegates) delegate.output.setItem(0, result.copy());
@@ -328,11 +328,11 @@ public final class CraftingTickPerformanceProbe extends BootstrapTest {
                                     new ResourceLocation("tick_probe", "group"), player, groupSize, false,
                                     BatchConcurrencyCapabilities.machineSlot(), null, groupSize,
                                     machine -> newSlotDelegate());
-                            check(group.startOperation(OperationStartContext.delegateExtracted(
+                            check(group.machineOperation().start(OperationStartContext.delegateExtracted(
                                     player, ExtractionLedger.external())));
                             while (group.getRunningOperations() < groupSize) {
                                 tick.incrementAndGet();
-                                group.observeCraft(player.serverLevel());
+                                group.machineOperation().observe(player.serverLevel());
                             }
                             delegate = group;
                         }
@@ -418,7 +418,9 @@ public final class CraftingTickPerformanceProbe extends BootstrapTest {
         }
     }
 
-    private static final class SlotDelegate implements IBatchDelegate {
+    private static final class SlotDelegate implements IBatchDelegate, MachineOperation {
+        @Override public MachineOperation machineOperation() { return this; }
+
         final SimpleContainer output = new SimpleContainer(1);
 
         @Override
@@ -426,19 +428,20 @@ public final class CraftingTickPerformanceProbe extends BootstrapTest {
                                        ResourceLocation dimension, BlockPos position) { return true; }
 
         @Override
-        public boolean startOperation(OperationStartContext context) { return true; }
+        public boolean start(OperationStartContext context) { return true; }
 
         @Override
-        public boolean isCraftComplete(ServerLevel level) { return !output.isEmpty(); }
+        public CraftObservation observe(ServerLevel level) { return new CraftObservation(!output.isEmpty() ? CraftPhase.DONE : CraftPhase.WORKING); }
+
+        @Override public OperationOutputSource outputSource() {
+            return OperationOutputSource.single(player -> output.removeItemNoUpdate(0), outputContract());
+        }
 
         @Override
-        public ItemStack collectResult(ServerPlayer player) { return output.removeItemNoUpdate(0); }
+        public void recover(ServerPlayer player, String reason) {}
 
         @Override
-        public void onBatchFailed(ServerPlayer player, String reason) {}
-
-        @Override
-        public void onBatchFinished(ServerPlayer player) {}
+        public void cleanup(ServerPlayer player) {}
 
         @Override
         public BlockPos getMachinePos() { return BlockPos.ZERO; }

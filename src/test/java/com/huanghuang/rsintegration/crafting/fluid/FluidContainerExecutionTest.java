@@ -1,9 +1,7 @@
 package com.huanghuang.rsintegration.crafting.fluid;
 
 import java.util.stream.IntStream;
-
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext.ReservedMaterial;
-
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.mods.historystages.HistoryStagesCompat;
 import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
@@ -39,12 +37,10 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
-
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -89,12 +85,12 @@ class FluidContainerExecutionTest extends BootstrapTest {
         assertTrue(startPrepared(delegate, player,
                 List.of(new ItemStack(Items.BUCKET, 3), FluidContainerCatalogTest.token(new FluidStack(Fluids.WATER, 3000))),
                 ExtractionLedger.external()));
-        var results = delegate.collectAllResults(player);
+        var results = delegate.outputSource().collectFinal(player).stacks();
         assertEquals(1, results.size());
         assertTrue(results.get(0).is(Items.WATER_BUCKET));
         assertEquals(3, results.get(0).getCount());
-        assertTrue(delegate.collectAllResults(player).isEmpty());
-        assertTrue(delegate.collectResult(player).isEmpty());
+        assertTrue(delegate.outputSource().collectFinal(player).stacks().isEmpty());
+        assertTrue(delegate.outputSource().collectFinal(player).stacks().isEmpty());
     }
 
     @Test void batchDrainReturnsFluidAndOneEmptyContainerPerInput() throws Exception {
@@ -103,12 +99,12 @@ class FluidContainerExecutionTest extends BootstrapTest {
         GenericBatchDelegate delegate = delegate(recipe, 2);
         assertTrue(startPrepared(delegate, player,
                 List.of(new ItemStack(Items.WATER_BUCKET, 2)), ExtractionLedger.external()));
-        var results = delegate.collectAllResults(player);
+        var results = delegate.outputSource().collectFinal(player).stacks();
         assertEquals(2, results.size());
         assertEquals(2000, InkFluidSupport.fluid(results.get(0)).getAmount());
         assertTrue(results.get(1).is(Items.BUCKET));
         assertEquals(2, results.get(1).getCount());
-        assertTrue(delegate.collectAllResults(player).isEmpty());
+        assertTrue(delegate.outputSource().collectFinal(player).stacks().isEmpty());
     }
 
     @Test void thirdPartyBucketConversionExecutesWithItsOwnEmptyBucket() throws Exception {
@@ -125,7 +121,7 @@ class FluidContainerExecutionTest extends BootstrapTest {
                 List.of(new ItemStack(buckets.empty(), 2),
                         FluidContainerCatalogTest.token(new FluidStack(Fluids.WATER, 2000))),
                 ExtractionLedger.external()));
-        var filled = fillDelegate.collectAllResults(player);
+        var filled = fillDelegate.outputSource().collectFinal(player).stacks();
         assertEquals(1, filled.size());
         assertTrue(filled.get(0).is(buckets.filled()));
         assertEquals(2, filled.get(0).getCount());
@@ -133,12 +129,12 @@ class FluidContainerExecutionTest extends BootstrapTest {
         GenericBatchDelegate drainDelegate = delegate(drain, 2);
         assertTrue(startPrepared(
                 drainDelegate, player, filled, ExtractionLedger.external()));
-        var drained = drainDelegate.collectAllResults(player);
+        var drained = drainDelegate.outputSource().collectFinal(player).stacks();
         assertEquals(2, drained.size());
         assertEquals(2000, InkFluidSupport.fluid(drained.get(0)).getAmount());
         assertTrue(drained.get(1).is(buckets.empty()));
         assertEquals(2, drained.get(1).getCount());
-        assertTrue(drainDelegate.collectAllResults(player).isEmpty());
+        assertTrue(drainDelegate.outputSource().collectFinal(player).stacks().isEmpty());
     }
 
     @Test void bucketSubclassWithoutCapabilitiesCanFillAndDrainInBatch() throws Exception {
@@ -154,7 +150,7 @@ class FluidContainerExecutionTest extends BootstrapTest {
         assertTrue(startPrepared(fillDelegate, player,
                 List.of(new ItemStack(Items.BUCKET, 2), FluidContainerCatalogTest.token(
                         new FluidStack(((BucketItem) buckets.filled()).getFluid(), 2000))), ExtractionLedger.external()));
-        var filled = fillDelegate.collectAllResults(player);
+        var filled = fillDelegate.outputSource().collectFinal(player).stacks();
         assertEquals(1, filled.size());
         assertTrue(filled.get(0).is(buckets.filled()));
         assertEquals(2, filled.get(0).getCount());
@@ -162,13 +158,13 @@ class FluidContainerExecutionTest extends BootstrapTest {
         GenericBatchDelegate drainDelegate = delegate(drain, 2);
         assertTrue(startPrepared(
                 drainDelegate, player, filled, ExtractionLedger.external()));
-        var drained = drainDelegate.collectAllResults(player);
+        var drained = drainDelegate.outputSource().collectFinal(player).stacks();
         assertEquals(2, drained.size());
         assertEquals(2000, InkFluidSupport.fluid(drained.get(0)).getAmount());
         assertEquals(((BucketItem) buckets.filled()).getFluid(), InkFluidSupport.fluid(drained.get(0)).getFluid());
         assertTrue(drained.get(1).is(Items.BUCKET));
         assertEquals(2, drained.get(1).getCount());
-        assertTrue(drainDelegate.collectAllResults(player).isEmpty());
+        assertTrue(drainDelegate.outputSource().collectFinal(player).stacks().isEmpty());
     }
 
     @Test void singleDrainExtractsTheFilledBucketAndReturnsItsEmptyContainerOnce() throws Exception {
@@ -187,15 +183,15 @@ class FluidContainerExecutionTest extends BootstrapTest {
                 StorageOperationResult.extracted(StorageOperationMode.PERFORM, 1, List.of(bucket)));
         GenericBatchDelegate delegate = delegate(recipe, 1);
         delegate.setStorageEndpoint(() -> session);
-        assertTrue(delegate.startOperation(
+        assertTrue(delegate.machineOperation().start(
                 OperationStartContext.delegateExtracted(
                         player, ExtractionLedger.external())));
-        var results = delegate.collectAllResults(player);
+        var results = delegate.outputSource().collectFinal(player).stacks();
         assertEquals(2, results.size());
         assertEquals(1000, InkFluidSupport.fluid(results.get(0)).getAmount());
         assertTrue(results.get(1).is(Items.BUCKET));
         assertEquals(1, results.get(1).getCount());
-        assertTrue(delegate.collectAllResults(player).isEmpty());
+        assertTrue(delegate.outputSource().collectFinal(player).stacks().isEmpty());
         verify(session, times(1)).extractMatching(player, recipe.specs().get(0).ingredient(), 1, false);
     }
 
@@ -212,7 +208,7 @@ class FluidContainerExecutionTest extends BootstrapTest {
             ServerPlayer player = player();
             assertFalse(startPrepared(
                     delegate, player, materials, ExtractionLedger.external()));
-            assertTrue(delegate.collectAllResults(player).isEmpty());
+            assertTrue(delegate.outputSource().collectFinal(player).stacks().isEmpty());
         }
     }
 
@@ -264,7 +260,7 @@ class FluidContainerExecutionTest extends BootstrapTest {
         delegate.setStorageEndpoint(() -> session);
         assertTrue(startPrepared(
                 delegate, player, List.of(new ItemStack(Items.WATER_BUCKET)), ledger));
-        delegate.onBatchFailed(player, "cancelled");
+        delegate.machineOperation().recover(player, "cancelled");
         // 逻辑转换没有物理产物；终止后由链退款，代理不能私自插入产物。
         verifyNoInteractions(session);
         assertEquals(ExtractionLedger.State.IDLE, ledger.state());
@@ -333,7 +329,7 @@ class FluidContainerExecutionTest extends BootstrapTest {
             List<ItemStack> materials,
             ExtractionLedger ledger
     ) {
-        return delegate.startOperation(OperationStartContext.chainReserved(
+        return delegate.machineOperation().start(OperationStartContext.chainReserved(
                 player, ledger, delegate.materialPlan(), IntStream.range(0, materials.size())
                         .mapToObj(i -> new ReservedMaterial("slot:" + i, materials.get(i))).toList(), null));
     }

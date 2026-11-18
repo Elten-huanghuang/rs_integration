@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mods.apotheosis;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -25,7 +25,6 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.registries.ForgeRegistries;
 import org.jetbrains.annotations.NotNull;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -256,18 +255,11 @@ public final class ApotheosisFletchingBatchDelegate extends InstantBatchDelegate
         return craftDone ? doneObservation() : workingObservation();
     }
 
-    @Nonnull
-    @Override
-    public ItemStack collectResult(@Nonnull ServerPlayer player) {
-        if (cachedResults.isEmpty()) return ItemStack.EMPTY;
-        ItemStack result = cachedResults.remove(0).copy();
-        craftDone = false;
-        return result;
+    @Override public OperationOutputSource outputSource() {
+        return player -> OperationOutputSource.Handoff.physical(takeResults(player), outputContract());
     }
 
-    @Nonnull
-    @Override
-    public List<ItemStack> collectAllResults(@Nonnull ServerPlayer player) {
+    private List<ItemStack> takeResults(@Nonnull ServerPlayer player) {
         List<ItemStack> results = cachedResults.stream().map(ItemStack::copy).toList();
         cachedResults.clear();
         craftDone = false;
@@ -278,10 +270,8 @@ public final class ApotheosisFletchingBatchDelegate extends InstantBatchDelegate
         return results;
     }
 
-    @Override
-    public boolean collectsPhysicalSecondaryOutputs() {
-        return true;
-    }
+
+
 
     @Nullable
     @Override
@@ -302,7 +292,7 @@ public final class ApotheosisFletchingBatchDelegate extends InstantBatchDelegate
     }
 
     @Override
-    public void onBatchFinished(@NotNull ServerPlayer player) {
+    public void cleanup(@NotNull ServerPlayer player) {
         clearMenu();
         cachedResults.clear();
         craftDone = false;

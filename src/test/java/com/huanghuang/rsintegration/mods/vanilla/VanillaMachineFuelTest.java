@@ -1,16 +1,14 @@
 package com.huanghuang.rsintegration.mods.vanilla;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationLifecycle;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext.ReservedMaterial;
-
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.TaskOutputReception;
-import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate.CraftPhase;
-import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+import com.huanghuang.rsintegration.crafting.batch.MachineOperation.CraftPhase;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
-import com.huanghuang.rsintegration.crafting.batch.OperationPoll;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.storage.rs.RefinedStorageOutputReception;
@@ -48,11 +46,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.MockedStatic;
-
 import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -157,8 +153,8 @@ class VanillaMachineFuelTest extends BootstrapTest {
         observe(1);
         assertTrue(furnace.getItem(1).isEmpty());
         furnace.setItem(2, ItemStack.EMPTY);
-        delegate.observeCraft(level);
-        delegate.observeCraft(level);
+        delegate.machineOperation().observe(level);
+        delegate.machineOperation().observe(level);
         assertTrue(furnace.getItem(1).isEmpty(), "单独观察不应取煤");
         observe(2);
         assertTrue(furnace.getItem(1).is(Items.COAL));
@@ -174,14 +170,14 @@ class VanillaMachineFuelTest extends BootstrapTest {
         furnace.setItem(1, ItemStack.EMPTY);
         clearInvocations(endpoint);
         when(level.hasChunkAt(POS)).thenReturn(false);
-        delegate.advanceCraft(level);
+        delegate.machineOperation().advance(level);
         assertTrue(furnace.getItem(1).isEmpty());
         var replacement = new TestFurnace();
         replacement.setLevel(level);
         replacement.setItem(0, new ItemStack(Items.IRON_ORE));
         when(level.hasChunkAt(POS)).thenReturn(true);
         when(level.getBlockEntity(POS)).thenReturn(replacement);
-        delegate.advanceCraft(level);
+        delegate.machineOperation().advance(level);
         assertTrue(replacement.getItem(1).isEmpty());
         assertTrue(furnace.getItem(1).isEmpty());
         verifyNoInteractions(endpoint);
@@ -244,8 +240,8 @@ class VanillaMachineFuelTest extends BootstrapTest {
     void collectedOutputNeedsConsumedInputAndIdleTimerOnDifferentTicks() throws Exception {
         stock(64);
         try (var session = TaskOutputReception.open()) {
-            delegate.setOutputReception(session);
-            assertTrue(delegate.supportsOutputReception());
+            delegate.bindProduction(session.writer());
+            assertTrue(delegate.acceptsFixedOutput());
             assertTrue(start(11));
             assertEquals(11, session.current().remaining("vanilla:primary"));
             furnace.setItem(2, new ItemStack(Items.IRON_INGOT, 11));
@@ -264,9 +260,9 @@ class VanillaMachineFuelTest extends BootstrapTest {
             assertEquals(CraftPhase.WORKING, observe(3));
             assertEquals(CraftPhase.WORKING, observe(3));
             assertEquals(CraftPhase.DONE, observe(4));
-            assertTrue(delegate.collectStructuredResults(player).isEmpty());
-            assertEquals(11, delegate.drainReceivedOutputs().get(0).getCount());
-            assertTrue(delegate.drainReceivedOutputs().isEmpty());
+            assertTrue(delegate.outputSource().collectFinal(player).ports().isEmpty());
+            assertEquals(11, session.drainStacks().get(0).getCount());
+            assertTrue(session.drainStacks().isEmpty());
         }
     }
 
@@ -275,7 +271,7 @@ class VanillaMachineFuelTest extends BootstrapTest {
         stock(64);
         delegate.prepareGraphBatch(64);
         try (var session = TaskOutputReception.open()) {
-            delegate.setOutputReception(session);
+            delegate.bindProduction(session.writer());
             assertTrue(start(11));
             assertEquals(11, session.current().remaining("vanilla:primary"));
             furnace.setItem(2, new ItemStack(Items.IRON_INGOT, 5));
@@ -285,12 +281,12 @@ class VanillaMachineFuelTest extends BootstrapTest {
             assertTrue(furnace.getItem(2).isEmpty());
             assertEquals(11, session.current().received("vanilla:primary"));
             assertEquals(0, session.current().remaining("vanilla:primary"));
-            assertEquals(11, delegate.drainReceivedOutputs().get(0).getCount());
+            assertEquals(11, session.drainStacks().get(0).getCount());
             furnace.setItem(0, ItemStack.EMPTY);
             assertEquals(CraftPhase.WORKING, observe(3));
             assertEquals(CraftPhase.DONE, observe(4));
-            assertTrue(delegate.collectAllResults(player).isEmpty());
-            assertTrue(delegate.drainReceivedOutputs().isEmpty());
+            assertTrue(delegate.outputSource().collectFinal(player).stacks().isEmpty());
+            assertTrue(session.drainStacks().isEmpty());
         }
     }
 
@@ -298,14 +294,14 @@ class VanillaMachineFuelTest extends BootstrapTest {
     void consumedInputWithoutDeliveryStillWaitsAndLateOutputIsCollected() {
         stock(64);
         try (var session = TaskOutputReception.open()) {
-            delegate.setOutputReception(session);
+            delegate.bindProduction(session.writer());
             assertTrue(start(2));
             furnace.setItem(0, ItemStack.EMPTY);
             assertEquals(CraftPhase.WORKING, observe(1));
             assertEquals(CraftPhase.WORKING, observe(2));
             furnace.setItem(2, new ItemStack(Items.IRON_INGOT, 2));
             assertEquals(CraftPhase.DONE, observe(3));
-            assertEquals(2, delegate.drainReceivedOutputs().get(0).getCount());
+            assertEquals(2, session.drainStacks().get(0).getCount());
         }
     }
 
@@ -313,13 +309,13 @@ class VanillaMachineFuelTest extends BootstrapTest {
     void actualOutputBeyondTheDeclarationIsNotDiscarded() {
         stock(64);
         try (var session = TaskOutputReception.open()) {
-            delegate.setOutputReception(session);
+            delegate.bindProduction(session.writer());
             assertTrue(start(2));
             furnace.setItem(0, ItemStack.EMPTY);
             furnace.setItem(2, new ItemStack(Items.IRON_INGOT, 4));
             assertEquals(CraftPhase.WORKING, observe(1));
             assertEquals(CraftPhase.DONE, observe(2));
-            assertEquals(4, delegate.drainReceivedOutputs().get(0).getCount());
+            assertEquals(4, session.drainStacks().get(0).getCount());
         }
     }
 
@@ -327,7 +323,7 @@ class VanillaMachineFuelTest extends BootstrapTest {
     void preparedReceptionSurvivesSynchronousDeliveryAndFailedFuelAdmission() {
         stock(0);
         try (var session = TaskOutputReception.open()) {
-            delegate.setOutputReception(session);
+            delegate.bindProduction(session.writer());
             furnace.onInputInserted = () -> {
                 assertNotNull(session.current());
                 assertFalse(session.current().complete());
@@ -339,11 +335,11 @@ class VanillaMachineFuelTest extends BootstrapTest {
             var context = OperationStartContext.chainReserved(player, mock(ExtractionLedger.class),
                     delegate.materialPlan(),
                     List.of(new ReservedMaterial("slot:0", new ItemStack(Items.IRON_ORE, 2))), plan);
-            assertFalse(delegate.startOperation(context));
+            assertFalse(new OperationLifecycle(delegate, session).start(context));
             assertTrue(session.closed());
             assertTrue(furnace.getItem(0).isEmpty());
-            assertEquals(2, delegate.drainReceivedOutputs().get(0).getCount());
-            assertTrue(delegate.drainReceivedOutputs().isEmpty());
+            assertEquals(2, session.drainStacks().get(0).getCount());
+            assertTrue(session.drainStacks().isEmpty());
         }
     }
 
@@ -351,17 +347,17 @@ class VanillaMachineFuelTest extends BootstrapTest {
     void cancellationPreservesAlreadyReceivedResourcesAndRecoversOwnedInput() {
         stock(64);
         try (var session = TaskOutputReception.open()) {
-            delegate.setOutputReception(session);
+            delegate.bindProduction(session.writer());
             assertTrue(start(3));
             furnace.setItem(0, new ItemStack(Items.IRON_ORE, 2));
             furnace.setItem(2, new ItemStack(Items.IRON_INGOT));
             assertEquals(CraftPhase.WORKING, observe(1));
-            delegate.onBatchFailed(player, "cancelled");
+            new OperationLifecycle(delegate, session).recover(player, "cancelled");
             assertTrue(session.closed());
             assertTrue(furnace.getItem(0).isEmpty());
             assertEquals(2, delegate.failureRecoveredInputs().get(0).getCount());
-            assertEquals(1, delegate.drainReceivedOutputs().get(0).getCount());
-            assertTrue(delegate.drainReceivedOutputs().isEmpty());
+            assertEquals(1, session.drainStacks().get(0).getCount());
+            assertTrue(session.drainStacks().isEmpty());
         }
     }
 
@@ -369,14 +365,14 @@ class VanillaMachineFuelTest extends BootstrapTest {
     void differentNbtAndAReplacedMachineCannotCompleteTheBatch() {
         stock(64);
         try (var session = TaskOutputReception.open()) {
-            delegate.setOutputReception(session);
+            delegate.bindProduction(session.writer());
             assertTrue(start(1));
             ItemStack tagged = new ItemStack(Items.IRON_INGOT);
             tagged.getOrCreateTag().putString("owner", "other");
             furnace.setItem(2, tagged);
             assertEquals(CraftPhase.FAILED, observe(1));
             assertEquals(1, furnace.getItem(2).getCount());
-            assertTrue(delegate.drainReceivedOutputs().isEmpty());
+            assertTrue(session.drainStacks().isEmpty());
             assertEquals(CraftPhase.FAILED,
                     delegate.observeMachineCraft(level, new TestFurnace()).phase());
         }
@@ -389,29 +385,28 @@ class VanillaMachineFuelTest extends BootstrapTest {
         furnace.setItem(0, ItemStack.EMPTY);
         furnace.setItem(2, new ItemStack(Items.IRON_INGOT, 2));
         assertEquals(CraftPhase.DONE, observe(1));
-        assertEquals(2, delegate.collectResult(player).getCount());
+        assertEquals(2, delegate.outputSource().collectFinal(player).stacks().get(0).getCount());
         assertTrue(furnace.getItem(2).isEmpty());
-        assertTrue(delegate.drainReceivedOutputs().isEmpty());
     }
 
     @Test
     void virtualMachinesAndMachinesWithoutTimerAreNotOptedIn() throws Exception {
-        assertTrue(delegate.supportsOutputReception());
+        assertTrue(delegate.acceptsFixedOutput());
         setField("furnaceBE", new FurnaceBlockEntity(POS, Blocks.FURNACE.defaultBlockState()));
-        assertFalse(delegate.supportsOutputReception());
+        assertFalse(delegate.acceptsFixedOutput());
         setField("furnaceBE", furnace);
         Field kind = VanillaMachineBatchDelegate.class.getDeclaredField("kind");
         kind.setAccessible(true);
         for (Object value : kind.getType().getEnumConstants()) {
             if (((Enum<?>) value).name().equals("FURNACE")) continue;
             kind.set(delegate, value);
-            assertFalse(delegate.supportsOutputReception());
+            assertFalse(delegate.acceptsFixedOutput());
         }
     }
 
     private CraftPhase observe(long tick) {
         when(level.getGameTime()).thenReturn(tick);
-        return OperationPoll.poll(delegate, level).phase();
+        return new OperationLifecycle(delegate).poll(level).phase();
     }
 
     @Test
@@ -420,13 +415,13 @@ class VanillaMachineFuelTest extends BootstrapTest {
         Object network = new Object();
         try (var session = TaskOutputReception.open()) {
             session.bindNetwork(network, () -> true);
-            delegate.setOutputReception(session);
+            delegate.bindProduction(session.writer());
             assertTrue(start(4));
             furnace.setItem(2, new ItemStack(Items.IRON_INGOT, 2));
             assertEquals(CraftPhase.WORKING, delegate.observeMachineCraft(level, furnace).phase());
             assertEquals(2, furnace.getItem(2).getCount());
             assertEquals(0, session.current().received("vanilla:primary"));
-            delegate.transferOutputs(level);
+            delegate.outputSource().transferAvailable(level);
             assertTrue(furnace.getItem(2).isEmpty());
             assertEquals(2, TaskOutputReception.receive(network, TaskOutputReception.resource(
                     new ItemStack(Items.IRON_INGOT)), 3, false));
@@ -436,8 +431,8 @@ class VanillaMachineFuelTest extends BootstrapTest {
             furnace.setItem(0, ItemStack.EMPTY);
             assertEquals(CraftPhase.WORKING, observe(3));
             assertEquals(CraftPhase.DONE, observe(4));
-            assertTrue(delegate.collectAllResults(player).isEmpty());
-            assertTrue(delegate.drainReceivedOutputs().isEmpty());
+            assertTrue(delegate.outputSource().collectFinal(player).stacks().isEmpty());
+            assertTrue(session.drainStacks().isEmpty());
         }
     }
 
@@ -463,34 +458,36 @@ class VanillaMachineFuelTest extends BootstrapTest {
                 RefinedStorageOutputReception.insertItem(network, call.getArgument(0), call.getArgument(1),
                         call.getArgument(2), (stack, count) -> stack.copyWithCount(count)));
         var plan = delegate.inputBufferPlan(4);
-        assertTrue(delegate.startOperation(OperationStartContext.chainReserved(player, mock(ExtractionLedger.class),
+        try (var session = TaskOutputReception.open()) {
+            var operation = new OperationLifecycle(delegate, session);
+            assertTrue(operation.start(OperationStartContext.chainReserved(player, mock(ExtractionLedger.class),
                 delegate.materialPlan(),
                 List.of(new ReservedMaterial("slot:0", new ItemStack(Items.IRON_ORE, 4))), plan)));
-        try (var session = delegate.outputReception()) {
+
             ItemStack iron = new ItemStack(Items.IRON_INGOT);
             assertEquals(1, network.insertItem(iron, 5, Action.SIMULATE).getCount());
             assertEquals(0, session.received(TaskOutputReception.resource(iron)));
             furnace.setItem(2, iron.copyWithCount(2));
-            assertEquals(CraftPhase.WORKING, delegate.observeCraft(level).phase());
+            assertEquals(CraftPhase.WORKING, delegate.machineOperation().observe(level).phase());
             assertEquals(2, furnace.getItem(2).getCount());
-            delegate.transferOutputs(level);
-            delegate.transferOutputs(level);
+            delegate.outputSource().transferAvailable(level);
+            delegate.outputSource().transferAvailable(level);
             assertEquals(2, session.received(TaskOutputReception.resource(iron)));
             assertEquals(1, network.insertItem(iron, 3, Action.PERFORM).getCount());
             assertEquals(CraftPhase.WORKING, observe(1));
             furnace.setItem(0, ItemStack.EMPTY);
             assertEquals(CraftPhase.WORKING, observe(2));
             assertEquals(CraftPhase.DONE, observe(3));
-            assertTrue(delegate.collectAllResults(player).isEmpty());
-            assertEquals(4, delegate.drainReceivedOutputs().get(0).getCount());
+            assertTrue(delegate.outputSource().collectFinal(player).stacks().isEmpty());
+            assertEquals(4, session.drainStacks().get(0).getCount());
             // 已关闭批次不能在重复结算时移走后来放入机器的物品。
             furnace.setItem(2, iron.copy());
-            assertTrue(delegate.collectAllResults(player).isEmpty());
-            delegate.transferOutputs(level);
+            assertTrue(delegate.outputSource().collectFinal(player).stacks().isEmpty());
+            delegate.outputSource().transferAvailable(level);
             assertEquals(1, furnace.getItem(2).getCount());
-            assertTrue(delegate.drainReceivedOutputs().isEmpty());
+            assertTrue(session.drainStacks().isEmpty());
             assertEquals(2, network.insertItem(iron, 2, Action.PERFORM).getCount());
-            delegate.onBatchFinished(player);
+            operation.cleanup(player);
             assertTrue(session.closed());
         }
     }

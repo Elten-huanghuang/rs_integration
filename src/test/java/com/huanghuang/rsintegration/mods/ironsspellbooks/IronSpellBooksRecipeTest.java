@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mods.ironsspellbooks;
 
+import com.huanghuang.rsintegration.crafting.batch.ProductionEvidence;
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceLocation;
@@ -11,11 +12,9 @@ import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.items.ItemStackHandler;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import org.junit.jupiter.api.Test;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.lang.reflect.Method;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -123,14 +122,14 @@ class IronSpellBooksRecipeTest extends BootstrapTest {
         record.setAccessible(true);
 
         record.invoke(delegate, ink);
-        var observed = delegate.drainObservedProduction();
+        var observed = ProductionEvidence.from(delegate).takeObserved();
 
         assertEquals(1, observed.size());
         assertEquals(
                 IntegrationResourceKey.ResourceKind.FLUID,
                 observed.get(0).resource().kind());
         assertEquals(250L, observed.get(0).amount());
-        assertTrue(delegate.drainObservedProduction().isEmpty());
+        assertTrue(ProductionEvidence.from(delegate).takeObserved().isEmpty());
     }
 
     @Test

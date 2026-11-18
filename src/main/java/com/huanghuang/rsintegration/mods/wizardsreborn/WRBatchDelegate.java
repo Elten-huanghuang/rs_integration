@@ -1,10 +1,9 @@
 package com.huanghuang.rsintegration.mods.wizardsreborn;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.util.CuriosAccess;
 import java.util.HashMap;
@@ -15,49 +14,39 @@ import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.SimpleContainer;
 import net.minecraftforge.common.crafting.StrictNBTIngredient;
-
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
-
+import com.huanghuang.rsintegration.crafting.batch.DrivenMachineDelegate;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.reflection.probes.WRReflection;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.mixin.wizardsreborn.ArcaneWorkbenchBlockEntityAccessor;
 import com.huanghuang.rsintegration.mixin.wizardsreborn.ArcaneIteratorBlockEntityAccessor;
 import com.huanghuang.rsintegration.mixin.wizardsreborn.CrystalBlockEntityAccessor;
 import com.huanghuang.rsintegration.mixin.wizardsreborn.WissenCrystallizerBlockEntityAccessor;
-import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.mods.wizardsreborn.WRRecipeHandler;
 import com.huanghuang.rsintegration.util.Reflect;
-import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
 import net.minecraftforge.items.ItemStackHandler;
 import org.jetbrains.annotations.NotNull;
-
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
 /** Batch delegate for Wizard's Reborn machines (Crystallizer, Workbench, Iterator, Crystal Ritual). */
-public final class WRBatchDelegate extends AbstractBatchDelegate {
+public final class WRBatchDelegate extends DrivenMachineDelegate {
 
     enum MachineType {
         WISSEN_CRYSTALLIZER,
@@ -725,7 +714,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         }
         if (!ok) {
             ledger = null;
-            // Keep network alive so onBatchFailed can return items to RS
+            // Keep network alive so recover can return items to RS
         }
         return ok;
     }
@@ -1552,7 +1541,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
+    protected boolean advanceNativeCycle(ServerLevel level, BlockEntity be) {
         if (!craftStarted) return false;
         waitTicks++;
         if (waitTicks > MAX_WAIT_TICKS) return true; // timeout
@@ -1732,8 +1721,11 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         return false;
     }
 
-    @Override
-    public ItemStack collectResult(ServerPlayer player) {
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.single(this::takeResult, outputContract());
+    }
+
+    private ItemStack takeResult(ServerPlayer player) {
         // First try to read output from machine slots
         ItemStack fromMachine = ItemStack.EMPTY;
         switch (machineType) {
@@ -1992,7 +1984,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@NotNull ServerPlayer player) {
+    public void cleanup(@NotNull ServerPlayer player) {
         // Success path. The chain does ledger.reset() (no refund), so any item
         // still on the machine is real and uncounted → always return it. Normally
         // inputs were consumed and the output was already taken by collectResult,
@@ -2035,7 +2027,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
     // clear must physically RETURN the machine contents to RS, or merely VOID
     // them, depends on who else refunds the committed ledger:
     //
-    //   • Success (onBatchFinished): the chain does ledger.reset() (no refund),
+    //   • Success (cleanup): the chain does ledger.reset() (no refund),
     //     so any item still on the machine is real and uncounted → RETURN it.
     //   • Abort, shared ledger (usingSharedLedger): the chain's abort() calls
     //     ledger.refundCommitted(), which re-inserts every committed template.

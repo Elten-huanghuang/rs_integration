@@ -1,35 +1,28 @@
 package com.huanghuang.rsintegration.mods.distantworlds;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.reflection.probes.DistantWorldsReflection;
-import com.huanghuang.rsintegration.util.ChunkUtils;
-import com.huanghuang.rsintegration.util.Reflect;
 import net.minecraft.core.BlockPos;
-import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
 import net.minecraft.world.Containers;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.LevelAccessor;
 import net.minecraftforge.registries.ForgeRegistries;
-
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -49,7 +42,6 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
     private boolean staffFromOffhand;
     private boolean staffFromNetwork;
     private ItemStack networkStaff = ItemStack.EMPTY;
-    private ItemStack pendingResult = ItemStack.EMPTY;
     private int clearedRecipeTicks;
     private final LithumAltarFuelHelper fuelHelper = new LithumAltarFuelHelper();
 
@@ -59,7 +51,6 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
         this.player = player;
         this.pos = pos;
         this.started = false;
-        this.pendingResult = ItemStack.EMPTY;
         this.clearedRecipeTicks = 0;
         this.ownedSlots.clear();
         this.definition = LithumAltarRecipeResolver.resolve(recipeId);
@@ -363,21 +354,11 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
             if (!definition.currentRecipe().equals(current)) {
                 return failObservation("Lithum Altar recipe ownership changed");
             }
-            if (RSIntegrationConfig.ALLOW_DISTANT_WORLDS_FUEL_AUTOMATION.get()) {
-                LithumAltarStateReader.Snapshot snapshot = LithumAltarStateReader.read(level, pos);
-                if (snapshot != null && snapshot.maxEnergy() > 0
-                        && snapshot.currentEnergy() < snapshot.maxEnergy()
-                        && !fuelHelper.ensureFuel(materialAccess(), level, storageEndpoint(), player)) {
-                    warnOnce("fuel", "[RSI-DW] No Lithum Furnace fuel available for altar at {}", pos);
-                }
-            }
             phase = CraftPhase.WORKING;
             return new CraftObservation(phase);
         }
         ItemStack output = getSlot(be, 0);
         if (IBatchDelegate.matchesProducedItem(output, definition.output())) {
-            pendingResult = output.copy();
-            setSlot(be, 0, ItemStack.EMPTY);
             phase = CraftPhase.DONE;
             return new CraftObservation(phase);
         }
@@ -386,12 +367,23 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
             return new CraftObservation(phase);
         }
         if (wereOwnedMaterialsConsumed()) {
-            pendingResult = definition.output().copy();
             phase = CraftPhase.DONE;
             return new CraftObservation(phase,
-                    "Lithum Altar consumed all inputs but exposed no output stack; recovered deterministic recipe output");
+                    "Lithum Altar consumed all inputs but exposed no output stack");
         }
         return failObservation("Lithum Altar cleared CurrentRecipe without the expected output");
+    }
+
+    @Override public void advance(ServerLevel current) {
+        if (!started || level == null || !level.hasChunkAt(pos)
+                || !RSIntegrationConfig.ALLOW_DISTANT_WORLDS_FUEL_AUTOMATION.get()) return;
+        var machine = level.getBlockEntity(pos);
+        if (machine == null || !definition.currentRecipe().equals(machine.getPersistentData().getString("CurrentRecipe"))) return;
+        var snapshot = LithumAltarStateReader.read(level, pos);
+        if (snapshot != null && snapshot.maxEnergy() > snapshot.currentEnergy()
+                && !fuelHelper.ensureFuel(materialAccess(), level, storageEndpoint(), player)) {
+            warnOnce("fuel", "[RSI-DW] No Lithum Furnace fuel available for altar at {}", pos);
+        }
     }
 
     private boolean wereOwnedMaterialsConsumed() {
@@ -419,18 +411,15 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
     @Override
     protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
         if (!started) return false;
-        if (IBatchDelegate.matchesProducedItem(pendingResult, definition.output())) return true;
         String current = be.getPersistentData().getString("CurrentRecipe");
         return current.isEmpty() && IBatchDelegate.matchesProducedItem(getSlot(be, 0), definition.output());
     }
 
-    @Override
-    public ItemStack collectResult(ServerPlayer player) {
-        if (IBatchDelegate.matchesProducedItem(pendingResult, definition.output())) {
-            ItemStack result = pendingResult.copy();
-            pendingResult = ItemStack.EMPTY;
-            return result;
-        }
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.single(this::takeResult, outputContract());
+    }
+
+    private ItemStack takeResult(ServerPlayer player) {
         BlockEntity be = level == null ? null : level.getBlockEntity(pos);
         if (be == null) return ItemStack.EMPTY;
         ItemStack result = getSlot(be, 0).copy();
@@ -447,10 +436,9 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(ServerPlayer player) {
+    public void cleanup(ServerPlayer player) {
         fuelHelper.refundUnused(materialAccess(), level, storageEndpoint(), player);
         releaseNetworkStaff();
-        pendingResult = ItemStack.EMPTY;
         clearedRecipeTicks = 0;
         ownedSlots.clear();
         resetState();

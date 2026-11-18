@@ -1,9 +1,7 @@
 package com.huanghuang.rsintegration.mods.arsnouveau;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
-import java.lang.reflect.Field;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -12,7 +10,6 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.OperationInputRecovery;
 import com.huanghuang.rsintegration.crafting.batch.OperationInputRecovery.Input;
-import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.util.Reflect;
 import net.minecraft.core.BlockPos;
@@ -27,7 +24,6 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -324,7 +320,7 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
         }
 
         if (!craftStarted) {
-            return observePendingStart(level, be);
+            return pendingStartState;
         }
 
         // Check timeout
@@ -367,7 +363,20 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
         return workingObservation();
     }
 
-    private CraftObservation observePendingStart(ServerLevel level, BlockEntity be) {
+    private CraftObservation pendingStartState = new CraftObservation(CraftPhase.WORKING);
+
+    @Override public void advance(ServerLevel current) {
+        if (craftStarted) return;
+        ServerLevel level = resolveMachineLevel(current);
+        BlockPos pos = getMachinePos();
+        if (pos == null || level == null || !level.hasChunkAt(pos)) return;
+        BlockEntity be = level.getBlockEntity(pos);
+        if (be != null && !be.isRemoved() && ArsTileAccess.isApparatus(be)) {
+            pendingStartState = retryPendingStart(level, be);
+        }
+    }
+
+    private CraftObservation retryPendingStart(ServerLevel level, BlockEntity be) {
         if (ArsTileAccess.isApparatusCrafting(be)) {
             markNativeCraftStarted(level);
             return workingObservation();
@@ -432,9 +441,11 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
         return false;
     }
 
-    @Nonnull
-    @Override
-    public ItemStack collectResult(@Nonnull ServerPlayer player) {
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.single(this::takeResult, outputContract());
+    }
+
+    private ItemStack takeResult(@Nonnull ServerPlayer player) {
         ServerLevel level = getLevel();
         if (level == null) return ItemStack.EMPTY;
 
@@ -445,8 +456,6 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
 
         // Remove result from central slot
         ItemStack result = container.removeItem(0, 64);
-        if (activeReagent != null) activeReagent.release();
-        activeReagent = null;
         be.setChanged();
 
         // Collect any remaining items from pedestals (container remainders)
@@ -489,9 +498,10 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@Nonnull ServerPlayer player) {
+    public void cleanup(@Nonnull ServerPlayer player) {
+        if (activeReagent != null) activeReagent.release();
+        activeReagent = null;
         RSIntegrationMod.LOGGER.debug("[RSI-ArsApparatus] Batch finished successfully");
-        // Cleanup done in collectResult
     }
 
     @Nonnull

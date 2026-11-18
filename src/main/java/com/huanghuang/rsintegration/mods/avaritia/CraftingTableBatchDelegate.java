@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mods.avaritia;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -23,12 +23,10 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.common.util.LazyOptional;
 import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
-import net.minecraftforge.items.ItemStackHandler;
 import net.minecraftforge.registries.ForgeRegistries;
 import org.jetbrains.annotations.NotNull;
 import java.util.Locale;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
-
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -253,8 +251,11 @@ public final class CraftingTableBatchDelegate extends InstantBatchDelegate {
         return craftDone;
     }
 
-    @Override
-    public ItemStack collectResult(ServerPlayer player) {
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.single(this::takeResult, outputContract());
+    }
+
+    private ItemStack takeResult(ServerPlayer player) {
         craftDone = false;
         ItemStack r = cachedResult.copy();
         cachedResult = ItemStack.EMPTY;
@@ -270,7 +271,7 @@ public final class CraftingTableBatchDelegate extends InstantBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@NotNull ServerPlayer player) {
+    public void cleanup(@NotNull ServerPlayer player) {
         forceChunkLoad(false);
         cachedResult = ItemStack.EMPTY;
         craftDone = false;

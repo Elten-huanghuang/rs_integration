@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mods.ironsspellbooks;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -9,7 +9,6 @@ import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.InstantBatchDelegate;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.mods.common.IdleInventoryEvacuator;
-import com.refinedmods.refinedstorage.api.util.Action;
 import io.redspace.ironsspellbooks.api.registry.SpellRegistry;
 import io.redspace.ironsspellbooks.api.registry.SchoolRegistry;
 import io.redspace.ironsspellbooks.api.spells.AbstractSpell;
@@ -28,7 +27,6 @@ import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
 import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraft.world.item.crafting.Ingredient;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -307,13 +305,10 @@ public final class IronSpellBooksBatchDelegate extends InstantBatchDelegate {
     @Override protected CraftObservation observeMissingMachineCraft(@Nonnull ServerLevel level, @Nonnull BlockPos pos) {
         return done ? doneObservation() : workingObservation();
     }
-    @Override public ItemStack collectResult(@Nonnull ServerPlayer player) {
-        if (results.isEmpty()) return ItemStack.EMPTY;
-        ItemStack out = results.remove(0).copy();
-        done = results.isEmpty();
-        return out;
+    @Override public OperationOutputSource outputSource() {
+        return player -> OperationOutputSource.Handoff.physical(takeResults(player), outputContract());
     }
-    @Override public List<ItemStack> collectAllResults(@Nonnull ServerPlayer player) {
+    private List<ItemStack> takeResults(@Nonnull ServerPlayer player) {
         List<ItemStack> output = results.stream().map(ItemStack::copy).toList();
         results.clear();
         done = false;
@@ -327,7 +322,7 @@ public final class IronSpellBooksBatchDelegate extends InstantBatchDelegate {
     @Override protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         clearMenu(); results.clear(); done = false; resetInstantBatch(); resetState();
     }
-    @Override public void onBatchFinished(@Nullable ServerPlayer player) {
+    @Override public void cleanup(@Nullable ServerPlayer player) {
         clearMenu(); results.clear(); done = false; resetInstantBatch(); resetState();
     }
     @Override public BlockPos getMachinePos() { return pos; }

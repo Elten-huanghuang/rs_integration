@@ -1,5 +1,8 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationLifecycle;
+import com.huanghuang.rsintegration.crafting.batch.MachineOperation;
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
@@ -30,7 +33,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.MockedStatic;
-
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -39,7 +41,6 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicInteger;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -50,6 +51,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -127,8 +129,8 @@ class AsyncCraftChainCaptureTest extends BootstrapTest {
     void flatMachineWorkRenewsTimeoutButRepeatedOrRegressedProgressDoesNot() throws Exception {
         Fixture fixture = fixture();
         AtomicLong work = new AtomicLong();
-        when(fixture.delegate.observeCraft(fixture.player.serverLevel())).thenAnswer(call ->
-                new IBatchDelegate.CraftObservation(IBatchDelegate.CraftPhase.WORKING)
+        when(fixture.delegate.machineOperation().observe(fixture.player.serverLevel())).thenAnswer(call ->
+                new MachineOperation.CraftObservation(MachineOperation.CraftPhase.WORKING)
                         .withCompletedWork(work.get()));
         int timeoutTicks = RSIntegrationConfig.MULTIBLOCK_CRAFT_TIMEOUT_SECONDS.get() * 20;
         for (int progress = 1; progress <= 3; progress++) {
@@ -136,7 +138,7 @@ class AsyncCraftChainCaptureTest extends BootstrapTest {
             work.set(progress);
             assertFalse(fixture.chain.tick());
             assertEquals(0, field(fixture.chain, "waitTicks"));
-            verify(fixture.delegate, never()).onBatchFinished(any());
+            verify(fixture.delegate.machineOperation(), never()).cleanup(any());
         }
         work.set(1L);
         assertFalse(fixture.chain.tick());
@@ -145,7 +147,7 @@ class AsyncCraftChainCaptureTest extends BootstrapTest {
         set(fixture.chain, "waitTicks", timeoutTicks);
         assertTrue(fixture.chain.tick());
         assertEquals(AsyncCraftChain.State.ABORTED, fixture.chain.state());
-        verify(fixture.delegate, never()).onBatchFinished(any());
+        verify(fixture.delegate.machineOperation(), never()).cleanup(any());
     }
 
     @Test
@@ -159,7 +161,7 @@ class AsyncCraftChainCaptureTest extends BootstrapTest {
             assertFalse(fixture.chain.tick());
             assertEquals(AsyncCraftChain.State.EXECUTING, fixture.chain.state());
             assertEquals(0, field(fixture.chain, "waitTicks"));
-            verify(fixture.delegate, never()).onBatchFinished(any());
+            verify(fixture.delegate.machineOperation(), never()).cleanup(any());
             verify(fixture.capture, never()).drainAndClose();
         }
         assertFalse(fixture.chain.tick());
@@ -167,7 +169,7 @@ class AsyncCraftChainCaptureTest extends BootstrapTest {
 
         fixture.captured.add(new ItemStack(Items.DIAMOND));
         assertFalse(fixture.chain.tick());
-        verify(fixture.delegate).onBatchFinished(fixture.player);
+        verify(fixture.delegate.machineOperation()).cleanup(fixture.player);
         verify(fixture.capture).drainAndClose();
     }
 
@@ -175,8 +177,10 @@ class AsyncCraftChainCaptureTest extends BootstrapTest {
     void incrementalParallelWorkerCaptureRenewsFlatTimeoutBeforeTheBatchCompletes() throws Exception {
         Fixture fixture = fixture();
         ParallelCraftGroup group = mock(ParallelCraftGroup.class);
-        when(group.observeCraft(fixture.player.serverLevel())).thenReturn(
-                new IBatchDelegate.CraftObservation(IBatchDelegate.CraftPhase.WORKING));
+        when(group.machineOperation()).thenReturn(mock(MachineOperation.class));
+        when(group.outputSource()).thenReturn(mock(OperationOutputSource.class));
+        when(group.machineOperation().observe(fixture.player.serverLevel())).thenReturn(
+                new MachineOperation.CraftObservation(MachineOperation.CraftPhase.WORKING));
         when(group.getTotalOperations()).thenReturn(1024);
         when(group.getRunningOperations()).thenReturn(64);
         when(group.getExpectedOutput()).thenReturn(new ItemStack(Items.DIAMOND));
@@ -194,7 +198,7 @@ class AsyncCraftChainCaptureTest extends BootstrapTest {
         }
         assertFalse(fixture.chain.tick());
         assertEquals(1, field(fixture.chain, "waitTicks"));
-        verify(group, never()).onBatchFinished(any());
+        verify(group.machineOperation(), never()).cleanup(any());
     }
 
     @ParameterizedTest
@@ -207,22 +211,41 @@ class AsyncCraftChainCaptureTest extends BootstrapTest {
         fixture.chain.abortForServerStop();
         fixture.chain.abortForServerStop();
 
-        var order = inOrder(fixture.delegate);
+        var order = inOrder(fixture.delegate.outputSource(), fixture.delegate.machineOperation());
         ServerLevel level = fixture.player.serverLevel();
-        order.verify(fixture.delegate).transferOutputs(level);
-        order.verify(fixture.delegate).advanceCraft(level);
-        order.verify(fixture.delegate).observeCraft(level);
-        verify(fixture.delegate).advanceCraft(level);
+        order.verify(fixture.delegate.outputSource()).transferAvailable(level);
+        order.verify(fixture.delegate.machineOperation()).advance(level);
+        order.verify(fixture.delegate.machineOperation()).observe(level);
+        verify(fixture.delegate.machineOperation()).advance(level);
         assertEquals(AsyncCraftChain.State.ABORTED, fixture.chain.state());
         if (capturedCount == 3) {
-            verify(fixture.delegate).onBatchFinished(fixture.player);
-            verify(fixture.delegate, never()).onBatchFailed(any(), anyString());
+            verify(fixture.delegate.machineOperation()).cleanup(fixture.player);
+            verify(fixture.delegate.machineOperation(), never()).recover(any(), anyString());
         } else {
-            verify(fixture.delegate, never()).onBatchFinished(any());
-            verify(fixture.delegate).onBatchFailed(isNull(), eq("Server stopping"));
+            verify(fixture.delegate.machineOperation(), never()).cleanup(any());
+            verify(fixture.delegate.machineOperation()).recover(isNull(), eq("Server stopping"));
         }
         assertEquals(capturedCount, fixture.returned.stream().mapToInt(ItemStack::getCount).sum());
         verify(fixture.capture).drainAndClose();
+    }
+
+    @Test
+    void shutdownReturnsPreviouslyReceivedItemsEvenWhenMachineCleanupThrows() throws Exception {
+        Fixture fixture = fixture();
+        fixture.captured.add(new ItemStack(Items.DIAMOND, 3));
+        try (var reception = TaskOutputReception.open()) {
+            var key = TaskOutputReception.resource(new ItemStack(Items.STICK));
+            reception.prepare(List.of()).collect(key, 2);
+            Field lifecycle = AsyncCraftChain.class.getDeclaredField("flatLifecycle");
+            lifecycle.setAccessible(true);
+            lifecycle.set(fixture.chain, new OperationLifecycle(fixture.delegate, reception));
+            var machine = fixture.delegate.machineOperation();
+            doThrow(new IllegalStateException("清理失败")).when(machine).cleanup(fixture.player);
+            fixture.chain.abortForServerStop();
+            fixture.chain.abortForServerStop();
+            assertEquals(5, fixture.returned.stream().mapToInt(ItemStack::getCount).sum());
+            verify(fixture.delegate.machineOperation(), never()).recover(any(), anyString());
+        }
     }
 
     private static Fixture fixture() throws Exception {
@@ -261,14 +284,16 @@ class AsyncCraftChainCaptureTest extends BootstrapTest {
             return drained;
         });
         IBatchDelegate delegate = mock(IBatchDelegate.class);
-        when(delegate.observeCraft(level)).thenReturn(
-                new IBatchDelegate.CraftObservation(IBatchDelegate.CraftPhase.WORKING));
+        when(delegate.machineOperation()).thenReturn(mock(MachineOperation.class));
+        when(delegate.machineOperation().observe(level)).thenReturn(
+                new MachineOperation.CraftObservation(MachineOperation.CraftPhase.WORKING));
         when(delegate.getExpectedOutput()).thenReturn(new ItemStack(Items.DIAMOND));
         when(delegate.getExpectedProduction()).thenReturn(
                 new IBatchDelegate.ExpectedProduction(new ItemStack(Items.DIAMOND), 3));
         when(delegate.validateExecutionContext(player)).thenReturn(true);
-        when(delegate.collectAllResults(player)).thenReturn(List.of());
-        when(delegate.collectsPhysicalSecondaryOutputs()).thenReturn(true);
+        var source = mock(OperationOutputSource.class);
+        when(source.collectFinal(player)).thenReturn(OperationOutputSource.Handoff.physical(List.of(), null));
+        when(delegate.outputSource()).thenReturn(source);
         CraftingResolver.ResolutionStep step = new CraftingResolver.ResolutionStep(
                 new ResourceLocation("test", "batch"), ModType.GENERIC,
                 new ResourceLocation("test", "batch"), List.of(), List.of(), false, 3);

@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
-import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 
+import com.huanghuang.rsintegration.crafting.batch.MachineOperation;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
@@ -53,7 +54,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.MockedStatic;
-
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -63,7 +63,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -112,7 +111,9 @@ class GraphLedgerRecoveryContractTest extends BootstrapTest {
         assertTrue(fixture.stock.isEmpty());
         ExtractionLedger privateLedger = account.access.newLedger();
         IBatchDelegate delegate = mock(IBatchDelegate.class);
-        when(delegate.startOperation(any())).thenAnswer(call -> {
+        when(delegate.machineOperation()).thenReturn(mock(MachineOperation.class));
+        MachineOperation machine = delegate.machineOperation();
+        when(delegate.machineOperation().start(any())).thenAnswer(call -> {
             assertTrue(fixture.stock.isEmpty(), "图内产物不能短暂进入公共库存供其他任务取走");
             assertEquals(5, privateLedger.reserveFromEndpoint(IRON, 5, fixture.endpoint, fixture.player).getCount());
             assertEquals(2, privateLedger.reserveFromEndpoint(GOLD, 2, fixture.endpoint, fixture.player).getCount());
@@ -122,7 +123,7 @@ class GraphLedgerRecoveryContractTest extends BootstrapTest {
         doAnswer(call -> {
             privateLedger.refundCommittedToEndpoint(fixture.endpoint, fixture.player);
             return null;
-        }).when(delegate).onBatchFailed(isNull(), anyString());
+        }).when(machine).recover(isNull(), anyString());
         fixture.dispatchPrivate(delegate, account.access.newLedger());
         fixture.cleanupTwice();
         assertTrue(fixture.stock.isEmpty(), "委托失败的退款也应先回任务账户");
@@ -155,7 +156,9 @@ class GraphLedgerRecoveryContractTest extends BootstrapTest {
         ExtractionLedger privateLedger = ExtractionLedger.external();
         ExtractionLedger nodeLedger = ExtractionLedger.external();
         IBatchDelegate delegate = mock(IBatchDelegate.class);
-        when(delegate.startOperation(any())).thenAnswer(call -> {
+        when(delegate.machineOperation()).thenReturn(mock(MachineOperation.class));
+        MachineOperation machine = delegate.machineOperation();
+        when(delegate.machineOperation().start(any())).thenAnswer(call -> {
             OperationStartContext context = call.getArgument(0);
             assertEquals(OperationStartContext.MaterialOwnership.DELEGATE_EXTRACTED,
                     context.materialOwnership());
@@ -186,7 +189,7 @@ class GraphLedgerRecoveryContractTest extends BootstrapTest {
             else privateLedger.rollback(fixture.player);
             privateLedger.close();
             return null;
-        }).when(delegate).onBatchFailed(isNull(), anyString());
+        }).when(machine).recover(isNull(), anyString());
 
         CraftNodeRuntime runtime = fixture.dispatchPrivate(delegate, nodeLedger);
         assertEquals("delegate rejected private-ledger graph dispatch", runtime.failureReason());
@@ -207,7 +210,7 @@ class GraphLedgerRecoveryContractTest extends BootstrapTest {
         assertTrue(fixture.broker.drainAvailableProducerAssets().isEmpty());
         assertEquals(0, fixture.broker.available(fixture.initialSource, fixture.goldKey));
         assertEquals(0, fixture.broker.heldBy(CONSUMER));
-        verify(delegate).onBatchFailed(isNull(), anyString());
+        verify(delegate.machineOperation()).recover(isNull(), anyString());
         verify(fixture.session, times(switch (failurePoint) {
             case BEFORE_RESERVATION, AFTER_RESERVATION -> 0;
             case AFTER_COMMIT -> 2;
@@ -233,6 +236,7 @@ class GraphLedgerRecoveryContractTest extends BootstrapTest {
         recovered.add(tagged("second", fullyRecovered ? 3 : 2));
         recovered.add(gold(fullyRecovered ? 2 : 1));
         AbstractBatchDelegate delegate = mock(AbstractBatchDelegate.class);
+        when(delegate.machineOperation()).thenReturn(delegate);
         when(delegate.physicalFailureCleanupCompleted()).thenReturn(true);
         when(delegate.failureRecoveredInputs()).thenReturn(recovered);
         OperationExecutionKernel.Session operation = fixture.operationKernel.prepareLogical();
@@ -260,7 +264,7 @@ class GraphLedgerRecoveryContractTest extends BootstrapTest {
         expectedProducer.add(tagged("second", fullyRecovered ? 3 : 2));
         assertAmounts(expectedProducer, producerRefund);
         assertTrue(fixture.broker.drainAvailableProducerAssets().isEmpty());
-        verify(delegate).onBatchFailed(isNull(), anyString());
+        verify(delegate.machineOperation()).recover(isNull(), anyString());
         verify(fixture.session).insert(eq(fixture.player), any(), eq(false));
     }
 

@@ -81,7 +81,6 @@ import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.MockedStatic;
-
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -94,7 +93,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
-
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -512,7 +510,9 @@ class LargeOrderPipelineTest extends BootstrapTest {
         }
     }
 
-    private static final class CountingMachine implements IBatchDelegate {
+    private static final class CountingMachine implements IBatchDelegate, MachineOperation {
+        @Override public MachineOperation machineOperation() { return this; }
+
         final Fixture fixture;
         ResourceLocation recipe;
         int batch;
@@ -539,7 +539,7 @@ class LargeOrderPipelineTest extends BootstrapTest {
         }
         @Override public int preferredParallelBatchSize(int total, int workers) { return MACHINE_CAPACITY; }
         @Override public void prepareGraphBatch(int executions) { batch = executions; }
-        @Override public boolean startOperation(OperationStartContext context) {
+        @Override public boolean start(OperationStartContext context) {
             held = context.inputSlots().stream().mapToLong(ItemStack::getCount).sum();
             assertEquals((long) batch * rawPerOperation, held, "每次派发实际材料必须与机器接收数量一致");
             assertTrue(context.inputSlots().stream().allMatch(stack -> stack.is(input)));
@@ -563,14 +563,12 @@ class LargeOrderPipelineTest extends BootstrapTest {
             ready = true;
             return true;
         }
-        @Override public boolean isCraftComplete(ServerLevel level) { return ready; }
-        @Override public ItemStack collectResult(ServerPlayer player) {
-            if (!ready) return ItemStack.EMPTY;
+        @Override public CraftObservation observe(ServerLevel level) { return new CraftObservation(ready ? CraftPhase.DONE : CraftPhase.WORKING); }
+        @Override public OperationOutputSource outputSource() { return OperationOutputSource.single(player -> { if (!ready) return ItemStack.EMPTY;
             ready = false;
             held = 0;
             fixture.completed.merge(recipe, (long) batch, Long::sum);
-            return new ItemStack(output, batch);
-        }
+            return new ItemStack(output, batch); }, outputContract()); }
         @Override public ExpectedProduction getExpectedProduction() {
             return new ExpectedProduction(new ItemStack(output), batch);
         }
@@ -583,8 +581,8 @@ class LargeOrderPipelineTest extends BootstrapTest {
             if (!recovered.isEmpty()) recovery.add(recovered);
             return recovery;
         }
-        @Override public void onBatchFailed(ServerPlayer player, String reason) { ready = false; }
-        @Override public void onBatchFinished(ServerPlayer player) { assertEquals(0L, held); }
+        @Override public void recover(ServerPlayer player, String reason) { ready = false; }
+        @Override public void cleanup(ServerPlayer player) { assertEquals(0L, held); }
         @Override public BlockPos getMachinePos() { return BlockPos.ZERO; }
     }
 

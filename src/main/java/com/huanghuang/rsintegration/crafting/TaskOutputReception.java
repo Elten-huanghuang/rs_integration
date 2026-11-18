@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.api.IntegrationResourceKey.ResourceKind;
 import com.huanghuang.rsintegration.feature.experience.ExperienceFluidNormalization;
@@ -8,7 +9,6 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.fluids.FluidStack;
-
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -153,7 +153,30 @@ public final class TaskOutputReception {
     /** 每次执行独立持有产物，不依赖 RS、BD 或其他存储后端的原生对象。 */
     public static Session open() { return new Session(); }
 
+    /** 机器只能登记物理批次和移交实物，不能取走任务资产或关闭整个操作。 */
+    public static final class Writer {
+        private final Session session;
+        private Writer(Session session) { this.session = session; }
+        public Batch prepare(List<Demand> demands) { return session.prepare(demands); }
+        @Nullable public Batch current() { return session.current(); }
+        public void activate() { if (current() != null) current().activate(); }
+        public void finishBatch() { if (current() != null) current().close(); }
+        public void unbindNetwork() { session.unbindNetwork(); }
+        public void bindTo(CraftStorageEndpoint endpoint) {
+            if (endpoint != null && endpoint.session() != null) endpoint.session().bindOutputReception(session);
+        }
+        public void hold(ItemStack actual) {
+            session.checkThread();
+            if (session.closed) throw new IllegalStateException("操作已关闭");
+            if (actual == null || actual.isEmpty()) return;
+            var key = ExperienceFluidNormalization.normalizeResource(resource(actual));
+            if (current() == null) session.hold(key, actual.getCount());
+            else current().collect(key, actual.getCount());
+        }
+    }
+
     public static final class Session implements AutoCloseable {
+        public Writer writer() { return new Writer(this); }
         private final Thread owner = Thread.currentThread();
         private final Map<IntegrationResourceKey, Long> pending = new LinkedHashMap<>();
         private final Map<IntegrationResourceKey, Long> received = new LinkedHashMap<>();
@@ -256,8 +279,20 @@ public final class TaskOutputReception {
         /** 全部成功构造后才移交所有权，转换失败不会清空已持有的资源。 */
         public List<ItemStack> drainStacks() {
             checkThread();
+            List<ItemStack> result = stacks(pending);
+            pending.clear();
+            return result;
+        }
+
+        /** 仅供整批端口校核，不是一次新的实物移交。 */
+        public List<ItemStack> cumulativeStacks() {
+            checkThread();
+            return stacks(received);
+        }
+
+        private static List<ItemStack> stacks(Map<IntegrationResourceKey, Long> resources) {
             List<ItemStack> result = new ArrayList<>();
-            for (var entry : pending.entrySet()) {
+            for (var entry : resources.entrySet()) {
                 long left = entry.getValue();
                 while (left > 0) {
                     int count = (int) Math.min(Integer.MAX_VALUE, left);
@@ -267,7 +302,6 @@ public final class TaskOutputReception {
                     left -= count;
                 }
             }
-            pending.clear();
             return List.copyOf(result);
         }
 

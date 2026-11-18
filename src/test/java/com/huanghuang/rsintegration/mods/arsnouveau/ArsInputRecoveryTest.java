@@ -23,10 +23,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.MockedStatic;
-
 import java.lang.reflect.Field;
 import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
@@ -50,8 +48,8 @@ class ArsInputRecoveryTest extends BootstrapTest {
         fixture.machine.stack.shrink(1);
         fixture.pedestal.stack.shrink(2);
 
-        fixture.delegate.onBatchFailed(null, "offline");
-        fixture.delegate.onBatchFailed(null, "repeat");
+        fixture.delegate.machineOperation().recover(null, "offline");
+        fixture.delegate.machineOperation().recover(null, "repeat");
 
         assertEquals(List.of(2, 2), fixture.delegate.failureRecoveredInputs()
                 .stream().map(ItemStack::getCount).toList());
@@ -69,7 +67,7 @@ class ArsInputRecoveryTest extends BootstrapTest {
         fixture.machine.stack = new ItemStack(Items.NETHERITE_INGOT);
         fixture.pedestal.stack = tagged("foreign", 4);
 
-        fixture.delegate.onBatchFailed(null, "offline");
+        fixture.delegate.machineOperation().recover(null, "offline");
 
         assertTrue(fixture.delegate.failureRecoveredInputs().isEmpty());
         assertEquals(Items.NETHERITE_INGOT, fixture.machine.stack.getItem());
@@ -86,7 +84,7 @@ class ArsInputRecoveryTest extends BootstrapTest {
         replacement.counter = 50;
         replacement.stack = tagged("central", 3);
 
-        fixture.delegate.onBatchFailed(null, "replaced");
+        fixture.delegate.machineOperation().recover(null, "replaced");
 
         assertEquals(1, fixture.delegate.failureRecoveredInputs().size());
         assertEquals(4, fixture.delegate.failureRecoveredInputs().get(0).getCount());
@@ -103,7 +101,7 @@ class ArsInputRecoveryTest extends BootstrapTest {
         assertTrue(fixture.start());
         when(fixture.level.getBlockEntity(BlockPos.ZERO)).thenReturn(null);
 
-        fixture.delegate.onBatchFailed(null, "missing");
+        fixture.delegate.machineOperation().recover(null, "missing");
 
         assertEquals(1, fixture.delegate.failureRecoveredInputs().size());
         assertEquals(4, fixture.delegate.failureRecoveredInputs().get(0).getCount());
@@ -123,7 +121,7 @@ class ArsInputRecoveryTest extends BootstrapTest {
 
         assertFalse(fixture.delegate.startPreparedOperation(
                 fixture.player, materials, fixture.ledger));
-        fixture.delegate.onBatchFailed(null, "start rejected");
+        fixture.delegate.machineOperation().recover(null, "start rejected");
 
         assertEquals(List.of(3, 4, 2), fixture.delegate.failureRecoveredInputs()
                 .stream().map(ItemStack::getCount).toList());
@@ -141,7 +139,7 @@ class ArsInputRecoveryTest extends BootstrapTest {
         fixture.machine.isCrafting = true;
 
         assertFalse(fixture.start());
-        fixture.delegate.onBatchFailed(null, "busy");
+        fixture.delegate.machineOperation().recover(null, "busy");
 
         assertEquals(List.of(3, 4), fixture.delegate.failureRecoveredInputs()
                 .stream().map(ItemStack::getCount).toList());
@@ -157,7 +155,7 @@ class ArsInputRecoveryTest extends BootstrapTest {
         assertTrue(fixture.start());
         fixture.delegate.setMachineServer(mock(MinecraftServer.class));
 
-        fixture.delegate.onBatchFailed(null, "dimension unavailable");
+        fixture.delegate.machineOperation().recover(null, "dimension unavailable");
 
         assertTrue(fixture.delegate.failureRecoveredInputs().isEmpty());
         assertEquals(3, fixture.machine.stack.getCount());
@@ -173,7 +171,7 @@ class ArsInputRecoveryTest extends BootstrapTest {
         fixture.machine.isCrafting = true;
         fixture.machine.counter = 80;
 
-        fixture.delegate.onBatchFailed(null, "external replacement");
+        fixture.delegate.machineOperation().recover(null, "external replacement");
 
         assertTrue(fixture.machine.isCrafting);
         assertEquals(80, fixture.machine.counter);
@@ -187,12 +185,12 @@ class ArsInputRecoveryTest extends BootstrapTest {
         assertTrue(fixture.start());
         fixture.machine.stack = new ItemStack(Items.NETHERITE_INGOT);
         assertEquals(Items.NETHERITE_INGOT,
-                fixture.delegate.collectResult(fixture.player).getItem());
+                fixture.delegate.outputSource().collectFinal(fixture.player).stacks().get(0).getItem());
         fixture.pedestal.stack.shrink(2);
         fixture.machine.stack = new ItemStack(Items.GOLD_INGOT);
 
         assertFalse(fixture.start());
-        fixture.delegate.onBatchFailed(null, "repeat busy");
+        fixture.delegate.machineOperation().recover(null, "repeat busy");
 
         assertEquals(List.of(2, 3), fixture.delegate.failureRecoveredInputs()
                 .stream().map(ItemStack::getCount).toList());
@@ -240,20 +238,20 @@ class ArsInputRecoveryTest extends BootstrapTest {
         Fixture fixture = new Fixture(false);
         assertTrue(fixture.start());
         fixture.machine.stack = new ItemStack(Items.NETHERITE_INGOT);
-        fixture.delegate.collectResult(fixture.player);
-        fixture.delegate.onBatchFinished(fixture.player);
+        fixture.delegate.outputSource().collectFinal(fixture.player).stacks();
+        fixture.delegate.machineOperation().cleanup(fixture.player);
         ArsImbuementBatchDelegate next = fixture.nextImbuement();
         assertTrue(fixture.delegate.transferReusableMaterialsTo(next));
 
         // 交接后的前驱不再拥有基座物品，即使误收到了失败通知也不能取回。
-        fixture.delegate.onBatchFailed(null, "old operation already handed off");
+        fixture.delegate.machineOperation().recover(null, "old operation already handed off");
         assertTrue(fixture.delegate.failureRecoveredInputs().isEmpty());
         assertEquals(4, fixture.pedestal.stack.getCount());
         fixture.machine.stack = new ItemStack(Items.GOLD_INGOT);
         assertFalse(next.startPreparedOperation(fixture.player,
                 List.of(tagged("central", 3), tagged("pedestal", 4)), fixture.ledger));
-        next.onBatchFailed(null, "busy");
-        next.onBatchFailed(null, "repeat");
+        next.machineOperation().recover(null, "busy");
+        next.machineOperation().recover(null, "repeat");
 
         assertEquals(List.of(3, 4), next.failureRecoveredInputs()
                 .stream().map(ItemStack::getCount).toList());
@@ -268,15 +266,15 @@ class ArsInputRecoveryTest extends BootstrapTest {
         Fixture fixture = new Fixture(false);
         assertTrue(fixture.start());
         fixture.machine.stack = new ItemStack(Items.NETHERITE_INGOT);
-        fixture.delegate.collectResult(fixture.player);
-        fixture.delegate.onBatchFinished(fixture.player);
+        fixture.delegate.outputSource().collectFinal(fixture.player).stacks();
+        fixture.delegate.machineOperation().cleanup(fixture.player);
         ArsImbuementBatchDelegate next = fixture.nextImbuement();
         assertTrue(fixture.delegate.transferReusableMaterialsTo(next));
         assertTrue(next.startPreparedOperation(fixture.player,
                 List.of(tagged("central", 3), tagged("pedestal", 4)), fixture.ledger));
         fixture.machine.stack = new ItemStack(Items.NETHERITE_INGOT);
-        next.collectResult(fixture.player);
-        next.onBatchFinished(fixture.player);
+        next.outputSource().collectFinal(fixture.player).stacks();
+        next.machineOperation().cleanup(fixture.player);
 
         assertTrue(fixture.delegate.collectReusableMaterials(fixture.player).isEmpty());
         List<ItemStack> returned = next.collectReusableMaterials(fixture.player);

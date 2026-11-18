@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.huanghuang.rsintegration.crafting.batch.MachineOperation;
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
@@ -9,7 +11,6 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import org.junit.jupiter.api.Test;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -66,7 +67,9 @@ class PreparedDelegateOwnershipTest extends BootstrapTest {
         assertEquals(0, delegate.preparationReleases);
     }
 
-    private static class TrackingDelegate implements IBatchDelegate {
+    private static class TrackingDelegate implements IBatchDelegate, MachineOperation {
+        @Override public MachineOperation machineOperation() { return this; }
+
         private final boolean validationResult;
         private final boolean throwDuringValidation;
         private int preparationReleases;
@@ -83,12 +86,14 @@ class PreparedDelegateOwnershipTest extends BootstrapTest {
             return validationResult;
         }
 
-        @Override public boolean startOperation(OperationStartContext context) { return false; }
-        @Override public boolean isCraftComplete(ServerLevel level) { return false; }
-        @Override public ItemStack collectResult(ServerPlayer player) { return ItemStack.EMPTY; }
+        @Override public boolean start(OperationStartContext context) { return false; }
+        @Override public CraftObservation observe(ServerLevel level) { return new CraftObservation(false ? CraftPhase.DONE : CraftPhase.WORKING); }
+        @Override public OperationOutputSource outputSource() {
+            return OperationOutputSource.single(player -> ItemStack.EMPTY, outputContract());
+        }
         @Override public void releasePreparationResources() { preparationReleases++; }
-        @Override public void onBatchFailed(ServerPlayer player, String reason) {}
-        @Override public void onBatchFinished(ServerPlayer player) {}
+        @Override public void recover(ServerPlayer player, String reason) {}
+        @Override public void cleanup(ServerPlayer player) {}
         @Override public BlockPos getMachinePos() { return BlockPos.ZERO; }
     }
 }

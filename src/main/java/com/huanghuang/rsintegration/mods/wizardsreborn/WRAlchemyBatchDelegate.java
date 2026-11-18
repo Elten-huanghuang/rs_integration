@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mods.wizardsreborn;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -25,7 +25,6 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fluids.capability.IFluidHandler;
 import net.minecraftforge.items.IItemHandler;
-
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
@@ -360,12 +359,11 @@ public final class WRAlchemyBatchDelegate extends AbstractBatchDelegate {
 
     @Override public Component craftFailureMessage(CraftObservation observation) { return failure; }
     @Override public boolean failureConsumesInputs(CraftObservation observation) { return consumed; }
-    @Override public ItemStack collectResult(ServerPlayer player) {
-        List<ItemStack> outputs = collectAllResults(player);
-        return outputs.isEmpty() ? ItemStack.EMPTY : outputs.get(0);
+    @Override public OperationOutputSource outputSource() {
+        return player -> OperationOutputSource.Handoff.physical(takeResults(player), outputContract());
     }
 
-    @Override public List<ItemStack> collectAllResults(ServerPlayer player) {
+    private List<ItemStack> takeResults(ServerPlayer player) {
         if (!structureValid() || !isMachineCraftFinished(level, machine)) return List.of();
         List<ItemStack> outputs = new ArrayList<>();
         if (!expectedItem.isEmpty()) outputs.add(WRAlchemyAccess.items(machine, true).extractItem(0, expectedItem.getCount(), false));
@@ -384,7 +382,8 @@ public final class WRAlchemyBatchDelegate extends AbstractBatchDelegate {
         return outputs;
     }
 
-    @Override public boolean collectsPhysicalSecondaryOutputs() { return true; }
+
+
 
     @Override protected void clearMachineState(BlockEntity be, @Nullable ServerPlayer player) {
         List<ItemStack> recovered = new ArrayList<>();
@@ -441,7 +440,7 @@ public final class WRAlchemyBatchDelegate extends AbstractBatchDelegate {
         placedFluids.clear();
     }
 
-    @Override public void onBatchFinished(@Nullable ServerPlayer player) {
+    @Override public void cleanup(@Nullable ServerPlayer player) {
         if (!markTerminalCleanup()) return;
         releaseMachineChunk();
         remaining.clear();

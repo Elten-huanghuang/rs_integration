@@ -1,10 +1,8 @@
 package com.huanghuang.rsintegration.mods.goety;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
-
-import java.lang.reflect.Field;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
@@ -21,7 +19,6 @@ import com.huanghuang.rsintegration.util.CuriosAccess;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.AABB;
-
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.CraftItemRecovery;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -49,12 +46,10 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.biome.Biome;
-import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.common.util.LazyOptional;
 import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
 import org.jetbrains.annotations.NotNull;
-
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
@@ -1069,7 +1064,12 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    protected CraftObservation observeMachineCraft(ServerLevel level, BlockEntity be) {
+    public void advance(ServerLevel current) {
+        ServerLevel level = resolveMachineLevel(current);
+        BlockPos pos = getMachinePos();
+        if (level == null || pos == null || !level.hasChunkAt(pos)) return;
+        BlockEntity be = level.getBlockEntity(pos);
+        if (be == null || be.isRemoved()) return;
         if (ritualPreparedForManualStart) {
             if (!pendingManualActivation.isEmpty()) {
                 ItemStack activation = pendingManualActivation.copy();
@@ -1081,9 +1081,14 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                 Component itemName = CraftPacketUtils.describeIngredient(activationIng);
                 player.sendSystemMessage(Component.translatable("rsi.goety.manual_ritual_prepared", itemName));
             }
-            return doneObservation();
+            return;
         }
         if (soulTask != null) soulTask.tick(level, be);
+    }
+
+    @Override
+    protected CraftObservation observeMachineCraft(ServerLevel level, BlockEntity be) {
+        if (ritualPreparedForManualStart) return doneObservation();
         if (isMachineCraftFinished(level, be)) return doneObservation();
         // Give event-driven substitute result handlers a wider completion
         // window after Goety clears its current-ritual field.
@@ -1107,13 +1112,18 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         ItemStack expected = expectedRitualOutput(level);
         if (expected.isEmpty()) return false;
 
-        // Completion and collection used to happen on different ticks. During the
-        // idle-stability window an attached importer could move the altar result
-        // into RS, leaving collectResult() with nothing to publish. Claim the
-        // operation-owned slot output as soon as it is observed and retain it
-        // until graph settlement.
         if (!pendingRitualResult.isEmpty()) return true;
+        return hasExternalRitualOutput(level, be, expected);
+    }
 
+    private void transferRitualSlot(ServerLevel current) {
+        if (isBrazier || altar == null || ritualPreparedForManualStart || !pendingRitualResult.isEmpty()) return;
+        ServerLevel level = resolveMachineLevel(current);
+        BlockPos pos = getMachinePos();
+        if (level == null || pos == null || !level.hasChunkAt(pos) || level.getBlockEntity(pos) != altar
+                || Reflect.getField(altar, GoetyReflection.F_CURRENT_RITUAL_RECIPE).orElse(null) != null) return;
+        ItemStack expected = expectedRitualOutput(level);
+        if (expected.isEmpty()) return;
         var handlerOpt = Reflect.<Object>getField(altar, "itemStackHandler");
         if (handlerOpt.isPresent() && handlerOpt.get() instanceof LazyOptional<?> lazy) {
             var resolved = lazy.resolve();
@@ -1126,11 +1136,13 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                     RSIntegrationMod.LOGGER.debug(
                             "[RSI-Batch-Goety] Claimed altar result for settlement: {} x{}",
                             claimed.getItem(), claimed.getCount());
-                    return true;
                 }
             }
         }
 
+    }
+
+    private boolean hasExternalRitualOutput(ServerLevel level, BlockEntity be, ItemStack expected) {
         BlockPos pos = be.getBlockPos();
         if (pos != null && level.isLoaded(pos)) {
             var entities = level.getEntitiesOfClass(
@@ -1219,8 +1231,12 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         return false;
     }
 
-    @Override
-    public ItemStack collectResult(ServerPlayer player) {
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.incremental(this::transferRitualSlot,
+                OperationOutputSource.single(this::takeResult, outputContract()));
+    }
+
+    private ItemStack takeResult(ServerPlayer player) {
         if (isBrazier) return collectBrazierResult(player);
         if (isCurrentManualRecipe()) return ItemStack.EMPTY;
 
@@ -1388,7 +1404,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@NotNull ServerPlayer player) {
+    public void cleanup(@NotNull ServerPlayer player) {
         if (!markTerminalCleanup()) return;
         if (isBrazier) {
             brazierCraftStarted = false;
@@ -1543,7 +1559,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean canCollectResultWithoutWorldCapture() {
         // Dark Altar craft results are normally written to its item handler and
-        // collectResult() extracts that slot. The brazier only ejects an entity.
+        // takeResult() extracts that slot. The brazier only ejects an entity.
         return !isBrazier;
     }
 

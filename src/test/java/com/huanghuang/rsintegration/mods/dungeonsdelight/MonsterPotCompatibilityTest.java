@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mods.dungeonsdelight;
 
+import com.huanghuang.rsintegration.crafting.batch.MachineOperation;
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -40,10 +41,8 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 import vectorwing.farmersdelight.common.crafting.CookingPotRecipe;
-
 import java.util.List;
 import java.util.Optional;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -153,12 +152,12 @@ class MonsterPotCompatibilityTest extends BootstrapTest {
         fixture.inventory.setStackInSlot(0, ItemStack.EMPTY);
         fixture.inventory.setStackInSlot(7, ItemStack.EMPTY);
         fixture.inventory.setStackInSlot(8, new ItemStack(Items.APPLE, 7));
-        assertFalse(fixture.delegate.isCraftComplete(fixture.level));
+        assertFalse((fixture.delegate.machineOperation().observe(fixture.level).phase() == MachineOperation.CraftPhase.DONE));
         fixture.inventory.setStackInSlot(8, new ItemStack(Items.APPLE, 8));
-        assertTrue(fixture.delegate.isCraftComplete(fixture.level));
+        assertTrue((fixture.delegate.machineOperation().observe(fixture.level).phase() == MachineOperation.CraftPhase.DONE));
         OutputContract contract = fixture.delegate.outputContract();
         List<OutputAccounting.CollectedOutput> outputs =
-                fixture.delegate.collectStructuredResults(fixture.player);
+                fixture.delegate.outputSource().collectFinal(fixture.player).ports();
         assertEquals(1, outputs.size());
         assertEquals("dungeonsdelight:monster_pot:output", outputs.get(0).portId());
         assertEquals(8, outputs.get(0).stack().getCount());
@@ -207,7 +206,7 @@ class MonsterPotCompatibilityTest extends BootstrapTest {
         }
         fixture.inventory.setStackInSlot(0, new ItemStack(Items.CARROT, 3));
         fixture.inventory.setStackInSlot(7, new ItemStack(Items.BOWL, 6));
-        fixture.delegate.onBatchFailed(fixture.player, "测试取消批次");
+        fixture.delegate.machineOperation().recover(fixture.player, "测试取消批次");
         List<ItemStack> recovered = fixture.delegate.failureRecoveredInputs();
         assertEquals(9, recovered.stream().mapToInt(ItemStack::getCount).sum());
         assertTrue(fixture.inventory.getStackInSlot(0).isEmpty());
@@ -232,9 +231,10 @@ class MonsterPotCompatibilityTest extends BootstrapTest {
         first.inventory.setStackInSlot(0, ItemStack.EMPTY);
         first.inventory.setStackInSlot(7, ItemStack.EMPTY);
         first.inventory.setStackInSlot(8, new ItemStack(Items.APPLE, 6));
-        assertTrue(first.delegate.isCraftComplete(first.level));
-        assertFalse(second.delegate.isCraftComplete(second.level));
-        assertEquals(6, first.delegate.collectResult(first.player).getCount());
+        assertEquals(MachineOperation.CraftPhase.WORKING, first.delegate.machineOperation().observe(first.level).phase());
+        assertTrue((first.delegate.machineOperation().observe(first.level).phase() == MachineOperation.CraftPhase.DONE));
+        assertFalse((second.delegate.machineOperation().observe(second.level).phase() == MachineOperation.CraftPhase.DONE));
+        assertEquals(6, first.delegate.outputSource().collectFinal(first.player).stacks().get(0).getCount());
         assertEquals(2, second.inventory.getStackInSlot(0).getCount());
         assertEquals(4, second.inventory.getStackInSlot(7).getCount());
     }

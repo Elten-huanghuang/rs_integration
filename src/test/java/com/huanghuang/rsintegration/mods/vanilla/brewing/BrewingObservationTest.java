@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mods.vanilla.brewing;
 
-import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate.CraftPhase;
+import com.huanghuang.rsintegration.crafting.batch.MachineOperation.CraftPhase;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mixin.minecraft.BrewingStandAccessor;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
@@ -10,9 +10,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.entity.BrewingStandBlockEntity;
 import org.junit.jupiter.api.Test;
-
 import java.lang.reflect.Field;
-
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.*;

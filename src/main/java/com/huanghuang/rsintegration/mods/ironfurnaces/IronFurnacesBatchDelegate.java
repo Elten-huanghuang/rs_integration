@@ -1,27 +1,22 @@
 package com.huanghuang.rsintegration.mods.ironfurnaces;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.crafting.TaskOutputReception;
-
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
-import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
-import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.ReceivingMachineDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.mods.common.IdleInventoryEvacuator;
 import com.huanghuang.rsintegration.mods.vanilla.VanillaFurnaceFuelPolicy;
-import com.refinedmods.refinedstorage.api.util.Action;
 import ironfurnaces.items.augments.ItemAugmentFuel;
 import ironfurnaces.items.augments.ItemAugmentSpeed;
 import ironfurnaces.tileentity.furnaces.BlockIronFurnaceTileBase;
@@ -45,17 +40,17 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.items.ItemHandlerHelper;
 import org.jetbrains.annotations.NotNull;
 import java.util.Arrays;
-
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 /** Batch delegate for Iron Furnaces ordinary furnace mode. */
-public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
+public final class IronFurnacesBatchDelegate extends ReceivingMachineDelegate {
     private int receptionIdleTicks;
+    private CraftObservation physicalState = new CraftObservation(CraftPhase.WORKING);
 
-    @Override public boolean supportsOutputReception() { return true; }
+    @Override public boolean acceptsFixedOutput() { return true; }
 
     private void prepareFurnaceOutputBatch(int operations) {
         receptionIdleTicks = 0;
@@ -75,7 +70,7 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
             }
         } else idle = current.getItem(INPUT).isEmpty() && current.cookTime <= 0;
         receptionIdleTicks = idle ? Math.min(2, receptionIdleTicks + 1) : 0;
-        return outputBatch != null && outputBatch.complete() && receptionIdleTicks >= 2;
+        return outputBatch() != null && outputBatch().complete() && receptionIdleTicks >= 2;
     }
 
     @Override
@@ -474,6 +469,7 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
     }
 
     private boolean startNextPhysicalBatch() {
+        receivedPhysical = 0;
         if (queuedMaterial.isEmpty() || queuedOperations <= 0 || !refreshMachine()) return false;
         if (validateMachine(furnace, recipe).state() != PreparationState.READY) return false;
         if (factoryMode && furnace.getEnergy() <= 0) return false;
@@ -527,7 +523,7 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
 
         queuedOperations -= operations;
         activePhysicalOperations = operations;
-        activateOutputBatch();
+        if (production != null) production.activate();
         furnace.setChanged();
         level.sendBlockUpdated(pos, level.getBlockState(pos), level.getBlockState(pos), 3);
         observedWorking = false;
@@ -656,9 +652,38 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
         if (validateMachine(current, recipe).state() != PreparationState.READY) {
             return failObservation("Iron Furnace mode changed during crafting");
         }
-        furnace = current;
+        if (current != furnace) return failObservation("Iron Furnace block entity replaced");
+        return physicalState;
+    }
+
+    private boolean activeFurnace() {
+        return level != null && pos != null && level.hasChunkAt(pos)
+                && furnace != null && level.getBlockEntity(pos) == furnace
+                && validateMachine(furnace, recipe).state() == PreparationState.READY;
+    }
+
+    private void transferAvailable(ServerLevel ignored) {
+        if (!activeFurnace()) return;
+        if (factoryMode) captureFactoryOutputs(furnace, completedBatchResults);
+        else if (outputBatch() != null || queuedOperations > 0) {
+            ItemStack actual = furnace.getItem(OUTPUT);
+            if (actual.isEmpty()) return;
+            if (outputBatch() == null && actual.getCount() < expectedOutputCount(activePhysicalOperations)) return;
+            receivedPhysical += actual.getCount();
+            receiveDirectOutput(actual.copy(), completedBatchResults);
+            furnace.setItem(OUTPUT, ItemStack.EMPTY);
+            furnace.setChanged();
+        }
+    }
+
+    private int receivedPhysical;
+
+    @Override public void advance(ServerLevel ignored) {
+        if (activeFurnace()) physicalState = advanceBatch(furnace);
+    }
+
+    private CraftObservation advanceBatch(BlockIronFurnaceTileBase current) {
         if (factoryMode) {
-            captureFactoryOutputs(current, completedBatchResults);
             boolean anyWorking = false;
             boolean allDone = true;
             int expectedTotal = expectedOutputCount(activePhysicalOperations);
@@ -690,12 +715,11 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
             RSIntegrationMod.debug(
                     "[RSI-IronFurnaces] factory observation pos={} expectedTotal={} capturedTotal={} allLanesDone={} working={} queued={}",
                     pos, expectedTotal, capturedTotal, allDone, observedWorking, queuedOperations);
-            boolean complete = outputBatch != null ? receivedAndPhysicallyIdle(current)
+            boolean complete = outputBatch() != null ? receivedAndPhysicallyIdle(current)
                     : allDone || aggregateDone;
             if (!observedWorking || !complete) return workingObservation();
             if (queuedOperations <= 0) return doneObservation();
-            drainActivePhysicalResults(current, completedBatchResults);
-            finishOutputBatch();
+            if (production != null) production.finishBatch();
             clearActivePhysicalState();
             return startNextPhysicalBatch()
                     ? workingObservation()
@@ -728,19 +752,12 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
         // the following tick. Require the actual output stack so the progress
         // panel cannot finish and collect before the product exists.
         boolean physicalDone;
-        if (outputBatch != null) {
-            if (!output.isEmpty()) {
-                ItemStack actual = output.copy();
-                current.setItem(OUTPUT, ItemStack.EMPTY);
-                receiveDirectOutput(actual, completedBatchResults);
-                current.setChanged();
-            }
+        if (outputBatch() != null) {
             physicalDone = receivedAndPhysicallyIdle(current);
-        } else physicalDone = output.getCount() >= expectedOutputCount(activePhysicalOperations);
+        } else physicalDone = receivedPhysical + output.getCount() >= expectedOutputCount(activePhysicalOperations);
         if (!physicalDone) return workingObservation();
         if (queuedOperations <= 0) return doneObservation();
-        drainActivePhysicalResults(current, completedBatchResults);
-        finishOutputBatch();
+        if (production != null) production.finishBatch();
         clearActivePhysicalState();
         return startNextPhysicalBatch()
                 ? workingObservation()
@@ -752,30 +769,18 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
         return observeMachineCraft(level, be).phase() == CraftPhase.DONE;
     }
 
-    @NotNull
-    @Override
-    public ItemStack collectResult(@NotNull ServerPlayer player) {
-        List<ItemStack> results = collectAllResults(player);
-        if (results.isEmpty()) return ItemStack.EMPTY;
-        ItemStack combined = results.get(0).copy();
-        for (int i = 1; i < results.size(); i++) {
-            ItemStack next = results.get(i);
-            if (ItemStack.isSameItemSameTags(combined, next)) {
-                combined.grow(next.getCount());
-            }
-        }
-        return combined;
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.incremental(this::transferAvailable,
+                player -> OperationOutputSource.Handoff.physical(takeResults(player), outputContract()));
     }
 
-    @NotNull
-    @Override
-    public List<ItemStack> collectAllResults(@NotNull ServerPlayer player) {
+    private List<ItemStack> takeResults(@NotNull ServerPlayer player) {
         if (!refreshMachine()) return List.of();
         List<ItemStack> results = new ArrayList<>(completedBatchResults.size() + FACTORY_INPUT.length);
         for (ItemStack result : completedBatchResults) results.add(result.copy());
         completedBatchResults.clear();
         drainActivePhysicalResults(furnace, results);
-        finishOutputBatch();
+        if (production != null) production.finishBatch();
         return results;
     }
 
@@ -911,7 +916,7 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@NotNull ServerPlayer player) {
+    public void cleanup(@NotNull ServerPlayer player) {
         if (refreshMachine()) refundFuel(furnace);
         releaseFactoryLease();
         clearInternalBatchState();

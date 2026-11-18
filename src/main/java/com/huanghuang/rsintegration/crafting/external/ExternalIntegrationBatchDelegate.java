@@ -1,12 +1,11 @@
 package com.huanghuang.rsintegration.crafting.external;
 
+import com.huanghuang.rsintegration.crafting.batch.ProductionEvidence;
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
-
 import com.huanghuang.rsintegration.crafting.TaskOutputReception;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import java.util.UUID;
-
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.api.RSIIntegrationApi;
 import com.huanghuang.rsintegration.api.diagnostic.IntegrationDiagnostic;
@@ -21,7 +20,6 @@ import com.huanghuang.rsintegration.api.execution.ExecutionRequestContext;
 import com.huanghuang.rsintegration.api.execution.ExecutionResult;
 import com.huanghuang.rsintegration.api.execution.ExecutionStartStatus;
 import com.huanghuang.rsintegration.api.execution.FailureReason;
-import com.huanghuang.rsintegration.api.execution.LifecyclePhase;
 import com.huanghuang.rsintegration.api.execution.MaterialDisposition;
 import com.huanghuang.rsintegration.api.execution.MaterialOutcome;
 import com.huanghuang.rsintegration.api.execution.OperationCleanupResult;
@@ -64,10 +62,9 @@ import com.huanghuang.rsintegration.api.recipe.RecipeView;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.TaskFluidAccess;
-import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.MaterialMatcher;
 import com.huanghuang.rsintegration.crafting.progress.MachineCycleProgress;
-import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.ReceivingMachineDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
@@ -80,7 +77,6 @@ import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.storage.StorageFluidKey;
 import com.huanghuang.rsintegration.storage.StorageFluidOperationResult;
 import com.huanghuang.rsintegration.storage.StorageFluidSnapshot;
-import com.huanghuang.rsintegration.storage.StoredFluid;
 import com.huanghuang.rsintegration.storage.StorageCapability;
 import com.huanghuang.rsintegration.storage.StorageOperationStatus;
 import net.minecraft.core.BlockPos;
@@ -106,20 +102,16 @@ import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.registries.ForgeRegistries;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-
 import javax.annotation.Nullable;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
-
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -129,7 +121,7 @@ import java.util.function.Supplier;
  * <p>物品标准 I/O 在 RSI 主线程完成端口容量检查、投料、状态观察和
  * 真实产物收取。无法无损落入标准物品端口的声明在这里显式拒绝。</p>
  */
-public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegate {
+public final class ExternalIntegrationBatchDelegate extends ReceivingMachineDelegate implements ProductionEvidence {
     private static final Logger LOGGER = LogManager.getLogger("RS Integration");
     private final Supplier<RSIIntegrationApi> apiProvider;
     private final boolean retainChunks;
@@ -311,7 +303,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     }
 
     @Override
-    public boolean supportsOutputReception() {
+    public boolean acceptsFixedOutput() {
         // 增量取出产物不等于机器安全结束，异步执行仍须可靠的结束信号。
         return executionKind == RecipeExecutionKind.STANDARD_IO && recipeView != null && descriptor != null
                 && !recipeView.outputs().isEmpty()
@@ -327,9 +319,16 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                 Math.multiplyExact(output.maximumAmount(), plannedBatchOperations))).toList());
     }
 
-    /** 两种收取入口复用同一套槽位提取，统一收货模式只向私有持有移交一次。 */
+    private void transferAvailable(ServerLevel playerLevel) {
+        if (operationStarted && outputBatch() != null && !outputBatch().closed()
+                && level != null && level.hasChunkAt(machinePos) && validateCurrentDescriptor() == null) {
+            collectReceptionOutputs(null);
+        }
+    }
+
+    /** 只移交实际从本次操作的物品或流体端口取出的资源。 */
     private void collectReceptionOutputs(ServerPlayer player) {
-        if (outputBatch == null) return;
+        if (outputBatch() == null) return;
         collectStandardItemOutputs(player);
         collectFluidOutputs(player);
     }
@@ -344,8 +343,8 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                 ItemStack actual = extractMatching(port, output,
                         (int) Math.min(Integer.MAX_VALUE, remaining), player);
                 if (actual.isEmpty()) continue;
-                if (outputBatch != null) {
-                    outputBatch.collect(IntegrationResourceKey.item(actual), actual.getCount());
+                if (outputBatch() != null) {
+                    outputBatch().collect(IntegrationResourceKey.item(actual), actual.getCount());
                 } else {
                     collected.add(new OutputAccounting.CollectedOutput(
                             output.portId().toString(), OutputContract.Source.SLOT, actual));
@@ -356,7 +355,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         return List.copyOf(collected);
     }
     private CraftObservation receptionCompletion() {
-        return outputBatch == null || outputBatch.complete() ? doneObservation() : workingObservation();
+        return outputBatch() == null || outputBatch().complete() ? doneObservation() : workingObservation();
     }
 
     @Override
@@ -717,7 +716,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             return failPreparedStart(
                     "machine output ports have insufficient capacity");
         }
-        if (outputReception() != null) prepareReceptionBatch();
+        if (production != null) prepareReceptionBatch();
         for (MaterialRequirement requirement : recipeView.materials()) {
             ItemStack stack = materials.get(requirement.entryId().toString()).copy();
             if (stack.isEmpty()) {
@@ -751,7 +750,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         }
         markCraftStarted();
         this.operationStarted = true;
-        activateOutputBatch();
+        if (production != null) production.activate();
         retainMachineChunk();
         return true;
     }
@@ -785,9 +784,9 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
             return failObservation(descriptorFailure);
         }
         if (executionKind == RecipeExecutionKind.CUSTOM) {
-            return observeCustomOperation(level);
+            observedCycle = customCycle;
+            return customState;
         }
-        if (outputBatch != null) collectReceptionOutputs(null);
         if (stateProvider != null) {
             MachineState state;
             try {
@@ -836,7 +835,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                 return receptionCompletion();
             }
         }
-        if (outputBatch != null) {
+        if (outputBatch() != null) {
             // 有状态提供者时必须等它证明工艺结束；即时机器则核对原料已消费。
             if (stateProvider == null && consumedInputsAreEmpty()
                     && level.getGameTime() > startedAtTick) return receptionCompletion();
@@ -858,45 +857,31 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         return workingObservation();
     }
 
-    @Override
-    public ItemStack collectResult(ServerPlayer player) {
-        List<ItemStack> results = collectAllResults(player);
-        return results.isEmpty() ? ItemStack.EMPTY : results.get(0);
+    @Override public OperationOutputSource outputSource() {
+        return new OperationOutputSource() {
+            @Override public void transferAvailable(ServerLevel level) {
+                ExternalIntegrationBatchDelegate.this.transferAvailable(level);
+            }
+            @Override public void transferSignalled() {
+                if (!customCollectionSignalled) return;
+                customCollectionSignalled = false;
+                String failure = collectCustomStep();
+                if (failure != null) customState = failObservation(failure);
+                else {
+                    captureCustomSnapshot();
+                    customState = customCollectionComplete ? doneObservation() : workingObservation();
+                }
+            }
+            @Override public Handoff collectFinal(ServerPlayer player) {
+                return ExternalIntegrationBatchDelegate.this.collectFinal(player);
+            }
+        };
     }
 
-    @Override
-    public List<ItemStack> collectAllResults(ServerPlayer player) {
-        if (resultsCollected || recipeView == null) return List.of();
-        if (outputBatch != null) {
-            collectReceptionOutputs(player);
-            resultsCollected = true;
-            finishOutputBatch();
-            return List.of();
-        }
+    private OperationOutputSource.Handoff collectFinal(ServerPlayer player) {
+        if (resultsCollected || recipeView == null) return OperationOutputSource.Handoff.identified(List.of());
         if (executionKind == RecipeExecutionKind.CUSTOM) {
-            return collectCustomResults(player);
-        }
-        resultsCollected = true;
-        Map<ItemStackKey, ItemStack> collected = new LinkedHashMap<>();
-        for (var output : collectStandardItemOutputs(player)) merge(collected, output.stack());
-        collectFluidOutputs(player);
-        List<ItemStack> result = new ArrayList<>(collected.values());
-        result.addAll(taskFluidOutputs);
-        taskFluidOutputs.clear();
-        return result.stream().map(ItemStack::copy).toList();
-    }
-
-    @Override
-    public List<OutputAccounting.CollectedOutput> collectStructuredResults(
-            ServerPlayer player
-    ) {
-        if (resultsCollected || recipeView == null) return List.of();
-        if (outputBatch != null) {
-            collectAllResults(player);
-            return List.of();
-        }
-        if (executionKind == RecipeExecutionKind.CUSTOM) {
-            if (!customCollectionComplete) return List.of();
+            if (!customCollectionComplete) return OperationOutputSource.Handoff.identified(List.of());
             List<OutputAccounting.CollectedOutput> collected =
                     new ArrayList<>();
             for (CollectedOutput output
@@ -912,13 +897,18 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                         output.amount()
                 );
             }
-            resultsCollected = true;
-            return List.copyOf(collected);
+            return new OperationOutputSource.Handoff(collectCustomResults(player), collected);
         }
 
         List<OutputAccounting.CollectedOutput> collected = collectStandardItemOutputs(player);
+        collectFluidOutputs(player);
+        List<ItemStack> stacks = new ArrayList<>();
+        for (var output : collected) stacks.add(output.stack());
+        stacks.addAll(taskFluidOutputs);
+        taskFluidOutputs.clear();
         resultsCollected = true;
-        return List.copyOf(collected);
+        if (production != null) production.finishBatch();
+        return new OperationOutputSource.Handoff(stacks, collected);
     }
 
     private void appendStructuredItemOutput(
@@ -941,7 +931,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     }
 
     @Override
-    public List<CollectedOutput> drainReportedResources() {
+    public List<CollectedOutput> takeDelivered() {
         if (reportedResources.isEmpty()) return List.of();
         List<CollectedOutput> result = List.copyOf(reportedResources);
         reportedResources.clear();
@@ -957,14 +947,12 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     }
 
     @Override
-    public String reportedResourceFailure() {
+    public String deliveryFailure() {
         return reportedResourceFailure;
     }
 
-    @Override
-    public boolean collectsPhysicalSecondaryOutputs() {
-        return true;
-    }
+
+
 
     @Override
     public OutputContract outputContract() {
@@ -1132,7 +1120,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     }
 
     @Override
-    public void onBatchFinished(@Nullable ServerPlayer player) {
+    public void cleanup(@Nullable ServerPlayer player) {
         if (!markTerminalCleanup()) return;
         if (runningOperation != null) {
             try {
@@ -1467,7 +1455,21 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         return null;
     }
 
-    private CraftObservation observeCustomOperation(ServerLevel level) {
+    private CraftObservation customState = new CraftObservation(CraftPhase.WORKING);
+    private MachineCycleProgress customCycle = MachineCycleProgress.UNKNOWN;
+    private boolean customCollectionSignalled;
+
+    @Override public void advance(ServerLevel current) {
+        customCollectionSignalled = false;
+        if (!operationStarted || executionKind != RecipeExecutionKind.CUSTOM || level == null
+                || !level.hasChunkAt(machinePos) || validateCurrentDescriptor() != null) return;
+        BlockEntity machine = level.getBlockEntity(machinePos);
+        if (machine == null || machine.isRemoved()) return;
+        customState = sampleCustomOperation(level);
+        customCycle = observedCycle;
+    }
+
+    private CraftObservation sampleCustomOperation(ServerLevel level) {
         observedCycle = MachineCycleProgress.UNKNOWN;
         if (customStartPending) {
             ExecutionResult started = startCustomIntegration(
@@ -1519,13 +1521,8 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                         ? workingObservation() : workingObservation(observation.completedTicks());
             }
             case READY_TO_COLLECT, COLLECTING -> {
-                String failure = collectCustomStep();
-                if (failure != null) {
-                    yield failObservation(failure);
-                }
-                captureCustomSnapshot();
-                yield customCollectionComplete
-                        ? doneObservation() : workingObservation();
+                customCollectionSignalled = true;
+                yield workingObservation();
             }
             case SETTLING, SUCCEEDED -> customCollectionComplete
                     ? doneObservation()
@@ -2053,7 +2050,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                         == IntegrationResourceKey.ResourceKind.FLUID)) {
             return;
         }
-        if (outputBatch == null && taskFluids == null && !hasStorageAccess()) {
+        if (outputBatch() == null && taskFluids == null && !hasStorageAccess()) {
             failReportedResource("selected storage has no fluid capability");
             return;
         }
@@ -2083,10 +2080,10 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                 int requested = (int) Math.min(remaining, available);
                 FluidStack candidate = current.copy();
                 candidate.setAmount(requested);
-                if (outputBatch != null) {
+                if (outputBatch() != null) {
                     FluidStack extracted = extractFluid(port, current, requested);
                     if (!extracted.isEmpty()) {
-                        outputBatch.collect(IntegrationResourceKey.fluid(extracted), extracted.getAmount());
+                        outputBatch().collect(IntegrationResourceKey.fluid(extracted), extracted.getAmount());
                         remaining -= extracted.getAmount();
                     }
                     continue;
@@ -2145,7 +2142,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                     return;
                 }
             }
-            if (outputBatch == null && expected > 0L && plannedOutputMaximum(output) - remaining < expected) {
+            if (outputBatch() == null && expected > 0L && plannedOutputMaximum(output) - remaining < expected) {
                 failReportedResource(
                         "declared fluid output was not fully collected");
                 return;

@@ -1,11 +1,10 @@
 package com.huanghuang.rsintegration.mods.biomancy;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.batch.InstantBatchDelegate;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
@@ -28,7 +27,6 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraftforge.items.IItemHandler;
 import org.jetbrains.annotations.NotNull;
-
 import javax.annotation.Nullable;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -388,19 +386,14 @@ final class BiomancyBatchDelegate extends InstantBatchDelegate {
                 || ModIds.ID_BIOMANCY_DECOMPOSER.equals(typeForRecipe(recipe)));
     }
 
-    @Override
-    public ItemStack collectResult(ServerPlayer player) {
-        List<ItemStack> results = collectAllResults(player);
-        return results.isEmpty() ? ItemStack.EMPTY : results.get(0);
+    @Override public OperationOutputSource outputSource() {
+        return player -> OperationOutputSource.Handoff.physical(takeResults(player), outputContract());
     }
 
-    @Override
-    public boolean collectsPhysicalSecondaryOutputs() {
-        return true;
-    }
 
-    @Override
-    public List<ItemStack> collectAllResults(ServerPlayer player) {
+
+
+    private List<ItemStack> takeResults(ServerPlayer player) {
         if (isBioForge()) {
             List<ItemStack> output = List.copyOf(results);
             results.clear();
@@ -462,7 +455,7 @@ final class BiomancyBatchDelegate extends InstantBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@Nullable ServerPlayer player) {
+    public void cleanup(@Nullable ServerPlayer player) {
         if (!markTerminalCleanup()) return;
         placedInputs.clear();
         unplacedInputs.clear();

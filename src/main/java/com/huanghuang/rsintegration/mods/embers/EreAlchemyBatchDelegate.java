@@ -1,35 +1,27 @@
 package com.huanghuang.rsintegration.mods.embers;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
-import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.reflection.probes.EmbersReflection;
 import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.huanghuang.rsintegration.util.Reflect;
-import com.refinedmods.refinedstorage.api.storage.tracker.IStorageTracker;
-import com.refinedmods.refinedstorage.api.util.Action;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Iterator;
 import java.util.List;
-import java.util.UUID;
 import javax.annotation.Nullable;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
@@ -284,6 +276,22 @@ extends AbstractBatchDelegate {
 
     @Override
     protected CraftObservation observeMachineCraft(ServerLevel level, BlockEntity be) {
+        if (ignitionState != null) return ignitionState;
+        return super.observeMachineCraft(level, be);
+    }
+
+    private CraftObservation ignitionState;
+
+    @Override public void advance(ServerLevel current) {
+        ignitionState = null;
+        if (!waitingForEmber) return;
+        ServerLevel level = resolveMachineLevel(current);
+        if (level == null || !level.hasChunkAt(machinePos)) return;
+        var machine = level.getBlockEntity(machinePos);
+        if (machine != null && !machine.isRemoved()) ignitionState = advanceIgnition(level, machine);
+    }
+
+    private CraftObservation advanceIgnition(ServerLevel level, BlockEntity be) {
         if (this.waitingForEmber) {
             EmbersBeamCannonIgnition.Result ignition = EmbersBeamCannonIgnition.ignite(
                     level, this.machinePos, be);
@@ -312,7 +320,7 @@ extends AbstractBatchDelegate {
                     "[RSI-Embers] Beam Cannon ignition failed while waiting for Ember: {}", ignition);
             return failObservation("Beam Cannon ignition failed: " + ignition);
         }
-        return super.observeMachineCraft(level, be);
+        return workingObservation();
     }
 
     @Override
@@ -341,8 +349,11 @@ extends AbstractBatchDelegate {
         this.lockLease = null;
     }
 
-    public ItemStack collectResult(ServerPlayer player) {
-        releaseAlchemyLease();
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.single(this::takeResult, outputContract());
+    }
+
+    private ItemStack takeResult(ServerPlayer player) {
         this.craftStarted = false;
         this.waitingForEmber = false;
         if (this.tablet == null) {
@@ -419,7 +430,8 @@ extends AbstractBatchDelegate {
         this.clearAllSlots();
     }
 
-    public void onBatchFinished(@NotNull ServerPlayer player) {
+    public void cleanup(@NotNull ServerPlayer player) {
+        releaseAlchemyLease();
     }
 
     @Override

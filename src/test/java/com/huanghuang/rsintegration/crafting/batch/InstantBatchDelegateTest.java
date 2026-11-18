@@ -9,7 +9,6 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import org.junit.jupiter.api.Test;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class InstantBatchDelegateTest extends BootstrapTest {
@@ -97,13 +96,12 @@ class InstantBatchDelegateTest extends BootstrapTest {
             return true;
         }
 
-        @Override
-        public ItemStack collectResult(ServerPlayer player) {
-            return ItemStack.EMPTY;
+        @Override public OperationOutputSource outputSource() {
+            return OperationOutputSource.single(player -> ItemStack.EMPTY, outputContract());
         }
 
         @Override
-        public void onBatchFinished(ServerPlayer player) {
+        public void cleanup(ServerPlayer player) {
         }
     }
 }

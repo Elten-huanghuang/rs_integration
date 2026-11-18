@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mods.aetherworks;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -9,11 +10,11 @@ import com.huanghuang.rsintegration.crafting.OperationResourceCoordinator;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities.OutputOwnership;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
-import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate.CraftObservation;
+import com.huanghuang.rsintegration.crafting.batch.MachineOperation.CraftObservation;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
-import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate.CraftPhase;
-import com.huanghuang.rsintegration.crafting.batch.OperationPoll;
+import com.huanghuang.rsintegration.crafting.batch.MachineOperation.CraftPhase;
+import com.huanghuang.rsintegration.crafting.batch.OperationLifecycle;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate.PreparationState;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.graph.GraphConcurrencyPolicy;
@@ -62,14 +63,12 @@ import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.MethodInsnNode;
-
 import java.io.InputStream;
 import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
@@ -129,7 +128,7 @@ class AetherworksMetalFormerBatchDelegateTest extends BootstrapTest {
         group.setOperationKernel(kernel, UUID.randomUUID(), new NodeId(0), craftBudget);
         try {
             assertEquals(2, group.getChildCount());
-            assertTrue(group.startOperation(OperationStartContext.delegateExtracted(
+            assertTrue(group.machineOperation().start(OperationStartContext.delegateExtracted(
                     player, ExtractionLedger.external())));
             assertEquals(2, craftBudget.active());
             assertEquals(2, machines.size());
@@ -137,16 +136,16 @@ class AetherworksMetalFormerBatchDelegateTest extends BootstrapTest {
             verify(first).startSingleOperation(player);
             verify(second).startSingleOperation(player);
 
-            doReturn(new CraftObservation(CraftPhase.DONE)).when(first).observeCraft(level);
-            doReturn(new CraftObservation(CraftPhase.DONE)).when(second).observeCraft(level);
-            doReturn(new ItemStack(Items.EMERALD)).when(first).collectResult(player);
-            doReturn(new ItemStack(Items.EMERALD)).when(second).collectResult(player);
-            assertEquals(CraftPhase.DONE, OperationPoll.poll(group, level).phase());
-            assertEquals(2, group.collectAllResults(player).stream().mapToInt(ItemStack::getCount).sum());
+            doReturn(new CraftObservation(CraftPhase.DONE)).when(first).observe(level);
+            doReturn(new CraftObservation(CraftPhase.DONE)).when(second).observe(level);
+            doReturn(OperationOutputSource.single(p -> new ItemStack(Items.EMERALD), first.outputContract())).when(first).outputSource();
+            doReturn(OperationOutputSource.single(p -> new ItemStack(Items.EMERALD), second.outputContract())).when(second).outputSource();
+            assertEquals(CraftPhase.DONE, new OperationLifecycle(group).poll(level).phase());
+            assertEquals(2, group.outputSource().collectFinal(player).stacks().stream().mapToInt(ItemStack::getCount).sum());
             assertEquals(0, craftBudget.active());
             assertEquals(0, machines.size());
         } finally {
-            group.onBatchFinished(player);
+            group.machineOperation().cleanup(player);
         }
     }
 
@@ -215,7 +214,7 @@ class AetherworksMetalFormerBatchDelegateTest extends BootstrapTest {
             assertEquals(CraftPhase.WORKING, fixture.delegate.observeMachineCraft(
                     fixture.level, fixture.machine).phase());
             assertEquals(2600.0, fixture.heat.getHeat());
-            assertTrue(fixture.delegate.collectResult(null).isEmpty());
+            assertTrue(fixture.delegate.outputSource().collectFinal(null).stacks().isEmpty());
 
             // 原生配方在同一刻消耗物品和流体，再把产物写回槽位 0。
             ItemStack produced = recipe.assemble(new MetalFormerContext(
@@ -224,9 +223,9 @@ class AetherworksMetalFormerBatchDelegateTest extends BootstrapTest {
             assertEquals(0, fixture.tank.getFluidAmount());
             assertEquals(CraftPhase.DONE, fixture.delegate.observeMachineCraft(
                     fixture.level, fixture.machine).phase());
-            assertEquals(Items.EMERALD, fixture.delegate.collectResult(null).getItem());
+            assertEquals(Items.EMERALD, fixture.delegate.outputSource().collectFinal(null).stacks().get(0).getItem());
             assertTrue(fixture.machine.inventory.getStackInSlot(0).isEmpty());
-            assertTrue(fixture.delegate.collectResult(null).isEmpty());
+            assertTrue(fixture.delegate.outputSource().collectFinal(null).stacks().isEmpty());
         }
     }
 

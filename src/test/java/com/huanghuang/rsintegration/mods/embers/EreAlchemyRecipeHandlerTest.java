@@ -32,13 +32,11 @@ import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraftforge.items.ItemStackHandler;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -223,7 +221,7 @@ class EreAlchemyRecipeHandlerTest extends BootstrapTest {
                     .thenReturn(EmbersBeamCannonIgnition.Result.STARTED);
             EreAlchemyBatchDelegate first = fixture.delegate();
             fixture.completeOperation();
-            assertFalse(first.collectResult(fixture.player).isEmpty());
+            assertFalse(first.outputSource().collectFinal(fixture.player).stacks().isEmpty());
             verify(fixture.endpoint, never()).insert(eq(fixture.player), any(), eq(false));
 
             EreAlchemyBatchDelegate next = fixture.delegate();
@@ -238,7 +236,7 @@ class EreAlchemyRecipeHandlerTest extends BootstrapTest {
                         .getTag().getString("owner"));
             }
             fixture.completeOperation();
-            assertFalse(next.collectResult(fixture.player).isEmpty());
+            assertFalse(next.outputSource().collectFinal(fixture.player).stacks().isEmpty());
             List<ItemStack> recovered = next.collectReusableMaterials(fixture.player);
             assertEquals(2, recovered.size());
             assertTrue(recovered.stream().allMatch(stack ->
@@ -253,7 +251,7 @@ class EreAlchemyRecipeHandlerTest extends BootstrapTest {
         try (AlchemyFixture fixture = new AlchemyFixture()) {
             EreAlchemyBatchDelegate first = fixture.delegate();
             fixture.completeOperation();
-            first.collectResult(fixture.player);
+            first.outputSource().collectFinal(fixture.player).stacks();
             EreAlchemyBatchDelegate next = fixture.delegate();
             assertTrue(first.transferReusableMaterialsTo(next));
             next.clearMachineState(fixture.tablet, fixture.player);
@@ -270,7 +268,7 @@ class EreAlchemyRecipeHandlerTest extends BootstrapTest {
             EreAlchemyBatchDelegate first = fixture.delegate();
             fixture.bottoms.get(0).inventory.setStackInSlot(0, ItemStack.EMPTY);
             fixture.completeOperation();
-            first.collectResult(fixture.player);
+            first.outputSource().collectFinal(fixture.player).stacks();
             assertFalse(first.transferReusableMaterialsTo(fixture.delegate()));
             assertEquals(1, first.collectReusableMaterials(fixture.player).size());
         }

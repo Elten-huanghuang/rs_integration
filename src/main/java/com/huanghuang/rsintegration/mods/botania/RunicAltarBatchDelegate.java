@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mods.botania;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -25,7 +25,6 @@ import vazkii.botania.common.block.block_entity.RunicAltarBlockEntity;
 import vazkii.botania.common.item.material.RuneItem;
 import vazkii.botania.xplat.XplatAbstractions;
 import net.minecraft.core.registries.Registries;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -208,8 +207,13 @@ public final class RunicAltarBatchDelegate extends AbstractBatchDelegate {
     @Override
     protected boolean isMachineCraftFinished(@Nonnull ServerLevel currentLevel,
                                              @Nonnull BlockEntity blockEntity) {
-        if (!started) return false;
-        if (hasPhysicalPrimaryOutput()) return true;
+        return started && (completionTriggered || hasPhysicalPrimaryOutput());
+    }
+
+    @Override public void advance(ServerLevel current) {
+        if (!started || phase != CraftPhase.WORKING || level == null || !level.hasChunkAt(pos)
+                || hasPhysicalPrimaryOutput()) return;
+        var blockEntity = level.getBlockEntity(pos);
         if (!completionTriggered && blockEntity instanceof RunicAltarBlockEntity altar
                 && altar.manaToGet > 0 && altar.getCurrentMana() >= altar.manaToGet
                 && hasOwnedReagent()) {
@@ -219,7 +223,6 @@ public final class RunicAltarBatchDelegate extends AbstractBatchDelegate {
                 completionTriggered = used && altar.isEmpty();
             }
         }
-        return completionTriggered || hasPhysicalPrimaryOutput();
     }
 
     private boolean hasOwnedReagent() {
@@ -240,14 +243,11 @@ public final class RunicAltarBatchDelegate extends AbstractBatchDelegate {
                         && ItemStack.isSameItemSameTags(entity.getItem(), expected)).isEmpty();
     }
 
-    @Override
-    public ItemStack collectResult(@Nonnull ServerPlayer player) {
-        List<ItemStack> results = collectAllResults(player);
-        return results.isEmpty() ? ItemStack.EMPTY : results.get(0);
+    @Override public OperationOutputSource outputSource() {
+        return player -> OperationOutputSource.Handoff.physical(takeResults(player), outputContract());
     }
 
-    @Override
-    public List<ItemStack> collectAllResults(@Nonnull ServerPlayer player) {
+    private List<ItemStack> takeResults(@Nonnull ServerPlayer player) {
         if (level == null || pos == null) return List.of();
         List<ItemStack> results = new ArrayList<>();
         for (ItemEntity entity : level.getEntitiesOfClass(
@@ -272,11 +272,8 @@ public final class RunicAltarBatchDelegate extends AbstractBatchDelegate {
                 && level.getGameTime() >= startTick;
     }
 
-    @Override
-    public boolean collectsPhysicalSecondaryOutputs() {
-        // Botania returns RuneItem inputs as fresh world entities after a successful craft.
-        return true;
-    }
+
+
 
     @Override
     protected void clearMachineState(BlockEntity blockEntity, @Nullable ServerPlayer player) {
@@ -363,7 +360,7 @@ public final class RunicAltarBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@Nullable ServerPlayer player) {
+    public void cleanup(@Nullable ServerPlayer player) {
         if (!markTerminalCleanup()) return;
         clearLocalState();
         resetState();

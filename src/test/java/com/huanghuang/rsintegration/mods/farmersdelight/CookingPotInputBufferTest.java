@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mods.farmersdelight;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
-import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
@@ -10,9 +10,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.Test;
-
 import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -67,9 +65,9 @@ class CookingPotInputBufferTest extends BootstrapTest {
                     OutputContract.Kind.PRIMARY, OutputContract.Source.SLOT)));
             ServerPlayer player = mock(ServerPlayer.class);
             doReturn(contract).when(delegate).outputContract();
-            doReturn(new ItemStack(Items.APPLE, 6)).when(delegate).collectResult(player);
+            doReturn(OperationOutputSource.single(p -> new ItemStack(Items.APPLE, 6), delegate.outputContract())).when(delegate).outputSource();
 
-            List<OutputAccounting.CollectedOutput> outputs = delegate.collectStructuredResults(player);
+            List<OutputAccounting.CollectedOutput> outputs = delegate.outputSource().collectFinal(player).ports();
             assertEquals(1, outputs.size());
             assertEquals(portId, outputs.get(0).portId());
             assertEquals(6, outputs.get(0).stack().getCount());

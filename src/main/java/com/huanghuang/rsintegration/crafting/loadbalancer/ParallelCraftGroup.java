@@ -1,11 +1,11 @@
 package com.huanghuang.rsintegration.crafting.loadbalancer;
 
+import com.huanghuang.rsintegration.crafting.batch.ProductionEvidence;
+import com.huanghuang.rsintegration.crafting.batch.MachineOperation;
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.progress.MachineCycleProgress;
-import com.huanghuang.rsintegration.crafting.TaskOutputReception;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
-
 import com.huanghuang.rsintegration.crafting.progress.CraftMaterialView;
-
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.api.execution.CollectedOutput;
 import com.huanghuang.rsintegration.api.execution.CancelReason;
@@ -29,12 +29,11 @@ import com.huanghuang.rsintegration.crafting.graph.OperationId;
 import com.huanghuang.rsintegration.crafting.graph.OperationBudget;
 import com.huanghuang.rsintegration.magic.MagicResourceTaskReservation;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
-import com.huanghuang.rsintegration.crafting.batch.OperationPoll;
+import com.huanghuang.rsintegration.crafting.batch.OperationLifecycle;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext.ReservedMaterial;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
-import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.batch.RepeatedOperationPlan;
 import com.huanghuang.rsintegration.crafting.batch.BulkOperationMaterials;
 import com.huanghuang.rsintegration.crafting.batch.CountedOperationMaterials;
@@ -42,7 +41,6 @@ import com.huanghuang.rsintegration.crafting.batch.CountedOperationMaterials.Ori
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.PreparationMessageScope;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry.BoundMachine;
-import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.MaterialAccess;
 import net.minecraft.core.BlockPos;
@@ -53,7 +51,6 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import org.jetbrains.annotations.NotNull;
 import java.nio.charset.StandardCharsets;
@@ -61,7 +58,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
-
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.AbstractList;
@@ -80,7 +76,9 @@ import java.util.function.Function;
  * Internal state (workers, settledResults, etc.) is not synchronized;
  * calling from worker threads will cause data races.
  */
-public final class ParallelCraftGroup implements IBatchDelegate {
+public final class ParallelCraftGroup implements IBatchDelegate, MachineOperation, ProductionEvidence {
+        @Override public MachineOperation machineOperation() { return this; }
+
     private static final int MAX_START_PROBES_PER_TICK = 32;
 
     private final List<WorkerSlot> workers = new ArrayList<>();
@@ -196,6 +194,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         final int id;
         final BoundMachine machine;
         IBatchDelegate delegate;
+        OperationLifecycle operation;
         OperationExecutionKernel.Session operationSession;
         List<Integer> operationIds = List.of();
         int dispatchedFirst;
@@ -214,6 +213,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             this.id = id;
             this.machine = machine;
             this.delegate = delegate;
+            this.operation = new OperationLifecycle(delegate);
         }
 
         boolean running() {
@@ -647,7 +647,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     }
 
     @Override
-    public boolean startOperation(@NotNull OperationStartContext context) {
+    public boolean start(@NotNull OperationStartContext context) {
         RepeatedOperationPlan repeated = context.repeatedOperationPlan();
         if (bulkOperationMaterials != null || countedMaterials != null) {
             if (repeated != null || context.buffered() || !context.materials().isEmpty()
@@ -815,6 +815,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         worker.observedCapturedCount = 0;
         worker.observedCompletedWork = 0L;
         worker.delegate = delegate;
+        worker.operation = new OperationLifecycle(delegate);
         worker.operationIds = claimedOperations;
         worker.dispatchedFirst = operationId;
         worker.dispatchedCount = claimedOperations.size();
@@ -862,7 +863,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
                         }
                     }
                     worker.reusableDispatched = true;
-                    return delegate.startOperation(identifiedContext);
+                    return worker.operation.start(identifiedContext);
                 };
                 accepted = worker.operationSession != null
                         ? worker.operationSession.tryStart(start) : start.start();
@@ -874,7 +875,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
                 OperationExecutionKernel.StartAction start = () -> {
                     worker.startAttempted = true;
                     worker.reusableDispatched = true;
-                    return delegate.startOperation(identifiedContext);
+                    return worker.operation.start(identifiedContext);
                 };
                 accepted = worker.operationSession != null
                         ? worker.operationSession.tryStart(start) : start.start();
@@ -992,13 +993,8 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         return List.copyOf(aggregated);
     }
 
-    @Override
-    public boolean isCraftComplete(ServerLevel level) {
-        return observeCraft(level).phase() == CraftPhase.DONE;
-    }
 
-    @Override
-    public void transferOutputs(ServerLevel level) {
+    private void transferAvailable(ServerLevel level) {
         if (!started && !draining) return;
         if (transferComplete || observationCursor > 0) return;
         transferStarted = true;
@@ -1007,7 +1003,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             WorkerSlot worker = workers.get(transferCursor++);
             if (!worker.running()) continue;
             try {
-                worker.delegate.transferOutputs(level);
+                worker.operation.transferAvailable(level);
             } catch (Exception failure) {
                 RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] Worker output transfer threw at {}",
                         worker.machine.pos(), failure);
@@ -1022,7 +1018,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     }
 
     @Override
-    public void advanceCraft(ServerLevel level) {
+    public void advance(ServerLevel level) {
         if (!started && !draining) return;
         currentTick = level.getGameTime();
 
@@ -1038,12 +1034,12 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             if (!worker.running()) continue;
             CraftObservation observation;
             try {
-                observation = OperationPoll.advanceAndObserve(worker.delegate, level);
+                observation = worker.operation.advanceAndObserve(level);
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.warn("[RSI-ParallelGroup] Worker observation threw at {}",
                         worker.machine.pos(), e);
                 // This worker can no longer be observed to natural completion. Its
-                // reservation stays unsettled and onBatchFailed recovers its machine.
+                // reservation stays unsettled and recover recovers its machine.
                 operations.abandonBatch(worker.id);
                 worker.clearOperations();
                 closeOperationResources(worker);
@@ -1053,7 +1049,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             }
             worker.lastObservation = observation;
             drainWorkerResources(worker);
-            String resourceFailure = worker.delegate.reportedResourceFailure();
+            String resourceFailure = ProductionEvidence.from(worker.delegate).deliveryFailure();
             if (resourceFailure != null && !resourceFailure.isBlank()) {
                 beginDraining(resourceFailure);
             }
@@ -1064,6 +1060,11 @@ public final class ParallelCraftGroup implements IBatchDelegate {
                 lastProgressTick = currentTick;
             }
             if (observation.phase() == CraftPhase.FAILED) {
+                if (worker.delegate.failureConsumesInputs(observation)) {
+                    beginDraining(worker.machine.pos() + ": " + observation.detail());
+                    settleCompletedOperation(worker);
+                    continue;
+                }
                 operations.abandonBatch(worker.id);
                 worker.clearOperations();
                 closeOperationResources(worker);
@@ -1102,7 +1103,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     }
 
     @Override
-    public CraftObservation observeCraft(ServerLevel level) {
+    public CraftObservation observe(ServerLevel level) {
         if (!started && !draining) return new CraftObservation(CraftPhase.WAITING_FOR_START);
         // 预算中断时保留整轮边界，即使最后一个运行中的单元已经结算。
         if (transferStarted) return new CraftObservation(CraftPhase.WORKING).withCompletedWork(workProgressSequence);
@@ -1195,62 +1196,20 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             return false;
         }
         List<Integer> operationIds = worker.operationIds;
-        ItemStack expectedWorldOutput = worker.delegate.getExpectedOutput();
-        List<ItemStack> actual;
         try {
-            actual = OutputAccounting.mergeLegacyOutputs(
-                    drainCapture(worker), worker.delegate.collectAllResults(player),
-                    expectedWorldOutput);
-        } catch (Exception e) {
-            operations.abandonBatch(worker.id);
-            worker.clearOperations();
-            closeOperationResources(worker);
-            worker.needsFailureCleanup = true;
-            beginDraining("worker result collection failed at " + worker.machine.pos());
-            return false;
-        }
-
-        ExpectedProduction expected = worker.delegate.getExpectedProduction();
-        long received = worker.delegate.outputReception() == null || expected == null ? 0L
-                : worker.delegate.outputReception().received(TaskOutputReception.resource(expected.item()));
-        if (expected != null && received + countMatching(actual, expected) < expected.count()) {
-            // DONE proves the inputs were consumed. Preserve the residual output and
-            // settle this token so an externally extracted result cannot pair with a refund.
-            settledResults.addAll(StackCopies.excludingEmpty(actual));
-            settleReservations(operationIds);
-            operations.abandonBatch(worker.id);
-            worker.clearOperations();
-            closeOperationResources(worker);
-            worker.needsFailureCleanup = true;
-            beginDraining("worker output was externally extracted at " + worker.machine.pos());
-            return false;
-        }
-        if (expected == null && expectedWorldOutput != null
-                && !expectedWorldOutput.isEmpty() && actual.isEmpty()) {
-            settleReservations(operationIds);
-            operations.abandonBatch(worker.id);
-            worker.clearOperations();
-            closeOperationResources(worker);
-            worker.needsFailureCleanup = true;
-            beginDraining("expected world output was not captured at " + worker.machine.pos());
-            return false;
-        }
-
-        // Output ownership is already proven at this point. Commit the operation
-        // before cleanup so a cleanup exception cannot pair real output with an input refund.
-        settleReservations(operationIds);
-        settledResults.addAll(StackCopies.excludingEmpty(actual));
-        drainWorkerResources(worker);
-        addSecondaryOutputs(worker.delegate);
-        try {
-            worker.delegate.onBatchFinished(player);
+            boolean complete = worker.operation.finish(player, operationIds.size(), () -> drainCapture(worker),
+                    outputs -> {
+                        settledResults.addAll(outputs);
+                        drainWorkerResources(worker);
+                    }, worker.operationSession, () -> settleReservations(operationIds));
             drainWorkerResources(worker);
-        } catch (Exception e) {
-            operations.abandonBatch(worker.id);
-            worker.clearOperations();
-            closeOperationResources(worker);
-            worker.needsFailureCleanup = true;
-            beginDraining("worker finish cleanup failed at " + worker.machine.pos());
+            if (!complete) {
+                abandonCompletedWorker(worker, "worker output was externally extracted at ");
+                return false;
+            }
+        } catch (RuntimeException failure) {
+            preserveCapturedProgress(worker, drainCapture(worker));
+            abandonCompletedWorker(worker, "worker result collection or cleanup failed at ");
             return false;
         }
         operations.completeBatch(worker.id);
@@ -1261,27 +1220,23 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         return !draining;
     }
 
-    private void addSecondaryOutputs(IBatchDelegate delegate) {
-        if (delegate.collectsPhysicalSecondaryOutputs() || machineServer == null) return;
-        ServerLevel overworld = machineServer.overworld();
-        if (overworld == null) return;
-        Recipe<?> recipe = overworld.getRecipeManager().byKey(recipeId).orElse(null);
-        if (recipe == null) return;
-        for (ItemStack secondary : ModRecipeHandlers.tryGetSecondaryOutputs(
-                recipe, overworld.registryAccess())) {
-            if (secondary != null && !secondary.isEmpty()) settledResults.add(secondary.copy());
-        }
+    private void abandonCompletedWorker(WorkerSlot worker, String reason) {
+        operations.abandonBatch(worker.id);
+        worker.clearOperations();
+        closeOperationResources(worker);
+        worker.needsFailureCleanup = true;
+        beginDraining(reason + worker.machine.pos());
     }
 
     private void drainWorkerResources(WorkerSlot worker) {
         drainWorkerReception(worker);
-        reportedResources.addAll(worker.delegate.drainReportedResources());
-        observedProduction.addAll(worker.delegate.drainObservedProduction());
+        reportedResources.addAll(ProductionEvidence.from(worker.delegate).takeDelivered());
+        observedProduction.addAll(ProductionEvidence.from(worker.delegate).takeObserved());
     }
 
     private void drainWorkerReception(WorkerSlot worker) {
         if (worker.delegate == null) return;
-        List<ItemStack> received = worker.delegate.drainReceivedOutputs();
+        List<ItemStack> received = worker.operation.drainHeld();
         if (received.isEmpty()) return;
         settledResults.addAll(received);
         productionSequence++;
@@ -1290,14 +1245,14 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     }
 
     @Override
-    public List<CollectedOutput> drainReportedResources() {
+    public List<CollectedOutput> takeDelivered() {
         List<CollectedOutput> result = List.copyOf(reportedResources);
         reportedResources.clear();
         return result;
     }
 
     @Override
-    public List<CollectedOutput> drainObservedProduction() {
+    public List<CollectedOutput> takeObserved() {
         List<CollectedOutput> result = List.copyOf(observedProduction);
         observedProduction.clear();
         return result;
@@ -1460,16 +1415,11 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         return Math.multiplyExact(operations.runningOperations(), logicalOperationsPerStart);
     }
 
-    @Override
-    public ItemStack collectResult(ServerPlayer player) {
-        List<ItemStack> results = collectAllResults(player);
-        return results.isEmpty() ? ItemStack.EMPTY : results.get(0);
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.incremental(this::transferAvailable,
+                player -> OperationOutputSource.Handoff.physical(drainSettledResults(), outputContract()));
     }
 
-    @Override
-    public List<ItemStack> collectAllResults(ServerPlayer player) {
-        return drainSettledResults();
-    }
 
     @Nullable
     @Override
@@ -1484,7 +1434,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     }
 
     @Override
-    public void onBatchFailed(ServerPlayer player, String reason) {
+    public void recover(ServerPlayer player, String reason) {
         if (failureCleanupFinished) return;
         failureCleanupFinished = true;
         int runningBeforeCleanup = getRunningOperations();
@@ -1509,7 +1459,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             if (worker.delegate != null) {
                 boolean physicalCleanupRequired = worker.running() || worker.needsFailureCleanup;
                 try {
-                    cleanupPreparedDelegate(worker.delegate, physicalCleanupRequired, player, reason);
+                    worker.operation.discardOrRecover(physicalCleanupRequired, player, reason);
                     if (physicalCleanupRequired && !physicalCleanupCompleted(worker.delegate)) {
                         physicalFailureCleanupCompleted = false;
                     }
@@ -1621,7 +1571,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         return List.copyOf(result);
     }
 
-    /** Terminal state captured before {@link #onBatchFailed} clears worker state. */
+    /** Terminal state captured before {@link #recover} clears worker state. */
     @Nullable
     public OperationExecutionKernel.TerminalClass failureTerminalClass() {
         return failureTerminalClass;
@@ -1639,22 +1589,12 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         return true;
     }
 
-    static void cleanupPreparedDelegate(IBatchDelegate delegate,
-                                        boolean physicalCleanupRequired,
-                                        @Nullable ServerPlayer player,
-                                        String reason) {
-        if (physicalCleanupRequired) delegate.onBatchFailed(player, reason);
-        else delegate.releasePreparationResources();
-    }
-
     private void preserveCapturedProgress(WorkerSlot worker, List<ItemStack> captured) {
         if (captured.isEmpty() || worker.operationIds.isEmpty()) return;
         int completed = completedExecutionsFromCapture(
                 worker.delegate, worker.operationIds.size(), captured);
-        if (completed > 0) {
-            settleReservations(worker.operationIds.subList(0, completed));
-            settledResults.addAll(StackCopies.excludingEmpty(captured));
-        }
+        if (completed > 0) settleReservations(worker.operationIds.subList(0, completed));
+        settledResults.addAll(StackCopies.excludingEmpty(captured));
     }
 
     static int completedExecutionsFromCapture(IBatchDelegate delegate, int batchSize,
@@ -1676,7 +1616,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@NotNull ServerPlayer player) {
+    public void cleanup(@NotNull ServerPlayer player) {
         started = false;
         for (WorkerSlot worker : workers) {
             drainCapture(worker);
@@ -1983,8 +1923,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
 
     private void closeOperationResources(WorkerSlot worker) {
         if (worker.delegate != null) {
-            worker.delegate.closeOutputReception();
-            drainWorkerReception(worker);
+            settledResults.addAll(worker.operation.retireHolding());
         }
         OperationExecutionKernel.Session session = worker.operationSession;
         worker.operationSession = null;
@@ -2044,14 +1983,6 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         if (!draining) failureDetail = detail;
         draining = true;
         operations.stopDispatch();
-    }
-
-    private static int countMatching(List<ItemStack> stacks, ExpectedProduction expected) {
-        int count = 0;
-        for (ItemStack stack : stacks) {
-            if (ItemStack.isSameItem(expected.item(), stack)) count += stack.getCount();
-        }
-        return count;
     }
 
     private IBatchDelegate createChildDelegate(ModType type) {

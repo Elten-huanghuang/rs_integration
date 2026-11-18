@@ -1,5 +1,8 @@
 package com.huanghuang.rsintegration.crafting.loadbalancer;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationLifecycle;
+import com.huanghuang.rsintegration.crafting.batch.MachineOperation;
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
@@ -17,14 +20,11 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
 import org.junit.jupiter.api.Test;
-
 import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
-
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -245,7 +245,7 @@ class ParallelCraftGroupSchedulingTest extends BootstrapTest {
     void preparedButUnstartedWorkerReleasesOnlyPreparationResources() {
         TrackingDelegate delegate = new TrackingDelegate();
 
-        ParallelCraftGroup.cleanupPreparedDelegate(delegate, false, null, "start rejected");
+        new OperationLifecycle(delegate).discardOrRecover(false, null, "start rejected");
 
         assertEquals(1, delegate.preparationReleases);
         assertEquals(0, delegate.failureCleanups);
@@ -255,13 +255,15 @@ class ParallelCraftGroupSchedulingTest extends BootstrapTest {
     void startedWorkerUsesFullFailureCleanup() {
         TrackingDelegate delegate = new TrackingDelegate();
 
-        ParallelCraftGroup.cleanupPreparedDelegate(delegate, true, null, "start rejected");
+        new OperationLifecycle(delegate).discardOrRecover(true, null, "start rejected");
 
         assertEquals(0, delegate.preparationReleases);
         assertEquals(1, delegate.failureCleanups);
     }
 
-    private static final class TrackingDelegate implements IBatchDelegate {
+    private static final class TrackingDelegate implements IBatchDelegate, MachineOperation {
+        @Override public MachineOperation machineOperation() { return this; }
+
         int preparationReleases;
         int failureCleanups;
 
@@ -271,12 +273,14 @@ class ParallelCraftGroupSchedulingTest extends BootstrapTest {
             return true;
         }
 
-        @Override public boolean startOperation(OperationStartContext context) { return false; }
-        @Override public boolean isCraftComplete(ServerLevel level) { return false; }
-        @Override public ItemStack collectResult(ServerPlayer player) { return ItemStack.EMPTY; }
+        @Override public boolean start(OperationStartContext context) { return false; }
+        @Override public CraftObservation observe(ServerLevel level) { return new CraftObservation(false ? CraftPhase.DONE : CraftPhase.WORKING); }
+        @Override public OperationOutputSource outputSource() {
+            return OperationOutputSource.single(player -> ItemStack.EMPTY, outputContract());
+        }
         @Override public void releasePreparationResources() { preparationReleases++; }
-        @Override public void onBatchFailed(ServerPlayer player, String reason) { failureCleanups++; }
-        @Override public void onBatchFinished(ServerPlayer player) {}
+        @Override public void recover(ServerPlayer player, String reason) { failureCleanups++; }
+        @Override public void cleanup(ServerPlayer player) {}
         @Override public BlockPos getMachinePos() { return BlockPos.ZERO; }
     }
 }

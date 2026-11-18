@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.huanghuang.rsintegration.crafting.batch.MachineOperation;
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
@@ -42,7 +44,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.MockedStatic;
-
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -55,7 +56,6 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -179,8 +179,9 @@ class AsyncCraftChainMaterialRefreshTest extends BootstrapTest {
         });
         set(fixture.chain, "storageEndpoint", endpoint);
         IBatchDelegate delegate = mock(IBatchDelegate.class, CALLS_REAL_METHODS);
-        when(delegate.isCraftComplete(level)).thenReturn(true);
-        when(delegate.collectResult(player)).thenReturn(new ItemStack(Items.IRON_INGOT, 2));
+        when(delegate.machineOperation()).thenReturn(mock(MachineOperation.class));
+        when(delegate.machineOperation().observe(level)).thenReturn(new MachineOperation.CraftObservation(MachineOperation.CraftPhase.DONE));
+        when(delegate.outputSource()).thenReturn(OperationOutputSource.single(p -> new ItemStack(Items.IRON_INGOT, 2), null));
         AtomicBoolean allowed = new AtomicBoolean(true);
         NodeAdmissionCoordinator admissions =
                 (NodeAdmissionCoordinator) field(fixture.chain, "graphAdmissions");
@@ -233,8 +234,8 @@ class AsyncCraftChainMaterialRefreshTest extends BootstrapTest {
         assertFalse(runtimes.get(0).hasPendingPublications());
         assertEquals(MaterialBroker.ReservationState.SETTLED,
                 fixture.broker.state(runtimes.get(0).admission().materialToken()));
-        verify(delegate, times(1)).collectResult(player);
-        verify(delegate, times(1)).onBatchFinished(player);
+
+        verify(delegate.machineOperation(), times(1)).cleanup(player);
     }
 
     @ParameterizedTest

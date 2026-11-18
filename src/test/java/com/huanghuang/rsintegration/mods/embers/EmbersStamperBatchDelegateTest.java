@@ -1,7 +1,6 @@
 package com.huanghuang.rsintegration.mods.embers;
 
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
@@ -22,11 +21,9 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraftforge.items.ItemStackHandler;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
-
 import java.lang.reflect.Field;
 import java.util.List;
 import java.util.Optional;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -96,7 +93,7 @@ class EmbersStamperBatchDelegateTest extends BootstrapTest {
                 new IngredientSpec(Ingredient.of(Items.GOLD_INGOT), 1, DemandRole.CATALYST));
         set(previous, "required", required);
         set(next, "required", required.subList(0, 1));
-        previous.onBatchFinished(fixture.player);
+        previous.machineOperation().cleanup(fixture.player);
 
         assertTrue(previous.transferReusableMaterialsTo(next));
         assertEquals(required, next.materialPlan().entries().stream().map(MaterialPlan.Entry::spec).toList());
@@ -121,7 +118,7 @@ class EmbersStamperBatchDelegateTest extends BootstrapTest {
                     List.of(new ItemStack(Items.CLAY_BALL), fixture.stamp.copy()), ExtractionLedger.external()));
         }
         input.extractItem(0, 1, false);
-        assertTrue(next.collectAllResults(fixture.player).isEmpty());
+        assertTrue(next.outputSource().collectFinal(fixture.player).stacks().isEmpty());
         assertEquals(1, next.collectReusableMaterials(fixture.player).size());
         assertTrue(fixture.slot.getStackInSlot(0).isEmpty());
     }
@@ -135,7 +132,7 @@ class EmbersStamperBatchDelegateTest extends BootstrapTest {
         when(inserted.remainder()).thenReturn(Optional.of(ItemStack.EMPTY));
         when(endpoint.insert(eq(fixture.player), any(ItemStack.class), eq(false))).thenReturn(inserted);
         set(delegate, "stampReturnEndpoint", endpoint);
-        delegate.onBatchFinished(fixture.player);
+        delegate.machineOperation().cleanup(fixture.player);
 
         delegate.releaseReusableMaterials(fixture.player);
         delegate.releaseReusableMaterials(fixture.player);

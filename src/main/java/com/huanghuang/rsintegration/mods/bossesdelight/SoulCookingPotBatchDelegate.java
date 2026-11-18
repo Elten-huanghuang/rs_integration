@@ -1,10 +1,9 @@
 package com.huanghuang.rsintegration.mods.bossesdelight;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
@@ -14,7 +13,6 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
-import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
@@ -32,7 +30,6 @@ import net.minecraft.tags.BlockTags;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
@@ -43,13 +40,11 @@ import net.minecraftforge.items.IItemHandlerModifiable;
 import net.minecraftforge.items.ItemHandlerHelper;
 import net.minecraftforge.items.wrapper.RecipeWrapper;
 import org.jetbrains.annotations.NotNull;
-
 import javax.annotation.Nullable;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
 
 /**
  * BOMD 乐事（bosses_delight）灵魂锅批量委托。
@@ -503,8 +498,11 @@ public final class SoulCookingPotBatchDelegate extends AbstractBatchDelegate {
                 && output.getCount() >= expectedOutputCount();
     }
 
-    @Override
-    public ItemStack collectResult(ServerPlayer player) {
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.single(this::takeResult, outputContract());
+    }
+
+    private ItemStack takeResult(ServerPlayer player) {
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null) return ItemStack.EMPTY;
         IItemHandler handler = getInventory(be);
@@ -516,13 +514,6 @@ public final class SoulCookingPotBatchDelegate extends AbstractBatchDelegate {
         if (!result.isEmpty()) be.setChanged();
         craftDone = true;
         return result;
-    }
-
-    @Override
-    public List<OutputAccounting.CollectedOutput> collectStructuredResults(ServerPlayer player) {
-        ItemStack result = collectResult(player);
-        return result.isEmpty() ? List.of() : List.of(new OutputAccounting.CollectedOutput(
-                outputPortId(), OutputContract.Source.SLOT, result));
     }
 
     @Override
@@ -552,7 +543,7 @@ public final class SoulCookingPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@NotNull ServerPlayer player) {
+    public void cleanup(@NotNull ServerPlayer player) {
         if (!markTerminalCleanup()) return;
         if (myLevel != null && myPos != null && myLevel.hasChunkAt(myPos)) {
             BlockEntity be = myLevel.getBlockEntity(myPos);

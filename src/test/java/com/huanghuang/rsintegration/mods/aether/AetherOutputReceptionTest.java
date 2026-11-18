@@ -1,14 +1,13 @@
 package com.huanghuang.rsintegration.mods.aether;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationLifecycle;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext.ReservedMaterial;
-
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.TaskOutputReception;
-import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate.CraftPhase;
-import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+import com.huanghuang.rsintegration.crafting.batch.MachineOperation.CraftPhase;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.mixin.minecraft.AbstractFurnaceAccessor;
@@ -45,10 +44,8 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
-
 import java.lang.reflect.Field;
 import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -108,11 +105,13 @@ class AetherOutputReceptionTest extends BootstrapTest {
     @Test
     void collectedOutputWaitsForInputAndTimerAndDistinctIdleTicks() {
         try (var session = TaskOutputReception.open()) {
-            delegate.setOutputReception(session);
-            assertTrue(delegate.supportsOutputReception());
+            operation = new OperationLifecycle(delegate, session);
+            assertTrue(delegate.acceptsFixedOutput());
             assertTrue(start(3));
             assertEquals(3, session.current().remaining("aether:furnace:output"));
             furnace.setItem(2, new ItemStack(Items.IRON_INGOT, 3));
+            assertEquals(CraftPhase.WORKING, delegate.observeMachineCraft(level, furnace).phase());
+            assertEquals(3, furnace.getItem(2).getCount());
             assertEquals(CraftPhase.WORKING, observe(1));
             assertEquals(3, session.current().received("aether:furnace:output"));
             assertTrue(furnace.getItem(2).isEmpty());
@@ -123,56 +122,56 @@ class AetherOutputReceptionTest extends BootstrapTest {
             assertEquals(CraftPhase.WORKING, observe(3));
             assertEquals(CraftPhase.WORKING, observe(3));
             assertEquals(CraftPhase.DONE, observe(4));
-            assertTrue(delegate.collectStructuredResults(player).isEmpty());
-            assertEquals(3, delegate.drainReceivedOutputs().get(0).getCount());
-            assertTrue(delegate.drainReceivedOutputs().isEmpty());
+            assertTrue(delegate.outputSource().collectFinal(player).ports().isEmpty());
+            assertEquals(3, session.drainStacks().get(0).getCount());
+            assertTrue(session.drainStacks().isEmpty());
         }
     }
 
     @Test
     void partialCollectionAndIncrementalPublicationCannotReturnTheSameResourceTwice() {
         try (var session = TaskOutputReception.open()) {
-            delegate.setOutputReception(session);
+            operation = new OperationLifecycle(delegate, session);
             assertTrue(start(3));
             furnace.setItem(2, new ItemStack(Items.IRON_INGOT));
             assertEquals(CraftPhase.WORKING, observe(1));
-            assertEquals(1, delegate.drainReceivedOutputs().get(0).getCount());
+            assertEquals(1, session.drainStacks().get(0).getCount());
             furnace.setItem(2, new ItemStack(Items.IRON_INGOT, 2));
             assertEquals(CraftPhase.WORKING, observe(2));
             assertTrue(furnace.getItem(2).isEmpty());
-            assertEquals(2, delegate.drainReceivedOutputs().get(0).getCount());
+            assertEquals(2, session.drainStacks().get(0).getCount());
             furnace.setItem(0, ItemStack.EMPTY);
             assertEquals(CraftPhase.WORKING, observe(3));
             assertEquals(CraftPhase.DONE, observe(4));
-            assertTrue(delegate.collectAllResults(player).isEmpty());
-            assertTrue(delegate.drainReceivedOutputs().isEmpty());
+            assertTrue(delegate.outputSource().collectFinal(player).stacks().isEmpty());
+            assertTrue(session.drainStacks().isEmpty());
         }
     }
 
     @Test
     void emptyInputWithoutReceivedOutputDoesNotFinish() {
         try (var session = TaskOutputReception.open()) {
-            delegate.setOutputReception(session);
+            operation = new OperationLifecycle(delegate, session);
             assertTrue(start(2));
             furnace.setItem(0, ItemStack.EMPTY);
             assertEquals(CraftPhase.WORKING, observe(1));
             assertEquals(CraftPhase.WORKING, observe(2));
             furnace.setItem(2, new ItemStack(Items.IRON_INGOT, 2));
             assertEquals(CraftPhase.DONE, observe(3));
-            assertEquals(2, delegate.drainReceivedOutputs().get(0).getCount());
+            assertEquals(2, session.drainStacks().get(0).getCount());
         }
     }
 
     @Test
     void actualOutputBeyondTheDeclarationIsStillHeld() {
         try (var session = TaskOutputReception.open()) {
-            delegate.setOutputReception(session);
+            operation = new OperationLifecycle(delegate, session);
             assertTrue(start(2));
             furnace.setItem(0, ItemStack.EMPTY);
             furnace.setItem(2, new ItemStack(Items.IRON_INGOT, 4));
             assertEquals(CraftPhase.WORKING, observe(1));
             assertEquals(CraftPhase.DONE, observe(2));
-            assertEquals(4, delegate.drainReceivedOutputs().get(0).getCount());
+            assertEquals(4, session.drainStacks().get(0).getCount());
         }
     }
 
@@ -180,7 +179,7 @@ class AetherOutputReceptionTest extends BootstrapTest {
     void failedStartClosesReceptionButKeepsSynchronousDelivery() {
         furnace.setItem(1, new ItemStack(Items.COAL));
         try (var session = TaskOutputReception.open()) {
-            delegate.setOutputReception(session);
+            operation = new OperationLifecycle(delegate, session);
             furnace.onInputInserted = () -> {
                 assertFalse(session.current().complete());
                 // 模拟受控收取在投料回调中已经移交实物，后续启动失败仍须保留。
@@ -191,24 +190,24 @@ class AetherOutputReceptionTest extends BootstrapTest {
             assertTrue(session.closed());
             assertTrue(furnace.getItem(0).isEmpty());
             assertEquals(11, delegate.failureRecoveredInputs().get(0).getCount());
-            assertEquals(1, delegate.drainReceivedOutputs().get(0).getCount());
+            assertEquals(1, session.drainStacks().get(0).getCount());
         }
     }
 
     @Test
     void cancellationKeepsReceivedOutputAndRecoversOnlyRemainingInput() {
         try (var session = TaskOutputReception.open()) {
-            delegate.setOutputReception(session);
+            operation = new OperationLifecycle(delegate, session);
             assertTrue(start(3));
             furnace.setItem(0, new ItemStack(Items.IRON_ORE, 2));
             furnace.setItem(2, new ItemStack(Items.IRON_INGOT));
             assertEquals(CraftPhase.WORKING, observe(1));
-            delegate.onBatchFailed(player, "cancelled");
+            operation.recover(player, "cancelled");
             assertTrue(session.closed());
             assertTrue(furnace.getItem(0).isEmpty());
             assertEquals(2, delegate.failureRecoveredInputs().get(0).getCount());
-            assertEquals(1, delegate.drainReceivedOutputs().get(0).getCount());
-            assertTrue(delegate.drainReceivedOutputs().isEmpty());
+            assertEquals(1, session.drainStacks().get(0).getCount());
+            assertTrue(session.drainStacks().isEmpty());
         }
     }
 
@@ -224,10 +223,10 @@ class AetherOutputReceptionTest extends BootstrapTest {
         };
         assertFalse(AetherFurnaceBatchDelegate.inheritsFixedCookingOutput(dynamic));
         set("recipe", dynamic);
-        assertFalse(delegate.supportsOutputReception());
+        assertFalse(delegate.acceptsFixedOutput());
         set("recipe", recipe());
         set("isIncubator", true);
-        assertFalse(delegate.supportsOutputReception());
+        assertFalse(delegate.acceptsFixedOutput());
     }
 
     @Test
@@ -242,7 +241,7 @@ class AetherOutputReceptionTest extends BootstrapTest {
         assertFalse(AetherFurnaceBatchDelegate.inheritsFixedCookingOutput(dynamic));
         when(level.getBlockEntity(POS)).thenReturn(new FurnaceBlockEntity(POS,
                 Blocks.FURNACE.defaultBlockState()));
-        assertFalse(delegate.supportsOutputReception());
+        assertFalse(delegate.acceptsFixedOutput());
     }
 
     @Test
@@ -251,12 +250,12 @@ class AetherOutputReceptionTest extends BootstrapTest {
                 CookingBookCategory.MISC, Ingredient.of(Items.IRON_INGOT),
                 new ItemStack(Items.IRON_INGOT), 0, 200);
         set("recipe", sameItem);
-        assertFalse(delegate.supportsOutputReception());
+        assertFalse(delegate.acceptsFixedOutput());
         SmeltingRecipe withContainer = new SmeltingRecipe(new ResourceLocation("test", "container"), "",
                 CookingBookCategory.MISC, Ingredient.of(Items.LAVA_BUCKET),
                 new ItemStack(Items.IRON_INGOT), 0, 200);
         set("recipe", withContainer);
-        assertFalse(delegate.supportsOutputReception());
+        assertFalse(delegate.acceptsFixedOutput());
     }
 
     @Test
@@ -269,7 +268,7 @@ class AetherOutputReceptionTest extends BootstrapTest {
     @Test
     void partialInsertionIsRemovedAndItsRemainderIsIncludedInRecovery() {
         try (var session = TaskOutputReception.open()) {
-            delegate.setOutputReception(session);
+            operation = new OperationLifecycle(delegate, session);
             furnace.partialInput = true;
             assertFalse(start(3));
             assertTrue(session.closed());
@@ -284,7 +283,7 @@ class AetherOutputReceptionTest extends BootstrapTest {
         try {
             RSIntegrationConfig.ENABLE_AETHER_FURNACE_INPUT_BUFFER.set(false);
             assertFalse(delegate.supportsInputBuffer());
-            assertTrue(delegate.supportsOutputReception());
+            assertTrue(delegate.acceptsFixedOutput());
             assertEquals(1, delegate.outputContract().ports().size());
         } finally {
             RSIntegrationConfig.ENABLE_AETHER_FURNACE_INPUT_BUFFER.set(old);
@@ -294,14 +293,14 @@ class AetherOutputReceptionTest extends BootstrapTest {
     @Test
     void replacedMachineAndWrongNbtDoNotContributeToReception() {
         try (var session = TaskOutputReception.open()) {
-            delegate.setOutputReception(session);
+            operation = new OperationLifecycle(delegate, session);
             assertTrue(start(1));
             ItemStack tagged = new ItemStack(Items.IRON_INGOT);
             tagged.getOrCreateTag().putString("owner", "other");
             furnace.setItem(2, tagged);
             assertEquals(CraftPhase.FAILED, observe(1));
             assertEquals(1, furnace.getItem(2).getCount());
-            assertTrue(delegate.drainReceivedOutputs().isEmpty());
+            assertTrue(session.drainStacks().isEmpty());
             assertEquals(CraftPhase.FAILED,
                     delegate.observeMachineCraft(level, new TestFreezer()).phase());
         }
@@ -314,19 +313,21 @@ class AetherOutputReceptionTest extends BootstrapTest {
                 List.of(new ItemStack(Items.IRON_ORE, 2)), mock(ExtractionLedger.class)));
         furnace.setItem(0, ItemStack.EMPTY);
         furnace.setItem(2, new ItemStack(Items.IRON_INGOT, 2));
-        assertEquals(2, delegate.collectResult(player).getCount());
-        assertTrue(delegate.drainReceivedOutputs().isEmpty());
+        assertEquals(2, delegate.outputSource().collectFinal(player).stacks().get(0).getCount());
     }
+
+    private OperationLifecycle operation;
 
     private boolean start(int operations) {
         delegate.prepareGraphBatch(operations);
-        return delegate.startOperation(OperationStartContext.chainReserved(player,
+        return operation.start(OperationStartContext.chainReserved(player,
                 mock(ExtractionLedger.class), delegate.materialPlan(),
                 List.of(new ReservedMaterial("slot:0", new ItemStack(Items.IRON_ORE, operations))), null));
     }
 
     private CraftPhase observe(long tick) {
         when(level.getGameTime()).thenReturn(tick);
+        delegate.outputSource().transferAvailable(level);
         return delegate.observeMachineCraft(level, furnace).phase();
     }
 

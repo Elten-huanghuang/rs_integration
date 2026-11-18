@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.huanghuang.rsintegration.crafting.batch.MachineOperation;
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -7,7 +9,7 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
-import com.huanghuang.rsintegration.crafting.batch.OperationPoll;
+import com.huanghuang.rsintegration.crafting.batch.OperationLifecycle;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.crafting.batch.CountedOperationMaterials;
 import com.huanghuang.rsintegration.crafting.batch.CountedOperationMaterials.Origin;
@@ -62,23 +64,24 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.MockedStatic;
 import org.mockito.ArgumentCaptor;
-
 import java.lang.reflect.Method;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicInteger;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.withSettings;
@@ -92,12 +95,15 @@ import static org.mockito.Mockito.anyInt;
 class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
     @Test
     void mixedReceptionDispatchesNextBatchOnlyAfterSafeFinishAndCleanup() {
-        INetwork network = mock(INetwork.class);
+        INetwork network = mock(INetwork.class, RETURNS_DEEP_STUBS);
+        when(network.getLevel()).thenReturn(level);
+        when(network.getPosition()).thenReturn(BlockPos.ZERO);
+        when(network.canRun()).thenReturn(true);
         when(network.insertItem(any(), anyInt(), any())).thenAnswer(call ->
                 RefinedStorageOutputReception.insertItem(network, call.getArgument(0), call.getArgument(1),
                         call.getArgument(2), (stack, count) -> stack.copyWithCount(count)));
         var resource = TaskOutputReception.resource(new ItemStack(Items.DIAMOND));
-        List<TaskOutputReception.Session> sessions = new ArrayList<>();
+        List<TaskOutputReception.Batch> sessions = new ArrayList<>();
         List<Integer> dispatched = new ArrayList<>();
         AtomicBoolean safelyFinished = new AtomicBoolean();
         AtomicInteger outputSlot = new AtomicInteger();
@@ -105,39 +111,39 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
         ModType type = ModType.register("test_multi_batch_network_reception",
                 new String[0], new String[0], new String[0], () -> new BufferedDelegate() {
                     private int operations;
-                    private TaskOutputReception.Session reception;
+                    private TaskOutputReception.Writer reception;
+                    @Override public void bindProduction(TaskOutputReception.Writer writer) { reception = writer; }
                     @Override public int preferredParallelBatchSize(int total, int workers) { return 2; }
                     @Override public void prepareGraphBatch(int count) {
                         super.prepareGraphBatch(count);
                         operations = count;
                     }
-                    @Override public boolean startOperation(OperationStartContext context) {
+                    @Override public boolean start(OperationStartContext context) {
                         assertEquals(dispatched.size(), cleanups.get(), "前批清理完成后才能再次派发");
-                        reception = TaskOutputReception.open();
-                        reception.bindNetwork(network, () -> true);
+                        reception.bindTo(CraftStorageEndpoints.fromResolvedNetwork(network));
                         reception.prepare(List.of(new TaskOutputReception.Demand("out", resource,
                                 8L * operations, 8L * operations))).activate();
-                        sessions.add(reception);
+                        sessions.add(reception.current());
                         dispatched.add(operations);
                         safelyFinished.set(false);
                         return true;
                     }
-                    @Override public TaskOutputReception.Session outputReception() { return reception; }
                     @Override public ItemStack getExpectedOutput() { return null; }
                     @Override public AABB getOutputCaptureRegion() { return null; }
-                    @Override public void transferOutputs(ServerLevel current) {
+                    @Override public OperationOutputSource outputSource() {
+                        return OperationOutputSource.incremental(current -> {
                         int extracted = outputSlot.getAndSet(0);
                         if (extracted > 0) reception.current().collect(resource, extracted);
+                        }, super.outputSource());
                     }
-                    @Override public CraftObservation observeCraft(ServerLevel current) {
+                    @Override public CraftObservation observe(ServerLevel current) {
                         return new CraftObservation(safelyFinished.get() && reception.current().complete()
                                 ? CraftPhase.DONE : CraftPhase.WORKING);
                     }
-                    @Override public void onBatchFinished(ServerPlayer current) {
+                    @Override public void cleanup(ServerPlayer current) {
                         assertTrue(safelyFinished.get());
-                        assertTrue(reception.current().complete());
+                        assertEquals(8L * operations, reception.current().received("out"));
                         cleanups.incrementAndGet();
-                        reception.close();
                     }
                 });
         BoundMachine machine = new BoundMachine(Level.OVERWORLD.location(), BlockPos.ZERO, type, "test");
@@ -155,7 +161,7 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
                 int operations = batch < 2 ? 2 : 1;
                 var reception = sessions.get(batch);
                 assertEquals(batch + 1, dispatched.size());
-                assertEquals(0, reception.received(resource), "前批收货不能成为新批进度");
+                assertEquals(0, reception.received("out"), "前批收货不能成为新批进度");
                 // 机器先报告可安全结束，但缺货时仍不得完成本批。
                 safelyFinished.set(true);
                 tick.incrementAndGet();
@@ -166,7 +172,7 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
                 tick.incrementAndGet();
                 assertEquals(ConcurrentNodeExecutor.Observation.WORKING, runtime.observe());
                 published += runtime.drainIncrementalOutputs().stream().mapToInt(p -> p.stack().getCount()).sum();
-                assertEquals(2, reception.received(resource));
+                assertEquals(2, reception.received("out"));
                 assertEquals(3, network.insertItem(new ItemStack(Items.DIAMOND),
                         operations * 8 + 1, Action.PERFORM).getCount());
                 tick.incrementAndGet();
@@ -190,8 +196,7 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
             assertTrue(runtime.outputsComplete());
             assertEquals(1, network.insertItem(new ItemStack(Items.DIAMOND), 1, Action.PERFORM).getCount());
         } finally {
-            for (var session : sessions) session.close();
-            group.onBatchFailed(player, "test cleanup");
+            group.machineOperation().recover(player, "test cleanup");
         }
     }
 
@@ -200,9 +205,10 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
         List<String> calls = new ArrayList<>();
         ModType type = ModType.register("test_transfer_before_observe", new String[0], new String[0],
                 new String[0], () -> new BufferedDelegate() {
-                    @Override public void transferOutputs(ServerLevel current) { calls.add("transfer"); }
-                    @Override public void advanceCraft(ServerLevel current) { calls.add("advance"); }
-                    @Override public CraftObservation observeCraft(ServerLevel current) {
+                    @Override public OperationOutputSource outputSource() {
+                        return OperationOutputSource.incremental(current -> { calls.add("transfer"); }, super.outputSource()); }
+                    @Override public void advance(ServerLevel current) { calls.add("advance"); }
+                    @Override public CraftObservation observe(ServerLevel current) {
                         calls.add("observe");
                         return new CraftObservation(CraftPhase.WORKING);
                     }
@@ -212,26 +218,29 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
         ParallelCraftGroup group = new ParallelCraftGroup(List.of(machine), type,
                 new ResourceLocation("test", "transfer_before_observe"), player, 1);
         startGroup(group);
-        group.observeCraft(level);
+        group.machineOperation().observe(level);
         assertTrue(calls.isEmpty());
         tick.incrementAndGet();
         assertEquals(ConcurrentNodeExecutor.Observation.WORKING, runtime(group).observe());
         assertEquals(List.of("transfer", "advance", "observe"), calls);
-        group.onBatchFailed(player, "test cleanup");
+        group.machineOperation().recover(player, "test cleanup");
     }
 
     @Test
     void cancellationRecoversUndrainedCollectedResourcesOnceAndClosesHolding() {
         var resource = TaskOutputReception.resource(new ItemStack(Items.DIAMOND));
         List<ItemStack> recovered = new ArrayList<>();
-        try (var session = TaskOutputReception.open()) {
+        var batch = new AtomicReference<TaskOutputReception.Batch>();
+        {
             ModType type = ModType.register("test_received_output_cancel", new String[0], new String[0],
                     new String[0], () -> new BufferedDelegate() {
-                        @Override public boolean startOperation(OperationStartContext context) {
-                            session.prepare(List.of(new TaskOutputReception.Demand("out", resource, 8, 8))).activate();
+                        @Override public boolean start(OperationStartContext context) {
+                            batch.get().activate();
                             return true;
                         }
-                        @Override public TaskOutputReception.Session outputReception() { return session; }
+                        @Override public void bindProduction(TaskOutputReception.Writer writer) {
+                            batch.set(writer.prepare(List.of(new TaskOutputReception.Demand("out", resource, 8, 8))));
+                        }
                         @Override public ItemStack getExpectedOutput() { return null; }
                         @Override public AABB getOutputCaptureRegion() { return null; }
                     });
@@ -241,12 +250,12 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
             startGroup(group);
             CraftNodeRuntime runtime = runtime(group);
             runtime.setChainContext(recovered, player);
-            assertEquals(5, session.current().collect(resource, 5));
+            assertEquals(5, batch.get().collect(resource, 5));
             runtime.cleanupFailure();
             assertEquals(5, recovered.stream().mapToInt(ItemStack::getCount).sum());
             runtime.cleanupFailure();
             assertEquals(5, recovered.stream().mapToInt(ItemStack::getCount).sum());
-            assertTrue(session.closed());
+            assertTrue(batch.get().closed());
         }
     }
 
@@ -254,17 +263,20 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
     void partialCollectionsPublishIncrementallyOnceAndDoNotFinishABusyWorker() {
         var resource = TaskOutputReception.resource(new ItemStack(Items.DIAMOND));
         AtomicBoolean finished = new AtomicBoolean();
-        try (var session = TaskOutputReception.open()) {
+        var batch = new AtomicReference<TaskOutputReception.Batch>();
+        {
             ModType type = ModType.register("test_received_output_progress", new String[0], new String[0],
                     new String[0], () -> new BufferedDelegate() {
-                        @Override public boolean startOperation(OperationStartContext context) {
-                            session.prepare(List.of(new TaskOutputReception.Demand("out", resource, 8, 8))).activate();
+                        @Override public boolean start(OperationStartContext context) {
+                            batch.get().activate();
                             return true;
                         }
-                        @Override public TaskOutputReception.Session outputReception() { return session; }
+                        @Override public void bindProduction(TaskOutputReception.Writer writer) {
+                            batch.set(writer.prepare(List.of(new TaskOutputReception.Demand("out", resource, 8, 8))));
+                        }
                         @Override public ItemStack getExpectedOutput() { return null; }
                         @Override public AABB getOutputCaptureRegion() { return null; }
-                        @Override public boolean isCraftComplete(ServerLevel current) { return finished.get(); }
+                        @Override public CraftObservation observe(ServerLevel current) { return new CraftObservation(finished.get() ? CraftPhase.DONE : CraftPhase.WORKING); }
                     });
             BoundMachine machine = new BoundMachine(Level.OVERWORLD.location(), BlockPos.ZERO, type, "test");
             ParallelCraftGroup group = new ParallelCraftGroup(List.of(machine), type,
@@ -274,12 +286,12 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
             runtime.attachOutputs(new NodeOutputAccumulator(List.of(OutputDeclaration.item(
                     new OutputPortId(new NodeId(0), 0), MaterialKey.of(new ItemStack(Items.DIAMOND)),
                     8, OutputKind.PRIMARY))));
-            assertEquals(5, session.current().collect(resource, 5));
+            assertEquals(5, batch.get().collect(resource, 5));
             tick.incrementAndGet();
             assertEquals(ConcurrentNodeExecutor.Observation.WORKING, runtime.observe());
             assertEquals(5, runtime.drainIncrementalOutputs().stream()
                     .mapToInt(output -> output.stack().getCount()).sum());
-            session.current().collect(resource, 3);
+            batch.get().collect(resource, 3);
             tick.incrementAndGet();
             assertEquals(ConcurrentNodeExecutor.Observation.WORKING, runtime.observe());
             assertEquals(3, runtime.drainIncrementalOutputs().stream()
@@ -291,7 +303,7 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
             assertEquals(1, group.getCompletedOperations());
             assertTrue(runtime.drainIncrementalOutputs().isEmpty());
             assertTrue(runtime.outputsComplete());
-            assertTrue(session.closed());
+            assertTrue(batch.get().closed());
         }
     }
 
@@ -346,7 +358,7 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
                         return contextValid.get();
                     }
 
-                    @Override public void onBatchFinished(ServerPlayer current) {
+                    @Override public void cleanup(ServerPlayer current) {
                         cleanups.incrementAndGet();
                         contextValid.set(false);
                     }
@@ -383,12 +395,10 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
                         return contextValid.get();
                     }
 
-                    @Override public ItemStack collectResult(ServerPlayer current) {
-                        collections.incrementAndGet();
-                        return ItemStack.EMPTY;
-                    }
+                    @Override public OperationOutputSource outputSource() { return OperationOutputSource.single(current -> { collections.incrementAndGet();
+                        return ItemStack.EMPTY; }, outputContract()); }
 
-                    @Override public void onBatchFinished(ServerPlayer current) {
+                    @Override public void cleanup(ServerPlayer current) {
                         cleanups.incrementAndGet();
                     }
                 });
@@ -423,7 +433,7 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
         startBulkGroup(group, mock(ExtractionLedger.class), false);
         assertEquals(4096, group.getRunningOperations());
         assertEquals(50_000_000, group.getTotalOperations());
-        group.onBatchFailed(player, "test cancellation");
+        group.machineOperation().recover(player, "test cancellation");
     }
 
     @Test
@@ -442,15 +452,15 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
                 .add(Origin.PRODUCER, new ItemStack(Items.IRON_INGOT), 98);
         group.setCountedOperationMaterials(new CountedOperationMaterials.Builder(128, 1)
                 .add(group.materialPlan().entries().get(0), source).build());
-        assertTrue(group.startOperation(OperationStartContext.chainReserved(player,
+        assertTrue(group.machineOperation().start(OperationStartContext.chainReserved(player,
                 mock(ExtractionLedger.class), MaterialPlan.none(), List.of(), InputBufferPlan.none())));
         assertEquals(64, group.getRunningOperations());
-        group.onBatchFailed(player, "partial recovery");
+        group.machineOperation().recover(player, "partial recovery");
         assertEquals(10, group.failureRecoveredInputs().stream().mapToInt(ItemStack::getCount).sum());
         assertEquals(20, group.drainRecoveredVirtualInputs().stream().mapToInt(ItemStack::getCount).sum());
         assertEquals(5, group.failureRecoveredProducerInputs().stream().mapToInt(ItemStack::getCount).sum());
         assertEquals(64, group.drainQueuedProducerMaterialsForRecovery().stream().mapToInt(ItemStack::getCount).sum());
-        group.onBatchFailed(player, "repeated cancellation");
+        group.machineOperation().recover(player, "repeated cancellation");
         assertTrue(group.drainRecoveredVirtualInputs().isEmpty());
         assertTrue(group.drainQueuedProducerMaterialsForRecovery().isEmpty());
     }
@@ -474,7 +484,7 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
                 new ResourceLocation("test", "incomplete_recovery"), player, 128);
         startBulkGroup(group, mock(ExtractionLedger.class), false);
         assertEquals(128, group.getRunningOperations());
-        group.onBatchFailed(player, "partially audited cleanup");
+        group.machineOperation().recover(player, "partially audited cleanup");
         assertEquals(7, group.failureRecoveredInputs().stream().mapToInt(ItemStack::getCount).sum());
         assertTrue(group.failureRecoveredProducerInputs().isEmpty());
     }
@@ -505,13 +515,13 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
         assertTrue(group.usesCountedOperationMaterials());
         assertTrue(virtual.stream().allMatch(ItemStack::isEmpty));
         verify(ledger).reserveExactAcrossNetworkAndInventory(any(ItemStack.class), eq(43_000_000), isNull(), eq(player));
-        assertTrue(group.startOperation(OperationStartContext.chainReserved(
+        assertTrue(group.machineOperation().start(OperationStartContext.chainReserved(
                 player, ledger, MaterialPlan.none(), List.of(), InputBufferPlan.none())));
         group.stopDispatch();
         List<ItemStack> refunded = group.drainQueuedMaterialsForRecovery();
         assertEquals(7_000_000 - 64, refunded.stream().mapToInt(ItemStack::getCount).sum());
         assertEquals("intermediate", refunded.get(0).getTag().getString("source"));
-        group.onBatchFailed(player, "flat cancellation");
+        group.machineOperation().recover(player, "flat cancellation");
     }
 
     @Test
@@ -521,7 +531,7 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
         startBulkGroup(group, mock(ExtractionLedger.class), false);
         assertEquals(8, group.getRunningOperations());
         assertEquals(50_000_000, group.getTotalOperations());
-        group.onBatchFailed(player, "test cancellation");
+        group.machineOperation().recover(player, "test cancellation");
     }
 
     @Test
@@ -535,7 +545,7 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
         assertEquals(64, coordinator.report().inFlightOperations());
         assertEquals(49_999_936, coordinator.report().preStartOperations());
         assertEquals(3_000_000_000L, coordinator.report().settledOperations());
-        group.onBatchFailed(player, "test cancellation");
+        group.machineOperation().recover(player, "test cancellation");
     }
     @Test
     void graphReservationUsesDeclaredPartitionWhenIdenticalInputsOccupySparseSlots() throws Exception {
@@ -544,6 +554,7 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
                 new MaterialPlan.Entry("tip", spec, MaterialPlan.Allocation.SUPPLEMENTAL, 4),
                 new MaterialPlan.Entry("base", spec, MaterialPlan.Allocation.GRAPH, 0)));
         var group = mock(ParallelCraftGroup.class);
+        when(group.machineOperation()).thenReturn(mock(MachineOperation.class));
         when(group.materialPlan()).thenReturn(plan);
         when(group.getChildCount()).thenReturn(1);
         when(group.getMaterialOperations()).thenReturn(1);
@@ -643,7 +654,7 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
         ArgumentCaptor<List<ItemStack>> refunded = stackLists();
         verify(ledger).refundCommittedMaterials(refunded.capture(), isNull(), eq(player));
         assertEquals(operations - 64, refunded.getValue().stream().mapToInt(ItemStack::getCount).sum());
-        group.onBatchFailed(player, "test cancellation");
+        group.machineOperation().recover(player, "test cancellation");
     }
 
     @Test
@@ -656,7 +667,7 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
         var queued = group.drainQueuedProducerMaterialsForRecovery();
         assertEquals(65, queued.stream().mapToInt(ItemStack::getCount).sum());
         assertTrue(group.drainQueuedProducerMaterialsForRecovery().isEmpty());
-        group.onBatchFailed(player, "test cancellation");
+        group.machineOperation().recover(player, "test cancellation");
         assertEquals(16, group.drainSettledResults().stream().mapToInt(ItemStack::getCount).sum());
     }
 
@@ -664,7 +675,7 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
     void rejectedCompactBatchRecoversOnlyUncompletedInputs() {
         ModType type = ModType.register("test_rejected_compact",
                 new String[0], new String[0], new String[0], () -> new BufferedDelegate() {
-                    @Override public boolean startOperation(OperationStartContext context) {
+                    @Override public boolean start(OperationStartContext context) {
                         produceOutput();
                         return false;
                     }
@@ -684,9 +695,9 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
         verify(ledger).releaseCommittedEntries(settled.capture());
         assertEquals(1, settled.getValue().get(0).getCount());
         assertEquals(8, group.drainSettledResults().stream().mapToInt(ItemStack::getCount).sum());
-        group.onBatchFailed(player, "test rejection");
+        group.machineOperation().recover(player, "test rejection");
         assertEquals(OperationExecutionKernel.TerminalClass.IN_FLIGHT, group.failureTerminalClass());
-        group.onBatchFailed(player, "repeated rejection");
+        group.machineOperation().recover(player, "repeated rejection");
         assertEquals(OperationExecutionKernel.TerminalClass.IN_FLIGHT, group.failureTerminalClass());
     }
 
@@ -696,7 +707,7 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
         var builder = new CountedOperationMaterials.Builder(group.getTotalOperations(), group.getChildCount());
         for (var spec : group.materialPlan().entries()) builder.add(spec, source);
         group.setCountedOperationMaterials(builder.build());
-        assertTrue(group.startOperation(OperationStartContext.chainReserved(
+        assertTrue(group.machineOperation().start(OperationStartContext.chainReserved(
                 player, ledger, MaterialPlan.none(), List.of(), InputBufferPlan.none())));
     }
 
@@ -797,7 +808,7 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
             }
 
             @Override
-            public boolean startOperation(OperationStartContext context) {
+            public boolean start(OperationStartContext context) {
                 if (inventory.getStackInSlot(0).isEmpty()) {
                     inventory.setStackInSlot(0, context.inputSlots().get(0).copy());
                 }
@@ -824,7 +835,7 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
             materials.add(new ItemStack(Items.STICK));
             materials.add(new ItemStack(Items.IRON_INGOT));
         }
-        assertTrue(group.startOperation(OperationStartContext.repeatedChainReserved(
+        assertTrue(group.machineOperation().start(OperationStartContext.repeatedChainReserved(
                 player, mock(ExtractionLedger.class), group.materialPlan(),
                 operations, materials)));
         NodeId node = new NodeId(0);
@@ -880,7 +891,7 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
             }
 
             @Override
-            public boolean startOperation(OperationStartContext context) {
+            public boolean start(OperationStartContext context) {
                 assertFalse(finished, "已经结束的操作实例不能再次启动");
                 if (first) held = context.inputSlots().get(0).copy();
                 if (held.isEmpty()) return false;
@@ -889,7 +900,7 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
             }
 
             @Override
-            public void onBatchFinished(ServerPlayer player) {
+            public void cleanup(ServerPlayer player) {
                 assertFalse(finished);
                 finished = true;
             }
@@ -935,7 +946,7 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
             materials.add(catalyst);
             materials.add(new ItemStack(Items.IRON_INGOT));
         }
-        assertTrue(group.startOperation(OperationStartContext.repeatedChainReserved(
+        assertTrue(group.machineOperation().start(OperationStartContext.repeatedChainReserved(
                 player, mock(ExtractionLedger.class), group.materialPlan(),
                 operations, materials)));
         CraftNodeRuntime runtime = runtime(group);
@@ -967,7 +978,7 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
         AtomicLong work = new AtomicLong();
         IBatchDelegate delegate = new BufferedDelegate() {
             @Override
-            public CraftObservation observeCraft(ServerLevel current) {
+            public CraftObservation observe(ServerLevel current) {
                 return new CraftObservation(CraftPhase.WORKING).withCompletedWork(work.get());
             }
         };
@@ -1001,7 +1012,7 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
                     public int preferredParallelBatchSize(int operations, int workers) { return 1; }
 
                     @Override
-                    public CraftObservation observeCraft(ServerLevel current) {
+                    public CraftObservation observe(ServerLevel current) {
                         return new CraftObservation(CraftPhase.WORKING).withCompletedWork(work.get());
                     }
                 });
@@ -1113,7 +1124,7 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
                     }
 
                     @Override
-                    public boolean startOperation(OperationStartContext context) {
+                    public boolean start(OperationStartContext context) {
                         starts.incrementAndGet();
                         assertEquals(1, craftBudget.active());
                         assertEquals(1, globalBudget.active());
@@ -1122,7 +1133,7 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
                     }
 
                     @Override
-                    public boolean isCraftComplete(ServerLevel level) { return true; }
+                    public CraftObservation observe(ServerLevel level) { return new CraftObservation(true ? CraftPhase.DONE : CraftPhase.WORKING); }
 
                     @Override
                     public ItemStack getExpectedOutput() { return ItemStack.EMPTY; }
@@ -1130,9 +1141,8 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
                     @Override
                     public AABB getOutputCaptureRegion() { return null; }
 
-                    @Override
-                    public List<ItemStack> collectAllResults(ServerPlayer player) {
-                        return List.of(new ItemStack(Items.DIAMOND, getExpectedProduction().count()));
+                    @Override public OperationOutputSource outputSource() {
+                        return player -> OperationOutputSource.Handoff.physical(List.of(new ItemStack(Items.DIAMOND, getExpectedProduction().count())), outputContract());
                     }
                 });
         BoundMachine machine = new BoundMachine(Level.OVERWORLD.location(), BlockPos.ZERO, type, "test");
@@ -1142,14 +1152,14 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
                 machines, captures, globalBudget)), UUID.randomUUID(), new NodeId(5), craftBudget);
         startGroup(group);
 
-        IBatchDelegate.CraftObservation observation = null;
+        MachineOperation.CraftObservation observation = null;
         for (int i = 0; i < expectedStarts + 1; i++) {
             tick.incrementAndGet();
-            observation = OperationPoll.poll(group, level);
-            if (observation.phase() == IBatchDelegate.CraftPhase.DONE) break;
+            observation = new OperationLifecycle(group).poll(level);
+            if (observation.phase() == MachineOperation.CraftPhase.DONE) break;
         }
         assertNotNull(observation);
-        assertEquals(IBatchDelegate.CraftPhase.DONE, observation.phase());
+        assertEquals(MachineOperation.CraftPhase.DONE, observation.phase());
         assertEquals(operations, group.getCompletedOperations());
         assertEquals(expectedStarts, starts.get());
         assertEquals(expectedStarts, craftBudget.starts());
@@ -1159,7 +1169,7 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
         assertEquals(0, machines.size());
         assertEquals(0, captures.size());
         assertEquals(operations * 8,
-                group.collectAllResults(player).stream().mapToInt(ItemStack::getCount).sum());
+                group.outputSource().collectFinal(player).stacks().stream().mapToInt(ItemStack::getCount).sum());
     }
 
     @Test
@@ -1226,11 +1236,13 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
         group.setVirtualDebits(Collections.nCopies(operations, List.of()));
         ExtractionLedger ledger = mock(ExtractionLedger.class);
         List<ItemStack> materials = Collections.nCopies(operations, new ItemStack(Items.IRON_INGOT));
-        assertTrue(group.startOperation(OperationStartContext.repeatedChainReserved(
+        assertTrue(group.machineOperation().start(OperationStartContext.repeatedChainReserved(
                 player, ledger, group.materialPlan(), operations, materials)));
     }
 
-    private static class BufferedDelegate implements IBatchDelegate {
+    private static class BufferedDelegate implements IBatchDelegate, MachineOperation {
+        @Override public MachineOperation machineOperation() { return this; }
+
         private int batchSize = 1;
 
         @Override
@@ -1255,13 +1267,13 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
         }
 
         @Override
-        public boolean startOperation(OperationStartContext context) {
+        public boolean start(OperationStartContext context) {
             return true;
         }
 
         @Override
-        public boolean isCraftComplete(ServerLevel level) {
-            return false;
+        public CraftObservation observe(ServerLevel level) {
+            return new CraftObservation(false ? CraftPhase.DONE : CraftPhase.WORKING);
         }
 
         @Override
@@ -1279,16 +1291,15 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
             return new AABB(BlockPos.ZERO).inflate(3);
         }
 
-        @Override
-        public ItemStack collectResult(ServerPlayer player) {
-            return ItemStack.EMPTY;
+        @Override public OperationOutputSource outputSource() {
+            return OperationOutputSource.single(player -> ItemStack.EMPTY, outputContract());
         }
 
         @Override
-        public void onBatchFailed(ServerPlayer player, String reason) {}
+        public void recover(ServerPlayer player, String reason) {}
 
         @Override
-        public void onBatchFinished(ServerPlayer player) {}
+        public void cleanup(ServerPlayer player) {}
 
         @Override
         public BlockPos getMachinePos() {

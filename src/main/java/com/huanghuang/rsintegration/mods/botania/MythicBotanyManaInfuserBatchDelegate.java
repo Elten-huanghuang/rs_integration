@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mods.botania;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -23,7 +23,6 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.AABB;
 import java.util.Optional;
 import net.minecraft.core.registries.Registries;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -265,8 +264,11 @@ public final class MythicBotanyManaInfuserBatchDelegate extends AbstractBatchDel
                 .stream().mapToInt(entity -> entity.getItem().getCount()).sum() >= expected.getCount();
     }
 
-    @Override
-    public @Nonnull ItemStack collectResult(@Nonnull ServerPlayer player) {
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.single(this::takeResult, outputContract());
+    }
+
+    private ItemStack takeResult(@Nonnull ServerPlayer player) {
         if (level == null || infuserPos == null) return ItemStack.EMPTY;
         int collected = 0;
         for (ItemEntity entity : level.getEntitiesOfClass(
@@ -379,7 +381,7 @@ public final class MythicBotanyManaInfuserBatchDelegate extends AbstractBatchDel
     }
 
     @Override
-    public void onBatchFinished(@Nullable ServerPlayer player) {
+    public void cleanup(@Nullable ServerPlayer player) {
         if (!markTerminalCleanup()) return;
         inputEntityIds.clear();
         resetLocalState();

@@ -1,10 +1,8 @@
 package com.huanghuang.rsintegration.crafting;
 
-import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.api.execution.CollectedOutput;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
-import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
@@ -39,9 +37,7 @@ import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraft.world.item.enchantment.EnchantmentInstance;
 import net.minecraft.world.item.enchantment.Enchantments;
 import org.junit.jupiter.api.Test;
-
 import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -88,7 +84,7 @@ class AsyncCraftChainProductionTest extends BootstrapTest {
                 new OutputContract.Port("world:primary", null, new ItemStack(Items.IRON_INGOT), 1,
                         OutputContract.Kind.PRIMARY, OutputContract.Source.WORLD)));
 
-        List<OutputAccounting.CollectedOutput> outputs = AsyncCraftChain.capturedWorldOutputRecords(
+        List<OutputAccounting.CollectedOutput> outputs = OutputAccounting.capturedWorldOutputRecords(
                 contract, List.of(new ItemStack(Items.IRON_INGOT)));
 
         assertEquals("world:primary", outputs.get(0).portId());
@@ -155,7 +151,7 @@ class AsyncCraftChainProductionTest extends BootstrapTest {
                 new OutputContract.Port("world:second", null, new ItemStack(Items.IRON_INGOT), 1,
                         OutputContract.Kind.SECONDARY, OutputContract.Source.WORLD)));
 
-        List<OutputAccounting.CollectedOutput> outputs = AsyncCraftChain.capturedWorldOutputRecords(
+        List<OutputAccounting.CollectedOutput> outputs = OutputAccounting.capturedWorldOutputRecords(
                 contract, List.of(new ItemStack(Items.IRON_INGOT)));
 
         assertEquals("unmatched:world:0", outputs.get(0).portId());

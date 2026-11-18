@@ -13,10 +13,8 @@ import net.minecraft.world.item.crafting.CraftingBookCategory;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.ShapelessRecipe;
 import org.junit.jupiter.api.Test;
-
 import java.lang.reflect.Field;
 import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -29,7 +27,7 @@ class GenericBatchDelegateTest extends BootstrapTest {
         pendingSecondary(delegate).add(new ItemStack(Items.BUCKET));
         pendingSecondary(delegate).add(new ItemStack(Items.STICK, 3));
 
-        List<ItemStack> results = delegate.collectAllResults(null);
+        List<ItemStack> results = delegate.outputSource().collectFinal(null).stacks();
 
         assertEquals(3, results.size());
         assertEquals(2, results.get(0).getCount());
@@ -37,9 +35,7 @@ class GenericBatchDelegateTest extends BootstrapTest {
         assertEquals(Items.BUCKET, results.get(1).getItem());
         assertEquals(3, results.get(2).getCount());
         assertEquals(Items.STICK, results.get(2).getItem());
-        assertTrue(delegate.collectsPhysicalSecondaryOutputs());
-        assertTrue(delegate.collectAllResults(null).isEmpty());
-        assertTrue(delegate.getPendingSecondary().isEmpty());
+        assertTrue(delegate.outputSource().collectFinal(null).stacks().isEmpty());
     }
 
     @Test
@@ -54,7 +50,7 @@ class GenericBatchDelegateTest extends BootstrapTest {
                 List.of(new ItemStack(Items.SHEARS), new ItemStack(Items.IRON_INGOT, 3)),
                 3, RegistryAccess.EMPTY));
 
-        List<ItemStack> results = delegate.collectAllResults(null);
+        List<ItemStack> results = delegate.outputSource().collectFinal(null).stacks();
         assertEquals(2, results.size());
         assertEquals(Items.DIAMOND, results.get(0).getItem());
         assertEquals(3, results.get(0).getCount());
@@ -77,7 +73,7 @@ class GenericBatchDelegateTest extends BootstrapTest {
                 List.of(catalyst, new ItemStack(Items.IRON_INGOT, 3)),
                 3, RegistryAccess.EMPTY));
 
-        List<ItemStack> results = delegate.collectAllResults(null);
+        List<ItemStack> results = delegate.outputSource().collectFinal(null).stacks();
         assertEquals(2, results.size());
         assertEquals(3, results.get(0).getCount());
         assertEquals(Items.SHEARS, results.get(1).getItem());

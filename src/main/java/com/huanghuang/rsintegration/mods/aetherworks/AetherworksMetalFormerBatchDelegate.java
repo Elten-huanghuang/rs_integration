@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mods.aetherworks;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -24,7 +24,6 @@ import net.sirplop.aetherworks.blockentity.IForge;
 import net.sirplop.aetherworks.blockentity.MetalFormerBlockEntity;
 import net.sirplop.aetherworks.recipe.IMetalFormerRecipe;
 import net.sirplop.aetherworks.recipe.MetalFormerContext;
-
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
@@ -248,7 +247,11 @@ public final class AetherworksMetalFormerBatchDelegate extends AbstractBatchDele
 
     @Override public Component craftFailureMessage(CraftObservation observation) { return failureMessage; }
 
-    @Override public ItemStack collectResult(ServerPlayer player) {
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.single(this::takeResult, outputContract());
+    }
+
+    private ItemStack takeResult(ServerPlayer player) {
         if (!isMachineCraftFinished(level, machine)) return ItemStack.EMPTY;
         ItemStack result = machine.inventory.extractItem(0, expected.getCount(), false);
         if (!result.isEmpty()) {
@@ -302,7 +305,7 @@ public final class AetherworksMetalFormerBatchDelegate extends AbstractBatchDele
         resetState();
     }
 
-    @Override public void onBatchFinished(@Nullable ServerPlayer player) {
+    @Override public void cleanup(@Nullable ServerPlayer player) {
         if (!markTerminalCleanup()) return;
         resetState();
     }

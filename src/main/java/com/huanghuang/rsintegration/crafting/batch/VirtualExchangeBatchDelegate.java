@@ -16,7 +16,6 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import org.jetbrains.annotations.NotNull;
-
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
@@ -212,16 +211,11 @@ public abstract class VirtualExchangeBatchDelegate extends AbstractBatchDelegate
         return done;
     }
 
-    @Override
-    public ItemStack collectResult(@NotNull ServerPlayer player) {
-        if (resultInserted || pendingResults.isEmpty()) return ItemStack.EMPTY;
-        ItemStack first = pendingResults.remove(0);
-        if (pendingResults.isEmpty()) done = false;
-        return first;
+    @Override public OperationOutputSource outputSource() {
+        return player -> OperationOutputSource.Handoff.physical(takeResults(player), outputContract());
     }
 
-    @Override
-    public List<ItemStack> collectAllResults(@NotNull ServerPlayer player) {
+    private List<ItemStack> takeResults(@NotNull ServerPlayer player) {
         if (resultInserted || pendingResults.isEmpty()) return List.of();
         List<ItemStack> results = List.copyOf(pendingResults);
         pendingResults.clear();
@@ -235,7 +229,7 @@ public abstract class VirtualExchangeBatchDelegate extends AbstractBatchDelegate
     }
 
     @Override
-    public void onBatchFinished(@NotNull ServerPlayer player) {
+    public void cleanup(@NotNull ServerPlayer player) {
         resetRuntime();
     }
 

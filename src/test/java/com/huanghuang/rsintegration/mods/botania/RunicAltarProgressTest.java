@@ -1,13 +1,11 @@
 package com.huanghuang.rsintegration.mods.botania;
 
-import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.MachineOperation;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.server.level.ServerLevel;
 import org.junit.jupiter.api.Test;
 import vazkii.botania.common.block.block_entity.RunicAltarBlockEntity;
-
 import java.lang.reflect.Field;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -25,7 +23,7 @@ class RunicAltarProgressTest extends BootstrapTest {
 
         var observation = delegate.observeMachineCraft(mock(ServerLevel.class), altar);
 
-        assertEquals(IBatchDelegate.CraftPhase.WORKING, observation.phase());
+        assertEquals(MachineOperation.CraftPhase.WORKING, observation.phase());
         assertEquals(250L, observation.completedWork());
     }
 

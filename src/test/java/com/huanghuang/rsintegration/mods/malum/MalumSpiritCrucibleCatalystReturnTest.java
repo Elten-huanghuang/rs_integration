@@ -10,10 +10,8 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraftforge.items.ItemStackHandler;
 import org.junit.jupiter.api.Test;
-
 import java.lang.reflect.Field;
 import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -38,7 +36,7 @@ class MalumSpiritCrucibleCatalystReturnTest extends BootstrapTest {
         ServerPlayer player = mock(ServerPlayer.class);
 
         List<ItemStack> recovered = delegate.collectReusableMaterials(player);
-        delegate.onBatchFinished(player);
+        delegate.machineOperation().cleanup(player);
         delegate.releaseReusableMaterials(player);
 
         assertEquals(1, recovered.size());

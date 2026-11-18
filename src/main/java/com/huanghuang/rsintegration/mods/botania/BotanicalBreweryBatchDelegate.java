@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mods.botania;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
@@ -18,6 +18,10 @@ List<IngredientSpec> recipeSlots() {if(recipe==null)return null;List<IngredientS
 @Override public boolean startSingleOperation(@Nonnull ServerPlayer p,@Nonnull ExtractionLedger l){return false;}@Override public boolean startPreparedOperation(@Nonnull ServerPlayer p,@Nonnull List<ItemStack>m,@Nonnull ExtractionLedger l){useSharedLedger(l);return start(m);}
 private boolean start(List<ItemStack>m){if(!(level.getBlockEntity(pos) instanceof BreweryBlockEntity be)||m.isEmpty()||!(m.get(0).getItem() instanceof BrewContainer))return false;entitiesBefore=BotaniaDelegateSupport.snapshot(level,new AABB(pos).inflate(1.5));for(ItemStack s:m)if(!be.addItem(null,s,null))return false;started=true;markCraftStarted();return true;}
 @Override protected boolean isMachineCraftFinished(@Nonnull ServerLevel l,@Nonnull BlockEntity b){return started&&!l.getEntitiesOfClass(ItemEntity.class,new AABB(pos).inflate(1.5),e->BotaniaDelegateSupport.isNew(e,entitiesBefore)&&ItemStack.isSameItem(e.getItem(),expected)).isEmpty();}
-@Override public ItemStack collectResult(@Nonnull ServerPlayer p){for(ItemEntity e:level.getEntitiesOfClass(ItemEntity.class,new AABB(pos).inflate(1.5),x->BotaniaDelegateSupport.isNew(x,entitiesBefore)&&ItemStack.isSameItem(x.getItem(),expected))){ItemStack result=e.getItem().copy();e.discard();return result;}return ItemStack.EMPTY;}
+@Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.single(this::takeResult, outputContract());
+    }
+
+    private ItemStack takeResult(@Nonnull ServerPlayer p) {for(ItemEntity e:level.getEntitiesOfClass(ItemEntity.class,new AABB(pos).inflate(1.5),x->BotaniaDelegateSupport.isNew(x,entitiesBefore)&&ItemStack.isSameItem(x.getItem(),expected))){ItemStack result=e.getItem().copy();e.discard();return result;}return ItemStack.EMPTY;}
 @Override protected void clearMachineState(BlockEntity b,ServerPlayer p){resetState();}
-@Override public ItemStack getExpectedOutput(){return expected.isEmpty()?null:expected.copy();}@Override public AABB getOutputCaptureRegion(){return pos==null?null:new AABB(pos).inflate(1.5);}@Override public BlockPos getMachinePos(){return pos;}@Override public void onBatchFinished(@Nonnull ServerPlayer p){resetState();}}
+@Override public ItemStack getExpectedOutput(){return expected.isEmpty()?null:expected.copy();}@Override public AABB getOutputCaptureRegion(){return pos==null?null:new AABB(pos).inflate(1.5);}@Override public BlockPos getMachinePos(){return pos;}@Override public void cleanup(@Nonnull ServerPlayer p){resetState();}}

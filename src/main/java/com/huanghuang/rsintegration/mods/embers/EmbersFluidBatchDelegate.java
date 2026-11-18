@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mods.embers;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.mods.common.MachineWaterSupply;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -20,7 +20,6 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fluids.capability.IFluidHandler;
-
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
@@ -211,12 +210,11 @@ abstract class EmbersFluidBatchDelegate extends AbstractBatchDelegate {
 
     @Override public boolean failureConsumesInputs(CraftObservation observation) { return consumed; }
 
-    @Override public ItemStack collectResult(ServerPlayer player) {
-        List<ItemStack> results = collectAllResults(player);
-        return results.isEmpty() ? ItemStack.EMPTY : results.get(0);
+    @Override public OperationOutputSource outputSource() {
+        return player -> OperationOutputSource.Handoff.physical(takeResults(player), outputContract());
     }
 
-    @Override public List<ItemStack> collectAllResults(ServerPlayer player) {
+    private List<ItemStack> takeResults(ServerPlayer player) {
         if (!started || !structureValid()
                 || !consumed && !isMachineCraftFinished(level, level.getBlockEntity(pos))) {
             return List.of();
@@ -225,7 +223,8 @@ abstract class EmbersFluidBatchDelegate extends AbstractBatchDelegate {
         return drained.isEmpty() ? List.of() : List.of(InkFluidSupport.token(drained));
     }
 
-    @Override public boolean collectsPhysicalSecondaryOutputs() { return true; }
+
+
 
     @Override protected void clearMachineState(BlockEntity be, @Nullable ServerPlayer player) {
         List<ItemStack> recovered = new ArrayList<>();
@@ -252,7 +251,7 @@ abstract class EmbersFluidBatchDelegate extends AbstractBatchDelegate {
         resetState();
     }
 
-    @Override public void onBatchFinished(@Nullable ServerPlayer player) {
+    @Override public void cleanup(@Nullable ServerPlayer player) {
         if (!markTerminalCleanup()) return;
         resetState();
     }

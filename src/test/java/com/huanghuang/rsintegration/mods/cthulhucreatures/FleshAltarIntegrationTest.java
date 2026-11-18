@@ -1,12 +1,11 @@
 package com.huanghuang.rsintegration.mods.cthulhucreatures;
 
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext.ReservedMaterial;
-
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
-import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate.CraftPhase;
+import com.huanghuang.rsintegration.crafting.batch.MachineOperation.CraftPhase;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate.PreparationState;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
@@ -31,10 +30,8 @@ import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import org.junit.jupiter.api.Test;
-
 import java.lang.reflect.Field;
 import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.doReturn;
@@ -94,30 +91,30 @@ class FleshAltarIntegrationTest extends BootstrapTest {
         assertTrue(startSingle(fixture, 64, 32));
         assertEquals(64, fixture.inventory.getItem(0).getCount());
         assertEquals(32, fixture.inventory.getItem(1).getCount());
-        assertEquals(CraftPhase.WORKING, fixture.delegate.observeCraft(fixture.level).phase());
+        assertEquals(CraftPhase.WORKING, fixture.delegate.machineOperation().observe(fixture.level).phase());
     }
 
     @Test
     void bufferedDispatchWaitsForAllCyclesAndSettlesActualOutput() throws Exception {
         Fixture fixture = fixture(new CountedRecipe(2, 4, 2));
         InputBufferPlan plan = fixture.delegate.inputBufferPlan(3);
-        assertTrue(fixture.delegate.startOperation(OperationStartContext.chainReserved(
+        assertTrue(fixture.delegate.machineOperation().start(OperationStartContext.chainReserved(
                 mock(ServerPlayer.class), ExtractionLedger.external(), fixture.delegate.materialPlan(),
                 List.of(new ReservedMaterial("slot:0", new ItemStack(Items.NETHERRACK, 6)), new ReservedMaterial("slot:1", new ItemStack(Items.DIAMOND, 12))), plan)));
         assertEquals(6, fixture.delegate.getExpectedProduction().count());
         fixture.inventory.setItem(0, new ItemStack(Items.NETHERRACK, 4));
         fixture.inventory.setItem(1, new ItemStack(Items.DIAMOND, 8));
         fixture.inventory.setItem(2, new ItemStack(Items.GOLD_INGOT, 2));
-        assertEquals(CraftPhase.WORKING, fixture.delegate.observeCraft(fixture.level).phase());
+        assertEquals(CraftPhase.WORKING, fixture.delegate.machineOperation().observe(fixture.level).phase());
         fixture.inventory.setItem(0, ItemStack.EMPTY);
         fixture.inventory.setItem(1, ItemStack.EMPTY);
         fixture.inventory.setItem(2, new ItemStack(Items.GOLD_INGOT, 6));
-        assertEquals(CraftPhase.DONE, fixture.delegate.observeCraft(fixture.level).phase());
-        List<OutputAccounting.CollectedOutput> outputs = fixture.delegate.collectStructuredResults(mock(ServerPlayer.class));
+        assertEquals(CraftPhase.DONE, fixture.delegate.machineOperation().observe(fixture.level).phase());
+        List<OutputAccounting.CollectedOutput> outputs = fixture.delegate.outputSource().collectFinal(mock(ServerPlayer.class)).ports();
         assertTrue(OutputAccounting.assess(fixture.delegate.outputContract(), 3, outputs).complete());
         assertEquals(6, outputs.get(0).stack().getCount());
         assertTrue(fixture.inventory.getItem(2).isEmpty());
-        assertTrue(fixture.delegate.collectResult(mock(ServerPlayer.class)).isEmpty());
+        assertTrue(fixture.delegate.outputSource().collectFinal(mock(ServerPlayer.class)).stacks().isEmpty());
     }
 
     @Test
@@ -152,10 +149,10 @@ class FleshAltarIntegrationTest extends BootstrapTest {
         Fixture fixture = fixture(new CountedRecipe(2, 4, 1));
         assertTrue(startSingle(fixture, 2, 4));
         fixture.inventory.setItem(2, new ItemStack(Items.GOLD_INGOT));
-        assertEquals(CraftPhase.FAILED, fixture.delegate.observeCraft(fixture.level).phase());
+        assertEquals(CraftPhase.FAILED, fixture.delegate.machineOperation().observe(fixture.level).phase());
         fixture.inventory.setItem(2, ItemStack.EMPTY);
         fixture.inventory.setItem(0, ItemStack.EMPTY);
-        assertEquals(CraftPhase.FAILED, fixture.delegate.observeCraft(fixture.level).phase());
+        assertEquals(CraftPhase.FAILED, fixture.delegate.machineOperation().observe(fixture.level).phase());
     }
 
     @Test
@@ -178,10 +175,10 @@ class FleshAltarIntegrationTest extends BootstrapTest {
         Fixture fixture = fixture(new CountedRecipe(1, 1, 1));
         assertTrue(startSingle(fixture, 1, 1));
         when(fixture.level.getBlockEntity(BlockPos.ZERO)).thenReturn(mock(BlockEntity.class));
-        assertEquals(CraftPhase.FAILED, fixture.delegate.observeCraft(fixture.level).phase());
-        assertTrue(fixture.delegate.collectResult(mock(ServerPlayer.class)).isEmpty());
+        assertEquals(CraftPhase.FAILED, fixture.delegate.machineOperation().observe(fixture.level).phase());
+        assertTrue(fixture.delegate.outputSource().collectFinal(mock(ServerPlayer.class)).stacks().isEmpty());
         when(fixture.level.hasChunkAt(BlockPos.ZERO)).thenReturn(false);
-        assertEquals(CraftPhase.FAILED, fixture.delegate.observeCraft(fixture.level).phase());
+        assertEquals(CraftPhase.FAILED, fixture.delegate.machineOperation().observe(fixture.level).phase());
     }
 
     @Test
@@ -195,8 +192,8 @@ class FleshAltarIntegrationTest extends BootstrapTest {
         fixture.inventory.setItem(0, new ItemStack(Items.BUCKET));
         fixture.inventory.setItem(1, ItemStack.EMPTY);
         fixture.inventory.setItem(2, new ItemStack(Items.GOLD_INGOT));
-        assertEquals(CraftPhase.DONE, fixture.delegate.observeCraft(fixture.level).phase());
-        List<ItemStack> outputs = fixture.delegate.collectAllResults(mock(ServerPlayer.class));
+        assertEquals(CraftPhase.DONE, fixture.delegate.machineOperation().observe(fixture.level).phase());
+        List<ItemStack> outputs = fixture.delegate.outputSource().collectFinal(mock(ServerPlayer.class)).stacks();
         assertEquals(List.of(Items.GOLD_INGOT, Items.BUCKET), outputs.stream().map(ItemStack::getItem).toList());
         assertTrue(fixture.inventory.isEmpty());
     }

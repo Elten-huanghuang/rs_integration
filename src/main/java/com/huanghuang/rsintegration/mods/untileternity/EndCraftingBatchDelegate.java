@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mods.untileternity;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.carrot123.until_eternity.block.ModBlocks;
 import com.carrot123.until_eternity.recipe.EndCraftingIngredient;
 import com.carrot123.until_eternity.recipe.EndCraftingRecipe;
@@ -22,7 +22,6 @@ import net.minecraft.world.inventory.TransientCraftingContainer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import org.jetbrains.annotations.NotNull;
-
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
@@ -193,16 +192,11 @@ public final class EndCraftingBatchDelegate extends AbstractBatchDelegate {
         return craftDone && level.getBlockState(pos).getBlock() == ModBlocks.END_CRAFTING_TABLE.get();
     }
 
-    @Override public ItemStack collectResult(ServerPlayer player) {
-        if (!craftDone || pending == null) return ItemStack.EMPTY;
-        ItemStack result = pending.result().copy();
-        pending = null;
-        craftDone = false;
-        collected = true;
-        return result;
+    @Override public OperationOutputSource outputSource() {
+        return player -> OperationOutputSource.Handoff.physical(takeResults(player), outputContract());
     }
 
-    @Override public List<ItemStack> collectAllResults(ServerPlayer player) {
+    private List<ItemStack> takeResults(ServerPlayer player) {
         if (!craftDone || pending == null) return List.of();
         List<ItemStack> results = new ArrayList<>(pending.secondary().size() + 1);
         results.add(pending.result().copy());
@@ -213,7 +207,8 @@ public final class EndCraftingBatchDelegate extends AbstractBatchDelegate {
         return List.copyOf(results);
     }
 
-    @Override public boolean collectsPhysicalSecondaryOutputs() { return true; }
+
+
     @Override public BlockPos getMachinePos() { return pos; }
 
     @Override protected void clearMachineState(BlockEntity be, ServerPlayer player) {
@@ -233,7 +228,7 @@ public final class EndCraftingBatchDelegate extends AbstractBatchDelegate {
         craftDone = false;
     }
 
-    @Override public void onBatchFinished(@NotNull ServerPlayer player) {
+    @Override public void cleanup(@NotNull ServerPlayer player) {
         forceMachineChunk(level, pos, false);
         pending = null;
         craftDone = false;

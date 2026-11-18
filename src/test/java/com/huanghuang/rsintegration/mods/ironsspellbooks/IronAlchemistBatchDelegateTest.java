@@ -1,9 +1,8 @@
 package com.huanghuang.rsintegration.mods.ironsspellbooks;
 
+import com.huanghuang.rsintegration.crafting.batch.MachineOperation;
 import com.huanghuang.rsintegration.crafting.recovery.FluidTokenItem;
-
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
-import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.storage.StorageBackendId;
 import com.huanghuang.rsintegration.storage.StorageOperationMode;
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
@@ -19,7 +18,6 @@ import net.minecraftforge.fluids.capability.templates.FluidTank;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeAll;
 import java.lang.reflect.Field;
-
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -35,11 +33,11 @@ class IronAlchemistBatchDelegateTest extends BootstrapTest {
         IronAlchemistBatchDelegate delegate = new IronAlchemistBatchDelegate();
         setField(delegate, "consumed", true);
         assertEquals("", IronAlchemistBatchDelegate.recyclingFailure(0, 250));
-        assertEquals(IBatchDelegate.CraftPhase.DONE,
+        assertEquals(MachineOperation.CraftPhase.DONE,
                 delegate.observeMachineCraft(mock(ServerLevel.class), null).phase());
-        assertTrue(delegate.collectResult(mock(ServerPlayer.class)).isEmpty());
+        assertTrue(delegate.outputSource().collectFinal(mock(ServerPlayer.class)).stacks().isEmpty());
         assertNull(delegate.getExpectedProduction());
-        assertTrue(delegate.failureConsumesInputs(new IBatchDelegate.CraftObservation(IBatchDelegate.CraftPhase.FAILED)));
+        assertTrue(delegate.failureConsumesInputs(new MachineOperation.CraftObservation(MachineOperation.CraftPhase.FAILED)));
     }
 
     @Test
@@ -49,8 +47,8 @@ class IronAlchemistBatchDelegateTest extends BootstrapTest {
             IronAlchemistBatchDelegate delegate = new IronAlchemistBatchDelegate();
             setField(delegate, "consumed", true);
             setField(delegate, "recycleFailure", IronAlchemistBatchDelegate.recyclingFailure(produced, 250));
-            IBatchDelegate.CraftObservation observation = delegate.observeMachineCraft(mock(ServerLevel.class), null);
-            assertEquals(IBatchDelegate.CraftPhase.FAILED, observation.phase());
+            MachineOperation.CraftObservation observation = delegate.observeMachineCraft(mock(ServerLevel.class), null);
+            assertEquals(MachineOperation.CraftPhase.FAILED, observation.phase());
             assertTrue(delegate.failureConsumesInputs(observation));
         }
     }

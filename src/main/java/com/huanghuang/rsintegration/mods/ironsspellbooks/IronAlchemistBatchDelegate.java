@@ -1,7 +1,8 @@
 package com.huanghuang.rsintegration.mods.ironsspellbooks;
 
+import com.huanghuang.rsintegration.crafting.batch.ProductionEvidence;
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.api.execution.CollectedOutput;
 import com.huanghuang.rsintegration.api.recipe.OutputKind;
@@ -29,7 +30,6 @@ import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fluids.capability.IFluidHandler;
 import net.minecraftforge.registries.ForgeRegistries;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -38,7 +38,7 @@ import java.lang.reflect.Method;
 import java.util.function.Function;
 
 /** 在真实炼金锅内执行回收和酿造，装瓶消耗账本实际提取的流体和玻璃瓶。 */
-public final class IronAlchemistBatchDelegate extends AbstractBatchDelegate {
+public final class IronAlchemistBatchDelegate extends AbstractBatchDelegate implements ProductionEvidence {
     private static final ResourceLocation FLUID_OUTPUT_PORT =
             new ResourceLocation(
                     "irons_spellbooks",
@@ -444,8 +444,11 @@ public final class IronAlchemistBatchDelegate extends AbstractBatchDelegate {
         return consumed && recycleFailure.isEmpty();
     }
 
-    @Override
-    public ItemStack collectResult(@Nonnull ServerPlayer player) {
+    @Override public OperationOutputSource outputSource() {
+        return player -> OperationOutputSource.Handoff.physical(takeResults(player), outputContract());
+    }
+
+    private ItemStack takeResult(@Nonnull ServerPlayer player) {
         if (result.isEmpty()) return ItemStack.EMPTY;
         if (producesFluid()) {
             if (!level.hasChunkAt(pos) || !isCauldron(level.getBlockEntity(pos))) return ItemStack.EMPTY;
@@ -472,10 +475,14 @@ public final class IronAlchemistBatchDelegate extends AbstractBatchDelegate {
         return actualProduction;
     }
 
-    @Override public boolean collectsPhysicalSecondaryOutputs() { return recipe != null && recipe.isBrewing(); }
 
-    @Override public List<ItemStack> collectAllResults(@Nonnull ServerPlayer player) {
-        if (recipe == null || !recipe.isBrewing()) return super.collectAllResults(player);
+
+
+    private List<ItemStack> takeResults(@Nonnull ServerPlayer player) {
+        if (recipe == null || !recipe.isBrewing()) {
+            ItemStack stack = takeResult(player);
+            return stack.isEmpty() ? List.of() : List.of(stack);
+        }
         if (result.isEmpty() || !level.hasChunkAt(pos) || !isCauldron(level.getBlockEntity(pos))) return List.of();
         BlockEntity tile = level.getBlockEntity(pos);
         IFluidHandler tank = tile.getCapability(ForgeCapabilities.FLUID_HANDLER).resolve().orElse(null);
@@ -563,7 +570,7 @@ public final class IronAlchemistBatchDelegate extends AbstractBatchDelegate {
         owner = null;
         resetState();
     }
-    @Override public void onBatchFinished(@Nullable ServerPlayer player) {
+    @Override public void cleanup(@Nullable ServerPlayer player) {
         markTerminalCleanup();
         result = ItemStack.EMPTY;
         actualProduction = null;
@@ -576,7 +583,7 @@ public final class IronAlchemistBatchDelegate extends AbstractBatchDelegate {
         resetState();
     }
     @Override
-    public List<CollectedOutput> drainObservedProduction() {
+    public List<CollectedOutput> takeObserved() {
         if (observedProduction.isEmpty()) return List.of();
         List<CollectedOutput> result =
                 List.copyOf(observedProduction);

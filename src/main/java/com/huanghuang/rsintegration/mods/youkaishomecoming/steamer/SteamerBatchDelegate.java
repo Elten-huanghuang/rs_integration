@@ -1,9 +1,8 @@
 package com.huanghuang.rsintegration.mods.youkaishomecoming.steamer;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.mods.common.MachineWaterSupply;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -13,13 +12,11 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
-import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.mods.youkaishomecoming.YoukaiRegistryIds;
 import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
-import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
@@ -28,7 +25,6 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
-import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.AbstractCookingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
@@ -37,18 +33,13 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BooleanProperty;
-import net.minecraftforge.common.capabilities.ForgeCapabilities;
-import net.minecraftforge.items.IItemHandler;
-import net.minecraftforge.items.ItemHandlerHelper;
 import org.jetbrains.annotations.NotNull;
 import net.minecraft.world.entity.player.Player;
-
 import javax.annotation.Nullable;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 /** Batch delegate for Youkais Homecoming Steamer. */
 public final class SteamerBatchDelegate extends AbstractBatchDelegate {
@@ -294,11 +285,8 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
         return "youkaishomecoming:steamer:output";
     }
 
-    @Override
-    public boolean collectsPhysicalSecondaryOutputs() {
-        // 蒸制配方没有副产物，产物全部由 collectResult 从蒸笼格取出。
-        return true;
-    }
+
+
 
     @Override
     public boolean startSingleOperation(ServerPlayer player) {
@@ -486,14 +474,11 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
         return ready;
     }
 
-    @Override
-    public ItemStack collectResult(ServerPlayer player) {
-        List<ItemStack> all = collectAllResults(player);
-        return all.isEmpty() ? ItemStack.EMPTY : all.get(0);
+    @Override public OperationOutputSource outputSource() {
+        return player -> OperationOutputSource.Handoff.physical(takeResults(player), outputContract());
     }
 
-    @Override
-    public List<ItemStack> collectAllResults(ServerPlayer player) {
+    private List<ItemStack> takeResults(ServerPlayer player) {
         BlockEntity be = myLevel.getBlockEntity(potBasePos != null ? potBasePos : myPos);
         if (be == null || !isSteamerBE(be)) return List.of();
 
@@ -516,19 +501,6 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public List<OutputAccounting.CollectedOutput> collectStructuredResults(ServerPlayer player) {
-        OutputContract contract = outputContract();
-        if (contract.ports().size() != 1) return List.of();
-        OutputContract.Port port = contract.ports().get(0);
-        // 逐格上报：链在结构化结算路径下只看 collectStructuredResults，
-        // 会忽略 collectAllResults，因此这里必须自己列出每一份产物供端口对账。
-        return collectAllResults(player).stream()
-                .filter(stack -> stack != null && !stack.isEmpty())
-                .map(stack -> new OutputAccounting.CollectedOutput(port.portId(), port.source(), stack))
-                .toList();
-    }
-
-    @Override
     public boolean canCollectResultWithoutWorldCapture() {
         return true;
     }
@@ -545,9 +517,9 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@NotNull ServerPlayer player) {
+    public void cleanup(@NotNull ServerPlayer player) {
         forceChunkLoad(false);
-        // 收尾清空蒸笼格：成品已由 collectAllResults 逐格取出并结算，
+        // 收尾清空蒸笼格：成品已由产物来源逐格取出并交接，
         // 留在这里的要么是已被账本结算（不再退款）的材质，要么是原生自己放的料。
         // 一律清掉、不再退还，否则会与账本的退款/虚拟产物重复结算。
         clearRackSlots();
@@ -562,7 +534,7 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
      * 失败清理：只摘回"还是原料形态"的那部分。
      * <p>
      * 这些正是共享账本为本次操作预留的材料，把它们如实上报后由账本统一退款；
-     * 已经蒸熟的那些不属于退款范围，留在这里由 {@link #onBatchFinished} 清掉，
+     * 已经蒸熟的那些不属于退款范围，留在这里由 {@link #cleanup} 清掉，
      * 绝不在两处重复退还同一份材料。
      *
      * @return 本次确实收回的原料堆叠，供账本据此退款

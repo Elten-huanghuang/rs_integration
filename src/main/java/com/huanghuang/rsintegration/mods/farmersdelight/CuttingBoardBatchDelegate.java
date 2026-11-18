@@ -1,11 +1,10 @@
 package com.huanghuang.rsintegration.mods.farmersdelight;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.MaterialAccess;
-import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -38,7 +37,6 @@ import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraft.world.item.enchantment.Enchantments;
-
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -403,14 +401,11 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
         return craftDone;
     }
 
-    @Override
-    public ItemStack collectResult(@NotNull ServerPlayer player) {
-        if (pendingResults.isEmpty()) return ItemStack.EMPTY;
-        return pendingResults.remove(0);
+    @Override public OperationOutputSource outputSource() {
+        return player -> OperationOutputSource.Handoff.physical(takeResults(player), outputContract());
     }
 
-    @Override
-    public List<ItemStack> collectAllResults(@NotNull ServerPlayer player) {
+    private List<ItemStack> takeResults(@NotNull ServerPlayer player) {
         List<ItemStack> results = new ArrayList<>(pendingResults);
         pendingResults.clear();
         return List.copyOf(results);
@@ -484,10 +479,8 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
         return true;
     }
 
-    @Override
-    public boolean collectsPhysicalSecondaryOutputs() {
-        return true;
-    }
+
+
 
     @Override
     public boolean canCollectResultWithoutWorldCapture() {
@@ -515,7 +508,7 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@Nullable ServerPlayer player) {
+    public void cleanup(@Nullable ServerPlayer player) {
         if (!markTerminalCleanup()) return;
         pendingResults.clear();
         craftDone = false;

@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting.graph;
 
+import com.huanghuang.rsintegration.crafting.batch.MachineOperation;
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
@@ -20,9 +22,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.AABB;
 import org.junit.jupiter.api.Test;
-
 import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -274,7 +274,9 @@ class GraphConcurrencyPolicyTest extends BootstrapTest {
         return BatchConcurrencyCapabilities.machineSlot();
     }
 
-    private static final class FakeDelegate implements IBatchDelegate {
+    private static final class FakeDelegate implements IBatchDelegate, MachineOperation {
+        @Override public MachineOperation machineOperation() { return this; }
+
         private final BatchConcurrencyCapabilities capabilities;
 
         private FakeDelegate(BatchConcurrencyCapabilities capabilities) {
@@ -283,24 +285,26 @@ class GraphConcurrencyPolicyTest extends BootstrapTest {
 
         @Override public BatchConcurrencyCapabilities concurrencyCapabilities() { return capabilities; }
         @Override public boolean validateAndInit(ServerPlayer p, ResourceLocation r, ResourceLocation d, BlockPos pos) { return false; }
-        @Override public boolean startOperation(OperationStartContext context) { return false; }
-        @Override public boolean isCraftComplete(ServerLevel level) { return false; }
-        @Override public ItemStack collectResult(ServerPlayer p) { return ItemStack.EMPTY; }
-        @Override public void onBatchFailed(ServerPlayer p, String reason) { }
-        @Override public void onBatchFinished(ServerPlayer p) { }
+        @Override public boolean start(OperationStartContext context) { return false; }
+        @Override public CraftObservation observe(ServerLevel level) { return new CraftObservation(false ? CraftPhase.DONE : CraftPhase.WORKING); }
+        @Override public OperationOutputSource outputSource() { return OperationOutputSource.single(p -> { return ItemStack.EMPTY; }, outputContract()); }
+        @Override public void recover(ServerPlayer p, String reason) { }
+        @Override public void cleanup(ServerPlayer p) { }
         @Override public BlockPos getMachinePos() { return BlockPos.ZERO; }
     }
 
     /** 不覆盖 concurrencyCapabilities，用来验证默认推断。 */
-    private static final class ExpectedOutputDelegate implements IBatchDelegate {
+    private static final class ExpectedOutputDelegate implements IBatchDelegate, MachineOperation {
+        @Override public MachineOperation machineOperation() { return this; }
+
         @Override public ItemStack getExpectedOutput() { return new ItemStack(Items.STONE); }
         @Override public AABB getOutputCaptureRegion() { return new AABB(BlockPos.ZERO); }
         @Override public boolean validateAndInit(ServerPlayer p, ResourceLocation r, ResourceLocation d, BlockPos pos) { return false; }
-        @Override public boolean startOperation(OperationStartContext context) { return false; }
-        @Override public boolean isCraftComplete(ServerLevel level) { return false; }
-        @Override public ItemStack collectResult(ServerPlayer p) { return ItemStack.EMPTY; }
-        @Override public void onBatchFailed(ServerPlayer p, String reason) { }
-        @Override public void onBatchFinished(ServerPlayer p) { }
+        @Override public boolean start(OperationStartContext context) { return false; }
+        @Override public CraftObservation observe(ServerLevel level) { return new CraftObservation(false ? CraftPhase.DONE : CraftPhase.WORKING); }
+        @Override public OperationOutputSource outputSource() { return OperationOutputSource.single(p -> { return ItemStack.EMPTY; }, outputContract()); }
+        @Override public void recover(ServerPlayer p, String reason) { }
+        @Override public void cleanup(ServerPlayer p) { }
         @Override public BlockPos getMachinePos() { return BlockPos.ZERO; }
     }
 }

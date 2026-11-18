@@ -1,25 +1,22 @@
 package com.huanghuang.rsintegration.mods.farmersrespite.kettle;
 
+import com.huanghuang.rsintegration.crafting.batch.MachineOperation;
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.mods.common.MachineWaterSupply;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
-import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.reflection.probes.FRReflection;
-import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
@@ -33,12 +30,10 @@ import org.jetbrains.annotations.NotNull;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
-
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Delegate for the Farmer's Respite Kettle (farmersrespite:brewing).
@@ -82,6 +77,7 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
     private boolean placedContainerSlot;
     private boolean machineMutated;
     private NativeInputPhase nativeInputPhase = NativeInputPhase.NONE;
+    private String nativeFailure;
     private ItemStack deferredOutputContainers = ItemStack.EMPTY;
     private final List<ItemStack> pendingNativeSolidMats = new ArrayList<>();
     /** Original private-ledger materials consumed by the native container path. */
@@ -130,6 +126,7 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
         this.placedContainerSlot = false;
         this.machineMutated = false;
         this.nativeInputPhase = NativeInputPhase.NONE;
+        this.nativeFailure = null;
         this.deferredOutputContainers = ItemStack.EMPTY;
         this.pendingNativeSolidMats.clear();
         this.nativeInputRefund = ItemStack.EMPTY;
@@ -280,6 +277,7 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
         this.placedContainerSlot = false;
         this.machineMutated = false;
         this.nativeInputPhase = NativeInputPhase.NONE;
+        this.nativeFailure = null;
         this.deferredOutputContainers = ItemStack.EMPTY;
         this.pendingNativeSolidMats.clear();
         this.nativeInputRefund = ItemStack.EMPTY;
@@ -500,20 +498,35 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    protected IBatchDelegate.CraftObservation observeMachineCraft(
+    protected MachineOperation.CraftObservation observeMachineCraft(
             @NotNull ServerLevel level, @NotNull BlockEntity be) {
-        if (nativeInputPhase == NativeInputPhase.NONE
-                || nativeInputPhase == NativeInputPhase.BOTTLING_OUTPUT) {
-            return super.observeMachineCraft(level, be);
+        if (nativeFailure != null) return failObservation(nativeFailure);
+        if (awaitingNativeTransition()) return workingObservation();
+        return super.observeMachineCraft(level, be);
+    }
+
+    private boolean awaitingNativeTransition() {
+        return nativeInputPhase == NativeInputPhase.EMPTYING_INPUT || nativeInputPhase == NativeInputPhase.BREWING;
+    }
+
+    @Override
+    public void advance(@NotNull ServerLevel playerLevel) {
+        if (!awaitingNativeTransition() || nativeFailure != null || !myLevel.hasChunkAt(myPos)) return;
+        BlockEntity be = myLevel.getBlockEntity(myPos);
+        if (be == null || be.isRemoved() || !isFRKettleBE(be)) {
+            nativeFailure = "kettle block entity changed";
+            return;
         }
-        if (!isFRKettleBE(be)) return failObservation("kettle block entity changed");
         ItemStackHandler inventory = getInventory(be);
         IFluidHandler fluidHandler = getFluidHandler(be);
         if (inventory == null || inventory.getSlots() < 5 || fluidHandler == null) {
-            return failObservation("kettle inventory or fluid tank unavailable");
+            nativeFailure = "kettle inventory or fluid tank unavailable";
+            return;
         }
+        advanceNativePhase(inventory, be, fluidHandler.getFluidInTank(0));
+    }
 
-        FluidStack tank = fluidHandler.getFluidInTank(0);
+    void advanceNativePhase(ItemStackHandler inventory, BlockEntity be, FluidStack tank) {
         if (nativeInputPhase == NativeInputPhase.EMPTYING_INPUT) {
             ItemStack bottledInput = inventory.getStackInSlot(3);
             ItemStack returnedContainers = inventory.getStackInSlot(4);
@@ -525,22 +538,23 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
                     && returnedContainers.getCount() >= inputBottlesPerCraft;
             if (filled && returned) {
                 if (!placePendingNativeSolids(inventory, be)) {
-                    return failObservation("kettle ingredient slot became occupied during native input");
+                    nativeFailure = "kettle ingredient slot became occupied during native input";
+                    return;
                 }
                 nativeInputPhase = NativeInputPhase.BREWING;
                 RSIntegrationMod.LOGGER.debug(
                         "[RSI-FRKettle] Native input emptied for {}; tank={} returned={}",
                         recipe.getId(), tank, returnedContainers);
             }
-            return workingObservation();
+            return;
         }
-
+        if (nativeInputPhase != NativeInputPhase.BREWING) return;
         boolean brewed = !tank.isEmpty()
                 && tank.getFluid() == recipeFluidOut.getFluid()
                 && tank.getAmount() >= recipeFluidOut.getAmount();
-        if (!brewed) return workingObservation();
+        if (!brewed) return;
 
-        ItemStack returnedContainers = takeOwnedSlot(inventory, 4);
+        ItemStack returnedContainers = inventory.getStackInSlot(4).copy();
         ItemStack outputContainers = deferredOutputContainers.copy();
         int deferredCount = matchesPouringItem(pourContainer, outputContainers)
                 ? Math.min(bottlesPerCraft, outputContainers.getCount()) : 0;
@@ -554,8 +568,10 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
         }
         if (outputContainers.isEmpty() || outputContainers.getCount() < bottlesPerCraft
                 || !matchesPouringItem(pourContainer, outputContainers) || required > 0) {
-            return failObservation("native bottled input did not return enough output containers");
+            nativeFailure = "native bottled input did not return enough output containers";
+            return;
         }
+        takeOwnedSlot(inventory, 4);
         deferredOutputContainers = ItemStack.EMPTY;
         inventory.setStackInSlot(3, outputContainers.copyWithCount(bottlesPerCraft));
         nativeInputPhase = NativeInputPhase.BOTTLING_OUTPUT;
@@ -563,7 +579,6 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
         RSIntegrationMod.LOGGER.debug(
                 "[RSI-FRKettle] Native brew finished for {}; moved {} to output-container slot",
                 recipe.getId(), outputContainers);
-        return workingObservation();
     }
 
     @Override
@@ -578,8 +593,12 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
                 && output.getCount() >= expected;
     }
 
-    @Override
-    public ItemStack collectResult(ServerPlayer player) {
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.single(this::takeResult, outputContract());
+    }
+
+    private ItemStack takeResult(ServerPlayer player) {
+        if (awaitingNativeTransition() || nativeFailure != null) return ItemStack.EMPTY;
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null) return ItemStack.EMPTY;
 
@@ -612,7 +631,7 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@NotNull ServerPlayer player) {
+    public void cleanup(@NotNull ServerPlayer player) {
         forceChunkLoad(false);
         BlockEntity be = myLevel.getBlockEntity(myPos);
         ItemStackHandler inventory = (be != null && isFRKettleBE(be)) ? getInventory(be) : null;

@@ -12,13 +12,12 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
-
 import javax.annotation.Nullable;
 
 /**
  * Structured handoff from the chain-owned reservation to a delegate start.
  *
- * <p>Existing delegates are reached through {@link IBatchDelegate#startOperation}
+ * <p>Existing delegates are reached through {@link IBatchDelegate#start}
  * while new delegates can consume the stable material and slot identities directly.</p>
  */
 public record OperationStartContext(

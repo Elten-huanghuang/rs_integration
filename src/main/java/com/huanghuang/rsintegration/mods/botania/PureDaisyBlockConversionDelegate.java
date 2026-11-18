@@ -1,14 +1,13 @@
 package com.huanghuang.rsintegration.mods.botania;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
-
 import net.minecraftforge.items.ItemHandlerHelper;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
@@ -25,7 +24,6 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import vazkii.botania.api.recipe.PureDaisyRecipe;
 import vazkii.botania.common.block.flower.PureDaisyBlockEntity;
-
 import javax.annotation.Nonnull;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -177,7 +175,6 @@ public final class PureDaisyBlockConversionDelegate extends AbstractBatchDelegat
                 current.getBlockState(target).is(recipe.getOutputState().getBlock()))) {
             return false;
         }
-        harvest(current);
         return true;
     }
 
@@ -203,14 +200,13 @@ public final class PureDaisyBlockConversionDelegate extends AbstractBatchDelegat
         }
     }
 
-    @Override
-    public ItemStack collectResult(@Nonnull ServerPlayer player) {
-        List<ItemStack> all = collectAllResults(player);
-        return all.isEmpty() ? ItemStack.EMPTY : all.get(0);
+    @Override public OperationOutputSource outputSource() {
+        return player -> OperationOutputSource.Handoff.physical(takeResults(player), outputContract());
     }
 
-    @Override
-    public List<ItemStack> collectAllResults(@Nonnull ServerPlayer player) {
+    private List<ItemStack> takeResults(@Nonnull ServerPlayer player) {
+        if (!harvested && level != null && level.hasChunkAt(pos)
+                && isMachineCraftFinished(level, level.getBlockEntity(pos))) harvest(level);
         if (harvestedOutputs.isEmpty()) return List.of();
         List<ItemStack> results = new ArrayList<>(harvestedOutputs.size());
         for (ItemStack stack : harvestedOutputs) {
@@ -284,7 +280,7 @@ public final class PureDaisyBlockConversionDelegate extends AbstractBatchDelegat
     }
     @Override public AABB getOutputCaptureRegion() { return pos == null ? null : captureRegion(); }
     @Override public BlockPos getMachinePos() { return pos; }
-    @Override public void onBatchFinished(@Nonnull ServerPlayer player) {
+    @Override public void cleanup(@Nonnull ServerPlayer player) {
         harvestedOutputs.clear();
         placed.clear();
         harvested = false;

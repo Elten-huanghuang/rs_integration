@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mods.farmersdelight;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.PhysicalInputRecovery;
 import java.util.HashSet;
@@ -9,7 +9,6 @@ import net.minecraft.core.NonNullList;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.AABB;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -17,7 +16,6 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.recipe.CampfireRecipeSupport;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.reflection.probes.FarmersDelightReflection;
-import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
@@ -27,7 +25,6 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.CampfireCookingRecipe;
-import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -35,13 +32,11 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraftforge.items.ItemHandlerHelper;
 import net.minecraftforge.items.ItemStackHandler;
 import org.jetbrains.annotations.NotNull;
-
 import javax.annotation.Nullable;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -437,13 +432,15 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
         return false;
     }
 
-    @Override
-    public ItemStack collectResult(ServerPlayer player) {
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.single(this::takeResult, outputContract());
+    }
+
+    private ItemStack takeResult(ServerPlayer player) {
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null) return ItemStack.EMPTY;
 
         if (isArcaneStove) {
-            forceMachineChunk(myLevel, myPos, false);
             return ItemStack.EMPTY;
         }
         if (isSkilletBE(be)) {
@@ -500,7 +497,7 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
             try {
                 Method isCooking = be.getClass().getMethod("isCooking");
                 if ((Boolean) isCooking.invoke(be)) {
-                    ItemStack recovered = collectResult(player);
+                    ItemStack recovered = takeResult(player);
                     if (PhysicalInputRecovery.recoveredExpected(recovered, placedInput)) {
                         ItemStack owned = recovered.copyWithCount(placedInput.getCount());
                         recoveredInputs.add(owned);
@@ -535,7 +532,7 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@NotNull ServerPlayer player) {
+    public void cleanup(@NotNull ServerPlayer player) {
         if (!markTerminalCleanup()) return;
         campfireForceLoad(false);
         forceMachineChunk(myLevel, myPos, false);

@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mods.botania;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
@@ -16,7 +16,6 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.AABB;
 import vazkii.botania.api.recipe.ManaInfusionRecipe;
@@ -30,7 +29,6 @@ import java.util.UUID;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.phys.Vec3;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.List;
@@ -287,7 +285,11 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
         return outputCount >= expectedOutputCount();
     }
 
-    @Override public ItemStack collectResult(@Nonnull ServerPlayer player) {
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.single(this::takeResult, outputContract());
+    }
+
+    private ItemStack takeResult(@Nonnull ServerPlayer player) {
         if (level == null) return ItemStack.EMPTY;
         AABB box = getOutputCaptureRegion();
         int collected = 0;
@@ -412,7 +414,7 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
         return poolPos.getY() + INPUT_SPAWN_HEIGHT;
     }
     @Override public BlockPos getMachinePos() { return poolPos; }
-    @Override public void onBatchFinished(@Nonnull ServerPlayer player) {
+    @Override public void cleanup(@Nonnull ServerPlayer player) {
         resetState();
     }
 }

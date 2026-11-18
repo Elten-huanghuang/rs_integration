@@ -1,9 +1,8 @@
 package com.huanghuang.rsintegration.mods.youkaishomecoming.kettle;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.mods.common.MachineWaterSupply;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -14,8 +13,6 @@ import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.mods.common.IdleInventoryEvacuator;
 import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
 import com.huanghuang.rsintegration.util.PlayerUtils;
-import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
-import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
@@ -37,13 +34,11 @@ import net.minecraftforge.items.ItemHandlerHelper;
 import org.jetbrains.annotations.NotNull;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.fluids.FluidUtil;
-
 import javax.annotation.Nullable;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.function.Consumer;
 
 /** Batch delegate for Youkais Homecoming Kettle. */
@@ -262,8 +257,11 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
         return true;
     }
 
-    @Override
-    public ItemStack collectResult(ServerPlayer player) {
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.single(this::takeResult, outputContract());
+    }
+
+    private ItemStack takeResult(ServerPlayer player) {
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null) return ItemStack.EMPTY;
 
@@ -388,7 +386,7 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
                 FluidStack recipeResult = getRecipeResult();
                 if (!tankFluid.isEmpty() && !recipeResult.isEmpty()
                         && tankFluid.getFluid() == recipeResult.getFluid()) {
-                    ItemStack result = collectResult(player);
+                    ItemStack result = takeResult(player);
                     if (!result.isEmpty()) {
                         if (storageEndpoint() == null)
                             setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, be.getBlockPos()).orElse(null));
@@ -407,7 +405,7 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@NotNull ServerPlayer player) {
+    public void cleanup(@NotNull ServerPlayer player) {
         forceChunkLoad(false);
         clearAndRefund();
         craftDone = false;

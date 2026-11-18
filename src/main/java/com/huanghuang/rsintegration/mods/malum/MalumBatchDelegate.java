@@ -1,15 +1,13 @@
 package com.huanghuang.rsintegration.mods.malum;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import java.lang.reflect.Field;
-import java.lang.reflect.Method;
-
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import java.util.Arrays;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.phys.AABB;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
@@ -17,7 +15,6 @@ import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
-
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
@@ -40,7 +37,6 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.items.ItemHandlerHelper;
 import org.jetbrains.annotations.NotNull;
-
 import javax.annotation.Nullable;
 import javax.annotation.Nonnull;
 import java.util.ArrayList;
@@ -957,8 +953,11 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         return false;
     }
 
-    @Override
-    public ItemStack collectResult(ServerPlayer player) {
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.single(this::takeResult, outputContract());
+    }
+
+    private ItemStack takeResult(ServerPlayer player) {
         ItemStack expected = ModRecipeHandlers.tryGetUncachedResultItem(recipe, player.serverLevel().registryAccess());
         if (expected.isEmpty()) return ItemStack.EMPTY;
 
@@ -1106,7 +1105,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@NotNull ServerPlayer player) {
+    public void cleanup(@NotNull ServerPlayer player) {
         craftStarted = false;
         craftWasSeenActive = false;
         clearPedestals();

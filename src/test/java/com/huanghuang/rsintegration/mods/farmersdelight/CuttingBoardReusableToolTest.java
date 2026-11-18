@@ -24,10 +24,8 @@ import org.mockito.ArgumentCaptor;
 import vectorwing.farmersdelight.common.Configuration;
 import vectorwing.farmersdelight.common.crafting.CuttingBoardRecipe;
 import vectorwing.farmersdelight.common.crafting.ingredient.ChanceResult;
-
 import java.lang.reflect.Field;
 import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -69,13 +67,13 @@ class CuttingBoardReusableToolTest extends BootstrapTest {
         ItemStack tool = tool(10, 1);
         assertTrue(start(previous, 64, tool));
         assertEquals(64, outputCount(previous));
-        previous.onBatchFinished(player);
+        previous.machineOperation().cleanup(player);
 
         CuttingBoardBatchDelegate next = delegate();
         assertTrue(previous.transferReusableMaterialsTo(next));
         assertTrue(start(next, 10, tool));
         assertEquals(10, outputCount(next));
-        next.onBatchFinished(player);
+        next.machineOperation().cleanup(player);
         previous.releaseReusableMaterials(player);
         next.releaseReusableMaterials(player);
         next.releaseReusableMaterials(player);
@@ -94,12 +92,12 @@ class CuttingBoardReusableToolTest extends BootstrapTest {
         CuttingBoardBatchDelegate first = delegate();
         assertTrue(start(first, 3, tools));
         assertEquals(3, outputCount(first));
-        first.onBatchFinished(player);
+        first.machineOperation().cleanup(player);
         CuttingBoardBatchDelegate second = delegate();
         assertTrue(first.transferReusableMaterialsTo(second));
         assertTrue(start(second, 1, tools));
         assertEquals(1, outputCount(second));
-        second.onBatchFinished(player);
+        second.machineOperation().cleanup(player);
         CuttingBoardBatchDelegate third = delegate();
         assertTrue(second.transferReusableMaterialsTo(third));
 
@@ -118,13 +116,13 @@ class CuttingBoardReusableToolTest extends BootstrapTest {
         assertTrue(first.acceptReusableStock(1, List.of(worn, spare), ledger));
         assertTrue(start(first, 3, worn));
         assertEquals(3, outputCount(first));
-        first.onBatchFinished(player);
+        first.machineOperation().cleanup(player);
 
         CuttingBoardBatchDelegate next = delegate();
         assertTrue(first.transferReusableMaterialsTo(next));
         assertTrue(start(next, 2, worn));
         assertEquals(2, outputCount(next));
-        next.onBatchFinished(player);
+        next.machineOperation().cleanup(player);
         first.releaseReusableMaterials(player);
         next.releaseReusableMaterials(player);
         next.releaseReusableMaterials(player);
@@ -141,8 +139,8 @@ class CuttingBoardReusableToolTest extends BootstrapTest {
     void anotherBoardCannotTakeOwnershipOfTheTool() throws Exception {
         CuttingBoardBatchDelegate previous = delegate();
         assertTrue(start(previous, 1, tool(0, 1)));
-        previous.collectAllResults(player);
-        previous.onBatchFinished(player);
+        previous.outputSource().collectFinal(player).stacks();
+        previous.machineOperation().cleanup(player);
         CuttingBoardBatchDelegate next = delegate();
         set(next, "myPos", BlockPos.ZERO.east());
 
@@ -174,7 +172,7 @@ class CuttingBoardReusableToolTest extends BootstrapTest {
     }
 
     private int outputCount(CuttingBoardBatchDelegate delegate) {
-        return delegate.collectAllResults(player).stream().mapToInt(ItemStack::getCount).sum();
+        return delegate.outputSource().collectFinal(player).stacks().stream().mapToInt(ItemStack::getCount).sum();
     }
 
     private static ItemStack tool(int damage, int count) {

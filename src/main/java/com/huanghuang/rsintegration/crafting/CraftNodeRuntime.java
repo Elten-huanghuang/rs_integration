@@ -1,10 +1,13 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.huanghuang.rsintegration.crafting.batch.ProductionEvidence;
+import com.huanghuang.rsintegration.crafting.batch.MachineOperation;
 import com.huanghuang.rsintegration.api.execution.CollectedOutput;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.util.PerformanceMonitor;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
-import com.huanghuang.rsintegration.crafting.batch.OperationPoll;
+import com.huanghuang.rsintegration.crafting.batch.OperationLifecycle;
+import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.graph.ConcurrentNodeExecutor;
@@ -22,7 +25,6 @@ import net.minecraft.world.item.ItemStack;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import java.util.ArrayList;
 import net.minecraft.server.level.ServerLevel;
-
 import javax.annotation.Nullable;
 import java.util.List;
 import java.util.ArrayDeque;
@@ -38,7 +40,8 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
 
     private final NodeId nodeId;
     private final String nodeLabel;
-    private IBatchDelegate delegate;
+    private final IBatchDelegate delegate;
+    private final OperationLifecycle operation;
     @Nullable
     private final ExtractionLedger nodeLedger;
     @Nullable
@@ -104,11 +107,14 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
         this.nodeId = nodeId;
         this.nodeLabel = nodeLabel;
         this.delegate = delegate;
+        this.operation = delegate == null ? null : new OperationLifecycle(delegate);
         this.nodeLedger = nodeLedger;
         this.machineLease = machineLease;
         this.admission = admission;
         this.operationSession = operationSession;
     }
+
+    boolean start(OperationStartContext context) { return operation.start(context); }
 
     void attachCapture(CaptureSession handle) {
         this.capture = handle;
@@ -143,7 +149,7 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
     List<NodeOutputAccumulator.Publication> drainIncrementalOutputs() {
         if (outputs == null) return List.of();
         List<ItemStack> actual = new ArrayList<>(drainSettledResults());
-        if (delegate != null) actual.addAll(delegate.drainReceivedOutputs());
+        if (delegate != null) actual.addAll(operation.drainHeld());
         if (!actual.isEmpty()) {
             waitTicks = 0;
             progressObserved = true;
@@ -153,10 +159,10 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
             actual.addAll(confirmedOutputs);
         }
         List<CollectedOutput> resources = new ArrayList<>(
-                delegate.drainReportedResources());
+                ProductionEvidence.from(delegate).takeDelivered());
         // 已写回普通网络的报告和仅观察产量都不代表任务私有实物。
         deliveredReports.addAll(resources);
-        List<CollectedOutput> observed = delegate.drainObservedProduction();
+        List<CollectedOutput> observed = ProductionEvidence.from(delegate).takeObserved();
         if (!resources.isEmpty() || !observed.isEmpty()) {
             waitTicks = 0;
             progressObserved = true;
@@ -424,9 +430,9 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
             } else {
                 drainingTicks = 0;
             }
-            IBatchDelegate.CraftObservation observation;
+            MachineOperation.CraftObservation observation;
             try {
-                observation = OperationPoll.poll(delegate, observeLevel);
+                observation = operation.poll(observeLevel);
             } catch (Throwable error) {
                 // A broken optional-mod delegate must fail its node cleanly.  In
                 // particular, never let a null ServerLevel from a cross-dimension
@@ -453,12 +459,12 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
                     progressObserved = true;
                 }
             }
-            if (observation.phase() == IBatchDelegate.CraftPhase.FAILED) {
+            if (observation.phase() == MachineOperation.CraftPhase.FAILED) {
                 failureReason = observation.detail();
                 failureCode = CraftFailureCode.UNKNOWN;
                 return ConcurrentNodeExecutor.Observation.FAILED;
             }
-            if (observation.phase() == IBatchDelegate.CraftPhase.WORKING
+            if (observation.phase() == MachineOperation.CraftPhase.WORKING
                     && observation.completedWork() > observedCompletedWork) {
                 observedCompletedWork = observation.completedWork();
                 waitTicks = 0;
@@ -482,7 +488,7 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
                     && !delegate.canCollectResultWithoutWorldCapture()
                     && !OutputAccounting.permitsEmptyResult(delegate.outputContract());
             // 先确认整批实物数量；声明的 NBT 和副产物在收集后统一校验。
-            if ((!requiresWorldCapture && observation.phase() == IBatchDelegate.CraftPhase.DONE)
+            if ((!requiresWorldCapture && observation.phase() == MachineOperation.CraftPhase.DONE)
                     || capturedWorldOutput) {
                 if (!delegate.validateExecutionContext(player)) {
                     failureReason = "execution context changed before output publication";
@@ -558,8 +564,8 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
         if (terminal) return;
         terminal = true;
         if (delegate != null) {
-            delegate.closeOutputReception();
-            if (virtualInventory != null) virtualInventory.addAll(delegate.drainReceivedOutputs());
+            List<ItemStack> held = operation.retireHolding();
+            if (virtualInventory != null) virtualInventory.addAll(held);
         }
         if (delegate != null) {
             boolean recoverReusable = !reusableMaterialsRecovered && player != null;
@@ -567,7 +573,7 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
             runFailureCleanup(recoverReusable,
                     () -> releaseReusableMaterials(player),
                     () -> {
-                        delegate.onBatchFailed(null,
+                        operation.recover(null,
                                 failureReason != null ? failureReason : "node failure");
                         failureRecoveredInputs = delegate.failureRecoveredInputs();
                         if (delegate instanceof AbstractBatchDelegate abstractDelegate) {
@@ -580,7 +586,8 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
                     });
         }
         drainSettledIntoVirtual();
-        disarmCapture();
+        List<ItemStack> captured = disarmCapture();
+        if (virtualInventory != null) virtualInventory.addAll(captured);
     }
 
     static void runFailureCleanup(boolean recoverReusable, Runnable reusableRecovery,
@@ -633,17 +640,8 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
 
     private void doSucceed() {
         if (terminal) return;
-        List<ItemStack> captured = disarmCapture();
-        ItemStack expectedWorldOutput = delegate == null ? null : delegate.getExpectedOutput();
-        List<ItemStack> results = collectResults(player);
-        if (delegate != null) {
-            delegate.closeOutputReception();
-            List<ItemStack> collected = new ArrayList<>(results);
-            collected.addAll(delegate.drainReceivedOutputs());
-            results = collected;
-        }
-        confirmedOutputs = OutputAccounting.mergeLegacyOutputs(
-                captured, results, expectedWorldOutput);
+        confirmedOutputs = delegate == null ? disarmCapture()
+                : operation.collect(player, logicalOperations, this::disarmCapture).stacks();
         if (delegate != null) {
             // 催化剂返还也是图的实物输出，必须在机器清理前取出并参与结算。
             List<ItemStack> completed = new ArrayList<>(confirmedOutputs);
@@ -654,7 +652,7 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
         terminal = true;
         if (delegate != null) {
             try {
-                delegate.onBatchFinished(player);
+                operation.cleanup(player);
                 releaseReusableMaterials(player);
             } catch (Exception ignored) {
                 // Best-effort
@@ -685,11 +683,6 @@ final class CraftNodeRuntime implements ConcurrentNodeExecutor.Worker {
             nodeLedger.settleCommitted(token);
         }
         reusableReservationsSettled = true;
-    }
-
-    List<ItemStack> collectResults(ServerPlayer player) {
-        if (delegate == null) return List.of();
-        return delegate.collectAllResults(player);
     }
 
     List<ItemStack> disarmCapture() {

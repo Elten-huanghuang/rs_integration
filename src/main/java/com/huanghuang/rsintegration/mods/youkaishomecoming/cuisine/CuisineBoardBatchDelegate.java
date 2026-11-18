@@ -1,12 +1,12 @@
 package com.huanghuang.rsintegration.mods.youkaishomecoming.cuisine;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.DrivenMachineDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
 import net.minecraft.core.BlockPos;
@@ -24,14 +24,13 @@ import net.minecraftforge.items.ItemHandlerHelper;
 import org.jetbrains.annotations.NotNull;
 import java.util.Optional;
 import net.minecraft.world.entity.player.Player;
-
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 
 /** Batch delegate for Youkais Homecoming Cuisine Board. */
-public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
+public final class CuisineBoardBatchDelegate extends DrivenMachineDelegate {
 
     @Override
     public BatchConcurrencyCapabilities concurrencyCapabilities() {
@@ -221,7 +220,7 @@ public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
+    protected boolean advanceNativeCycle(ServerLevel level, BlockEntity be) {
         if (craftDone) return true;
 
         if (!isCuisineBE(be)) return false;
@@ -258,8 +257,11 @@ public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
         return false;
     }
 
-    @Override
-    public ItemStack collectResult(ServerPlayer player) {
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.single(this::takeResult, outputContract());
+    }
+
+    private ItemStack takeResult(ServerPlayer player) {
         BlockEntity be = myLevel.getBlockEntity(myPos);
 
         if (!resultItem.isEmpty()) {
@@ -273,7 +275,6 @@ public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
                 clearModel(be);
                 be.setChanged();
             }
-            forceChunkLoad(false);
             return r;
         }
 
@@ -283,7 +284,6 @@ public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
                 // Board is empty -- nothing to collect, craft was manually completed
                 RSIntegrationMod.LOGGER.debug("[RSI-Cuisine] collectResult: board empty, already taken");
                 craftDone = true;
-                forceChunkLoad(false);
                 return ItemStack.EMPTY;
             }
             // Last-resort: try complete one final time
@@ -291,15 +291,13 @@ public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
             if (!s.isEmpty()) {
                 be.setChanged();
                 craftDone = true;
-                forceChunkLoad(false);
                 return s.copy();
             }
         }
 
         craftDone = true;
-        forceChunkLoad(false);
         RSIntegrationMod.LOGGER.warn("[RSI-Cuisine] collectResult: no result available");
-        return recipe.getResultItem(myLevel.registryAccess()).copy();
+        return ItemStack.EMPTY;
     }
 
     @Override
@@ -312,7 +310,7 @@ public final class CuisineBoardBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@NotNull ServerPlayer player) {
+    public void cleanup(@NotNull ServerPlayer player) {
         forceChunkLoad(false);
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be != null && isCuisineBE(be)) {

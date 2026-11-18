@@ -1,12 +1,11 @@
 package com.huanghuang.rsintegration.mods.farmersdelight;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import java.util.Arrays;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
@@ -15,7 +14,6 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
-import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
@@ -23,7 +21,6 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.farmersdelight.FarmersDelightRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.reflection.probes.FarmersDelightReflection;
-import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.network.chat.Component;
@@ -40,7 +37,6 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
 import org.jetbrains.annotations.NotNull;
-
 import javax.annotation.Nullable;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -578,8 +574,11 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
                 && matchesRecipeOutput(meal) && meal.getCount() >= expectedCount;
     }
 
-    @Override
-    public ItemStack collectResult(ServerPlayer player) {
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.single(this::takeResult, outputContract());
+    }
+
+    private ItemStack takeResult(ServerPlayer player) {
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null) return ItemStack.EMPTY;
 
@@ -605,16 +604,6 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public List<OutputAccounting.CollectedOutput> collectStructuredResults(ServerPlayer player) {
-        OutputContract contract = outputContract();
-        if (contract.ports().size() != 1) return List.of();
-        ItemStack result = collectResult(player);
-        if (result.isEmpty()) return List.of();
-        OutputContract.Port port = contract.ports().get(0);
-        return List.of(new OutputAccounting.CollectedOutput(port.portId(), port.source(), result));
-    }
-
-    @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         List<ItemStack> recovered = recoverFailureInputs(be);
         recordFailureRecoveredInputs(recovered);
@@ -624,7 +613,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@NotNull ServerPlayer player) {
+    public void cleanup(@NotNull ServerPlayer player) {
         forceChunkLoad(false);
         clearMachineSlotsAndRefund();
         craftDone = false;

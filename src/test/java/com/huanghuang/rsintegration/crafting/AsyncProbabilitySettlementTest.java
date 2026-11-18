@@ -1,6 +1,10 @@
 package com.huanghuang.rsintegration.crafting;
-import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 
+import com.huanghuang.rsintegration.crafting.batch.ProductionEvidence;
+import com.huanghuang.rsintegration.crafting.batch.OperationLifecycle;
+import com.huanghuang.rsintegration.crafting.batch.MachineOperation;
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
@@ -47,7 +51,6 @@ import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
-
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -55,7 +58,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.Optional;
-
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static com.huanghuang.rsintegration.crafting.graph.OutputKind.PRIMARY;
@@ -200,6 +202,7 @@ class AsyncProbabilitySettlementTest extends BootstrapTest {
                 MaterialKey.of(new ItemStack(Items.EGG)), 2, PRIMARY, 0, 2,
                 OutputProbability.probabilistic(0.35, 16, "egg"), false, null);
         IBatchDelegate delegate = mock(IBatchDelegate.class);
+        when(delegate.machineOperation()).thenReturn(mock(MachineOperation.class));
         when(delegate.publishesDeclaredGraphOutputs()).thenReturn(true);
         CraftNodeRuntime runtime = new CraftNodeRuntime(node, "test:random", delegate, null, null);
         runtime.attachOutputs(new NodeOutputAccumulator(List.of(output)));
@@ -445,14 +448,15 @@ class AsyncProbabilitySettlementTest extends BootstrapTest {
             List<CollectedOutput> reported,
             List<CollectedOutput> observed
     ) throws Exception {
-        IBatchDelegate delegate = mock(IBatchDelegate.class);
-        when(delegate.observeCraft(any())).thenReturn(new IBatchDelegate.CraftObservation(IBatchDelegate.CraftPhase.DONE));
+        IBatchDelegate delegate = mock(IBatchDelegate.class, withSettings().extraInterfaces(ProductionEvidence.class).defaultAnswer(CALLS_REAL_METHODS));
+        when(delegate.machineOperation()).thenReturn(mock(MachineOperation.class));
+        when(delegate.machineOperation().observe(any())).thenReturn(new MachineOperation.CraftObservation(MachineOperation.CraftPhase.DONE));
         when(delegate.validateExecutionContext(fixture.player)).thenReturn(true);
-        when(delegate.collectAllResults(fixture.player)).thenReturn(outputs);
-        when(delegate.drainReportedResources()).thenReturn(reported);
-        when(delegate.drainObservedProduction()).thenReturn(observed);
-        when(delegate.collectsPhysicalSecondaryOutputs()).thenReturn(true);
+        when(delegate.outputSource()).thenReturn(p -> OperationOutputSource.Handoff.physical(outputs, null));
+        when(ProductionEvidence.from(delegate).takeDelivered()).thenReturn(reported);
+        when(ProductionEvidence.from(delegate).takeObserved()).thenReturn(observed);
         set(fixture.chain, "currentDelegate", delegate);
+        set(fixture.chain, "flatLifecycle", new OperationLifecycle(delegate));
         assertFalse(fixture.chain.tick());
         assertEquals(AsyncCraftChain.State.EXECUTING, fixture.chain.state());
     }

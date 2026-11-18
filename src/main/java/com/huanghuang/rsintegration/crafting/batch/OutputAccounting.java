@@ -3,7 +3,6 @@ package com.huanghuang.rsintegration.crafting.batch;
 import com.huanghuang.rsintegration.crafting.MaterialMatcher;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import net.minecraft.world.item.ItemStack;
-
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -68,43 +67,25 @@ public final class OutputAccounting {
         return false;
     }
 
-    /**
-     * 合并世界捕获物与委托收集结果。部分委托在世界实体已被捕获后，
-     * 仍会通过配方结果兜底返回同一份产物；这里仅扣除已捕获覆盖的数量，
-     * 真实额外产物、不同物品和副产物均保留。
-     */
-    public static List<ItemStack> mergeLegacyOutputs(
-            List<ItemStack> capturedWorldOutputs,
-            List<ItemStack> collectedResults,
-            ItemStack expectedWorldOutput) {
-        List<ItemStack> merged = new ArrayList<>();
-        int coveredCount = 0;
-        if (capturedWorldOutputs != null) {
-            for (ItemStack captured : capturedWorldOutputs) {
-                if (captured == null || captured.isEmpty()) continue;
-                merged.add(captured.copy());
-                if (expectedWorldOutput != null && !expectedWorldOutput.isEmpty()
-                        && ItemStack.isSameItem(expectedWorldOutput, captured)) {
-                    coveredCount = Math.addExact(coveredCount, captured.getCount());
-                }
-            }
+    public static List<OutputAccounting.CollectedOutput> capturedWorldOutputRecords(
+            OutputContract contract, List<ItemStack> captured) {
+        if (captured == null || captured.isEmpty()) return List.of();
+        OutputContract safeContract = contract == null ? OutputContract.none() : contract;
+        List<OutputAccounting.CollectedOutput> outputs = new ArrayList<>();
+        int unknownIndex = 0;
+        for (ItemStack stack : captured) {
+            if (stack == null || stack.isEmpty()) continue;
+            List<OutputContract.Port> matches = safeContract.ports().stream()
+                    .filter(port -> port.source() == OutputContract.Source.WORLD)
+                    .filter(port -> MaterialMatcher.matchesOutputDeclaration(
+                            MaterialKey.of(port.prototype()), stack))
+                    .toList();
+            String portId = matches.size() == 1
+                    ? matches.get(0).portId() : "unmatched:world:" + unknownIndex++;
+            outputs.add(new OutputAccounting.CollectedOutput(
+                    portId, OutputContract.Source.WORLD, stack));
         }
-
-        if (collectedResults != null) {
-            for (ItemStack collected : collectedResults) {
-                if (collected == null || collected.isEmpty()) continue;
-                ItemStack remaining = collected.copy();
-                if (coveredCount > 0 && expectedWorldOutput != null
-                        && !expectedWorldOutput.isEmpty()
-                        && ItemStack.isSameItem(expectedWorldOutput, remaining)) {
-                    int covered = Math.min(coveredCount, remaining.getCount());
-                    remaining.shrink(covered);
-                    coveredCount -= covered;
-                }
-                if (!remaining.isEmpty()) merged.add(remaining);
-            }
-        }
-        return List.copyOf(merged);
+        return List.copyOf(outputs);
     }
 
     public static Settlement assess(OutputContract contract, long operations,

@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mods.apprenticecodex;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
@@ -11,7 +11,6 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
-import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
@@ -26,7 +25,6 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.registries.ForgeRegistries;
 import java.util.Arrays;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
@@ -171,19 +169,8 @@ public final class ApprenticeCodexEssenceSmokerBatchDelegate extends AbstractBat
                 OutputContract.Kind.PRIMARY, OutputContract.Source.VIRTUAL)));
     }
 
-    @Override
-    public List<OutputAccounting.CollectedOutput> collectStructuredResults(
-            @Nonnull ServerPlayer player) {
-        OutputContract contract = outputContract();
-        if (contract.ports().size() != 1) return List.of();
-        List<ItemStack> collected = collectAllResults(player);
-        if (collected.isEmpty()) return List.of();
-        String portId = contract.ports().get(0).portId();
-        return collected.stream()
-                .filter(stack -> stack != null && !stack.isEmpty())
-                .map(stack -> new OutputAccounting.CollectedOutput(
-                        portId, OutputContract.Source.VIRTUAL, stack))
-                .toList();
+    @Override public OperationOutputSource outputSource() {
+        return player -> OperationOutputSource.Handoff.physical(takeResults(player), outputContract());
     }
 
     @Override public boolean startSingleOperation(@Nonnull ServerPlayer player) {
@@ -288,12 +275,7 @@ public final class ApprenticeCodexEssenceSmokerBatchDelegate extends AbstractBat
         return started && invokeBoolean(be, "isCompleted", new Class<?>[0]);
     }
 
-    @Override public ItemStack collectResult(@Nonnull ServerPlayer player) {
-        List<ItemStack> all = collectAllResults(player);
-        return all.isEmpty() ? ItemStack.EMPTY : all.get(0);
-    }
-
-    @Override public List<ItemStack> collectAllResults(@Nonnull ServerPlayer player) {
+    private List<ItemStack> takeResults(@Nonnull ServerPlayer player) {
         BlockEntity be = level.getBlockEntity(pos);
         if (be == null || !be.getClass().getName().equals(BE_CLASS)
                 || !invokeBoolean(be, "isCompleted", new Class<?>[0])) return List.of();
@@ -306,7 +288,8 @@ public final class ApprenticeCodexEssenceSmokerBatchDelegate extends AbstractBat
         return results.stream().map(ItemStack::copy).toList();
     }
 
-    @Override public boolean collectsPhysicalSecondaryOutputs() { return true; }
+
+
     @Override public ExpectedProduction getExpectedProduction() {
         if (expected.isEmpty()) return null;
         int count = Math.max(1, activeMaterialCount) * Math.max(1, expected.getCount());
@@ -316,7 +299,7 @@ public final class ApprenticeCodexEssenceSmokerBatchDelegate extends AbstractBat
         resetContents(be);
         results.clear(); started = false; activeMaterialCount = 0; resetState();
     }
-    @Override public void onBatchFinished(@Nullable ServerPlayer player) {
+    @Override public void cleanup(@Nullable ServerPlayer player) {
         if (!markTerminalCleanup()) return;
         results.clear(); started = false; activeMaterialCount = 0;
         expected = ItemStack.EMPTY; resetState();

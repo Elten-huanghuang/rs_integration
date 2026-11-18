@@ -14,18 +14,15 @@ import net.minecraft.world.item.crafting.SmithingRecipe;
 import net.minecraft.world.item.crafting.SmithingTransformRecipe;
 import net.minecraft.world.item.crafting.SmithingTrimRecipe;
 import net.minecraft.world.SimpleContainer;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
-import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler;
 import com.huanghuang.rsintegration.mods.slashblade.SlashBladeRecipeHandler;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.mods.goety.GoetySoulTotemCrafting;
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.network.chat.Component;
@@ -39,7 +36,6 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import org.jetbrains.annotations.NotNull;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -434,7 +430,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
 
         // Materials were already reserved and committed by the chain's
         // preReserveStepMaterials flow — just mark as done so the chain
-        // collects the result via collectResult().
+        // collects the result via takeResult().
         this.craftDone = true;
         return true;
     }
@@ -592,32 +588,12 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
         return craftDone;
     }
 
-    @Override
-    public ItemStack collectResult(ServerPlayer player) {
-        if (recipe instanceof FluidContainerRecipe && !craftDone) return ItemStack.EMPTY;
-        ItemStack r = pendingResult.copy();
-        pendingResult = ItemStack.EMPTY;
-        craftDone = false;
-        return r;
+    @Override public OperationOutputSource outputSource() {
+        return player -> OperationOutputSource.Handoff.physical(takeResults(player), outputContract());
     }
 
-    @Override
-    public List<ItemStack> collectAllResults(ServerPlayer player) {
+    private List<ItemStack> takeResults(ServerPlayer player) {
         if (recipe instanceof FluidContainerRecipe && !craftDone) return List.of();
-        // A non-CraftingRecipe (notably SmithingTransformRecipe) is resolved
-        // from its declared result during dispatch rather than assembled from
-        // a grid.  If a graph retry/cleanup cleared the transient result
-        // before collection, recover it from the authoritative recipe instead
-        // of publishing an empty output after materials were committed.
-        if (pendingResult.isEmpty() && recipe != null && player != null) {
-            ItemStack recovered = computeResult(player);
-            if (!recovered.isEmpty()) {
-                pendingResult = recovered;
-                RSIntegrationMod.LOGGER.warn(
-                        "[RSI-Batch-Generic] Recovered missing collected output recipe={} output={}x{}",
-                        recipe.getId(), ItemStackUtils.registryId(recovered), recovered.getCount());
-            }
-        }
         List<ItemStack> results = new ArrayList<>(pendingSecondary.size() + 1);
         if (!pendingResult.isEmpty()) results.add(pendingResult.copy());
         for (ItemStack secondary : pendingSecondary) {
@@ -629,17 +605,8 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
         return List.copyOf(results);
     }
 
-    @Override
-    public boolean collectsPhysicalSecondaryOutputs() {
-        return true;
-    }
 
-    /** Legacy compatibility for callers that collect only the primary result. */
-    public List<ItemStack> getPendingSecondary() {
-        List<ItemStack> copy = new ArrayList<>(pendingSecondary);
-        pendingSecondary.clear();
-        return copy;
-    }
+
 
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
@@ -650,7 +617,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@NotNull ServerPlayer player) {
+    public void cleanup(@NotNull ServerPlayer player) {
         pendingResult = ItemStack.EMPTY;
         pendingSecondary.clear();
         craftDone = false;

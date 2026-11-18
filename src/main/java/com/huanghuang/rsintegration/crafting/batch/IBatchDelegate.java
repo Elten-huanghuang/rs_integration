@@ -1,10 +1,5 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
-import com.huanghuang.rsintegration.crafting.TaskOutputReception;
-
-import java.lang.reflect.Method;
-
-import com.huanghuang.rsintegration.api.execution.CollectedOutput;
 import com.huanghuang.rsintegration.api.execution.CancelReason;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -16,50 +11,13 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.AABB;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
 public interface IBatchDelegate {
 
-    /**
-     * A delegate instance owns exactly one recipe operation. After either
-     * {@link #onBatchFinished} or {@link #onBatchFailed}, callers must discard it
-     * and create a new instance before starting another operation.
-     */
-
-    enum CraftPhase {
-        WAITING_FOR_START,
-        WORKING,
-        DONE,
-        FAILED
-    }
-
-    /**
-     * completedWork 是本次操作已完成的实际工作量，0 表示尚无可确认进度。
-     * 只有超过本次操作的历史最高值才可重置无进展超时；不能填入世界时间、
-     * 轮询次数、状态版本或“仍在工作”标记。内部连续加工多批的适配器应累计工作量。
-     */
-    record CraftObservation(CraftPhase phase, String detail, long completedWork) {
-        public CraftObservation {
-            if (completedWork < 0L) throw new IllegalArgumentException("completedWork must be non-negative");
-        }
-
-        public CraftObservation(CraftPhase phase, String detail) {
-            this(phase, detail, 0L);
-        }
-
-        public CraftObservation(CraftPhase phase) {
-            this(phase, "");
-        }
-
-        public CraftObservation withCompletedWork(long completedWork) {
-            return new CraftObservation(phase, detail, completedWork);
-        }
-    }
+    MachineOperation machineOperation();
 
     /**
      * Match a physically produced stack against a recipe-output template.
@@ -210,8 +168,6 @@ public interface IBatchDelegate {
         return InputBufferPlan.none();
     }
 
-    /** Unified operation start entry. */
-    boolean startOperation(@Nonnull OperationStartContext context);
 
     /**
      * 最近一次启动失败的稳定详情，供并行组和故障报告展示。
@@ -361,29 +317,8 @@ public interface IBatchDelegate {
         return BatchConcurrencyCapabilities.machineSlot();
     }
 
-    /**
-     * Poll machine state to detect craft completion.
-     * Called every tick while in WAITING state.
-     */
-    boolean isCraftComplete(@Nonnull ServerLevel level);
-
-    /** 搬运步骤：只交接真实抽出的资源，不推进机器阶段；执行链在观察之前调用。 */
-    default void transferOutputs(@Nonnull ServerLevel level) {}
-
-    /** 执行需要主动驱动的机器动作；自行加工的机器无需推进。 */
-    default void advanceCraft(@Nonnull ServerLevel level) {}
-
-    /**
-     * Observe the physical craft lifecycle. Legacy delegates are considered
-     * working after start and map their old completion predicate to DONE.
-     */
-    @Nonnull
-    default CraftObservation observeCraft(@Nonnull ServerLevel level) {
-        return new CraftObservation(isCraftComplete(level) ? CraftPhase.DONE : CraftPhase.WORKING);
-    }
-
     /** True when a FAILED observation happened after the operation consumed its inputs. */
-    default boolean failureConsumesInputs(@Nonnull CraftObservation observation) {
+    default boolean failureConsumesInputs(@Nonnull MachineOperation.CraftObservation observation) {
         return false;
     }
 
@@ -399,87 +334,21 @@ public interface IBatchDelegate {
 
     /** Optional translated reason for a terminal craft failure. */
     @Nullable
-    default Component craftFailureMessage(@Nonnull CraftObservation observation) {
+    default Component craftFailureMessage(@Nonnull MachineOperation.CraftObservation observation) {
         return null;
     }
 
-    /**
-     * Collect the result item from the machine after craft completes.
-     * @return the result ItemStack, or ItemStack.EMPTY if not yet available
-     */
-    @Nonnull
-    ItemStack collectResult(@Nonnull ServerPlayer player);
+    OperationOutputSource outputSource();
 
-    /** Collect every real stack still owned by this craft. */
-    @Nonnull
-    default List<ItemStack> collectAllResults(@Nonnull ServerPlayer player) {
-        ItemStack result = collectResult(player);
-        return result.isEmpty() ? List.of() : List.of(result);
-    }
 
-    /** True when {@link #collectAllResults} already includes physical remainders/byproducts. */
-    default boolean collectsPhysicalSecondaryOutputs() {
-        return false;
-    }
+
 
     /**
-     * Explicit per-operation output declaration for structured accounting.
-     * Returning {@link OutputContract#none()} preserves the legacy collection
-     * path until a delegate has declared every primary and secondary channel.
+     * 可选的端口数量声明。无论有无端口校核，实物均由同一产物来源移交。
      */
     @Nonnull
     default OutputContract outputContract() {
         return OutputContract.none();
-    }
-
-    /**
-     * Removes and identifies outputs that originate from a machine slot or a
-     * virtual operation. World outputs captured by the chain are attached by
-     * the orchestration layer because their entity origin is external to the
-     * delegate's inventory.
-     */
-    @Nonnull
-    default List<OutputAccounting.CollectedOutput> collectStructuredResults(
-            @Nonnull ServerPlayer player) {
-        return List.of();
-    }
-
-    /** 取出已由 delegate 直接安全交付、但不在物品槽结算中的资源。 */
-    @Nonnull
-    default List<CollectedOutput> drainReportedResources() {
-        return List.of();
-    }
-
-    /**
-     * 取出本次操作已经真实产生、但尚未完成最终存储投递的资源。
-     * 这些资源只能推进概率进度，不能计入已交付订单输出。
-     */
-    @Nonnull
-    default List<CollectedOutput> drainObservedProduction() {
-        return List.of();
-    }
-
-    /** 仅完成批次、实际提取及清理适配的执行器才启用公共产物持有。 */
-    default boolean supportsOutputReception() { return false; }
-
-    @Nullable
-    default TaskOutputReception.Session outputReception() { return null; }
-
-    /** 接收器已持有的真实资源。取走后不得在最终收取中再次返回。 */
-    default List<ItemStack> drainReceivedOutputs() {
-        TaskOutputReception.Session reception = outputReception();
-        return reception == null ? List.of() : reception.drainStacks();
-    }
-
-    default void closeOutputReception() {
-        TaskOutputReception.Session reception = outputReception();
-        if (reception != null) reception.close();
-    }
-
-    /** 直接资源交付失败时返回稳定详情，使订单不能伪装成成功。 */
-    @Nullable
-    default String reportedResourceFailure() {
-        return null;
     }
 
     /** 在统一失败清理前标记取消原因；不知道取消语义的 delegate 保持原行为。 */
@@ -512,20 +381,6 @@ public interface IBatchDelegate {
     /** Release resources acquired during preparation when this candidate is discarded. */
     default void releasePreparationResources() {
     }
-
-    /** Cleanup and refund on batch failure. */
-    void onBatchFailed(@Nonnull ServerPlayer player, @Nonnull String reason);
-
-    /**
-     * Cleanup on successful batch completion.
-     *
-     * <p>{@code player} is null when the craft finished but its owner is already
-     * offline (server stop). Implementations must not dereference it — pass it
-     * through to the null-tolerant refund helpers instead. Settling still has to
-     * happen in that case, otherwise the ledger refunds inputs for a craft whose
-     * product was already produced.</p>
-     */
-    void onBatchFinished(@Nullable ServerPlayer player);
 
     /** The machine position this delegate is operating on. */
     @Nonnull
@@ -575,7 +430,7 @@ public interface IBatchDelegate {
     }
 
     /**
-     * True when {@link #collectAllResults(ServerPlayer)} can authoritatively
+     * True when 产物来源 can authoritatively
      * remove the completed product from a machine slot even though a defensive
      * world-output capture is also armed. World-spawning delegates remain false
      * so a premature DONE observation cannot lose their output.

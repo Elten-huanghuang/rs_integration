@@ -1,16 +1,13 @@
 package com.huanghuang.rsintegration.mods.aetherworks;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
-
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.DrivenMachineDelegate;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.huanghuang.rsintegration.reflection.probes.AetherworksReflection;
 import net.minecraft.core.BlockPos;
@@ -26,13 +23,12 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.items.ItemHandlerHelper;
 import net.sirplop.aetherworks.blockentity.ToolStationBlockEntity;
 import org.jetbrains.annotations.NotNull;
-
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
 /** Batch delegate for Aetherworks Tool Station. */
-public final class AetherworksToolStationBatchDelegate extends AbstractBatchDelegate {
+public final class AetherworksToolStationBatchDelegate extends DrivenMachineDelegate {
 
     private static final int INPUT_SLOT_COUNT = 5;
     private static final int OUTPUT_SLOT = 5;
@@ -227,7 +223,7 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
     }
 
     @Override
-    protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
+    protected boolean advanceNativeCycle(ServerLevel level, BlockEntity be) {
         if (!materialsPlaced || AetherworksReflection.toolStationBEClass == null) return false;
 
         if (!AetherworksReflection.toolStationBEClass.isInstance(be)) {
@@ -380,8 +376,11 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
         return recipeTemperature + 1.0;
     }
 
-    @Override
-    public ItemStack collectResult(ServerPlayer player) {
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.single(this::takeResult, outputContract());
+    }
+
+    private ItemStack takeResult(ServerPlayer player) {
         if (craftTimedOut || toolStationBE == null) return ItemStack.EMPTY;
 
         Object inv = Reflect.getField(toolStationBE, "inventory").orElse(null);
@@ -454,7 +453,7 @@ public final class AetherworksToolStationBatchDelegate extends AbstractBatchDele
     }
 
     @Override
-    public void onBatchFinished(@NotNull ServerPlayer player) {
+    public void cleanup(@NotNull ServerPlayer player) {
         materialsPlaced = false;
         placedInputs.clear();
         failureRefundSafe = true;

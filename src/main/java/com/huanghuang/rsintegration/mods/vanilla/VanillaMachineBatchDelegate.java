@@ -1,15 +1,11 @@
 package com.huanghuang.rsintegration.mods.vanilla;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.crafting.progress.MachineCycleProgress;
 import com.huanghuang.rsintegration.mixin.minecraft.AbstractFurnaceAccessor;
-
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import java.lang.reflect.Field;
-import java.lang.reflect.Method;
-
-import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.huanghuang.rsintegration.recipe.CampfireRecipeSupport;
 import java.util.Arrays;
 import net.minecraft.core.NonNullList;
@@ -17,23 +13,19 @@ import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.level.block.entity.CampfireBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
-
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.TaskOutputReception;
 import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
-import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.ReceivingMachineDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.MachineSlotOwnershipPolicy;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
-import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.batch.PhysicalInputRecovery;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import net.minecraft.core.BlockPos;
@@ -47,22 +39,17 @@ import net.minecraft.world.item.crafting.*;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
-import net.minecraft.world.level.block.entity.BlastFurnaceBlockEntity;
-import net.minecraft.world.level.block.entity.FurnaceBlockEntity;
-import net.minecraft.world.level.block.entity.SmokerBlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraftforge.registries.ForgeRegistries;
-import net.minecraftforge.common.ForgeHooks;
 import net.minecraftforge.items.ItemHandlerHelper;
 import org.jetbrains.annotations.NotNull;
-
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
 /** Batch delegate for vanilla machine cooking (Furnace, Blast Furnace, Smoker). */
-public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
+public final class VanillaMachineBatchDelegate extends ReceivingMachineDelegate {
 
     private ServerPlayer player;
     private ServerLevel myLevel;
@@ -91,7 +78,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     private long lastReceptionIdleTick = Long.MIN_VALUE;
 
     @Override
-    public boolean supportsOutputReception() {
+    public boolean acceptsFixedOutput() {
         if (kind != MachineKind.FURNACE || !(furnaceBE instanceof AbstractFurnaceAccessor)
                 || recipe == null || myLevel == null
                 || BrickFurnaceCompat.isBrickFurnace(furnaceBE)) return false;
@@ -102,7 +89,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     }
 
     private void prepareFurnaceOutputBatch() {
-        if (!supportsOutputReception()) return;
+        if (!acceptsFixedOutput()) return;
         receptionIdleTicks = 0;
         lastReceptionIdleTick = Long.MIN_VALUE;
         ItemStack result = computeResult();
@@ -112,11 +99,10 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    protected boolean supportsNetworkOutputReception() { return supportsOutputReception(); }
+    protected boolean supportsNetworkOutputReception() { return acceptsFixedOutput(); }
 
-    @Override
-    public void transferOutputs(ServerLevel playerLevel) {
-        if (outputBatch == null || outputReception().closed()) return;
+    private void transferAvailable(ServerLevel playerLevel) {
+        if (outputBatch() == null || outputBatch().closed()) return;
         ServerLevel level = resolveMachineLevel(playerLevel);
         if (level == null || myPos == null || !level.hasChunkAt(myPos)) return;
         if (level.getBlockEntity(myPos) == furnaceBE && !furnaceBE.isRemoved()) collectFurnaceOutput();
@@ -131,7 +117,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         else if (tick != lastReceptionIdleTick) receptionIdleTicks = Math.min(2, receptionIdleTicks + 1);
         lastReceptionIdleTick = tick;
         // 同物补货只满足收货条件；必须跨 tick 确认机器安全结束，余火不影响完成。
-        return outputBatch != null && outputBatch.complete() && receptionIdleTicks >= 2;
+        return outputBatch() != null && outputBatch().complete() && receptionIdleTicks >= 2;
     }
 
     /** 切石机、锻造台这类没有处理时间的虚拟机器，一次派发最多完成的操作数。 */
@@ -451,7 +437,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     public void prepareGraphBatch(int executions) {
         // Planning may run again while the delegate is being admitted. Keep it
         // separate from activeFurnaceOperations, which becomes immutable only
-        // when startOperation accepts the bound input buffer.
+        // when start accepts the bound input buffer.
         if (kind == MachineKind.VIRTUAL) {
             activeVirtualOperations = Math.min(VIRTUAL_INSTANT_BATCH, Math.max(1, executions));
             return;
@@ -754,7 +740,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
-        activateOutputBatch();
+        if (production != null) production.activate();
         furnaceBE.setChanged();
         myLevel.sendBlockUpdated(myPos,
                 myLevel.getBlockState(myPos), myLevel.getBlockState(myPos), 3);
@@ -781,7 +767,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
-        activateOutputBatch();
+        if (production != null) production.activate();
         furnaceBE.setChanged();
         myLevel.sendBlockUpdated(myPos,
                 myLevel.getBlockState(myPos), myLevel.getBlockState(myPos), 3);
@@ -1003,7 +989,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
 
     private boolean matchesFurnaceOutput(ItemStack output) {
         ExpectedProduction expected = getExpectedProduction();
-        return expected != null && (outputBatch == null
+        return expected != null && (outputBatch() == null
                 ? IBatchDelegate.matchesProducedItem(output, expected.item())
                 : !output.isEmpty() && ItemStack.isSameItemSameTags(output, expected.item()));
     }
@@ -1231,7 +1217,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     // ── polling / collection ──────────────────────────────────────
 
     @Override
-    public void advanceCraft(ServerLevel playerLevel) {
+    public void advance(ServerLevel playerLevel) {
         if (kind != MachineKind.FURNACE || furnaceBE == null || myPos == null) return;
         ServerLevel level = resolveMachineLevel(playerLevel);
         if (level == null || !level.hasChunkAt(myPos) || level.getBlockEntity(myPos) != furnaceBE
@@ -1245,7 +1231,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     @NotNull
     @Override
     protected CraftObservation observeMachineCraft(@NotNull ServerLevel level, @NotNull BlockEntity be) {
-        if (outputBatch != null && (be != furnaceBE || !(be instanceof AbstractFurnaceBlockEntity))) {
+        if (outputBatch() != null && (be != furnaceBE || !(be instanceof AbstractFurnaceBlockEntity))) {
             return failObservation("furnace block entity replaced");
         }
         if (kind == MachineKind.FURNACE && be instanceof AbstractFurnaceBlockEntity current) {
@@ -1253,7 +1239,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
                 observedCycle = MachineCycleProgress.of(timer.rsi$getCookingProgress(), timer.rsi$getCookingTotalTime());
             }
             ItemStack output = current.getItem(2);
-            if (outputBatch != null) {
+            if (outputBatch() != null) {
                 if (!output.isEmpty() && !matchesFurnaceOutput(output)) {
                     return failObservation("furnace output slot contains another item");
                 }
@@ -1308,7 +1294,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
-        if (outputBatch != null) {
+        if (outputBatch() != null) {
             return observeMachineCraft(level, be).phase() == CraftPhase.DONE;
         }
         if (kind == MachineKind.VIRTUAL) return craftDone;
@@ -1329,8 +1315,12 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         return activeFurnaceOperations <= 1 && furnaceBE.getItem(0).isEmpty();
     }
 
-    @Override
-    public ItemStack collectResult(ServerPlayer player) {
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.incremental(this::transferAvailable,
+                player -> OperationOutputSource.Handoff.physical(takeResults(player), outputContract()));
+    }
+
+    private ItemStack takeResult(ServerPlayer player) {
         if (kind == MachineKind.VIRTUAL) {
             if (pendingVirtualResults.isEmpty()) {
                 pendingResult = ItemStack.EMPTY;
@@ -1346,7 +1336,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         }
 
         ItemStack result = collectFurnaceOutput();
-        finishOutputBatch();
+        if (production != null) production.finishBatch();
         return result;
     }
 
@@ -1354,12 +1344,12 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     private ItemStack collectFurnaceOutput() {
         if (furnaceBE == null) return ItemStack.EMPTY;
         // 结算、取消之后的重复调用不能先移走槽内实物再向已关闭账本交货。
-        if (outputBatch != null && (outputBatch.closed() || outputReception().closed())) return ItemStack.EMPTY;
+        if (outputBatch() != null && outputBatch().closed()) return ItemStack.EMPTY;
 
         ItemStack visible = furnaceBE.getItem(2);
         if (!matchesFurnaceOutput(visible)) return ItemStack.EMPTY;
         ExpectedProduction expected = getExpectedProduction();
-        int amount = outputBatch != null || expected == null ? visible.getCount()
+        int amount = outputBatch() != null || expected == null ? visible.getCount()
                 : Math.min(visible.getCount(), expected.count());
         ItemStack result = visible.copyWithCount(amount);
         ItemStack retained = visible.copy();
@@ -1371,10 +1361,9 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         return legacyResults.isEmpty() ? ItemStack.EMPTY : legacyResults.get(0);
     }
 
-    @Override
-    public List<ItemStack> collectAllResults(ServerPlayer player) {
+    private List<ItemStack> takeResults(ServerPlayer player) {
         if (kind != MachineKind.VIRTUAL) {
-            ItemStack result = collectResult(player);
+            ItemStack result = takeResult(player);
             return result.isEmpty() ? List.of() : List.of(result);
         }
         if (pendingVirtualResults.isEmpty()) {
@@ -1458,9 +1447,9 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@NotNull ServerPlayer player) {
+    public void cleanup(@NotNull ServerPlayer player) {
         if (!markTerminalCleanup()) return;
-        finishOutputBatch();
+        if (production != null) production.finishBatch();
         campfireForceLoad(false);
         if (kind == MachineKind.FURNACE) {
             refundLeftoverFuel();
@@ -1505,26 +1494,6 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
             case CAMPFIRE -> vanillaPrimaryOutputContract(result, OutputContract.Source.WORLD, null);
             case VIRTUAL -> vanillaPrimaryOutputContract(result, OutputContract.Source.VIRTUAL, null);
         };
-    }
-
-    @Override
-    public List<OutputAccounting.CollectedOutput> collectStructuredResults(ServerPlayer player) {
-        OutputContract contract = outputContract();
-        if (contract.ports().size() != 1) return List.of();
-        OutputContract.Port port = contract.ports().get(0);
-        if (kind == MachineKind.VIRTUAL) {
-            // 整批产物可能被拆成多个不超过最大堆叠的栈，全部交给结算，
-            // 让实际数量与 machineCount 份声明对齐。
-            List<OutputAccounting.CollectedOutput> outputs = new ArrayList<>();
-            for (ItemStack stack : collectAllResults(player)) {
-                if (stack == null || stack.isEmpty()) continue;
-                outputs.add(new OutputAccounting.CollectedOutput(port.portId(), port.source(), stack));
-            }
-            return List.copyOf(outputs);
-        }
-        ItemStack result = collectResult(player);
-        if (result.isEmpty()) return List.of();
-        return List.of(new OutputAccounting.CollectedOutput(port.portId(), port.source(), result));
     }
 
     static OutputContract vanillaPrimaryOutputContract(ItemStack result,

@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mods.immortalersdelight;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
@@ -9,7 +9,6 @@ import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
-import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.common.IdleInventoryEvacuator;
@@ -41,7 +40,6 @@ import net.minecraftforge.items.IItemHandler;
 import org.jetbrains.annotations.NotNull;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.items.ItemHandlerHelper;
-
 import javax.annotation.Nullable;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -500,8 +498,11 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
                 || (craftObservedWorking && areInputsEmpty(itemHandler));
     }
 
-    @Override
-    public ItemStack collectResult(ServerPlayer player) {
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.port(this::takeResult, "immortalers_delight:cooler:output", OutputContract.Source.SLOT);
+    }
+
+    private ItemStack takeResult(ServerPlayer player) {
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null) return ItemStack.EMPTY;
 
@@ -517,13 +518,6 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         be.setChanged();
         craftDone = true;
         return result;
-    }
-
-    @Override
-    public List<OutputAccounting.CollectedOutput> collectStructuredResults(ServerPlayer player) {
-        ItemStack result = collectResult(player);
-        return result.isEmpty() ? List.of() : List.of(new OutputAccounting.CollectedOutput(
-                "immortalers_delight:cooler:output", OutputContract.Source.SLOT, result));
     }
 
     @Override
@@ -546,7 +540,7 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@NotNull ServerPlayer player) {
+    public void cleanup(@NotNull ServerPlayer player) {
         if (!markTerminalCleanup()) return;
         if (myLevel.hasChunkAt(myPos)) {
             BlockEntity be = myLevel.getBlockEntity(myPos);

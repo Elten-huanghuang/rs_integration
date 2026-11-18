@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mods.wishingfountain;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -22,7 +22,6 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.AABB;
 import net.minecraftforge.items.IItemHandlerModifiable;
 import net.minecraft.core.registries.Registries;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
@@ -298,8 +297,11 @@ public final class WishingFountainBatchDelegate extends AbstractBatchDelegate {
         return started && actionInvoked;
     }
 
-    @Override
-    public ItemStack collectResult(@Nonnull ServerPlayer player) {
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.single(this::takeResult, outputContract());
+    }
+
+    private ItemStack takeResult(@Nonnull ServerPlayer player) {
         if (expected.isEmpty() || level == null) return ItemStack.EMPTY;
         for (ItemEntity entity : level.getEntitiesOfClass(
                 ItemEntity.class, getOutputCaptureRegion(), this::isOwnedOutput)) {
@@ -372,7 +374,7 @@ public final class WishingFountainBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@Nullable ServerPlayer player) {
+    public void cleanup(@Nullable ServerPlayer player) {
         if (!markTerminalCleanup()) return;
         clearLocalState();
         resetState();

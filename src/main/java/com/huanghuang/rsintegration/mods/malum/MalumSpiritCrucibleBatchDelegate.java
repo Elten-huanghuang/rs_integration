@@ -1,10 +1,9 @@
 package com.huanghuang.rsintegration.mods.malum;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import java.lang.reflect.Method;
-
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
-import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import java.util.Arrays;
@@ -13,12 +12,10 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.Item;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.reflection.probes.MalumReflection;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
-
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
@@ -43,7 +40,6 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.AABB;
 import net.minecraftforge.items.IItemHandler;
 import org.jetbrains.annotations.NotNull;
-
 import javax.annotation.Nullable;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
@@ -188,7 +184,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(
                     player, level.dimension(), pos).orElse(null));
         }
-        // onBatchFinished resets AbstractBatchDelegate before the surrounding
+        // cleanup resets AbstractBatchDelegate before the surrounding
         // parallel group releases its worker-reusable catalyst. Preserve the
         // exact backend route until releaseReusableMaterials runs, otherwise a
         // later order can leave the catalyst outside its originating storage.
@@ -987,8 +983,11 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
 
     // ── collectResult ─────────────────────────────────────────────
 
-    @Override
-    public ItemStack collectResult(ServerPlayer player) {
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.single(this::takeResult, outputContract());
+    }
+
+    private ItemStack takeResult(ServerPlayer player) {
         if (myLevel == null || myPos == null) return ItemStack.EMPTY;
 
         ItemStack target = getExpectedOutput();
@@ -1055,7 +1054,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     }
 
     @Override
-    public void onBatchFinished(@NotNull ServerPlayer player) {
+    public void cleanup(@NotNull ServerPlayer player) {
         clearSpiritSlots(player);
         if (!hasReusableCatalystInput()) {
             releaseCatalystSlot(player);

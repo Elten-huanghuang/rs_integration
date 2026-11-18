@@ -15,10 +15,8 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.ShapelessRecipe;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
-
 import java.lang.reflect.Field;
 import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -39,7 +37,7 @@ class EidolonWorktableRemainderTest extends BootstrapTest {
                     List.of(new ItemStack(Items.WATER_BUCKET)), ExtractionLedger.external()));
             delivery.verifyNoInteractions();
 
-            List<ItemStack> results = delegate.collectAllResults(player);
+            List<ItemStack> results = delegate.outputSource().collectFinal(player).stacks();
 
             assertEquals(2, results.size());
             assertTrue(results.get(0).is(Items.DIAMOND));
@@ -56,7 +54,7 @@ class EidolonWorktableRemainderTest extends BootstrapTest {
         try (MockedStatic<PlayerUtils> delivery = mockStatic(PlayerUtils.class)) {
             assertTrue(delegate.startPreparedOperation(player,
                     List.of(new ItemStack(Items.WATER_BUCKET)), ExtractionLedger.external()));
-            delegate.onBatchFailed(player, "cancelled before collection");
+            delegate.machineOperation().recover(player, "cancelled before collection");
 
             delivery.verifyNoInteractions();
             assertTrue(readField(delegate, "pendingResult", ItemStack.class).isEmpty());

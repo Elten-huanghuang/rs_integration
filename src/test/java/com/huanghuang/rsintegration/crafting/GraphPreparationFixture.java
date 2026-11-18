@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.huanghuang.rsintegration.crafting.batch.MachineOperation;
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
@@ -22,7 +24,6 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import org.mockito.MockedStatic;
-
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
@@ -34,7 +35,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.IntFunction;
-
 import static org.mockito.Mockito.RETURNS_DEFAULTS;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
@@ -178,7 +178,9 @@ final class GraphPreparationFixture implements AutoCloseable {
         bindings.close();
     }
 
-    private class ProbeDelegate implements IBatchDelegate {
+    private class ProbeDelegate implements IBatchDelegate, MachineOperation {
+        @Override public MachineOperation machineOperation() { return this; }
+
         BlockPos position = BlockPos.ZERO;
 
         @Override
@@ -190,11 +192,13 @@ final class GraphPreparationFixture implements AutoCloseable {
 
         @Override public boolean validateAndInit(ServerPlayer player, ResourceLocation recipeId,
                                                  ResourceLocation dim, BlockPos pos) { return true; }
-        @Override public boolean startOperation(OperationStartContext context) { return false; }
-        @Override public boolean isCraftComplete(ServerLevel level) { return false; }
-        @Override public ItemStack collectResult(ServerPlayer player) { return ItemStack.EMPTY; }
-        @Override public void onBatchFailed(ServerPlayer player, String reason) {}
-        @Override public void onBatchFinished(ServerPlayer player) {}
+        @Override public boolean start(OperationStartContext context) { return false; }
+        @Override public CraftObservation observe(ServerLevel level) { return new CraftObservation(false ? CraftPhase.DONE : CraftPhase.WORKING); }
+        @Override public OperationOutputSource outputSource() {
+            return OperationOutputSource.single(player -> ItemStack.EMPTY, outputContract());
+        }
+        @Override public void recover(ServerPlayer player, String reason) {}
+        @Override public void cleanup(ServerPlayer player) {}
         @Override public BlockPos getMachinePos() { return position; }
     }
 

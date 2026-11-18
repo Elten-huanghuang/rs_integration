@@ -1,11 +1,10 @@
 package com.huanghuang.rsintegration.mods.pmmo;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
-import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -16,7 +15,6 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -135,23 +133,18 @@ public final class PmmoSalvageBatchDelegate extends AbstractBatchDelegate {
         return done;
     }
 
-    @Nonnull
-    @Override
-    public List<ItemStack> collectAllResults(@Nonnull ServerPlayer player) {
+    @Override public OperationOutputSource outputSource() {
+        return player -> OperationOutputSource.Handoff.physical(takeResults(player), outputContract());
+    }
+
+    private List<ItemStack> takeResults(@Nonnull ServerPlayer player) {
         List<ItemStack> copy = results.stream().map(ItemStack::copy).toList();
         results.clear();
         return copy;
     }
 
-    @Nonnull
     @Override
-    public ItemStack collectResult(@Nonnull ServerPlayer player) {
-        if (results.isEmpty()) return ItemStack.EMPTY;
-        return results.remove(0);
-    }
-
-    @Override
-    public void onBatchFinished(@Nullable ServerPlayer player) {
+    public void cleanup(@Nullable ServerPlayer player) {
         if (!markTerminalCleanup()) return;
         results.clear();
         done = false;

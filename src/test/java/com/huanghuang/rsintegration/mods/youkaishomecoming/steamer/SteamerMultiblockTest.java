@@ -30,7 +30,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -39,7 +38,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Stream;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -102,14 +100,14 @@ class SteamerMultiblockTest extends BootstrapTest {
             assertFalse(fixture.delegate.isMachineCraftFinished(fixture.level, fixture.base()));
             items.get(items.size() - 1).cook();
             assertTrue(fixture.delegate.isMachineCraftFinished(fixture.level, fixture.base()));
-            var output = fixture.delegate.collectStructuredResults(fixture.player);
+            var output = fixture.delegate.outputSource().collectFinal(fixture.player).ports();
             assertEquals(operations, output.stream().mapToInt(value -> value.stack().getCount()).sum());
             assertTrue(output.stream().allMatch(value -> value.stack().is(Items.BAKED_POTATO)));
             assertTrue(output.stream().allMatch(value -> value.stack().getTag().getInt("batch") == 7));
-            assertTrue(fixture.delegate.collectAllResults(fixture.player).isEmpty());
+            assertTrue(fixture.delegate.outputSource().collectFinal(fixture.player).stacks().isEmpty());
             assertTrue(fixture.nonEmptyItems().isEmpty());
             fixture.assertCorrectOwners();
-            fixture.delegate.onBatchFinished(fixture.player);
+            fixture.delegate.machineOperation().cleanup(fixture.player);
         }
     }
 
@@ -153,7 +151,7 @@ class SteamerMultiblockTest extends BootstrapTest {
         try (SteamerFixture fixture = new SteamerFixture("youkaishomecoming", 7)) {
             fixture.fillCookedItems();
             fixture.ids.put(BASE.above(), new ResourceLocation("minecraft", "air"));
-            List<ItemStack> output = fixture.delegate.collectAllResults(fixture.player);
+            List<ItemStack> output = fixture.delegate.outputSource().collectFinal(fixture.player).stacks();
             assertEquals(8, output.size());
             assertEquals(20, fixture.nonEmptyItems().size());
         }
@@ -163,7 +161,7 @@ class SteamerMultiblockTest extends BootstrapTest {
     void terminalCleanupClearsCollectibleItemsInUpperBlocks() throws Exception {
         try (SteamerFixture fixture = new SteamerFixture("youkaishomecoming", 7)) {
             fixture.fillCookedItems();
-            fixture.delegate.onBatchFinished(fixture.player);
+            fixture.delegate.machineOperation().cleanup(fixture.player);
             assertTrue(fixture.nonEmptyItems().isEmpty());
             fixture.assertCorrectOwners();
         }

@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mods.botania;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraftforge.items.ItemHandlerHelper;
@@ -17,6 +17,10 @@ List<IngredientSpec> recipeSlots() {if(recipe==null)return null;List<IngredientS
 @Override public boolean startSingleOperation(@Nonnull ServerPlayer p){if(storageEndpoint()==null)return false;List<ItemStack> m=BotaniaDelegateSupport.extractAtomically(materialAccess(), storageEndpoint(),p,recipeSlots());return !m.isEmpty()&&start(m);}@Override public boolean startSingleOperation(@Nonnull ServerPlayer p,@Nonnull ExtractionLedger l){return false;}@Override public boolean startPreparedOperation(@Nonnull ServerPlayer p,@Nonnull List<ItemStack>m,@Nonnull ExtractionLedger l){useSharedLedger(l);return start(m);}
 private boolean start(List<ItemStack>m){entitiesBefore=BotaniaDelegateSupport.snapshot(level,new AABB(pos).inflate(2));if(!(level.getBlockEntity(pos) instanceof TerrestrialAgglomerationPlateBlockEntity))return false;inputs.clear();for(ItemStack s:m){ItemEntity e=new ItemEntity(level,pos.getX()+.5,pos.getY()+1.05,pos.getZ()+.5,s.copy());e.setDeltaMovement(0,0,0);BotaniaDelegateSupport.protectOperationInput(e);if(!level.addFreshEntity(e))return false;inputs.add(e.getUUID());}started=true;startTick=level.getGameTime();markCraftStarted();return true;}
 @Override protected boolean isMachineCraftFinished(@Nonnull ServerLevel l,@Nonnull BlockEntity b){return started&&l.getEntitiesOfClass(ItemEntity.class,new AABB(pos).inflate(2),e->BotaniaDelegateSupport.isNew(e,entitiesBefore)&&e.isAlive()&&ItemStack.isSameItem(e.getItem(),expected)&&l.getGameTime()>=startTick).stream().findAny().isPresent();}
-@Override public ItemStack collectResult(@Nonnull ServerPlayer p){for(ItemEntity e:level.getEntitiesOfClass(ItemEntity.class,new AABB(pos).inflate(2),x->BotaniaDelegateSupport.isNew(x,entitiesBefore)&&x.isAlive()&&ItemStack.isSameItem(x.getItem(),expected))){ItemStack s=e.getItem().copy();e.discard();return s;}return ItemStack.EMPTY;}
+@Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.single(this::takeResult, outputContract());
+    }
+
+    private ItemStack takeResult(@Nonnull ServerPlayer p) {for(ItemEntity e:level.getEntitiesOfClass(ItemEntity.class,new AABB(pos).inflate(2),x->BotaniaDelegateSupport.isNew(x,entitiesBefore)&&x.isAlive()&&ItemStack.isSameItem(x.getItem(),expected))){ItemStack s=e.getItem().copy();e.discard();return s;}return ItemStack.EMPTY;}
 @Override protected void clearMachineState(BlockEntity b,ServerPlayer p){List<ItemStack> recovered=new ArrayList<>();for(UUID id:inputs){var e=level.getEntity(id);if(e instanceof ItemEntity item&&item.isAlive()){ItemStack s=item.getItem().copy();item.discard();recovered.add(s.copy());if(!usingSharedLedger&&!s.isEmpty()){ItemStack r=insertIntoStorage(p,s,false);if(!r.isEmpty()&&p!=null)ItemHandlerHelper.giveItemToPlayer(p,r);}}}inputs.clear();recordFailureRecoveredInputs(recovered);}
-@Override public ItemStack getExpectedOutput(){return expected.isEmpty()?null:expected;}@Override public AABB getOutputCaptureRegion(){return new AABB(pos).inflate(2);}@Override public BlockPos getMachinePos(){return pos;}@Override public void onBatchFinished(@Nonnull ServerPlayer p){inputs.clear();resetState();}}
+@Override public ItemStack getExpectedOutput(){return expected.isEmpty()?null:expected;}@Override public AABB getOutputCaptureRegion(){return new AABB(pos).inflate(2);}@Override public BlockPos getMachinePos(){return pos;}@Override public void cleanup(@Nonnull ServerPlayer p){inputs.clear();resetState();}}

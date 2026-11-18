@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mods.common;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -22,7 +22,6 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.registries.ForgeRegistries;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -256,11 +255,10 @@ public abstract class ReflectiveMenuBatchDelegate extends InstantBatchDelegate {
         if (!isMachine(level, pos)) return failObservation("menu machine replaced");
         return done ? doneObservation() : workingObservation();
     }
-    @Override public ItemStack collectResult(@Nonnull ServerPlayer player) {
-        List<ItemStack> all = collectAllResults(player);
-        return all.isEmpty() ? ItemStack.EMPTY : all.get(0);
+    @Override public OperationOutputSource outputSource() {
+        return player -> OperationOutputSource.Handoff.physical(takeResults(player), outputContract());
     }
-    @Override public List<ItemStack> collectAllResults(@Nonnull ServerPlayer player) {
+    private List<ItemStack> takeResults(@Nonnull ServerPlayer player) {
         List<ItemStack> output = results.stream().map(ItemStack::copy).toList();
         results.clear();
         done = false;
@@ -268,7 +266,8 @@ public abstract class ReflectiveMenuBatchDelegate extends InstantBatchDelegate {
         if (ledger != null && !usingSharedLedger && ledger.isCommitted()) ledger.settleAllCommitted();
         return output;
     }
-    @Override public boolean collectsPhysicalSecondaryOutputs() { return true; }
+
+
     @Override public ExpectedProduction getExpectedProduction() {
         return expected.isEmpty() ? null : new ExpectedProduction(
                 expected, scaledCount(expected.getCount(), preparedExecutions()));
@@ -279,7 +278,7 @@ public abstract class ReflectiveMenuBatchDelegate extends InstantBatchDelegate {
     @Override protected void clearMissingMachineState(@Nullable ServerPlayer player) {
         clearMenu(); results.clear(); done = false; resetInstantBatch(); resetState();
     }
-    @Override public void onBatchFinished(@Nullable ServerPlayer player) {
+    @Override public void cleanup(@Nullable ServerPlayer player) {
         if (!markTerminalCleanup()) return;
         clearMenu(); results.clear(); done = false; resetInstantBatch();
         expected = ItemStack.EMPTY; resetState();

@@ -1,11 +1,11 @@
 package com.huanghuang.rsintegration.mods.ironfurnaces;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationLifecycle;
 import com.huanghuang.rsintegration.crafting.TaskOutputReception;
-
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate.CraftPhase;
+import com.huanghuang.rsintegration.crafting.batch.MachineOperation.CraftPhase;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import ironfurnaces.tileentity.furnaces.BlockIronFurnaceTileBase;
 import net.minecraft.core.BlockPos;
@@ -34,14 +34,12 @@ import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.tree.AnnotationNode;
 import org.objectweb.asm.tree.ClassNode;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
-
 import java.io.InputStream;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -164,6 +162,8 @@ class IronFurnaceFactoryTierTest extends BootstrapTest {
         furnace.factoryCookTime = new int[6];
 
         assertEquals(CraftPhase.WORKING, fixture.delegate.observeMachineCraft(level, furnace).phase());
+        assertEquals(12, Arrays.stream(fixture.items, 13, 19).mapToInt(ItemStack::getCount).sum());
+        assertEquals(CraftPhase.WORKING, new OperationLifecycle(fixture.delegate).poll(level).phase());
         assertEquals(10, Arrays.stream(fixture.items, 13, 19).mapToInt(ItemStack::getCount).sum());
     }
 
@@ -192,15 +192,15 @@ class IronFurnaceFactoryTierTest extends BootstrapTest {
                 fixture.items[slot + 6] = new ItemStack(Items.IRON_INGOT, input.getCount());
                 fixture.items[slot] = ItemStack.EMPTY;
             }
-            phase = fixture.delegate.observeMachineCraft(level, furnace).phase();
+            phase = new OperationLifecycle(fixture.delegate).poll(level).phase();
         } while (phase == CraftPhase.WORKING);
 
         assertEquals(CraftPhase.DONE, phase);
-        List<ItemStack> results = fixture.delegate.collectAllResults(mock(ServerPlayer.class));
+        List<ItemStack> results = fixture.delegate.outputSource().collectFinal(mock(ServerPlayer.class)).stacks();
         assertEquals(operations, results.stream().mapToInt(ItemStack::getCount).sum());
         assertTrue(Arrays.stream(fixture.items, 7, 19).allMatch(ItemStack::isEmpty));
         assertTrue(IronFurnaceFactoryLeases.hasActiveLease(furnace));
-        fixture.delegate.onBatchFinished(mock(ServerPlayer.class));
+        fixture.delegate.machineOperation().cleanup(mock(ServerPlayer.class));
         assertFalse(IronFurnaceFactoryLeases.hasActiveLease(furnace));
 
         int firstLane = tier == 0 ? 2 : tier == 1 ? 1 : 0;
@@ -289,31 +289,31 @@ class IronFurnaceFactoryTierTest extends BootstrapTest {
         when(furnace.getMaxStackSize()).thenReturn(1);
         var level = (ServerLevel) get(fixture.delegate, "level");
         try (var session = TaskOutputReception.open()) {
-            fixture.delegate.setOutputReception(session);
+            fixture.delegate.bindProduction(session.writer());
             set(fixture.delegate, "queuedMaterial", new ItemStack(Items.IRON_ORE));
             set(fixture.delegate, "queuedOperations", 7);
             assertTrue(startNextBatch(fixture.delegate));
             var first = session.current();
             for (int slot = 13; slot < 19; slot++) fixture.items[slot] = new ItemStack(Items.IRON_INGOT);
-            assertEquals(CraftPhase.WORKING, fixture.delegate.observeMachineCraft(level, furnace).phase());
+            assertEquals(CraftPhase.WORKING, new OperationLifecycle(fixture.delegate).poll(level).phase());
             assertEquals(6, session.current().received("result"));
             assertEquals(first, session.current());
             assertEquals(1, get(fixture.delegate, "queuedOperations"));
             Arrays.fill(fixture.items, 7, 13, ItemStack.EMPTY);
-            assertEquals(CraftPhase.WORKING, fixture.delegate.observeMachineCraft(level, furnace).phase());
-            assertEquals(CraftPhase.WORKING, fixture.delegate.observeMachineCraft(level, furnace).phase());
+            assertEquals(CraftPhase.WORKING, new OperationLifecycle(fixture.delegate).poll(level).phase());
+            assertEquals(CraftPhase.WORKING, new OperationLifecycle(fixture.delegate).poll(level).phase());
             assertFalse(first == session.current());
             assertEquals(0, session.current().received("result"));
             assertEquals(0, get(fixture.delegate, "queuedOperations"));
             // 第二批由机器直接给货；第一批已经发布的资源不再进入最终收取。
-            assertEquals(6, fixture.delegate.drainReceivedOutputs().get(0).getCount());
+            assertEquals(6, session.drainStacks().get(0).getCount());
             fixture.items[7] = ItemStack.EMPTY;
             fixture.items[13] = new ItemStack(Items.IRON_INGOT);
-            assertEquals(CraftPhase.WORKING, fixture.delegate.observeMachineCraft(level, furnace).phase());
-            assertEquals(CraftPhase.DONE, fixture.delegate.observeMachineCraft(level, furnace).phase());
-            assertTrue(fixture.delegate.collectAllResults(mock(ServerPlayer.class)).isEmpty());
-            assertEquals(1, fixture.delegate.drainReceivedOutputs().get(0).getCount());
-            assertTrue(fixture.delegate.drainReceivedOutputs().isEmpty());
+            assertEquals(CraftPhase.WORKING, new OperationLifecycle(fixture.delegate).poll(level).phase());
+            assertEquals(CraftPhase.DONE, new OperationLifecycle(fixture.delegate).poll(level).phase());
+            assertTrue(fixture.delegate.outputSource().collectFinal(mock(ServerPlayer.class)).stacks().isEmpty());
+            assertEquals(1, session.drainStacks().get(0).getCount());
+            assertTrue(session.drainStacks().isEmpty());
         }
     }
 
@@ -323,20 +323,20 @@ class IronFurnaceFactoryTierTest extends BootstrapTest {
         var furnace = (BlockIronFurnaceTileBase) get(fixture.delegate, "furnace");
         var level = (ServerLevel) get(fixture.delegate, "level");
         try (var session = TaskOutputReception.open()) {
-            fixture.delegate.setOutputReception(session);
+            fixture.delegate.bindProduction(session.writer());
             set(fixture.delegate, "rainbowMode", true);
             set(fixture.delegate, "queuedMaterial", new ItemStack(Items.IRON_ORE));
             set(fixture.delegate, "queuedOperations", 8);
             assertTrue(startNextBatch(fixture.delegate));
             fixture.items[13] = new ItemStack(Items.IRON_INGOT, 5);
-            assertEquals(CraftPhase.WORKING, fixture.delegate.observeMachineCraft(level, furnace).phase());
-            assertEquals(5, fixture.delegate.drainReceivedOutputs().get(0).getCount());
+            assertEquals(CraftPhase.WORKING, new OperationLifecycle(fixture.delegate).poll(level).phase());
+            assertEquals(5, session.drainStacks().get(0).getCount());
             fixture.items[7] = ItemStack.EMPTY;
             fixture.items[13] = new ItemStack(Items.IRON_INGOT, 3);
-            assertEquals(CraftPhase.WORKING, fixture.delegate.observeMachineCraft(level, furnace).phase());
-            assertEquals(CraftPhase.DONE, fixture.delegate.observeMachineCraft(level, furnace).phase());
-            assertTrue(fixture.delegate.collectAllResults(mock(ServerPlayer.class)).isEmpty());
-            assertEquals(3, fixture.delegate.drainReceivedOutputs().stream().mapToInt(ItemStack::getCount).sum());
+            assertEquals(CraftPhase.WORKING, new OperationLifecycle(fixture.delegate).poll(level).phase());
+            assertEquals(CraftPhase.DONE, new OperationLifecycle(fixture.delegate).poll(level).phase());
+            assertTrue(fixture.delegate.outputSource().collectFinal(mock(ServerPlayer.class)).stacks().isEmpty());
+            assertEquals(3, session.drainStacks().stream().mapToInt(ItemStack::getCount).sum());
         }
     }
 

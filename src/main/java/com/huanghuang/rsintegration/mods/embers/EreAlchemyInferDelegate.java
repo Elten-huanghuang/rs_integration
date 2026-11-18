@@ -1,17 +1,13 @@
 package com.huanghuang.rsintegration.mods.embers;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
-
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
-import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.DrivenMachineDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.mods.embers.EreAlchemyBatchDelegate;
 import com.huanghuang.rsintegration.mods.embers.EreAlchemyLock;
@@ -19,8 +15,6 @@ import com.huanghuang.rsintegration.mods.embers.KnownCodeSavedData;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.reflection.probes.EmbersReflection;
 import com.huanghuang.rsintegration.util.Reflect;
-import com.refinedmods.refinedstorage.api.storage.tracker.IStorageTracker;
-import com.refinedmods.refinedstorage.api.util.Action;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -33,12 +27,10 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
@@ -48,7 +40,7 @@ import net.minecraftforge.items.ItemHandlerHelper;
 import org.jetbrains.annotations.NotNull;
 
 public final class EreAlchemyInferDelegate
-extends AbstractBatchDelegate {
+extends DrivenMachineDelegate {
     @Override
     public MaterialPlan materialPlan() {
         return firstAttemptMaterials == null ? MaterialPlan.privateExtraction() : firstAttemptMaterials;
@@ -294,7 +286,7 @@ extends AbstractBatchDelegate {
     }
 
     @Override
-    protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
+    protected boolean advanceNativeCycle(ServerLevel level, BlockEntity be) {
         if (this.phase == Phase.DONE_SUCCESS || this.phase == Phase.DONE_FAILED) {
             warnOnce("already_done", "[RSI-Embers-Infer] isMachineCraftFinished: already done, phase={}", this.phase);
             return true;
@@ -381,7 +373,7 @@ extends AbstractBatchDelegate {
         return ItemStack.EMPTY;
     }
 
-    private ItemStack extractFailedResult() {
+    private ItemStack extractTabletOrBinResult() {
         Object outHandler = Reflect.getField((Object)this.tablet, "outputHandler").orElse(null);
         if (outHandler != null) {
             ItemStack removed = Reflect.invoke(outHandler, "extractItem", 0, 64, false)
@@ -440,7 +432,7 @@ extends AbstractBatchDelegate {
         // used. IBin is checked by findResultAnywhere(), so leaving its item
         // there would make every tick process the same failure again and
         // repeatedly refund the next attempt's materials.
-        this.extractFailedResult();
+        this.extractTabletOrBinResult();
         if (blackPins == 0) {
             ++this.consecutiveZeroBlackPins;
             int zeroLimit = (Integer)RSIntegrationConfig.EMBERS_INFER_ZERO_BLACK_LIMIT.get();
@@ -512,32 +504,16 @@ extends AbstractBatchDelegate {
         this.lockLease = null;
     }
 
-    public ItemStack collectResult(ServerPlayer player) {
-        releaseAlchemyLease();
-        if (this.succeeded && !this.successResult.isEmpty()) {
-            ItemStack out = this.successResult.copy();
-            this.successResult = ItemStack.EMPTY;
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.single(this::takeResult, outputContract());
+    }
 
-            // Clear result from wherever it ended up (outputHandler or IBin),
-            // matching the HEAD version's extraction order.
-            Object outHandler = Reflect.getField((Object)this.tablet, "outputHandler").orElse(null);
-            ItemStack cleared = ItemStack.EMPTY;
-            if (outHandler != null) {
-                cleared = Reflect.invoke(outHandler, "extractItem", 0, 64, false)
-                        .map(o -> (ItemStack)o).orElse(ItemStack.EMPTY);
-            }
-            if (cleared.isEmpty()) {
-                // Result may be in IBin below
-                BlockPos below = this.machinePos.below();
-                BlockEntity be = this.level.isLoaded(below) ? this.level.getBlockEntity(below) : null;
-                if (EmbersReflection.ibinClass != null && be != null && EmbersReflection.ibinClass.isInstance(be)) {
-                    Object binInv = Reflect.invoke((Object)be, "getInventory").orElse(null);
-                    if (binInv != null) {
-                        Reflect.invoke(binInv, "extractItem", 0, 64, false);
-                    }
-                }
-            }
-            ((BlockEntity) this.tablet).setChanged();
+    private ItemStack takeResult(ServerPlayer player) {
+        if (this.succeeded && !this.successResult.isEmpty()) {
+            ItemStack visible = findResultAnywhere();
+            ItemStack out = ItemStack.isSameItemSameTags(visible, successResult)
+                    ? extractTabletOrBinResult() : ItemStack.EMPTY;
+            successResult = ItemStack.EMPTY;
             this.clearAndRefundSurvivors();
             return out;
         }
@@ -550,7 +526,8 @@ extends AbstractBatchDelegate {
         this.clearAndRefundSurvivors();
     }
 
-    public void onBatchFinished(@NotNull ServerPlayer player) {
+    public void cleanup(@NotNull ServerPlayer player) {
+        releaseAlchemyLease();
     }
 
     public BlockPos getMachinePos() {

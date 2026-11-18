@@ -1,6 +1,6 @@
 package com.huanghuang.rsintegration.mods.biomancy;
 
-import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate.CraftPhase;
+import com.huanghuang.rsintegration.crafting.batch.MachineOperation.CraftPhase;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -12,9 +12,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import org.junit.jupiter.api.Test;
-
 import java.util.concurrent.atomic.AtomicInteger;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -88,7 +86,6 @@ class BiomancyBatchDelegateTest extends BootstrapTest {
     @Test
     void delegateCollectsActualByproductsAndCannotRefundMissingInputs() {
         BiomancyBatchDelegate delegate = new BiomancyBatchDelegate();
-        assertTrue(delegate.collectsPhysicalSecondaryOutputs());
         assertFalse(delegate.isFailureRefundSafe());
     }
 }

@@ -1,9 +1,9 @@
 package com.huanghuang.rsintegration.crafting.external;
 
+import com.huanghuang.rsintegration.crafting.batch.ProductionEvidence;
+import com.huanghuang.rsintegration.crafting.batch.MachineOperation;
 import com.huanghuang.rsintegration.crafting.TaskOutputReception;
-import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import net.minecraftforge.fluids.capability.templates.FluidTank;
-
 import com.huanghuang.rsintegration.api.DefaultRSIIntegrationApi;
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.api.RegistrationOptions;
@@ -93,11 +93,9 @@ import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.common.util.LazyOptional;
 import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemStackHandler;
-import net.minecraftforge.registries.ForgeRegistries;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.List;
@@ -106,7 +104,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -163,25 +160,25 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
         ExternalIntegrationBatchDelegate delegate = new ExternalIntegrationBatchDelegate(api);
         assertEquals(IBatchDelegate.PreparationState.READY, delegate.prepare(player, recipeId, null, BlockPos.ZERO).state());
         try (var session = TaskOutputReception.open()) {
-            delegate.setOutputReception(session);
+            delegate.bindProduction(session.writer());
             assertTrue(startWithDiamond(delegate, player));
             state.set(new MachineState(true, true, true, 1, 10, recipeId, processId, 2, null));
             inventory.setStackInSlot(1, new ItemStack(Items.STICK, 5));
-            assertEquals(IBatchDelegate.CraftPhase.WORKING, delegate.observeCraft(level).phase());
+            assertEquals(MachineOperation.CraftPhase.WORKING, delegate.machineOperation().observe(level).phase());
             assertEquals(5, inventory.getStackInSlot(1).getCount());
-            assertTrue(delegate.drainReceivedOutputs().isEmpty());
-            delegate.transferOutputs(level);
-            assertEquals(5, delegate.drainReceivedOutputs().stream().mapToInt(ItemStack::getCount).sum());
+            assertTrue(session.drainStacks().isEmpty());
+            delegate.outputSource().transferAvailable(level);
+            assertEquals(5, session.drainStacks().stream().mapToInt(ItemStack::getCount).sum());
             inventory.setStackInSlot(1, new ItemStack(Items.STICK, 3));
-            delegate.transferOutputs(level);
-            assertEquals(IBatchDelegate.CraftPhase.WORKING, delegate.observeCraft(level).phase());
-            assertEquals(3, delegate.drainReceivedOutputs().stream().mapToInt(ItemStack::getCount).sum());
+            delegate.outputSource().transferAvailable(level);
+            assertEquals(MachineOperation.CraftPhase.WORKING, delegate.machineOperation().observe(level).phase());
+            assertEquals(3, session.drainStacks().stream().mapToInt(ItemStack::getCount).sum());
             assertTrue(inventory.getStackInSlot(1).isEmpty());
             inventory.setStackInSlot(0, ItemStack.EMPTY);
             state.set(new MachineState(true, true, false, 0, 0, null, null, 3, null));
-            assertEquals(IBatchDelegate.CraftPhase.DONE, delegate.observeCraft(level).phase());
-            assertTrue(delegate.collectAllResults(player).isEmpty());
-            assertTrue(delegate.drainReceivedOutputs().isEmpty());
+            assertEquals(MachineOperation.CraftPhase.DONE, delegate.machineOperation().observe(level).phase());
+            assertTrue(delegate.outputSource().collectFinal(player).stacks().isEmpty());
+            assertTrue(session.drainStacks().isEmpty());
         }
     }
 
@@ -199,14 +196,13 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
         MachineDescriptor descriptor = mock(MachineDescriptor.class);
         when(descriptor.fluidPorts()).thenReturn(List.of(new MachineFluidPort("water", 0, Direction.NORTH,
                 InputOutputAccess.OUTPUT, FluidPortAccess.FLUID_HANDLER, null, "fluids", 1000)));
+        when(descriptor.executionMode()).thenReturn(MachineExecutionMode.IMMEDIATE_ON_INSERT);
+        setField(delegate, "executionKind", RecipeExecutionKind.STANDARD_IO);
         setField(delegate, "descriptor", descriptor);
         try (var session = TaskOutputReception.open()) {
-            delegate.setOutputReception(session);
+            delegate.bindProduction(session.writer());
             var batch = session.prepare(List.of(new TaskOutputReception.Demand("water", water, 1000, 1000)));
             batch.activate();
-            Field field = AbstractBatchDelegate.class.getDeclaredField("outputBatch");
-            field.setAccessible(true);
-            field.set(delegate, batch);
             Method collect = ExternalIntegrationBatchDelegate.class.getDeclaredMethod(
                     "collectReceptionOutputs", ServerPlayer.class);
             collect.setAccessible(true);
@@ -219,8 +215,8 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
             assertEquals(0, tank.getFluidAmount());
             assertEquals(600, session.drain().get(0).amount());
             assertTrue(batch.complete());
-            assertTrue(delegate.drainReportedResources().isEmpty());
-            assertTrue(delegate.collectAllResults(mock(ServerPlayer.class)).isEmpty());
+            assertTrue(ProductionEvidence.from(delegate).takeDelivered().isEmpty());
+            assertTrue(delegate.outputSource().collectFinal(mock(ServerPlayer.class)).stacks().isEmpty());
             assertTrue(session.drain().isEmpty());
         }
     }
@@ -368,22 +364,22 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
         assertEquals(IBatchDelegate.PreparationState.READY,
                 delegate.prepare(player, recipeId, null, BlockPos.ZERO).state());
         assertTrue(startWithDiamond(delegate, player));
-        assertEquals(IBatchDelegate.CraftPhase.WORKING, delegate.observeCraft(level).phase());
+        assertEquals(MachineOperation.CraftPhase.WORKING, delegate.machineOperation().observe(level).phase());
 
         if (busySignal) {
             state.set(new MachineState(true, true, true, 1, 10,
                     recipeId, processId, 2L, null));
-            assertEquals(IBatchDelegate.CraftPhase.WORKING, delegate.observeCraft(level).phase());
+            assertEquals(MachineOperation.CraftPhase.WORKING, delegate.machineOperation().observe(level).phase());
             state.set(new MachineState(true, true, false, 0, 0, null, null, 3L, null));
         } else {
             when(level.getGameTime()).thenReturn(13L);
-            assertEquals(IBatchDelegate.CraftPhase.WORKING, delegate.observeCraft(level).phase());
+            assertEquals(MachineOperation.CraftPhase.WORKING, delegate.machineOperation().observe(level).phase());
             inventory.setStackInSlot(0, ItemStack.EMPTY);
         }
-        assertEquals(IBatchDelegate.CraftPhase.DONE, delegate.observeCraft(level).phase());
-        assertTrue(delegate.collectStructuredResults(player).isEmpty());
+        assertEquals(MachineOperation.CraftPhase.DONE, delegate.machineOperation().observe(level).phase());
+        assertTrue(delegate.outputSource().collectFinal(player).ports().isEmpty());
         assertTrue(OutputAccounting.assess(delegate.outputContract(), 1, List.of()).complete());
-        delegate.onBatchFinished(player);
+        delegate.machineOperation().cleanup(player);
     }
 
     @Test
@@ -413,7 +409,7 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
 
         assertNull(collect.invoke(delegate));
         assertEquals(true, getField(delegate, "customCollectionComplete"));
-        assertTrue(delegate.collectAllResults(player).isEmpty());
+        assertTrue(delegate.outputSource().collectFinal(player).stacks().isEmpty());
     }
 
     private static RecipeView randomRecipeView(ResourceLocation recipeId, ResourceLocation processId) {
@@ -614,43 +610,43 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
         );
         // 本例通过库存差值结算；增量接收路径有独立的观察与取出测试。
         delegate = spy(delegate);
-        doReturn(false).when(delegate).supportsOutputReception();
+        doReturn(false).when(delegate).acceptsFixedOutput();
         delegate.prepareGraphBatch(2);
-        assertTrue(delegate.startOperation(OperationStartContext.chainReserved(player, ExtractionLedger.external(),
+        assertTrue(delegate.machineOperation().start(OperationStartContext.chainReserved(player, ExtractionLedger.external(),
                 delegate.materialPlan(), List.of(reservedDiamond("input/1"), reservedDiamond("input/0")), null)));
         assertEquals(Items.DIAMOND, inputSlot.get().getItem());
         assertEquals(4, inputSlot.get().getCount());
 
         machineIntegration.revision = 2L;
-        var changed = delegate.observeCraft(level);
-        assertEquals(IBatchDelegate.CraftPhase.FAILED, changed.phase());
+        var changed = delegate.machineOperation().observe(level);
+        assertEquals(MachineOperation.CraftPhase.FAILED, changed.phase());
         assertTrue(changed.detail().contains("MACHINE_DESCRIPTOR_CHANGED"));
         machineIntegration.revision = 1L;
 
         MachineStateProvider progressing = (context, ignored) -> new MachineState(
                 true, true, true, 7, 10, recipeId, processId, 2L, null);
         setField(delegate, "stateProvider", progressing);
-        assertEquals(7L, delegate.observeCraft(level).completedWork());
+        assertEquals(7L, delegate.machineOperation().observe(level).completedWork());
         assertEquals(70, delegate.monitorCycleProgress().percent());
         MachineStateProvider unchanged = (context, ignored) -> new MachineState(
                 true, true, true, 7, 10, recipeId, processId, 3L, null);
         setField(delegate, "stateProvider", unchanged);
-        assertEquals(7L, delegate.observeCraft(level).completedWork());
+        assertEquals(7L, delegate.machineOperation().observe(level).completedWork());
         setField(delegate, "stateProvider", null);
 
         outputSlot.set(new ItemStack(Items.STICK, 1));
         assertEquals(
-                IBatchDelegate.CraftPhase.WORKING,
-                delegate.observeCraft(level).phase()
+                MachineOperation.CraftPhase.WORKING,
+                delegate.machineOperation().observe(level).phase()
         );
         assertFalse(delegate.monitorCycleProgress().known(), "缺少可靠计时后不能沿用上一轮百分比");
         outputSlot.set(new ItemStack(Items.STICK, 2));
         assertEquals(
-                IBatchDelegate.CraftPhase.DONE,
-                delegate.observeCraft(level).phase()
+                MachineOperation.CraftPhase.DONE,
+                delegate.machineOperation().observe(level).phase()
         );
         List<OutputAccounting.CollectedOutput> outputs =
-                delegate.collectStructuredResults(player);
+                delegate.outputSource().collectFinal(player).ports();
 
         assertEquals(1, outputs.size());
         assertEquals(
@@ -659,7 +655,7 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
         assertEquals(Items.STICK, outputs.get(0).stack().getItem());
         assertEquals(2, outputs.get(0).stack().getCount());
         assertTrue(outputSlot.get().isEmpty());
-        delegate.onBatchFinished(player);
+        delegate.machineOperation().cleanup(player);
     }
 
     @Test
@@ -748,7 +744,7 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
                         + preparation.userMessage()
         );
         assertTrue(startWithDiamond(delegate, player));
-        delegate.onBatchFinished(player);
+        delegate.machineOperation().cleanup(player);
     }
 
     @Test
@@ -804,7 +800,7 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
         assertTrue(startWithDiamond(delegate, player));
         assertEquals(Items.DIAMOND, inventory.getStackInSlot(0).getItem());
         assertEquals(2, inventory.getStackInSlot(0).getCount());
-        delegate.onBatchFinished(player);
+        delegate.machineOperation().cleanup(player);
     }
 
     @Test
@@ -984,7 +980,7 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
         assertNull(deliver.invoke(delegate, player, output));
 
         List<CollectedOutput> reported =
-                delegate.drainReportedResources();
+                ProductionEvidence.from(delegate).takeDelivered();
         assertEquals(1, reported.size());
         assertEquals(500L, reported.get(0).amount());
         assertEquals(IntegrationResourceKey.ResourceKind.FLUID,
@@ -1255,7 +1251,7 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
         ExternalIntegrationBatchDelegate delegate = new ExternalIntegrationBatchDelegate(new DefaultRSIIntegrationApi());
         setField(delegate, "runningOperation", operation);
         setField(delegate, "recipe", recipe);
-        Method observe = ExternalIntegrationBatchDelegate.class.getDeclaredMethod("observeCustomOperation", ServerLevel.class);
+        Method observe = ExternalIntegrationBatchDelegate.class.getDeclaredMethod("sampleCustomOperation", ServerLevel.class);
         observe.setAccessible(true);
 
         when(operation.observe(level)).thenReturn(
@@ -1265,13 +1261,13 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
                 new CraftObservation(LifecyclePhase.WAITING_FOR_MACHINE, 9, 100, 4L, recipeId, List.of()),
                 new CraftObservation(LifecyclePhase.WORKING, 10, 100, 5L, null, List.of()),
                 new CraftObservation(LifecyclePhase.WORKING, 11, 100, 6L, resource("another_recipe"), List.of()));
-        assertEquals(7L, ((IBatchDelegate.CraftObservation) observe.invoke(delegate, level)).completedWork());
-        assertEquals(7L, ((IBatchDelegate.CraftObservation) observe.invoke(delegate, level)).completedWork());
-        assertEquals(8L, ((IBatchDelegate.CraftObservation) observe.invoke(delegate, level)).completedWork());
-        assertEquals(0L, ((IBatchDelegate.CraftObservation) observe.invoke(delegate, level)).completedWork());
-        assertEquals(0L, ((IBatchDelegate.CraftObservation) observe.invoke(delegate, level)).completedWork());
-        assertEquals(IBatchDelegate.CraftPhase.FAILED,
-                ((IBatchDelegate.CraftObservation) observe.invoke(delegate, level)).phase());
+        assertEquals(7L, ((MachineOperation.CraftObservation) observe.invoke(delegate, level)).completedWork());
+        assertEquals(7L, ((MachineOperation.CraftObservation) observe.invoke(delegate, level)).completedWork());
+        assertEquals(8L, ((MachineOperation.CraftObservation) observe.invoke(delegate, level)).completedWork());
+        assertEquals(0L, ((MachineOperation.CraftObservation) observe.invoke(delegate, level)).completedWork());
+        assertEquals(0L, ((MachineOperation.CraftObservation) observe.invoke(delegate, level)).completedWork());
+        assertEquals(MachineOperation.CraftPhase.FAILED,
+                ((MachineOperation.CraftObservation) observe.invoke(delegate, level)).phase());
     }
 
     @Test
@@ -1348,7 +1344,7 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
         assertEquals(true, getField(
                 delegate, "customCollectionComplete"));
 
-        List<ItemStack> results = delegate.collectAllResults(player);
+        List<ItemStack> results = delegate.outputSource().collectFinal(player).stacks();
         assertEquals(1, results.size());
         assertEquals(Items.STICK, results.get(0).getItem());
         assertEquals(1, results.get(0).getCount());
@@ -1555,7 +1551,7 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
     }
 
     private static boolean startWithDiamond(ExternalIntegrationBatchDelegate delegate, ServerPlayer player) {
-        return delegate.startOperation(OperationStartContext.chainReserved(player, ExtractionLedger.external(),
+        return delegate.machineOperation().start(OperationStartContext.chainReserved(player, ExtractionLedger.external(),
                 delegate.materialPlan(), List.of(reservedDiamond("input")), null));
     }
 

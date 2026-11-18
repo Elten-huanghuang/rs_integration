@@ -1,25 +1,22 @@
 package com.huanghuang.rsintegration.mods.aether;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import java.util.Arrays;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.items.ItemHandlerHelper;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.TaskOutputReception;
 import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
-import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.ReceivingMachineDelegate;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.MachineSlotOwnershipPolicy;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
-import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
@@ -49,7 +46,6 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.common.ForgeHooks;
 import net.minecraftforge.items.IItemHandler;
 import org.jetbrains.annotations.NotNull;
-
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -72,7 +68,7 @@ import java.util.Set;
  * valid Aether fuel items, so we must use the machine's own
  * {@code getBurnDuration()} (furnace) or {@code getIncubatingMap()} (incubator).
  */
-public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
+public final class AetherFurnaceBatchDelegate extends ReceivingMachineDelegate {
     private static final TagKey<Item> SAVE_NBT_IN_RECIPE = TagKey.create(Registries.ITEM,
             new ResourceLocation("aether", "save_nbt_in_recipe"));
 
@@ -153,7 +149,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
     private AbstractFurnaceBlockEntity receptionFurnace;
 
     @Override
-    public boolean supportsOutputReception() {
+    public boolean acceptsFixedOutput() {
         if (isIncubator || myLevel == null || myPos == null || !myLevel.hasChunkAt(myPos)
                 || !inheritsFixedCookingOutput(recipe)) return false;
         BlockEntity be = myLevel.getBlockEntity(myPos);
@@ -202,7 +198,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
     }
 
     private void prepareFurnaceOutputBatch(BlockEntity be, int operations) {
-        if (!supportsOutputReception()) return;
+        if (!acceptsFixedOutput()) return;
         receptionIdleTicks = 0;
         lastReceptionIdleTick = Long.MIN_VALUE;
         receptionFurnace = (AbstractFurnaceBlockEntity) be;
@@ -220,7 +216,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         if (!idle) receptionIdleTicks = 0;
         else if (tick != lastReceptionIdleTick) receptionIdleTicks = Math.min(2, receptionIdleTicks + 1);
         lastReceptionIdleTick = tick;
-        return outputBatch != null && outputBatch.complete() && receptionIdleTicks >= 2;
+        return outputBatch() != null && outputBatch().complete() && receptionIdleTicks >= 2;
     }
 
     @Override
@@ -483,7 +479,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         }
         ItemStack toInsert = batchInput.stack();
         // 自定义 Ingredient 的实际匹配项可能超出展示候选；真实投料前再核对一次。
-        if (outputReception() != null && !fixedFurnaceInput(toInsert, resultItem())) {
+        if (production != null && !fixedFurnaceInput(toInsert, resultItem())) {
             resetInventoryOwnership();
             forceChunkLoad(false);
             return false;
@@ -520,7 +516,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
-        activateOutputBatch();
+        if (production != null) production.activate();
         be.setChanged();
         markCraftStarted();
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-Aether] Materials inserted at {}, waiting for cooking", myPos);
@@ -564,7 +560,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
     @NotNull
     protected CraftObservation observeMachineCraft(@NotNull ServerLevel level,
                                                     @NotNull BlockEntity be) {
-        if (outputBatch != null && be != receptionFurnace) {
+        if (outputBatch() != null && be != receptionFurnace) {
             return failObservation("Aether furnace block entity replaced");
         }
         if (be instanceof AbstractFurnaceBlockEntity furnace) {
@@ -572,8 +568,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
             if (!output.isEmpty() && !matchesExpectedOutput(output)) {
                 return failObservation("Aether furnace output slot contains another item");
             }
-            if (outputBatch != null) {
-                collectFurnaceOutput(furnace);
+            if (outputBatch() != null) {
                 return receivedAndPhysicallyIdle(furnace) ? doneObservation() : workingObservation();
             }
         }
@@ -582,7 +577,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
-        if (outputBatch != null) {
+        if (outputBatch() != null) {
             return observeMachineCraft(level, be).phase() == CraftPhase.DONE;
         }
         if (be instanceof AbstractFurnaceBlockEntity furnace) {
@@ -607,16 +602,26 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         return input.isEmpty(); // input consumed → craft done
     }
 
-    @Override
-    public ItemStack collectResult(ServerPlayer player) {
+    private void transferAvailable(ServerLevel playerLevel) {
+        if (outputBatch() == null || outputBatch().closed() || myLevel == null || !myLevel.hasChunkAt(myPos)) return;
+        if (myLevel.getBlockEntity(myPos) instanceof AbstractFurnaceBlockEntity furnace
+                && furnace == receptionFurnace && !furnace.isRemoved()) collectFurnaceOutput(furnace);
+    }
+
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.incremental(this::transferAvailable,
+                OperationOutputSource.port(this::takeResult, "aether:furnace:output", OutputContract.Source.SLOT));
+    }
+
+    private ItemStack takeResult(ServerPlayer player) {
         if (!myLevel.hasChunkAt(myPos)) return ItemStack.EMPTY;
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null) return ItemStack.EMPTY;
 
         if (be instanceof AbstractFurnaceBlockEntity furnace) {
-            if (outputBatch != null && furnace != receptionFurnace) return ItemStack.EMPTY;
+            if (outputBatch() != null && furnace != receptionFurnace) return ItemStack.EMPTY;
             ItemStack result = collectFurnaceOutput(furnace);
-            finishOutputBatch();
+            if (production != null) production.finishBatch();
             return result;
         }
 
@@ -628,7 +633,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         ItemStack visible = furnace.getItem(2);
         if (!matchesExpectedOutput(visible)) return ItemStack.EMPTY;
         ExpectedProduction expected = getExpectedProduction();
-        int amount = outputBatch != null || expected == null ? visible.getCount()
+        int amount = outputBatch() != null || expected == null ? visible.getCount()
                 : Math.min(visible.getCount(), expected.count());
         ItemStack result = visible.copyWithCount(amount);
         ItemStack retained = visible.copy();
@@ -638,13 +643,6 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         List<ItemStack> legacyResults = new ArrayList<>(1);
         receiveDirectOutput(result, legacyResults);
         return legacyResults.isEmpty() ? ItemStack.EMPTY : legacyResults.get(0);
-    }
-
-    @Override
-    public List<OutputAccounting.CollectedOutput> collectStructuredResults(ServerPlayer player) {
-        ItemStack result = collectResult(player);
-        return result.isEmpty() ? List.of() : List.of(new OutputAccounting.CollectedOutput(
-                "aether:furnace:output", OutputContract.Source.SLOT, result));
     }
 
     @Override
@@ -708,9 +706,9 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@NotNull ServerPlayer player) {
+    public void cleanup(@NotNull ServerPlayer player) {
         if (!markTerminalCleanup()) return;
-        finishOutputBatch();
+        if (production != null) production.finishBatch();
         forceChunkLoad(false);
         if (!myLevel.hasChunkAt(myPos)) {
             resetInventoryOwnership();
@@ -738,7 +736,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public OutputContract outputContract() {
-        if (!supportsInputBuffer() && !supportsOutputReception()) return OutputContract.none();
+        if (!supportsInputBuffer() && !acceptsFixedOutput()) return OutputContract.none();
         ItemStack result = resultItem();
         return result.isEmpty() ? OutputContract.none() : new OutputContract(List.of(
                 new OutputContract.Port("aether:furnace:output", 2, result,
@@ -1049,7 +1047,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
 
     private boolean matchesExpectedOutput(ItemStack output) {
         ExpectedProduction expected = getExpectedProduction();
-        return expected != null && (outputBatch == null
+        return expected != null && (outputBatch() == null
                 ? IBatchDelegate.matchesProducedItem(output, expected.item())
                 : !output.isEmpty() && ItemStack.isSameItemSameTags(output, expected.item()));
     }

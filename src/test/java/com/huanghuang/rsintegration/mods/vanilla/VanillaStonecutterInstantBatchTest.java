@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mods.vanilla;
 
+import com.huanghuang.rsintegration.crafting.batch.MachineOperation;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.server.level.ServerLevel;
@@ -8,11 +9,9 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.StonecutterRecipe;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
-
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -66,11 +65,11 @@ class VanillaStonecutterInstantBatchTest extends BootstrapTest {
         assertEquals(36, staged.get(1).getCount());
         stageVirtualResults(delegate, stone, 100);
 
-        List<ItemStack> collected = delegate.collectAllResults(null);
+        List<ItemStack> collected = delegate.outputSource().collectFinal(null).stacks();
 
         assertEquals(100, collected.stream().mapToInt(ItemStack::getCount).sum());
-        assertTrue(delegate.collectAllResults(null).isEmpty());
-        assertFalse(delegate.isCraftComplete(null));
+        assertTrue(delegate.outputSource().collectFinal(null).stacks().isEmpty());
+        assertFalse((delegate.machineOperation().observe(null).phase() == MachineOperation.CraftPhase.DONE));
     }
 
     private static void stageVirtualResults(VanillaMachineBatchDelegate delegate,

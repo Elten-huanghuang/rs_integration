@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.vanilla;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationLifecycle;
+import com.huanghuang.rsintegration.crafting.batch.MachineOperation;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.TaskOutputReception;
 import com.huanghuang.rsintegration.mods.ironfurnaces.IronFurnacesBatchDelegate;
@@ -13,10 +15,8 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.Level;
 import org.junit.jupiter.api.Test;
-
 import java.lang.reflect.Field;
 import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -35,15 +35,14 @@ class CookingMachineRecoveryTest extends BootstrapTest {
         childField().set(wrapper, child);
         var iron = TaskOutputReception.resource(new ItemStack(Items.IRON_INGOT));
         try (var session = TaskOutputReception.open()) {
-            wrapper.setOutputReception(session);
-            assertSame(session, child.outputReception());
+            var operation = new OperationLifecycle(wrapper, session);
+            wrapper.bindProduction(session.writer());
             session.prepare(List.of(new TaskOutputReception.Demand("out", iron, 8, 8))).activate();
             assertEquals(3, session.current().collect(iron, 3));
             wrapper.clearMachineState(mock(BlockEntity.class), null);
             assertNull(childField().get(wrapper));
-            assertSame(session, wrapper.outputReception());
-            assertEquals(3, wrapper.drainReceivedOutputs().get(0).getCount());
-            assertTrue(wrapper.drainReceivedOutputs().isEmpty());
+            assertEquals(3, operation.retireHolding().get(0).getCount());
+            assertTrue(operation.drainHeld().isEmpty());
             assertTrue(session.closed());
         }
     }
@@ -52,18 +51,19 @@ class CookingMachineRecoveryTest extends BootstrapTest {
     void finishedWrapperStillCollectsAndReleasesChildReusableMaterials() throws Exception {
         CookingMachineBatchDelegate wrapper = new CookingMachineBatchDelegate();
         IBatchDelegate child = mock(IBatchDelegate.class);
+        when(child.machineOperation()).thenReturn(mock(MachineOperation.class));
         ServerPlayer player = mock(ServerPlayer.class);
         Field field = childField();
         field.set(wrapper, child);
         List<ItemStack> actual = List.of(new ItemStack(Items.STICK));
         when(child.collectReusableMaterials(player)).thenReturn(actual);
 
-        wrapper.onBatchFinished(player);
-        wrapper.onBatchFinished(player);
+        wrapper.machineOperation().cleanup(player);
+        wrapper.machineOperation().cleanup(player);
 
         assertSame(actual, wrapper.collectReusableMaterials(player));
         wrapper.releaseReusableMaterials(player);
-        verify(child).onBatchFinished(player);
+        verify(child.machineOperation()).cleanup(player);
         verify(child).releaseReusableMaterials(player);
         assertNull(field.get(wrapper));
     }
@@ -73,11 +73,12 @@ class CookingMachineRecoveryTest extends BootstrapTest {
         CookingMachineBatchDelegate previous = new CookingMachineBatchDelegate();
         CookingMachineBatchDelegate next = new CookingMachineBatchDelegate();
         IBatchDelegate oldChild = mock(IBatchDelegate.class);
+        when(oldChild.machineOperation()).thenReturn(mock(MachineOperation.class));
         IBatchDelegate newChild = mock(IBatchDelegate.class);
         childField().set(previous, oldChild);
         childField().set(next, newChild);
         when(oldChild.transferReusableMaterialsTo(newChild)).thenReturn(true);
-        previous.onBatchFinished(mock(ServerPlayer.class));
+        previous.machineOperation().cleanup(mock(ServerPlayer.class));
 
         assertTrue(previous.transferReusableMaterialsTo(next));
 
@@ -88,6 +89,7 @@ class CookingMachineRecoveryTest extends BootstrapTest {
     void wrapperPreservesChildRecoveryEvidenceBeforeDiscardingDelegate() throws Exception {
         CookingMachineBatchDelegate wrapper = new CookingMachineBatchDelegate();
         IBatchDelegate child = mock(IBatchDelegate.class);
+        when(child.machineOperation()).thenReturn(mock(MachineOperation.class));
         Field field = CookingMachineBatchDelegate.class.getDeclaredField("delegate");
         field.setAccessible(true);
         field.set(wrapper, child);
@@ -97,13 +99,14 @@ class CookingMachineRecoveryTest extends BootstrapTest {
 
         assertEquals(3, wrapper.failureRecoveredInputs().get(0).getCount());
         assertNull(field.get(wrapper));
-        verify(child).onBatchFailed(isNull(), anyString());
+        verify(child.machineOperation()).recover(isNull(), anyString());
     }
 
     @Test
     void releasingReusableMaterialsBeforeFailureStillAllowsPhysicalInputRecovery() throws Exception {
         CookingMachineBatchDelegate wrapper = new CookingMachineBatchDelegate();
         IBatchDelegate child = mock(IBatchDelegate.class);
+        when(child.machineOperation()).thenReturn(mock(MachineOperation.class));
         ServerPlayer player = mock(ServerPlayer.class);
         MinecraftServer server = mock(MinecraftServer.class);
         ServerLevel level = mock(ServerLevel.class);
@@ -118,10 +121,10 @@ class CookingMachineRecoveryTest extends BootstrapTest {
 
         wrapper.releaseReusableMaterials(player);
         assertSame(child, childField().get(wrapper));
-        wrapper.onBatchFailed(null, "offline");
+        wrapper.machineOperation().recover(null, "offline");
 
         verify(child).releaseReusableMaterials(player);
-        verify(child).onBatchFailed(isNull(), anyString());
+        verify(child.machineOperation()).recover(isNull(), anyString());
         assertEquals(3, wrapper.failureRecoveredInputs().get(0).getCount());
         assertTrue(wrapper.physicalFailureCleanupCompleted());
         assertNull(childField().get(wrapper));

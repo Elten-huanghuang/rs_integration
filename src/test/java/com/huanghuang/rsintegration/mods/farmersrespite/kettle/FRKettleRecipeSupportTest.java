@@ -3,20 +3,68 @@ package com.huanghuang.rsintegration.mods.farmersrespite.kettle;
 import com.huanghuang.rsintegration.mods.farmersrespite.FarmersRespiteRecipeHandler;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.server.level.ServerLevel;
+import com.huanghuang.rsintegration.crafting.batch.MachineOperation.CraftPhase;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.items.ItemStackHandler;
 import org.junit.jupiter.api.Test;
-
 import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 
 class FRKettleRecipeSupportTest extends BootstrapTest {
+
+    @Test
+    void observationAndEarlyCollectionLeaveIntermediateBottlesForTheNextPhase() throws Exception {
+        var kettle = new FRKettleBatchDelegate();
+        var inventory = new ItemStackHandler(5);
+        var be = mock(BlockEntity.class);
+        var level = mock(ServerLevel.class);
+        var input = new FluidStack(Fluids.WATER, 250);
+        var brewed = new FluidStack(Fluids.LAVA, 250);
+        var bottle = new ItemStack(Items.GLASS_BOTTLE);
+        var phase = FRKettleBatchDelegate.class.getDeclaredField("nativeInputPhase");
+        phase.setAccessible(true);
+        for (Object value : phase.getType().getEnumConstants()) {
+            if ("EMPTYING_INPUT".equals(value.toString())) phase.set(kettle, value);
+        }
+        set(kettle, "recipe", mock(Recipe.class));
+        set(kettle, "recipeFluidIn", input);
+        set(kettle, "recipeFluidOut", brewed);
+        set(kettle, "pourContainer", bottle);
+        set(kettle, "inputPourContainer", bottle);
+        set(kettle, "bottlesPerCraft", 1);
+        set(kettle, "inputBottlesPerCraft", 1);
+        inventory.setStackInSlot(4, bottle.copy());
+        kettle.advanceNativePhase(inventory, be, input);
+        assertEquals("BREWING", phase.get(kettle).toString());
+        for (int read = 0; read < 2; read++) {
+            assertEquals(CraftPhase.WORKING, kettle.observeMachineCraft(level, be).phase());
+            assertTrue(kettle.outputSource().collectFinal(null).stacks().isEmpty());
+            assertTrue(inventory.getStackInSlot(4).is(Items.GLASS_BOTTLE));
+            assertTrue(inventory.getStackInSlot(3).isEmpty());
+        }
+        kettle.advanceNativePhase(inventory, be, brewed);
+        assertEquals("BOTTLING_OUTPUT", phase.get(kettle).toString());
+        assertTrue(inventory.getStackInSlot(4).isEmpty());
+        assertEquals(1, inventory.getStackInSlot(3).getCount());
+        inventory.setStackInSlot(3, ItemStack.EMPTY);
+        kettle.advanceNativePhase(inventory, be, brewed);
+        assertTrue(inventory.getStackInSlot(3).isEmpty());
+    }
+
+    private static void set(FRKettleBatchDelegate kettle, String name, Object value) throws Exception {
+        var field = FRKettleBatchDelegate.class.getDeclaredField(name);
+        field.setAccessible(true);
+        field.set(kettle, value);
+    }
 
     @Test
     void fullKettleBecomesFourBottles() {

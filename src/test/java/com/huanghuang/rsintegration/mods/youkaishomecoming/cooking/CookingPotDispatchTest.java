@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.youkaishomecoming.cooking;
 
+import com.huanghuang.rsintegration.crafting.batch.MachineOperation;
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -11,7 +13,7 @@ import com.huanghuang.rsintegration.crafting.OperationExecutionKernel;
 import com.huanghuang.rsintegration.crafting.OperationResourceCoordinator;
 import com.huanghuang.rsintegration.crafting.batch.CountedOperationMaterials;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
-import com.huanghuang.rsintegration.crafting.batch.OperationPoll;
+import com.huanghuang.rsintegration.crafting.batch.OperationLifecycle;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
@@ -39,18 +41,15 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.MockedStatic;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /** 使用真实执行组和资源租约，防止锅具的产物归属声明在投料前阻断订单。 */
@@ -90,6 +89,7 @@ class CookingPotDispatchTest extends BootstrapTest {
         List<OperationStartContext> starts = new ArrayList<>();
         // 仅替代世界交互；规划资格取真实锅具声明，派发、材料交接与捕获租约均走正式代码。
         IBatchDelegate worker = mock(IBatchDelegate.class);
+        when(worker.machineOperation()).thenReturn(mock(MachineOperation.class));
         when(worker.concurrencyCapabilities()).thenReturn(pot.concurrencyCapabilities());
         when(worker.materialPlan()).thenReturn(MaterialPlan.graphSlots(specs));
         when(worker.getMachinePos()).thenReturn(position);
@@ -98,12 +98,12 @@ class CookingPotDispatchTest extends BootstrapTest {
         when(worker.getOutputCaptureRegion()).thenReturn(new AABB(position).inflate(0.5));
         when(worker.canCollectResultWithoutWorldCapture()).thenReturn(pot.canCollectResultWithoutWorldCapture());
         when(worker.validateExecutionContext(player)).thenReturn(true);
-        when(worker.startOperation(any())).thenAnswer(call -> {
+        when(worker.machineOperation().start(any())).thenAnswer(call -> {
             starts.add(call.getArgument(0));
             return true;
         });
-        when(worker.observeCraft(level)).thenReturn(new IBatchDelegate.CraftObservation(IBatchDelegate.CraftPhase.DONE));
-        when(worker.collectAllResults(player)).thenReturn(List.of(new ItemStack(Items.MUSHROOM_STEW, 4)));
+        when(worker.machineOperation().observe(level)).thenReturn(new MachineOperation.CraftObservation(MachineOperation.CraftPhase.DONE));
+        when(worker.outputSource()).thenReturn(p -> OperationOutputSource.Handoff.physical(List.of(new ItemStack(Items.MUSHROOM_STEW, 4)), null));
         var planned = GraphConcurrencyEligibility.capabilities(
                 new GraphConcurrencyEligibility.Context(typeId, "", false));
         ParallelCraftGroup group = new ParallelCraftGroup(List.of(machine), type,
@@ -126,7 +126,7 @@ class CookingPotDispatchTest extends BootstrapTest {
         try (ExtractionLedger ledger = ExtractionLedger.external()) {
             assertTrue(ledger.commitToEndpoint(null, player));
             try {
-                assertTrue(group.startOperation(OperationStartContext.chainReserved(
+                assertTrue(group.machineOperation().start(OperationStartContext.chainReserved(
                         player, ledger, MaterialPlan.none(), List.of(), InputBufferPlan.none())));
                 assertEquals(1, starts.size(), "订单应进入锅具投料，不能因产物归属冲突一直排队");
                 assertEquals(1, machines.size());
@@ -137,20 +137,20 @@ class CookingPotDispatchTest extends BootstrapTest {
                 assertNotNull(starts.get(0).operationId());
                 assertEquals(1, starts.get(0).inputSlots().get(0).getCount());
                 assertEquals(4, starts.get(0).inputSlots().get(1).getCount());
-                assertEquals(IBatchDelegate.CraftPhase.DONE, OperationPoll.poll(group, level).phase());
+                assertEquals(MachineOperation.CraftPhase.DONE, new OperationLifecycle(group).poll(level).phase());
                 assertEquals(1, group.getCompletedOperations());
                 List<ItemStack> output = group.drainSettledResults();
                 assertEquals(1, output.size());
                 assertTrue(output.get(0).is(Items.MUSHROOM_STEW));
                 assertEquals(4, output.get(0).getCount());
                 assertTrue(group.drainSettledResults().isEmpty());
-                verify(worker).collectAllResults(player);
+
                 assertEquals(0, machines.size());
                 assertEquals(0, captures.size());
                 assertEquals(0, budget.active());
                 assertEquals(0, global.active());
             } finally {
-                group.onBatchFinished(player);
+                group.machineOperation().cleanup(player);
             }
         }
         assertEquals(initialZones, CraftOutputInterceptor.activeZoneCount());

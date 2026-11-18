@@ -1,9 +1,8 @@
 package com.huanghuang.rsintegration.mods.malum;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import java.lang.reflect.Field;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.InstantBatchDelegate;
 import com.huanghuang.rsintegration.reflection.probes.MalumReflection;
@@ -28,7 +27,6 @@ import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
 import org.jetbrains.annotations.NotNull;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
-
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
@@ -244,8 +242,11 @@ public final class MalumRunicWorkbenchBatchDelegate extends InstantBatchDelegate
         return craftDone;
     }
 
-    @Override
-    public ItemStack collectResult(ServerPlayer player) {
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.single(this::takeResult, outputContract());
+    }
+
+    private ItemStack takeResult(ServerPlayer player) {
         ItemStack result = ItemStack.EMPTY;
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be != null && MalumReflection.runicWorkbenchBEClass.isInstance(be)) {
@@ -307,7 +308,7 @@ public final class MalumRunicWorkbenchBatchDelegate extends InstantBatchDelegate
     }
 
     @Override
-    public void onBatchFinished(@NotNull ServerPlayer player) {
+    public void cleanup(@NotNull ServerPlayer player) {
         // Clear any leftover from slot 0
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be != null && !be.isRemoved()) {

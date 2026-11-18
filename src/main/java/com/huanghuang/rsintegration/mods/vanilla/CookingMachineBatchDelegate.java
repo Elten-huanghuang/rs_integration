@@ -1,17 +1,12 @@
 package com.huanghuang.rsintegration.mods.vanilla;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.crafting.TaskOutputReception;
-
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
-import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.phys.AABB;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.crafting.ExtractionLedger;
-import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
@@ -26,7 +21,6 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.List;
@@ -90,10 +84,7 @@ public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void transferOutputs(ServerLevel level) { active().transferOutputs(level); }
-
-    @Override
-    public void advanceCraft(ServerLevel level) { active().advanceCraft(level); }
+    public void advance(ServerLevel level) { active().machineOperation().advance(level); }
 
     private void configureChild() {
         if (!(delegate instanceof AbstractBatchDelegate child)) return;
@@ -188,70 +179,37 @@ public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
     @Override
     protected boolean startOperationImpl(@Nonnull OperationStartContext context) {
         configureChild();
-        return active().startOperation(context);
+        return active().machineOperation().start(context);
     }
 
     @Override
-    public boolean supportsOutputReception() {
-        return delegate != null && delegate.supportsOutputReception();
-    }
-
-    @Override
-    @Nullable public TaskOutputReception.Session outputReception() {
-        TaskOutputReception.Session child = delegate == null ? null : delegate.outputReception();
-        return child == null ? super.outputReception() : child;
-    }
-
-    @Override
-    public void setOutputReception(@Nullable TaskOutputReception.Session reception) {
-        super.setOutputReception(reception);
+    public void bindProduction(TaskOutputReception.Writer writer) {
         configureChild();
-        if (delegate instanceof AbstractBatchDelegate child) child.setOutputReception(reception);
+        active().machineOperation().bindProduction(writer);
     }
 
     @Nonnull
     @Override
     protected CraftObservation observeMachineCraft(@Nonnull ServerLevel level,
                                                     @Nonnull BlockEntity be) {
-        CraftObservation observation = active().observeCraft(level);
+        CraftObservation observation = active().machineOperation().observe(level);
         observedCycle = active().monitorCycleProgress();
         this.phase = observation.phase();
         return observation;
     }
 
-    @Override
-    protected boolean isMachineCraftFinished(@Nonnull ServerLevel level, @Nonnull BlockEntity be) {
-        return active().isCraftComplete(level);
+
+    @Override public OperationOutputSource outputSource() {
+        return active().outputSource();
     }
 
-    @Nonnull
-    @Override
-    public ItemStack collectResult(@Nonnull ServerPlayer player) {
-        return active().collectResult(player);
-    }
 
-    @Nonnull
-    @Override
-    public List<ItemStack> collectAllResults(@Nonnull ServerPlayer player) {
-        return active().collectAllResults(player);
-    }
 
-    @Override
-    public boolean collectsPhysicalSecondaryOutputs() {
-        return active().collectsPhysicalSecondaryOutputs();
-    }
 
     @Nonnull
     @Override
     public OutputContract outputContract() {
         return active().outputContract();
-    }
-
-    @Nonnull
-    @Override
-    public List<OutputAccounting.CollectedOutput>
-    collectStructuredResults(@Nonnull ServerPlayer player) {
-        return active().collectStructuredResults(player);
     }
 
     @Nullable
@@ -296,9 +254,7 @@ public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
 
     private void clearChildState(@Nullable ServerPlayer player) {
         if (delegate != null) {
-            // 失败清理会丢弃子实例，但公共层稍后仍需取走已收到的实物。
-            if (delegate.outputReception() != null) super.setOutputReception(delegate.outputReception());
-            delegate.onBatchFailed(player, "cooking delegate aborted");
+            delegate.machineOperation().recover(player, "cooking delegate aborted");
             List<ItemStack> recovered = delegate.failureRecoveredInputs();
             if (recovered != null) recordFailureRecoveredInputs(recovered);
         }
@@ -307,9 +263,9 @@ public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@Nonnull ServerPlayer player) {
+    public void cleanup(@Nonnull ServerPlayer player) {
         if (!markTerminalCleanup()) return;
-        if (delegate != null) delegate.onBatchFinished(player);
+        if (delegate != null) delegate.machineOperation().cleanup(player);
         // 整个节点稍后才收取或归还可复用材料，子批次结束时仍需保留其所有权。
         resetState();
     }

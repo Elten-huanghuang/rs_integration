@@ -25,10 +25,8 @@ import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-
 import java.lang.reflect.Field;
 import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
@@ -69,7 +67,7 @@ public class WRAlchemyBatchDelegateTest extends BootstrapTest {
 
         try (MockedStatic<InkFluidSupport> support = mockStatic(InkFluidSupport.class, CALLS_REAL_METHODS)) {
             support.when(() -> InkFluidSupport.token(any(FluidStack.class))).thenAnswer(call -> token(call.getArgument(0)));
-            List<ItemStack> collected = harness.delegate.collectAllResults(mock(ServerPlayer.class));
+            List<ItemStack> collected = harness.delegate.outputSource().collectFinal(mock(ServerPlayer.class)).stacks();
             assertEquals(3, collected.size());
             assertEquals(2, collected.get(0).getCount());
             assertTrue(collected.get(0).is(Items.DIAMOND));
@@ -78,7 +76,7 @@ public class WRAlchemyBatchDelegateTest extends BootstrapTest {
             assertTrue(harness.machine.itemOutputHandler.getStackInSlot(0).isEmpty());
             assertTrue(harness.boiler.tank.isEmpty());
             assertTrue(harness.machine.itemHandler.getStackInSlot(3).isEmpty());
-            assertTrue(harness.delegate.collectAllResults(mock(ServerPlayer.class)).isEmpty());
+            assertTrue(harness.delegate.outputSource().collectFinal(mock(ServerPlayer.class)).stacks().isEmpty());
         }
     }
 

@@ -1,21 +1,15 @@
 package com.huanghuang.rsintegration.mods.touhoulittlemaid;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
-
-import com.huanghuang.rsintegration.util.ChunkUtils;
 import com.huanghuang.rsintegration.storage.StorageRestockSupport;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.AABB;
 import net.minecraftforge.common.capabilities.Capability;
-
-import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
-
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -42,7 +36,6 @@ import net.minecraftforge.items.ItemStackHandler;
 import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraft.core.registries.Registries;
 import org.jetbrains.annotations.NotNull;
-
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -543,8 +536,11 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         return true;
     }
 
-    @Override
-    public ItemStack collectResult(ServerPlayer player) {
+    @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.single(this::takeResult, outputContract());
+    }
+
+    private ItemStack takeResult(ServerPlayer player) {
         ServerLevel level = resolveMachineLevel(player);
 
         // Primary: capture the spawned ItemEntity for full NBT fidelity
@@ -591,7 +587,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@NotNull ServerPlayer player) {
+    public void cleanup(@NotNull ServerPlayer player) {
         clearHandlers();
         resetState();
         craftEverConfirmed = false;

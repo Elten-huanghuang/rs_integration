@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.huanghuang.rsintegration.crafting.batch.ProductionEvidence;
 import com.huanghuang.rsintegration.ModItems;
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.api.RSIIntegrationApi;
@@ -69,7 +70,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -79,7 +79,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -164,7 +163,7 @@ class TaskFluidExecutionTest extends BootstrapTest {
         ExternalIntegrationBatchDelegate delegate = spy(delegate(1000));
         doReturn(true).when(delegate).validateExecutionContext(player);
         assertTrue(delegate.usesTaskFluidInputs());
-        assertTrue(delegate.startOperation(OperationStartContext.chainReserved(player, ExtractionLedger.external(),
+        assertTrue(delegate.machineOperation().start(OperationStartContext.chainReserved(player, ExtractionLedger.external(),
                 MaterialPlan.none(), List.of(), InputBufferPlan.none())));
         assertEquals(1000, tank.getFluidAmount());
         assertEquals(0, held());
@@ -312,7 +311,7 @@ class TaskFluidExecutionTest extends BootstrapTest {
         set(delegate, "customCollectionComplete", true);
         List<?> results = (List<?>) invoke(delegate, "collectCustomResults", new Class<?>[]{ServerPlayer.class}, player);
         assertEquals(700, InkFluidSupport.fluid((ItemStack) results.get(0)).getAmount());
-        assertTrue(delegate.drainReportedResources().isEmpty());
+        assertTrue(ProductionEvidence.from(delegate).takeDelivered().isEmpty());
         assertTrue(((List<?>) invoke(delegate, "collectCustomResults", new Class<?>[]{ServerPlayer.class}, player)).isEmpty());
         assertEquals(0, held());
         verifyNoInteractions(session);
@@ -373,12 +372,12 @@ class TaskFluidExecutionTest extends BootstrapTest {
                 MachineExecutionMode.TICKED_AND_BUSY, false, ConcurrencyCapabilities.machineSlot(),
                 new SupportScope(List.of(), List.of(), false), false));
         tank.setFluid(water(700));
-        List<ItemStack> results = delegate.collectAllResults(player);
+        List<ItemStack> results = delegate.outputSource().collectFinal(player).stacks();
         assertEquals(1, results.size());
         assertEquals(700, InkFluidSupport.fluid(results.get(0)).getAmount());
         assertEquals(0, tank.getFluidAmount());
-        assertTrue(delegate.drainReportedResources().isEmpty());
-        assertTrue(delegate.collectAllResults(player).isEmpty());
+        assertTrue(ProductionEvidence.from(delegate).takeDelivered().isEmpty());
+        assertTrue(delegate.outputSource().collectFinal(player).stacks().isEmpty());
         verifyNoInteractions(session);
     }
 
@@ -425,7 +424,7 @@ class TaskFluidExecutionTest extends BootstrapTest {
         when(view.materials()).thenReturn(List.of(item));
         MaterialPlan plan = new MaterialPlan(List.of(new MaterialPlan.Entry(id("iron").toString(),
                 new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 1), MaterialPlan.Allocation.GRAPH, 0)));
-        assertFalse(delegate.startOperation(OperationStartContext.chainReserved(player, ExtractionLedger.external(),
+        assertFalse(delegate.machineOperation().start(OperationStartContext.chainReserved(player, ExtractionLedger.external(),
                 plan, List.of(new OperationStartContext.ReservedMaterial(id("iron").toString(),
                         new ItemStack(Items.IRON_INGOT))), null)));
         invoke(delegate, "clearMachineState", new Class<?>[]{BlockEntity.class, ServerPlayer.class}, machine, player);

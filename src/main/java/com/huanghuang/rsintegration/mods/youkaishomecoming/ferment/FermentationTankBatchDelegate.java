@@ -1,9 +1,8 @@
 package com.huanghuang.rsintegration.mods.youkaishomecoming.ferment;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
 import com.huanghuang.rsintegration.mods.common.MachineWaterSupply;
-
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -12,7 +11,6 @@ import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
 import com.huanghuang.rsintegration.util.Reflect;
-import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
@@ -39,13 +37,11 @@ import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.Items;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
-
 import javax.annotation.Nullable;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 /** Batch delegate for Youkais Homecoming Fermentation Tank. */
 public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
@@ -463,23 +459,16 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
         return workingObservation();
     }
 
-    @Override
-    public ItemStack collectResult(ServerPlayer player) {
-        List<ItemStack> all = collectPhysicalResults();
-        if (all.isEmpty()) return ItemStack.EMPTY;
-        for (int i = 1; i < all.size(); i++) refund(all.get(i));
-        return all.get(0);
+    @Override public OperationOutputSource outputSource() {
+        return player -> OperationOutputSource.Handoff.physical(takeResults(player), outputContract());
     }
 
-    @Override
-    public List<ItemStack> collectAllResults(ServerPlayer player) {
+    private List<ItemStack> takeResults(ServerPlayer player) {
         return collectPhysicalResults();
     }
 
-    @Override
-    public boolean collectsPhysicalSecondaryOutputs() {
-        return true;
-    }
+
+
 
     private List<ItemStack> collectPhysicalResults() {
         if (!completionLatched) {
@@ -578,7 +567,7 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public void onBatchFinished(@NotNull ServerPlayer player) {
+    public void cleanup(@NotNull ServerPlayer player) {
         forceChunkLoad(false);
         clearAndRefund();
         resetFermentState();

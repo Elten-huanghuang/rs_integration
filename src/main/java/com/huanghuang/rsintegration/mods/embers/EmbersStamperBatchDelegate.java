@@ -1,8 +1,7 @@
 package com.huanghuang.rsintegration.mods.embers;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
-
-
 import com.huanghuang.rsintegration.mods.common.MachineWaterSupply;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -35,7 +34,6 @@ import net.minecraft.world.phys.AABB;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fluids.capability.IFluidHandler;
 import net.minecraftforge.items.ItemStackHandler;
-
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
@@ -326,11 +324,10 @@ public final class EmbersStamperBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override public boolean failureConsumesInputs(CraftObservation observation) { return consumed; }
-    @Override public ItemStack collectResult(ServerPlayer player) {
-        List<ItemStack> results = collectAllResults(player);
-        return results.isEmpty() ? ItemStack.EMPTY : results.get(0);
+    @Override public OperationOutputSource outputSource() {
+        return player -> OperationOutputSource.Handoff.physical(takeResults(player), outputContract());
     }
-    @Override public List<ItemStack> collectAllResults(ServerPlayer player) {
+    private List<ItemStack> takeResults(ServerPlayer player) {
         if (!started) return List.of();
         List<ItemStack> collected = new ArrayList<>();
         remaining.stream().filter(stack -> !stack.isEmpty()).forEach(stack -> collected.add(stack.copy()));
@@ -427,7 +424,8 @@ public final class EmbersStamperBatchDelegate extends AbstractBatchDelegate {
         }
     }
 
-    @Override public boolean collectsPhysicalSecondaryOutputs() { return true; }
+
+
 
     @Override public void releasePreparationResources() {
         // 失败时若机器区块已卸载，基类不会调用机器清理钩子；先保全旧印模。
@@ -460,7 +458,7 @@ public final class EmbersStamperBatchDelegate extends AbstractBatchDelegate {
         resetState();
     }
 
-    @Override public void onBatchFinished(@Nullable ServerPlayer player) {
+    @Override public void cleanup(@Nullable ServerPlayer player) {
         if (!markTerminalCleanup()) return;
         returnReplacedStamp(player);
         resetState();

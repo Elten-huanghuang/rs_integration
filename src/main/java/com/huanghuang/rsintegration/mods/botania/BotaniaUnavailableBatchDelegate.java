@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mods.botania;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
@@ -15,8 +16,12 @@ public abstract class BotaniaUnavailableBatchDelegate extends AbstractBatchDeleg
  @Override public boolean validateAndInit(@Nonnull ServerPlayer p,@Nonnull ResourceLocation id,ResourceLocation dim,@Nonnull BlockPos pos){this.pos=pos;this.machineDim=dim;this.machineServer=p.getServer();return false;}
  @Override public boolean startSingleOperation(@Nonnull ServerPlayer p){return false;}
  @Override public boolean startSingleOperation(@Nonnull ServerPlayer p,@Nonnull ExtractionLedger l){return false;}
- @Override public ItemStack collectResult(@Nonnull ServerPlayer p){return ItemStack.EMPTY;}
+ @Override public OperationOutputSource outputSource() {
+        return OperationOutputSource.single(this::takeResult, outputContract());
+    }
+
+    private ItemStack takeResult(@Nonnull ServerPlayer p) {return ItemStack.EMPTY;}
  @Override protected boolean isMachineCraftFinished(@Nonnull ServerLevel l,@Nonnull BlockEntity b){return false;}
- @Override public void onBatchFinished(@Nonnull ServerPlayer p){resetState();}
+ @Override public void cleanup(@Nonnull ServerPlayer p){resetState();}
  @Override public BlockPos getMachinePos(){return pos;}
 }
