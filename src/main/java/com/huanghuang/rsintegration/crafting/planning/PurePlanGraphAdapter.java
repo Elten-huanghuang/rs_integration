@@ -21,6 +21,7 @@ import com.huanghuang.rsintegration.crafting.graph.OutputPortId;
 import com.huanghuang.rsintegration.crafting.graph.OutputProbability;
 import com.huanghuang.rsintegration.crafting.graph.RootAllocation;
 import com.huanghuang.rsintegration.crafting.graph.RootDemand;
+import com.huanghuang.rsintegration.crafting.plan.PlanStep;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
@@ -88,6 +89,22 @@ public final class PurePlanGraphAdapter {
         }
         builder.consumeRootCatalysts();
         return builder;
+    }
+
+    /** 将轨迹绑定到已生成的卡片；缺失的生产卡片不能改指到下一张。 */
+    public static void attachPreviewTrace(List<PlanStep> steps, PureRecipePlanner.PreviewTrace trace,
+                                          Map<Integer, Integer> cards, int terminal) {
+        cards.forEach((ordinal, card) -> steps.set(card, steps.get(card).withTraceInputs(
+                previewInputs(trace.inputs().get(ordinal), cards))));
+        if (terminal >= 0 && trace.roots() != null) {
+            steps.set(terminal, steps.get(terminal).withTraceInputs(previewInputs(trace.roots(), cards)));
+        }
+    }
+
+    private static List<PlanStep.TraceInput> previewInputs(List<PureRecipePlanner.PreviewDemand> demands,
+                                                          Map<Integer, Integer> cards) {
+        return demands.stream().map(d -> new PlanStep.TraceInput(stack(d.material()), d.quantity(),
+                d.role(), cards.getOrDefault(d.producer(), -1))).toList();
     }
 
     private static ItemStack stack(MaterialRef material) {

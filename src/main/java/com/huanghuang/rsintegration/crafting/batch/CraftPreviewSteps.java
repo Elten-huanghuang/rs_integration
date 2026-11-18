@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.batch;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.crafting.plan.PlanStep;
+import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner.PlannedStep;
 import com.huanghuang.rsintegration.mods.slashblade.SlashBladePlanning;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceLocation;
@@ -24,7 +25,26 @@ import java.util.function.Function;
 public final class CraftPreviewSteps {
     private CraftPreviewSteps() {}
 
-    record PreviewStep(ResolutionStep step, int batches) {}
+    record PreviewStep(ResolutionStep step, long batches) {}
+
+    /** 诊断轨迹按规划序号引用生产者。只合回同一规划步骤拆出的批次，不合并相同配方。 */
+    static List<PreviewStep> tracedSteps(List<PlannedStep> planned, List<ResolutionStep> segments) {
+        List<PreviewStep> cards = new ArrayList<>(planned.size());
+        int cursor = 0;
+        for (var step : planned) {
+            ResolutionStep template = segments.get(cursor);
+            long remaining = step.batches();
+            while (remaining > 0) {
+                var segment = segments.get(cursor++);
+                if (!step.recipeId().equals(segment.recipeId()) || segment.executions() <= 0
+                        || segment.executions() > remaining) throw new IllegalStateException("预览步骤批次错位");
+                remaining -= segment.executions();
+            }
+            cards.add(new PreviewStep(template, step.batches()));
+        }
+        if (cursor != segments.size()) throw new IllegalStateException("诊断轨迹与规划步骤数量不符");
+        return cards;
+    }
 
     /** 将条件展示栈连接到服务端已规划的实际生产者，避免 UUID/额外 NBT 让树断层。 */
     static List<PlanStep> linkSlashBladeInputs(List<PlanStep> steps,

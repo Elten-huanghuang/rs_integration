@@ -241,7 +241,9 @@ public record PlanResponseDraft(
                 step.inputs().stream().map(ItemStack::copy).toList(),
                 step.alternatives(), step.modType(), step.depth(), step.hasOrSiblings(),
                 step.recipeWidth(), step.recipeHeight(), step.alternativeModTypes(),
-                step.inputRoles(), step.inferMode(), step.parallelPlan());
+                step.inputRoles(), step.inferMode(), step.parallelPlan(), step.traceInputs() == null ? null :
+                        step.traceInputs().stream().map(input -> new PlanStep.TraceInput(
+                                input.material(), input.quantity(), input.role(), input.producer())).toList());
     }
 
     private static PlanGraphView copyGraph(PlanGraphView source) {

@@ -158,6 +158,16 @@ public final class PlanResponsePacket {
             }
             buf.writeBoolean(step.inferMode());
             writeParallelPlan(buf, step.parallelPlan());
+            buf.writeBoolean(step.traceInputs() != null);
+            if (step.traceInputs() != null) {
+                buf.writeVarInt(step.traceInputs().size());
+                for (var input : step.traceInputs()) {
+                    InkFluidSupport.writePacket(buf, input.material());
+                    buf.writeVarLong(input.quantity());
+                    buf.writeVarInt(input.role().ordinal());
+                    buf.writeVarInt(input.producer() + 1);
+                }
+            }
         }
         // Materials
         buf.writeVarInt(plan.materials().size());
@@ -321,9 +331,25 @@ public final class PlanResponsePacket {
             for (int j = 0; j < altModCount; j++) {
                 alternativeModTypes.add(buf.readUtf(MAX_MOD_TYPE_LENGTH));
             }
+            boolean infer = buf.readBoolean();
+            ParallelPlan parallel = readParallelPlan(buf);
+            List<PlanStep.TraceInput> trace = null;
+            if (buf.readBoolean()) {
+                int n = readBoundedCount(buf);
+                trace = new ArrayList<>(n);
+                for (int j = 0; j < n; j++) {
+                    var material = InkFluidSupport.readPacket(buf);
+                    long quantity = readNonNegativeVarLong(buf, "trace quantity");
+                    int role = readNonNegativeVarInt(buf, "trace role");
+                    int producer = readNonNegativeVarInt(buf, "trace producer") - 1;
+                    if (quantity == 0 || role >= demandRoles.length || producer >= i)
+                        throw new DecoderException("预览需求或生产步骤引用无效");
+                    trace.add(new PlanStep.TraceInput(material, quantity, demandRoles[role], producer));
+                }
+            }
             steps.add(new PlanStep(rid, output, batches, inputs, alternatives, modType,
                     depth, hasOrSiblings, recipeWidth, recipeHeight, alternativeModTypes,
-                    inputRoles, buf.readBoolean(), readParallelPlan(buf)));
+                    inputRoles, infer, parallel, trace));
         }
         // Materials
         int matCount = readBoundedCount(buf);

@@ -32,9 +32,33 @@ public record PlanStep(
         List<String> alternativeModTypes,
         List<DemandRole> inputRoles,
         boolean inferMode,
-        @Nullable ParallelPlan parallelPlan
+        @Nullable ParallelPlan parallelPlan,
+        @Nullable List<TraceInput> traceInputs
 ) {
+    /** 生产者是本响应中先前步骤的序号；-1 表示来源未知，不代表已从库存分配。 */
+    public record TraceInput(ItemStack material, long quantity, DemandRole role, int producer) {
+        public TraceInput {
+            material = material.copyWithCount(1);
+            if (quantity <= 0 || producer < -1) throw new IllegalArgumentException("无效的预览需求");
+        }
+    }
+
+    public PlanStep(ResourceLocation recipeId, ItemStack output, long batches,
+                    List<ItemStack> inputs, List<ResourceLocation> alternatives, @Nullable ModType modType,
+                    int depth, boolean hasOrSiblings, int recipeWidth, int recipeHeight,
+                    List<String> alternativeModTypes, List<DemandRole> inputRoles, boolean inferMode,
+                    @Nullable ParallelPlan parallelPlan) {
+        this(recipeId, output, batches, inputs, alternatives, modType, depth, hasOrSiblings, recipeWidth,
+                recipeHeight, alternativeModTypes, inputRoles, inferMode, parallelPlan, null);
+    }
+
+    public PlanStep withTraceInputs(List<TraceInput> trace) {
+        return new PlanStep(recipeId, output, batches, inputs, alternatives, modType, depth, hasOrSiblings,
+                recipeWidth, recipeHeight, alternativeModTypes, inputRoles, inferMode, parallelPlan, trace);
+    }
+
     public PlanStep {
+        traceInputs = traceInputs == null ? null : List.copyOf(traceInputs);
         inputs = List.copyOf(inputs);
         alternatives = List.copyOf(alternatives);
         alternativeModTypes = List.copyOf(alternativeModTypes);
@@ -69,7 +93,7 @@ public record PlanStep(
     public PlanStep withParallelPlan(@Nullable ParallelPlan plan) {
         return new PlanStep(recipeId, output, batches, inputs, alternatives, modType, depth,
                 hasOrSiblings, recipeWidth, recipeHeight, alternativeModTypes, inputRoles,
-                inferMode, plan);
+                inferMode, plan, traceInputs);
     }
 
     public PlanStep(ResourceLocation recipeId, ItemStack output, long batches,

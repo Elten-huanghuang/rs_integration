@@ -213,6 +213,7 @@ public final class PureRecipePlanner {
             case UNRESOLVABLE -> search.bestFailureSteps;
             case STEP_LIMIT, SEARCH_LIMIT, TIME_LIMIT -> List.of();
         };
+        PreviewTrace previewTrace = null;
         if (buildPartialPreview && (status == Status.UNRESOLVABLE || status == Status.TIME_LIMIT) && !roots.isEmpty()) {
             PartialPlanBuilder partialBuilder = new PartialPlanBuilder(
                     graph, preciseAvailable, maxSteps, activeRootOutputs,
@@ -226,6 +227,7 @@ public final class PureRecipePlanner {
                         && partial.steps().size() >= resultSteps.size()) {
                     missing = partial.missing();
                     resultSteps = partial.steps();
+                    previewTrace = partial.trace();
                 }
             } catch (TimeLimitException ignored) {
                 // Feasibility is already known. Keep the search trace when the optional
@@ -235,6 +237,7 @@ public final class PureRecipePlanner {
                 if (!partial.missing().isEmpty()) {
                     missing = partial.missing();
                     resultSteps = partial.steps();
+                    previewTrace = partial.trace();
                 }
             }
         }
@@ -249,7 +252,7 @@ public final class PureRecipePlanner {
                 aggregateMagicCosts(graph, resultSteps), status,
                 search.expandedStates, search.backtracks, search.memoHits,
                 failureReason, status == Status.SUCCESS
-                        ? new MaterialFlow(normalizedRoots, search.flow) : null);
+                        ? new MaterialFlow(normalizedRoots, search.flow) : null, previewTrace);
     }
 
     public enum Status { SUCCESS, UNRESOLVABLE, STEP_LIMIT, SEARCH_LIMIT, TIME_LIMIT }
@@ -321,7 +324,15 @@ public final class PureRecipePlanner {
                          List<IngredientRef> missing, Map<MaterialRef, Long> remaining,
                          List<MagicResourceCost> magicCosts,
                          Status status, int expandedStates, int backtracks, int memoHits,
-                         FailureReason failureReason, @Nullable MaterialFlow materialFlow) {
+                         FailureReason failureReason, @Nullable MaterialFlow materialFlow,
+                         @Nullable PreviewTrace previewTrace) {
+        public Result(Feasibility feasibility, List<PlannedStep> steps,
+                      List<IngredientRef> missing, Map<MaterialRef, Long> remaining,
+                      List<MagicResourceCost> magicCosts, Status status, int expandedStates, int backtracks,
+                      int memoHits, FailureReason failureReason, @Nullable MaterialFlow materialFlow) {
+            this(feasibility, steps, missing, remaining, magicCosts, status, expandedStates, backtracks,
+                    memoHits, failureReason, materialFlow, null);
+        }
         public Result(Feasibility feasibility, List<PlannedStep> steps,
                       List<IngredientRef> missing, Map<MaterialRef, Long> remaining,
                       List<MagicResourceCost> magicCosts,
@@ -361,6 +372,12 @@ public final class PureRecipePlanner {
         }
 
         private Result withOutputTarget(boolean additionalOutput) {
+            if (previewTrace != null && previewTrace.roots() != null) {
+                // 这里的根是最终产物，不是终端配方的输入。保留各步骤自己的证据。
+                return new Result(feasibility, steps, missing, remaining, magicCosts, status,
+                        expandedStates, backtracks, memoHits, failureReason, materialFlow,
+                        new PreviewTrace(previewTrace.inputs(), null));
+            }
             if (materialFlow == null || materialFlow.outputTarget()
                     && materialFlow.additionalOutput() == additionalOutput) return this;
             return new Result(feasibility, steps, missing, remaining, magicCosts, status,
@@ -2359,6 +2376,11 @@ public final class PureRecipePlanner {
         private final Map<ResourceLocation, Set<MaterialRef>> stockByItem = new HashMap<>();
         private final int maxSteps;
         private final List<PlannedStep> steps = new ArrayList<>();
+        private final List<List<PreviewDemand>> inputs = new ArrayList<>();
+        private final List<PreviewDemand> rootDemands = new ArrayList<>();
+        private List<IngredientRef> roots = List.of();
+        private int finishedRoots;
+        private final Map<MaterialRef, ArrayDeque<PreviewLot>> lots = new HashMap<>();
         private final Set<MaterialRef> visiting = new HashSet<>();
         private final Map<List<MaterialRef>, PartialFamilyCost> familyCosts = new HashMap<>();
         private final Map<CandidateLookup, List<RecipeNode>> candidateCache = new HashMap<>();
@@ -2380,7 +2402,7 @@ public final class PureRecipePlanner {
             this.limits = limits;
             available.forEach((material, count) -> {
                 if (material != null && count != null && count > 0) {
-                    addStock(material, count);
+                    addStock(material, count, -1);
                 }
             });
             this.maxSteps = Math.max(1, maxSteps);
@@ -2392,27 +2414,39 @@ public final class PureRecipePlanner {
         }
 
         private PartialTrace build(List<IngredientRef> roots) {
+            this.roots = roots;
             for (IngredientRef root : roots) {
                 budgetCheck.run();
-                expand(root);
+                List<PreviewDemand> branch = new ArrayList<>();
+                expand(root, branch);
+                rootDemands.addAll(branch);
+                finishedRoots++;
             }
-            return new PartialTrace(List.copyOf(steps), List.copyOf(missing.values()));
+            return new PartialTrace(List.copyOf(steps), List.copyOf(missing.values()),
+                    new PreviewTrace(inputs, rootDemands));
         }
 
         private PartialTrace snapshot() {
-            return new PartialTrace(List.copyOf(steps), List.copyOf(missing.values()));
+            List<PreviewDemand> boundaries = new ArrayList<>(rootDemands);
+            for (int i = finishedRoots; i < roots.size(); i++) {
+                recordBoundary(roots.get(i), roots.get(i).count(), boundaries);
+            }
+            return new PartialTrace(List.copyOf(steps), List.copyOf(missing.values()),
+                    new PreviewTrace(inputs, boundaries));
         }
 
-        private boolean expand(IngredientRef ingredient) {
+        private boolean expand(IngredientRef ingredient, List<PreviewDemand> demands) {
             budgetCheck.run();
-            long remaining = consumeAvailable(ingredient);
+            long remaining = consumeAvailable(ingredient, demands);
             if (remaining == 0L) return true;
             if (steps.size() >= maxSteps || visiting.size() >= limits.auxiliaryMaxDepth()) {
                 noteMissing(ingredient, remaining);
+                recordBoundary(ingredient, remaining, demands);
                 return false;
             }
             if (!ingredient.recursive()) {
                 noteMissing(ingredient, remaining);
+                recordBoundary(ingredient, remaining, demands);
                 return false;
             }
 
@@ -2440,13 +2474,17 @@ public final class PureRecipePlanner {
 
                 visiting.add(choice.output());
                 boolean covered = true;
+                List<PreviewDemand> children = new ArrayList<>();
                 try {
                     for (IngredientRef input : scaledInputs) {
-                        if (!expand(input)) covered = false;
+                        if (!expand(input, children)) covered = false;
                     }
                 } finally {
                     visiting.remove(choice.output());
                 }
+                int producer = steps.size();
+                demands.add(new PreviewDemand(choice.output(), remaining, ingredient.role(), producer));
+                inputs.add(List.copyOf(children));
                 steps.add(new PlannedStep(recipe.recipeId(), batches,
                         ("smithing".equals(recipe.modTypeId()) || recipe.output().constrainedNbt())
                                 && !recipe.output().nbt().isEmpty()
@@ -2457,16 +2495,22 @@ public final class PureRecipePlanner {
                     if (output.getKey().equals(recipe.output()) && ingredient.role() != DemandRole.CATALYST) {
                         surplus -= remaining;
                     }
-                    if (surplus > 0L) addStock(output.getKey(), surplus);
+                    if (surplus > 0L) addStock(output.getKey(), surplus, producer);
                 }
                 return covered;
             }
 
             noteMissing(ingredient, remaining);
+            recordBoundary(ingredient, remaining, demands);
             return false;
         }
 
-        private long consumeAvailable(IngredientRef ingredient) {
+        private static void recordBoundary(IngredientRef ingredient, long remaining, List<PreviewDemand> demands) {
+            if (!ingredient.alternatives().isEmpty()) demands.add(new PreviewDemand(
+                    ingredient.alternatives().get(0), remaining, ingredient.role(), -1));
+        }
+
+        private long consumeAvailable(IngredientRef ingredient, List<PreviewDemand> demands) {
             long remaining = ingredient.count();
             Set<ResourceLocation> itemIds = new LinkedHashSet<>();
             for (MaterialRef alternative : ingredient.alternatives()) {
@@ -2490,6 +2534,19 @@ public final class PureRecipePlanner {
                 long have = stock.getOrDefault(material, 0L);
                 if (have <= 0L) continue;
                 long take = Math.min(have, remaining);
+                long outstanding = take;
+                var iter = lots.get(material).iterator();
+                while (outstanding > 0) {
+                    budgetCheck.run();
+                    var lot = iter.next();
+                    long used = Math.min(outstanding, lot.remaining);
+                    demands.add(new PreviewDemand(material, used, ingredient.role(), lot.producer));
+                    if (ingredient.role() != DemandRole.CATALYST) {
+                        lot.remaining -= used;
+                        if (lot.remaining == 0) iter.remove();
+                    }
+                    outstanding -= used;
+                }
                 if (ingredient.role() != DemandRole.CATALYST) {
                     if (take == have) stock.remove(material);
                     else stock.put(material, have - take);
@@ -2500,9 +2557,22 @@ public final class PureRecipePlanner {
             return remaining;
         }
 
-        private void addStock(MaterialRef material, long count) {
-            if (count <= 0L) return;
-            stock.merge(material, count, PureRecipePlanner::saturatedAdd);
+        private static final class PreviewLot {
+            private final int producer;
+            private long remaining;
+
+            private PreviewLot(int producer, long remaining) {
+                this.producer = producer;
+                this.remaining = remaining;
+            }
+        }
+
+        private void addStock(MaterialRef material, long count, int producer) {
+            long previous = stock.getOrDefault(material, 0L);
+            long added = Math.min(count, Long.MAX_VALUE - previous);
+            if (added <= 0L) return;
+            stock.put(material, previous + added);
+            lots.computeIfAbsent(material, ignored -> new ArrayDeque<>()).addLast(new PreviewLot(producer, added));
             stockByItem.computeIfAbsent(material.itemId(), ignored -> new LinkedHashSet<>())
                     .add(material);
         }
@@ -2700,7 +2770,17 @@ public final class PureRecipePlanner {
         }
     }
 
-    private record PartialTrace(List<PlannedStep> steps, List<IngredientRef> missing) {}
+    /** 只描述诊断展开，不证明执行分配；负序号表示未记录生产者。 */
+    public record PreviewDemand(MaterialRef material, long quantity, DemandRole role, int producer) {}
+
+    public record PreviewTrace(List<List<PreviewDemand>> inputs, @Nullable List<PreviewDemand> roots) {
+        public PreviewTrace {
+            inputs = inputs.stream().map(List::copyOf).toList();
+            roots = roots == null ? null : List.copyOf(roots);
+        }
+    }
+
+    private record PartialTrace(List<PlannedStep> steps, List<IngredientRef> missing, PreviewTrace trace) {}
 
     private static final class DiagnosticBudget implements Runnable {
         private int remaining;

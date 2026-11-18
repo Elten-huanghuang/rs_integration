@@ -168,9 +168,16 @@ public final class PlanMaterialBill {
         Map<IngredientKey, Long> peak = new LinkedHashMap<>();
         for (PlanStep step : steps) {
             Map<IngredientKey, Long> reusable = new LinkedHashMap<>();
-            for (int slot = 0; slot < step.inputs().size(); slot++) {
-                mergeDemand(step.inputRole(slot) == DemandRole.CATALYST ? reusable : consumed,
-                        step.inputs().get(slot), step.totalInputCount(slot, step.batches()));
+            if (step.traceInputs() != null) {
+                for (var input : step.traceInputs()) {
+                    mergeDemand(input.role() == DemandRole.CATALYST ? reusable : consumed,
+                            input.material(), input.quantity());
+                }
+            } else {
+                for (int slot = 0; slot < step.inputs().size(); slot++) {
+                    mergeDemand(step.inputRole(slot) == DemandRole.CATALYST ? reusable : consumed,
+                            step.inputs().get(slot), step.totalInputCount(slot, step.batches()));
+                }
             }
             reusable.forEach((key, quantity) -> peak.merge(key, quantity, Math::max));
         }

@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.plan.PlanOutcome;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import com.huanghuang.rsintegration.crafting.plan.PlanStep;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.tree.PlanTreeModel;
 import com.huanghuang.rsintegration.mods.slashblade.SlashBladeRSModule;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
@@ -27,7 +28,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class SlashBladePreviewLinkTest extends BootstrapTest {
     @Test
-    void legacyTreeLinksNestedBladesDespiteDifferentTemplateAndOutputNbt() {
+    void traceLinksNestedBladesDespiteDifferentTemplateAndOutputNbt() {
         SlashBladeRSModule.INSTANCE.registerModType();
         ModType type = ModType.byId("slashblade");
         Ingredient targetInput = ingredient("ak:rage", 1000, 10);
@@ -47,6 +48,11 @@ class SlashBladePreviewLinkTest extends BootstrapTest {
                 rageId, recipe(rageId, rageInput, rage), baseId, recipe(baseId, Ingredient.of(Items.STICK), base));
 
         var linked = CraftPreviewSteps.linkSlashBladeInputs(List.of(leaf, middle, root), recipes::get, RegistryAccess.EMPTY);
+        assertTrue(ItemStack.isSameItemSameTags(linked.get(1).inputs().get(0), base));
+        assertTrue(ItemStack.isSameItemSameTags(linked.get(2).inputs().get(0), rage));
+        linked = List.of(linked.get(0), linked.get(1).withTraceInputs(List.of(
+                new PlanStep.TraceInput(base, 1, DemandRole.CONSUMED, 0))),
+                linked.get(2).withTraceInputs(List.of(new PlanStep.TraceInput(rage, 1, DemandRole.CONSUMED, 1))));
         PlanTreeModel tree = PlanTreeModel.from(new PlanResponse(false, "test", target, linked, Map.of(),
                 List.of("raw"), targetId.toString(), List.of(), 1, PlanOutcome.MISSING_INPUTS, List.of()));
         assertEquals(1, tree.root.children.size());

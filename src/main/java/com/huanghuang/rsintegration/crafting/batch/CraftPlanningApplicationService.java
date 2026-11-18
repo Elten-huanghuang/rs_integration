@@ -1717,7 +1717,11 @@ final class CraftPlanningApplicationService {
         // 有图时按投影的拓扑顺序逐节点构建展示属性；没有原生配方模板的节点仍由图直接展示。
         List<PlanStep> steps = new ArrayList<>();
         Map<Integer, Integer> templateIndices = new LinkedHashMap<>();
-        List<CraftPreviewSteps.PreviewStep> mergedSteps = planGraph == null
+        var trace = usedPurePlan && planGraph == null ? precomputedPlan.previewTrace() : null;
+        Map<Integer, Integer> traceCards = new LinkedHashMap<>();
+        List<CraftPreviewSteps.PreviewStep> mergedSteps = trace != null
+                ? CraftPreviewSteps.tracedSteps(precomputedPlan.steps(), resolutionSteps)
+                : planGraph == null
                 ? CraftPreviewSteps.merge(resolutionSteps, id -> CraftRecipeResolver.resolve(player.serverLevel(), id),
                         player.serverLevel().registryAccess())
                 : resolutionSteps.stream().map(rs -> new CraftPreviewSteps.PreviewStep(rs, rs.executions())).toList();
@@ -1725,9 +1729,10 @@ final class CraftPlanningApplicationService {
             CraftPreviewSteps.PreviewStep previewStep = mergedSteps.get(ordinal);
             ResolutionStep mergedRs = previewStep.step();
             ResourceLocation stepId = mergedRs.recipeId();
-            int batches = previewStep.batches();
+            long batches = previewStep.batches();
             if (mergedRs != null && mergedRs.syntheticInput() != null && mergedRs.syntheticOutput() != null) {
                 if (planGraph != null) templateIndices.put(planGraph.topologicalOrder().get(ordinal).value(), steps.size());
+                if (trace != null) traceCards.put(ordinal, steps.size());
                 steps.add(new PlanStep(stepId, mergedRs.syntheticOutput().copy(), batches,
                         List.of(mergedRs.syntheticInput().copy()), Collections.emptyList(), mergedRs.modType(),
                         0, false, 0, 0, Collections.emptyList()));
@@ -1818,8 +1823,8 @@ final class CraftPlanningApplicationService {
                     for (IngredientSpec spec : modSpecs) {
                         if (spec.isEmpty()) continue;
                         int cnt = spec.role() == DemandRole.CATALYST && stepHandler != null
-                                ? stepHandler.requiredIngredientCount(
-                                        stepRecipe, spec, stepInputIndex, batches)
+                                ? SaturatingLongMath.clampToInt(stepHandler.requiredIngredientCountLong(
+                                        stepRecipe, spec, stepInputIndex, batches))
                                 : spec.count();
                         stepInputIndex++;
                         ItemStack matched = CraftDisplayMaterials.matchAndConsume(spec.ingredient(), displayAvailable);
@@ -1871,6 +1876,7 @@ final class CraftPlanningApplicationService {
 
             ModType mt = stepModType;
             if (planGraph != null) templateIndices.put(planGraph.topologicalOrder().get(ordinal).value(), steps.size());
+            if (trace != null) traceCards.put(ordinal, steps.size());
             steps.add(new PlanStep(stepId, output, batches, inputs, alternatives, mt,
                     0, !alternatives.isEmpty(), recipeW, recipeH, alternativeModTypes,
                     inputRoles));
@@ -1937,7 +1943,8 @@ final class CraftPlanningApplicationService {
             }
         }
 
-        int firstStandalone = planGraph == null ? 0 : steps.size();
+        int terminalIndex = steps.size();
+        int firstStandalone = planGraph == null ? 0 : terminalIndex;
         // 图外的终端与额外阶段单列；已嵌入的终端从节点投影生成。
         // Components, not Strings: a dedicated server cannot resolve rsi.* keys.
         List<Component> modWarnings = new ArrayList<>();
@@ -2142,6 +2149,10 @@ final class CraftPlanningApplicationService {
 
         steps = CraftPreviewSteps.linkSlashBladeInputs(steps,
                 id -> CraftRecipeResolver.resolve(player.serverLevel(), id), player.serverLevel().registryAccess());
+        if (trace != null) {
+            PurePlanGraphAdapter.attachPreviewTrace(steps, trace, traceCards,
+                    !terminalEmbedded && levelBooks == null ? terminalIndex : -1);
+        }
 
         // Compute material availability for ALL items in the plan.
         // neededCounts: displayItem → how many needed (negative if produced > consumed)

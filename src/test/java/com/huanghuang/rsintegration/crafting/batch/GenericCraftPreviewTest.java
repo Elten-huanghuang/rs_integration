@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.plan.MissingMaterialBookmarkList;
 import com.huanghuang.rsintegration.crafting.plan.PlanMaterialBill;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
@@ -86,7 +87,7 @@ class GenericCraftPreviewTest extends BootstrapTest {
         List<ResolutionStep> projected = PurePlanAdapter.toResolutionSteps(planned, graph);
         Map<ResourceLocation, Recipe<?>> recipes = Map.of(producerId, producer, fill.getId(), fill);
         var preview = CraftPreviewSteps.merge(projected, recipes::get, RegistryAccess.EMPTY);
-        assertEquals(production > 0 ? List.of(production, executions) : List.of(executions),
+        assertEquals(production > 0 ? List.of((long) production, (long) executions) : List.of((long) executions),
                 preview.stream().map(CraftPreviewSteps.PreviewStep::batches).toList());
 
         List<PlanStep> steps = new ArrayList<>();
@@ -106,11 +107,23 @@ class GenericCraftPreviewTest extends BootstrapTest {
             ItemStack output = recipe.getResultItem(RegistryAccess.EMPTY);
             needed.merge(output.getItem(), -(long) output.getCount() * step.batches(),
                     SaturatingLongMath::signedAdd);
-            steps.add(new PlanStep(recipe.getId(), output, step.batches(), displays));
+            var card = new PlanStep(recipe.getId(), output, step.batches(), displays);
+            if (recipe == fill) {
+                var inputsTrace = new ArrayList<PlanStep.TraceInput>();
+                inputsTrace.add(new PlanStep.TraceInput(displays.get(0), executions, DemandRole.CONSUMED, -1));
+                if (production > 0) inputsTrace.add(new PlanStep.TraceInput(fluid, 1000L * production, DemandRole.CONSUMED, 0));
+                if (fluidStock > 0) inputsTrace.add(new PlanStep.TraceInput(fluid, fluidStock, DemandRole.CONSUMED, -1));
+                card = card.withTraceInputs(inputsTrace);
+            }
+            steps.add(card);
         }
         ItemStack target = new ItemStack(Items.DIAMOND);
         ResourceLocation targetId = new ResourceLocation("test", "target");
-        steps.add(new PlanStep(targetId, target, 1, List.of(new ItemStack(Items.WATER_BUCKET, 2))));
+        var bucket = new ItemStack(Items.WATER_BUCKET);
+        var rootInputs = new ArrayList<PlanStep.TraceInput>();
+        rootInputs.add(new PlanStep.TraceInput(bucket, executions, DemandRole.CONSUMED, steps.size() - 1));
+        if (filledStock > 0) rootInputs.add(new PlanStep.TraceInput(bucket, filledStock, DemandRole.CONSUMED, -1));
+        steps.add(new PlanStep(targetId, target, 1, List.of(bucket.copyWithCount(2))).withTraceInputs(rootInputs));
         needed.merge(Items.WATER_BUCKET, 2L, SaturatingLongMath::signedAdd);
         sources.put(Items.WATER_BUCKET, Ingredient.of(Items.WATER_BUCKET));
         var bill = PlanMaterialBill.summarize(needed, sources,
@@ -134,11 +147,13 @@ class GenericCraftPreviewTest extends BootstrapTest {
         assertTrue(MissingMaterialBookmarkList.from(response).isEmpty());
         var tree = PlanTreeModel.from(response);
         var filled = tree.findByKey(IngredientKey.of(new ItemStack(Items.WATER_BUCKET)));
-        assertEquals(2, filled.amount);
+        assertEquals(2, tree.root.children.stream().mapToLong(node -> node.amount).sum());
+        assertEquals(executions, filled.amount);
         assertEquals(executions, filled.step.batches());
         assertEquals(executions, tree.findByKey(IngredientKey.of(new ItemStack(Items.BUCKET))).amount);
         var fluidNode = tree.findByKey(IngredientKey.of(fluid));
-        assertEquals(1000 * executions, fluidNode.amount);
+        assertEquals(1000 * executions, filled.children.stream().filter(node -> node.key.equals(IngredientKey.of(fluid)))
+                .mapToLong(node -> node.amount).sum());
         assertEquals(fluidStock, fluidNode.available);
         if (production > 0) {
             assertEquals(production, fluidNode.step.batches());
@@ -166,9 +181,21 @@ class GenericCraftPreviewTest extends BootstrapTest {
         var preview = CraftPreviewSteps.merge(stages,
                 ignored -> recipe, RegistryAccess.EMPTY);
 
-        assertEquals(List.of(7),
+        assertEquals(List.of(7L),
                 preview.stream().map(CraftPreviewSteps.PreviewStep::batches).toList());
         assertEquals(List.of(1, 2, 4), stages.stream().map(ResolutionStep::executions).toList());
+    }
+
+    @Test
+    void traceRejoinsOnlySegmentsOfTheSamePlanningOrdinal() {
+        var id = ResourceLocation.parse("test:repeat");
+        var steps = List.of(new PureRecipePlanner.PlannedStep(id, (long) Integer.MAX_VALUE + 3),
+                new PureRecipePlanner.PlannedStep(id, 4));
+        var segments = List.of(Integer.MAX_VALUE, 3, 4).stream().map(count ->
+                new ResolutionStep(id, ModType.GENERIC, null, List.of(), List.of(), false, count)).toList();
+        var cards = CraftPreviewSteps.tracedSteps(steps, segments);
+        assertEquals(List.of((long) Integer.MAX_VALUE + 3, 4L), cards.stream().map(CraftPreviewSteps.PreviewStep::batches).toList());
+        assertEquals(4, cards.get(1).step().executions());
     }
 
     @Test
@@ -198,7 +225,7 @@ class GenericCraftPreviewTest extends BootstrapTest {
                 List.of(), List.of(), false, 3, null, second);
         var merged = CraftPreviewSteps.merge(List.of(firstStep, firstStep, secondStep),
                 ignored -> null, RegistryAccess.EMPTY);
-        assertEquals(List.of(4, 3), merged.stream().map(CraftPreviewSteps.PreviewStep::batches).toList());
+        assertEquals(List.of(4L, 3L), merged.stream().map(CraftPreviewSteps.PreviewStep::batches).toList());
         assertEquals(first.getTag(), merged.get(0).step().syntheticOutput().getTag());
         assertEquals(second.getTag(), merged.get(1).step().syntheticOutput().getTag());
         assertFalse(first.getTag().equals(second.getTag()));

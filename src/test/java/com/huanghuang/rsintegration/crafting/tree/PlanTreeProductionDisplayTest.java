@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.tree;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import com.huanghuang.rsintegration.crafting.plan.PlanMaterialBill;
 import com.huanghuang.rsintegration.crafting.plan.PlanStep;
+import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
 import com.huanghuang.rsintegration.crafting.plan.ParallelPlan;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
@@ -158,7 +159,9 @@ class PlanTreeProductionDisplayTest extends BootstrapTest {
 
         PlanStep producer = new PlanStep(ingotRecipe, ingot, 7,
                 List.of(new ItemStack(Items.IRON_ORE)));
-        PlanStep terminal = new PlanStep(targetRecipe, target, 84, List.of(ingot));
+        PlanStep terminal = new PlanStep(targetRecipe, target, 84, List.of(ingot)).withTraceInputs(List.of(
+                new PlanStep.TraceInput(ingot, 7, DemandRole.CONSUMED, 0),
+                new PlanStep.TraceInput(ingot, 77, DemandRole.CONSUMED, -1)));
         Map<IngredientKey, PlanResponse.Availability> materials = Map.of(
                 IngredientKey.of(ingot), new PlanResponse.Availability(84, 77, 0));
 
@@ -167,7 +170,8 @@ class PlanTreeProductionDisplayTest extends BootstrapTest {
                 targetRecipe.toString(), null, null, 0, 0, 0, List.of(), 84);
         PlanTreeNode produced = PlanTreeModel.from(plan).findByKey(IngredientKey.of(ingot));
 
-        assertEquals(84, produced.amount);
+        assertEquals(84, PlanTreeModel.from(plan).root.children.stream().mapToLong(node -> node.amount).sum());
+        assertEquals(7, produced.amount);
         assertEquals(7, produced.step.batches());
         assertEquals(7, produced.productionAmount);
         assertEquals(7, produced.displayAmount());

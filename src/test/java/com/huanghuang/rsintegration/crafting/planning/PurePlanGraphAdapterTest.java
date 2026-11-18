@@ -13,6 +13,10 @@ import com.huanghuang.rsintegration.crafting.graph.NodeOutputAccumulator;
 import com.huanghuang.rsintegration.crafting.graph.OutputKind;
 import com.huanghuang.rsintegration.crafting.plan.RecipeChoice;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
+import com.huanghuang.rsintegration.crafting.plan.PlanOutcome;
+import com.huanghuang.rsintegration.crafting.plan.PlanResponsePacket;
+import com.huanghuang.rsintegration.crafting.plan.PlanStep;
+import com.huanghuang.rsintegration.crafting.tree.PlanTreeModel;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.NbtMatchMode;
@@ -45,6 +49,55 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PurePlanGraphAdapterTest extends BootstrapTest {
+    @Test
+    void missingPreviewKeepsTheActualVariantAndSharedSurplusThroughThePacket() {
+        var gem = new ItemStack(Items.DIAMOND);
+        gem.getOrCreateTag().putString("variant", "blue");
+        var raw = new ItemStack(Items.IRON_INGOT);
+        var gemRecipe = recipe("two_gems", gem, 2, demand(Items.IRON_INGOT, 1));
+        var oneGem = new IngredientRef(List.of(material(gem)), 1, NbtMatchMode.EXACT, DemandRole.CONSUMED);
+        var left = recipe("left", new ItemStack(Items.STICK), 1, oneGem);
+        var right = recipe("right", new ItemStack(Items.PAPER), 1, oneGem);
+        var result = PureRecipePlanner.resolve(graph(gemRecipe, left, right), Map.of(),
+                List.of(demand(Items.STICK, 1), demand(Items.PAPER, 1)), 20);
+        assertFalse(result.feasible());
+        assertNull(result.materialFlow());
+        var trace = result.previewTrace();
+        assertNotNull(trace);
+        assertNull(result.withOutputTarget().previewTrace().roots(), "产物目标不是目标配方的输入");
+        List<PlanStep> cards = new ArrayList<>();
+        Map<Integer, Integer> indices = new LinkedHashMap<>();
+        var outputs = Map.of(gemRecipe.recipeId(), gem, left.recipeId(), new ItemStack(Items.STICK),
+                right.recipeId(), new ItemStack(Items.PAPER));
+        for (var step : result.steps()) {
+            indices.put(cards.size(), cards.size());
+            cards.add(new PlanStep(step.recipeId(), outputs.get(step.recipeId()), step.batches(), List.of()));
+        }
+        var target = new ItemStack(Items.BOOK);
+        int terminal = cards.size();
+        cards.add(new PlanStep(id("terminal"), target, 1, List.of()));
+        PurePlanGraphAdapter.attachPreviewTrace(cards, trace, indices, terminal);
+        var response = new PlanResponse(false, "", target, cards, Map.of(), List.of(), "test:terminal", List.of(),
+                1, PlanOutcome.MISSING_INPUTS, List.of());
+        var decoded = PlanResponsePacket.decodePayload(PlanResponsePacket.encodePayload(response, 42)).plan();
+        assertNull(decoded.graph());
+        assertEquals(PlanOutcome.MISSING_INPUTS, decoded.outcome());
+        var roots = PlanTreeModel.from(decoded).root.children;
+        assertEquals(2, roots.size());
+        var first = roots.get(0).children.get(0);
+        var shared = roots.get(1).children.get(0);
+        assertTrue(ItemStack.isSameItemSameTags(gem, first.displayStack));
+        assertEquals(gemRecipe.recipeId(), first.step.recipeId());
+        assertSame(first.step, shared.step);
+        assertTrue(shared.referenceOnly);
+        assertTrue(ItemStack.isSameItemSameTags(raw, first.children.get(0).displayStack));
+        assertNull(first.children.get(0).step);
+
+        indices.remove(0);
+        PurePlanGraphAdapter.attachPreviewTrace(cards, trace, indices, terminal);
+        assertEquals(-1, cards.get(1).traceInputs().get(0).producer());
+    }
+
     @Test
     void craftedAuxiliaryAndRouteSpecificInputsShareOneExecutionProducer() {
         RecipeNode fuel = recipe("fuel", new ItemStack(Items.COAL), 16, demand(Items.OAK_LOG, 1));
