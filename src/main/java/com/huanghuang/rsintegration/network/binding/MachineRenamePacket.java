@@ -1,6 +1,5 @@
 package com.huanghuang.rsintegration.network.binding;
 
-import com.huanghuang.rsintegration.machine.bd.BeyondDimensionsMachineOperations;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.huanghuang.rsintegration.network.packet.NetworkPacketIds;
 import net.minecraft.network.FriendlyByteBuf;
@@ -39,7 +38,7 @@ public record MachineRenamePacket(UUID bookId, MachineEndpointId endpointId, Str
         if (player != null && !(player instanceof FakePlayer)) {
             context.enqueueWork(() -> {
                 MachineBindingService.rename(player, packet.bookId, packet.endpointId, packet.name);
-                BeyondDimensionsMachineOperations.sendBindingSync(player);
+                MachineBindingSyncBridge.send(player);
             });
         }
         context.setPacketHandled(true);

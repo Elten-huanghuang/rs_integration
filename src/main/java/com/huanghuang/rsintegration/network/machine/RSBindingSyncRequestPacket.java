@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.network.machine;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.binding.BindingSyncRequestRateLimiter;
+import com.huanghuang.rsintegration.network.binding.MachineBindingSyncBridge;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.network.NetworkEvent;
@@ -31,7 +32,7 @@ public final class RSBindingSyncRequestPacket {
                 && !BindingSyncRequestRateLimiter.isRateLimited(player.getUUID())) {
             context.enqueueWork(() -> {
                 if (RSIntegrationConfig.ENABLE_MACHINE_GUI_TABS.get()) {
-                    MachineNetworkHandler.sendBindingSync(player);
+                    MachineBindingSyncBridge.send(player);
                 }
             });
         }

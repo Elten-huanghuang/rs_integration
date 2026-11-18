@@ -62,7 +62,10 @@ import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.binding.AltarBinding;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.network.binding.BeyondDimensionsBindingHook;
+import com.huanghuang.rsintegration.network.binding.BindingSyncRequestRateLimiter;
 import com.huanghuang.rsintegration.network.binding.ExplicitMachineBindingPacket;
+import com.huanghuang.rsintegration.network.binding.MachineBindingSnapshotService;
+import com.huanghuang.rsintegration.network.binding.MachineBindingSyncBridge;
 import com.huanghuang.rsintegration.network.binding.MachineRenamePacket;
 import com.huanghuang.rsintegration.network.binding.NearbyBindingRequestPacket;
 import com.huanghuang.rsintegration.network.gui.RemoteGuiAuth;
@@ -80,7 +83,6 @@ import com.huanghuang.rsintegration.feature.anvilmemory.AnvilMemoryNetworkHandle
 import com.huanghuang.rsintegration.client.ClientEventBootstrap;
 import com.huanghuang.rsintegration.feature.update.UpdateCheckClient;
 import com.huanghuang.rsintegration.client.storage.StorageClientBootstrap;
-import com.huanghuang.rsintegration.machine.bd.BeyondDimensionsMachineOperations;
 import com.huanghuang.rsintegration.feature.ftbquests.CheckmarkConfirmService;
 import com.huanghuang.rsintegration.feature.ftbquests.ClaimAllChainService;
 import com.huanghuang.rsintegration.feature.ftbquests.ExternalItemProgressBridge;
@@ -853,6 +855,12 @@ public final class RSIntegrationMod {
         if (ModList.get().isLoaded("beyonddimensions")) {
             BeyondDimensionsMachineNetworkHandler.register();
         }
+        // 混装时共享缓存必须使用完整快照，不能被仅含 BD 绑定的快照覆盖。
+        if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
+            MachineBindingSyncBridge.install(RSOptionalBootstrap::sendMachineBindingSync);
+        } else if (ModList.get().isLoaded("beyonddimensions")) {
+            MachineBindingSyncBridge.install(BeyondDimensionsMachineNetworkHandler::sendBindingSync);
+        }
         // Crafting
         BatchCraftNetworkHandler.register();
         if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
@@ -919,11 +927,7 @@ public final class RSIntegrationMod {
             if (e.getEntity() instanceof ServerPlayer sp) {
                 NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> sp),
                         ConfigSyncPacket.fromServerConfig());
-                if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
-                    RSOptionalBootstrap.onPlayerLoggedIn(sp);
-                } else if (ModList.get().isLoaded("beyonddimensions")) {
-                    BeyondDimensionsMachineOperations.sendBindingSync(sp);
-                }
+                MachineBindingSyncBridge.send(sp);
                 sp.server.execute(() -> {
                     if (sp.hasDisconnected()) return;
                     int claimed = FluidRecoveryDelivery.claim(sp);
@@ -941,6 +945,8 @@ public final class RSIntegrationMod {
                 AsyncCraftManager.getInstance().cancelAllForPlayer(sp.getUUID());
                 AutoEatRateLimiter.onPlayerLogout(sp.getUUID());
                 AutoEatEngine.onPlayerLogout(sp.getUUID());
+                BindingSyncRequestRateLimiter.onPlayerLogout(sp.getUUID());
+                MachineBindingSnapshotService.INSTANCE.forgetPlayer(sp.getUUID());
                 CraftRequestCoordinator.onPlayerLogout(sp.getUUID());
                 VillagerTradeLockService
                         .remove(sp.getUUID());
@@ -1003,6 +1009,7 @@ public final class RSIntegrationMod {
                         .clearFactoryLeases();
             }
             RemoteGuiAuth.clearServerState();
+            MachineBindingSnapshotService.INSTANCE.clear();
             if (ModList.get().isLoaded(ModIds.REFINED_STORAGE)) {
                 RSOptionalBootstrap.clearServerState();
             }

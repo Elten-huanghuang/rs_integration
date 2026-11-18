@@ -97,8 +97,8 @@ public final class RSOptionalBootstrap {
         RSSidePanelModule.initClient();
     }
 
-    public static void onPlayerLoggedIn(ServerPlayer player) {
-        MachineNetworkHandler.sendBindingSync(player);
+    public static void sendMachineBindingSync(ServerPlayer player) {
+        MachineNetworkHandler.sendCurrentState(player, true);
     }
 
     public static void onPlayerChangedDimension(ServerPlayer player) {

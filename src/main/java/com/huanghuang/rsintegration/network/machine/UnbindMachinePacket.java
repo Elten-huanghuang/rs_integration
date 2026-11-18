@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.network.machine;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.network.binding.MachineBindingSyncBridge;
 import com.huanghuang.rsintegration.network.binding.MachineUnbindService;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
@@ -55,7 +56,7 @@ public final class UnbindMachinePacket {
         MachineUnbindService.Result result =
                 MachineUnbindService.unbind(player, dim, pos);
         player.sendSystemMessage(result.message());
-        MachineNetworkHandler.sendBindingSync(player);
+        MachineBindingSyncBridge.send(player);
         if (result.success()) {
             RSIntegrationMod.LOGGER.debug(
                     "[RSI-MachineHub] Player {} removed binding dim={} pos={}",

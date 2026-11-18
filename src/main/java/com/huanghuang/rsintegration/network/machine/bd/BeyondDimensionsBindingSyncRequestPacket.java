@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.network.machine.bd;
 
-import com.huanghuang.rsintegration.machine.bd.BeyondDimensionsMachineOperations;
 import com.huanghuang.rsintegration.network.binding.BindingSyncRequestRateLimiter;
+import com.huanghuang.rsintegration.network.binding.MachineBindingSyncBridge;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.common.util.FakePlayer;
@@ -24,7 +24,7 @@ public final class BeyondDimensionsBindingSyncRequestPacket {
         ServerPlayer player = context.getSender();
         if (player != null && !(player instanceof FakePlayer)
                 && !BindingSyncRequestRateLimiter.isRateLimited(player.getUUID())) {
-            context.enqueueWork(() -> BeyondDimensionsMachineOperations.sendBindingSync(player));
+            context.enqueueWork(() -> MachineBindingSyncBridge.send(player));
         }
         context.setPacketHandled(true);
     }

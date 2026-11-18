@@ -5,14 +5,9 @@ import com.huanghuang.rsintegration.machine.MachineInteractType;
 import com.huanghuang.rsintegration.machine.MachineStatus;
 import com.huanghuang.rsintegration.machine.MachineStatusKey;
 import com.huanghuang.rsintegration.machine.MachineStatusReader;
-import com.huanghuang.rsintegration.machine.bd.BeyondDimensionsMachineOperations;
-import com.huanghuang.rsintegration.network.binding.BindingInfo;
-import com.huanghuang.rsintegration.network.binding.BindingSyncCodec;
-import com.huanghuang.rsintegration.network.binding.BindingSyncRequestRateLimiter;
-import com.huanghuang.rsintegration.network.binding.MachineBindingInfoFactory;
 import com.huanghuang.rsintegration.network.binding.MachineBindingService;
+import com.huanghuang.rsintegration.network.binding.MachineBindingSnapshotService;
 import com.huanghuang.rsintegration.network.binding.MachineFavoritesSavedData;
-import com.huanghuang.rsintegration.network.binding.MachineBindingSyncBridge;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.huanghuang.rsintegration.network.packet.NetworkPacketIds;
 import net.minecraft.core.registries.Registries;
@@ -27,7 +22,6 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.network.NetworkDirection;
 import net.minecraftforge.network.PacketDistributor;
 import net.minecraftforge.network.simple.SimpleChannel;
-import net.minecraftforge.fml.ModList;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -37,7 +31,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicLong;
 
 /** 机器标签、Hub、收藏、绑定快照和实时状态的网络入口。 */
 public final class MachineNetworkHandler {
@@ -47,10 +40,6 @@ public final class MachineNetworkHandler {
             lastPushedStatuses = new ConcurrentHashMap<>();
     private static final Set<UUID> dirtyMachinePlayers =
             ConcurrentHashMap.newKeySet();
-    private static final Map<UUID, Long> bindingFingerprints =
-            new ConcurrentHashMap<>();
-    private static final AtomicLong BINDING_GENERATION = new AtomicLong(1L);
-
     private static int machineScanCounter;
     private static long machineStatusSequence;
     private static boolean eventsRegistered;
@@ -140,8 +129,6 @@ public final class MachineNetworkHandler {
     public static void registerEvents() {
         if (eventsRegistered) return;
         eventsRegistered = true;
-        MachineBindingSyncBridge.install(
-                MachineNetworkHandler::sendBindingSyncForBackend);
         MinecraftForge.EVENT_BUS.register(MachineNetworkHandler.class);
         MinecraftForge.EVENT_BUS.addListener(
                 MachineNetworkHandler::onServerTickEnd);
@@ -155,24 +142,16 @@ public final class MachineNetworkHandler {
         CHANNEL.sendToServer(new RSBindingSyncRequestPacket());
     }
 
-    public static void sendBindingSync(ServerPlayer player) {
-        sendCurrentState(player, true);
-    }
-
-    private static void sendBindingSyncForBackend(ServerPlayer player) {
-        if (ModList.get().isLoaded("refinedstorage")) {
-            sendBindingSync(player);
-            return;
-        }
-        BeyondDimensionsMachineOperations.sendBindingSync(player);
-    }
-
     public static void sendCurrentState(
             ServerPlayer player, boolean forceBindings) {
         if (player == null) return;
         markMachineStatusDirty(player.getUUID());
         sendMachineFavoritesSync(player);
-        sendBindingSnapshot(player, forceBindings);
+        MachineBindingSnapshotService.INSTANCE.send(
+                player, MachineBindingSnapshotService.Scope.ALL, forceBindings,
+                chunk -> CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
+                        new RSBindingSyncPacket(chunk.bindings(), chunk.generation(),
+                                chunk.chunkIndex(), chunk.totalChunks())));
     }
 
     public static void sendMachineFavoritesSync(ServerPlayer player) {
@@ -185,28 +164,18 @@ public final class MachineNetworkHandler {
                         data.getBlocked(player.getUUID())));
     }
 
-    public static List<BindingInfo> collectPlayerBindings(
-            ServerPlayer player) {
-        List<MachineBindingService.PlayerEndpoint> endpoints =
-                MachineBindingService.collectPlayerEndpoints(player);
-        return toBindingInfos(endpoints);
-    }
-
     @SubscribeEvent
     public static void onPlayerLogout(
             PlayerEvent.PlayerLoggedOutEvent event) {
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
         UUID playerId = player.getUUID();
         lastPushedStatuses.remove(playerId);
-        bindingFingerprints.remove(playerId);
         dirtyMachinePlayers.remove(playerId);
-        BindingSyncRequestRateLimiter.onPlayerLogout(playerId);
     }
 
     public static void clearServerState() {
         dirtyMachinePlayers.clear();
         lastPushedStatuses.clear();
-        bindingFingerprints.clear();
         machineScanCounter = 0;
         machineStatusSequence = 0;
     }
@@ -278,67 +247,6 @@ public final class MachineNetworkHandler {
                     new MachineStatusDeltaPacket(
                             changed, ++machineStatusSequence));
         }
-    }
-
-    private static void sendBindingSnapshot(
-            ServerPlayer player, boolean force) {
-        List<MachineBindingService.PlayerEndpoint> endpoints =
-                MachineBindingService.collectPlayerEndpoints(player);
-        long fingerprint = bindingFingerprint(endpoints);
-        Long previous = bindingFingerprints.get(player.getUUID());
-        if (!force && previous != null
-                && previous.longValue() == fingerprint) {
-            return;
-        }
-
-        List<BindingInfo> bindings = toBindingInfos(endpoints);
-        long generation = BINDING_GENERATION.incrementAndGet();
-        for (BindingSyncCodec.Payload chunk :
-                BindingSyncCodec.chunks(bindings, generation)) {
-            CHANNEL.send(
-                    PacketDistributor.PLAYER.with(() -> player),
-                    new RSBindingSyncPacket(
-                            chunk.bindings(), chunk.generation(),
-                            chunk.chunkIndex(), chunk.totalChunks()));
-        }
-        bindingFingerprints.put(player.getUUID(), fingerprint);
-    }
-
-    private static List<BindingInfo> toBindingInfos(
-            List<MachineBindingService.PlayerEndpoint> endpoints) {
-        if (endpoints.isEmpty()) return List.of();
-        try {
-            return MachineBindingInfoFactory.fromEndpoints(endpoints);
-        } catch (Exception exception) {
-            RSIntegrationMod.LOGGER.debug(
-                    "[RSI] Failed to collect player bindings", exception);
-            return List.of();
-        }
-    }
-
-    private static long bindingFingerprint(
-            List<MachineBindingService.PlayerEndpoint> endpoints) {
-        long hash = 0x9E3779B97F4A7C15L;
-        for (MachineBindingService.PlayerEndpoint endpoint : endpoints) {
-            var entry = endpoint.entry();
-            hash = hash * 31
-                    + endpoint.bookId().getMostSignificantBits();
-            hash = hash * 31
-                    + endpoint.bookId().getLeastSignificantBits();
-            hash = hash * 31
-                    + endpoint.endpointId().value()
-                    .getMostSignificantBits();
-            hash = hash * 31
-                    + endpoint.endpointId().value()
-                    .getLeastSignificantBits();
-            hash = hash * 31
-                    + (endpoint.itemKey() == null
-                    ? 0 : endpoint.itemKey().hashCode());
-            hash = hash * 31 + entry.dim().hashCode();
-            hash = hash * 31 + entry.pos().asLong();
-            hash = hash * 31 + endpoint.revision();
-        }
-        return hash;
     }
 
     private static ServerPlayer findPlayer(

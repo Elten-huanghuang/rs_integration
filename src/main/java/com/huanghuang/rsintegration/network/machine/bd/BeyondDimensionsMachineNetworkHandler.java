@@ -1,8 +1,12 @@
 package com.huanghuang.rsintegration.network.machine.bd;
 
+import com.huanghuang.rsintegration.network.binding.MachineBindingSnapshotService;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.huanghuang.rsintegration.network.packet.NetworkPacketIds;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.network.NetworkDirection;
+import net.minecraftforge.network.PacketDistributor;
+
 import java.util.Optional;
 
 /** Registers the machine-center packet required by BD-only clients. */
@@ -10,6 +14,14 @@ public final class BeyondDimensionsMachineNetworkHandler {
     private static boolean registered;
 
     private BeyondDimensionsMachineNetworkHandler() {}
+
+    public static void sendBindingSync(ServerPlayer player) {
+        MachineBindingSnapshotService.INSTANCE.send(
+                player, MachineBindingSnapshotService.Scope.BD_TERMINALS, true,
+                chunk -> NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
+                        new BeyondDimensionsBindingSyncPacket(chunk.bindings(), chunk.generation(),
+                                chunk.chunkIndex(), chunk.totalChunks())));
+    }
 
     public static void register() {
         if (registered) return;
