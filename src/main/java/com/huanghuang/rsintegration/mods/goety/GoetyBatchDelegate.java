@@ -24,7 +24,6 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.CraftItemRecovery;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.mods.goety.GoetyRecipeHandler;
 import com.huanghuang.rsintegration.reflection.probes.GoetyReflection;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
@@ -1297,11 +1296,9 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
     @SuppressWarnings("unchecked")
     private ItemStack collectBrazierResult(ServerPlayer player) {
-        // Route through RecipeIndex (SRG-safe) rather than reflecting the vanilla
-        // Recipe#getResultItem by literal name — that method is remapped to
-        // m_8043_ at runtime, so the reflective lookup fails and the produced
-        // result would be silently lost after the brazier already consumed inputs.
-        ItemStack expected = RecipeIndex.tryGetResultItem((Recipe<?>) brazierRecipeObj, player.serverLevel().registryAccess());
+        // 使用支持运行时重映射的产物入口，避免祭坛消耗材料后因方法名不匹配而漏收成品。
+        ItemStack expected = ModRecipeHandlers.tryGetUncachedResultItem(
+                (Recipe<?>) brazierRecipeObj, player.serverLevel().registryAccess());
         if (expected.isEmpty()) return ItemStack.EMPTY;
 
         // stopBrazier(true) drops the result at (x, y+1, z)
@@ -1485,7 +1482,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         if (level == null) return null;
         ItemStack expected = !isBrazier
                 ? expectedRitualOutput(level)
-                : RecipeIndex.tryGetResultItem(outputRecipe, level.registryAccess());
+                : ModRecipeHandlers.tryGetUncachedResultItem(outputRecipe, level.registryAccess());
         return expected.isEmpty() ? null : expected;
     }
 
@@ -1509,7 +1506,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             ItemStack dynamic = GoetyDynamicRitualRecipe.validatedOutput(recipe, targetOutput);
             return dynamic;
         }
-        return RecipeIndex.tryGetResultItem(recipe, level.registryAccess());
+        return ModRecipeHandlers.tryGetUncachedResultItem(recipe, level.registryAccess());
     }
 
     private void rememberActivation(ItemStack activation) {

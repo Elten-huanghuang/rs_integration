@@ -90,7 +90,7 @@ public final class YoukaisHomecomingRecipeHandler implements ModRecipeHandler {
                     output.isEmpty() ? "EMPTY" : output.getHoverName().getString(), output.getCount());
             return output;
         }
-        return ModRecipeHandlers.tryGetResultItem(recipe, access);
+        return ModRecipeHandlers.probeResultItem(recipe, access);
     }
 
     @Nonnull

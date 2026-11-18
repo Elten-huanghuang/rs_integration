@@ -6,7 +6,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.crafting.RecipeIndex;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
@@ -678,7 +678,7 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
     /** 本配方的产物（不含数量缩放）。 */
     private ItemStack getRecipeResult() {
         if (recipe == null || myLevel == null) return ItemStack.EMPTY;
-        ItemStack out = RecipeIndex.tryGetResultItem(recipe, myLevel.registryAccess());
+        ItemStack out = ModRecipeHandlers.tryGetUncachedResultItem(recipe, myLevel.registryAccess());
         return out == null ? ItemStack.EMPTY : out;
     }
 

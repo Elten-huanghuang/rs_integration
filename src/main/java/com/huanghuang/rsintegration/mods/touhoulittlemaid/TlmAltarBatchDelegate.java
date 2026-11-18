@@ -18,7 +18,7 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.crafting.RecipeIndex;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.reflection.probes.TLMReflection;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.util.Reflect;
@@ -606,7 +606,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         // interceptor can grab it before magnets. Matching is item-type only,
         // so the bare recipe result is fine even for copy-input NBT recipes.
         if (recipe == null || machineServer == null) return null;
-        ItemStack out = RecipeIndex.tryGetResultItem(recipe, machineServer.registryAccess());
+        ItemStack out = ModRecipeHandlers.tryGetUncachedResultItem(recipe, machineServer.registryAccess());
         return out.isEmpty() ? null : out;
     }
 
@@ -856,7 +856,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
             if (level != null && myPos != null) {
                 ItemStack expected = ItemStack.EMPTY;
                 if (recipe != null && level != null) {
-                    expected = RecipeIndex.tryGetResultItem(recipe, level.registryAccess());
+                    expected = ModRecipeHandlers.tryGetUncachedResultItem(recipe, level.registryAccess());
                 }
                 for (ItemEntity entity : level.getEntitiesOfClass(ItemEntity.class,
                         new AABB(myPos).inflate(2.5))) {

@@ -104,7 +104,7 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
             List<CuttingBoardResult> results = getCuttingBoardResults(recipe);
             return results.isEmpty() ? ItemStack.EMPTY : results.get(0).stack().copy();
         }
-        return ModRecipeHandlers.tryGetResultItem(recipe, access);
+        return ModRecipeHandlers.probeResultItem(recipe, access);
     }
 
     @Nullable

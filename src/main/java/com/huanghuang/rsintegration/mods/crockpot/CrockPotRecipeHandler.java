@@ -87,7 +87,7 @@ public final class CrockPotRecipeHandler extends AbstractRecipeHandler {
         } catch (ReflectiveOperationException ignored) {
             // Fall through for older CrockPot builds.
         }
-        return ModRecipeHandlers.tryGetResultItem(recipe, access);
+        return ModRecipeHandlers.probeResultItem(recipe, access);
     }
 
     @Nullable

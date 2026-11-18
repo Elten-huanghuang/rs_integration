@@ -28,7 +28,7 @@ public final class AetherRecipeHandler extends AbstractRecipeHandler {
         // IncubationRecipe produces an entity, not an item — no RS-relevant output.
         if (recipe.getClass().getSimpleName().equals("IncubationRecipe"))
             return ItemStack.EMPTY;
-        return ModRecipeHandlers.tryGetResultItem(recipe, access);
+        return ModRecipeHandlers.probeResultItem(recipe, access);
     }
 
     @Nullable

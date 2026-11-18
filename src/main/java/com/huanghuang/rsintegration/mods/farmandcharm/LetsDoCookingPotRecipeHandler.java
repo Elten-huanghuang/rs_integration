@@ -60,12 +60,11 @@ public final class LetsDoCookingPotRecipeHandler extends AbstractRecipeHandler {
 
     /**
      * 本类配方实现了 {@code isSpecial() == true}，原版数据包加载器会直接跳过它们，
-     * 因此无法从 {@code RecipeManager} 取回。这里保持默认的"未声明结果"，
-     * 让 {@code ModRecipeHandlers} 走结构字段回退，直接读 {@code output} 字段。
+     * 因此无法从 {@code RecipeManager} 取回。接口未声明产物时，默认探测可回退到结构字段。
      */
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
-        return ModRecipeHandlers.tryGetResultItem(recipe, access);
+        return ModRecipeHandlers.probeResultItem(recipe, access);
     }
 
     @Nullable

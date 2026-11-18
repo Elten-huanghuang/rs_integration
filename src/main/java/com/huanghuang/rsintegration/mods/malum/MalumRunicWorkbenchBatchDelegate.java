@@ -8,7 +8,6 @@ import com.huanghuang.rsintegration.reflection.probes.MalumReflection;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -362,7 +361,7 @@ public final class MalumRunicWorkbenchBatchDelegate extends InstantBatchDelegate
     }
 
     private ItemStack computeResult() {
-        return RecipeIndex.tryGetResultItem(recipe, myLevel.registryAccess()).copy();
+        return ModRecipeHandlers.tryGetUncachedResultItem(recipe, myLevel.registryAccess());
     }
 
     private void returnStrayItem(ItemStack stack) {

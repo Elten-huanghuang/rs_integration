@@ -24,7 +24,6 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler;
 import com.huanghuang.rsintegration.mods.slashblade.SlashBladeRecipeHandler;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
-import com.huanghuang.rsintegration.crafting.RecipeIndex;
 import com.huanghuang.rsintegration.mods.goety.GoetySoulTotemCrafting;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import net.minecraft.core.BlockPos;
@@ -244,8 +243,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
     }
 
     private ItemStack computeResult(ServerPlayer player) {
-        ItemStack indexed = RecipeIndex
-                .tryGetResultItem(recipe, player.serverLevel().registryAccess()).copy();
+        ItemStack indexed = ModRecipeHandlers.tryGetUncachedResultItem(recipe, player.serverLevel().registryAccess());
         if (!indexed.isEmpty()) return indexed;
         // Vanilla smithing recipes expose a stable registry-aware result even
         // when a third-party result cache has recorded a transient empty value.

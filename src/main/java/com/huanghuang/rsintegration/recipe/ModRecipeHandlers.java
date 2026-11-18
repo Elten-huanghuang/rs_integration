@@ -1,20 +1,15 @@
 package com.huanghuang.rsintegration.recipe;
-import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
-import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 
-import java.lang.reflect.Field;
-
-import com.mojang.logging.LogUtils;
-import com.huanghuang.rsintegration.crafting.RecipeIndex;
+import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.crafting.CraftingResolver;
+import com.huanghuang.rsintegration.crafting.fluid.FluidContainerRecipe;
 import com.huanghuang.rsintegration.crafting.fluid.FluidContainerRecipeHandler;
 import com.huanghuang.rsintegration.crafting.planning.PlanningThreadContext;
-import com.huanghuang.rsintegration.mods.vanilla.brewing.VanillaBrewingRecipeHandler;
-
-import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.ModType;
-import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.mods.vanilla.VanillaMachineRecipeHandler;
 import com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler;
+import com.huanghuang.rsintegration.mods.vanilla.VanillaMachineRecipeHandler;
+import com.huanghuang.rsintegration.mods.vanilla.brewing.VanillaBrewingRecipeHandler;
+import com.huanghuang.rsintegration.util.Reflect;
+import com.mojang.logging.LogUtils;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -22,42 +17,42 @@ import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.fml.loading.FMLEnvironment;
+import org.slf4j.Logger;
 
 import javax.annotation.Nullable;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import org.slf4j.Logger;
 
-/**
- * Registry of {@link ModRecipeHandler} instances, keyed by {@link ModType}.
- *
- * <p>Call {@link #claimFor(Recipe)} for explicit winner/ambiguity semantics.</p>
- */
+/** 配方处理器注册表，统一读取配方主产物和副产物。 */
 public final class ModRecipeHandlers {
     private static final Logger RESULT_LOGGER = LogUtils.getLogger();
 
     private static final Map<Class<?>, Method> RESULT_METHOD_CACHE = new ConcurrentHashMap<>();
     private static final Map<Class<?>, CraftTweakerOutputAccessor> CT_OUTPUT_ACCESSOR_CACHE = new ConcurrentHashMap<>();
     private static final Set<Class<?>> NO_CT_OUTPUT_ACCESSOR_CACHE = ConcurrentHashMap.newKeySet();
-    /** Caches the ItemStack-producing field per recipe class. */
+    /** 按配方类缓存产物字段。 */
     private static final Map<Class<?>, Field> OUTPUT_FIELD_CACHE = new ConcurrentHashMap<>();
-    /** Classes that have been scanned and have no suitable output field. */
+    /** 已扫描且没有可用产物字段的配方类。 */
     private static final Set<Class<?>> NO_OUTPUT_FIELD_CACHE = ConcurrentHashMap.newKeySet();
-    /** Global result cache: recipe ID → output ItemStack (or EMPTY sentinel). */
+    /** 非网格配方的静态结果按配方 ID 缓存。 */
     private static final Map<ResourceLocation, ItemStack> GLOBAL_RESULT_CACHE = new ConcurrentHashMap<>();
-    private static final Set<ResourceLocation> GLOBAL_EMPTY_CACHE = ConcurrentHashMap.newKeySet();
     private static final Set<Class<?>> CLIENT_UNSAFE_RESULT_LOGGED = ConcurrentHashMap.newKeySet();
     private static final Map<Class<?>, Claim> CLAIM_CACHE = new ConcurrentHashMap<>();
     private static final Set<ResourceLocation> AMBIGUOUS_CLAIMS_LOGGED =
             ConcurrentHashMap.newKeySet();
-    /** Prevents infinite recursion when a handler's getResultItem() calls back into tryGetResultItem(). */
-    private static final ThreadLocal<Class<?>> DISPATCH_GUARD = new ThreadLocal<>();
+    /** 防止处理器直接回调，或经其他配方类间接回调时重复分发。 */
+    private static final ThreadLocal<Set<Class<?>>> ACTIVE_RESULT_HANDLERS = new ThreadLocal<>();
 
     private static final List<ModRecipeHandler> HANDLERS = new ArrayList<>();
     private static final List<ModRecipeHandler> CLASS_HANDLERS = new ArrayList<>();
@@ -150,51 +145,77 @@ public final class ModRecipeHandlers {
     /** Clear recipe-result caches. Called on /reload so new recipes take effect. */
     public static void clearResultCaches() {
         GLOBAL_RESULT_CACHE.clear();
-        GLOBAL_EMPTY_CACHE.clear();
         CLIENT_UNSAFE_RESULT_LOGGED.clear();
         CLAIM_CACHE.clear();
         RecipeResultMethodSafety.clear();
     }
 
-    // ── shared result-item extraction ─────────────────────────────
+    // ── 主产物提取 ───────────────────────────────────────────────
 
-    /**
-     * Common {@code getResultItem} with global result cache.
-     * Expensive reflection is done at most once per recipe instance.
-     */
-    public static ItemStack tryGetResultItem(Recipe<?> recipe, RegistryAccess access) {
-        // Non-vanilla recipe handlers may invoke arbitrary third-party reflection and
-        // registry state. They remain on the server thread until their inputs are
-        // projected into an immutable planning snapshot.
-        if (!(recipe instanceof CraftingRecipe)) {
-            PlanningThreadContext.requireMainThread("third-party recipe result extraction");
-        }
+    /** 读取声明的主产物；非网格配方使用结果缓存。 */
+    public static ItemStack tryGetResultItem(@Nullable Recipe<?> recipe, RegistryAccess access) {
+        if (recipe == null) return ItemStack.EMPTY;
         if (recipe instanceof CraftingRecipe cr) {
-            return tryGetCraftingResultItem(cr, access,
-                    FMLEnvironment.dist == Dist.DEDICATED_SERVER);
+            return tryGetCraftingResultItem(cr, access, isDedicatedServer());
         }
+        // 第三方处理器可能访问注册表或执行反射，后台规划只消费已投影的结果。
+        PlanningThreadContext.requireMainThread("third-party recipe result extraction");
+        if (isDispatching(recipe)) return probeNonGridResult(recipe, access);
+
         ResourceLocation id = recipe.getId();
-        if (GLOBAL_EMPTY_CACHE.contains(id)) return ItemStack.EMPTY;
         ItemStack cached = GLOBAL_RESULT_CACHE.get(id);
         if (cached != null) return cached.copy();
 
-        ItemStack result = internalTryGetResultItem(recipe, access);
+        ItemStack result = resolveNonGridResult(recipe, access);
+        GLOBAL_RESULT_CACHE.put(id, result.copy());
+        return result;
+    }
 
-        if (result.isEmpty()) {
-            GLOBAL_EMPTY_CACHE.add(id);
-        } else {
-            GLOBAL_RESULT_CACHE.put(id, result.copy());
+    /** 读取当前配方实例的主产物，不读写按配方 ID 保存的结果缓存。 */
+    public static ItemStack tryGetUncachedResultItem(@Nullable Recipe<?> recipe, RegistryAccess access) {
+        PlanningThreadContext.requireMainThread("third-party recipe result extraction");
+        if (recipe == null) return ItemStack.EMPTY;
+        if (recipe instanceof CraftingRecipe cr) {
+            return tryGetCraftingResultItem(cr, access, isDedicatedServer());
         }
-        return result.copy();
+        return resolveNonGridResult(recipe, access);
+    }
+
+    /** 处理器的默认产物探测，不再分发处理器，也不写结果缓存。 */
+    public static ItemStack probeResultItem(Recipe<?> recipe, RegistryAccess access) {
+        if (recipe instanceof CraftingRecipe cr) {
+            ItemStack result = readCraftingResult(cr, access, isDedicatedServer());
+            return result.isEmpty() ? probeCraftingFallback(cr) : result;
+        }
+        PlanningThreadContext.requireMainThread("third-party recipe result extraction");
+        return probeNonGridResult(recipe, access);
+    }
+
+    private static boolean isDedicatedServer() {
+        return FMLEnvironment.dist == Dist.DEDICATED_SERVER;
     }
 
     static ItemStack tryGetCraftingResultItem(CraftingRecipe recipe, RegistryAccess access,
                                                boolean dedicatedServer) {
+        ItemStack result = readCraftingResult(recipe, access, dedicatedServer);
+        if (!result.isEmpty()) return result;
+
+        ModRecipeHandler handler = resultHandler(recipe);
+        // 通用处理器只会重复调用接口；专服判定不安全时也不能绕过检查。
+        if (handler != null && !(handler instanceof GenericRecipeHandler)) {
+            ItemStack handlerResult = readHandlerResult(handler, recipe, access);
+            if (!handlerResult.isEmpty()) return handlerResult;
+        }
+        return probeCraftingFallback(recipe);
+    }
+
+    private static ItemStack readCraftingResult(CraftingRecipe recipe, RegistryAccess access,
+                                                boolean dedicatedServer) {
         if (!dedicatedServer
                 || RecipeResultMethodSafety.mayInvokeOnDedicatedServer(recipe.getClass())) {
             try {
                 ItemStack result = recipe.getResultItem(access);
-                if (!result.isEmpty()) return result.copy();
+                if (result != null && !result.isEmpty()) return result.copy();
             } catch (RuntimeException | LinkageError failure) {
                 if (!dedicatedServer) throw failure;
                 RecipeResultMethodSafety.markUnsafe(recipe.getClass());
@@ -204,30 +225,46 @@ public final class ModRecipeHandlers {
             logClientUnsafeFallback(recipe.getClass(), null);
         }
 
-        ItemStack handlerResult = tryGetHandlerResultItem(recipe, access);
-        if (!handlerResult.isEmpty()) return handlerResult;
+        return ItemStack.EMPTY;
+    }
 
+    private static ItemStack probeCraftingFallback(CraftingRecipe recipe) {
         ItemStack craftTweakerResult = tryGetCraftTweakerOutput(recipe);
         if (!craftTweakerResult.isEmpty()) return craftTweakerResult;
         return tryGetOutputField(recipe);
     }
 
-    private static ItemStack tryGetHandlerResultItem(Recipe<?> recipe, RegistryAccess access) {
-        if (DISPATCH_GUARD.get() == recipe.getClass()) return ItemStack.EMPTY;
-        ModRecipeHandler handler = claimFor(recipe).winner();
-        if (handler == null) return ItemStack.EMPTY;
+    private static ItemStack resolveNonGridResult(Recipe<?> recipe, RegistryAccess access) {
+        ModRecipeHandler handler = resultHandler(recipe);
+        // 非网格配方的处理器明确返回空时，不再探测。
+        return handler == null
+                ? probeNonGridResult(recipe, access)
+                : readHandlerResult(handler, recipe, access);
+    }
 
-        Class<?> previous = DISPATCH_GUARD.get();
-        DISPATCH_GUARD.set(recipe.getClass());
+    private static boolean isDispatching(Recipe<?> recipe) {
+        Set<Class<?>> active = ACTIVE_RESULT_HANDLERS.get();
+        return active != null && active.contains(recipe.getClass());
+    }
+
+    @Nullable
+    private static ModRecipeHandler resultHandler(Recipe<?> recipe) {
+        return isDispatching(recipe) ? null : claimFor(recipe).winner();
+    }
+
+    private static ItemStack readHandlerResult(ModRecipeHandler handler, Recipe<?> recipe, RegistryAccess access) {
+        Set<Class<?>> active = ACTIVE_RESULT_HANDLERS.get();
+        if (active == null) {
+            active = new HashSet<>();
+            ACTIVE_RESULT_HANDLERS.set(active);
+        }
+        active.add(recipe.getClass());
         try {
             ItemStack result = handler.getResultItem(recipe, access);
-            return result == null || result.isEmpty() ? ItemStack.EMPTY : result.copy();
+            return result == null ? ItemStack.EMPTY : result.copy();
         } finally {
-            if (previous == null) {
-                DISPATCH_GUARD.remove();
-            } else {
-                DISPATCH_GUARD.set(previous);
-            }
+            active.remove(recipe.getClass());
+            if (active.isEmpty()) ACTIVE_RESULT_HANDLERS.remove();
         }
     }
 
@@ -270,7 +307,7 @@ public final class ModRecipeHandlers {
                 CT_OUTPUT_ACCESSOR_CACHE.put(clazz, accessor);
             } catch (ReflectiveOperationException e) {
                 NO_CT_OUTPUT_ACCESSOR_CACHE.add(clazz);
-                RSIntegrationMod.LOGGER.debug("[RSI-Handler] CraftTweaker output accessor unavailable for {}",
+                RESULT_LOGGER.debug("[RSI-Handler] CraftTweaker output accessor unavailable for {}",
                         clazz.getName(), e);
                 return ItemStack.EMPTY;
             }
@@ -283,7 +320,7 @@ public final class ModRecipeHandlers {
             return internal instanceof ItemStack stack && !stack.isEmpty()
                     ? stack.copy() : ItemStack.EMPTY;
         } catch (ReflectiveOperationException e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Handler] CraftTweaker output read failed for {}",
+            RESULT_LOGGER.debug("[RSI-Handler] CraftTweaker output read failed for {}",
                     clazz.getName(), e);
             return ItemStack.EMPTY;
         }
@@ -291,34 +328,13 @@ public final class ModRecipeHandlers {
 
     private record CraftTweakerOutputAccessor(Method getCtOutput, Method getInternal) {}
 
-    /**
-     * Internal reflection-based result extraction.  Only called on cache miss
-     * for non-CraftingRecipe instances.
-     */
-    private static ItemStack internalTryGetResultItem(Recipe<?> recipe, RegistryAccess access) {
-        // Re-entry guard: when a handler's getResultItem() calls back into
-        // tryGetResultItem() for the same recipe class, skip handler dispatch
-        // and fall through to reflection to avoid StackOverflowError.
-        if (DISPATCH_GUARD.get() != recipe.getClass()) {
-            ModRecipeHandler handler = claimFor(recipe).winner();
-            if (handler != null) {
-                Class<?> prev = DISPATCH_GUARD.get();
-                DISPATCH_GUARD.set(recipe.getClass());
-                try {
-                    ItemStack result = handler.getResultItem(recipe, access);
-                    if (!result.isEmpty()) return result;
-                } finally {
-                    if (prev != null) {
-                        DISPATCH_GUARD.set(prev);
-                    } else {
-                        DISPATCH_GUARD.remove();
-                    }
-                }
-                // Handler exists but returned EMPTY — don't fall through to the
-                // reflection probe (it would hit the deprecated no-arg
-                // getResultItem(); see the probe loop below).
-                return ItemStack.EMPTY;
-            }
+    private static ItemStack probeNonGridResult(Recipe<?> recipe, RegistryAccess access) {
+        // 接口调用会被 ForgeGradle 重映射；开发环境里的方法名在生产环境不可靠。
+        try {
+            ItemStack result = recipe.getResultItem(access);
+            if (result != null && !result.isEmpty()) return result.copy();
+        } catch (RuntimeException | LinkageError e) {
+            RESULT_LOGGER.debug("[RSI-Handler] Recipe result lookup failed", e);
         }
         Class<?> clazz = recipe.getClass();
 
@@ -330,22 +346,18 @@ public final class ModRecipeHandlers {
                         : cached.invoke(recipe);
                 if (r instanceof ItemStack s && !s.isEmpty()) return s.copy();
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Handler] cached getResultItem failed for {}", clazz.getName(), e);
+                RESULT_LOGGER.debug("[RSI-Handler] cached getResultItem failed for {}", clazz.getName(), e);
             }
         }
 
-        // Probe known method names, preferring 1-param (RegistryAccess)
-        // overloads.  The deprecated no-arg getResultItem() is skipped entirely:
-        // several mods (WR, Malum) override it to return a machine block icon
-        // instead of the recipe output.  In 1.20.1 getResultItem(RegistryAccess)
-        // always exists on Recipe, so the no-arg probe is never needed for it.
-        for (String name : new String[]{"getResultItem", "getResult", "getOutput", "getOutputCopy", "getAssembledItem"}) {
-            boolean isResultItem = "getResultItem".equals(name);
-            // Try 1-param methods first
+        // 不探测已废弃的无参 getResultItem()，部分模组用它返回机器图标。
+        for (String name : new String[]{"getResult", "getOutput", "getOutputCopy", "getAssembledItem"}) {
+            // 同名方法优先使用接收 RegistryAccess 的重载。
             for (Method m : clazz.getMethods()) {
                 if (!m.getName().equals(name)) continue;
                 if (!ItemStack.class.isAssignableFrom(m.getReturnType())) continue;
                 if (m.getParameterCount() != 1) continue;
+                if (!m.getParameterTypes()[0].isAssignableFrom(RegistryAccess.class)) continue;
                 try {
                     Object r = m.invoke(recipe, access);
                     if (r instanceof ItemStack s && !s.isEmpty()) {
@@ -353,12 +365,9 @@ public final class ModRecipeHandlers {
                         return s.copy();
                     }
                 } catch (Exception e) {
-                    RSIntegrationMod.LOGGER.debug("[RSI-Handler] probe {} on {} failed", name, clazz.getName(), e);
+                    RESULT_LOGGER.debug("[RSI-Handler] probe {} on {} failed", name, clazz.getName(), e);
                 }
             }
-            // No-arg getResultItem() is the abused overload — skip it (see above).
-            if (isResultItem) continue;
-            // Fall back to no-arg methods (other method names)
             for (Method m : clazz.getMethods()) {
                 if (!m.getName().equals(name)) continue;
                 if (!ItemStack.class.isAssignableFrom(m.getReturnType())) continue;
@@ -370,12 +379,11 @@ public final class ModRecipeHandlers {
                         return s.copy();
                     }
                 } catch (Exception e) {
-                    RSIntegrationMod.LOGGER.debug("[RSI-Handler] probe {} on {} failed", name, clazz.getName(), e);
+                    RESULT_LOGGER.debug("[RSI-Handler] probe {} on {} failed", name, clazz.getName(), e);
                 }
             }
         }
 
-        // Fallback: scan fields for an output ItemStack
         return tryGetOutputField(recipe);
     }
 
@@ -388,7 +396,7 @@ public final class ModRecipeHandlers {
                 ItemStack s = (ItemStack) cachedField.get(recipe);
                 if (s != null && !s.isEmpty()) return s.copy();
             } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-Handler] cached output field read failed for {}", clazz.getName(), e);
+                RESULT_LOGGER.debug("[RSI-Handler] cached output field read failed for {}", clazz.getName(), e);
             }
             return ItemStack.EMPTY;
         }
@@ -407,7 +415,7 @@ public final class ModRecipeHandlers {
                         return s.copy();
                     }
                 } catch (Exception e) {
-                    RSIntegrationMod.LOGGER.debug("[RSI-Handler] output field probe failed for {}", clazz.getName(), e);
+                    RESULT_LOGGER.debug("[RSI-Handler] output field probe failed for {}", clazz.getName(), e);
                 }
             }
             scan = scan.getSuperclass();
@@ -416,10 +424,82 @@ public final class ModRecipeHandlers {
         return ItemStack.EMPTY;
     }
 
-    // ── shared secondary-output extraction ────────────────────────
+    // ── 副产物提取 ───────────────────────────────────────────────
 
-    public static List<ItemStack> tryGetSecondaryOutputs(Recipe<?> recipe, RegistryAccess access) {
-        return RecipeIndex.tryGetSecondaryOutputs(recipe, access);
+    public static List<ItemStack> tryGetSecondaryOutputs(@Nullable Recipe<?> recipe, RegistryAccess access) {
+        if (recipe instanceof FluidContainerRecipe conversion) return conversion.secondaryOutputs();
+        List<ItemStack> results = new ArrayList<>();
+        if (recipe == null) return results;
+
+        Set<Object> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+        // 网格配方要用实际合成网格计算剩余物。
+        if (!(recipe instanceof CraftingRecipe)) {
+            appendSecondaryStacks(readSecondaryGetter(recipe, "getRemainingItems", seen), ItemStack.EMPTY, results);
+        }
+        appendSecondaryStacks(readSecondaryGetter(recipe, "getByproducts", seen), ItemStack.EMPTY, results);
+        appendSecondaryStacks(readSecondaryGetter(recipe, "getRollResults", seen), ItemStack.EMPTY, results);
+        List<?> outputs = readSecondaryGetter(recipe, "getOutputs", seen);
+        if (!outputs.isEmpty()) {
+            // 全量产物可能包含主产物；调用方已单独计入主产物。
+            try {
+                ItemStack primary = CraftingResolver.resolveDeclaredOutput(
+                        recipe, tryGetUncachedResultItem(recipe, access));
+                appendSecondaryStacks(outputs, primary, results);
+            } catch (RuntimeException failure) {
+                RESULT_LOGGER.debug("[RSI-Handler] Could not resolve the primary output for {}", recipe.getClass(), failure);
+            }
+        }
+        if (results.isEmpty()) trySecondaryOutputFields(recipe, results);
+        return results;
+    }
+
+    private static List<?> readSecondaryGetter(Recipe<?> recipe, String name, Set<Object> seen) {
+        try {
+            Method method = Reflect.findMethod(recipe.getClass(), name, new Class<?>[0]);
+            if (method == null) return List.of();
+            Object value = method.invoke(recipe);
+            if (!seen.add(value)) return List.of();
+            if (value instanceof List<?> list) return list;
+            if (value instanceof ItemStack[] stacks) return Arrays.asList(stacks);
+        } catch (Exception failure) {
+            RESULT_LOGGER.debug("[RSI-Handler] Secondary output getter {} failed for {}", name, recipe.getClass(), failure);
+        }
+        return List.of();
+    }
+
+    private static void appendSecondaryStacks(List<?> values, ItemStack primary, List<ItemStack> results) {
+        boolean primaryDropped = false;
+        for (Object value : values) {
+            if (!(value instanceof ItemStack stack) || stack.isEmpty()) continue;
+            if (!primaryDropped && !primary.isEmpty()
+                    && (primary.hasTag() ? ItemStack.isSameItemSameTags(stack, primary)
+                                         : ItemStack.isSameItem(stack, primary))) {
+                primaryDropped = true;
+                continue;
+            }
+            results.add(stack.copy());
+        }
+    }
+
+    private static void trySecondaryOutputFields(Recipe<?> recipe, List<ItemStack> results) {
+        for (Class<?> scan = recipe.getClass(); scan != null && scan != Object.class; scan = scan.getSuperclass()) {
+            for (Field field : scan.getDeclaredFields()) {
+                String name = field.getName().toLowerCase(Locale.ROOT);
+                if (!name.contains("byproduct") && !name.contains("secondary")
+                        && !name.contains("extra") && !name.contains("bonus") && !name.contains("roll")) continue;
+                try {
+                    field.setAccessible(true);
+                    Object value = field.get(recipe);
+                    if (value instanceof List<?> list) {
+                        appendSecondaryStacks(list, ItemStack.EMPTY, results);
+                    } else if (value instanceof ItemStack stack && !stack.isEmpty()) {
+                        results.add(stack.copy());
+                    }
+                } catch (Exception failure) {
+                    RESULT_LOGGER.debug("[RSI-Handler] Secondary output field {} failed for {}", field, scan, failure);
+                }
+            }
+        }
     }
 
 }

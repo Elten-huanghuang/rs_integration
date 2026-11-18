@@ -41,9 +41,6 @@ import java.util.List;
  *       Classification uses the recipe type registry ID so the two supported
  *       item transformations are admitted without accidentally including
  *       spell writing or reactive enchantment.</li>
- *   <li>This handler does NOT call back to {@code RecipeIndex.tryGetResultItem}
- *       to avoid recursion (the codebase has a history of
- *       {@code tryGetResultItem} recursion stack overflows).</li>
  *   <li>Source cost is NOT modeled as an ingredient — it's a per-tile integer
  *       resource handled by the delegate.</li>
  * </ul>

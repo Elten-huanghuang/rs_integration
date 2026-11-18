@@ -3,7 +3,7 @@ package com.huanghuang.rsintegration.mods.wizardsreborn;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
-import com.huanghuang.rsintegration.crafting.RecipeIndex;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.util.CuriosAccess;
 import java.util.HashMap;
 import java.util.Locale;
@@ -1776,8 +1776,8 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
                 // (two blocks below). Durability-based recipes leave tools
                 // on input pedestals with reduced durability — those are NOT
                 // outputs and must not be collected.
-                ItemStack expectedOut = RecipeIndex
-                        .tryGetResultItem(recipe, player.serverLevel().registryAccess());
+                ItemStack expectedOut = ModRecipeHandlers.tryGetUncachedResultItem(
+                        recipe, player.serverLevel().registryAccess());
 
                 // 1. Check main pedestal (canonical output location)
                 try {
@@ -1945,7 +1945,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
 
         // wissenWandFunction auto-delivers the result to the player's inventory
         // (standard WR behavior). Search player inventory as fallback.
-        ItemStack expected = RecipeIndex.tryGetResultItem(
+        ItemStack expected = ModRecipeHandlers.tryGetUncachedResultItem(
                 recipe, player.serverLevel().registryAccess());
         if (expected.isEmpty()) return ItemStack.EMPTY;
 
@@ -2009,8 +2009,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         if (machineType != MachineType.CRYSTAL_RITUAL || recipe == null || player == null) return null;
         ServerLevel level = resolveMachineLevel(player);
         if (level == null) return null;
-        ItemStack expected = RecipeIndex
-                .tryGetResultItem(recipe, level.registryAccess());
+        ItemStack expected = ModRecipeHandlers.tryGetUncachedResultItem(recipe, level.registryAccess());
         return expected.isEmpty() ? null : expected;
     }
 
