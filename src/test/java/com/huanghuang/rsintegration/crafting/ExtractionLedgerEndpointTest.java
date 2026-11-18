@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 
+import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidTestFixtures;
 import com.huanghuang.rsintegration.storage.*;
@@ -106,6 +107,33 @@ class ExtractionLedgerEndpointTest extends BootstrapTest {
         assertEquals(2, reserved.getCount());
         assertTrue(ledger.describeEntries().get(0).contains("source=inventory"));
         assertEquals(ExtractionLedger.State.RESERVING, ledger.state());
+    }
+
+    @Test
+    void taglessPlanningTemplateReservesAndExtractsEmptyTagFromMainInventory() {
+        Inventory inventory = new Inventory(player);
+        ItemStack variant = new ItemStack(Items.NETHER_STAR);
+        variant.getOrCreateTag().putInt("state", 1);
+        ItemStack emptyTag = new ItemStack(Items.NETHER_STAR);
+        emptyTag.setTag(new CompoundTag());
+        inventory.setItem(0, variant);
+        inventory.setItem(1, emptyTag);
+        when(player.getInventory()).thenReturn(inventory);
+
+        ItemStack template = MaterialKey.of(emptyTag).toStack(1);
+        assertNull(template.getTag());
+        assertEquals(1, ledger.countAvailableExactForBatch(template, player));
+        assertEquals(1, ledger.reserveExactAcrossNetworkAndInventory(template, 1, null, player).getCount());
+        assertTrue(ledger.reserveExactAcrossNetworkAndInventory(emptyTag, 1, null, player).isEmpty());
+
+        try (MockedStatic<PlayerUtils> ignored = mockStatic(PlayerUtils.class)) {
+            assertTrue(ledger.commitToEndpoint(null, player));
+        }
+
+        assertSame(variant, inventory.getItem(0));
+        assertEquals(1, variant.getCount());
+        assertTrue(inventory.getItem(1).isEmpty());
+        assertEquals(new CompoundTag(), ledger.committedFragments().get(0).getTag());
     }
 
     @Test

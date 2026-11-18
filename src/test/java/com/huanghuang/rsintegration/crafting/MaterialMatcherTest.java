@@ -105,6 +105,19 @@ class MaterialMatcherTest extends BootstrapTest {
     }
 
     @Test
+    void runtimeIdentityTreatsOnlyEmptyTagAsAbsent() {
+        ItemStack tagless = new ItemStack(Items.DIAMOND);
+        ItemStack emptyTag = tagless.copy();
+        emptyTag.setTag(new CompoundTag());
+        ItemStack nonEmptyTag = tagged("variant");
+
+        assertTrue(MaterialMatcher.equivalentRuntimeFragment(tagless, emptyTag));
+        assertFalse(MaterialMatcher.sameRuntimeFragment(tagless, nonEmptyTag));
+        assertFalse(MaterialMatcher.sameRuntimeFragment(nonEmptyTag, emptyTag));
+        assertFalse(MaterialMatcher.sameRuntimeFragment(emptyTag, new ItemStack(Items.IRON_INGOT)));
+    }
+
+    @Test
     void nonFiniteNumericTagsKeepTheLegacyNormalizedIdentity() {
         ItemStack actual = new ItemStack(Items.DIAMOND);
         actual.getOrCreateTag().putFloat("nan", Float.NaN);

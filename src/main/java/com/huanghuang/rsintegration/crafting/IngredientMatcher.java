@@ -224,6 +224,8 @@ public final class IngredientMatcher {
         if (expected.getMaxDamage() > 0 && isUnbreakable(expected.getTag())) {
             return matchesProducedOutput(expected, actual);
         }
+        // 与规划键一致：空 CompoundTag 等同于无标签，但仍需检查 Forge 能力数据。
+        if (!expected.hasTag() && !actual.hasTag()) return expected.areCapsCompatible(actual);
         return ItemStack.isSameItemSameTags(expected, actual);
     }
 
