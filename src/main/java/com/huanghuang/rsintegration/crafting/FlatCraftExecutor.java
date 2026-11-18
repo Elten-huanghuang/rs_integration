@@ -65,6 +65,12 @@ final class FlatCraftExecutor {
         void logVirtualInventory(String context);
 
         void logLedgerState(ExtractionLedger ledger);
+
+        default void onCrafted(ItemStack output) {
+            onCrafted(output, output.getCount());
+        }
+
+        default void onCrafted(ItemStack output, long amount) {}
     }
 
     record Context(ServerLevel level, CraftLogContext logContext,
@@ -210,12 +216,13 @@ final class FlatCraftExecutor {
                 ItemStack produced = result.copyWithCount(
                         StepExecutor.mulCount(result.getCount(), executions));
                 addToInventory(workingInventory, produced);
+                if (!(recipe instanceof FluidContainerRecipe)) context.host().onCrafted(produced);
                 ExternalItemProgressBridge.enqueueCrafted(online, produced);
             }
             for (ItemStack secondary : ModRecipeHandlers.tryGetSecondaryOutputs(recipe, registryAccess)) {
-                addToInventory(workingInventory,
-                        secondary.copyWithCount(StepExecutor.mulCount(
-                                secondary.getCount(), executions)));
+                ItemStack produced = secondary.copyWithCount(StepExecutor.mulCount(secondary.getCount(), executions));
+                addToInventory(workingInventory, produced);
+                if (!(recipe instanceof FluidContainerRecipe)) context.host().onCrafted(produced);
             }
             // 排空节点已显式返回容器，不能再按桶的 crafting remainder 重复返还。
             if (recipe instanceof FluidContainerRecipe) continue;
@@ -308,6 +315,7 @@ final class FlatCraftExecutor {
         if (result.isEmpty()) result = ModRecipeHandlers.tryGetResultItem(recipe, registryAccess);
         if (!result.isEmpty()) {
             addToInventory(workingInventory, result);
+            context.host().onCrafted(result);
             ExternalItemProgressBridge.enqueueCrafted(online, result);
         }
         List<ItemStack> remainders = CraftPacketUtils.getRecipeRemaindersBySpec(recipe, consumed);

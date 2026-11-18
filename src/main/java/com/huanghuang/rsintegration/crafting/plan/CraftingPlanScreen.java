@@ -77,6 +77,10 @@ import java.util.*;
 @OnlyIn(Dist.CLIENT)
 public final class CraftingPlanScreen extends Screen {
 
+    private final PlanExtensionState planExtensions = new PlanExtensionState();
+    private boolean publishPlanExtensions = true;
+    private List<String> extensionSummaries = List.of();
+
     private PlanInventoryClientState inventoryState;
     private final Map<IngredientKey, List<PlanTreeNode>> inventoryNodes = new HashMap<>();
     private final Map<IngredientKey, Integer> inventoryStripIndices = new HashMap<>();
@@ -102,6 +106,10 @@ public final class CraftingPlanScreen extends Screen {
         JeiCraftingPlanContext.INSTANCE.updateMaterials(plan, inventoryState.changed());
         if (detailsPanel != null) detailsPanel.updateInventory(plan, displayWarnings(plan));
         if (materialTable != null) materialTable.update(plan);
+        if (externalRequest == null && !publishPlanExtensions && !responseRequests.waitingForPreview()
+                && !inventoryState.changed().isEmpty()) {
+            planExtensions.update(plan, materialSources, true, minecraft);
+        }
         updateConfirmButton();
     }
 
@@ -304,6 +312,8 @@ public final class CraftingPlanScreen extends Screen {
         preserveLatestPreview();
         if (responseRequests.pending()) PlanBackgroundClient.detach(responseRequests.activeRequestId());
         stopInventoryWatch();
+        planExtensions.newPlan();
+        publishPlanExtensions = true;
         treeMouseGesture.cancel();
         super.removed();
     }
@@ -366,6 +376,8 @@ public final class CraftingPlanScreen extends Screen {
      *  Avoids creating a new screen which would lose UI state. */
     public void updatePlan(PlanResponse newPlan) {
         stopInventoryWatch();
+        planExtensions.newPlan();
+        publishPlanExtensions = true;
         MachineCandidateView previous = selectedMachineCandidate();
         this.plan = newPlan;
         this.currentRepeat = clampRepeatCount(newPlan.repeatCount());
@@ -682,6 +694,7 @@ public final class CraftingPlanScreen extends Screen {
         }
         planRefreshTick = ticksOpen + 10;
         responseRequests.scheduleRefresh();
+        planExtensions.invalidate();
         updateConfirmButton();
     }
 
@@ -772,6 +785,7 @@ public final class CraftingPlanScreen extends Screen {
             lastRefreshCount = repeatCount;
             long previousRequest = responseRequests.activeRequestId();
             long supersededRequestId = responseRequests.beginPreview(requestId, rid.toString());
+            planExtensions.invalidate();
             if (supersededRequestId > 0L) PlanningProgressOverlay.cancel(supersededRequestId);
             PlanBackgroundClient.replaceRevision(previousRequest, requestId);
             updateConfirmButton();
@@ -934,6 +948,7 @@ public final class CraftingPlanScreen extends Screen {
         lastRefreshCount = currentRepeat;
         planRefreshTick = ticksOpen + 10;
         responseRequests.scheduleRefresh();
+        planExtensions.invalidate();
         updateConfirmButton();
     }
 
@@ -973,6 +988,11 @@ public final class CraftingPlanScreen extends Screen {
 
     @Override
     public void render(GuiGraphics gfx, int mouseX, int mouseY, float partialTick) {
+        if (publishPlanExtensions && !responseRequests.waitingForPreview()) {
+            publishPlanExtensions = false;
+            if (externalRequest == null) planExtensions.update(plan, materialSources, false, minecraft);
+        }
+        extensionSummaries = planExtensions.summaries();
         CraftingGlassBackground.render(gfx, CraftingUiTheme.current(CraftingUiTheme.Scope.TREE), partialTick);
         int wheelMouseX = mouseX, wheelMouseY = mouseY;
         if (themeButton != null && themeButton.isWheelOpen()) mouseX = mouseY = -10000;
@@ -987,9 +1007,10 @@ public final class CraftingPlanScreen extends Screen {
         chrome.begin(gfx, workspace);
         renderWorkspaceHeader(gfx);
         renderWorkspaceSummary(gfx);
+        renderExtensionSummary(gfx);
         renderWorkspaceToolbar(gfx, partialTick);
         if (embersDetailsOpen) renderEmbersSheet(gfx);
-        else if (materialView) materialTable.render(gfx, workspace.content(), mouseX, mouseY);
+        else if (materialView) materialTable.render(gfx, workspace.content(), mouseX, mouseY, planExtensions);
         else {
             Rect tree = workspace.tree();
             renderTreeArea(gfx, tree.x(), tree.y(), tree.width(), tree.bottom(), mouseX, mouseY);
@@ -1013,7 +1034,8 @@ public final class CraftingPlanScreen extends Screen {
 
     private void layoutWorkspace() {
         workspace = PlanWorkspaceLayout.create(width, height,
-                !materialView && !embersDetailsOpen && detailsPanel != null && detailsPanel.isOpen(), PlanUiConfig.panelWidth());
+                !materialView && !embersDetailsOpen && detailsPanel != null && detailsPanel.isOpen(),
+                PlanUiConfig.panelWidth(), extensionSummaryRows() * (font.lineHeight + 2));
         if (detailsPanel != null) detailsPanel.layout(workspace.inspector());
         if (confirmButton != null) {
             Rect r = workspace.confirm();
@@ -1024,6 +1046,25 @@ public final class CraftingPlanScreen extends Screen {
             cancelButton.setPosition(r.x(), r.y());
             cancelButton.setWidth(r.width());
             cancelButton.setHeight(r.height());
+        }
+    }
+
+    private int extensionSummaryRows() {
+        return Math.min(height < 280 ? 1 : 3, extensionSummaries.size());
+    }
+
+    private void renderExtensionSummary(GuiGraphics g) {
+        Rect summary = workspace.summary();
+        int rowHeight = font.lineHeight + 2;
+        for (int i = 0; i < extensionSummaryRows(); i++) {
+            Rect row = new Rect(summary.x(), summary.bottom() + i * rowHeight, summary.width(), rowHeight);
+            chrome.label(g, extensionSummaries.get(i), row.x() + 8, row.y() + 1,
+                    row.width() - 16, Color.MUTED);
+            if (row.contains(mouseX, mouseY)) {
+                hoveredStepWarnings = extensionSummaries.stream().<Component>map(Component::literal).toList();
+                hoveredTooltipX = mouseX;
+                hoveredTooltipY = mouseY;
+            }
         }
     }
 
@@ -2462,6 +2503,12 @@ public final class CraftingPlanScreen extends Screen {
         if (availability != null && !availability.isEnough() && availability.missingCount() == 0) {
             lines.add(Component.translatable("rsi.plan.tooltip.planned")
                     .withStyle(ChatFormatting.GOLD));
+        }
+        if (availability != null) {
+            planExtensions.notes(hoveredItemForTooltip).forEach(note -> {
+                if (!note.note().isBlank()) lines.add(Component.literal(note.note()));
+                note.tooltipLines().forEach(line -> lines.add(Component.literal(line)));
+            });
         }
 
         // This single call triggers Forge's RenderTooltipEvent — Legendary

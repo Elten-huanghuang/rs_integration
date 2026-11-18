@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
 import com.huanghuang.rsintegration.api.execution.CancelReason;
+import com.huanghuang.rsintegration.api.execution.RecursiveCraftSucceededEvent;
 
 import com.huanghuang.rsintegration.crafting.batch.OperationLifecycle;
 import com.huanghuang.rsintegration.crafting.graph.CaptureLeaseRegistry;
@@ -32,6 +33,8 @@ import net.minecraft.server.players.PlayerList;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.RecipeManager;
+import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import org.junit.jupiter.api.BeforeAll;
@@ -49,6 +52,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -110,13 +114,32 @@ class AsyncCraftChainCaptureTest extends BootstrapTest {
             set(fixture.chain, "finalSettlementPrepared", true);
             Method finish = AsyncCraftChain.class.getDeclaredMethod("finish", ServerPlayer.class);
             finish.setAccessible(true);
-            assertEquals(true, finish.invoke(fixture.chain, fixture.player));
-            assertEquals(destination == OutputDestination.PLAYER_INVENTORY ? 3 : 0, deliveredToPlayer.get());
-            assertEquals(destination == OutputDestination.RS_NETWORK ? 5 : 2, stored.get());
-            assertEquals(0, otherTask.received(key), "最终写回不能被另一任务再次认领");
-            assertTrue(reception.drain().isEmpty());
-            assertTrue(fixture.chain.tick());
-            assertEquals(5, deliveredToPlayer.get() + stored.get());
+            var history = (CraftProductionHistory) field(fixture.chain, "productionHistory");
+            history.record(diamond, 3);
+            var events = new ArrayList<RecursiveCraftSucceededEvent>();
+            Consumer<RecursiveCraftSucceededEvent> listener = event -> {
+                assertEquals(5, deliveredToPlayer.get() + stored.get(), "成功事件必须在结算之后发出");
+                events.add(event);
+            };
+            // 单元测试未经过 ModLauncher 的事件类转换，先用真实实例初始化监听列表。
+            new RecursiveCraftSucceededEvent(fixture.player, fixture.chain.getCraftId(), Map.of()).getListenerList();
+            MinecraftForge.EVENT_BUS.addListener(EventPriority.NORMAL, false, RecursiveCraftSucceededEvent.class, listener);
+            MinecraftForge.EVENT_BUS.start();
+            try {
+                assertEquals(true, finish.invoke(fixture.chain, fixture.player));
+                assertEquals(destination == OutputDestination.PLAYER_INVENTORY ? 3 : 0, deliveredToPlayer.get());
+                assertEquals(destination == OutputDestination.RS_NETWORK ? 5 : 2, stored.get());
+                assertEquals(0, otherTask.received(key), "最终写回不能被另一任务再次认领");
+                assertTrue(reception.drain().isEmpty());
+                assertTrue(fixture.chain.tick());
+                assertEquals(5, deliveredToPlayer.get() + stored.get());
+                assertEquals(1, events.size());
+                assertEquals(fixture.chain.getCraftId(), events.get(0).taskId());
+                assertEquals(Map.of(key, 3L), events.get(0).producedItems());
+            } finally {
+                MinecraftForge.EVENT_BUS.unregister(listener);
+                MinecraftForge.EVENT_BUS.shutdown();
+            }
         }
     }
 

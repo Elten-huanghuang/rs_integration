@@ -30,6 +30,7 @@ RSI 不要求第三方改写现有配方 JSON。第三方保留自己的 `Recipe
 - [Consumer 查询与下单](#12-consumer-api)
 - [版本规则](#14-版本规则)
 - [补充入口与边界](#17-补充入口与边界)
+- [原生交互扩展](#18-原生交互扩展)
 
 RSI 内置 Goety 坩埚的构建版本与功能范围见
 [Goety 兼容说明](../GOETY_COMPATIBILITY.md)，不属于第三方 API 接入合同。
@@ -1506,3 +1507,36 @@ RSI 可以在新的 major 中引入不兼容变更；升级 RSI 的第三方需�
 `com.huanghuang.rsintegration.api.magic` 中的 `RsiMagicApi`、`BdMagicApi` 是按后端
 拆分的现有入口，仍依赖后端或 RSI 内部资源类型，不是后端无关的公共资源协议。
 RS 与 BD 的魔法资源余额不会因调用这些入口自动共享或合并。
+
+## 18. 原生交互扩展
+
+以下入口从 Integration API 1.2 提供。
+
+### 18.1 原生合成计划展示
+
+仅客户端初始化时调用 `RSIPlanExtensions.register(id, provider)`。`Context` 包含当前计划 ID、
+配方、次数、存储网络、来源开关和外部材料需求，不把任务内的中间产物再算作外部材料。
+库存更新保留计划 ID 并增加 `inventoryRevision`；`complete=false` 表示只能看到已确认的材料。
+没有计划图时不会从展示用材料表猜测外部需求。
+现有规划不记录每种来源分别承担的数量，请勿把总可用量当作来源分摊。
+
+`Provider.onPlan` 在客户端线程调用；耗时计算应在其他线程进行，可通过 `publish` 异步提交
+整份 `Decoration`，或用它更新同一计划的内容。换计划或更新库存后，旧回调的结果会被忽略。
+摘要及单项备注由 RSI 排版，完整文本可通过悬浮查看。通过空列表及空映射清除内容。
+
+### 18.2 递归合成成功事件
+
+在 `MinecraftForge.EVENT_BUS` 监听 `RecursiveCraftSucceededEvent`。原生递归任务成功结算后，
+在服务端主线程发出一次；失败、取消和预览不会发出。`producedItems()` 按实际物品及 NBT
+汇总新产物，含已被下游用掉的中间产物，不含已识别的退料、空容器和催化剂返还。
+它不是最终交付清单，也不是 Consumer 订单事件。机器无法明确区分用途的额外堆叠不会被猜作产物。
+
+### 18.3 JEI 取物和世界选块兜底
+
+使用 `RSIItemRetrievalFallback.register(id, handler)` 注册，RSI 在服务端主线程按 ID 排序调用。
+仅在原生权限和交付目标检查通过、明确缺货且实际交付为零时触发。无网络、无权限、无空间、
+后端异常或部分交付时保持原流程。不同取物场景的交付目标不同，处理器应重验来源权限和空间。
+
+`Result.PASS` 不得扣料或修改库存；`new Delivered(actualCount)` 仅用于已经实际交付的物品，
+数量不得超过请求数。首次交付后停止调用并跳过原失败通知和收藏。该 API 不处理跨模组按键冲突，
+也不会注册递归合成材料来源。

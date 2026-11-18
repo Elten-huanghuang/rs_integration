@@ -1,10 +1,13 @@
 package com.huanghuang.rsintegration.mods.jei;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.api.RSIItemRetrievalFallback.Destination;
+import com.huanghuang.rsintegration.api.RSIItemRetrievalFallback.Scene;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.huanghuang.rsintegration.network.packet.NetworkPacketIds;
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
+import com.huanghuang.rsintegration.storage.ItemRetrievalFallbacks;
 import com.huanghuang.rsintegration.storage.StorageRestockSupport;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
@@ -62,16 +65,24 @@ public record JeiStoragePullPacket(ItemStack stack) {
         }
 
         int amount = Math.min(template.getMaxStackSize(), capacity);
-        ItemStack extracted;
+        StorageRestockSupport.Extraction extraction;
         try {
-            extracted = StorageRestockSupport.extract(endpoint, player, template, amount);
+            extraction = StorageRestockSupport.extractOutcome(endpoint, player, template, amount);
         } catch (RuntimeException exception) {
             RSIntegrationMod.LOGGER.warn("[RSI-JEI] Storage pull failed for {}", template, exception);
             notify(player, "rsi.jei.pull.failed");
             return;
         }
 
+        ItemStack extracted = extraction.stack();
         if (extracted.isEmpty()) {
+            if (extraction.confirmedMissing() && inventoryCapacity(player.getInventory(), template) >= amount
+                    && ItemRetrievalFallbacks.onMissing(player, template, amount, Scene.JEI,
+                            Destination.PLAYER_INVENTORY, endpoint.session().reference()) > 0) {
+                player.getInventory().setChanged();
+                player.containerMenu.broadcastChanges();
+                return;
+            }
             notify(player, "rsi.jei.pull.not_found", template.getHoverName());
             return;
         }

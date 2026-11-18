@@ -93,8 +93,15 @@ public final class StorageRestockSupport {
 
     public static ItemStack extract(CraftStorageEndpoint endpoint, ServerPlayer player,
                                     ItemStack template, int amount) {
+        return extractOutcome(endpoint, player, template, amount).stack();
+    }
+
+    public record Extraction(ItemStack stack, boolean confirmedMissing) {}
+
+    public static Extraction extractOutcome(CraftStorageEndpoint endpoint, ServerPlayer player,
+                                            ItemStack template, int amount) {
         if (endpoint == null || template == null || template.isEmpty() || amount <= 0) {
-            return ItemStack.EMPTY;
+            return new Extraction(ItemStack.EMPTY, false);
         }
         StorageOperationResult result = endpoint.extractExact(player, template, amount, false);
         refund(endpoint, player, result.recoveryStacks(), "recovery");
@@ -105,7 +112,14 @@ public final class StorageRestockSupport {
         if (merged.isEmpty() && !extracted.isEmpty()) {
             refund(endpoint, player, extracted, "invalid exact extraction");
         }
-        return merged;
+        return new Extraction(merged, confirmedMissing(result));
+    }
+
+    public static boolean confirmedMissing(StorageOperationResult result) {
+        return result.kind() == StorageOperationResult.Kind.EXTRACT
+                && result.status() == StorageOperationStatus.NOT_FOUND
+                && result.transferredAmount().orElse(-1L) == 0L
+                && result.recoveryStacks().isEmpty();
     }
 
     static ItemStack mergeExactStacks(ItemStack template, List<ItemStack> stacks,

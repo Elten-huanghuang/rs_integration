@@ -656,6 +656,7 @@ public final class ConsumerCraftingRuntime {
                     plan.targetOutput,
                     outputDestination(plan.destination),
                     running -> {
+                        running.suppressNativeSuccessEvent();
                         order.chain = running;
                         running.setTargetResource(
                                 plan.targetResource);

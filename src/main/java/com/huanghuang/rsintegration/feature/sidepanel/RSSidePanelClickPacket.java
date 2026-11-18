@@ -1,5 +1,8 @@
 package com.huanghuang.rsintegration.feature.sidepanel;
 
+import com.huanghuang.rsintegration.api.RSIItemRetrievalFallback.Destination;
+import com.huanghuang.rsintegration.api.RSIItemRetrievalFallback.Scene;
+import com.huanghuang.rsintegration.storage.ItemRetrievalFallbacks;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
@@ -419,11 +422,12 @@ public final class RSSidePanelClickPacket {
         if (snapshot == null) return ItemStack.EMPTY;
         int count = pickRequestCount(snapshot.countExact(endpoint.session().itemKey(targetItem)),
                 targetItem.getMaxStackSize());
-        if (count <= 0) return ItemStack.EMPTY;
+        if (count <= 0) return tryPickFallback(player, targetItem, endpoint);
 
         StorageOperationResult simulated = endpoint.extractExact(player, targetItem, count, true);
         long simulatedCount = simulated.transferredAmount().orElse(0L);
-        if (simulatedCount <= 0L) return ItemStack.EMPTY;
+        if (simulatedCount <= 0L) return StorageRestockSupport.confirmedMissing(simulated)
+                ? tryPickFallback(player, targetItem, endpoint) : ItemStack.EMPTY;
         count = (int) Math.min(count, simulatedCount);
 
         StorageOperationResult performed = endpoint.extractExact(player, targetItem, count, false);
@@ -432,7 +436,8 @@ public final class RSSidePanelClickPacket {
         ItemStack extracted = mergeExactStacks(extractedStacks);
         if (extracted.isEmpty()) {
             refundStacks(endpoint, player, extractedStacks, "invalid exact extraction");
-            return ItemStack.EMPTY;
+            return StorageRestockSupport.confirmedMissing(performed)
+                    ? tryPickFallback(player, targetItem, endpoint) : ItemStack.EMPTY;
         }
 
         int selectedSlot = player.getInventory().selected;
@@ -451,6 +456,19 @@ public final class RSSidePanelClickPacket {
                 RefinedStorageBackend.resolveNativeNetwork(endpoint.session().reference(), player),
                 player);
         return extracted;
+    }
+
+    private static ItemStack tryPickFallback(ServerPlayer player, ItemStack target, CraftStorageEndpoint endpoint) {
+        int slot = player.getInventory().selected;
+        if (!player.getInventory().getItem(slot).isEmpty()) return ItemStack.EMPTY;
+        int delivered = ItemRetrievalFallbacks.onMissing(player, target, target.getMaxStackSize(),
+                Scene.WORLD_PICK, Destination.SELECTED_HOTBAR_SLOT, endpoint.session().reference());
+        if (delivered <= 0) return ItemStack.EMPTY;
+        player.getInventory().setChanged();
+        player.inventoryMenu.broadcastChanges();
+        player.containerMenu.broadcastChanges();
+        syncPlayerInventorySlot(player, slot);
+        return target.copyWithCount(delivered);
     }
 
     static ItemStack coalescedNativePick(ItemStack mainHand, ItemStack targetItem) {

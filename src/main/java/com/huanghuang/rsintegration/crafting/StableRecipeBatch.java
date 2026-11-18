@@ -114,6 +114,7 @@ final class StableRecipeBatch {
             remainingBatch -= chunk;
         }
         context.host().logVirtualInventory("after stable batch");
+        context.host().onCrafted(plan.output(), requested * outputPerCraft);
         return new Result(Outcome.SUCCESS, "completed=" + requested);
     }
 

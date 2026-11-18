@@ -10,6 +10,8 @@ import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot.Wait
 import com.huanghuang.rsintegration.api.execution.CollectedOutput;
 import com.huanghuang.rsintegration.api.execution.CancelReason;
 import com.huanghuang.rsintegration.feature.ftbquests.ExternalItemProgressBridge;
+import com.huanghuang.rsintegration.api.execution.RecursiveCraftSucceededEvent;
+import net.minecraftforge.common.MinecraftForge;
 import com.huanghuang.rsintegration.crafting.batch.CraftExecutionPolicy;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
 import com.huanghuang.rsintegration.mods.embers.EreAlchemyDelegateMode;
@@ -258,6 +260,8 @@ public final class AsyncCraftChain {
     private final Map<NodeId, SupplementalSearch> supplementalSearches = new HashMap<>();
     /** 累计真实发布的产物；最终交付或取消清理不能使 HUD 的已完成数量倒退。 */
     private final Map<OutputPortId, Long> publishedOutputQuantities = new HashMap<>();
+    private final CraftProductionHistory productionHistory = new CraftProductionHistory();
+    private boolean publishSuccessEvent = true;
     private final Map<NodeId, String> graphFailureDetails = new HashMap<>();
     private final Map<NodeId, CraftFailureCode> graphFailureCodes = new HashMap<>();
     /** Prevents an unavailable machine/material from being rescanned every tick. */
@@ -2301,7 +2305,9 @@ public final class AsyncCraftChain {
     void publishIncrementalGraphOutputs(NodeId nodeId, ConcurrentNodeExecutor.Worker worker) {
         if (!(worker instanceof CraftNodeRuntime runtime) || graphMaterials == null) return;
         runtime.prepareGraphPublications();
-        reportedResources.addAll(runtime.drainDeliveredReports());
+        List<CollectedOutput> delivered = runtime.drainDeliveredReports();
+        reportedResources.addAll(delivered);
+        delivered.forEach(productionHistory::record);
         boolean advanced = runtime.consumeProgressSignal();
         if (advanced) executionClock.markProgress();
         if (advanced || runtime.isWaitingForLeasedMachine()) {
@@ -2314,6 +2320,15 @@ public final class AsyncCraftChain {
                     publication.material(), publication.stack());
             runtime.graphPublicationCompleted();
             recordPublishedOutput(publication.port(), publication.stack());
+            CraftNode node = graphNodes.get(nodeId);
+            if (node != null && publication.resource().kind() == IntegrationResourceKey.ResourceKind.ITEM) {
+                for (OutputDeclaration output : node.outputs()) {
+                    if (publication.port().equals(output.id())) {
+                        productionHistory.record(publication.stack(), output.kind());
+                        break;
+                    }
+                }
+            }
             if (publication.resource().kind()
                     == IntegrationResourceKey.ResourceKind.ITEM
                     && isPrimaryGraphPublication(
@@ -2382,9 +2397,7 @@ public final class AsyncCraftChain {
                         && attempt != null && !runtime.productionTargetComplete();
                 if (targetUnmet && attempt.progress.hasAttemptBudget()) {
                     attempt.next();
-                    for (ItemStack stack : runtime.drainOutputSurplus()) {
-                        addToVirtualInventory(stack);
-                    }
+                    settleMachineSurplus(nodeId, runtime);
                     nodeRuntimes.remove(nodeId);
                     snapshotCommittedVirtual();
                     graphProgressWatchdog.markProgress();
@@ -2412,7 +2425,7 @@ public final class AsyncCraftChain {
                 snapshotCommittedVirtual();
                 return ConcurrentNodeExecutor.CompletionStatus.FAILED;
             }
-            for (ItemStack stack : runtime.drainOutputSurplus()) addToVirtualInventory(stack);
+            settleMachineSurplus(nodeId, runtime);
             nodeRuntimes.remove(nodeId);
             snapshotCommittedVirtual();
             graphProgressWatchdog.markProgress();
@@ -2427,6 +2440,22 @@ public final class AsyncCraftChain {
             graphFailureCodes.put(nodeId, CraftFailureCode.INTERNAL_ERROR);
             RSIntegrationMod.LOGGER.error(ctx.format("Failed to settle graph node {}"), nodeId, exception);
             return ConcurrentNodeExecutor.CompletionStatus.FAILED;
+        }
+    }
+
+    private void settleMachineSurplus(NodeId nodeId, CraftNodeRuntime runtime) {
+        CraftNode node = graphNodes.get(nodeId);
+        for (ItemStack stack : runtime.drainOutputSurplus()) {
+            boolean product = false;
+            boolean returned = false;
+            for (OutputDeclaration output : node.outputs()) {
+                if (output.resource().kind() != IntegrationResourceKey.ResourceKind.ITEM
+                        || !MaterialMatcher.matchesOutputDeclaration(output.material(), stack)) continue;
+                if (CraftProductionHistory.isProduction(output.kind())) product = true;
+                else returned = true;
+            }
+            if (product && !returned) productionHistory.record(stack);
+            addToVirtualInventory(stack);
         }
     }
 
@@ -2775,6 +2804,8 @@ public final class AsyncCraftChain {
     public boolean isDone() { return state == State.COMPLETED || state == State.ABORTED; }
     public boolean isAborted() { return state == State.ABORTED; }
     public State state() { return state; }
+
+    public void suppressNativeSuccessEvent() { publishSuccessEvent = false; }
     public String abortReason() { return abortReason; }
     @Nullable public TerminationCoordinator.Report terminationReport() { return terminationReport; }
     /** @return the stable identity of this craft run */
@@ -3094,6 +3125,7 @@ public final class AsyncCraftChain {
      * 主动写回该节点的 ProducerOutput，否则下游节点永远等不到材料。
      */
     private void publishTaintedEarthHeart(NodeId nodeId, ItemStack tainted, ServerPlayer player) {
+        productionHistory.record(tainted);
         CraftNode node = graphNodes.get(nodeId);
         if (graphMaterials == null || node == null || node.outputs().isEmpty()) {
             addToVirtualInventory(tainted);
@@ -3231,6 +3263,11 @@ public final class AsyncCraftChain {
                             @Override
                             public void logLedgerState(ExtractionLedger ledger) {
                                 AsyncCraftChain.this.logLedgerState(ledger);
+                            }
+
+                            @Override
+                            public void onCrafted(ItemStack output, long amount) {
+                                productionHistory.record(output, amount);
                             }
                         }, supplementalMaterialLocks, catalystState));
     }
@@ -3587,6 +3624,14 @@ public final class AsyncCraftChain {
         sendTerminalProgress(online);
         closeMagicReservation();
         fireOnDone();
+        if (publishSuccessEvent) {
+            try {
+                MinecraftForge.EVENT_BUS.post(
+                        new RecursiveCraftSucceededEvent(online, craftId, productionHistory.snapshot()));
+            } catch (RuntimeException exception) {
+                RSIntegrationMod.LOGGER.error(ctx.format("Recursive craft success listener failed"), exception);
+            }
+        }
         return true;
     }
 

@@ -13,13 +13,19 @@ public record PlanWorkspaceLayout(Rect frame, Rect header, Rect summary, Rect to
     }
 
     public static PlanWorkspaceLayout create(int width, int height, boolean inspectorOpen, int preferredWidth) {
+        return create(width, height, inspectorOpen, preferredWidth, 0);
+    }
+
+    static PlanWorkspaceLayout create(int width, int height, boolean inspectorOpen, int preferredWidth,
+                                      int extraSummaryHeight) {
         boolean compact = width < 720 || height < 360;
         int margin = compact ? 6 : 12, gap = compact ? 4 : 8;
         int inner = Math.max(1, width - margin * 2);
         Rect frame = new Rect(margin, margin, inner, Math.max(1, height - margin * 2));
         Rect header = new Rect(margin + (compact ? 6 : 8), margin + 4, inner - 12, compact ? 24 : 36);
         Rect summary = new Rect(margin + (compact ? 6 : 8), header.bottom() + gap, inner - 12, compact ? 28 : 46);
-        Rect toolbar = new Rect(summary.x(), summary.bottom() + gap, summary.width(), width < 720 ? 38 : 20);
+        Rect toolbar = new Rect(summary.x(), summary.bottom() + gap + extraSummaryHeight,
+                summary.width(), width < 720 ? 38 : 20);
         boolean stackedFooter = width < 900;
         int footerHeight = stackedFooter ? 48 : 42;
         Rect footer = new Rect(summary.x(), height - margin - footerHeight, summary.width(), footerHeight);
@@ -29,7 +35,7 @@ public record PlanWorkspaceLayout(Rect frame, Rect header, Rect summary, Rect to
         // GUI 宽度很小时侧栏仍需容纳三页签；树保留至少半个内容区。
         if (compact) inspectorWidth = Math.min(Math.max(160, inspectorWidth), content.width() / 2);
         // 小 GUI 的右侧抽屉向上延伸，为候选卡片和条件列表保留滚动空间。
-        int inspectorTop = content.height() < 160 ? summary.y() : toolbar.y();
+        int inspectorTop = content.height() < 160 && extraSummaryHeight == 0 ? summary.y() : toolbar.y();
         Rect inspector = new Rect(content.right() - inspectorWidth, inspectorTop, inspectorWidth,
                 footer.y() - gap - inspectorTop);
         Rect tree = inspectorOpen ? new Rect(content.x(), content.y(),

@@ -1,10 +1,13 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
 import com.huanghuang.rsintegration.config.PlanUiConfig.Color;
+import com.huanghuang.rsintegration.api.RSIPlanExtensions.MaterialNote;
 import com.huanghuang.rsintegration.crafting.plan.PlanWorkspaceLayout.Rect;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.client.InkFluidRenderer;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
@@ -16,6 +19,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 /** 主内容区的材料整页，与树视图切换时保留相机和选中节点。 */
 public final class PlanMaterialTable {
@@ -62,10 +66,11 @@ public final class PlanMaterialTable {
         if (!this.query.equals(query)) { this.query = query; scroll = 0; filterDirty = true; }
     }
 
-    public void render(GuiGraphics g, Rect bounds, int mouseX, int mouseY) {
+    public void render(GuiGraphics g, Rect bounds, int mouseX, int mouseY, PlanExtensionState extensions) {
         this.bounds = bounds;
         hits.clear();
         hoveredItem = ItemStack.EMPTY;
+        List<MaterialNote> hoveredNotes = List.of();
         chrome.resetActions();
         PlanWorkspaceChrome.panel(g, bounds, Color.BACKGROUND, Color.BORDER);
         int x = bounds.x() + 7, width = bounds.width() - 14;
@@ -89,7 +94,7 @@ public final class PlanMaterialTable {
         label(g, text("column_missing"), missingX, headerY, countWidth - 2, Color.MUTED);
         if (wide) label(g, text("column_source"), sourceX, headerY, actionX - sourceX - 4, Color.MUTED);
         int top = headerY + 17, bottom = bounds.bottom() - 19;
-        int rowHeight = 30;
+        int rowHeight = extensions.hasNotes() ? 40 : 30;
         if (filterDirty) {
             filtered = rows.stream().filter(row -> !onlyMissing || row.missing() > 0)
                 .filter(row -> MaterialSearchMatcher.matches(row.key().stack(1).getHoverName().getString(),
@@ -111,7 +116,11 @@ public final class PlanMaterialTable {
                                 : row.missing() > 0 ? Color.WARNING_SURFACE : index % 2 == 0 ? Color.SURFACE : Color.PANEL;
                         g.fill(x, y, x + width, y + rowHeight - 2, fill.value());
                         ItemStack stack = row.key().stack(1);
-                        if (hit.contains(mouseX, mouseY) && mouseX < x + 25) hoveredItem = stack;
+                        List<MaterialNote> notes = row.leftover() ? List.of() : extensions.notes(stack);
+                        if (hit.contains(mouseX, mouseY) && (mouseX < x + 25 || !notes.isEmpty())) {
+                            hoveredItem = stack;
+                            hoveredNotes = notes;
+                        }
                         InkFluidRenderer.render(g, stack, x + 4, y + 3);
                         label(g, stack.getHoverName().getString(), x + 26, y + 7, nameEnd - x - 30, Color.TEXT);
                         label(g, PlanRenderEngine.formatCompact(row.needed()), needX, y + 7, countWidth - 2, Color.TEXT);
@@ -125,6 +134,9 @@ public final class PlanMaterialTable {
                                 sourceX, y + 7, actionX - sourceX - 4, row.missing() > 0 ? Color.WARNING : Color.READY);
                         label(g, text(row.missing() > 0 ? "locate_star" : "locate_short"), actionX, y + 7,
                                 bounds.right() - actionX - 8, Color.MUTED);
+                        if (!notes.isEmpty()) label(g, notes.stream().map(MaterialNote::note)
+                                        .filter(note -> !note.isBlank()).collect(Collectors.joining(" | ")),
+                                x + 26, y + 23, actionX - x - 30, Color.MUTED);
                         hits.add(new Hit(hit, row));
                     }
                     y += rowHeight;
@@ -142,7 +154,15 @@ public final class PlanMaterialTable {
         }
         if (visible.isEmpty()) label(g, text(incomplete && rows.isEmpty() ? "no_settled_materials" : "empty"),
                 x + 8, top + 6, width - 16, Color.MUTED);
-        if (!hoveredItem.isEmpty()) g.renderTooltip(font, hoveredItem, mouseX, mouseY);
+        if (!hoveredItem.isEmpty() && hoveredNotes.isEmpty()) g.renderTooltip(font, hoveredItem, mouseX, mouseY);
+        else if (!hoveredItem.isEmpty()) {
+            List<Component> tooltip = new ArrayList<>(Screen.getTooltipFromItem(Minecraft.getInstance(), hoveredItem));
+            for (MaterialNote note : hoveredNotes) {
+                if (!note.note().isBlank()) tooltip.add(Component.literal(note.note()));
+                note.tooltipLines().forEach(line -> tooltip.add(Component.literal(line)));
+            }
+            g.renderComponentTooltip(font, tooltip, mouseX, mouseY);
+        }
     }
 
     public boolean click(double x, double y, int button) {
