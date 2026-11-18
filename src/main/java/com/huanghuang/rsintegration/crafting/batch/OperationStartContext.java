@@ -88,73 +88,26 @@ public record OperationStartContext(
     }
 
     /**
-     * Ordered compatibility projection used only by legacy delegate entry points.
-     * Sparse plans retain empty placeholders so delegates that consume fixed input
-     * slots receive the same layout that {@code getRequiredMaterials()} declared.
+     * 仅在机器投料边界生成物理槽位视图；材料身份不由此视图反推。
      */
-    public List<ItemStack> legacyMaterials() {
+    public List<ItemStack> inputSlots() {
         Map<String, ItemStack> byId = new LinkedHashMap<>();
         for (ReservedMaterial material : materials) {
             byId.put(material.entryId(), material.stack());
         }
 
-        boolean hasExplicitSlots = materialPlan.entries().stream()
-                .anyMatch(entry -> entry.inputSlot() != null);
-        if (!hasExplicitSlots) {
-            return materialPlan.entries().stream()
-                    .map(entry -> reservedStack(byId, entry).copy())
-                    .toList();
-        }
-
-        int slotCount = materialPlan.entries().size();
-        for (MaterialPlan.Entry entry : materialPlan.entries()) {
-            if (entry.inputSlot() != null) {
-                slotCount = Math.max(slotCount, entry.inputSlot() + 1);
-            }
-        }
+        int slotCount = 1 + materialPlan.entries().stream().mapToInt(MaterialPlan.Entry::inputSlot).max().orElse(-1);
         List<ItemStack> ordered = new ArrayList<>(
                 Collections.nCopies(slotCount, ItemStack.EMPTY));
-        int nextSlot = 0;
         for (MaterialPlan.Entry entry : materialPlan.entries()) {
-            int slot = entry.inputSlot() == null ? nextFreeSlot(ordered, nextSlot) : entry.inputSlot();
-            if (slot < 0 || slot >= ordered.size()) {
-                throw new IllegalStateException("invalid input slot for " + entry.id());
-            }
-            if (!ordered.get(slot).isEmpty()) {
-                throw new IllegalStateException("duplicate input slot for " + entry.id());
-            }
-            ordered.set(slot, reservedStack(byId, entry).copy());
-            nextSlot = slot + 1;
+            ordered.set(entry.inputSlot(), byId.get(entry.id()).copy());
         }
         return List.copyOf(ordered);
     }
 
-    /**
-     * Adapts an existing ordered reservation to stable material identities.
-     * Compact lists map directly to plan order; lists retaining empty legacy
-     * slots use each entry's recorded compatibility index.
-     */
     public static OperationStartContext chainReserved(
-            ServerPlayer player, ExtractionLedger ledger, MaterialPlan materialPlan,
-            List<ItemStack> orderedMaterials, @Nullable InputBufferPlan inputBufferPlan) {
-        MaterialPlan plan = materialPlan == null ? MaterialPlan.none() : materialPlan;
-        List<ItemStack> ordered = orderedMaterials == null ? List.of() : orderedMaterials;
-        List<ReservedMaterial> reserved = new ArrayList<>(plan.entries().size());
-        boolean compact = ordered.size() == plan.entries().size()
-                && ordered.stream().allMatch(stack -> stack != null && !stack.isEmpty());
-        for (int index = 0; index < plan.entries().size(); index++) {
-            MaterialPlan.Entry entry = plan.entries().get(index);
-            int sourceIndex = compact ? index
-                    : entry.inputSlot() == null ? -1 : entry.inputSlot();
-            if (sourceIndex < 0 || sourceIndex >= ordered.size()) {
-                throw new IllegalArgumentException("missing ordered material for " + entry.id());
-            }
-            ItemStack stack = ordered.get(sourceIndex);
-            if (stack == null || stack.isEmpty()) {
-                throw new IllegalArgumentException("empty ordered material for " + entry.id());
-            }
-            reserved.add(new ReservedMaterial(entry.id(), stack));
-        }
+            ServerPlayer player, ExtractionLedger ledger, MaterialPlan plan,
+            List<ReservedMaterial> reserved, @Nullable InputBufferPlan inputBufferPlan) {
         InputBufferPlan buffer = inputBufferPlan == null
                 ? InputBufferPlan.none()
                 : inputBufferPlan.withResolvedMaterials(reserved);
@@ -165,29 +118,13 @@ public record OperationStartContext(
                 plan, reserved, buffer, null);
     }
 
-    private static ItemStack reservedStack(Map<String, ItemStack> byId, MaterialPlan.Entry entry) {
-        ItemStack stack = byId.get(entry.id());
-        if (stack == null || stack.isEmpty()) {
-            throw new IllegalStateException("missing reserved material " + entry.id());
-        }
-        return stack;
-    }
-
-    private static int nextFreeSlot(List<ItemStack> ordered, int start) {
-        for (int slot = Math.max(0, start); slot < ordered.size(); slot++) {
-            if (ordered.get(slot).isEmpty()) return slot;
-        }
-        return -1;
-    }
-
     /** Unified outer-group handoff for an operation-major material matrix. */
     public static OperationStartContext repeatedChainReserved(
             ServerPlayer player, ExtractionLedger ledger, MaterialPlan perOperationPlan,
-            int operations, int legacyStride, List<ItemStack> flatMaterials) {
+            int operations, List<ItemStack> flatMaterials) {
         return new OperationStartContext(player, ledger, MaterialOwnership.CHAIN_RESERVED,
                 MaterialPlan.none(), List.of(), InputBufferPlan.none(),
-                new RepeatedOperationPlan(perOperationPlan, operations,
-                        legacyStride, flatMaterials));
+                new RepeatedOperationPlan(perOperationPlan, operations, flatMaterials));
     }
 
     /** Unified start context for delegates that intentionally acquire their own materials. */
@@ -222,5 +159,6 @@ public record OperationStartContext(
                         + material.entryId());
             }
         }
+        if (!suppliedIds.equals(knownIds)) throw new IllegalArgumentException("missing reserved materials");
     }
 }

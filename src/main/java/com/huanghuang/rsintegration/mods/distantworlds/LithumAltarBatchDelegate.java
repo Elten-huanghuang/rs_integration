@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.distantworlds;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -79,8 +81,8 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public List<IngredientSpec> getRequiredMaterials() {
-        return definition == null ? null : definition.allMaterials();
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(definition == null ? null : definition.allMaterials());
     }
 
     @Override

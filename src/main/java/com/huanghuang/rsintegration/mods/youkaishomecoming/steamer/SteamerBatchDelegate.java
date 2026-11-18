@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.youkaishomecoming.steamer;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.mods.common.MachineWaterSupply;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -105,9 +107,12 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
         return true;
     }
 
-    @Nullable
     @Override
-    public List<IngredientSpec> getRequiredMaterials() {
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    List<IngredientSpec> recipeSlots() {
         Ingredient ing = recipe.getIngredients().get(0);
         if (ing.isEmpty()) return null;
         return List.of(new IngredientSpec(ing, 1));
@@ -170,7 +175,7 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
     public boolean supportsInputBuffer() {
         if (!SteamerBatchConfig.inputBufferEnabled() || recipe == null
                 || myLevel == null || myPos == null || !myLevel.hasChunkAt(myPos)) return false;
-        IngredientSpec spec = getRequiredMaterials().get(0);
+        IngredientSpec spec = recipeSlots().get(0);
         if (spec == null || spec.isEmpty() || spec.count() != 1
                 || spec.role() != DemandRole.CONSUMED
                 || hasCraftingRemainder(spec)) {
@@ -217,7 +222,7 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
         List<InputBufferContract.InputSlot> inputs = List.of(
                 new InputBufferContract.InputSlot(
                         "yhk:steamer:input", 0, prototype, 1, capacity,
-                        getRequiredMaterials().get(0).consumption()));
+                        recipeSlots().get(0).consumption()));
 
         ItemStack output = getRecipeResult();
         if (output.isEmpty()) return InputBufferContract.none();
@@ -233,7 +238,7 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
     public List<IngredientSpec> getFlatBatchRequiredMaterials(int executions) {
         // 与契约保持同一声明口径：物料条目只有一条，整批材料的份数按份数放大。
         if (executions <= 0) return null;
-        List<IngredientSpec> base = getRequiredMaterials();
+        List<IngredientSpec> base = recipeSlots();
         if (base == null || base.isEmpty()) return null;
         Ingredient ing = base.get(0).ingredient();
         if (ing == null || ing.isEmpty()) return null;
@@ -297,7 +302,7 @@ public final class SteamerBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public boolean startSingleOperation(ServerPlayer player) {
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.isEmpty()) return false;
 
         List<ItemStack> materials = new ArrayList<>();

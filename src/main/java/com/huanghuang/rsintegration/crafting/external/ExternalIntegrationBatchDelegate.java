@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting.external;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 
 import com.huanghuang.rsintegration.crafting.TaskOutputReception;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
@@ -295,7 +297,17 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     @Override
     protected boolean startOperationImpl(OperationStartContext context) {
         this.operationStartContext = context;
-        return super.startOperationImpl(context);
+        if (context.materialOwnership() == OperationStartContext.MaterialOwnership.DELEGATE_EXTRACTED) {
+            return super.startOperationImpl(context);
+        }
+        if (context.buffered() || recipeView == null) return false;
+        Map<String, ItemStack> byId = new LinkedHashMap<>();
+        for (var material : context.materials()) byId.put(material.entryId(), material.stack());
+        if (byId.size() != recipeView.materials().size()
+                || recipeView.materials().stream().anyMatch(r -> !byId.containsKey(r.entryId().toString()))) {
+            return failPreparedStart("reserved material IDs do not match recipe");
+        }
+        return startReservedOperation(context.player(), byId, context.ledger());
     }
 
     @Override
@@ -623,15 +635,8 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     }
 
     @Override
-    @Nullable
-    public List<IngredientSpec> getRequiredMaterials() {
-        if (recipeView == null) return null;
-        try {
-            return ExternalRecipeProjection.ingredients(recipeView);
-        } catch (IllegalArgumentException exception) {
-            preparationFailure = Component.literal(exception.getMessage());
-            return null;
-        }
+    public MaterialPlan materialPlan() {
+        return recipeView == null ? MaterialPlan.privateExtraction() : ExternalRecipeProjection.materialPlan(recipeView);
     }
 
     @Override
@@ -643,15 +648,10 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
     public boolean startSingleOperation(ServerPlayer player, ExtractionLedger sharedLedger) {
         // 纯流体配方的共享物品布局为空，仍需进入正常的准备和投料流程。
         return recipeView != null && recipeView.materials().isEmpty()
-                && startPreparedOperation(player, List.of(), sharedLedger);
+                && startReservedOperation(player, Map.of(), sharedLedger);
     }
 
-    @Override
-    public boolean startPreparedOperation(
-            ServerPlayer player,
-            List<ItemStack> materials,
-            ExtractionLedger sharedLedger
-    ) {
+    private boolean startReservedOperation(ServerPlayer player, Map<String, ItemStack> materials, ExtractionLedger sharedLedger) {
         if (!validateExecutionContext(player)
                 || recipeView == null || descriptor == null) {
             return failPreparedStart("execution context is invalid");
@@ -661,7 +661,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                 && (fluidTransferUncertain || taskFluids != null && !taskFluids.usable())) {
             rejectedBeforeInputDelivery = true;
             uninsertedMaterials.clear();
-            materials.stream().filter(stack -> !stack.isEmpty())
+            materials.values().stream().filter(stack -> !stack.isEmpty())
                     .forEach(stack -> uninsertedMaterials.add(stack.copy()));
             return failPreparedStart("task fluid account is unavailable");
         }
@@ -681,7 +681,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         this.insertedMaterials.clear();
         this.uninsertedMaterials.clear();
         this.pendingInputRefunds.clear();
-        for (ItemStack stack : materials) {
+        for (ItemStack stack : materials.values()) {
             if (!stack.isEmpty()) uninsertedMaterials.add(stack.copy());
         }
         if (materials.size() < recipeView.materials().size()) {
@@ -718,9 +718,8 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                     "machine output ports have insufficient capacity");
         }
         if (outputReception() != null) prepareReceptionBatch();
-        for (int index = 0; index < recipeView.materials().size(); index++) {
-            MaterialRequirement requirement = recipeView.materials().get(index);
-            ItemStack stack = materials.get(index).copy();
+        for (MaterialRequirement requirement : recipeView.materials()) {
+            ItemStack stack = materials.get(requirement.entryId().toString()).copy();
             if (stack.isEmpty()) {
                 return failPreparedStart(
                         "prepared material is empty: "
@@ -1183,7 +1182,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
 
     private boolean startCustomOperation(
             ServerPlayer player,
-            List<ItemStack> materials,
+            Map<String, ItemStack> materials,
             ExtractionLedger sharedLedger
     ) {
         if (LOGGER.isDebugEnabled()) {
@@ -1192,7 +1191,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
                     recipe == null ? "unknown" : recipe.getId(),
                     recipeView.materials().size(),
                     materials.size(),
-                    materials.stream().map(ItemStack::getCount).toList()
+                    materials.values().stream().map(ItemStack::getCount).toList()
             );
         }
         if (operationStartContext == null
@@ -1212,10 +1211,9 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
         this.lastCustomSnapshotSequence = -1L;
         resetCustomCollectionState();
         List<ReservedMaterial> reserved = new ArrayList<>();
-        for (int index = 0; index < recipeView.materials().size(); index++) {
-            MaterialRequirement requirement = recipeView.materials().get(index);
-            ItemStack stack = materials.get(index);
-            if (stack.isEmpty()) {
+        for (MaterialRequirement requirement : recipeView.materials()) {
+            ItemStack stack = materials.get(requirement.entryId().toString());
+            if (stack == null || stack.isEmpty()) {
                 preparationFailure = Component.literal(
                         "RSI Integration reserved material is empty: "
                                 + requirement.entryId());

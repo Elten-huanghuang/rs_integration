@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.botania;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -96,7 +98,11 @@ public final class RunicAltarBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public List<IngredientSpec> getRequiredMaterials() {
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    List<IngredientSpec> recipeSlots() {
         if (recipe == null) return null;
         List<IngredientSpec> specs = new ArrayList<>();
         for (Ingredient ingredient : recipe.getIngredients()) {
@@ -113,7 +119,7 @@ public final class RunicAltarBatchDelegate extends AbstractBatchDelegate {
         if (!canStartNow()) return false;
         if (storageEndpoint() == null) return false;
         List<ItemStack> extracted = BotaniaDelegateSupport.extractAtomically(
-                storageEndpoint(), player, getRequiredMaterials());
+                storageEndpoint(), player, recipeSlots());
         if (extracted.isEmpty()) return false;
         if (start(player, extracted)) return true;
         for (ItemStack stack : extracted) refundStandalone(player, stack);
@@ -135,7 +141,7 @@ public final class RunicAltarBatchDelegate extends AbstractBatchDelegate {
     }
 
     private boolean start(ServerPlayer player, List<ItemStack> materials) {
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || materials.size() != specs.size() || !canStartNow()) return false;
         for (int i = 0; i < specs.size(); i++) {
             ItemStack material = materials.get(i);

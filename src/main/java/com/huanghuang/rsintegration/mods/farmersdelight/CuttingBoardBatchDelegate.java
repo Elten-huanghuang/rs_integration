@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.farmersdelight;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
@@ -171,30 +173,21 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
         }
     }
 
-    @Nullable
     @Override
-    public List<IngredientSpec> getRequiredMaterials() {
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    List<IngredientSpec> recipeSlots() {
         if (recipe == null || !RECIPE_CLASS.equals(recipe.getClass().getName())) return null;
         var handler = ModRecipeHandlers.claimFor(recipe).winner();
         return handler == null ? null : handler.getIngredients(recipe);
     }
 
     @Override
-    public List<IngredientSpec> getGraphSpecs() {
-        return FarmersDelightRecipeHandler.cuttingBoardGraphIngredients(
-                getRequiredMaterials());
-    }
-
-    @Override
-    public List<IngredientSpec> getSupplementalSpecs() {
-        // 工具已进入递归图，不能再作为 supplemental 重复预留。
-        return List.of();
-    }
-
-    @Override
     public void configureMaterialReservation(@NotNull ExtractionLedger ledger,
                                              @NotNull ServerPlayer player) {
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs != null && specs.size() == 2) {
             ledger.preferResonanceFor(specs.get(1).ingredient());
         }
@@ -210,7 +203,7 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public boolean startSingleOperation(@NotNull ServerPlayer player) {
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.size() != 2) return false;
         List<ItemStack> materials = new ArrayList<>();
         try (ExtractionLedger local = new ExtractionLedger()) {
@@ -279,7 +272,7 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
                     + preparedExecutions + ", input=" + countOf(materials.get(0))
                     + ", tool=" + countOf(materials.get(1)) + ")", materials);
         }
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.size() != 2) {
             return rejectStart("cutting board: recipe does not expose an input and a tool slot", materials);
         }
@@ -475,7 +468,7 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
         for (ItemStack tool : stock) reusableTools.add(tool.copy());
         toolStockInitialized = true;
         toolReturnEndpoint = ledger.storageEndpoint();
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs != null && specs.size() > inputSlot) {
             for (ItemStack tool : stock) {
                 ExtractionLedger.ResonanceReturnTarget target =
@@ -624,7 +617,7 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
     }
 
     private int executionsFor(List<ItemStack> materials) {
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.size() != 2) return -1;
         int executions = Math.max(1, preparedExecutions);
         if (materials.get(0).isEmpty() || materials.get(1).isEmpty()) return -1;

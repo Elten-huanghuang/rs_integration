@@ -102,17 +102,17 @@ class EreAlchemyRecipeHandlerTest extends BootstrapTest {
 
     @Test
     void executionMaterialsDeclareSelectedAspectsAsReusableCatalysts() {
-        EreAlchemyMaterials materials = EreAlchemyMaterials.create(
+        MaterialPlan materials = EreAlchemyMaterials.create(
                 Ingredient.of(Items.COPPER_INGOT),
                 List.of(Ingredient.of(Items.DIAMOND), Ingredient.of(Items.GOLD_INGOT)),
                 List.of(Ingredient.of(Items.CLAY_BALL), Ingredient.of(Items.REDSTONE)));
 
-        assertEquals(5, materials.allSpecs().size());
-        assertTrue(materials.supplementalSpecs().isEmpty());
-        assertEquals(DemandRole.CATALYST, materials.allSpecs().get(1).role());
-        assertEquals(DemandRole.CONSUMED, materials.allSpecs().get(2).role());
-        assertEquals(DemandRole.CATALYST, materials.allSpecs().get(3).role());
-        assertEquals(DemandRole.CONSUMED, materials.allSpecs().get(4).role());
+        assertEquals(5, materials.entries().size());
+        assertTrue(materials.supplementalEntries().isEmpty());
+        assertEquals(DemandRole.CATALYST, materials.entries().get(1).spec().role());
+        assertEquals(DemandRole.CONSUMED, materials.entries().get(2).spec().role());
+        assertEquals(DemandRole.CATALYST, materials.entries().get(3).spec().role());
+        assertEquals(DemandRole.CONSUMED, materials.entries().get(4).spec().role());
     }
 
     @Test
@@ -145,9 +145,9 @@ class EreAlchemyRecipeHandlerTest extends BootstrapTest {
             assertFalse(DirectMaterialAllocator.allocate(batch, Map.of(
                     new StackKey(Items.CLAY_BALL, null), 4,
                     new StackKey(Items.BONE_MEAL, null), 8)).feasible());
-            EreAlchemyMaterials execution = EreAlchemyMaterials.create(
+            MaterialPlan execution = EreAlchemyMaterials.create(
                     recipe.tablet, selected, recipe.inputs);
-            assertTrue(DirectMaterialAllocator.allocate(execution.graphSpecs(), stock).feasible());
+            assertTrue(DirectMaterialAllocator.allocate(execution.graphEntries().stream().map(MaterialPlan.Entry::spec).toList(), stock).feasible());
             assertSame(planned, handler.getPlanningIngredients(recipe, player, planned));
         } finally {
             RSIntegrationConfig.ENABLE_EMBERS_ALCHEMY_CALC.set(original);
@@ -182,34 +182,28 @@ class EreAlchemyRecipeHandlerTest extends BootstrapTest {
     @Test
     void unknownInferenceReservesGuessedAspectsOutsideTheStableGraphAndKeepsPlacementOrder() {
         AlchemyRecipe recipe = adhesiveRecipe();
-        EreAlchemyMaterials materials = EreAlchemyMaterials.createInference(
+        MaterialPlan materials = EreAlchemyMaterials.createInference(
                 recipe.tablet, List.of(Ingredient.of(Items.GOLD_INGOT),
                         Ingredient.of(Items.IRON_INGOT)), recipe.inputs);
-        assertEquals(3, materials.graphSpecs().size());
-        assertEquals(2, materials.supplementalSpecs().size());
-        assertTrue(materials.supplementalSpecs().stream()
-                .allMatch(s -> s.role() == DemandRole.CATALYST));
-        MaterialPlan plan = MaterialPlan.fromLegacyPartitions(
-                materials.allSpecs(), materials.graphSpecs(), materials.supplementalSpecs());
-        List<ItemStack> graph = List.of(new ItemStack(Items.CLAY_BALL),
-                new ItemStack(Items.BONE_MEAL), new ItemStack(Items.BONE_MEAL));
-        List<ItemStack> supplemental = List.of(new ItemStack(Items.GOLD_INGOT),
-                new ItemStack(Items.IRON_INGOT));
-        assertEquals(List.of(Items.CLAY_BALL, Items.GOLD_INGOT, Items.BONE_MEAL,
-                Items.IRON_INGOT, Items.BONE_MEAL),
-                plan.mergeLegacyReservations(graph, supplemental).stream()
-                        .map(ItemStack::getItem).toList());
+        assertEquals(3, materials.graphEntries().size());
+        assertEquals(2, materials.supplementalEntries().size());
+        assertTrue(materials.supplementalEntries().stream()
+                .allMatch(s -> s.spec().role() == DemandRole.CATALYST));
+        assertEquals(List.of("tablet", "aspect:0", "input:0", "aspect:1", "input:1"),
+                materials.entries().stream().map(MaterialPlan.Entry::id).toList());
+        assertEquals(List.of(1, 3), materials.supplementalEntries().stream()
+                .map(MaterialPlan.Entry::inputSlot).toList());
     }
 
     @Test
     void twoAshenFabricOperationsNeedOnlyTwoCopperAndTwoIronCatalysts() {
-        EreAlchemyMaterials materials = EreAlchemyMaterials.create(
+        MaterialPlan materials = EreAlchemyMaterials.create(
                 Ingredient.of(Items.CLAY_BALL),
                 List.of(Ingredient.of(Items.COPPER_INGOT), Ingredient.of(Items.IRON_INGOT),
                         Ingredient.of(Items.COPPER_INGOT), Ingredient.of(Items.IRON_INGOT)),
                 List.of(Ingredient.of(Items.BONE_MEAL), Ingredient.of(Items.BONE_MEAL),
                         Ingredient.of(Items.BONE_MEAL), Ingredient.of(Items.BONE_MEAL)));
-        List<IngredientSpec> twoOperations = materials.graphSpecs().stream()
+        List<IngredientSpec> twoOperations = materials.graphEntries().stream().map(MaterialPlan.Entry::spec)
                 .map(s -> new IngredientSpec(s.ingredient(),
                         CraftPacketUtils.requiredCount(s, 2), s.consumption()))
                 .toList();

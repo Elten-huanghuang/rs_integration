@@ -326,7 +326,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
                 || invSpirits == null || expectedOutput == null || expectedOutput.isEmpty()) {
             return false;
         }
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.size() < 2
                 || specs.get(0).role() != DemandRole.CATALYST
                 || specs.size() - 1 > invSpirits.getSlots()) return false;
@@ -339,7 +339,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     @Override
     public InputBufferContract inputBufferContract() {
         if (!supportsInputBuffer()) return InputBufferContract.none();
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         List<InputBufferContract.InputSlot> inputs = new ArrayList<>(specs.size());
         ItemStack catalyst = ingredientPrototype(specs.get(0));
         if (catalyst.isEmpty()) return InputBufferContract.none();
@@ -369,7 +369,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
                                            @NotNull InputBufferPlan plan,
                                            @NotNull ExtractionLedger sharedLedger) {
         if (!supportsInputBuffer() || plan == null || !plan.enabled()) return false;
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (plan.operations() <= 0 || plan.inputs().size() != specs.size()) return false;
         InputBufferPlan.InputSlot catalyst = plan.inputs().stream()
                 .filter(input -> CATALYST_ENTRY_ID.equals(input.entryId())).findFirst().orElse(null);
@@ -429,7 +429,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
 
     @Override
     public MaterialPlan materialPlan() {
-        return materialPlanForSpecs(getRequiredMaterials());
+        return materialPlanForSpecs(recipeSlots());
     }
 
     static MaterialPlan materialPlanForSpecs(@Nullable List<IngredientSpec> specs) {
@@ -479,9 +479,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         }
     }
 
-    @Nullable
-    @Override
-    public List<IngredientSpec> getRequiredMaterials() {
+    List<IngredientSpec> recipeSlots() {
         if (recipe == null) return null;
         var handler = ModRecipeHandlers.claimFor(recipe).winner();
         if (handler != null) {
@@ -724,7 +722,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             }
             ItemStack existing = invCatalyst.getStackInSlot(0);
             if (!existing.isEmpty()
-                    && !keepsCatalystInSlot(getRequiredMaterials(), existing)) {
+                    && !keepsCatalystInSlot(recipeSlots(), existing)) {
                 returnCrucibleItem(existing.copy());
                 setSlot(invCatalyst, 0, ItemStack.EMPTY);
                 existing = ItemStack.EMPTY;
@@ -1163,7 +1161,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     }
 
     private boolean hasReusableCatalystInput() {
-        return hasReusableCatalystInput(getRequiredMaterials());
+        return hasReusableCatalystInput(recipeSlots());
     }
 
     static boolean hasReusableCatalystInput(@Nullable List<IngredientSpec> specs) {
@@ -1172,7 +1170,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     }
 
     private boolean matchesCatalystInput(ItemStack stack) {
-        return matchesCatalystInput(getRequiredMaterials(), stack);
+        return matchesCatalystInput(recipeSlots(), stack);
     }
 
     static boolean matchesCatalystInput(@Nullable List<IngredientSpec> specs,

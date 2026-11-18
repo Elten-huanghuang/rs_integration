@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationStartContext.ReservedMaterial;
+
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -226,7 +228,7 @@ class SelfAmplifyingTerminalGraphTest extends BootstrapTest {
         CountedOperationMaterials.Pool pool = new CountedOperationMaterials.Pool()
                 .add(CountedOperationMaterials.Origin.INITIAL, new ItemStack(Items.SLIME_BALL), 1);
         assertThrows(IllegalArgumentException.class, () -> new CountedOperationMaterials.Builder(11, 1)
-                .add(new IngredientSpec(Ingredient.of(Items.SLIME_BALL), 1), pool));
+                .add(MaterialPlan.graphSlot(0, new IngredientSpec(Ingredient.of(Items.SLIME_BALL), 1)), pool));
     }
 
     private static CraftPlanGraph compose(CraftPlanGraph input, ItemStack output, int operations, ModType type) {
@@ -273,13 +275,13 @@ class SelfAmplifyingTerminalGraphTest extends BootstrapTest {
                     .add(CountedOperationMaterials.Origin.INITIAL, checkout.initialStacks())
                     .add(CountedOperationMaterials.Origin.PRODUCER, checkout.producerStacks());
             CountedOperationMaterials.Builder builder = new CountedOperationMaterials.Builder(node.executions(), 1);
-            builder.add(new IngredientSpec(StrictNBTIngredient.of(seed), consumed), pool)
-                    .add(new IngredientSpec(Ingredient.of(Items.DIRT), 4), pool)
-                    .add(new IngredientSpec(Ingredient.of(Items.AMETHYST_SHARD), 64), pool);
-            if (catalyst) builder.add(new IngredientSpec(Ingredient.of(Items.BUCKET), 1, DemandRole.CATALYST), pool);
+            builder.add(MaterialPlan.graphSlot(0, new IngredientSpec(StrictNBTIngredient.of(seed), consumed)), pool)
+                    .add(MaterialPlan.graphSlot(1, new IngredientSpec(Ingredient.of(Items.DIRT), 4)), pool)
+                    .add(MaterialPlan.graphSlot(2, new IngredientSpec(Ingredient.of(Items.AMETHYST_SHARD), 64)), pool);
+            if (catalyst) builder.add(MaterialPlan.graphSlot(3, new IngredientSpec(Ingredient.of(Items.BUCKET), 1, DemandRole.CATALYST)), pool);
             CountedOperationMaterials materials = builder.build();
             for (int operation = 0; operation < node.executions(); operation++) {
-                List<ItemStack> batch = materials.batchMaterials(0, operation, 1);
+                List<ItemStack> batch = materials.batchMaterials(0, operation, 1).stream().map(ReservedMaterial::stack).toList();
                 assertEquals(List.of(consumed, 4, 64), batch.stream().limit(3).map(ItemStack::getCount).toList());
             }
             broker.commit(token);

@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.arsnouveau;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -199,10 +201,9 @@ public final class ArsApparatusBatchDelegate extends AbstractBatchDelegate {
         return true;
     }
 
-    @Nullable
     @Override
-    public List<IngredientSpec> getRequiredMaterials() {
-        return requiredMaterials;
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(requiredMaterials);
     }
 
     @Override

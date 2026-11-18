@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.pmmo;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -90,10 +92,9 @@ public final class PmmoSalvageBatchDelegate extends AbstractBatchDelegate {
         return Math.max(0, Math.min(MAX_ATTEMPTS_PER_BATCH, remainingOperations));
     }
 
-    @Nullable
     @Override
-    public List<IngredientSpec> getRequiredMaterials() {
-        return recipe == null ? null : new PmmoSalvageRecipeHandler().getIngredients(recipe);
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipe == null ? null : new PmmoSalvageRecipeHandler().getIngredients(recipe));
     }
 
     @Override

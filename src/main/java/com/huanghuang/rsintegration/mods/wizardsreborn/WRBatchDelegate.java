@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.wizardsreborn;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
@@ -1257,8 +1259,11 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    @Nullable
-    public List<IngredientSpec> getRequiredMaterials() {
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    List<IngredientSpec> recipeSlots() {
         if (recipe == null) return null;
         // ARCANE_ITERATOR must self-manage extraction: leveled enchant books
         // require N sequential machine runs (one side-material set + Wissen per
@@ -1436,7 +1441,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         if (itemHandler == null) return false;
 
         // Map materials back to their original recipe slot indices.
-        // getRequiredMaterials() filters empty ingredients, so materials are
+        // recipeSlots() filters empty ingredients, so materials are
         // compacted; we must re-expand them to match the recipe's slot layout.
         List<Ingredient> recipeIngredients = CraftPacketUtils.extractIngredients(recipe);
         if (recipeIngredients == null) return false;
@@ -1499,7 +1504,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         }
 
         // Re-expand compacted materials to match recipe ingredient positions.
-        // Both getRequiredMaterials() and extractIngredients() filter out the
+        // Both recipeSlots() and extractIngredients() filter out the
         // crystal catalyst, so materials and recipeIngredients are aligned.
         List<Ingredient> recipeIngredients = CraftPacketUtils.extractIngredients(recipe);
         if (recipeIngredients == null || pedestals.size() < recipeIngredients.size()) return false;

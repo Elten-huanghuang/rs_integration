@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.farmandcharm;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -44,7 +46,7 @@ import java.util.List;
  *   <li>槽位布局：容器槽变成 6、产物槽变成 7，没有原版"碗食留在展示槽"的兜底；</li>
  *   <li>库存入口：这些锅没有注册 {@code IItemHandler} 能力，改为包装原生 {@code getItems()}；</li>
  *   <li>容器口径：数量 = 每份用量 × 份数（原版假设一份只扣一个），因此
- *       {@link #getRequiredContainer} 与 {@link #getRequiredMaterials} 都按该口径重建；</li>
+ *       {@link #getRequiredContainer} 与 {@link #materialPlan} 都按该口径重建；</li>
  *   <li>配方与机器判定：父类认的是农夫乐事的类和配方，父类的机器判定直接沿用会让预载恒关，
  *       因此两者都换成这套锅自己的口径；</li>
  *   <li>余留物风险：原版的 {@code INGREDIENT_REMAINDER_OVERRIDES} 静态表专属于原版锅的
@@ -79,7 +81,7 @@ public abstract class LetsDoCookingPotBatchDelegate extends CookingPotBatchDeleg
                 context.player(), context.inputBufferPlan(), context.ledger())) {
             return true;
         }
-        List<ItemStack> materials = context.legacyMaterials();
+        List<ItemStack> materials = context.inputSlots();
         if (materials.isEmpty()) return false;
         if (context.buffered()) {
             RSIntegrationMod.LOGGER.warn(
@@ -246,7 +248,7 @@ public abstract class LetsDoCookingPotBatchDelegate extends CookingPotBatchDeleg
      * 下游只按下标取材料，条目数一旦与槽位数错位，插料与回滚就会串槽。
      */
     @Override
-    public List<IngredientSpec> getRequiredMaterials() {
+    protected List<IngredientSpec> recipeSlots() {
         if (recipe == null) return null;
         return buildSpecs(recipe.getIngredients(),
                 LetsDoCookingPotRecipeHandler.declaredContainer(recipe),

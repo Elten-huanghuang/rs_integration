@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.farmersrespite.kettle;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.mods.common.MachineWaterSupply;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -196,9 +198,12 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
         return null;
     }
 
-    @Nullable
     @Override
-    public List<IngredientSpec> getRequiredMaterials() {
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    List<IngredientSpec> recipeSlots() {
         List<Ingredient> ingredients = recipe.getIngredients();
 
         List<IngredientSpec> specs = new ArrayList<>();
@@ -233,7 +238,7 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public boolean startSingleOperation(ServerPlayer player) {
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.isEmpty()) return false;
 
         List<ItemStack> materials = new ArrayList<>();

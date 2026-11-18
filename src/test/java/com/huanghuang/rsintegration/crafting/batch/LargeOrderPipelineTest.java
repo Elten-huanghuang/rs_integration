@@ -533,20 +533,21 @@ class LargeOrderPipelineTest extends BootstrapTest {
             rawPerOperation = RAW_RECIPE.equals(recipeId) ? RAW_PER_OPERATION : INTERMEDIATES_PER_TARGET;
             return true;
         }
-        @Override public List<IngredientSpec> getRequiredMaterials() {
-            return List.of(new IngredientSpec(Ingredient.of(input), rawPerOperation));
+        @Override
+        public MaterialPlan materialPlan() {
+            return MaterialPlan.graphSlots(List.of(new IngredientSpec(Ingredient.of(input), rawPerOperation)));
         }
         @Override public int preferredParallelBatchSize(int total, int workers) { return MACHINE_CAPACITY; }
         @Override public void prepareGraphBatch(int executions) { batch = executions; }
         @Override public boolean startOperation(OperationStartContext context) {
-            held = context.legacyMaterials().stream().mapToLong(ItemStack::getCount).sum();
+            held = context.inputSlots().stream().mapToLong(ItemStack::getCount).sum();
             assertEquals((long) batch * rawPerOperation, held, "每次派发实际材料必须与机器接收数量一致");
-            assertTrue(context.legacyMaterials().stream().allMatch(stack -> stack.is(input)));
+            assertTrue(context.inputSlots().stream().allMatch(stack -> stack.is(input)));
             fixture.starts++;
             if (fixture.rejectPartialInput) {
                 // 使用真实 Forge 槽位容量限制，只接收一叠；余料仍由适配器持有。
                 held = 0;
-                for (ItemStack stack : context.legacyMaterials()) {
+                for (ItemStack stack : context.inputSlots()) {
                     ItemStack rejected = inputSlot.insertItem(0, stack, false);
                     if (!rejected.isEmpty()) rejectedInputs.add(rejected);
                 }

@@ -440,7 +440,7 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
                 .add(Origin.VIRTUAL, new ItemStack(Items.IRON_INGOT), 20)
                 .add(Origin.PRODUCER, new ItemStack(Items.IRON_INGOT), 98);
         group.setCountedOperationMaterials(new CountedOperationMaterials.Builder(128, 1)
-                .add(group.getFlatOperationMaterials().get(0), source).build());
+                .add(group.materialPlan().entries().get(0), source).build());
         assertTrue(group.startOperation(OperationStartContext.chainReserved(player,
                 mock(ExtractionLedger.class), MaterialPlan.none(), List.of(), InputBufferPlan.none())));
         assertEquals(64, group.getRunningOperations());
@@ -536,6 +536,48 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
         assertEquals(3_000_000_000L, coordinator.report().settledOperations());
         group.onBatchFailed(player, "test cancellation");
     }
+    @Test
+    void graphReservationUsesDeclaredPartitionWhenIdenticalInputsOccupySparseSlots() throws Exception {
+        var spec = new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 1);
+        var plan = new MaterialPlan(List.of(
+                new MaterialPlan.Entry("tip", spec, MaterialPlan.Allocation.SUPPLEMENTAL, 4),
+                new MaterialPlan.Entry("base", spec, MaterialPlan.Allocation.GRAPH, 0)));
+        var group = mock(ParallelCraftGroup.class);
+        when(group.materialPlan()).thenReturn(plan);
+        when(group.getChildCount()).thenReturn(1);
+        when(group.getMaterialOperations()).thenReturn(1);
+        var produced = new ItemStack(Items.IRON_INGOT);
+        produced.getOrCreateTag().putString("source", "graph");
+        var key = MaterialKey.of(produced);
+        var producer = new MaterialSource.ProducerOutput(new OutputPortId(new NodeId(0), 0));
+        var broker = new MaterialBroker();
+        broker.publish(producer, key, 1);
+        var token = broker.reserve(new NodeId(1), List.of(new MaterialBroker.Request(producer, key, 1)));
+        var chain = new AsyncCraftChain(UUID.randomUUID(), player.getServer(), null, List.of());
+        var field = AsyncCraftChain.class.getDeclaredField("graphMaterials");
+        field.setAccessible(true);
+        field.set(chain, broker);
+        var ledger = mock(ExtractionLedger.class);
+        when(ledger.reserveExactAcrossNetworkAndInventory(any(), eq(1), isNull(), eq(player)))
+                .thenReturn(new ItemStack(Items.IRON_INGOT));
+        Method reserve = AsyncCraftChain.class.getDeclaredMethod("reserveCountedOperationMaterials",
+                ParallelCraftGroup.class, ServerPlayer.class, ExtractionLedger.class, MaterialBroker.ReservationToken.class);
+        reserve.setAccessible(true);
+        try (var sources = mockStatic(MaterialSources.class)) {
+            sources.when(() -> MaterialSources.listAllAvailable(player, null))
+                    .thenReturn(Map.of(new StackKey(Items.IRON_INGOT, null), 1L));
+            assertNotNull(reserve.invoke(chain, group, player, ledger, token));
+        }
+        var captured = ArgumentCaptor.forClass(CountedOperationMaterials.class);
+        verify(group).setCountedOperationMaterials(captured.capture());
+        var reserved = captured.getValue().batchMaterials(0, 0, 1);
+        var slots = OperationStartContext.chainReserved(player, ledger, plan, reserved, null).inputSlots();
+        assertEquals("graph", slots.get(0).getTag().getString("source"));
+        assertTrue(slots.get(1).isEmpty());
+        assertTrue(slots.get(4).is(Items.IRON_INGOT));
+        assertFalse(slots.get(4).hasTag());
+    }
+
     @Test
     void graphReservationEntryUsesOnePhysicalReservationForFiftyMillionOperations() throws Exception {
         int operations = 50_000_000;
@@ -651,7 +693,7 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
         List<ItemStack> pool = List.of(new ItemStack(Items.IRON_INGOT, group.getTotalOperations()));
         Pool source = new Pool().add(producer ? Origin.PRODUCER : Origin.INITIAL, pool);
         var builder = new CountedOperationMaterials.Builder(group.getTotalOperations(), group.getChildCount());
-        for (IngredientSpec spec : group.getFlatOperationMaterials()) builder.add(spec, source);
+        for (var spec : group.materialPlan().entries()) builder.add(spec, source);
         group.setCountedOperationMaterials(builder.build());
         assertTrue(group.startOperation(OperationStartContext.chainReserved(
                 player, ledger, MaterialPlan.none(), List.of(), InputBufferPlan.none())));
@@ -742,10 +784,10 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
         AtomicInteger collections = new AtomicInteger();
         BufferedDelegate delegate = new BufferedDelegate() {
             @Override
-            public List<IngredientSpec> getRequiredMaterials() {
-                return List.of(
+            public MaterialPlan materialPlan() {
+                return MaterialPlan.graphSlots(List.of(
                         new IngredientSpec(Ingredient.of(Items.STICK), 1, DemandRole.CATALYST),
-                        new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 1));
+                        new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 1)));
             }
 
             @Override
@@ -756,7 +798,7 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
             @Override
             public boolean startOperation(OperationStartContext context) {
                 if (inventory.getStackInSlot(0).isEmpty()) {
-                    inventory.setStackInSlot(0, context.legacyMaterials().get(0).copy());
+                    inventory.setStackInSlot(0, context.inputSlots().get(0).copy());
                 }
                 return true;
             }
@@ -782,8 +824,8 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
             materials.add(new ItemStack(Items.IRON_INGOT));
         }
         assertTrue(group.startOperation(OperationStartContext.repeatedChainReserved(
-                player, mock(ExtractionLedger.class), group.operationMaterialPlan(),
-                operations, 2, materials)));
+                player, mock(ExtractionLedger.class), group.materialPlan(),
+                operations, materials)));
         NodeId node = new NodeId(0);
         CraftNodeRuntime runtime = runtime(group);
         runtime.attachOutputs(new NodeOutputAccumulator(List.of(
@@ -825,10 +867,10 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
             boolean finished;
 
             @Override
-            public List<IngredientSpec> getRequiredMaterials() {
-                return List.of(
+            public MaterialPlan materialPlan() {
+                return MaterialPlan.graphSlots(List.of(
                         new IngredientSpec(Ingredient.of(Items.STICK), 1, DemandRole.CATALYST),
-                        new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 1));
+                        new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 1)));
             }
 
             @Override
@@ -839,7 +881,7 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
             @Override
             public boolean startOperation(OperationStartContext context) {
                 assertFalse(finished, "已经结束的操作实例不能再次启动");
-                if (first) held = context.legacyMaterials().get(0).copy();
+                if (first) held = context.inputSlots().get(0).copy();
                 if (held.isEmpty()) return false;
                 starts.incrementAndGet();
                 return true;
@@ -893,8 +935,8 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
             materials.add(new ItemStack(Items.IRON_INGOT));
         }
         assertTrue(group.startOperation(OperationStartContext.repeatedChainReserved(
-                player, mock(ExtractionLedger.class), group.operationMaterialPlan(),
-                operations, 2, materials)));
+                player, mock(ExtractionLedger.class), group.materialPlan(),
+                operations, materials)));
         CraftNodeRuntime runtime = runtime(group);
         int completed = rejectHandoff ? 64 : operations;
         for (int i = 1; i <= completed; i++) {
@@ -1184,7 +1226,7 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
         ExtractionLedger ledger = mock(ExtractionLedger.class);
         List<ItemStack> materials = Collections.nCopies(operations, new ItemStack(Items.IRON_INGOT));
         assertTrue(group.startOperation(OperationStartContext.repeatedChainReserved(
-                player, ledger, group.operationMaterialPlan(), operations, 1, materials)));
+                player, ledger, group.materialPlan(), operations, materials)));
     }
 
     private static class BufferedDelegate implements IBatchDelegate {
@@ -1197,8 +1239,8 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
         }
 
         @Override
-        public List<IngredientSpec> getRequiredMaterials() {
-            return List.of(new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 1));
+        public MaterialPlan materialPlan() {
+            return MaterialPlan.graphSlots(List.of(new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 1)));
         }
 
         @Override

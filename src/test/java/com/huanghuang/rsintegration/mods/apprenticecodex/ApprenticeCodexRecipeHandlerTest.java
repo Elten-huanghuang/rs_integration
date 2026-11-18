@@ -73,7 +73,7 @@ class ApprenticeCodexRecipeHandlerTest {
         var specs = java.util.List.of(
                 new IngredientSpec(Ingredient.of(Items.STONE), 1, DemandRole.CATALYST),
                 new IngredientSpec(Ingredient.of(Items.DIRT), 1));
-        MaterialPlan materialPlan = MaterialPlan.fromLegacy(specs);
+        MaterialPlan materialPlan = MaterialPlan.graphSlots(specs);
 
         assertEquals(ApprenticeCodexEssenceSmokerBatchDelegate.CATALYST_ENTRY_ID,
                 materialPlan.entries().get(0).id());

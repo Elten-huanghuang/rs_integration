@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.forbidden;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import com.huanghuang.rsintegration.util.CuriosAccess;
 import java.util.Map;
@@ -463,8 +465,11 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
     // ── Chain support: pre-reserved materials ────────────────────
 
     @Override
-    @Nullable
-    public List<IngredientSpec> getRequiredMaterials() {
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    List<IngredientSpec> recipeSlots() {
         if (ritual == null) return null;
         List<IngredientSpec> specs = new ArrayList<>();
         Ingredient mainIng = (Ingredient) FaRitualHelper.invoke(ritual, "mainIngredient");

@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.MaterialMatcher;
 import com.huanghuang.rsintegration.crafting.StackCopies;
 import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
+import com.huanghuang.rsintegration.crafting.batch.OperationStartContext.ReservedMaterial;
 import net.minecraft.world.item.ItemStack;
 
 import javax.annotation.Nullable;
@@ -17,7 +18,7 @@ import java.util.Objects;
  * 只在机器领取一批操作时生成物料；催化剂、变体混用等情况仍走原执行路径。
  */
 public final class BulkOperationMaterials {
-    private record Slot(ItemStack template, boolean producer) {}
+    private record Slot(MaterialPlan.Entry entry, ItemStack template, boolean producer) {}
 
     private final int operations;
     private final List<Slot> slots;
@@ -34,17 +35,15 @@ public final class BulkOperationMaterials {
 
     /** 预检只改副本；失败后原池和物理库存均保持不变。 */
     @Nullable
-    public static BulkOperationMaterials tryCreate(List<IngredientSpec> specs, int operations,
+    public static BulkOperationMaterials tryCreate(MaterialPlan plan, int operations,
                                                    List<ItemStack> initial, List<ItemStack> producer) {
-        if (operations <= 0 || specs.isEmpty()) return null;
+        if (operations <= 0 || plan.entries().isEmpty()) return null;
         List<ItemStack> initialPool = new ArrayList<>(StackCopies.excludingEmpty(initial));
         List<ItemStack> producerPool = new ArrayList<>(StackCopies.excludingEmpty(producer));
         List<Slot> slots = new ArrayList<>();
-        for (IngredientSpec spec : specs) {
-            if (spec.isEmpty()) {
-                slots.add(new Slot(ItemStack.EMPTY, false));
-                continue;
-            }
+        for (var entry : plan.entries()) {
+            if (entry.allocation() != MaterialPlan.Allocation.GRAPH) return null;
+            IngredientSpec spec = entry.spec();
             if (spec.consumption().kind() != InputConsumption.Kind.CONSUMED) return null;
             boolean fromProducer = producerPool.stream()
                     .anyMatch(stack -> !stack.isEmpty() && IngredientMatcher.test(spec.ingredient(), stack));
@@ -67,7 +66,7 @@ public final class BulkOperationMaterials {
             }
             if (remaining != 0L) return null;
             // 使用扣料前复制的模板，池元素扣空后也不会丢失物品与 NBT 身份。
-            slots.add(new Slot(template.copyWithCount(spec.count()), fromProducer));
+            slots.add(new Slot(entry, template.copyWithCount(spec.count()), fromProducer));
         }
         return new BulkOperationMaterials(operations, slots, initialPool, producerPool);
     }
@@ -76,10 +75,14 @@ public final class BulkOperationMaterials {
     public int stride() { return slots.size(); }
 
     /** 按真实槽位契约验证，不能依赖 Ingredient 对象是否是同一个实例。 */
-    public boolean matches(List<IngredientSpec> specs) {
-        if (specs == null || specs.size() != slots.size()) return false;
-        for (int slot = 0; slot < specs.size(); slot++) {
-            IngredientSpec spec = specs.get(slot);
+    public boolean matches(MaterialPlan plan) {
+        if (plan.entries().size() != slots.size()) return false;
+        for (int slot = 0; slot < slots.size(); slot++) {
+            var expected = plan.entries().get(slot);
+            var entry = slots.get(slot).entry();
+            if (!entry.id().equals(expected.id()) || entry.inputSlot() != expected.inputSlot()
+                    || entry.allocation() != expected.allocation()) return false;
+            IngredientSpec spec = expected.spec();
             ItemStack stack = slots.get(slot).template();
             if (spec.isEmpty()) {
                 if (!stack.isEmpty()) return false;
@@ -99,12 +102,12 @@ public final class BulkOperationMaterials {
         return max;
     }
 
-    public List<ItemStack> batchMaterials(int first, int count) {
+    public List<ReservedMaterial> batchMaterials(int first, int count) {
         checkRange(first, count);
         if (count > maxBatchSize()) throw new IllegalArgumentException("batch exceeds ItemStack count range");
-        List<ItemStack> result = new ArrayList<>(slots.size());
-        for (Slot slot : slots) result.add(slot.template().isEmpty() ? ItemStack.EMPTY
-                : slot.template().copyWithCount(Math.multiplyExact(slot.template().getCount(), count)));
+        List<ReservedMaterial> result = new ArrayList<>(slots.size());
+        for (Slot slot : slots) result.add(new ReservedMaterial(slot.entry().id(),
+                slot.template().copyWithCount(Math.multiplyExact(slot.template().getCount(), count))));
         return result;
     }
 

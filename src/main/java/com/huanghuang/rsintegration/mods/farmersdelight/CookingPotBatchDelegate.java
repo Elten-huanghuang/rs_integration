@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.farmersdelight;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import java.util.Arrays;
 import net.minecraft.world.item.crafting.CraftingRecipe;
@@ -113,9 +115,12 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         return true;
     }
 
-    @Nullable
     @Override
-    public List<IngredientSpec> getRequiredMaterials() {
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    protected List<IngredientSpec> recipeSlots() {
         List<IngredientSpec> specs = getRecipeIngredientSpecs();
         if (specs == null) specs = new ArrayList<>();
         else specs = new ArrayList<>(specs);
@@ -143,20 +148,6 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
                     container.getCount()));
         }
         return specs.isEmpty() ? null : specs;
-    }
-
-    @Override
-    public List<IngredientSpec> getGraphSpecs() {
-        // The serving container is a real per-operation input. Keep it in the
-        // graph demand so a missing bowl blocks planning instead of producing a
-        // retry loop in supplemental reservation.
-        List<IngredientSpec> specs = getRequiredMaterials();
-        return specs != null ? specs : List.of();
-    }
-
-    @Override
-    public List<IngredientSpec> getSupplementalSpecs() {
-        return List.of();
     }
 
     @Nullable
@@ -216,7 +207,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
                 || myLevel == null || myPos == null || !myLevel.hasChunkAt(myPos)) return false;
         BlockEntity machine = myLevel.getBlockEntity(myPos);
         if (machine == null || !supportsBufferedMachine(machine)) return false;
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.isEmpty() || specs.size() > inputSlots() + 1) return false;
         ItemStack requiredContainer = getRequiredContainer(recipe, myLevel.registryAccess());
         ItemStack declaredContainer = getDeclaredContainerItem(recipe);
@@ -241,7 +232,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         if (handler == null || handler.getSlots() < inventorySize()) {
             return InputBufferContract.none();
         }
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         ItemStack container = getRequiredContainer(recipe, myLevel.registryAccess());
         int ingredientCount = specs.size() - (container.isEmpty() ? 0 : 1);
         List<InputBufferContract.InputSlot> inputs = new ArrayList<>(specs.size());
@@ -249,14 +240,14 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             IngredientSpec spec = specs.get(i);
             ItemStack prototype = ingredientPrototype(spec);
             inputs.add(new InputBufferContract.InputSlot(
-                    "legacy:material:" + i, i, prototype, spec.count(),
+                    "slot:" + i, i, prototype, spec.count(),
                     slotCapacity(handler, i, prototype), spec.consumption()));
         }
         if (!container.isEmpty()) {
             IngredientSpec spec = specs.get(specs.size() - 1);
             ItemStack prototype = ingredientPrototype(spec);
             inputs.add(new InputBufferContract.InputSlot(
-                    "legacy:material:" + (specs.size() - 1), containerSlot(), prototype,
+                    "slot:" + (specs.size() - 1), containerSlot(), prototype,
                     spec.count(), slotCapacity(handler, containerSlot(), prototype),
                     spec.consumption()));
         }
@@ -287,7 +278,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
                     recipe == null ? null : recipe.getId(), myPos);
             return false;
         }
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || plan.inputs().size() != specs.size()) {
             RSIntegrationMod.LOGGER.warn(
                     "[RSI-Batch-CookingPot] 输入缓冲规格不一致 recipe={} planned={} required={}",
@@ -296,7 +287,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         }
         List<ItemStack> ordered = new ArrayList<>(specs.size());
         for (int i = 0; i < specs.size(); i++) {
-            InputBufferPlan.InputSlot input = inputByEntryId(plan, "legacy:material:" + i);
+            InputBufferPlan.InputSlot input = inputByEntryId(plan, "slot:" + i);
             IngredientSpec spec = specs.get(i);
             int expectedSlot = i == specs.size() - 1
                     && !getRequiredContainer(recipe, myLevel.registryAccess()).isEmpty()
@@ -338,7 +329,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public boolean startSingleOperation(ServerPlayer player) {
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.isEmpty()) return false;
 
         List<ItemStack> materials = new ArrayList<>();
@@ -482,7 +473,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
-        List<IngredientSpec> requiredSpecs = getRequiredMaterials();
+        List<IngredientSpec> requiredSpecs = recipeSlots();
         int requiredInputCount = requiredSpecs == null ? 0
                 : requiredSpecs.size() - (requiredContainer.isEmpty() ? 0 : 1);
         if (requiredInputCount != inputMaterials.size()) {

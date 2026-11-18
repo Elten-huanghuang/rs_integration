@@ -163,7 +163,7 @@ class CuttingBoardReusableToolTest extends BootstrapTest {
         doReturn(List.of(new IngredientSpec(Ingredient.of(Items.PAPER), 1),
                 new IngredientSpec(Ingredient.of(Items.IRON_SWORD), 1,
                         InputConsumption.durability(1L))))
-                .when(delegate).getRequiredMaterials();
+                .when(delegate).recipeSlots();
         return delegate;
     }
 

@@ -1,4 +1,6 @@
 package com.huanghuang.rsintegration.mods.goety;
+
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 
 import java.lang.reflect.Field;
@@ -761,8 +763,11 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    @Nullable
-    public List<IngredientSpec> getRequiredMaterials() {
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    List<IngredientSpec> recipeSlots() {
         if (isBrazier) {
             if (brazierRecipeObj == null) return null;
             List<IngredientSpec> specs = new ArrayList<>();
@@ -774,7 +779,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         if (ritualRecipe == null) return null;
         // Build the ritual's material list self-contained: raw ingredients plus
         // the activation item. startPreparedOperation() consumes the activation
-        // (getActivationItem), so getRequiredMaterials() MUST reserve it too.
+        // (getActivationItem), so recipeSlots() MUST reserve it too.
         //
         // We deliberately do NOT route through collectIngredients()/the recipe
         // handler here: ModRecipeHandlers caches its dispatch decision per

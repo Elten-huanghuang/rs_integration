@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.common;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -73,7 +75,7 @@ public abstract class ReflectiveMenuBatchDelegate extends InstantBatchDelegate {
         this.machineDim = resolved.dimension().location();
         this.machineServer = player.server;
         markCraftStarted();
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         return !expected.isEmpty() && specs != null && !specs.isEmpty() && specs.size() <= inputCount;
     }
 
@@ -81,7 +83,12 @@ public abstract class ReflectiveMenuBatchDelegate extends InstantBatchDelegate {
         return isMachine(level, pos);
     }
 
-    @Override public List<IngredientSpec> getRequiredMaterials() {
+    @Override
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    List<IngredientSpec> recipeSlots() {
         return recipe == null ? null : CraftPacketUtils.extractIngredientSpecs(recipe);
     }
 
@@ -90,7 +97,7 @@ public abstract class ReflectiveMenuBatchDelegate extends InstantBatchDelegate {
     }
 
     @Override public boolean startSingleOperation(@Nonnull ServerPlayer player) {
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.size() > inputCount) return false;
         ExtractionLedger privateLedger = new ExtractionLedger();
         this.ledger = privateLedger;
@@ -124,7 +131,7 @@ public abstract class ReflectiveMenuBatchDelegate extends InstantBatchDelegate {
     private boolean start(ServerPlayer player, List<ItemStack> materials) {
         done = false;
         results.clear();
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || materials.size() != specs.size() || specs.size() > inputCount
                 || !isMachine(level, pos)) return false;
         MenuProvider provider = level.getBlockState(pos).getMenuProvider(level, pos);

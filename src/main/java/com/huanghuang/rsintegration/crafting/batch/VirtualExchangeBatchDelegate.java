@@ -98,7 +98,11 @@ public abstract class VirtualExchangeBatchDelegate extends AbstractBatchDelegate
     }
 
     @Override
-    public List<IngredientSpec> getRequiredMaterials() {
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    List<IngredientSpec> recipeSlots() {
         if (exchangeRecipe == null) return null;
         return scaledIngredientSpecs(exchangeRecipe.costSpecs(), 1);
     }

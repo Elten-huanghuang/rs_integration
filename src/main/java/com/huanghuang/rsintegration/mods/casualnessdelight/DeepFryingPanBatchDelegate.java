@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.casualnessdelight;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
@@ -47,9 +49,9 @@ import java.util.Map;
 public final class DeepFryingPanBatchDelegate extends AbstractBatchDelegate {
 
     private static final int INPUT_SLOT = 0;
-    // 默认 MaterialPlan 使用 legacy:material:<index> 作为稳定 ID，输入缓冲
+    // 默认 MaterialPlan 使用 slot:<index> 作为稳定 ID，输入缓冲
     // 必须沿用同一身份，否则预扣材料无法绑定到炸锅唯一输入槽。
-    static final String INPUT_ID = "legacy:material:0";
+    static final String INPUT_ID = "slot:0";
     private static final String OUTPUT_ID = "casualness_delight:deep_frying_pan:output";
 
     private ServerPlayer player;
@@ -115,9 +117,12 @@ public final class DeepFryingPanBatchDelegate extends AbstractBatchDelegate {
                 && !candidate.isSpecial();
     }
 
-    @Nullable
     @Override
-    public List<IngredientSpec> getRequiredMaterials() {
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    List<IngredientSpec> recipeSlots() {
         if (!isSupportedRecipe(recipe)) return null;
         var handler = ModRecipeHandlers.claimFor(recipe).winner();
         return handler == null ? null : handler.getIngredients(recipe);
@@ -166,7 +171,7 @@ public final class DeepFryingPanBatchDelegate extends AbstractBatchDelegate {
                 || !myLevel.hasChunkAt(myPos)) return false;
         BlockEntity be = myLevel.getBlockEntity(myPos);
         IItemHandler inventory = getInventory(be);
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         ItemStack result = resultItem();
         return CasualnessDelightReflection.isDeepFryingPan(be)
                 && inventory != null && inventory.getSlots() > INPUT_SLOT
@@ -182,7 +187,7 @@ public final class DeepFryingPanBatchDelegate extends AbstractBatchDelegate {
         if (!supportsInputBuffer()) return InputBufferContract.none();
         BlockEntity be = myLevel.getBlockEntity(myPos);
         IItemHandler inventory = getInventory(be);
-        IngredientSpec spec = getRequiredMaterials().get(0);
+        IngredientSpec spec = recipeSlots().get(0);
         ItemStack prototype = ingredientPrototype(spec);
         int capacity = Math.max(1, Math.min(inputBufferLimit(),
                 Math.min(inventory.getSlotLimit(INPUT_SLOT), prototype.getMaxStackSize())));
@@ -208,7 +213,7 @@ public final class DeepFryingPanBatchDelegate extends AbstractBatchDelegate {
         InputBufferPlan.InputSlot input = plan.inputs().stream()
                 .filter(slot -> INPUT_ID.equals(slot.entryId()))
                 .findFirst().orElse(null);
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (input == null || specs == null || specs.size() != 1
                 || input.consumption().reusableWithinWorkerBatch()
                 || input.perOperation() != 1
@@ -230,7 +235,7 @@ public final class DeepFryingPanBatchDelegate extends AbstractBatchDelegate {
         ItemStack input = materials.get(0);
         int operations = supportsInputBuffer() ? Math.max(1, plannedOperations) : 1;
         if (input.isEmpty() || input.getCount() != operations) return false;
-        IngredientSpec spec = getRequiredMaterials() == null ? null : getRequiredMaterials().get(0);
+        IngredientSpec spec = recipeSlots() == null ? null : recipeSlots().get(0);
         if (spec == null || !spec.ingredient().test(input)) return false;
         if (!isHeated(be)) {
             player.sendSystemMessage(Component.translatable("rsi.casualness_delight.no_heat"));

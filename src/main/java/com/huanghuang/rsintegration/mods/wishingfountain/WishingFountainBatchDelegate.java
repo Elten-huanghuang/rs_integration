@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.wishingfountain;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -113,9 +115,12 @@ public final class WishingFountainBatchDelegate extends AbstractBatchDelegate {
         return PreparationResult.ready();
     }
 
-    @Nullable
     @Override
-    public List<IngredientSpec> getRequiredMaterials() {
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    List<IngredientSpec> recipeSlots() {
         return recipe == null ? null : specifications(recipe);
     }
 
@@ -142,7 +147,7 @@ public final class WishingFountainBatchDelegate extends AbstractBatchDelegate {
     }
 
     private List<ItemStack> reserveMaterials(ServerPlayer player, ExtractionLedger targetLedger) {
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.isEmpty()) return List.of();
         List<ItemStack> materials = new ArrayList<>(specs.size());
         for (IngredientSpec spec : specs) {
@@ -163,7 +168,7 @@ public final class WishingFountainBatchDelegate extends AbstractBatchDelegate {
     }
 
     private boolean start(ServerPlayer player, List<ItemStack> materials) {
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || materials.size() != specs.size() || !canStartNow()) return false;
         for (int i = 0; i < specs.size(); i++) {
             ItemStack material = materials.get(i);

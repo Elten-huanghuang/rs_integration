@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.summoningrituals;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
@@ -125,10 +127,9 @@ public final class SummoningRitualAltarBatchDelegate extends AbstractBatchDelega
         return false;
     }
 
-    @Nullable
     @Override
-    public List<IngredientSpec> getRequiredMaterials() {
-        return missingMaterials.isEmpty() ? List.of() : missingMaterials;
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(missingMaterials.isEmpty() ? List.of() : missingMaterials);
     }
 
     @Override

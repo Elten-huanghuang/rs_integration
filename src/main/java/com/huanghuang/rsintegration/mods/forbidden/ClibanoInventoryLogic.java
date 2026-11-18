@@ -66,7 +66,7 @@ public final class ClibanoInventoryLogic {
             if (operations <= 0) continue;
             // 两个物理槽共用一条物料需求，份数由规划器分摊。
             inputs.add(new InputBufferContract.InputSlot(
-                    "legacy:material:0", slot, prototype, spec.count(),
+                    "slot:0", slot, prototype, spec.count(),
                     operations * spec.count(), spec.consumption()));
         }
         return new InputBufferContract(limit, inputs,

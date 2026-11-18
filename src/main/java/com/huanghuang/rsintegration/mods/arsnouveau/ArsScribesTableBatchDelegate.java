@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.arsnouveau;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -131,10 +133,9 @@ public final class ArsScribesTableBatchDelegate extends AbstractBatchDelegate {
         return player != null && (player.isCreative() || totalExperience(player) >= experienceCost);
     }
 
-    @Nullable
     @Override
-    public List<IngredientSpec> getRequiredMaterials() {
-        return requiredMaterials;
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(requiredMaterials);
     }
 
     @Override

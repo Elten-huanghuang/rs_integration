@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.untileternity;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.carrot123.until_eternity.block.ModBlocks;
 import com.carrot123.until_eternity.recipe.EndCraftingIngredient;
 import com.carrot123.until_eternity.recipe.EndCraftingRecipe;
@@ -68,7 +70,10 @@ public final class EndCraftingBatchDelegate extends AbstractBatchDelegate {
                 && level.getBlockState(pos).getBlock() == ModBlocks.END_CRAFTING_TABLE.get();
     }
 
-    @Override public List<IngredientSpec> getRequiredMaterials() { return specs; }
+    @Override
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(specs);
+    }
     @Override public BatchConcurrencyCapabilities concurrencyCapabilities() {
         return BatchConcurrencyCapabilities.delegateResult();
     }

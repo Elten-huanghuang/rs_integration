@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.apprenticecodex;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
@@ -37,8 +39,8 @@ public final class ApprenticeCodexEssenceSmokerBatchDelegate extends AbstractBat
     private static final int MAX_MATERIAL_COUNT =
             ApprenticeCodexRecipeHandler.ESSENCE_SMOKER_MATERIAL_SLOTS;
     /** IDs must match MaterialPlan.fromLegacy's stable compatibility IDs. */
-    static final String CATALYST_ENTRY_ID = "legacy:material:0";
-    static final String MATERIAL_ENTRY_ID = "legacy:material:1";
+    static final String CATALYST_ENTRY_ID = "slot:0";
+    static final String MATERIAL_ENTRY_ID = "slot:1";
 
     private ServerLevel level;
     private ResourceKey<Level> dimension;
@@ -71,7 +73,12 @@ public final class ApprenticeCodexEssenceSmokerBatchDelegate extends AbstractBat
         return !expected.isEmpty();
     }
 
-    @Override public List<IngredientSpec> getRequiredMaterials() {
+    @Override
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    List<IngredientSpec> recipeSlots() {
         if (recipe == null) return null;
         var handler = ModRecipeHandlers.claimFor(recipe).winner();
         return handler != null ? handler.getIngredients(recipe)
@@ -106,7 +113,7 @@ public final class ApprenticeCodexEssenceSmokerBatchDelegate extends AbstractBat
     @Override
     public InputBufferContract inputBufferContract() {
         if (!supportsInputBuffer()) return InputBufferContract.none();
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.size() != 2 || expected.isEmpty()) {
             return InputBufferContract.none();
         }
@@ -180,7 +187,7 @@ public final class ApprenticeCodexEssenceSmokerBatchDelegate extends AbstractBat
     }
 
     @Override public boolean startSingleOperation(@Nonnull ServerPlayer player) {
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.size() != 2) return false;
         ExtractionLedger privateLedger = new ExtractionLedger();
         this.ledger = privateLedger;
@@ -212,7 +219,7 @@ public final class ApprenticeCodexEssenceSmokerBatchDelegate extends AbstractBat
     }
 
     private boolean start(List<ItemStack> materials) {
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         BlockEntity be = level.getBlockEntity(pos);
         if (specs == null || specs.size() != 2 || materials.size() != 2 || !isIdle(be)) return false;
         ItemStack catalystInput = materials.get(0);

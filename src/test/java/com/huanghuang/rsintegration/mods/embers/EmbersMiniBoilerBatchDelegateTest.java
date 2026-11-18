@@ -52,7 +52,7 @@ class EmbersMiniBoilerBatchDelegateTest extends BootstrapTest {
             assertEquals(200, fixture.delegate.flatBatchOperationLimit(32));
             assertEquals(200, fixture.delegate.prepareFlatBatch(1000));
             assertEquals(1000, fixture.delegate.getExpectedProduction().count());
-            assertEquals(1, fixture.delegate.getRequiredMaterials().get(0).count());
+            assertEquals(1, fixture.delegate.materialPlan().entries().get(0).spec().count());
 
             // 流体容量不受物品的 64 个堆叠上限限制。
             fixture.output.setCapacity(10000);

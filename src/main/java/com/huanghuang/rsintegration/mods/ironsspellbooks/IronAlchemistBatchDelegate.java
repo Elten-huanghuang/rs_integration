@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.ironsspellbooks;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.api.execution.CollectedOutput;
 import com.huanghuang.rsintegration.api.recipe.OutputKind;
@@ -103,7 +105,12 @@ public final class IronAlchemistBatchDelegate extends AbstractBatchDelegate {
                 ForgeRegistries.BLOCKS.getKey(tile.getBlockState().getBlock()));
     }
 
-    @Override public List<IngredientSpec> getRequiredMaterials() {
+    @Override
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    List<IngredientSpec> recipeSlots() {
         return recipe == null ? null : new IronSpellBooksRecipeHandler().getIngredients(recipe);
     }
     @Override public BatchConcurrencyCapabilities concurrencyCapabilities() { return BatchConcurrencyCapabilities.delegateResult(); }
@@ -187,7 +194,7 @@ public final class IronAlchemistBatchDelegate extends AbstractBatchDelegate {
         usingSharedLedger = false;
         privateLedger.setStorageEndpoint(storageEndpoint());
         List<ItemStack> materials = new ArrayList<>();
-        for (IngredientSpec spec : getRequiredMaterials()) {
+        for (IngredientSpec spec : recipeSlots()) {
             ItemStack material = CraftPacketUtils.ensureMaterialAvailable(player, level.dimension(), pos,
                     spec.ingredient(), spec.count(), privateLedger);
             if (material.isEmpty()) { privateLedger.close(); return false; }
@@ -214,7 +221,7 @@ public final class IronAlchemistBatchDelegate extends AbstractBatchDelegate {
         // 链已提交的材料从进入启动方法起由本委托保管；预检失败也必须可退款。
         heldInputs = materials.stream().map(ItemStack::copy).toList();
         if (!validateExecutionContext(player)) return false;
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (materials.size() != specs.size()) return false;
         for (int i = 0; i < specs.size(); i++) {
             if (materials.get(i).getCount() != specs.get(i).count()

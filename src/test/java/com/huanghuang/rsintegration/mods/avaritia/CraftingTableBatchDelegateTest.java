@@ -105,7 +105,7 @@ class CraftingTableBatchDelegateTest extends BootstrapTest {
                 expectedSlots.add(slot);
             }
         }
-        MaterialPlan plan = MaterialPlan.fromLegacy(layout);
+        MaterialPlan plan = MaterialPlan.graphSlots(layout);
 
         assertEquals(81, layout.size());
         assertTrue(layout.get(1).isEmpty());
@@ -122,7 +122,7 @@ class CraftingTableBatchDelegateTest extends BootstrapTest {
                 Collections.nCopies(9 * 9, Ingredient.EMPTY));
         ingredients.set(0, Ingredient.of(Items.IRON_BLOCK));
         ingredients.set(80, Ingredient.of(Items.REDSTONE_BLOCK));
-        MaterialPlan plan = MaterialPlan.fromLegacy(
+        MaterialPlan plan = MaterialPlan.graphSlots(
                 CraftingTableBatchDelegate.fixedSlotLayout(ingredients));
 
         assertEquals(List.of(0, 80), plan.entries().stream()

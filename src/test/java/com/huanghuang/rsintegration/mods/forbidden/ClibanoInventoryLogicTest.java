@@ -231,6 +231,6 @@ class ClibanoInventoryLogicTest extends BootstrapTest {
 
     private static InputBufferPlan bind(InputBufferPlan plan) {
         return plan.withResolvedMaterials(List.of(new OperationStartContext.ReservedMaterial(
-                "legacy:material:0", new ItemStack(Items.RAW_IRON, plan.operations()))));
+                "slot:0", new ItemStack(Items.RAW_IRON, plan.operations()))));
     }
 }

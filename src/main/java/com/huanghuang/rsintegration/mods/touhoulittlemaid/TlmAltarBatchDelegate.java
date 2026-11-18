@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.touhoulittlemaid;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 
@@ -328,8 +330,11 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    @Nullable
-    public List<IngredientSpec> getRequiredMaterials() {
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    List<IngredientSpec> recipeSlots() {
         if (recipe == null) return null;
         List<Ingredient> ingredients = recipe.getIngredients();
         if (ingredients.isEmpty()) return null;

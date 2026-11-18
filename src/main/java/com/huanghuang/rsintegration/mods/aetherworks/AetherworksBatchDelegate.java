@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.aetherworks;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import java.lang.reflect.Field;
 
@@ -137,10 +139,9 @@ public final class AetherworksBatchDelegate extends AbstractBatchDelegate {
         }
     }
 
-    @Nullable
     @Override
-    public List<IngredientSpec> getRequiredMaterials() {
-        return recipe == null ? null : RECIPE_HANDLER.getIngredients(recipe);
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipe == null ? null : RECIPE_HANDLER.getIngredients(recipe));
     }
 
     @Override

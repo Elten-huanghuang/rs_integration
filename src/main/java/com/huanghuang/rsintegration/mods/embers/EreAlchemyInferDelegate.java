@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.embers;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
@@ -47,6 +49,11 @@ import org.jetbrains.annotations.NotNull;
 
 public final class EreAlchemyInferDelegate
 extends AbstractBatchDelegate {
+    @Override
+    public MaterialPlan materialPlan() {
+        return firstAttemptMaterials == null ? MaterialPlan.privateExtraction() : firstAttemptMaterials;
+    }
+
     private static final int MINIMAX_THRESHOLD = 1024;
     private static final int MAX_COMBINATIONS = 50000;
     private ServerLevel level;
@@ -72,7 +79,7 @@ extends AbstractBatchDelegate {
     private long emberWaitDeadline;
     private ItemStack successResult = ItemStack.EMPTY;
     private boolean succeeded;
-    private EreAlchemyMaterials firstAttemptMaterials;
+    private MaterialPlan firstAttemptMaterials;
     private int[] aspectEquivClasses;
 
     private void saveProgress(UUID playerId) {
@@ -247,29 +254,6 @@ extends AbstractBatchDelegate {
             player.displayClientMessage(Component.translatable("rsi.embers.infer.started", this.allCombinations.size(), RSIntegrationConfig.EMBERS_INFER_MAX_ATTEMPTS.get()), true);
         }
         return true;
-    }
-
-    @Nullable
-    public List<IngredientSpec> getRequiredMaterials() {
-        return this.firstAttemptMaterials != null ? this.firstAttemptMaterials.allSpecs() : null;
-    }
-
-    @Override
-    public List<IngredientSpec> getGraphSpecs() {
-        return this.firstAttemptMaterials != null ? this.firstAttemptMaterials.graphSpecs() : List.of();
-    }
-
-    @Override
-    public List<IngredientSpec> getSupplementalSpecs() {
-        return this.firstAttemptMaterials != null
-                ? this.firstAttemptMaterials.supplementalSpecs() : List.of();
-    }
-
-    @Override
-    public List<ItemStack> mergeSupplementalMaterials(List<ItemStack> graphMaterials,
-                                                       List<ItemStack> supplementalMaterials) {
-        if (this.firstAttemptMaterials == null) return graphMaterials;
-        return this.firstAttemptMaterials.mergeStacks(graphMaterials, supplementalMaterials);
     }
 
     public boolean startSingleOperation(ServerPlayer player) {

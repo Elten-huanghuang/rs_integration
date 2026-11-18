@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.vanilla.brewing;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.crafting.progress.MachineCycleProgress;
 
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
@@ -68,11 +70,11 @@ public final class BrewingStandBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public List<IngredientSpec> getRequiredMaterials() {
-        return recipe == null ? null : List.of(
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipe == null ? null : List.of(
                 new IngredientSpec(recipe.getIngredients().get(0), 3),
                 new IngredientSpec(recipe.getIngredients().get(1), 1),
-                new IngredientSpec(recipe.getIngredients().get(2), 1));
+                new IngredientSpec(recipe.getIngredients().get(2), 1)));
     }
 
     @Override

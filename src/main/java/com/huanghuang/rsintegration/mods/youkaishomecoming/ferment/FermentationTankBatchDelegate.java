@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.youkaishomecoming.ferment;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.mods.common.MachineWaterSupply;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -132,9 +134,12 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
         return inputFluidMaterial.supported();
     }
 
-    @Nullable
     @Override
-    public List<IngredientSpec> getRequiredMaterials() {
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    List<IngredientSpec> recipeSlots() {
         List<Ingredient> ingredients = getRecipeIngredients();
         List<IngredientSpec> specs = new ArrayList<>();
         for (Ingredient ing : ingredients) {
@@ -154,7 +159,7 @@ public final class FermentationTankBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public boolean startSingleOperation(ServerPlayer player) {
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.isEmpty()) return false;
 
         List<ItemStack> materials = new ArrayList<>();

@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.embers;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
@@ -44,6 +46,11 @@ import net.minecraftforge.items.IItemHandlerModifiable;
 /** Batch delegate for Embers Alchemy Tablet (deterministic mode). */
 public final class EreAlchemyBatchDelegate
 extends AbstractBatchDelegate {
+    @Override
+    public MaterialPlan materialPlan() {
+        return materials == null ? MaterialPlan.privateExtraction() : materials;
+    }
+
     private static final ResourceLocation ALCHEMY_TABLET_BLOCK_ID =
             new ResourceLocation("embers", "alchemy_tablet");
 
@@ -51,7 +58,7 @@ extends AbstractBatchDelegate {
     private BlockPos machinePos;
     private Object recipe;
     private List<Ingredient> code;
-    private EreAlchemyMaterials materials;
+    private MaterialPlan materials;
     private Object tablet;
     private List<PedestalInfo> pedestals;
     private boolean craftStarted;
@@ -180,28 +187,6 @@ extends AbstractBatchDelegate {
         return true;
     }
 
-    @Nullable
-    public List<IngredientSpec> getRequiredMaterials() {
-        return this.materials != null ? this.materials.allSpecs() : null;
-    }
-
-    @Override
-    public List<IngredientSpec> getGraphSpecs() {
-        return this.materials != null ? this.materials.graphSpecs() : List.of();
-    }
-
-    @Override
-    public List<IngredientSpec> getSupplementalSpecs() {
-        return this.materials != null ? this.materials.supplementalSpecs() : List.of();
-    }
-
-    @Override
-    public List<ItemStack> mergeSupplementalMaterials(List<ItemStack> graphMaterials,
-                                                       List<ItemStack> supplementalMaterials) {
-        if (this.materials == null) return graphMaterials;
-        return this.materials.mergeStacks(graphMaterials, supplementalMaterials);
-    }
-
     public boolean startSingleOperation(ServerPlayer player) {
         return false;
     }
@@ -228,7 +213,7 @@ extends AbstractBatchDelegate {
             return false;
         }
         int expectedMaterialCount = this.materials != null
-                ? this.materials.allSpecs().size() : 1 + 2 * this.code.size();
+                ? this.materials.entries().size() : 1 + 2 * this.code.size();
         if (materials.size() < expectedMaterialCount) {
             RSIntegrationMod.LOGGER.error("[RSI-Embers] Material count mismatch: expected >= {}, got {}", (Object)expectedMaterialCount, (Object)materials.size());
             return false;

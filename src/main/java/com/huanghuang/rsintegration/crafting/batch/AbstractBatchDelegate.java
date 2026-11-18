@@ -190,7 +190,7 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
             return startBufferedOperation(
                     context.player(), context.inputBufferPlan(), context.ledger());
         }
-        List<ItemStack> materials = context.legacyMaterials();
+        List<ItemStack> materials = context.inputSlots();
         if (!materials.isEmpty()) {
             return startPreparedOperation(context.player(), materials, context.ledger());
         }

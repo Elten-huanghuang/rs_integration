@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationStartContext.ReservedMaterial;
+
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
@@ -126,19 +128,19 @@ class InputBufferContractTest extends BootstrapTest {
         InputBufferContract contract = new InputBufferContract(64,
                 List.of(
                         new InputBufferContract.InputSlot(
-                                "legacy:material:0", 3, new ItemStack(Items.IRON_INGOT), 1, 64,
+                                "slot:0", 3, new ItemStack(Items.IRON_INGOT), 1, 64,
                                 InputConsumption.consumed()),
                         new InputBufferContract.InputSlot(
-                                "legacy:material:0", 4, new ItemStack(Items.IRON_INGOT), 1, 64,
+                                "slot:0", 4, new ItemStack(Items.IRON_INGOT), 1, 64,
                                 InputConsumption.consumed())), List.of());
         ItemStack reserved = new ItemStack(Items.RAW_IRON, 63);
         reserved.getOrCreateTag().putString("batch", "test");
-        MaterialPlan materials = MaterialPlan.fromLegacy(List.of(
+        MaterialPlan materials = MaterialPlan.graphSlots(List.of(
                 new IngredientSpec(Ingredient.of(Items.RAW_IRON), 1)));
 
         OperationStartContext context = OperationStartContext.chainReserved(
                 mock(ServerPlayer.class), new ExtractionLedger(), materials,
-                List.of(reserved), contract.plan(63));
+                List.of(new ReservedMaterial("slot:0", reserved)), contract.plan(63));
 
         assertTrue(context.buffered());
         assertEquals(List.of(32, 31), context.inputBufferPlan().inputs().stream()
@@ -150,7 +152,7 @@ class InputBufferContractTest extends BootstrapTest {
         for (int count : List.of(62, 64)) {
             assertFalse(contract.plan(63).withResolvedMaterials(List.of(
                     new OperationStartContext.ReservedMaterial(
-                            "legacy:material:0", reserved.copyWithCount(count)))).enabled());
+                            "slot:0", reserved.copyWithCount(count)))).enabled());
         }
     }
 }

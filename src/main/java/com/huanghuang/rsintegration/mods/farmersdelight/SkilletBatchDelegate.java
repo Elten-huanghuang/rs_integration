@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.farmersdelight;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.PhysicalInputRecovery;
 import java.util.HashSet;
@@ -143,9 +145,12 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
         return true;
     }
 
-    @Nullable
     @Override
-    public List<IngredientSpec> getRequiredMaterials() {
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    List<IngredientSpec> recipeSlots() {
         var handler = ModRecipeHandlers.claimFor(recipe).winner();
         if (handler != null) {
             return handler.getIngredients(recipe);
@@ -155,7 +160,7 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public boolean startSingleOperation(ServerPlayer player) {
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.isEmpty()) return false;
 
         List<ItemStack> materials = new ArrayList<>();

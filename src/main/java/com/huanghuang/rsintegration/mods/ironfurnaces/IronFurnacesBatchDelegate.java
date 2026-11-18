@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.ironfurnaces;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.crafting.TaskOutputReception;
 
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
@@ -168,7 +170,7 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
         if (prototype.isEmpty()) return InputBufferContract.none();
         return new InputBufferContract(batchProfile().physicalCapacity(),
                 List.of(new InputBufferContract.InputSlot(
-                        "legacy:material:0", INPUT, prototype, 1,
+                        "slot:0", INPUT, prototype, 1,
                         batchProfile().laneCapacity(), InputConsumption.consumed())),
                 List.of());
     }
@@ -329,10 +331,9 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
         return null;
     }
 
-    @Nullable
     @Override
-    public List<IngredientSpec> getRequiredMaterials() {
-        return recipe == null ? null : CraftPacketUtils.extractIngredientSpecs(recipe);
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipe == null ? null : CraftPacketUtils.extractIngredientSpecs(recipe));
     }
 
     @Override

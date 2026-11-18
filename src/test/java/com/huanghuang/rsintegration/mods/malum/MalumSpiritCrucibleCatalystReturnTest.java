@@ -135,7 +135,7 @@ class MalumSpiritCrucibleCatalystReturnTest extends BootstrapTest {
     private static MalumSpiritCrucibleBatchDelegate catalystDelegate(InputConsumption consumption) {
         MalumSpiritCrucibleBatchDelegate delegate = spy(new MalumSpiritCrucibleBatchDelegate());
         doReturn(List.of(new IngredientSpec(Ingredient.of(Items.STICK), 1, consumption)))
-                .when(delegate).getRequiredMaterials();
+                .when(delegate).recipeSlots();
         return delegate;
     }
 

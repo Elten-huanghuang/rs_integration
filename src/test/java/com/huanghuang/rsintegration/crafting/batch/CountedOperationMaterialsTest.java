@@ -24,7 +24,7 @@ class CountedOperationMaterialsTest extends BootstrapTest {
         int operations = Integer.MAX_VALUE;
         long quantity = (long) operations * Integer.MAX_VALUE;
         var input = new IngredientSpec(Ingredient.of(Items.IRON_INGOT), Integer.MAX_VALUE);
-        var plan = new CountedOperationMaterials.Builder(operations, 1).add(input,
+        var plan = new CountedOperationMaterials.Builder(operations, 1).add(MaterialPlan.graphSlot(0, input),
                 new Pool().add(Origin.INITIAL, new ItemStack(Items.IRON_INGOT), quantity)).build();
         var calls = new AtomicInteger();
         var sum = new AtomicLong();
@@ -44,11 +44,11 @@ class CountedOperationMaterialsTest extends BootstrapTest {
         Pool stock = new Pool().add(Origin.PRODUCER, new ItemStack(Items.IRON_INGOT), 30_000_001L)
                 .add(Origin.INITIAL, new ItemStack(Items.IRON_INGOT), 44_999_999L)
                 .add(Origin.INITIAL, variant, 75_000_000L);
-        var plan = new CountedOperationMaterials.Builder(count, 2).add(INPUT, stock).build();
+        var plan = new CountedOperationMaterials.Builder(count, 2).add(MaterialPlan.graphSlot(0, INPUT), stock).build();
         assertEquals(2, plan.segmentCount());
         assertEquals(25_000_000, plan.compatibleBatchSize(0, count));
-        assertEquals(3, plan.batchMaterials(1, count - 1, 1).get(0).getCount());
-        assertEquals("b", plan.batchMaterials(1, count - 1, 1).get(0).getTag().getString("variant"));
+        assertEquals(3, plan.batchMaterials(1, count - 1, 1).get(0).stack().getCount());
+        assertEquals("b", plan.batchMaterials(1, count - 1, 1).get(0).stack().getTag().getString("variant"));
         assertEquals(30_000_001L, quantity(plan.materials(Origin.PRODUCER, 0, count)));
         assertEquals(119_999_999L, quantity(plan.materials(Origin.INITIAL, 0, count)));
         assertTrue(stock.remaining(Origin.INITIAL).isEmpty());
@@ -57,13 +57,13 @@ class CountedOperationMaterialsTest extends BootstrapTest {
 
     @Test
     void sourceBoundaryInsideAnOperationPreservesExactRefundCounts() {
-        var plan = new CountedOperationMaterials.Builder(3, 1).add(INPUT,
+        var plan = new CountedOperationMaterials.Builder(3, 1).add(MaterialPlan.graphSlot(0, INPUT),
                 new Pool().add(Origin.PRODUCER, new ItemStack(Items.IRON_INGOT), 4)
                         .add(Origin.INITIAL, new ItemStack(Items.IRON_INGOT), 5)).build();
         assertEquals(1, quantity(plan.materials(Origin.PRODUCER, 1, 1)));
         assertEquals(2, quantity(plan.materials(Origin.INITIAL, 1, 1)));
         assertEquals(3, quantity(plan.materials(Origin.INITIAL, 2, 1)));
-        assertEquals(9, plan.batchMaterials(0, 0, 3).get(0).getCount());
+        assertEquals(9, plan.batchMaterials(0, 0, 3).get(0).stack().getCount());
     }
 
     @Test
@@ -72,12 +72,12 @@ class CountedOperationMaterialsTest extends BootstrapTest {
         ItemStack second = new ItemStack(Items.DIAMOND);
         second.getOrCreateTag().putString("owner", "second");
         var plan = new CountedOperationMaterials.Builder(1_000_000, 2)
-                .addGraphReusable(catalyst, new Pool().add(Origin.PRODUCER, List.of(new ItemStack(Items.DIAMOND))),
+                .addGraphReusable(MaterialPlan.graphSlot(0, catalyst), new Pool().add(Origin.PRODUCER, List.of(new ItemStack(Items.DIAMOND))),
                         new Pool().add(Origin.INITIAL, List.of(second)))
-                .add(INPUT, new Pool().add(Origin.INITIAL, new ItemStack(Items.IRON_INGOT), 3_000_000))
+                .add(MaterialPlan.graphSlot(1, INPUT), new Pool().add(Origin.INITIAL, new ItemStack(Items.IRON_INGOT), 3_000_000))
                 .build();
-        assertEquals("second", plan.batchMaterials(1, 0, 8).get(0).getTag().getString("owner"));
-        assertNull(plan.batchMaterials(0, 31, 8).get(0).getTag());
+        assertEquals("second", plan.batchMaterials(1, 0, 8).get(0).stack().getTag().getString("owner"));
+        assertNull(plan.batchMaterials(0, 31, 8).get(0).stack().getTag());
         assertEquals(24, quantity(plan.materials(Origin.INITIAL, 0, 8)));
         assertEquals(1, quantity(plan.reusableMaterials(Origin.PRODUCER, 0)));
         assertEquals(1, quantity(plan.reusableMaterials(Origin.INITIAL, 1)));
@@ -88,11 +88,11 @@ class CountedOperationMaterialsTest extends BootstrapTest {
         ItemStack knife = new ItemStack(Items.IRON_SWORD);
         knife.setDamageValue(knife.getMaxDamage() - 10);
         IngredientSpec tool = new IngredientSpec(Ingredient.of(Items.IRON_SWORD), 1, InputConsumption.durability(1));
-        var plan = new CountedOperationMaterials.Builder(50, 2).add(tool,
+        var plan = new CountedOperationMaterials.Builder(50, 2).add(MaterialPlan.graphSlot(0, tool),
                 new Pool().add(Origin.INITIAL, knife, 6)).build();
-        assertEquals(3, plan.batchMaterials(0, 0, 8).get(0).getCount());
-        assertEquals(3, plan.batchMaterials(1, 8, 8).get(0).getCount());
-        assertTrue(plan.matches(List.of(tool)));
+        assertEquals(3, plan.batchMaterials(0, 0, 8).get(0).stack().getCount());
+        assertEquals(3, plan.batchMaterials(1, 8, 8).get(0).stack().getCount());
+        assertTrue(plan.matches(MaterialPlan.graphSlots(List.of(tool))));
         assertTrue(plan.materials(Origin.INITIAL, 0, 50).isEmpty());
         assertEquals(6, quantity(plan.reusableMaterials(Origin.INITIAL, 0))
                 + quantity(plan.reusableMaterials(Origin.INITIAL, 1)));
@@ -103,7 +103,7 @@ class CountedOperationMaterialsTest extends BootstrapTest {
         ItemStack knife = new ItemStack(Items.IRON_SWORD);
         knife.setDamageValue(knife.getMaxDamage() - 10);
         IngredientSpec tool = new IngredientSpec(Ingredient.of(Items.IRON_SWORD), 1, InputConsumption.durability(1));
-        var plan = new CountedOperationMaterials.Builder(40, 2).addGraphReusable(tool,
+        var plan = new CountedOperationMaterials.Builder(40, 2).addGraphReusable(MaterialPlan.graphSlot(0, tool),
                 new Pool().add(Origin.PRODUCER, knife, 4), new Pool()).build();
         assertEquals(2, quantity(plan.reusableMaterials(Origin.PRODUCER, 1)));
     }
@@ -115,9 +115,9 @@ class CountedOperationMaterialsTest extends BootstrapTest {
         ItemStack other = new ItemStack(Items.IRON_SWORD);
         other.setDamageValue(other.getMaxDamage() - 7);
         IngredientSpec tool = new IngredientSpec(Ingredient.of(Items.IRON_SWORD), 1, InputConsumption.durability(1));
-        var plan = new CountedOperationMaterials.Builder(10, 1).add(tool,
+        var plan = new CountedOperationMaterials.Builder(10, 1).add(MaterialPlan.graphSlot(7, tool),
                 new Pool().add(Origin.PRODUCER, List.of(damaged)).add(Origin.INITIAL, List.of(other))).build();
-        assertEquals(2, plan.mixedReusableStock(0).get(0).size());
+        assertEquals(2, plan.mixedReusableStock(0).get(7).size());
         assertEquals(damaged.getDamageValue(), plan.reusableMaterials(Origin.PRODUCER, 0).get(0).getDamageValue());
         assertEquals(other.getDamageValue(), plan.reusableMaterials(Origin.INITIAL, 0).get(0).getDamageValue());
     }
@@ -128,7 +128,7 @@ class CountedOperationMaterialsTest extends BootstrapTest {
         for (int trial = 0; trial < 200; trial++) {
             int operations = 1 + random.nextInt(300);
             long producer = random.nextInt(operations * 3 + 1);
-            var plan = new CountedOperationMaterials.Builder(operations, 1).add(INPUT,
+            var plan = new CountedOperationMaterials.Builder(operations, 1).add(MaterialPlan.graphSlot(0, INPUT),
                     new Pool().add(Origin.PRODUCER, new ItemStack(Items.IRON_INGOT), producer)
                             .add(Origin.INITIAL, new ItemStack(Items.IRON_INGOT), operations * 3L - producer)).build();
             long foundProducer = 0, foundInitial = 0;
@@ -149,17 +149,16 @@ class CountedOperationMaterialsTest extends BootstrapTest {
         tagged.getOrCreateTag().putInt("variant", 2);
         Pool stock = new Pool().add(Origin.VIRTUAL, List.of(new ItemStack(Items.IRON_INGOT, 1), tagged));
         assertThrows(IllegalArgumentException.class,
-                () -> new CountedOperationMaterials.Builder(1, 1).add(INPUT, stock));
+                () -> new CountedOperationMaterials.Builder(1, 1).add(MaterialPlan.graphSlot(0, INPUT), stock));
     }
 
     @Test
     void sparseSlotsAndReturnedContainersRemainInTheirPhysicalPositions() {
         var container = new IngredientSpec(Ingredient.of(Items.WATER_BUCKET), 1, InputConsumption.containerReturned());
         var plan = new CountedOperationMaterials.Builder(8, 1)
-                .add(IngredientSpec.EMPTY, new Pool())
-                .add(container, new Pool().add(Origin.VIRTUAL, new ItemStack(Items.WATER_BUCKET), 8)).build();
-        assertTrue(plan.batchMaterials(0, 0, 3).get(0).isEmpty());
-        assertEquals(3, plan.batchMaterials(0, 0, 3).get(1).getCount());
+                .add(MaterialPlan.graphSlot(1, container), new Pool().add(Origin.VIRTUAL, new ItemStack(Items.WATER_BUCKET), 8)).build();
+        assertEquals("slot:1", plan.batchMaterials(0, 0, 3).get(0).entryId());
+        assertEquals(3, plan.batchMaterials(0, 0, 3).get(0).stack().getCount());
         assertEquals(5, quantity(plan.materials(Origin.VIRTUAL, 3, 5)));
     }
 

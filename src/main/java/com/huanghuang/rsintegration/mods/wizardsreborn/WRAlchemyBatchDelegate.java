@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.wizardsreborn;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -194,7 +196,10 @@ public final class WRAlchemyBatchDelegate extends AbstractBatchDelegate {
                 InkFluidSupport.token(expectedFluid), true).status() == StorageOperationStatus.SUCCESS;
     }
 
-    @Override public List<IngredientSpec> getRequiredMaterials() { return required; }
+    @Override
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(required);
+    }
 
     @Override public void configureMaterialReservation(ExtractionLedger ledger, ServerPlayer player) {
         if (ledger.storageEndpoint() != null) setStorageEndpoint(ledger.storageEndpoint());

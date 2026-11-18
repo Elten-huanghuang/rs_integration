@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.botania;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -73,7 +75,11 @@ public final class ElvenTradeBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    public List<IngredientSpec> getRequiredMaterials() {
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    List<IngredientSpec> recipeSlots() {
         if (recipe == null) return null;
         List<IngredientSpec> specs = new ArrayList<>();
         for (Ingredient ingredient : recipe.getIngredients()) {
@@ -119,7 +125,7 @@ public final class ElvenTradeBatchDelegate extends AbstractBatchDelegate {
     public boolean startSingleOperation(@Nonnull ServerPlayer player) {
         if (storageEndpoint() == null) return false;
         List<ItemStack> materials = BotaniaDelegateSupport.extractAtomically(
-                storageEndpoint(), player, getRequiredMaterials());
+                storageEndpoint(), player, recipeSlots());
         if (materials.isEmpty()) return false;
         requestedBatch = 1;
         if (start(materials)) return true;
@@ -146,11 +152,11 @@ public final class ElvenTradeBatchDelegate extends AbstractBatchDelegate {
         if (level == null || pos == null || recipe == null
                 || !(level.getBlockEntity(pos) instanceof AlfheimPortalBlockEntity portal)
                 || !portalQueueEmpty(portal)) return false;
-        int operations = inferOperations(getRequiredMaterials(), materials);
+        int operations = inferOperations(recipeSlots(), materials);
         if (operations <= 0 || operations > Math.max(1, requestedBatch)
                 || operations > configuredLimit() || (!batchingEnabled() && operations > 1)) return false;
         List<ItemStack> oneOperation = oneOperationMaterials(
-                getRequiredMaterials(), materials, operations);
+                recipeSlots(), materials, operations);
         if (oneOperation.isEmpty()) return false;
         List<ItemStack> dynamicOutputs = recipe.getOutputs(oneOperation);
         if (dynamicOutputs == null || dynamicOutputs.isEmpty()) return false;

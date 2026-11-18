@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.avaritia;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -94,9 +96,12 @@ public final class CraftingTableBatchDelegate extends InstantBatchDelegate {
         return true;
     }
 
-    @Nullable
     @Override
-    public List<IngredientSpec> getRequiredMaterials() {
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    List<IngredientSpec> recipeSlots() {
         if (recipe != null && isShapedTableRecipe(recipe)) {
             // Avaritia's shaped matcher reads the complete square handler and
             // preserves empty cells. Keep those cells in the material contract
@@ -122,7 +127,7 @@ public final class CraftingTableBatchDelegate extends InstantBatchDelegate {
 
     @Override
     public boolean startSingleOperation(ServerPlayer player) {
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.isEmpty()) return false;
 
         List<ItemStack> materials = new ArrayList<>();

@@ -90,9 +90,9 @@ class AsyncCraftChainMachineDedupTest extends BootstrapTest {
                 (proxy, method, args) -> method.getName()
                         .equals("requiresPrivateLedgerGraphDispatch"));
 
-        assertTrue(AsyncCraftChain.shouldUsePrivateLedgerGraphDispatch(delegate, List.of()));
+        assertTrue(AsyncCraftChain.shouldUsePrivateLedgerGraphDispatch(delegate, MaterialPlan.privateExtraction()));
         assertFalse(AsyncCraftChain.shouldUsePrivateLedgerGraphDispatch(
-                delegate, List.of(new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 1))));
+                delegate, MaterialPlan.graphSlots(List.of(new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 1)))));
     }
 
     @Test
@@ -144,7 +144,7 @@ class AsyncCraftChainMachineDedupTest extends BootstrapTest {
                         int operations = Math.min(8, requested);
                         yield new InputBufferPlan(operations,
                                 List.of(new InputBufferPlan.InputSlot(
-                                        "legacy:material:0", 0,
+                                        "slot:0", 0,
                                         new ItemStack(Items.IRON_ORE, operations), 1,
                                         InputConsumption.consumed())),
                                 List.of());

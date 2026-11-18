@@ -385,9 +385,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
 
     // ── Chain support: pre-reserved materials ────────────────────
 
-    @Override
-    @Nullable
-    public List<IngredientSpec> getRequiredMaterials() {
+    List<IngredientSpec> recipeSlots() {
         if (recipe == null) return null;
         return CraftPacketUtils.extractIngredientSpecs(recipe);
     }
@@ -427,7 +425,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
     public boolean supportsInputBuffer() {
         if (!malumAltarInputBufferEnabled() || recipe == null || invMain == null
                 || invSpirit == null || pedestals == null) return false;
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         int extraCount = recipeListSize("extraItems");
         int spiritCount = recipeListSize("spirits");
         if (specs == null || specs.size() != 1 + extraCount + spiritCount) return false;
@@ -444,7 +442,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
     @Override
     public InputBufferContract inputBufferContract() {
         if (!supportsInputBuffer()) return InputBufferContract.none();
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         int extraCount = recipeListSize("extraItems");
         int spiritCount = recipeListSize("spirits");
         List<InputBufferContract.InputSlot> inputs = new ArrayList<>(specs.size());
@@ -483,7 +481,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
                                            @Nonnull InputBufferPlan plan,
                                            @Nonnull ExtractionLedger sharedLedger) {
         if (!supportsInputBuffer() || plan == null || !plan.enabled()) return false;
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         int extraCount = recipeListSize("extraItems");
         int spiritCount = recipeListSize("spirits");
         if (plan.inputs().size() != specs.size()) return false;
@@ -514,7 +512,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public MaterialPlan materialPlan() {
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         return materialPlanForSpecs(specs, recipeListSize("extraItems"), recipeListSize("spirits"));
     }
 
@@ -649,7 +647,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         int normalizedExtraCount = recipeListSize("extraItems");
         int normalizedSpiritCount = recipeListSize("spirits");
         List<ItemStack> placementMaterials = normalizePlacementMaterials(

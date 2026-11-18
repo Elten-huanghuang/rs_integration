@@ -31,6 +31,7 @@ import com.huanghuang.rsintegration.api.recipe.RecipeExecutionKind;
 import com.huanghuang.rsintegration.api.recipe.RecipeView;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+import com.huanghuang.rsintegration.api.recipe.MaterialRequirement;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.external.ExternalIntegrationBatchDelegate;
@@ -358,8 +359,7 @@ class TaskFluidExecutionTest extends BootstrapTest {
         when(group.getMaterialOperations()).thenReturn(1);
         when(group.usesTaskFluidInputs()).thenReturn(true);
         List<IngredientSpec> specs = List.of(new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 2));
-        when(group.getFlatOperationMaterials()).thenReturn(specs);
-        when(group.reservationMaterialPlan()).thenReturn(MaterialPlan.fromLegacy(specs));
+        when(group.materialPlan()).thenReturn(MaterialPlan.graphSlots(specs));
         assertNotNull(invoke(chain, "reserveCountedOperationMaterials",
                 new Class<?>[]{ParallelCraftGroup.class, ServerPlayer.class, ExtractionLedger.class,
                         MaterialBroker.ReservationToken.class}, group, player, new ExtractionLedger(), token));
@@ -438,9 +438,19 @@ class TaskFluidExecutionTest extends BootstrapTest {
         doReturn(true).when(delegate).validateExecutionContext(player);
         tank.setFluid(water(400));
         account.markTransferUncertain();
+        var item = mock(MaterialRequirement.class);
+        when(item.entryId()).thenReturn(id("iron"));
+        var view = mock(RecipeView.class);
+        var fluid = mock(FluidRequirement.class);
+        when(view.fluids()).thenReturn(List.of(fluid));
+        set(delegate, "recipeView", view);
+        when(view.materials()).thenReturn(List.of(item));
+        MaterialPlan plan = new MaterialPlan(List.of(new MaterialPlan.Entry(id("iron").toString(),
+                new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 1), MaterialPlan.Allocation.GRAPH, 0)));
         try (var scope = RuntimeMaterialAccount.enter(account)) {
-            assertFalse(delegate.startPreparedOperation(player, List.of(new ItemStack(Items.IRON_INGOT)),
-                    new ExtractionLedger()));
+            assertFalse(delegate.startOperation(OperationStartContext.chainReserved(player, new ExtractionLedger(),
+                    plan, List.of(new OperationStartContext.ReservedMaterial(id("iron").toString(),
+                            new ItemStack(Items.IRON_INGOT))), null)));
         }
         invoke(delegate, "clearMachineState", new Class<?>[]{BlockEntity.class, ServerPlayer.class}, machine, player);
         assertEquals(400, tank.getFluidAmount());

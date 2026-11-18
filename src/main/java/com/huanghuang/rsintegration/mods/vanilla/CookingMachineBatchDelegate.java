@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.vanilla;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.crafting.TaskOutputReception;
 
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
@@ -31,6 +33,11 @@ import java.util.List;
 
 /** Selects the physical delegate for cooking recipes without eagerly loading optional mods. */
 public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
+    @Override
+    public MaterialPlan materialPlan() {
+        return active().materialPlan();
+    }
+
 
     private static final String IRON_DELEGATE =
             "com.huanghuang.rsintegration.mods.ironfurnaces.IronFurnacesBatchDelegate";
@@ -140,31 +147,6 @@ public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean acceptsMachineWithoutBlockEntity(@Nonnull ServerLevel level, @Nonnull BlockPos pos) {
         return delegate != null && delegate.acceptsMachineWithoutBlockEntity(level, pos);
-    }
-
-    @Nullable
-    @Override
-    public List<IngredientSpec> getRequiredMaterials() {
-        return active().getRequiredMaterials();
-    }
-
-    @Nonnull
-    @Override
-    public List<IngredientSpec> getGraphSpecs() {
-        return active().getGraphSpecs();
-    }
-
-    @Nonnull
-    @Override
-    public List<IngredientSpec> getSupplementalSpecs() {
-        return active().getSupplementalSpecs();
-    }
-
-    @Nonnull
-    @Override
-    public List<ItemStack> mergeSupplementalMaterials(@Nonnull List<ItemStack> graph,
-                                                       @Nonnull List<ItemStack> supplemental) {
-        return active().mergeSupplementalMaterials(graph, supplemental);
     }
 
     @Nullable

@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.botania;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
@@ -122,8 +124,9 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
         // block entity. The actual leased machine is the Mana Pool directly above it.
         return ManaPoolInterop.isManaPool(level.getBlockEntity(pos.above()));
     }
-    @Override public List<IngredientSpec> getRequiredMaterials() {
-        return recipe == null ? null : List.of(new IngredientSpec(recipe.getIngredients().get(0), 1));
+    @Override
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipe == null ? null : List.of(new IngredientSpec(recipe.getIngredients().get(0), 1)));
     }
 
     @Override

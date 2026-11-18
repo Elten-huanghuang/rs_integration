@@ -96,7 +96,7 @@ class MalumSpiritCrucibleSpiritReturnTest extends BootstrapTest {
         MalumSpiritCrucibleBatchDelegate delegate = spy(new MalumSpiritCrucibleBatchDelegate());
         doReturn(List.of(new IngredientSpec(
                 Ingredient.of(Items.STICK), 1, InputConsumption.catalyst())))
-                .when(delegate).getRequiredMaterials();
+                .when(delegate).recipeSlots();
         return delegate;
     }
 

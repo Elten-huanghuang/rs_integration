@@ -90,9 +90,7 @@ class CookingPotDispatchTest extends BootstrapTest {
         // 仅替代世界交互；规划资格取真实锅具声明，派发、材料交接与捕获租约均走正式代码。
         IBatchDelegate worker = mock(IBatchDelegate.class);
         when(worker.concurrencyCapabilities()).thenReturn(pot.concurrencyCapabilities());
-        when(worker.getRequiredMaterials()).thenReturn(specs);
-        when(worker.getGraphSpecs()).thenReturn(specs);
-        when(worker.materialPlan()).thenReturn(MaterialPlan.fromLegacy(specs));
+        when(worker.materialPlan()).thenReturn(MaterialPlan.graphSlots(specs));
         when(worker.getMachinePos()).thenReturn(position);
         when(worker.getOperationMachinePos(position)).thenReturn(position);
         when(worker.getExpectedOutput()).thenReturn(new ItemStack(Items.MUSHROOM_STEW));
@@ -113,7 +111,7 @@ class CookingPotDispatchTest extends BootstrapTest {
         CountedOperationMaterials.Pool pool = new CountedOperationMaterials.Pool()
                 .add(CountedOperationMaterials.Origin.INITIAL, supplied);
         CountedOperationMaterials.Builder materials = new CountedOperationMaterials.Builder(1, 1);
-        specs.forEach(spec -> materials.add(spec, pool));
+        worker.materialPlan().entries().forEach(entry -> materials.add(entry, pool));
         group.setCountedOperationMaterials(materials.build());
         MachineLeaseRegistry machines = new MachineLeaseRegistry();
         CaptureLeaseRegistry captures = new CaptureLeaseRegistry();
@@ -136,8 +134,8 @@ class CookingPotDispatchTest extends BootstrapTest {
                 assertEquals(1, global.active());
                 assertEquals(initialZones + 1, CraftOutputInterceptor.activeZoneCount());
                 assertNotNull(starts.get(0).operationId());
-                assertEquals(1, starts.get(0).legacyMaterials().get(0).getCount());
-                assertEquals(4, starts.get(0).legacyMaterials().get(1).getCount());
+                assertEquals(1, starts.get(0).inputSlots().get(0).getCount());
+                assertEquals(4, starts.get(0).inputSlots().get(1).getCount());
                 assertEquals(IBatchDelegate.CraftPhase.DONE, group.observeCraft(level).phase());
                 assertEquals(1, group.getCompletedOperations());
                 List<ItemStack> output = group.drainSettledResults();

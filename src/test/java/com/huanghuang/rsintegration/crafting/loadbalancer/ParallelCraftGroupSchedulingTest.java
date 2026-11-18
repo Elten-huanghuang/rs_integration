@@ -37,13 +37,12 @@ class ParallelCraftGroupSchedulingTest extends BootstrapTest {
         IngredientSpec iron = new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 1);
         ItemStack tagged = new ItemStack(Items.IRON_INGOT);
         tagged.getOrCreateTag().putString("variant", "other");
-        RepeatedOperationPlan repeated = new RepeatedOperationPlan(MaterialPlan.fromLegacy(List.of(iron)),
-                3, 1, List.of(new ItemStack(Items.IRON_INGOT), new ItemStack(Items.IRON_INGOT), tagged));
-        assertEquals(2, ParallelCraftGroup.compatibleBatchSize(repeated, List.of(iron), 0, 3));
+        RepeatedOperationPlan repeated = new RepeatedOperationPlan(MaterialPlan.graphSlots(List.of(iron)), 3, List.of(new ItemStack(Items.IRON_INGOT), new ItemStack(Items.IRON_INGOT), tagged));
+        assertEquals(2, ParallelCraftGroup.compatibleBatchSize(repeated, 0, 3));
         IngredientSpec huge = new IngredientSpec(iron.ingredient(), Integer.MAX_VALUE);
-        var overflow = new RepeatedOperationPlan(MaterialPlan.fromLegacy(List.of(huge)), 2, 1,
+        var overflow = new RepeatedOperationPlan(MaterialPlan.graphSlots(List.of(huge)), 2,
                 List.of(new ItemStack(Items.IRON_INGOT, Integer.MAX_VALUE), new ItemStack(Items.IRON_INGOT, Integer.MAX_VALUE)));
-        assertEquals(1, ParallelCraftGroup.compatibleBatchSize(overflow, List.of(huge), 0, 2));
+        assertEquals(1, ParallelCraftGroup.compatibleBatchSize(overflow, 0, 2));
     }
 
 
@@ -110,48 +109,20 @@ class ParallelCraftGroupSchedulingTest extends BootstrapTest {
     }
 
     @Test
-    void supplementalContainerIsRepeatedAndMergedIntoEveryOperation() {
-        IngredientSpec bowl = new IngredientSpec(Ingredient.of(Items.BOWL), 1);
-        assertEquals(6, ParallelCraftGroup.repeatSpecs(List.of(bowl), 6).size());
-
-        List<ItemStack> graph = new ArrayList<>();
-        List<ItemStack> supplemental = new ArrayList<>();
-        for (int operation = 0; operation < 6; operation++) {
-            graph.add(new ItemStack(Items.MILK_BUCKET));
-            graph.add(new ItemStack(Items.SUGAR));
-            graph.add(new ItemStack(Items.COCOA_BEANS));
-            graph.add(new ItemStack(Items.COCOA_BEANS));
-            supplemental.add(new ItemStack(Items.BOWL));
-        }
-
-        List<ItemStack> merged = ParallelCraftGroup.mergeOperationSlices(
-                graph, supplemental, 6, 4, 1, (inputs, containers) -> {
-                    List<ItemStack> operation = new ArrayList<>(inputs);
-                    operation.addAll(containers);
-                    return operation;
-                });
-
-        assertEquals(30, merged.size());
-        for (int operation = 0; operation < 6; operation++) {
-            assertTrue(merged.get(operation * 5 + 4).is(Items.BOWL));
-        }
-    }
-
-    @Test
     void reusableWorkerBatchAggregatesConsumablesButNotCatalyst() {
-        MaterialPlan materials = MaterialPlan.fromLegacy(
+        MaterialPlan materials = MaterialPlan.graphSlots(
                 List.of(new IngredientSpec(Ingredient.of(Items.DIAMOND), 1,
                                 DemandRole.CATALYST),
                         new IngredientSpec(Ingredient.of(Items.CLAY_BALL), 2)));
-        RepeatedOperationPlan repeated = new RepeatedOperationPlan(materials, 3, 2,
+        RepeatedOperationPlan repeated = new RepeatedOperationPlan(materials, 3,
                 List.of(new ItemStack(Items.DIAMOND), new ItemStack(Items.CLAY_BALL, 2),
                         new ItemStack(Items.DIAMOND), new ItemStack(Items.CLAY_BALL, 2),
                         new ItemStack(Items.DIAMOND), new ItemStack(Items.CLAY_BALL, 2)));
 
-        List<ItemStack> aggregated = ParallelCraftGroup.aggregateBatchMaterials(
-                repeated, materials, List.of(0, 1, 2));
-        assertEquals(1, aggregated.get(0).getCount());
-        assertEquals(6, aggregated.get(1).getCount());
+        var aggregated = ParallelCraftGroup.aggregateBatchMaterials(
+                repeated, List.of(0, 1, 2));
+        assertEquals(1, aggregated.get(0).stack().getCount());
+        assertEquals(6, aggregated.get(1).stack().getCount());
         assertEquals(1, repeated.materialAt(2, 0).getCount());
     }
 

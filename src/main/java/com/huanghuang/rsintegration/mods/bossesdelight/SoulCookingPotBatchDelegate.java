@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.bossesdelight;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
@@ -161,9 +163,12 @@ public final class SoulCookingPotBatchDelegate extends AbstractBatchDelegate {
         return BossesDelightReflection.isSoulCookingPot(blockEntity);
     }
 
-    @Nullable
     @Override
-    public List<IngredientSpec> getRequiredMaterials() {
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    List<IngredientSpec> recipeSlots() {
         if (recipe == null) return null;
         var handler = ModRecipeHandlers.claimFor(recipe).winner();
         return handler != null ? handler.getIngredients(recipe) : null;
@@ -220,7 +225,7 @@ public final class SoulCookingPotBatchDelegate extends AbstractBatchDelegate {
         if (be == null || !isSupportedBlockEntity(be)) return false;
         IItemHandler handler = getInventory(be);
         if (handler == null || handler.getSlots() < INVENTORY_SIZE) return false;
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.isEmpty() || specs.size() > INPUT_SLOTS + 1) return false;
         int ingredientCount = specs.size() - (requiredContainer().isEmpty() ? 0 : 1);
         if (ingredientCount <= 0 || ingredientCount > INPUT_SLOTS) return false;
@@ -258,7 +263,7 @@ public final class SoulCookingPotBatchDelegate extends AbstractBatchDelegate {
         BlockEntity be = myLevel.getBlockEntity(myPos);
         IItemHandler handler = be == null ? null : getInventory(be);
         if (handler == null || handler.getSlots() < INVENTORY_SIZE) return InputBufferContract.none();
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null) return InputBufferContract.none();
         ItemStack container = requiredContainer();
         int ingredientCount = specs.size() - (container.isEmpty() ? 0 : 1);
@@ -266,12 +271,12 @@ public final class SoulCookingPotBatchDelegate extends AbstractBatchDelegate {
         List<InputBufferContract.InputSlot> inputs = new ArrayList<>(specs.size());
         for (int i = 0; i < ingredientCount; i++) {
             ItemStack prototype = ingredientPrototype(specs.get(i));
-            inputs.add(new InputBufferContract.InputSlot("legacy:material:" + i, i, prototype,
+            inputs.add(new InputBufferContract.InputSlot("slot:" + i, i, prototype,
                     1, slotCapacity(handler, i, prototype), specs.get(i).consumption()));
         }
         if (!container.isEmpty()) {
             inputs.add(new InputBufferContract.InputSlot(
-                    "legacy:material:" + ingredientCount, CONTAINER_SLOT,
+                    "slot:" + ingredientCount, CONTAINER_SLOT,
                     container.copyWithCount(1), 1,
                     slotCapacity(handler, CONTAINER_SLOT, container),
                     InputConsumption.consumed()));
@@ -297,12 +302,12 @@ public final class SoulCookingPotBatchDelegate extends AbstractBatchDelegate {
                                            @NotNull InputBufferPlan plan,
                                            @NotNull ExtractionLedger sharedLedger) {
         if (!supportsInputBuffer() || plan == null || !plan.enabled()) return false;
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || plan.inputs().size() != specs.size()) return false;
         List<ItemStack> ordered = new ArrayList<>(specs.size());
         ItemStack container = requiredContainer();
         for (int i = 0; i < specs.size(); i++) {
-            InputBufferPlan.InputSlot input = inputByEntryId(plan, "legacy:material:" + i);
+            InputBufferPlan.InputSlot input = inputByEntryId(plan, "slot:" + i);
             int expectedSlot = i == specs.size() - 1 && !container.isEmpty() ? CONTAINER_SLOT : i;
             long required = (long) specs.get(i).count() * plan.operations();
             if (input == null || input.slot() != expectedSlot
@@ -347,7 +352,7 @@ public final class SoulCookingPotBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null) return false;
         ItemStack container = requiredContainer();
         int ingredientCount = specs.size() - (container.isEmpty() ? 0 : 1);

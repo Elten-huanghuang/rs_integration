@@ -118,6 +118,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.withSettings;
@@ -163,7 +164,7 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
         assertEquals(IBatchDelegate.PreparationState.READY, delegate.prepare(player, recipeId, null, BlockPos.ZERO).state());
         try (var session = TaskOutputReception.open()) {
             delegate.setOutputReception(session);
-            assertTrue(delegate.startPreparedOperation(player, List.of(new ItemStack(Items.DIAMOND, 2)), new ExtractionLedger()));
+            assertTrue(startWithDiamond(delegate, player));
             state.set(new MachineState(true, true, true, 1, 10, recipeId, processId, 2, null));
             inventory.setStackInSlot(1, new ItemStack(Items.STICK, 5));
             assertEquals(IBatchDelegate.CraftPhase.WORKING, delegate.observeCraft(level).phase());
@@ -362,8 +363,7 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
         }
         assertEquals(IBatchDelegate.PreparationState.READY,
                 delegate.prepare(player, recipeId, null, BlockPos.ZERO).state());
-        assertTrue(delegate.startPreparedOperation(
-                player, List.of(new ItemStack(Items.DIAMOND, 2)), new ExtractionLedger()));
+        assertTrue(startWithDiamond(delegate, player));
         assertEquals(IBatchDelegate.CraftPhase.WORKING, delegate.observeCraft(level).phase());
 
         if (busySignal) {
@@ -608,15 +608,12 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
                 ),
                 concurrency.supportOffsets()
         );
+        // 本例通过库存差值结算；增量接收路径有独立的观察与取出测试。
+        delegate = spy(delegate);
+        doReturn(false).when(delegate).supportsOutputReception();
         delegate.prepareGraphBatch(2);
-        assertTrue(delegate.startPreparedOperation(
-                player,
-                List.of(
-                        new ItemStack(Items.DIAMOND, 2),
-                        new ItemStack(Items.DIAMOND, 2)
-                ),
-                new ExtractionLedger()
-        ));
+        assertTrue(delegate.startOperation(OperationStartContext.chainReserved(player, new ExtractionLedger(),
+                delegate.materialPlan(), List.of(reservedDiamond("input/1"), reservedDiamond("input/0")), null)));
         assertEquals(Items.DIAMOND, inputSlot.get().getItem());
         assertEquals(4, inputSlot.get().getCount());
 
@@ -746,11 +743,7 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
                 () -> preparation.detail() + " / "
                         + preparation.userMessage()
         );
-        assertTrue(delegate.startPreparedOperation(
-                player,
-                List.of(new ItemStack(Items.DIAMOND, 2)),
-                new ExtractionLedger()
-        ));
+        assertTrue(startWithDiamond(delegate, player));
         delegate.onBatchFinished(player);
     }
 
@@ -804,11 +797,7 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
                 () -> preparation.detail() + " / "
                         + preparation.userMessage()
         );
-        assertTrue(delegate.startPreparedOperation(
-                player,
-                List.of(new ItemStack(Items.DIAMOND, 2)),
-                new ExtractionLedger()
-        ));
+        assertTrue(startWithDiamond(delegate, player));
         assertEquals(Items.DIAMOND, inventory.getStackInSlot(0).getItem());
         assertEquals(2, inventory.getStackInSlot(0).getCount());
         delegate.onBatchFinished(player);
@@ -1555,6 +1544,15 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
         Field field = target.getClass().getDeclaredField(name);
         field.setAccessible(true);
         return field.get(target);
+    }
+
+    private static OperationStartContext.ReservedMaterial reservedDiamond(String name) {
+        return new OperationStartContext.ReservedMaterial(resource(name).toString(), new ItemStack(Items.DIAMOND, 2));
+    }
+
+    private static boolean startWithDiamond(ExternalIntegrationBatchDelegate delegate, ServerPlayer player) {
+        return delegate.startOperation(OperationStartContext.chainReserved(player, new ExtractionLedger(),
+                delegate.materialPlan(), List.of(reservedDiamond("input")), null));
     }
 
     private static RecipeView recipeView(

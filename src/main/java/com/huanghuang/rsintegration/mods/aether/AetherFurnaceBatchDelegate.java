@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.aether;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 import java.util.Arrays;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
@@ -273,9 +275,12 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         return true;
     }
 
-    @Nullable
     @Override
-    public List<IngredientSpec> getRequiredMaterials() {
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    List<IngredientSpec> recipeSlots() {
         var handler = ModRecipeHandlers.claimFor(recipe).winner();
         if (handler != null) {
             return handler.getIngredients(recipe);
@@ -319,7 +324,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
     public boolean supportsInputBuffer() {
         if (!aetherInputBufferEnabled() || isIncubator || recipe == null || myLevel == null
                 || myPos == null || !myLevel.hasChunkAt(myPos)) return false;
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.size() != 1) return false;
         IngredientSpec input = specs.get(0);
         if (input == null || input.isEmpty() || input.role() != DemandRole.CONSUMED
@@ -333,7 +338,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         BlockEntity be = myLevel.getBlockEntity(myPos);
         IItemHandler handler = be == null ? null : getInventory(be);
         if (handler == null || handler.getSlots() < 3) return InputBufferContract.none();
-        IngredientSpec input = getRequiredMaterials().get(0);
+        IngredientSpec input = recipeSlots().get(0);
         ItemStack prototype = ingredientPrototype(input);
         ItemStack output = resultItem();
         int inputCapacity = Math.min(handler.getSlotLimit(0), prototype.getMaxStackSize());
@@ -344,7 +349,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         if (operations <= 0) return InputBufferContract.none();
         return new InputBufferContract(operations,
                 List.of(new InputBufferContract.InputSlot(
-                        "legacy:material:0", 0, prototype, input.count(),
+                        "slot:0", 0, prototype, input.count(),
                         inputCapacity, input.consumption())),
                 List.of(new OutputContract.Port(
                         "aether:furnace:output", 2, output, output.getCount(),
@@ -377,9 +382,9 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         if (!supportsInputBuffer() || plan == null || !plan.enabled()
                 || plan.inputs().size() != 1) return false;
         InputBufferPlan.InputSlot input = plan.inputs().get(0);
-        IngredientSpec spec = getRequiredMaterials().get(0);
+        IngredientSpec spec = recipeSlots().get(0);
         long required = (long) spec.count() * plan.operations();
-        if (!"legacy:material:0".equals(input.entryId()) || input.slot() != 0
+        if (!"slot:0".equals(input.entryId()) || input.slot() != 0
                 || input.consumption().reusableWithinWorkerBatch()
                 || input.perOperation() != spec.count()
                 || required > Integer.MAX_VALUE || input.stack().getCount() != (int) required) {
@@ -393,7 +398,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public boolean startSingleOperation(ServerPlayer player) {
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.isEmpty()) return false;
 
         List<ItemStack> materials = new ArrayList<>();
@@ -459,7 +464,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         forceChunkLoad(true);
 
         // ── Phase 1: Insert into input slot (slot 0 for all three machines) ──
-        List<IngredientSpec> inputSpecs = getRequiredMaterials();
+        List<IngredientSpec> inputSpecs = recipeSlots();
         if (inputSpecs == null || inputSpecs.size() != 1) {
             resetInventoryOwnership();
             forceChunkLoad(false);

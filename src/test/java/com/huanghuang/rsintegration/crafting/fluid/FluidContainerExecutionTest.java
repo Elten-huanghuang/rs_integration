@@ -1,5 +1,9 @@
 package com.huanghuang.rsintegration.crafting.fluid;
 
+import java.util.stream.IntStream;
+
+import com.huanghuang.rsintegration.crafting.batch.OperationStartContext.ReservedMaterial;
+
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.mods.historystages.HistoryStagesCompat;
 import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
@@ -330,7 +334,8 @@ class FluidContainerExecutionTest extends BootstrapTest {
             ExtractionLedger ledger
     ) {
         return delegate.startOperation(OperationStartContext.chainReserved(
-                player, ledger, delegate.materialPlan(), materials, null));
+                player, ledger, delegate.materialPlan(), IntStream.range(0, materials.size())
+                        .mapToObj(i -> new ReservedMaterial("slot:" + i, materials.get(i))).toList(), null));
     }
 
     private static void field(Object target, String name, Object value) throws Exception {

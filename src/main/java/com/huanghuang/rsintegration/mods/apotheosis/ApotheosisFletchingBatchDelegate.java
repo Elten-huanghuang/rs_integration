@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.apotheosis;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -94,9 +96,12 @@ public final class ApotheosisFletchingBatchDelegate extends InstantBatchDelegate
         return isFletchingTable(level, pos);
     }
 
-    @Nullable
     @Override
-    public List<IngredientSpec> getRequiredMaterials() {
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    List<IngredientSpec> recipeSlots() {
         if (recipe == null) return null;
         var handler = ModRecipeHandlers.claimFor(recipe).winner();
         return handler != null ? handler.getIngredients(recipe) : null;
@@ -109,7 +114,7 @@ public final class ApotheosisFletchingBatchDelegate extends InstantBatchDelegate
 
     @Override
     public boolean startSingleOperation(@Nonnull ServerPlayer player) {
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.size() != INPUT_COUNT) return false;
 
         ExtractionLedger privateLedger = new ExtractionLedger();
@@ -160,7 +165,7 @@ public final class ApotheosisFletchingBatchDelegate extends InstantBatchDelegate
             return false;
         }
 
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.size() != INPUT_COUNT) {
             clearMenu();
             return false;

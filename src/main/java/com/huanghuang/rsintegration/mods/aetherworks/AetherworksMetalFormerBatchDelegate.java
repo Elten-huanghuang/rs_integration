@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.aetherworks;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -129,7 +131,10 @@ public final class AetherworksMetalFormerBatchDelegate extends AbstractBatchDele
         return player != null && structureValid() && (started || idle() && hasPower());
     }
 
-    @Override public List<IngredientSpec> getRequiredMaterials() { return required; }
+    @Override
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(required);
+    }
     // 产物留在各自的槽位中，不申请会与相邻成型台重叠的世界掉落物收取区域。
     @Override public BatchConcurrencyCapabilities concurrencyCapabilities() {
         return BatchConcurrencyCapabilities.machineSlot();

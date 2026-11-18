@@ -114,7 +114,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
             return context.materials().isEmpty()
                     && startExtractedOperation(context.player());
         }
-        List<ItemStack> materials = context.legacyMaterials();
+        List<ItemStack> materials = context.inputSlots();
         return !materials.isEmpty()
                 && startPreparedOperationImpl(
                 context.player(), materials, context.ledger());
@@ -144,7 +144,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
                 return false;
             }
 
-            List<IngredientSpec> specs = getRequiredMaterials();
+            List<IngredientSpec> specs = recipeSlots();
             if (specs == null || specs.isEmpty()) {
                 RSIntegrationMod.LOGGER.warn(
                         "[RSI-Batch-Generic] No ingredients for recipe: {}", recipe.getId());
@@ -273,8 +273,11 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
     // ── shared-ledger path for AsyncCraftChain ───────────────────────
 
     @Override
-    @Nullable
-    public List<IngredientSpec> getRequiredMaterials() {
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    List<IngredientSpec> recipeSlots() {
         List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(recipe);
         if (SlashBladeRecipeHandler.isShapedBladeRecipe(recipe)) {
             specs = SlashBladeRecipeHandler.requireOutput(recipe, specs,
@@ -376,7 +379,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
                 if (!captureRepeatedCraftingOutputs(cr, materials, player)) return false;
             } else if (recipe instanceof SmithingTransformRecipe smithing) {
                 List<ItemStack> operationMaterials = new ArrayList<>();
-                List<IngredientSpec> specs = getRequiredMaterials();
+                List<IngredientSpec> specs = recipeSlots();
                 for (int i = 0; i < specs.size() && i < materials.size(); i++) {
                     IngredientSpec spec = specs.get(i);
                     operationMaterials.add(spec.isEmpty() || materials.get(i) == null
@@ -386,7 +389,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
                         smithing, operationMaterials, player.serverLevel().registryAccess());
                 if (assembled.isEmpty()) return false;
                 int executions = materialExecutions(
-                        getRequiredMaterials(), materials,
+                        recipeSlots(), materials,
                         preparedGraphExecutions);
                 if (executions <= 0) return false;
                 assembled.setCount(Math.multiplyExact(assembled.getCount(), executions));
@@ -395,7 +398,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
                         recipe, player.serverLevel().registryAccess()));
             } else if (recipe instanceof SmithingRecipe smithing) {
                 List<ItemStack> operationMaterials = new ArrayList<>();
-                List<IngredientSpec> specs = getRequiredMaterials();
+                List<IngredientSpec> specs = recipeSlots();
                 for (int i = 0; i < specs.size() && i < materials.size(); i++) {
                     IngredientSpec spec = specs.get(i);
                     operationMaterials.add(spec.isEmpty() || materials.get(i) == null
@@ -405,7 +408,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
                         smithing, operationMaterials, player.serverLevel().registryAccess());
                 if (assembled.isEmpty()) return false;
                 int executions = materialExecutions(
-                        getRequiredMaterials(), materials,
+                        recipeSlots(), materials,
                         preparedGraphExecutions);
                 if (executions <= 0) return false;
                 assembled.setCount(Math.multiplyExact(assembled.getCount(), executions));
@@ -414,7 +417,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
                         recipe, player.serverLevel().registryAccess()));
             } else {
                 int executions = materialExecutions(
-                        getRequiredMaterials(), materials,
+                        recipeSlots(), materials,
                         preparedGraphExecutions);
                 if (executions <= 0) return false;
                 pendingResult.setCount(Math.multiplyExact(pendingResult.getCount(), executions));
@@ -445,7 +448,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
     private boolean captureRepeatedCraftingOutputs(
             CraftingRecipe craftingRecipe,
             List<ItemStack> materials, ServerPlayer player) {
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         return captureRepeatedCraftingOutputs(
                 craftingRecipe, specs, materials,
                 preparedGraphExecutions, player.serverLevel().registryAccess());
@@ -555,7 +558,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
             CraftingRecipe craftingRecipe,
             List<ItemStack> materials, ServerPlayer player) {
         return captureActualCraftingOutputs(
-                craftingRecipe, materials, getRequiredMaterials(), true,
+                craftingRecipe, materials, recipeSlots(), true,
                 player.serverLevel().registryAccess());
     }
 

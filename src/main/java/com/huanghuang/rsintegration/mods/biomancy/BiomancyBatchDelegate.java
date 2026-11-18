@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.biomancy;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -78,9 +80,12 @@ final class BiomancyBatchDelegate extends InstantBatchDelegate {
         return true;
     }
 
-    @Nullable
     @Override
-    public List<IngredientSpec> getRequiredMaterials() {
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    List<IngredientSpec> recipeSlots() {
         ModRecipeHandler handler = recipe == null
                 ? null : ModRecipeHandlers.claimFor(recipe).winner();
         return handler == null ? null : handler.getIngredients(recipe);
@@ -111,7 +116,7 @@ final class BiomancyBatchDelegate extends InstantBatchDelegate {
     @Override
     public boolean startSingleOperation(ServerPlayer player) {
         startFailureDetail = null;
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.isEmpty()) return false;
         if (storageEndpoint() == null) {
             setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, dimension, pos).orElse(null));
@@ -272,7 +277,7 @@ final class BiomancyBatchDelegate extends InstantBatchDelegate {
         placedInputs.clear();
         if (ModIds.ID_BIOMANCY_BIO_LAB.equals(typeForRecipe(recipe))) {
             Object reactant = invoke(recipe, "getReactant");
-            List<IngredientSpec> specs = getRequiredMaterials();
+            List<IngredientSpec> specs = recipeSlots();
             if (!(inventory instanceof IItemHandler input) || !(reactant instanceof Ingredient ingredient)
                     || specs == null || !placeBioLabInputs(input, specs, ingredient, materials)) return false;
             machine.setChanged();

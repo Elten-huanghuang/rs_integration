@@ -2607,7 +2607,7 @@ public final class AsyncCraftChain {
                 : 1;
         if (operationGroup && workerReusable) {
             operationCost = Math.min(operationCost, Math.max(1,
-                    reusableWorkerCapacity(delegateMaterials.legacyGraphSpecs(),
+                    reusableWorkerCapacity(delegateMaterials.graphEntries().stream().map(MaterialPlan.Entry::spec).toList(),
                             online, storageEndpoint)));
         }
         RSIntegrationMod.debug(
@@ -2811,7 +2811,7 @@ public final class AsyncCraftChain {
             if (!validatePreparedDelegate(group, online, prepared.step().recipeId(), null, BlockPos.ZERO)) {
                 return GraphDispatchResult.retry("execution worker temporarily unavailable");
             }
-            if (shouldUsePrivateLedgerGraphDispatch(group, group.getGraphSpecs())) {
+            if (shouldUsePrivateLedgerGraphDispatch(group, group.materialPlan())) {
                 GraphDispatchResult result = dispatchPrivateLedgerGraphNode(
                         nodeId, prepared, group, online, admission, nodeLedger);
                 ownershipTransferred = result.state() == DispatchState.STARTED;
@@ -2859,9 +2859,9 @@ public final class AsyncCraftChain {
     }
 
     static boolean shouldUsePrivateLedgerGraphDispatch(
-            IBatchDelegate delegate, List<IngredientSpec> graphSpecs) {
+            IBatchDelegate delegate, MaterialPlan plan) {
         return delegate != null
-                && (graphSpecs == null || graphSpecs.isEmpty())
+                && plan.graphEntries().isEmpty()
                 && delegate.requiresPrivateLedgerGraphDispatch();
     }
 
@@ -3218,9 +3218,8 @@ public final class AsyncCraftChain {
     private GraphNodeMaterials reserveCountedOperationMaterials(
             ParallelCraftGroup group, ServerPlayer online, ExtractionLedger targetLedger,
             @Nullable MaterialBroker.ReservationToken graphToken) {
-        List<IngredientSpec> specs = group.getFlatOperationMaterials();
-        if (specs == null) return null;
-        specs = MaterialLocks.narrowSpecs(group.recipeId(), specs, supplementalMaterialLocks);
+        MaterialPlan plan = group.materialPlan();
+        if (plan.delegateExtracted()) return null;
         int mark = targetLedger.reservationMark();
         List<ItemStack> virtualBefore = StackCopies.excludingEmpty(virtualInventory);
         boolean prepared = false;
@@ -3233,27 +3232,27 @@ public final class AsyncCraftChain {
             Pool available = new Pool();
             if (graphToken == null) available.add(Origin.VIRTUAL, virtualInventory);
             boolean needsAvailable = graphToken == null
-                    || !group.reservationMaterialPlan().supplementalEntries().isEmpty()
-                    || group.getChildCount() > 1 && !group.operationMaterialPlan().reusableEntries().isEmpty();
+                    || !plan.supplementalEntries().isEmpty()
+                    || group.getChildCount() > 1 && !plan.reusableEntries().isEmpty();
             if (needsAvailable) {
                 for (Map.Entry<StackKey, Long> entry : MaterialSources.listAllAvailable(online, storageEndpoint).entrySet()) {
                     available.add(Origin.INITIAL, entry.getKey().toStack(), entry.getValue());
                 }
             }
             if (graphToken != null) available.subtract(Origin.INITIAL, checkout.initialStacks());
-            Map<Integer, MaterialPlan.Allocation> allocations = new HashMap<>();
-            for (MaterialPlan.Entry entry : group.reservationMaterialPlan().entries()) {
-                if (entry.inputSlot() != null) allocations.put(entry.inputSlot(), entry.allocation());
-            }
             CountedOperationMaterials.Builder builder = new CountedOperationMaterials.Builder(
                     group.getMaterialOperations(), group.getChildCount());
-            for (int slot = 0; slot < specs.size(); slot++) {
-                IngredientSpec spec = specs.get(slot);
-                boolean graphOwned = graphToken != null
-                        && allocations.getOrDefault(slot, MaterialPlan.Allocation.GRAPH) == MaterialPlan.Allocation.GRAPH;
-                if (graphOwned && !spec.isEmpty() && spec.consumption().reusableWithinWorkerBatch()) {
-                    builder.addGraphReusable(spec, planned, available);
-                } else builder.add(spec, graphOwned ? planned : available);
+            for (MaterialPlan.Entry declared : plan.entries()) {
+                var entry = declared;
+                if (supplementalMaterialLocks != null && !supplementalMaterialLocks.isEmpty()) {
+                    var spec = declared.spec();
+                    entry = new MaterialPlan.Entry(declared.id(), new IngredientSpec(
+                            MaterialLocks.narrow(group.recipeId(), spec.ingredient(), supplementalMaterialLocks),
+                            spec.count(), spec.consumption()), declared.allocation(), declared.inputSlot());
+                }
+                boolean graphOwned = graphToken != null && entry.allocation() == MaterialPlan.Allocation.GRAPH;
+                if (graphOwned && entry.reusable()) builder.addGraphReusable(entry, planned, available);
+                else builder.add(entry, graphOwned ? planned : available);
             }
             CountedOperationMaterials counted = builder.build();
             List<ExtractionLedger.ReservationToken> reusableTokens = new ArrayList<>();
@@ -4297,8 +4296,8 @@ public final class AsyncCraftChain {
         boolean startInvoked = false;
         try {
             OperationStartContext context;
-            if (shouldUsePrivateLedgerGraphDispatch(group, group.getGraphSpecs())
-                    || group.getFlatOperationMaterials() == null) {
+            if (shouldUsePrivateLedgerGraphDispatch(group, group.materialPlan())
+                    || group.materialPlan().delegateExtracted()) {
                 materializePrivateLedgerFlatInputs(online);
                 context = OperationStartContext.delegateExtracted(online, ledger);
             } else {

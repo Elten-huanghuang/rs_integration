@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.embers;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.mods.common.MachineWaterSupply;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -122,7 +124,10 @@ abstract class EmbersFluidBatchDelegate extends AbstractBatchDelegate {
                 && outputTank().getFluidInTank(0).isEmpty() && hasPower() && canStoreOutput(player));
     }
 
-    @Override public List<IngredientSpec> getRequiredMaterials() { return required; }
+    @Override
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(required);
+    }
 
     @Override public boolean startSingleOperation(ServerPlayer player) {
         if (!validateExecutionContext(player)) return false;

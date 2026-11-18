@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.malum;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -97,9 +99,12 @@ public final class MalumRunicWorkbenchBatchDelegate extends InstantBatchDelegate
         return true;
     }
 
-    @Nullable
     @Override
-    public List<IngredientSpec> getRequiredMaterials() {
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    List<IngredientSpec> recipeSlots() {
         if (recipe == null) return null;
         var handler = ModRecipeHandlers.claimFor(recipe).winner();
         if (handler != null) {
@@ -120,7 +125,7 @@ public final class MalumRunicWorkbenchBatchDelegate extends InstantBatchDelegate
         this.ledger.setStorageEndpoint(storageEndpoint());
         if (storageEndpoint() == null && !hasStorageAccess()) return false;
 
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.isEmpty()) return false;
         // specs order: [primaryInput, secondaryInput]
         if (specs.size() < 2) return false;
@@ -201,7 +206,7 @@ public final class MalumRunicWorkbenchBatchDelegate extends InstantBatchDelegate
         this.expectedOutput = scaledCopy(computeResult(), preparedExecutions());
         if (expectedOutput.isEmpty()) return false;
 
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.size() < 2) return false;
 
         // Materials order: [primaryInput, secondaryInput]

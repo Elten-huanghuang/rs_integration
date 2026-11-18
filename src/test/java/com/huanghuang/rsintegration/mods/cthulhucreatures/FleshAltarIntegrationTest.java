@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.cthulhucreatures;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationStartContext.ReservedMaterial;
+
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -101,7 +103,7 @@ class FleshAltarIntegrationTest extends BootstrapTest {
         InputBufferPlan plan = fixture.delegate.inputBufferPlan(3);
         assertTrue(fixture.delegate.startOperation(OperationStartContext.chainReserved(
                 mock(ServerPlayer.class), new ExtractionLedger(), fixture.delegate.materialPlan(),
-                List.of(new ItemStack(Items.NETHERRACK, 6), new ItemStack(Items.DIAMOND, 12)), plan)));
+                List.of(new ReservedMaterial("slot:0", new ItemStack(Items.NETHERRACK, 6)), new ReservedMaterial("slot:1", new ItemStack(Items.DIAMOND, 12))), plan)));
         assertEquals(6, fixture.delegate.getExpectedProduction().count());
         fixture.inventory.setItem(0, new ItemStack(Items.NETHERRACK, 4));
         fixture.inventory.setItem(1, new ItemStack(Items.DIAMOND, 8));

@@ -260,19 +260,6 @@ public interface IBatchDelegate {
     }
 
     /**
-     * Return the ingredient specs for the recipe loaded by {@link #validateAndInit}.
-     * Used by {@code AsyncCraftChain} to pre-reserve all multi-block materials
-     * from a shared ledger before placing them in the machine.
-     *
-     * @return ingredient list in the order expected by the prepared-operation hook,
-     *         or null if the delegate handles extraction on its own
-     */
-    @Nullable
-    default List<IngredientSpec> getRequiredMaterials() {
-        return null;
-    }
-
-    /**
      * Optional exact material requirements for one prepared flat batch.
      * Returning a list means its counts already cover {@code executions}; the
      * chain must not scale them a second time. Returning null preserves the
@@ -292,30 +279,10 @@ public interface IBatchDelegate {
         return null;
     }
 
-    /**
-     * Stable material declaration for new planning and start paths. Legacy
-     * delegates are projected as graph-owned ordered entries until they opt in
-     * with explicit allocation and physical slot identities.
-     */
+    /** 一次操作的材料声明；默认由委托自行取料。 */
     @Nonnull
     default MaterialPlan materialPlan() {
-        List<IngredientSpec> required = getRequiredMaterials();
-        if (required == null || required.isEmpty()) return MaterialPlan.none();
-        List<IngredientSpec> graph = getGraphSpecs();
-        List<IngredientSpec> supplemental = getSupplementalSpecs();
-        if ((graph == null || graph.isEmpty())
-                && (supplemental == null || supplemental.isEmpty())
-                && requiresPrivateLedgerGraphDispatch()) {
-            return MaterialPlan.none();
-        }
-        try {
-            return MaterialPlan.fromLegacyPartitions(required, graph, supplemental);
-        } catch (IllegalArgumentException ignored) {
-            // A legacy delegate may recreate non-equal Ingredient instances on
-            // each getter call. Preserve its former all-graph behavior until it
-            // declares stable MaterialPlan entries explicitly.
-            return MaterialPlan.fromLegacy(required);
-        }
+        return MaterialPlan.privateExtraction();
     }
 
     /** Configure source preferences before this delegate's materials are reserved. */
@@ -363,33 +330,6 @@ public interface IBatchDelegate {
     }
 
     /**
-     * The portion of {@link #getRequiredMaterials()} that the graph planner
-     * should allocate via MaterialBroker checkout. Defaults to the full list
-     * for delegates that do not override it.
-     * <p>
-     * The graph reservation view may differ from the per-operation material
-     * layout when reusable inputs are reserved once per worker.
-     */
-    @Nonnull
-    default List<IngredientSpec> getGraphSpecs() {
-        List<IngredientSpec> full = getRequiredMaterials();
-        return full != null ? full : Collections.emptyList();
-    }
-
-    /**
-     * Materials that bypass the graph planner and are reserved directly from
-     * the RS network after (or alongside) graph reservation.
-     * <p>
-     * Return {@code Collections.emptyList()} when there are no supplemental
-     * materials (the default). When non-empty, {@code AsyncCraftChain} will
-     * extract these from the network independently of the graph checkout.
-     */
-    @Nonnull
-    default List<IngredientSpec> getSupplementalSpecs() {
-        return List.of();
-    }
-
-    /**
      * Whether graph dispatch must call {@code startSingleOperation}
      * with the delegate's private extraction ledger. This is required by
      * machines that consume inputs across multiple internal runs and cannot
@@ -401,24 +341,6 @@ public interface IBatchDelegate {
 
     /** 流体不进入共享物品槽位布局，由当前任务账户交付给委托。 */
     default boolean usesTaskFluidInputs() { return false; }
-
-    /**
-     * Merge graph-allocated and directly reserved supplemental materials into
-     * the order expected by {@code startPreparedOperation}. Delegates exposing
-     * supplemental specs must override this method when concatenation is not
-     * their placement order.
-     */
-    @Nonnull
-    default List<ItemStack> mergeSupplementalMaterials(
-            @Nonnull List<ItemStack> graphMaterials,
-            @Nonnull List<ItemStack> supplementalMaterials) {
-        if (supplementalMaterials.isEmpty()) return graphMaterials;
-        List<ItemStack> merged = new ArrayList<>(
-                graphMaterials.size() + supplementalMaterials.size());
-        merged.addAll(graphMaterials);
-        merged.addAll(supplementalMaterials);
-        return merged;
-    }
 
     /**
      * 未显式声明的委托按产物形态推断并发契约；只有真正无法并行的形态

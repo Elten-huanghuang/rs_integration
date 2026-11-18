@@ -20,6 +20,7 @@ import com.huanghuang.rsintegration.api.recipe.RecipeView;
 import com.huanghuang.rsintegration.crafting.CanonicalNbt;
 import com.huanghuang.rsintegration.crafting.CraftPlanningRevision;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
 import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.crafting.consumption.InputConsumption.Kind;
 import com.huanghuang.rsintegration.crafting.plan.MagicResourceCostCatalog;
@@ -136,17 +137,22 @@ final class ExternalRecipeProjection {
     }
 
     static List<IngredientSpec> ingredients(RecipeView view) {
-        List<IngredientSpec> result = new ArrayList<>(view.materials().size());
+        return view.materials().stream().map(ExternalRecipeProjection::ingredientSpec).toList();
+    }
+
+    static MaterialPlan materialPlan(RecipeView view) {
+        List<MaterialPlan.Entry> result = new ArrayList<>();
         for (MaterialRequirement requirement : view.materials()) {
-            int amount = toIntAmount(
-                    requirement.amount(), "material " + requirement.entryId());
-            result.add(new IngredientSpec(
-                    ingredient(requirement.ingredient()),
-                    amount,
-                    consumption(requirement.consumption())
-            ));
+            // 公共端口按组编号，不同组可以同号。内部行只保存逻辑投入，机器路由由公共 ID 查找。
+            result.add(new MaterialPlan.Entry(requirement.entryId().toString(), ingredientSpec(requirement),
+                    MaterialPlan.Allocation.GRAPH, result.size()));
         }
-        return List.copyOf(result);
+        return new MaterialPlan(result);
+    }
+
+    private static IngredientSpec ingredientSpec(MaterialRequirement requirement) {
+        return new IngredientSpec(ingredient(requirement.ingredient()),
+                toIntAmount(requirement.amount(), "material " + requirement.entryId()), consumption(requirement.consumption()));
     }
 
     static List<ItemStack> exactSecondaryOutputs(RecipeView view) {

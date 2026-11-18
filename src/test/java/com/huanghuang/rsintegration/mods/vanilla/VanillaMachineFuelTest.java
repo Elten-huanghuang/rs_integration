@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.vanilla;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationStartContext.ReservedMaterial;
+
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
@@ -294,8 +296,8 @@ class VanillaMachineFuelTest extends BootstrapTest {
             };
             var plan = delegate.inputBufferPlan(2);
             var context = OperationStartContext.chainReserved(player, mock(ExtractionLedger.class),
-                    MaterialPlan.fromLegacy(delegate.getRequiredMaterials()),
-                    List.of(new ItemStack(Items.IRON_ORE, 2)), plan);
+                    delegate.materialPlan(),
+                    List.of(new ReservedMaterial("slot:0", new ItemStack(Items.IRON_ORE, 2))), plan);
             assertFalse(delegate.startOperation(context));
             assertTrue(session.closed());
             assertTrue(furnace.getItem(0).isEmpty());
@@ -422,8 +424,8 @@ class VanillaMachineFuelTest extends BootstrapTest {
                         call.getArgument(2), (stack, count) -> stack.copyWithCount(count)));
         var plan = delegate.inputBufferPlan(4);
         assertTrue(delegate.startOperation(OperationStartContext.chainReserved(player, mock(ExtractionLedger.class),
-                MaterialPlan.fromLegacy(delegate.getRequiredMaterials()),
-                List.of(new ItemStack(Items.IRON_ORE, 4)), plan)));
+                delegate.materialPlan(),
+                List.of(new ReservedMaterial("slot:0", new ItemStack(Items.IRON_ORE, 4))), plan)));
         try (var session = delegate.outputReception()) {
             ItemStack iron = new ItemStack(Items.IRON_INGOT);
             assertEquals(1, network.insertItem(iron, 5, Action.SIMULATE).getCount());

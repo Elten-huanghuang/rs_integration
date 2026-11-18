@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.immortalersdelight;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
@@ -122,7 +124,7 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public boolean startSingleOperation(ServerPlayer player) {
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.isEmpty()) return false;
 
         List<ItemStack> materials = new ArrayList<>();
@@ -155,9 +157,12 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         }
     }
 
-    @Nullable
     @Override
-    public List<IngredientSpec> getRequiredMaterials() {
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    List<IngredientSpec> recipeSlots() {
         var handler = ModRecipeHandlers.claimFor(recipe).winner();
         if (handler != null) {
             return handler.getIngredients(recipe);
@@ -202,7 +207,7 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         if (!coolerInputBufferEnabled() || recipe == null || myLevel == null || myPos == null
                 || !myLevel.hasChunkAt(myPos)) return false;
         List<IngredientSpec> inputSpecs = EnchantalCoolerRecipeHandler.getInputSpecs(recipe);
-        List<IngredientSpec> allSpecs = getRequiredMaterials();
+        List<IngredientSpec> allSpecs = recipeSlots();
         ItemStack result = resultItem();
         if (inputSpecs == null || inputSpecs.isEmpty() || inputSpecs.size() > INPUT_SLOTS
                 || allSpecs == null || result.isEmpty()) return false;
@@ -226,14 +231,14 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
             IngredientSpec spec = inputSpecs.get(slot);
             ItemStack prototype = ingredientPrototype(spec);
             int capacity = Math.min(handler.getSlotLimit(slot), prototype.getMaxStackSize());
-            inputs.add(new InputBufferContract.InputSlot("legacy:material:" + materialIndex++,
+            inputs.add(new InputBufferContract.InputSlot("slot:" + materialIndex++,
                     slot, prototype, spec.count(), capacity, spec.consumption()));
         }
         ItemStack container = EnchantalCoolerRecipeHandler.getContainerItem(recipe);
         if (!container.isEmpty()) {
             int capacity = Math.min(handler.getSlotLimit(CONTAINER_SLOT),
                     container.getMaxStackSize());
-            inputs.add(new InputBufferContract.InputSlot("legacy:material:" + materialIndex,
+            inputs.add(new InputBufferContract.InputSlot("slot:" + materialIndex,
                     CONTAINER_SLOT, container, 1, capacity,
                     InputConsumption.consumed()));
         }
@@ -261,11 +266,11 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
                                            @NotNull InputBufferPlan plan,
                                            @NotNull ExtractionLedger sharedLedger) {
         if (!supportsInputBuffer() || plan == null || !plan.enabled()) return false;
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || plan.inputs().size() != specs.size()) return false;
         List<ItemStack> ordered = new ArrayList<>(specs.size());
         for (int i = 0; i < specs.size(); i++) {
-            String id = "legacy:material:" + i;
+            String id = "slot:" + i;
             InputBufferPlan.InputSlot input = plan.inputs().stream()
                     .filter(candidate -> id.equals(candidate.entryId()))
                     .findFirst().orElse(null);

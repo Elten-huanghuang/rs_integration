@@ -1,5 +1,9 @@
 package com.huanghuang.rsintegration.mods.vanilla;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationStartContext.ReservedMaterial;
+
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -182,12 +186,12 @@ class SmithingRecipeHandlerTest extends BootstrapTest {
         assertTrue(IngredientMatcher.test(specs.get(1).ingredient(), selectedSword));
 
         CountedOperationMaterials materials = new CountedOperationMaterials.Builder(1, 1)
-                .add(specs.get(0), new Pool().add(Origin.INITIAL,
+                .add(MaterialPlan.graphSlot(0, specs.get(0)), new Pool().add(Origin.INITIAL,
                         new ItemStack(Items.NETHERITE_UPGRADE_SMITHING_TEMPLATE), 1))
-                .add(specs.get(1), new Pool().add(Origin.INITIAL, selectedSword, 1))
-                .add(specs.get(2), new Pool().add(Origin.INITIAL, new ItemStack(Items.NETHERITE_INGOT), 1))
+                .add(MaterialPlan.graphSlot(1, specs.get(1)), new Pool().add(Origin.INITIAL, selectedSword, 1))
+                .add(MaterialPlan.graphSlot(2, specs.get(2)), new Pool().add(Origin.INITIAL, new ItemStack(Items.NETHERITE_INGOT), 1))
                 .build();
-        List<ItemStack> batch = materials.batchMaterials(0, 0, 1);
+        List<ItemStack> batch = materials.batchMaterials(0, 0, 1).stream().map(ReservedMaterial::stack).toList();
         ItemStack assembled = SmithingRecipeHandler.assembleTransform(recipe, batch, RegistryAccess.EMPTY);
 
         assertTrue(assembled.is(Items.NETHERITE_SWORD));
@@ -204,7 +208,7 @@ class SmithingRecipeHandlerTest extends BootstrapTest {
         assertTrue(IngredientMatcher.test(exactSelection.get(1).ingredient(), selectedSword));
         assertFalse(IngredientMatcher.test(exactSelection.get(1).ingredient(), otherSword));
         assertThrows(IllegalArgumentException.class, () -> new CountedOperationMaterials.Builder(1, 1)
-                .add(exactSelection.get(1), new Pool().add(Origin.INITIAL, otherSword, 1)));
+                .add(MaterialPlan.graphSlot(1, exactSelection.get(1)), new Pool().add(Origin.INITIAL, otherSword, 1)));
     }
 
     @Test
@@ -229,7 +233,7 @@ class SmithingRecipeHandlerTest extends BootstrapTest {
         damagedBase.setDamageValue(1);
         assertFalse(IngredientMatcher.test(specs.get(1).ingredient(), damagedBase));
         assertThrows(IllegalArgumentException.class, () -> new CountedOperationMaterials.Builder(1, 1)
-                .add(specs.get(1), new Pool().add(Origin.INITIAL, damagedBase, 1)));
+                .add(MaterialPlan.graphSlot(1, specs.get(1)), new Pool().add(Origin.INITIAL, damagedBase, 1)));
     }
 
     private static SmithingTransformRecipe recipe() {

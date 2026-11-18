@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.crockpot;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -109,8 +111,11 @@ public final class BirdcageBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
-    @Nullable
-    public List<IngredientSpec> getRequiredMaterials() {
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    List<IngredientSpec> recipeSlots() {
         ModRecipeHandler handler = recipe == null
                 ? null : ModRecipeHandlers.claimFor(recipe).winner();
         return handler == null ? null : handler.getIngredients(recipe);
@@ -121,7 +126,7 @@ public final class BirdcageBatchDelegate extends AbstractBatchDelegate {
         if (recipe == null || !hasCagedParrot() || isOnCooldown() || hasPendingOutput()) return false;
         this.ledger = new ExtractionLedger();
         ledger.setStorageEndpoint(storageEndpoint());
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.size() != 1) return false;
         ItemStack input = CraftPacketUtils.ensureMaterialAvailable(
                 player, dimension, pos, specs.get(0).ingredient(), 1, ledger);

@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.embers;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 
 import com.huanghuang.rsintegration.mods.common.MachineWaterSupply;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
@@ -186,7 +188,10 @@ public final class EmbersStamperBatchDelegate extends AbstractBatchDelegate {
                 && (started || idle() && hasPower());
     }
 
-    @Override public List<IngredientSpec> getRequiredMaterials() { return required; }
+    @Override
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(required);
+    }
     @Override public ItemStack getExpectedOutput() { return expected.copy(); }
     @Override public ExpectedProduction getExpectedProduction() {
         return expected.isEmpty() ? null : new ExpectedProduction(expected.copy(), expected.getCount());

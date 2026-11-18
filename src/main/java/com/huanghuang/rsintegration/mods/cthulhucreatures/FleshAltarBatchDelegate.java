@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.cthulhucreatures;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -69,7 +71,10 @@ public final class FleshAltarBatchDelegate extends AbstractBatchDelegate {
         return true;
     }
 
-    @Override public List<IngredientSpec> getRequiredMaterials() { return specs; }
+    @Override
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(specs);
+    }
 
     @Override
     public PreparationResult prepare(ServerPlayer player, ResourceLocation recipeId,
@@ -102,7 +107,7 @@ public final class FleshAltarBatchDelegate extends AbstractBatchDelegate {
             if (candidates.length == 0) return InputBufferContract.none();
             int capacity = Math.min(64, inventory.getMaxStackSize());
             for (ItemStack candidate : candidates) capacity = Math.min(capacity, candidate.getMaxStackSize());
-            inputs.add(new InputBufferContract.InputSlot("legacy:material:" + slot, slot,
+            inputs.add(new InputBufferContract.InputSlot("slot:" + slot, slot,
                     candidates[0], spec.count(), capacity, spec.consumption()));
         }
         int outputLimit = Math.min(inventory.getMaxStackSize(), result.getMaxStackSize()) / result.getCount();

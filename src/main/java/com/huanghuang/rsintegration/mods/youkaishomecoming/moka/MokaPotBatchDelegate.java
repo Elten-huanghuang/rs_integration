@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.youkaishomecoming.moka;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.mods.common.MachineWaterSupply;
 
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
@@ -110,9 +112,12 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
         return getCookTime(existing) <= 0;
     }
 
-    @Nullable
     @Override
-    public List<IngredientSpec> getRequiredMaterials() {
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    List<IngredientSpec> recipeSlots() {
         List<Ingredient> ingredients = recipe.getIngredients();
         if (ingredients.isEmpty()) return null;
         List<IngredientSpec> specs = new ArrayList<>();
@@ -165,7 +170,7 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
                 || !myLevel.hasChunkAt(myPos)) return false;
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null || !isMokaBE(be)) return false;
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         ItemStack container = getOutputContainer(recipe);
         int ingredientCount = specs == null ? 0 : specs.size() - (container.isEmpty() ? 0 : 1);
         if (ingredientCount <= 0 || ingredientCount > INPUT_SLOTS) return false;
@@ -184,7 +189,7 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
         BlockEntity be = myLevel.getBlockEntity(myPos);
         IItemHandler handler = be == null ? null : getInventory(be);
         if (handler == null || handler.getSlots() < INVENTORY_SIZE) return InputBufferContract.none();
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         ItemStack container = getOutputContainer(recipe);
         int ingredientCount = specs.size() - (container.isEmpty() ? 0 : 1);
         List<InputBufferContract.InputSlot> inputs = new ArrayList<>(specs.size());
@@ -192,7 +197,7 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
             IngredientSpec spec = specs.get(i);
             ItemStack prototype = ingredientPrototype(spec);
             inputs.add(new InputBufferContract.InputSlot(
-                    "legacy:material:" + i, i, prototype, spec.count(),
+                    "slot:" + i, i, prototype, spec.count(),
                     slotCapacity(handler, i, prototype), spec.consumption()));
         }
         if (!container.isEmpty()) {
@@ -200,7 +205,7 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
             IngredientSpec spec = specs.get(index);
             ItemStack prototype = ingredientPrototype(spec);
             inputs.add(new InputBufferContract.InputSlot(
-                    "legacy:material:" + index, CONTAINER_SLOT, prototype,
+                    "slot:" + index, CONTAINER_SLOT, prototype,
                     spec.count(), slotCapacity(handler, CONTAINER_SLOT, prototype),
                     spec.consumption()));
         }
@@ -224,12 +229,12 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
                                            @NotNull InputBufferPlan plan,
                                            @NotNull ExtractionLedger sharedLedger) {
         if (!supportsInputBuffer() || plan == null || !plan.enabled()) return false;
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         ItemStack container = getOutputContainer(recipe);
         if (specs == null || plan.inputs().size() != specs.size()) return false;
         List<ItemStack> ordered = new ArrayList<>(specs.size());
         for (int i = 0; i < specs.size(); i++) {
-            InputBufferPlan.InputSlot input = inputById(plan, "legacy:material:" + i);
+            InputBufferPlan.InputSlot input = inputById(plan, "slot:" + i);
             IngredientSpec spec = specs.get(i);
             int expectedSlot = !container.isEmpty() && i == specs.size() - 1
                     ? CONTAINER_SLOT : i;
@@ -259,7 +264,7 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public boolean startSingleOperation(ServerPlayer player) {
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.isEmpty()) return false;
 
         List<ItemStack> materials = new ArrayList<>();
@@ -348,7 +353,7 @@ public final class MokaPotBatchDelegate extends AbstractBatchDelegate {
         }
         if (evacuated > 0) be.setChanged();
 
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         ItemStack container = getOutputContainer(recipe);
         int ingredientCount = specs == null ? 0 : specs.size() - (container.isEmpty() ? 0 : 1);
         if (specs == null || materials.size() != specs.size() || ingredientCount <= 0) return false;

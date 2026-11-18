@@ -2,7 +2,8 @@ package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
-import com.huanghuang.rsintegration.crafting.MaterialMatcher;
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan.Entry;
+import com.huanghuang.rsintegration.crafting.batch.OperationStartContext.ReservedMaterial;
 import com.huanghuang.rsintegration.crafting.StackCopies;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.consumption.DurabilityMath;
@@ -159,7 +160,7 @@ public final class CountedOperationMaterials {
 
     private record SourceRange(long first, long end, Origin origin) {}
     private record Run(int first, int end, ItemStack template, List<SourceRange> sources) {}
-    private record Slot(boolean reusable, List<Run> runs) {}
+    private record Slot(Entry entry, List<Run> runs) {}
 
     public static final class Builder {
         private final int operations;
@@ -172,31 +173,31 @@ public final class CountedOperationMaterials {
             this.workers = workers;
         }
 
-        public Builder add(IngredientSpec spec, Pool pool) {
-            if (spec.isEmpty()) slots.add(new Slot(false, List.of()));
-            else if (spec.consumption().kind() == InputConsumption.Kind.DURABILITY) addTools(spec, pool, pool);
+        public Builder add(Entry entry, Pool pool) {
+            IngredientSpec spec = entry.spec();
+            if (spec.consumption().kind() == InputConsumption.Kind.DURABILITY) addTools(entry, pool, pool);
             else {
-                boolean reusable = spec.consumption().reusableWithinWorkerBatch();
-                slots.add(new Slot(reusable, pool.take(spec, reusable ? workers : operations)));
+                slots.add(new Slot(entry, pool.take(spec, entry.reusable() ? workers : operations)));
             }
             return this;
         }
 
         /** 图只为第一台机器声明工具，其余机器的工具来自可用库存。 */
-        public Builder addGraphReusable(IngredientSpec spec, Pool graph, Pool extra) {
+        public Builder addGraphReusable(Entry entry, Pool graph, Pool extra) {
+            IngredientSpec spec = entry.spec();
             if (spec.consumption().kind() == InputConsumption.Kind.DURABILITY) {
-                addTools(spec, graph, extra);
+                addTools(entry, graph, extra);
                 return this;
             }
             List<Run> runs = new ArrayList<>(graph.take(spec, 1));
             if (workers > 1) for (Run run : extra.take(spec, workers - 1)) {
                 runs.add(new Run(run.first + 1, run.end + 1, run.template, run.sources));
             }
-            slots.add(new Slot(true, List.copyOf(runs)));
+            slots.add(new Slot(entry, List.copyOf(runs)));
             return this;
         }
 
-        private void addTools(IngredientSpec spec, Pool first, Pool extra) {
+        private void addTools(Entry entry, Pool first, Pool extra) {
             List<Run> runs = new ArrayList<>();
             Pool tools = first;
             if (first != extra) {
@@ -206,9 +207,9 @@ public final class CountedOperationMaterials {
             }
             for (int worker = 0; worker < workers; worker++) {
                 int share = operations / workers + (worker < operations % workers ? 1 : 0);
-                runs.addAll(tools.takeTool(spec, share, worker));
+                runs.addAll(tools.takeTool(entry.spec(), share, worker));
             }
-            slots.add(new Slot(true, List.copyOf(runs)));
+            slots.add(new Slot(entry, List.copyOf(runs)));
         }
 
         public CountedOperationMaterials build() { return new CountedOperationMaterials(operations, workers, slots); }
@@ -228,13 +229,15 @@ public final class CountedOperationMaterials {
     public int stride() { return slots.size(); }
     public int segmentCount() { return slots.stream().mapToInt(slot -> slot.runs.size()).sum(); }
 
-    public boolean matches(List<IngredientSpec> specs) {
-        if (specs == null || specs.size() != slots.size()) return false;
+    public boolean matches(MaterialPlan plan) {
+        if (plan.entries().size() != slots.size()) return false;
         for (int i = 0; i < slots.size(); i++) {
             Slot slot = slots.get(i);
-            IngredientSpec spec = specs.get(i);
-            if (slot.runs.isEmpty() != spec.isEmpty()) return false;
-            if (!spec.isEmpty() && slot.reusable != spec.consumption().reusableWithinWorkerBatch()) return false;
+            Entry expected = plan.entries().get(i);
+            IngredientSpec spec = expected.spec();
+            if (!slot.entry.id().equals(expected.id()) || slot.entry.inputSlot() != expected.inputSlot()
+                    || slot.entry.allocation() != expected.allocation()
+                    || !slot.entry.spec().consumption().equals(spec.consumption())) return false;
             for (Run run : slot.runs) if (spec.consumption().kind() != InputConsumption.Kind.DURABILITY
                     && run.template.getCount() != spec.count()
                     || !IngredientMatcher.test(spec.ingredient(), run.template)) return false;
@@ -247,22 +250,22 @@ public final class CountedOperationMaterials {
         int count = Math.min(requested, operations - first);
         if (count <= 0) throw new IllegalArgumentException("empty batch");
         for (Slot slot : slots) {
-            if (slot.reusable || slot.runs.isEmpty()) continue;
+            if (slot.entry.reusable()) continue;
             Run run = at(slot, first);
             count = Math.min(count, Math.min(run.end - first, Integer.MAX_VALUE / run.template.getCount()));
         }
         return count;
     }
 
-    public List<ItemStack> batchMaterials(int worker, int first, int count) {
+    public List<ReservedMaterial> batchMaterials(int worker, int first, int count) {
         Objects.checkIndex(worker, workers);
         Objects.checkFromIndexSize(first, count, operations);
         if (count <= 0 || compatibleBatchSize(first, count) != count) throw new IllegalArgumentException("incompatible batch");
-        List<ItemStack> result = new ArrayList<>(slots.size());
+        List<ReservedMaterial> result = new ArrayList<>(slots.size());
         for (Slot slot : slots) {
-            if (slot.runs.isEmpty()) { result.add(ItemStack.EMPTY); continue; }
-            Run run = at(slot, slot.reusable ? worker : first);
-            result.add(run.template.copyWithCount(Math.multiplyExact(run.template.getCount(), slot.reusable ? 1 : count)));
+            Run run = at(slot, slot.entry.reusable() ? worker : first);
+            result.add(new ReservedMaterial(slot.entry.id(), run.template.copyWithCount(
+                    Math.multiplyExact(run.template.getCount(), slot.entry.reusable() ? 1 : count))));
         }
         return result;
     }
@@ -281,12 +284,11 @@ public final class CountedOperationMaterials {
     public Map<Integer, List<ItemStack>> mixedReusableStock(int worker) {
         Objects.checkIndex(worker, workers);
         Map<Integer, List<ItemStack>> result = new LinkedHashMap<>();
-        for (int index = 0; index < slots.size(); index++) {
-            Slot slot = slots.get(index);
-            if (!slot.reusable) continue;
+        for (Slot slot : slots) {
+            if (!slot.entry.reusable()) continue;
             List<ItemStack> stock = new ArrayList<>();
             for (Run run : slot.runs) if (worker >= run.first && worker < run.end) stock.add(run.template.copy());
-            if (stock.size() > 1) result.put(index, List.copyOf(stock));
+            if (stock.size() > 1) result.put(slot.entry.inputSlot(), List.copyOf(stock));
         }
         return Map.copyOf(result);
     }
@@ -294,7 +296,7 @@ public final class CountedOperationMaterials {
     private List<ItemStack> materials(Origin origin, int first, int count, boolean reusable) {
         List<ItemStack> result = new ArrayList<>();
         for (Slot slot : slots) {
-            if (slot.reusable != reusable) continue;
+            if (slot.entry.reusable() != reusable) continue;
             for (Run run : slot.runs) {
                 int start = Math.max(first, run.first);
                 int end = Math.min(first + count, run.end);
@@ -314,7 +316,7 @@ public final class CountedOperationMaterials {
                                 BiConsumer<MaterialKey, Long> visitor) {
         Objects.checkFromIndexSize(first, count, reusable ? workers : operations);
         for (Slot slot : slots) {
-            if (slot.reusable != reusable) continue;
+            if (slot.entry.reusable() != reusable) continue;
             for (Run run : slot.runs) {
                 int start = Math.max(first, run.first), end = Math.min(first + count, run.end);
                 if (start >= end) continue;

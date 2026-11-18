@@ -31,6 +31,7 @@ import com.huanghuang.rsintegration.magic.MagicResourceTaskReservation;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+import com.huanghuang.rsintegration.crafting.batch.OperationStartContext.ReservedMaterial;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.batch.RepeatedOperationPlan;
@@ -64,7 +65,6 @@ import java.util.ArrayList;
 import java.util.AbstractList;
 import java.util.List;
 import java.util.RandomAccess;
-import java.util.function.BiFunction;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 
@@ -124,15 +124,9 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     private int[] plannedShares = new int[0];
     private int[] assignedShares = new int[0];
     private boolean[] reusableReservationsSettled = new boolean[0];
-    private List<IngredientSpec> baseSpecs;
+    private MaterialPlan operationPlan = MaterialPlan.privateExtraction();
     @Nullable
-    private List<IngredientSpec> plannedSpecs;
-    private List<IngredientSpec> graphSpecs = List.of();
-    private List<IngredientSpec> graphReservationSpecs = List.of();
-    private List<IngredientSpec> supplementalSpecs = List.of();
-    @Nullable
-    private List<IngredientSpec> requiredSpecsView;
-    private List<IngredientSpec> supplementalSpecsView = List.of();
+    private MaterialPlan plannedLayout;
     private ItemStack targetOutput;
     private IntegrationResourceKey targetResource;
     private OperationBudget craftOperationBudget;
@@ -403,47 +397,12 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         return !workers.isEmpty();
     }
 
-    @Nullable
-    @Override
-    public List<IngredientSpec> getRequiredMaterials() {
-        return requiredSpecsView;
-    }
-
-    /**
-     * Graph reservations need every consumed item per operation and one
-     * reusable item per physical worker. The legacy required-material view uses
-     * a different operation-major layout and must not be used here.
-     */
-    @Override
-    public List<IngredientSpec> getGraphSpecs() {
-        return graphReservationSpecs;
-    }
-
-    @Nullable
-    public List<IngredientSpec> getOperationMaterials() {
-        return graphSpecs.isEmpty() ? null : List.copyOf(graphSpecs);
-    }
-
-    /** Complete per-operation material layout used by the flat executor. */
-    @Nullable
-    public List<IngredientSpec> getFlatOperationMaterials() {
-        return baseSpecs == null ? null : List.copyOf(baseSpecs);
-    }
-
     /** Stable material declaration for one row of the outer operation matrix. */
-    public MaterialPlan operationMaterialPlan() {
-        if (baseSpecs == null || baseSpecs.isEmpty()) return MaterialPlan.none();
-        return MaterialPlan.fromLegacy(baseSpecs);
-    }
-
-    /** 图和顺序任务共享物理槽位声明，保留补充材料的归属。 */
-    public MaterialPlan reservationMaterialPlan() {
-        return plannedSpecs != null ? MaterialPlan.fromLegacy(plannedSpecs)
-                : workers.isEmpty() ? MaterialPlan.none() : workers.get(0).delegate.materialPlan();
-    }
+    @Override
+    public MaterialPlan materialPlan() { return operationPlan; }
 
     public void setPlannedMaterialLayout(List<IngredientSpec> specs) {
-        plannedSpecs = List.copyOf(specs);
+        plannedLayout = MaterialPlan.graphSlots(specs);
         refreshMaterialSpecs();
     }
 
@@ -475,7 +434,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     }
 
     public void setCountedOperationMaterials(CountedOperationMaterials materials) {
-        if (materials.operations() != operations.totalOperations() || !materials.matches(baseSpecs)) {
+        if (materials.operations() != operations.totalOperations() || !materials.matches(operationPlan)) {
             throw new IllegalArgumentException("counted materials do not match operation layout");
         }
         for (WorkerSlot worker : workers) {
@@ -489,23 +448,6 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     }
 
     public boolean usesCountedOperationMaterials() { return countedMaterials != null; }
-
-    @Override
-    public List<IngredientSpec> getSupplementalSpecs() {
-        return supplementalSpecsView;
-    }
-
-    @Override
-    public List<ItemStack> mergeSupplementalMaterials(
-            List<ItemStack> graphMaterials, List<ItemStack> supplementalMaterials) {
-        if (supplementalMaterials.isEmpty()) return graphMaterials;
-        if (workers.isEmpty()) return List.of();
-        IBatchDelegate child = workers.get(0).delegate;
-        int graphPerOperation = graphSpecs.size();
-        return mergeOperationSlices(graphMaterials, supplementalMaterials,
-                operations.totalOperations(), graphPerOperation, supplementalSpecs.size(),
-                child::mergeSupplementalMaterials);
-    }
 
     static List<IngredientSpec> graphReservationSpecs(
             List<IngredientSpec> perOperationSpecs,
@@ -602,27 +544,6 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         }
     }
 
-    static List<ItemStack> mergeOperationSlices(
-            List<ItemStack> graphMaterials, List<ItemStack> supplementalMaterials,
-            int operationCount, int graphPerOperation, int supplementalPerOperation,
-            BiFunction<List<ItemStack>, List<ItemStack>, List<ItemStack>> merger) {
-        if (graphMaterials.size() != graphPerOperation * operationCount
-                || supplementalMaterials.size() != supplementalPerOperation * operationCount) {
-            throw new IllegalArgumentException("parallel material slices do not match operation specs");
-        }
-        List<ItemStack> merged = new ArrayList<>();
-        for (int operation = 0; operation < operationCount; operation++) {
-            int graphStart = operation * graphPerOperation;
-            int supplementalStart = operation * supplementalPerOperation;
-            merged.addAll(merger.apply(
-                    List.copyOf(graphMaterials.subList(
-                            graphStart, graphStart + graphPerOperation)),
-                    List.copyOf(supplementalMaterials.subList(
-                            supplementalStart, supplementalStart + supplementalPerOperation))));
-        }
-        return List.copyOf(merged);
-    }
-
     /**
      * Preserve the child's private-ledger graph contract when this group is
      * used as the graph node delegate.  Some machines (for example Arcane
@@ -651,7 +572,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     }
 
     public void setBulkOperationMaterials(BulkOperationMaterials materials) {
-        if (materials.operations() != operations.totalOperations() || !materials.matches(baseSpecs)) {
+        if (materials.operations() != operations.totalOperations() || !materials.matches(operationPlan)) {
             throw new IllegalArgumentException("bulk materials do not match operation layout");
         }
         this.bulkOperationMaterials = materials;
@@ -732,12 +653,11 @@ public final class ParallelCraftGroup implements IBatchDelegate {
             this.sharedLedger = context.ledger();
             return startInitialWorkers();
         }
-        if (baseSpecs == null || baseSpecs.isEmpty()
+        if (operationPlan.entries().isEmpty()
                 || context.materialOwnership()
                 != OperationStartContext.MaterialOwnership.CHAIN_RESERVED
                 || repeated.operations() != operations.totalOperations()
-                || repeated.legacyStride() != baseSpecs.size()
-                || !operationMaterialPlan().entries().equals(repeated.materialPlan().entries())
+                || !operationPlan.equals(repeated.materialPlan())
                 || reservationTokens.size() != operations.totalOperations()
                 || virtualDebits.size() != operations.totalOperations()
                 || (!producerDebits.isEmpty()
@@ -911,15 +831,14 @@ public final class ParallelCraftGroup implements IBatchDelegate {
                 if (delegate instanceof AbstractBatchDelegate abstractDelegate) {
                     abstractDelegate.useSharedLedger(sharedLedger);
                 }
-                List<ItemStack> batchMaterials = countedMaterials == null
+                List<ReservedMaterial> batchMaterials = countedMaterials == null
                         ? aggregateOperationMaterials(claimedOperations)
                         : countedMaterials.batchMaterials(worker.id, operationId, claimedOperations.size());
-                MaterialPlan materialPlan = plannedSpecs == null ? delegate.materialPlan() : operationMaterialPlan();
                 InputBufferPlan inputBuffer = delegate.supportsInputBuffer()
                         ? delegate.inputBufferPlan(claimedOperations.size())
                         : InputBufferPlan.none();
                 OperationStartContext startContext = OperationStartContext.chainReserved(
-                        player, sharedLedger, materialPlan, batchMaterials, inputBuffer);
+                        player, sharedLedger, operationPlan, batchMaterials, inputBuffer);
                 OperationStartContext identifiedContext = attachOperationIdentity(
                         startContext, worker.operationSession);
                 OperationExecutionKernel.StartAction start = () -> {
@@ -995,22 +914,21 @@ public final class ParallelCraftGroup implements IBatchDelegate {
 
     private int compatibleBatchSize(IBatchDelegate delegate, int firstOperation, int requested) {
         if (!sharedMaterialMode || requested <= 1) return 1;
-        if (!operationMaterialPlan().reusableEntries().isEmpty()
+        if (!operationPlan.reusableEntries().isEmpty()
                 && !delegate.supportsReusableBatchAggregation()) return 1;
         if (countedMaterials != null) return countedMaterials.compatibleBatchSize(firstOperation, requested);
         if (bulkOperationMaterials != null) return Math.min(requested, bulkOperationMaterials.maxBatchSize());
-        return compatibleBatchSize(repeatedOperationPlan, baseSpecs, firstOperation, requested);
+        return compatibleBatchSize(repeatedOperationPlan, firstOperation, requested);
     }
 
     /** 每个槽位只向后扫描一次，避免依次验证 2、3、4……整批导致平方级开销。 */
-    static int compatibleBatchSize(RepeatedOperationPlan repeated, List<IngredientSpec> specs,
-                                   int firstOperation, int requested) {
+    static int compatibleBatchSize(RepeatedOperationPlan repeated, int firstOperation, int requested) {
         if (repeated == null || requested <= 1) return 1;
         int compatible = requested;
-        int perOperation = specs.size();
+        var entries = repeated.materialPlan().entries();
+        int perOperation = entries.size();
         for (int materialIndex = 0; materialIndex < perOperation; materialIndex++) {
-            boolean reusable = specs.get(materialIndex)
-                    .consumption().reusableWithinWorkerBatch();
+            boolean reusable = entries.get(materialIndex).reusable();
             ItemStack first = ItemStack.EMPTY;
             long total = 0L;
             for (int offset = 0; offset < compatible; offset++) {
@@ -1029,38 +947,34 @@ public final class ParallelCraftGroup implements IBatchDelegate {
         return Math.max(1, compatible);
     }
 
-    private List<ItemStack> aggregateOperationMaterials(List<Integer> operationIds) {
+    private List<ReservedMaterial> aggregateOperationMaterials(List<Integer> operationIds) {
         if (bulkOperationMaterials != null) {
             return bulkOperationMaterials.batchMaterials(operationIds.get(0), operationIds.size());
         }
-        return aggregateBatchMaterials(repeatedOperationPlan, operationMaterialPlan(), operationIds);
+        return aggregateBatchMaterials(repeatedOperationPlan, operationIds);
     }
 
-    static List<ItemStack> aggregateBatchMaterials(RepeatedOperationPlan repeated,
-                                                   MaterialPlan materialPlan,
+    static List<ReservedMaterial> aggregateBatchMaterials(RepeatedOperationPlan repeated,
                                                    List<Integer> operationIds) {
         if (repeated == null || operationIds == null || operationIds.isEmpty()) return List.of();
-        if (operationIds.size() == 1) return repeated.legacyMaterials(operationIds.get(0));
-        int perOperation = repeated.legacyStride();
-        boolean[] reusable = new boolean[perOperation];
-        for (MaterialPlan.Entry entry : materialPlan.reusableEntries()) {
-            reusable[entry.inputSlot()] = true;
-        }
-        List<ItemStack> aggregated = new ArrayList<>(perOperation);
+        var entries = repeated.materialPlan().entries();
+        int perOperation = entries.size();
+        List<ReservedMaterial> aggregated = new ArrayList<>(perOperation);
         for (int materialIndex = 0; materialIndex < perOperation; materialIndex++) {
+            var entry = entries.get(materialIndex);
             ItemStack combined = ItemStack.EMPTY;
             for (int operationId : operationIds) {
                 ItemStack stack = repeated.materialAt(operationId, materialIndex);
                 if (stack == null || stack.isEmpty()) continue;
                 if (combined.isEmpty()) combined = stack.copy();
                 else if (!MaterialMatcher.equivalentRuntimeFragment(combined, stack)
-                        || reusable[materialIndex] && combined.getCount() != stack.getCount()) {
+                        || entry.reusable() && combined.getCount() != stack.getCount()) {
                     throw new IllegalArgumentException("incompatible repeated material at slot " + materialIndex);
-                } else if (!reusable[materialIndex]) {
+                } else if (!entry.reusable()) {
                     combined.setCount(Math.addExact(combined.getCount(), stack.getCount()));
                 }
             }
-            aggregated.add(combined);
+            aggregated.add(new ReservedMaterial(entry.id(), combined));
         }
         return List.copyOf(aggregated);
     }
@@ -1853,24 +1767,8 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     }
 
     private void refreshMaterialSpecs() {
-        if (workers.isEmpty()) {
-            baseSpecs = null;
-            graphSpecs = List.of();
-            graphReservationSpecs = List.of();
-            supplementalSpecs = List.of();
-            requiredSpecsView = null;
-            supplementalSpecsView = List.of();
-            return;
-        }
-        IBatchDelegate child = workers.get(0).delegate;
-        List<IngredientSpec> required = plannedSpecs == null ? child.getRequiredMaterials() : plannedSpecs;
-        baseSpecs = required == null ? null : List.copyOf(required);
-        graphSpecs = plannedSpecs == null ? List.copyOf(child.getGraphSpecs()) : plannedSpecs;
-        graphReservationSpecs = graphSpecs;
-        supplementalSpecs = List.copyOf(child.getSupplementalSpecs());
-        requiredSpecsView = baseSpecs == null || baseSpecs.isEmpty()
-                ? null : baseSpecs;
-        supplementalSpecsView = supplementalSpecs;
+        operationPlan = plannedLayout != null ? plannedLayout : workers.isEmpty()
+                ? MaterialPlan.privateExtraction() : workers.get(0).delegate.materialPlan();
     }
 
     private ChildPreparation prepareChildDelegate(BoundMachine machine, ServerPlayer player) {

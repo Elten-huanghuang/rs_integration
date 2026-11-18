@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.forbidden;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
@@ -132,9 +134,12 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
         }
     }
 
-    @Nullable
     @Override
-    public List<IngredientSpec> getRequiredMaterials() {
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    List<IngredientSpec> recipeSlots() {
         if (recipe == null || recipe.getIngredients().isEmpty()) return null;
         Ingredient ingredient = recipe.getIngredients().get(0);
         return ingredient.isEmpty() ? null : List.of(new IngredientSpec(ingredient, 1));
@@ -184,7 +189,7 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
         BlockEntity raw = level.getBlockEntity(pos);
         IItemHandler inventory = raw == null ? null : fullInventory(raw);
         if (inventory == null) return InputBufferContract.none();
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.size() != 1) return InputBufferContract.none();
         IngredientSpec spec = specs.get(0);
         ItemStack prototype = Arrays.stream(spec.ingredient().getItems())
@@ -240,14 +245,14 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
         if (supportsInputBuffer()) {
             InputBufferPlan plan = inputBufferPlan(operations).withResolvedMaterials(List.of(
                     new OperationStartContext.ReservedMaterial(
-                            "legacy:material:0", material)));
+                            "slot:0", material)));
             return plan.enabled() && plan.operations() == operations
                     && startBufferedOperation(player, plan, sharedLedger);
         }
         int slot = availableInputSlot();
         return slot >= 0 && startInputs(player, List.of(new InputBufferPlan.InputSlot(
-                "legacy:material:0", slot, material, 1,
-                getRequiredMaterials().get(0).consumption())), 1, sharedLedger);
+                "slot:0", slot, material, 1,
+                recipeSlots().get(0).consumption())), 1, sharedLedger);
     }
 
     private boolean startInputs(ServerPlayer player, List<InputBufferPlan.InputSlot> inputs,

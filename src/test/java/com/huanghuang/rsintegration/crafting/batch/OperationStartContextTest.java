@@ -32,7 +32,7 @@ class OperationStartContextTest extends BootstrapTest {
                 OperationStartContext.MaterialOwnership.CHAIN_RESERVED, plan,
                 List.of(new ReservedMaterial("base", new ItemStack(Items.IRON_INGOT)),
                         new ReservedMaterial("tip", tip)), null, null);
-        var placed = context.legacyMaterials();
+        var placed = context.inputSlots();
         assertEquals(Items.IRON_INGOT, placed.get(0).getItem());
         assertNull(placed.get(0).getTag());
         assertEquals("polished", placed.get(4).getTag().getString("variant"));
@@ -45,11 +45,11 @@ class OperationStartContextTest extends BootstrapTest {
         var pool = new CountedOperationMaterials.Pool()
                 .add(Origin.PRODUCER, new ItemStack(Items.IRON_INGOT), 1)
                 .add(Origin.INITIAL, new ItemStack(Items.IRON_INGOT), 2);
-        var counted = new CountedOperationMaterials.Builder(1, 1).add(iron, pool).build();
         var plan = new MaterialPlan(List.of(new MaterialPlan.Entry("base", iron, MaterialPlan.Allocation.GRAPH, 4)));
+        var counted = new CountedOperationMaterials.Builder(1, 1).add(plan.entries().get(0), pool).build();
         var context = OperationStartContext.chainReserved(mock(ServerPlayer.class), new ExtractionLedger(),
                 plan, counted.batchMaterials(0, 0, 1), null);
-        assertEquals(3, context.legacyMaterials().get(4).getCount());
+        assertEquals(3, context.inputSlots().get(4).getCount());
         assertEquals(1, counted.materials(Origin.PRODUCER, 0, 1).get(0).getCount());
         assertEquals(2, counted.materials(Origin.INITIAL, 0, 1).get(0).getCount());
     }

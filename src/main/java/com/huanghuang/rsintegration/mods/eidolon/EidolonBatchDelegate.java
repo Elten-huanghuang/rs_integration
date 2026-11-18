@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.eidolon;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
@@ -897,8 +899,11 @@ public final class EidolonBatchDelegate extends InstantBatchDelegate {
     // ── Chain support: pre-reserved materials ────────────────────
 
     @Override
-    @Nullable
-    public List<IngredientSpec> getRequiredMaterials() {
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    List<IngredientSpec> recipeSlots() {
         if (recipe == null) return null;
         if (isRitual) {
             return getRitualRequiredMaterials();

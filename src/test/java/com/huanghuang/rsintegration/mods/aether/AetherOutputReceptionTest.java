@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.aether;
 
+import com.huanghuang.rsintegration.crafting.batch.OperationStartContext.ReservedMaterial;
+
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
@@ -319,8 +321,8 @@ class AetherOutputReceptionTest extends BootstrapTest {
     private boolean start(int operations) {
         delegate.prepareGraphBatch(operations);
         return delegate.startOperation(OperationStartContext.chainReserved(player,
-                mock(ExtractionLedger.class), MaterialPlan.fromLegacy(delegate.getRequiredMaterials()),
-                List.of(new ItemStack(Items.IRON_ORE, operations)), null));
+                mock(ExtractionLedger.class), delegate.materialPlan(),
+                List.of(new ReservedMaterial("slot:0", new ItemStack(Items.IRON_ORE, operations))), null));
     }
 
     private CraftPhase observe(long tick) {

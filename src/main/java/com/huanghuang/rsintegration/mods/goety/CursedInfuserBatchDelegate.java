@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.goety;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
@@ -154,7 +156,7 @@ public final class CursedInfuserBatchDelegate extends AbstractBatchDelegate {
     @Override
     public InputBufferContract inputBufferContract() {
         if (!supportsInputBuffer()) return InputBufferContract.none();
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.size() != 1 || specs.get(0).isEmpty()
                 || expected.isEmpty()) return InputBufferContract.none();
         ItemStack prototype = Arrays.stream(specs.get(0).ingredient().getItems())
@@ -164,7 +166,7 @@ public final class CursedInfuserBatchDelegate extends AbstractBatchDelegate {
         return new InputBufferContract(
                 Math.min(preparedCapacity, goetyInputBufferLimit()),
                 List.of(new InputBufferContract.InputSlot(
-                        "legacy:material:0", 0, prototype, 1,
+                        "slot:0", 0, prototype, 1,
                         Math.min(preparedCapacity, goetyInputBufferLimit()),
                         specs.get(0).consumption())),
                 List.of(new OutputContract.Port(
@@ -221,9 +223,12 @@ public final class CursedInfuserBatchDelegate extends AbstractBatchDelegate {
         return List.of();
     }
 
-    @Nullable
     @Override
-    public List<IngredientSpec> getRequiredMaterials() {
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    List<IngredientSpec> recipeSlots() {
         var handler = ModRecipeHandlers.claimFor(recipe).winner();
         return handler == null ? null : handler.getIngredients(recipe);
     }

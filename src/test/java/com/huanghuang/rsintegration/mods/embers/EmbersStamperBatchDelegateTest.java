@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.embers;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
@@ -97,7 +99,7 @@ class EmbersStamperBatchDelegateTest extends BootstrapTest {
         previous.onBatchFinished(fixture.player);
 
         assertTrue(previous.transferReusableMaterialsTo(next));
-        assertEquals(required, next.getRequiredMaterials());
+        assertEquals(required, next.materialPlan().entries().stream().map(MaterialPlan.Entry::spec).toList());
         assertTrue(previous.collectReusableMaterials(fixture.player).isEmpty());
         assertEquals(1, fixture.slot.getStackInSlot(0).getCount());
         // 实际启动继承者，模板中的印模不能作为第二枚未投放物品再次返回。

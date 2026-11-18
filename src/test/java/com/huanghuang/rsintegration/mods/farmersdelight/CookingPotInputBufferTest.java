@@ -24,9 +24,9 @@ class CookingPotInputBufferTest extends BootstrapTest {
     @Test
     void capacityUsesTheTightestIngredientContainerOrOutputSlot() {
         List<InputBufferContract.InputSlot> inputs = List.of(
-                slot("legacy:material:0", 0, 1, 64),
-                slot("legacy:material:1", 1, 2, 32),
-                slot("legacy:material:2", 7, 1, 12));
+                slot("slot:0", 0, 1, 64),
+                slot("slot:1", 1, 2, 32),
+                slot("slot:2", 7, 1, 12));
 
         assertEquals(12, CookingPotBatchDelegate.bufferedOperationCapacity(
                 64, inputs, 1, 64));
@@ -37,7 +37,7 @@ class CookingPotInputBufferTest extends BootstrapTest {
     @Test
     void invalidPerOperationCountsDisableBuffering() {
         List<InputBufferContract.InputSlot> inputs = List.of(
-                slot("legacy:material:0", 0, 0, 64));
+                slot("slot:0", 0, 0, 64));
 
         assertEquals(0, CookingPotBatchDelegate.bufferedOperationCapacity(
                 64, inputs, 1, 64));
@@ -46,8 +46,8 @@ class CookingPotInputBufferTest extends BootstrapTest {
     @Test
     void copperCupConversionUsesDoubledContainerAndOutputCounts() {
         List<InputBufferContract.InputSlot> inputs = List.of(
-                slot("legacy:material:0", 0, 1, 64),
-                slot("legacy:material:1", 5, 2, 64));
+                slot("slot:0", 0, 1, 64),
+                slot("slot:1", 5, 2, 64));
 
         assertEquals(32, CookingPotBatchDelegate.bufferedOperationCapacity(
                 64, inputs, 2, 64));

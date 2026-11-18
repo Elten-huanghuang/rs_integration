@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.ironsspellbooks;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -72,7 +74,12 @@ public final class IronSpellBooksBatchDelegate extends InstantBatchDelegate {
                 || isMachine(level, pos, IronSpellBooksRecipe.Machine.ARCANE_ANVIL);
     }
 
-    @Override public List<IngredientSpec> getRequiredMaterials() {
+    @Override
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    List<IngredientSpec> recipeSlots() {
         if (recipe == null) return null;
         List<Ingredient> ingredients = recipe.inputIngredients();
         List<ItemStack> displays = recipe.inputs();
@@ -86,7 +93,7 @@ public final class IronSpellBooksBatchDelegate extends InstantBatchDelegate {
     @Override public BatchConcurrencyCapabilities concurrencyCapabilities() { return BatchConcurrencyCapabilities.delegateResult(); }
 
     @Override public boolean startSingleOperation(@Nonnull ServerPlayer player) {
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null) return false;
         ExtractionLedger privateLedger = new ExtractionLedger();
         this.ledger = privateLedger;
@@ -117,7 +124,7 @@ public final class IronSpellBooksBatchDelegate extends InstantBatchDelegate {
     }
 
     private boolean start(ServerPlayer player, List<ItemStack> materials) {
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null) return fail("recipe has no material specification", ItemStack.EMPTY, materials);
         if (materials.size() != specs.size()) {
             return fail("material count does not match recipe specification", ItemStack.EMPTY, materials);

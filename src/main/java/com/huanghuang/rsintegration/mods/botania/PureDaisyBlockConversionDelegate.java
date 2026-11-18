@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.botania;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -76,7 +78,11 @@ public final class PureDaisyBlockConversionDelegate extends AbstractBatchDelegat
     }
 
     @Override
-    public List<IngredientSpec> getRequiredMaterials() {
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    List<IngredientSpec> recipeSlots() {
         ItemStack[] displayed = recipe.getInput().getDisplayedStacks().toArray(ItemStack[]::new);
         return displayed.length == 0 ? null
                 : List.of(new IngredientSpec(Ingredient.of(Arrays.stream(displayed)), 1));
@@ -114,7 +120,7 @@ public final class PureDaisyBlockConversionDelegate extends AbstractBatchDelegat
     public boolean startSingleOperation(@Nonnull ServerPlayer player) {
         if (storageEndpoint() == null) return false;
         List<ItemStack> materials = BotaniaDelegateSupport.extractAtomically(
-                storageEndpoint(), player, getRequiredMaterials());
+                storageEndpoint(), player, recipeSlots());
         return !materials.isEmpty() && start(materials.get(0));
     }
 

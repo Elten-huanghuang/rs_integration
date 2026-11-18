@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.youkaishomecoming.cooking;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -135,9 +137,12 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
                 level.getBlockState(pos), bowlKey(blockId.getNamespace(), potIndex));
     }
 
-    @Nullable
     @Override
-    public List<IngredientSpec> getRequiredMaterials() {
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    List<IngredientSpec> recipeSlots() {
         probeReflection();
         List<Ingredient> ingredients = getRecipeInput(recipe);
         if (ingredients.isEmpty()) return null;
@@ -243,7 +248,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
                 ForgeCapabilities.ITEM_HANDLER).resolve().orElse(null);
         if (handler == null || handler.getSlots() <= 0) return InputBufferContract.none();
 
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         boolean potFood = isPotFoodRecipe(recipe);
         ItemStack bowls = potFood ? computeServeBowls(recipe) : ItemStack.EMPTY;
         int ingredientCount = specs.size() - (bowls.isEmpty() ? 0 : 1);
@@ -289,7 +294,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
                                            @NotNull InputBufferPlan plan,
                                            @NotNull ExtractionLedger sharedLedger) {
         if (!supportsInputBuffer() || plan == null || !plan.enabled()) return false;
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || plan.inputs().size() != specs.size()) return false;
 
         ItemStack bowls = isPotFoodRecipe(recipe) ? computeServeBowls(recipe) : ItemStack.EMPTY;
@@ -339,7 +344,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     private int maxIngredientStackSize() {
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.isEmpty()) return 64;
         ItemStack prototype = ingredientPrototype(specs.get(0));
         return prototype.isEmpty() ? 64 : prototype.getMaxStackSize();
@@ -354,7 +359,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public boolean startSingleOperation(ServerPlayer player) {
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.isEmpty()) return false;
 
         List<ItemStack> materials = new ArrayList<>();

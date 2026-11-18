@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.crockpot;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
@@ -154,9 +156,12 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
         return one.hasTag() ? StrictNBTIngredient.of(one) : Ingredient.of(one);
     }
 
-    @Nullable
     @Override
-    public List<IngredientSpec> getRequiredMaterials() {
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    List<IngredientSpec> recipeSlots() {
         if (hasCatConstraints) {
             return buildCategoryPlanIngredients(
                     recipe, storageEndpoint(), player, myLevel, myPos);

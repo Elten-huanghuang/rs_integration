@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.apotheosis;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
@@ -67,7 +69,11 @@ public final class ApotheosisGemCuttingBatchDelegate extends InstantBatchDelegat
     }
 
     @Override
-    public List<IngredientSpec> getRequiredMaterials() {
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    List<IngredientSpec> recipeSlots() {
         return recipe == null ? null : new ApotheosisGemCuttingRecipeHandler().getIngredients(recipe);
     }
 
@@ -78,7 +84,7 @@ public final class ApotheosisGemCuttingBatchDelegate extends InstantBatchDelegat
 
     @Override
     public boolean startSingleOperation(@Nonnull ServerPlayer player) {
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.size() != 3) return false;
         ExtractionLedger privateLedger = new ExtractionLedger();
         this.ledger = privateLedger;

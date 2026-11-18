@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.vanilla;
 
+import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+
 import com.huanghuang.rsintegration.crafting.progress.MachineCycleProgress;
 import com.huanghuang.rsintegration.mixin.minecraft.AbstractFurnaceAccessor;
 
@@ -411,9 +413,12 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
 
     // ── Pre-reserved materials (chain path, getRequiredMaterials returns specs) ─
 
-    @Nullable
     @Override
-    public List<IngredientSpec> getRequiredMaterials() {
+    public MaterialPlan materialPlan() {
+        return MaterialPlan.graphSlots(recipeSlots());
+    }
+
+    List<IngredientSpec> recipeSlots() {
         List<IngredientSpec> specs = CraftPacketUtils.extractIngredientSpecs(recipe);
         return recipe instanceof SmithingTransformRecipe smithing
                 ? SmithingRecipeHandler.requireDemandedOutputTag(smithing, specs, targetOutput) : specs;
@@ -517,7 +522,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         if (prototype.isEmpty()) return InputBufferContract.none();
         return new InputBufferContract(inputBufferOperationLimit(),
                 List.of(new InputBufferContract.InputSlot(
-                        "legacy:material:0", 0, prototype, 1,
+                        "slot:0", 0, prototype, 1,
                         furnaceInputCapacity(ingredients.get(0)),
                         InputConsumption.consumed())),
                 outputContract().ports());
@@ -1005,7 +1010,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     }
 
     private boolean tryStartVirtual(ServerPlayer player) {
-        List<IngredientSpec> specs = getRequiredMaterials();
+        List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.isEmpty()) return false;
 
         this.pendingResult = computeResult();
