@@ -418,6 +418,7 @@ tasks.register('packPlanningReplay', JavaExec) {
     mainClass = 'com.huanghuang.rsintegration.crafting.planning.PackPlanningReplay'
     maxHeapSize = '2g'
     args providers.gradleProperty('packPlanningPath').getOrElse(''), file('src/benchmark/scripts/pack-recipes.cjs')
+    args providers.gradleProperty('packPlanningTyped').getOrElse('false')
 }
 
 tasks.register('diskLimitCheck', JavaExec) {

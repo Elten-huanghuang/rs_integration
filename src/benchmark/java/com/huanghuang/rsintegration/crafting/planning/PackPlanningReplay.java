@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
+import com.huanghuang.rsintegration.crafting.PackTypedPlanningReplay;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
@@ -60,7 +61,7 @@ public final class PackPlanningReplay {
         if (node.waitFor() != 0) throw new IOException("KubeJS 配方提取失败");
         replay.applyScripts(scripts);
         replay.applyCraftTweaker(root.resolve("scripts/wujin.zs"));
-        replay.solve(root, scripts);
+        replay.solve(root, scripts, args.length > 2 && Boolean.parseBoolean(args[2]));
     }
 
     private void readVanilla(Path root) throws IOException {
@@ -143,7 +144,7 @@ public final class PackPlanningReplay {
         raw.put(CATALYST_RECIPE, recipe);
     }
 
-    private void solve(Path root, JsonObject scripts) throws IOException {
+    private void solve(Path root, JsonObject scripts, boolean typed) throws IOException {
         Map<MaterialRef, List<RecipeNode>> recipes = new LinkedHashMap<>();
         Map<String, Set<String>> unprojectedOutputs = new HashMap<>();
         int skipped = 0;
@@ -222,6 +223,10 @@ public final class PackPlanningReplay {
         }
         System.out.println("hypothetical_void_favor_recipes=" + virtualRecipes);
         solveCase("synthetic_gathered_with_void_favor", abilityGraph, target, abilityStock, forced, unprojectedOutputs);
+        if (typed) {
+            PackTypedPlanningReplay.run("saved_disks", graph, target, stock, forced);
+            PackTypedPlanningReplay.run("synthetic_gathered_with_void_favor", abilityGraph, target, abilityStock, forced);
+        }
         for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(target.inputs())) {
             long start = System.nanoTime();
             var branch = PureRecipePlanner.resolve(graph, frontier, List.of(input), 4096, 65_536, 8192,

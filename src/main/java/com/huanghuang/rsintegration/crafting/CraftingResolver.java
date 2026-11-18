@@ -670,6 +670,7 @@ public final class CraftingResolver {
                         return;
                     }
                     RootSpec root = rootsToResolve.get(index++);
+                    ctx.previewRootSlot = root.order();
                     Ingredient ingredient = pendingRoots.remove(0).ingredient();
                     if (root.isEmpty()) {
                         stack.resume(this);
@@ -736,6 +737,8 @@ public final class CraftingResolver {
             long now = System.nanoTime();
             if (suspendedAt != 0L) context.deadlineNanos += now - suspendedAt;
             suspendedAt = 0L;
+            // 实际机器状态可能在两个切片之间改变，不跨切片复用其可用性。
+            context.beginCandidateSlice();
             if (job.advance(sliceNanos)) return true;
             suspendedAt = System.nanoTime();
             return false;
@@ -744,6 +747,11 @@ public final class CraftingResolver {
         private CraftPlanGraph finishSynchronously() {
             advance(Long.MAX_VALUE);
             return graph();
+        }
+
+        public String timeoutSummary() {
+            return "rootSlot=" + context.timeoutRootSlot + " ensureCalls=" + context.ensureCalls
+                    + " attemptedRecipeTypes=" + context.busiestPreviewTypes();
         }
 
         public CraftPlanGraph graph() {
@@ -1054,7 +1062,7 @@ public final class CraftingResolver {
                         candStart, candidateDiag, candidates, stack, done));
     }
 
-    private record AliveCandidate(RecipeIndex.Entry entry, ItemStack output, int netGain) {}
+    private record AliveCandidate(RecipeIndex.Entry entry, ItemStack output, int netGain, int selfConsumed) {}
 
     private static void collectViableCandidates(Ingredient ingredient, long count, ResolutionContext ctx,
                                                int depth, EdgeTracker edges, @Nullable InputPortId consumer,
@@ -1120,17 +1128,17 @@ public final class CraftingResolver {
                 }
                 return;
             }
-            int ng = netGainPerBatch(candidate, out, ctx.level.registryAccess());
+            int selfConsumed = selfConsumedPerBatch(candidate, out, ctx.level.registryAccess(), ctx);
+            int ng = netGain(declaredOutputCount(candidate, out, ctx.level.registryAccess()), selfConsumed);
             if (ng <= 0) {
                 if (ctx.diagnosticsEnabled()) {
                     ctx.diag("ensureIngredient REJECT " + candidate.recipe().getId()
                             + ": non-positive net gain output=" + out.getCount()
-                            + " selfConsumed=" + selfConsumedPerBatch(
-                            candidate, out, ctx.level.registryAccess()));
+                            + " selfConsumed=" + selfConsumed);
                 }
                 return;
             }
-            alive.add(new AliveCandidate(candidate, out, ng));
+            alive.add(new AliveCandidate(candidate, out, ng, selfConsumed));
             }
         }
         stack.resume(new Outputs());
@@ -1251,7 +1259,7 @@ public final class CraftingResolver {
             // Ping-pong guard using StackKey (Item + NBT) to correctly distinguish
             // NBT-differentiated items like TACZ attachments (all tacz:attachment).
             Set<StackKey> inKeys = ctx.candidateCycleInputs.computeIfAbsent(a.entry,
-                    candidate -> getRecipeInputKeys(candidate, ctx.level.registryAccess()));
+                    candidate -> getRecipeInputKeys(candidate, ctx));
             if (ctx.recipeCycles.containsAnyOutput(inKeys)) {
                 if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId()
                         + ": input consumes an ancestor output");
@@ -1281,9 +1289,9 @@ public final class CraftingResolver {
 
             long batches = Math.max(1L,
                     SaturatingLongMath.ceilDiv(needed, a.netGain));
-            int selfConsumed = selfConsumedPerBatch(a.entry, a.output,
-                    ctx.level.registryAccess());
+            int selfConsumed = a.selfConsumed();
 
+            ctx.recordPreviewCandidate(a.entry);
             ctx.beginUndo();
             edges.beginUndo();
             ctx.recipeCycles.enter(a.entry.recipe().getId(), a.output);
@@ -1422,7 +1430,7 @@ public final class CraftingResolver {
         for (RecipeIndex.Entry entry : ctx.index.getOrDefault(output.getItem(), List.of())) {
             ItemStack declared = CandidateEngine.outputForDemand(entry, ingredient, ctx);
             if (declared.isEmpty()) continue;
-            int seed = selfConsumedPerBatch(entry, declared, ctx.level.registryAccess());
+            int seed = selfConsumedPerBatch(entry, declared, ctx.level.registryAccess(), ctx);
             if (seed > 0 && availableSeed >= seed
                     && netGainPerBatch(entry, declared, ctx.level.registryAccess()) > 0) {
                 seededCopy = true;
@@ -1531,12 +1539,12 @@ public final class CraftingResolver {
         return getRecipeInputKeys(recipe, null);
     }
 
-    private static Set<StackKey> getRecipeInputKeys(RecipeIndex.Entry entry,
-                                                     @Nullable RegistryAccess access) {
+    private static Set<StackKey> getRecipeInputKeys(RecipeIndex.Entry entry, ResolutionContext ctx) {
+        RegistryAccess access = ctx.level.registryAccess();
         if (entry.recipe() instanceof CraftingRecipe) {
             return getRecipeInputKeys(entry.recipe(), access);
         }
-        List<IngredientSpec> specs = recipeSpecs(entry, access);
+        List<IngredientSpec> specs = recipeSpecs(entry, access, ctx);
         if (specs != null && !isIngredientDataBroken(specs)) {
             Set<StackKey> inputs = new HashSet<>();
             for (IngredientSpec spec : specs) {
@@ -1616,7 +1624,7 @@ public final class CraftingResolver {
         if (entry.recipe() instanceof CraftingRecipe cr) {
             return requiresMissingSelfInput(cr, output, ctx);
         }
-        List<IngredientSpec> specs = recipeSpecs(entry, ctx.level.registryAccess());
+        List<IngredientSpec> specs = recipeSpecs(entry, ctx.level.registryAccess(), ctx);
         if (isIngredientDataBroken(specs)) {
             List<ItemStack> repaired = getRepairedInputStacks(entry.recipe(), ctx.level.registryAccess());
             for (ItemStack stack : repaired) {
@@ -1668,7 +1676,10 @@ public final class CraftingResolver {
     static int netGainPerBatch(RecipeIndex.Entry entry, ItemStack output,
                                RegistryAccess access) {
         long produced = declaredOutputCount(entry, output, access);
-        long consumed = selfConsumedPerBatch(entry, output, access);
+        return netGain(produced, selfConsumedPerBatch(entry, output, access, null));
+    }
+
+    private static int netGain(long produced, long consumed) {
         long net = produced - consumed;
         return net <= 0L ? 0 : SaturatingLongMath.clampToInt(net);
     }
@@ -1694,7 +1705,7 @@ public final class CraftingResolver {
     }
 
     private static int selfConsumedPerBatch(RecipeIndex.Entry entry, ItemStack output,
-                                             RegistryAccess access) {
+                                             RegistryAccess access, @Nullable ResolutionContext ctx) {
         if (entry.recipe() instanceof CraftingRecipe cr) {
             int selfConsumed = 0;
             for (IngredientSpec spec : CraftPacketUtils.extractCraftingIngredientSpecs(cr)) {
@@ -1705,7 +1716,7 @@ public final class CraftingResolver {
             }
             return selfConsumed;
         }
-        List<IngredientSpec> specs = recipeSpecs(entry, access);
+        List<IngredientSpec> specs = recipeSpecs(entry, access, ctx);
         if (isIngredientDataBroken(specs)) {
             int selfConsumed = 0;
             List<ItemStack> repaired = getRepairedInputStacks(entry.recipe(), access);
@@ -1748,10 +1759,11 @@ public final class CraftingResolver {
         return candidates > 0;
     }
 
-    private static List<IngredientSpec> recipeSpecs(RecipeIndex.Entry entry,
-                                                     @Nullable RegistryAccess access) {
-        List<IngredientSpec> specs =
-                CraftPacketUtils.extractSingleOperationRecursiveIngredientSpecs(entry.recipe());
+    private static List<IngredientSpec> recipeSpecs(RecipeIndex.Entry entry, @Nullable RegistryAccess access,
+                                                     @Nullable ResolutionContext ctx) {
+        List<IngredientSpec> specs = ctx == null
+                ? CraftPacketUtils.extractSingleOperationRecursiveIngredientSpecs(entry.recipe())
+                : ctx.declaredRecursiveInputs(entry);
         return MinersDelightCopperPotSupport.adaptIngredientSpecs(
                 entry.modType(), specs, entry.recipe(), access);
     }

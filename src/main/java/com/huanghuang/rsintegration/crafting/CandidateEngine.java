@@ -182,15 +182,9 @@ final class CandidateEngine {
                     return;
                 }
                 if (entry.modType() != ModType.GENERIC) {
-                    var handler = ModRecipeHandlers.claimFor(entry.recipe()).winner();
-                    if (handler != null
-                            && !handler.isAvailableForPlanning(entry.recipe(), ctx.player)) {
-                        if (diag != null) logDiag(diag, item, entry, 0, entry.modType(), true,
-                                "Execution context unavailable");
-                        return;
-                    }
-                    if (!isMachineAvailable(entry, ctx)) {
-                        if (diag != null) logDiag(diag, item, entry, 0, entry.modType(), true, "Machine not available");
+                    String unavailable = ctx.candidateRouteCheck(entry, () -> checkRoute(entry, ctx));
+                    if (!unavailable.isEmpty()) {
+                        if (diag != null) logDiag(diag, item, entry, 0, entry.modType(), true, unavailable);
                         return;
                     }
                     if (!entry.modType().isVirtual()) {
@@ -252,11 +246,12 @@ final class CandidateEngine {
             }
             RecipeIndex.Entry entry = result.get(nextScore++);
             CandidateKey key = CandidateKey.of(entry);
-            scoreCache.put(key, scoreEntry(entry, ctx, nbtStrict, matchCache));
-            availCache.put(key, countAvailableIngredients(entry, ctx, matchCache));
-            inputGroupCache.put(key, distinctInputGroups(entry, ctx));
+            var score = scoreEntry(entry, ctx, nbtStrict, matchCache);
+            scoreCache.put(key, score.score());
+            availCache.put(key, score.availableGroups());
+            inputGroupCache.put(key, score.inputGroups());
             operationCache.put(key, remaining > 0L
-                    ? estimatedOperations(entry, ctx, remaining)
+                    ? estimatedOperations(remaining, score.outputCount())
                     : Integer.MAX_VALUE);
             stack.resume(this::score);
         }
@@ -346,14 +341,6 @@ final class CandidateEngine {
                 inputGroupCache.getOrDefault(keyB, Integer.MAX_VALUE));
     }
 
-    private static int distinctInputGroups(RecipeIndex.Entry entry, ResolutionContext ctx) {
-        if (entry.recipe() instanceof CraftingRecipe cr) {
-            return craftingDemands(cr).size();
-        }
-        List<IngredientSpec> specs = ingredientSpecs(entry, ctx);
-        return specs == null ? Integer.MAX_VALUE : specDemands(specs).size();
-    }
-
     /** Resolves shared runtime recipes against the exact NBT-bearing item being requested. */
     static ItemStack outputForDemand(RecipeIndex.Entry entry, Ingredient demand,
                                      ResolutionContext ctx) {
@@ -363,6 +350,11 @@ final class CandidateEngine {
         }
         ItemStack output = ModRecipeHandlers.tryGetResultItem(
                 entry.recipe(), ctx.level.registryAccess());
+        return adaptOutputForDemand(entry, output, demand, ctx);
+    }
+
+    private static ItemStack adaptOutputForDemand(RecipeIndex.Entry entry, ItemStack output,
+                                                  Ingredient demand, ResolutionContext ctx) {
         output = SlashBladeRecipeHandler.planningOutput(entry.recipe(), output, demand);
         output = MinersDelightCopperPotSupport.adaptResult(entry.modType(), output);
         return inheritSmithingBaseTag(entry.recipe(), output, demand, ctx);
@@ -532,6 +524,14 @@ final class CandidateEngine {
                 ctx.player, entry.recipe(), entry.modType());
     }
 
+    private static String checkRoute(RecipeIndex.Entry entry, ResolutionContext ctx) {
+        var handler = ModRecipeHandlers.claimFor(entry.recipe()).winner();
+        if (handler != null && !handler.isAvailableForPlanning(entry.recipe(), ctx.player)) {
+            return "Execution context unavailable";
+        }
+        return isMachineAvailable(entry, ctx) ? "" : "Machine not available";
+    }
+
     private static boolean isPreferred(RecipeIndex.Entry entry, ResolutionContext ctx) {
         ItemStack output = ModRecipeHandlers.tryGetResultItem(entry.recipe(), ctx.level.registryAccess());
         if (output.isEmpty()) return false;
@@ -539,85 +539,42 @@ final class CandidateEngine {
         return pref != null && pref.equals(entry.recipe().getId());
     }
 
-    private static int scoreEntry(RecipeIndex.Entry entry, ResolutionContext ctx, boolean nbtStrict,
-                                  @Nullable Map<Ingredient, Long> matchCache) {
-        if (entry.recipe() instanceof CraftingRecipe cr) {
-            return scoreRecipe(cr, ctx, nbtStrict, matchCache) + (entry.modType() == ModType.GENERIC ? 10 : 0);
-        }
-        int score = 0;
-        if (entry.modType() == ModType.GENERIC) score += 10;
-        if (nbtStrict && entry.nbtSensitive()) score += 5;
-        List<IngredientSpec> specs = ingredientSpecs(entry, ctx);
-        if (specs != null) {
-            Map<String, IngredientDemand> demands = specDemands(specs);
-            for (IngredientDemand demand : demands.values()) {
-                long available = cachedCountMatching(ctx, demand.ingredient(), matchCache);
-                if (available >= demand.required()) score += 10;
-                else if (available > 0) {
-                    score += SaturatingLongMath.clampToInt(Math.max(0L,
-                            10L - (demand.required() - available) * 5L));
-                }
-            }
-            score -= demands.values().stream().mapToInt(IngredientDemand::required).sum();
-            score += reusableCatalystPreferenceScore(specs, demands.values(), ctx, matchCache);
-        }
-        ItemStack output = outputForDemand(entry, Ingredient.EMPTY, ctx);
-        if (!output.isEmpty()) {
-            if (isPreferred(entry, ctx)) {
-                score += PREFERRED_RECIPE_BONUS;
-            }
-            // Only award the output-count bonus when this recipe's ingredients
-            // are actually present — otherwise decompression recipes (block→4 bars)
-            // outscore direct recipes (beeswax_block→1 bar) even when their
-            // input must itself be crafted from the output, creating a circular
-            // dependency that forces the resolver into a sub-optimal path.
-            if (output.getCount() > 1 && allIngredientsAvailable(entry, ctx, matchCache)) {
-                score += cappedOutputBonus(output.getCount());
-            }
-        }
-        return score;
-    }
+    private record CandidateScore(int score, int availableGroups, int inputGroups, int outputCount) {}
 
-    private static int scoreRecipe(CraftingRecipe recipe, ResolutionContext ctx, boolean nbtStrict,
-                                   @Nullable Map<Ingredient, Long> matchCache) {
-        int score = 0;
-        ItemStack output = ModRecipeHandlers.tryGetResultItem(recipe, ctx.level.registryAccess());
-        ResourceLocation preferred = ctx.preferredRecipeFor(output);
-        if (preferred != null && preferred.equals(recipe.getId())) {
-            score += PREFERRED_RECIPE_BONUS;
-        }
-
-        List<IngredientSpec> specs = CraftPacketUtils.extractCraftingIngredientSpecs(recipe);
-        Map<String, IngredientDemand> demands = specDemands(specs);
+    private static CandidateScore scoreEntry(RecipeIndex.Entry entry, ResolutionContext ctx, boolean nbtStrict,
+                                             Map<Ingredient, Long> matchCache) {
+        boolean crafting = entry.recipe() instanceof CraftingRecipe;
+        int score = entry.modType() == ModType.GENERIC ? 10 : 0;
+        if (!crafting && nbtStrict && entry.nbtSensitive()) score += 5;
+        List<IngredientSpec> specs = entry.recipe() instanceof CraftingRecipe recipe
+                ? CraftPacketUtils.extractCraftingIngredientSpecs(recipe)
+                : ingredientSpecs(entry, ctx);
+        Map<String, IngredientDemand> demands = specs == null ? Map.of() : specDemands(specs);
+        int availableGroups = 0;
         for (IngredientDemand demand : demands.values()) {
             long available = cachedCountMatching(ctx, demand.ingredient(), matchCache);
-            if (available >= demand.required()) score += 10;
-            else if (available > 0) score += SaturatingLongMath.clampToInt(
-                    Math.max(0L, 10L - (demand.required() - available) * 5L));
-        }
-
-        score -= demands.values().stream().mapToInt(IngredientDemand::required).sum();
-        score += reusableCatalystPreferenceScore(specs, demands.values(), ctx, matchCache);
-
-        if (output.getCount() > 1) {
-            // Gate output bonus behind ingredient availability for the same
-            // reason as the mod-recipe path: avoid over-ranking decompression
-            // recipes when their inputs are themselves craftable only via the
-            // output they produce.
-            boolean allAvail = true;
-            for (IngredientDemand demand : demands.values()) {
-                if (cachedCountMatching(ctx, demand.ingredient(), matchCache)
-                        < demand.required()) {
-                    allAvail = false;
-                    break;
-                }
+            if (available >= demand.required()) {
+                availableGroups++;
+                score += 10;
+            } else if (available > 0) {
+                score += SaturatingLongMath.clampToInt(Math.max(0L, 10L - (demand.required() - available) * 5L));
             }
-            if (allAvail) {
-                score += cappedOutputBonus(output.getCount());
+            score -= demand.required();
+        }
+        if (specs != null) score += reusableCatalystPreferenceScore(specs, demands.values(), ctx, matchCache);
+
+        ItemStack declared = ModRecipeHandlers.tryGetResultItem(entry.recipe(), ctx.level.registryAccess());
+        ItemStack output = adaptOutputForDemand(entry, declared, Ingredient.EMPTY, ctx);
+        if (crafting || !output.isEmpty()) {
+            if (entry.recipe().getId().equals(ctx.preferredRecipeFor(declared))) score += PREFERRED_RECIPE_BONUS;
+            // 原料未齐时不奖励解压缩等高产量配方。
+            ItemStack scoredOutput = crafting ? declared : output;
+            if (scoredOutput.getCount() > 1 && specs != null && availableGroups == demands.size()) {
+                score += cappedOutputBonus(scoredOutput.getCount());
             }
         }
-
-        return score;
+        return new CandidateScore(score, availableGroups, specs == null ? Integer.MAX_VALUE : demands.size(),
+                output.isEmpty() ? 0 : output.getCount());
     }
 
     private static long cachedCountMatching(ResolutionContext ctx, Ingredient ing,
@@ -715,13 +672,6 @@ final class CandidateEngine {
      * 与执行派发保持一致的关键维度。需求未知（{@code remaining <= 0}）时返回 0，
      * 表示该维度不参与比较。
      */
-    static int estimatedOperations(RecipeIndex.Entry entry, ResolutionContext ctx, long remaining) {
-        if (remaining <= 0L) return 0;
-        ItemStack output = outputForDemand(entry, Ingredient.EMPTY, ctx);
-        if (output.isEmpty()) return Integer.MAX_VALUE;
-        return estimatedOperations(remaining, output.getCount());
-    }
-
     /** 向上取整的炉数估算，防溢出；每批产量非正时视为不可比较（排最后）。 */
     static int estimatedOperations(long remaining, long perOperation) {
         if (perOperation <= 0L) return Integer.MAX_VALUE;
@@ -730,50 +680,11 @@ final class CandidateEngine {
         return (int) Math.min(batches, Integer.MAX_VALUE);
     }
 
-    /** Returns true when every non-empty ingredient has at least one matching item available. */
-    private static boolean allIngredientsAvailable(RecipeIndex.Entry entry, ResolutionContext ctx,
-                                                  @Nullable Map<Ingredient, Long> matchCache) {
-        if (entry.recipe() instanceof CraftingRecipe cr) {
-            for (IngredientDemand demand : craftingDemands(cr).values()) {
-                if (cachedCountMatching(ctx, demand.ingredient(), matchCache) < demand.required()) {
-                    return false;
-                }
-            }
-            return true;
-        }
-        List<IngredientSpec> specs = ingredientSpecs(entry, ctx);
-        if (specs == null) return false;
-        for (IngredientDemand demand : specDemands(specs).values()) {
-            if (cachedCountMatching(ctx, demand.ingredient(), matchCache) < demand.required()) return false;
-        }
-        return true;
-    }
-
-    /** Count how many distinct ingredients of a recipe have matching items available. */
-    private static int countAvailableIngredients(RecipeIndex.Entry entry, ResolutionContext ctx,
-                                                  @Nullable Map<Ingredient, Long> matchCache) {
-        if (entry.recipe() instanceof CraftingRecipe cr) {
-            return (int) craftingDemands(cr).values().stream()
-                    .filter(demand -> cachedCountMatching(ctx, demand.ingredient(), matchCache)
-                            >= demand.required())
-                    .count();
-        }
-        List<IngredientSpec> specs = ingredientSpecs(entry, ctx);
-        if (specs == null) return 0;
-        Map<String, IngredientDemand> demands = specDemands(specs);
-        return (int) demands.values().stream()
-                .filter(demand -> cachedCountMatching(ctx, demand.ingredient(), matchCache)
-                        >= demand.required())
-                .count();
-    }
-
     record IngredientDemand(Ingredient ingredient, int required, DemandRole role) {}
 
     private static List<IngredientSpec> ingredientSpecs(RecipeIndex.Entry entry,
                                                         ResolutionContext ctx) {
-        List<IngredientSpec> specs =
-                ctx.candidateScoringInputs.computeIfAbsent(entry,
-                        candidate -> CraftPacketUtils.extractSingleOperationRecursiveIngredientSpecs(candidate.recipe()));
+        List<IngredientSpec> specs = ctx.declaredRecursiveInputs(entry);
         specs = CraftPacketUtils.applyPlanningIngredientContext(entry.recipe(), ctx.player, specs);
         return MinersDelightCopperPotSupport.adaptIngredientSpecs(
                 entry.modType(), specs, entry.recipe(), ctx.level.registryAccess());

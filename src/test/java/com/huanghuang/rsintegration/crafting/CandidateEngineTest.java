@@ -1,15 +1,23 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.CraftingBookCategory;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.ShapedRecipe;
 import net.minecraft.core.NonNullList;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.Level;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
@@ -20,10 +28,54 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.when;
 import static com.huanghuang.rsintegration.testutil.SlashBladeFixtures.blade;
 import static com.huanghuang.rsintegration.testutil.SlashBladeFixtures.ingredient;
 
 class CandidateEngineTest extends BootstrapTest {
+
+    @BeforeAll
+    static void initializeMod() {
+        DeepPlanningFixture.initializeMod();
+    }
+
+    @Test
+    void previewRechecksUnavailableMachineOnTheNextSlice() {
+        Level level = mock(Level.class);
+        when(level.registryAccess()).thenReturn(RegistryAccess.EMPTY);
+        ServerPlayer player = mock(ServerPlayer.class);
+        ModType route = ModType.register("test_candidate_slice",
+                new String[0], new String[0], new String[0], GenericBatchDelegate::new);
+        ShapedRecipe recipe = new ShapedRecipe(ResourceLocation.parse("test:slice_binding"), "",
+                CraftingBookCategory.MISC, 1, 1, NonNullList.of(Ingredient.EMPTY, Ingredient.of(Items.STICK)),
+                new ItemStack(Items.IRON_INGOT));
+        var entry = new RecipeIndex.Entry(recipe, route, ResourceLocation.parse("test:machine"));
+        int[] probes = {0};
+        var config = CommentedConfig.inMemory();
+        RSIntegrationConfig.SERVER_SPEC.correct(config);
+        RSIntegrationConfig.SERVER_SPEC.setConfig(config);
+        try (var index = mockStatic(RecipeIndex.class);
+             var bindings = mockStatic(AltarBindingRegistry.class)) {
+            index.when(() -> RecipeIndex.reusableCatalystRoutes(level)).thenReturn(Map.of());
+            bindings.when(() -> AltarBindingRegistry.hasBindingForRecipe(player, recipe, route))
+                    .thenAnswer(call -> ++probes[0] > 1);
+            var ctx = new ResolutionContext(level, Map.of(Items.IRON_INGOT, List.of(entry)),
+                    List.of(), null, player, null);
+            ctx.deadlineNanos = Long.MAX_VALUE;
+            Ingredient demand = Ingredient.of(Items.IRON_INGOT);
+            ctx.beginCandidateSlice();
+            assertTrue(CandidateEngine.findCandidates(demand, ctx).isEmpty());
+            assertTrue(CandidateEngine.findCandidates(demand, ctx).isEmpty());
+            assertEquals(1, probes[0]);
+            ctx.beginCandidateSlice();
+            assertEquals(List.of(entry), CandidateEngine.findCandidates(demand, ctx));
+            assertEquals(2, probes[0]);
+        } finally {
+            RSIntegrationConfig.SERVER_SPEC.setConfig(null);
+        }
+    }
 
     @Test
     void slashBladeOutputCheckDoesNotTreatEverySameItemVariantAsAProducer() {

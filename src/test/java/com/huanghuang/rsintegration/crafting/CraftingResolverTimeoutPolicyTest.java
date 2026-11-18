@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -17,6 +18,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CraftingResolverTimeoutPolicyTest extends BootstrapTest {
+
+    @BeforeAll
+    static void initializeMod() {
+        DeepPlanningFixture.initializeMod();
+    }
 
     @Test
     void onlyStrictPlanningAbortsOnTimeout() {

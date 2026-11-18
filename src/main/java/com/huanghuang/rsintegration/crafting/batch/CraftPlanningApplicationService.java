@@ -594,6 +594,7 @@ final class CraftPlanningApplicationService {
             private boolean solved;
             private CraftPlanGraph graph;
             private long computeNanos;
+            private long maxSliceNanos;
             private ParallelPlanEstimator.Request.GraphEstimate estimates;
             private Map<Integer, ParallelPlan> parallelPlans;
 
@@ -624,6 +625,7 @@ final class CraftPlanningApplicationService {
                             } finally {
                                 long elapsed = System.nanoTime() - start;
                                 computeNanos += elapsed;
+                                maxSliceNanos = Math.max(maxSliceNanos, elapsed);
                                 PerformanceMonitor.recordPlanningLatency(
                                         PerformanceMonitor.PlanningLatencyPhase.TYPED_SLICE, elapsed);
                             }
@@ -682,9 +684,10 @@ final class CraftPlanningApplicationService {
                 } else if (failure instanceof CraftingPlanningTimeoutException) {
                     PerformanceMonitor.recordResolveTimeout();
                     RSIntegrationMod.LOGGER.warn(
-                            "[RSI-plan] 类型规划超时 recipe={} request={} activeMs={} stockKeys={} projectedRecipes={}",
+                            "[RSI-plan] 类型规划超时 recipe={} request={} activeMs={} maxSliceMs={} stockKeys={} projectedRecipes={} {}",
                             recipeId, generation, computeNanos / 1_000_000L,
-                            snapshot.availableItems().size(), snapshot.recipeGraph().recipesById().size());
+                            maxSliceNanos / 1_000_000L, snapshot.availableItems().size(),
+                            snapshot.recipeGraph().recipesById().size(), job.timeoutSummary());
                     sink.error(PlanOutcome.BUDGET_EXHAUSTED,
                             IntegrationDiagnostic.error(IntegrationDiagnosticCode.PLANNING_TIMEOUT));
                 } else {

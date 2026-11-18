@@ -29,6 +29,7 @@ import net.minecraft.world.item.crafting.CraftingRecipe;
 
 import javax.annotation.Nullable;
 import java.util.*;
+import java.util.function.Supplier;
 
 /**
  * Resolution context — holds the unified recipe index, available item counts,
@@ -112,9 +113,40 @@ final class ResolutionContext {
     private final Map<Item, List<CachedStack>> inventoryIndex = new HashMap<>();
     private final Map<CraftingResolver.StackKey, CachedStack> stacksByKey = new HashMap<>();
     // 同一请求会多次经过共享配方；只缓存不依赖搜索中模拟库存的配方数据。
-    final Map<RecipeIndex.Entry, List<IngredientSpec>> candidateScoringInputs = new HashMap<>();
+    private final Map<RecipeIndex.Entry, List<IngredientSpec>> declaredRecursiveInputs = new HashMap<>();
     final Map<RecipeIndex.Entry, Set<CraftingResolver.StackKey>> candidateCycleInputs = new HashMap<>();
+    @Nullable private Map<RecipeIndex.Entry, String> candidateRouteChecks;
     private long nextInventoryOrder;
+
+    void beginCandidateSlice() {
+        if (candidateRouteChecks == null) candidateRouteChecks = new HashMap<>();
+        else candidateRouteChecks.clear();
+    }
+
+    String candidateRouteCheck(RecipeIndex.Entry entry, Supplier<String> probe) {
+        return candidateRouteChecks == null ? probe.get()
+                : candidateRouteChecks.computeIfAbsent(entry, ignored -> probe.get());
+    }
+
+    @Nullable List<IngredientSpec> declaredRecursiveInputs(RecipeIndex.Entry entry) {
+        return declaredRecursiveInputs.computeIfAbsent(entry,
+                candidate -> CraftPacketUtils.extractSingleOperationRecursiveIngredientSpecs(candidate.recipe()));
+    }
+
+    private final Map<ResourceLocation, Integer> previewCandidateAttempts = new HashMap<>();
+    int previewRootSlot = -1;
+    int timeoutRootSlot = -1;
+
+    void recordPreviewCandidate(RecipeIndex.Entry entry) {
+        if (candidateRouteChecks != null) previewCandidateAttempts.merge(entry.recipeTypeId(), 1, Integer::sum);
+    }
+
+    List<String> busiestPreviewTypes() {
+        return previewCandidateAttempts.entrySet().stream()
+                .sorted(Map.Entry.<ResourceLocation, Integer>comparingByValue().reversed()
+                        .thenComparing(Map.Entry.comparingByKey()))
+                .limit(6).map(entry -> entry.getKey() + ":" + entry.getValue()).toList();
+    }
 
     ResolutionContext(Level level,
                       Map<Item, List<RecipeIndex.Entry>> index,
@@ -483,7 +515,10 @@ final class ResolutionContext {
 
     boolean timedOut() {
         boolean expired = System.nanoTime() - deadlineNanos >= 0L;
-        if (expired) timeoutReached = true;
+        if (expired && !timeoutReached) {
+            timeoutReached = true;
+            timeoutRootSlot = previewRootSlot;
+        }
         if (expired && abortOnTimeout) throw new CraftingPlanningTimeoutException();
         return expired;
     }
