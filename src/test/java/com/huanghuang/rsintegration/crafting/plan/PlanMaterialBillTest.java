@@ -28,6 +28,28 @@ class PlanMaterialBillTest extends BootstrapTest {
             new ResourceLocation("test", "target");
 
     @Test
+    void timeoutBillCombinesConfirmedRootAndNodeAllocationsWithoutGuessingShortages() {
+        var book = new ItemStack(Items.BOOK);
+        var variant = book.copy();
+        variant.getOrCreateTag().putString("variant", "chosen");
+        var iron = new ItemStack(Items.IRON_INGOT);
+        var gold = new ItemStack(Items.GOLD_INGOT);
+        var initial = PlanGraphView.SourceView.fromInitial();
+        var producer = PlanGraphView.SourceView.fromProducer(0, 0);
+        var root = new PlanGraphView.RootView(variant, 9, 6,
+                List.of(new PlanGraphView.RootEdgeView(initial, variant, 3)));
+        var graph = new PlanGraphView(1, List.of(),
+                List.of(new PlanGraphView.EdgeView(0, 0, initial, variant, 2),
+                        new PlanGraphView.EdgeView(0, 1, initial, book, 1),
+                        new PlanGraphView.EdgeView(1, 0, producer, iron, 8)),
+                List.of(root), List.of(new PlanGraphView.UnresolvedView(1, 1, gold, 4)), List.of());
+        var bill = PlanMaterialBill.completedAllocations(graph,
+                Map.of(StackKey.of(variant, true), 12L, StackKey.of(book, true), 30L));
+        assertEquals(Map.of(IngredientKey.of(variant), new PlanResponse.Availability(5, 12, 0),
+                IngredientKey.of(book), new PlanResponse.Availability(1, 30, 0)), bill);
+    }
+
+    @Test
     void partialTraceIncludesKnownInputsEvenWhenTheDisplayCannotLinkTheirProducer() {
         ItemStack target = new ItemStack(Items.DIAMOND);
         var first = new PlanStep(new ResourceLocation("test", "iron"), new ItemStack(Items.IRON_INGOT),

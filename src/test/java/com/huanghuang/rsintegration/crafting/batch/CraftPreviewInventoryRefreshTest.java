@@ -63,6 +63,25 @@ class CraftPreviewInventoryRefreshTest extends BootstrapTest {
     }
 
     @Test
+    void incompletePreviewPublishesOnceWithoutRecheckingInventory() {
+        CraftPlanResultDispatcher.Sink destination = mock(CraftPlanResultDispatcher.Sink.class);
+        var draft = PlanResponse.incomplete(new ResourceLocation("test", "target"), new ItemStack(Items.DIAMOND),
+                1, null, null, null, null, null, null, Map.of(),
+                IntegrationDiagnostic.error(IntegrationDiagnosticCode.PLANNING_TIMEOUT));
+        var refresh = new CraftPreviewInventoryRefresh(destination, 1, () -> true,
+                (snapshot, plan) -> { fail("超时草稿不参与库存校验"); return false; },
+                snapshot -> fail("超时草稿没有执行缓存"), task -> fail("超时后不应排队重算"),
+                (plan, sink) -> fail("超时后不应重算"));
+
+        refresh.incomplete(draft);
+        refresh.incomplete(draft);
+        refresh.success(plan(true), snapshot());
+        verify(destination).incomplete(draft);
+        verifyNoMoreInteractions(destination);
+        assertFalse(CraftPlanDecisionRules.canExecuteCachedPlan(draft, null));
+    }
+
+    @Test
     void aSingleRefreshPublishesOnlyTheNewStableResult() {
         CraftPlanResultDispatcher.Sink destination = mock(CraftPlanResultDispatcher.Sink.class);
         Queue<Runnable> queue = new ArrayDeque<>();

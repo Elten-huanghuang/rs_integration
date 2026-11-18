@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
+import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -74,6 +76,24 @@ public record PlanResponse(
         if (outcome == null) {
             outcome = PlanOutcome.infer(success, materials, missing, executionBlocked);
         }
+    }
+
+    /** 预算耗尽时保留目标、重算参数、已完成的展示图和已结算材料。 */
+    public static PlanResponse incomplete(ResourceLocation recipe, ItemStack output, int repeat,
+                                          @Nullable ResourceLocation dimension, @Nullable BlockPos position,
+                                          @Nullable ItemStack base, @Nullable ItemStack clicked,
+                                          @Nullable StorageReference storage, @Nullable PlanGraphView graph,
+                                          Map<StackKey, Long> snapshotStock,
+                                          IntegrationDiagnostic diagnostic) {
+        return new PlanResponse(false, "", output.copy(),
+                List.of(new PlanStep(recipe, output.copy(), repeat, List.of())),
+                PlanMaterialBill.completedAllocations(graph, snapshotStock), List.of(), recipe.toString(),
+                null, dimension == null ? null : dimension.toString(),
+                position == null ? 0 : position.getX(), position == null ? 0 : position.getY(),
+                position == null ? 0 : position.getZ(), List.of(), repeat,
+                null, null, null, 0L, false, false, false, base, Set.of(), Map.of(), clicked,
+                graph, true, List.of(), Map.of(), storage, List.of(), PlanOutcome.BUDGET_EXHAUSTED,
+                List.of(diagnostic));
     }
 
     /** 图内卡片按拓扑顺序投影；图外目标、额外阶段或无图轨迹才独立传输。 */

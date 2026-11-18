@@ -523,6 +523,10 @@ final class ResolutionContext {
         return expired;
     }
 
+    boolean timeoutReached() {
+        return timeoutReached;
+    }
+
     void requireKnownPreviewBudget() {
         if (timeoutReached) throw new CraftingPlanningTimeoutException();
         if (depthGuardHits > 0) throw new CraftingPlanningLimitException(

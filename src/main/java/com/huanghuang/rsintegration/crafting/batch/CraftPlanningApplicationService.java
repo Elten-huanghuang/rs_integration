@@ -587,6 +587,7 @@ final class CraftPlanningApplicationService {
                                              PlanningSnapshot snapshot, CraftPlanResultDispatcher.Sink sink,
                                              CraftingResolver.TypedPreview job, BooleanSupplier sameWorldContext,
                                              Consumer<CompletedTypedPreview> completed,
+                                             Consumer<IntegrationDiagnostic> incomplete,
                                              List<String> missing, ItemStack output, List<TypedRootKey> roots) {
         var queue = CraftPlanningRuntime.typedPreviewRequests();
         class PreviewTask implements Runnable {
@@ -594,6 +595,7 @@ final class CraftPlanningApplicationService {
             private CraftPlanGraph graph;
             private long computeNanos;
             private long maxSliceNanos;
+            private IntegrationDiagnostic budgetFailure;
             private ParallelPlanEstimator.Request.GraphEstimate estimates;
             private Map<Integer, ParallelPlan> parallelPlans;
 
@@ -615,6 +617,10 @@ final class CraftPlanningApplicationService {
                     return;
                 }
                 try (var scope = snapshot.preferences().materialSources().enter()) {
+                    if (budgetFailure != null) {
+                        incomplete.accept(budgetFailure);
+                        return;
+                    }
                     if (!solved) {
                         long budget = queue.remainingTickNanos();
                         if (budget > 0L) {
@@ -678,8 +684,7 @@ final class CraftPlanningApplicationService {
             private void failed(Throwable failure) {
                 if (failure instanceof CraftingPlanningLimitException) {
                     RSIntegrationMod.LOGGER.debug("[RSI-plan] 兼容规划达到上限：recipe={} {}", recipeId, failure.getMessage());
-                    sink.error(PlanOutcome.BUDGET_EXHAUSTED,
-                            IntegrationDiagnostic.error(IntegrationDiagnosticCode.COMPLEXITY_LIMIT));
+                    budgetFailure = IntegrationDiagnostic.error(IntegrationDiagnosticCode.COMPLEXITY_LIMIT);
                 } else if (failure instanceof CraftingPlanningTimeoutException) {
                     PerformanceMonitor.recordResolveTimeout();
                     RSIntegrationMod.LOGGER.warn(
@@ -687,13 +692,15 @@ final class CraftPlanningApplicationService {
                             recipeId, generation, computeNanos / 1_000_000L,
                             maxSliceNanos / 1_000_000L, snapshot.availableItems().size(),
                             snapshot.recipeGraph().recipesById().size(), job.timeoutSummary());
-                    sink.error(PlanOutcome.BUDGET_EXHAUSTED,
-                            IntegrationDiagnostic.error(IntegrationDiagnosticCode.PLANNING_TIMEOUT));
+                    budgetFailure = IntegrationDiagnostic.error(IntegrationDiagnosticCode.PLANNING_TIMEOUT);
                 } else {
                     RSIntegrationMod.LOGGER.error("[RSI-plan] 兼容规划失败：recipe={}", recipeId, failure);
                     sink.error(PlanOutcome.RUNTIME_UNAVAILABLE,
                             IntegrationDiagnostic.error(IntegrationDiagnosticCode.INTERNAL_ERROR));
+                    return;
                 }
+                // 停止求解，下一 tick 只发送有界的已完成分支。
+                enqueue();
             }
         }
         new PreviewTask().enqueue();
@@ -1447,8 +1454,9 @@ final class CraftPlanningApplicationService {
                     precomputedPlan.backtracks(), precomputedPlan.memoHits());
             // UNKNOWN means the planner did not prove feasibility. Its
             // diagnostic trace is not an authoritative shortage report.
-            sink.error(PlanOutcome.BUDGET_EXHAUSTED,
-                    CraftFailureMessages.purePreviewDiagnostic(precomputedPlan));
+            sink.incomplete(PlanResponse.incomplete(recipeId, planTargetOutput, repeatCount, dim, pos,
+                    baseItem, clickedOutput, planStorageReference, null, Map.of(),
+                    CraftFailureMessages.purePreviewDiagnostic(precomputedPlan)));
             return;
         }
         boolean selectedPureResolver = routeDecision.action() == PlannerAction.USE_PURE_RESULT
@@ -1599,7 +1607,11 @@ final class CraftPlanningApplicationService {
                         preview -> tryBuildPlanWithSources(player, recipeId, forcedRecipes, dim, pos, repeatCount,
                                 baseItem, clickedOutput, requestId, previewGeneration, precomputedPlan, typedSnapshot,
                                 true, true, sink, planStorageReference, materialLocks, routedPlan, safePreferences,
-                                preview), missing, activeRoot.output(), rootKeys);
+                                preview),
+                        diagnostic -> sink.incomplete(PlanResponse.incomplete(recipeId, activeRoot.output(),
+                                repeatCount, dim, pos, baseItem, clickedOutput, planStorageReference,
+                                PlanGraphView.from(job.completedRootsGraph()), available, diagnostic)),
+                        missing, activeRoot.output(), rootKeys);
                 return;
             }
             if (!ItemStack.matches(completedTyped.output(), targetOutput)

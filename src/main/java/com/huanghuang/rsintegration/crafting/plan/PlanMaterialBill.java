@@ -22,6 +22,20 @@ import java.util.Set;
 public final class PlanMaterialBill {
     private PlanMaterialBill() {}
 
+    /** 草稿只汇总已分配的外部材料，不把未结算的需求提示当成缺料。 */
+    static Map<IngredientKey, PlanResponse.Availability> completedAllocations(
+            @Nullable PlanGraphView graph, Map<StackKey, Long> snapshotStock) {
+        if (graph == null) return Map.of();
+        Map<IngredientKey, Long> needed = new LinkedHashMap<>();
+        graph.visitInitialAllocations((stack, count) -> mergeDemand(needed, stack, count));
+        Map<IngredientKey, PlanResponse.Availability> materials = new LinkedHashMap<>();
+        needed.forEach((key, count) -> {
+            long available = snapshotStock.getOrDefault(StackKey.of(key.stack(1), true), 0L);
+            materials.put(key, new PlanResponse.Availability(count, available, 0L));
+        });
+        return Collections.unmodifiableMap(materials);
+    }
+
     public static Result summarize(Map<Item, ? extends Number> neededCounts,
                                    Map<Item, Ingredient> itemSources,
                                    Map<Item, ? extends Number> itemAvailable,

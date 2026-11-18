@@ -87,6 +87,17 @@ final class CraftPreviewInventoryRefresh implements CraftPlanResultDispatcher.Si
     }
 
     @Override
+    public void incomplete(PlanResponse plan) {
+        if (finished || refreshPending) return;
+        if (!currentRequest.getAsBoolean()) {
+            cancelled(Component.translatable("rsi.plan.failure.planning_cancelled"));
+            return;
+        }
+        finished = true;
+        destination.incomplete(plan);
+    }
+
+    @Override
     public void error(PlanOutcome outcome, IntegrationDiagnostic diagnostic) {
         if (finished) return;
         finished = true;

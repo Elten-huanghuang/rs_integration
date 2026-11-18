@@ -2,11 +2,15 @@ package com.huanghuang.rsintegration.crafting;
 
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanValidator;
 import com.huanghuang.rsintegration.crafting.graph.MaterialAllocation;
 import com.huanghuang.rsintegration.crafting.graph.MaterialSource;
+import com.huanghuang.rsintegration.crafting.plan.IntegrationDiagnostic;
+import com.huanghuang.rsintegration.crafting.plan.IntegrationDiagnosticCode;
 import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
+import com.huanghuang.rsintegration.crafting.plan.PlanOutcome;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponsePacket;
 import com.huanghuang.rsintegration.crafting.planning.TypedPreviewAdmissionQueue;
@@ -14,6 +18,7 @@ import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.crafting.tree.PlanTreeLayout;
 import com.huanghuang.rsintegration.crafting.tree.PlanTreeModel;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.AfterEach;
@@ -29,6 +34,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.LockSupport;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -238,6 +245,49 @@ class DeepPlanningTest extends BootstrapTest {
                 null, null, true, List.of(), System.nanoTime() - 1, false);
         assertTrue(context.timedOut());
         assertThrows(CraftingPlanningTimeoutException.class, context::requireKnownPreviewBudget);
+    }
+
+    @Test
+    void timeoutPreviewRendersCompletedBranchWithoutGuessingTheNextRoot() {
+        try (var fixture = new DeepPlanningFixture(12, 2, false)) {
+            var job = fixture.sliced(true, 1_000, new ArrayList<>());
+            int frames = 0;
+            while (job.completedRootsGraph().rootDemands().isEmpty()) {
+                assertFalse(job.advance(0L));
+                assertTrue(++frames < 2_000);
+            }
+            // 在下一个求解切片中耗尽累计预算，切片之间的等待不计入。
+            assertThrows(CraftingPlanningTimeoutException.class, () -> job.advance(Long.MAX_VALUE, () -> {
+                long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(1_050);
+                long remaining;
+                while ((remaining = deadline - System.nanoTime()) > 0) LockSupport.parkNanos(remaining);
+                return true;
+            }));
+            var graph = job.completedRootsGraph();
+            CraftPlanValidator.validate(graph);
+            assertEquals(12, graph.nodes().size());
+            assertEquals(1, graph.rootDemands().size());
+            assertTrue(graph.unresolvedDemands().isEmpty());
+            assertEquals(0, graph.rootDemands().get(0).unresolvedQuantity());
+
+            var diagnostic = IntegrationDiagnostic.error(IntegrationDiagnosticCode.PLANNING_TIMEOUT);
+            var response = PlanResponse.incomplete(new ResourceLocation("test", "target"), fixture.target(), 1,
+                    null, null, null, null, null, PlanGraphView.from(graph),
+                    Map.of(new StackKey(Items.STICK, null), 2L), diagnostic);
+            var decoded = PlanResponsePacket.decodePayload(PlanResponsePacket.encodePayload(response, 17L)).plan();
+            assertEquals(response.recipeId(), decoded.recipeId());
+            assertFalse(decoded.targetResult().isEmpty());
+            assertEquals(PlanOutcome.BUDGET_EXHAUSTED, decoded.outcome());
+            assertEquals(List.of(diagnostic), decoded.diagnostics());
+            assertFalse(decoded.success());
+            assertTrue(decoded.executionBlocked());
+            assertEquals(Map.of(IngredientKey.of(new ItemStack(Items.STICK)),
+                    new PlanResponse.Availability(1, 2, 0)), decoded.materials());
+            var layout = new PlanTreeLayout();
+            layout.rebuild(PlanTreeModel.from(decoded).root);
+            assertEquals(14, layout.boxes().size());
+            assertTrue(layout.boxes().stream().noneMatch(box -> box.node().unresolved > 0));
+        }
     }
 
     @Test

@@ -59,6 +59,18 @@ class PlanPreviewDecisionTest extends BootstrapTest {
     }
 
     @Test
+    void timeoutDraftOpensForRefreshAndKeepsOldTreeForAnUnfinishedCandidateSwitch() {
+        PlanResponse current = plan(true, TARGET, TARGET);
+        PlanResponse timedOut = PlanResponse.incomplete(TARGET, new ItemStack(Items.DIAMOND), 1,
+                null, null, null, null, null, null, Map.of(),
+                IntegrationDiagnostic.error(IntegrationDiagnosticCode.PLANNING_TIMEOUT));
+
+        assertFalse(PlanPreviewDecision.keepCurrentPlan(null, timedOut));
+        assertFalse(PlanPreviewDecision.keepCurrentPlan(current, timedOut));
+        assertTrue(PlanPreviewDecision.keepCurrentPlan(current, timedOut, true));
+    }
+
+    @Test
     void legalSelfInputIsNotGuessedAsACycleWithoutServerOutcome() {
         PlanResponse current = plan(true, TARGET, TARGET);
         PlanResponse amplifiedMissing = planWithSteps(false, TARGET, List.of(

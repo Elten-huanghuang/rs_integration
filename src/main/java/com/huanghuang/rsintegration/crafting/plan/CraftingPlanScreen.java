@@ -105,7 +105,8 @@ public final class CraftingPlanScreen extends Screen {
     }
 
     private void watchInventory() {
-        if (externalRequest != null || plan.graph() == null || responseRequests.waitingForPreview()) return;
+        if (externalRequest != null || plan.graph() == null || responseRequests.waitingForPreview()
+                || plan.outcome() == PlanOutcome.BUDGET_EXHAUSTED) return;
         if (inventoryState != null && inventoryState.needsResync()) stopInventoryWatch();
         if (inventoryState != null) return;
         inventoryState = new PlanInventoryClientState(responseRequests.activeRequestId(), PlanningRequestIds.next(), plan);
@@ -355,8 +356,10 @@ public final class CraftingPlanScreen extends Screen {
             return true;
         }
         updatePlan(newPlan);
-        previewFeedback = workspaceText("recalculated");
-        previewFeedbackColor = Color.READY;
+        if (newPlan.outcome() != PlanOutcome.BUDGET_EXHAUSTED) {
+            previewFeedback = workspaceText("recalculated");
+            previewFeedbackColor = Color.READY;
+        }
         boolean executable = (newPlan.success() && !newPlan.executionBlocked())
                 || (partialPreparation && newPlan.outcome() == PlanOutcome.MISSING_INPUTS);
         if (responseRequests.consumeConfirmation(executable)) {
@@ -585,6 +588,7 @@ public final class CraftingPlanScreen extends Screen {
         if (confirmButton == null) return;
         confirmButton.setMessage(executionActionLabel());
         confirmButton.active = !responseRequests.confirmationRequested()
+                && plan.outcome() != PlanOutcome.BUDGET_EXHAUSTED
                 && (responseRequests.waitingForPreview() || partialPreparation
                 || !plan.executionBlocked() || selectedPath.isDirty());
     }
@@ -710,6 +714,7 @@ public final class CraftingPlanScreen extends Screen {
     }
 
     private void onConfirm() {
+        if (plan.outcome() == PlanOutcome.BUDGET_EXHAUSTED) return;
         commitRepeatCountInput();
         if (responseRequests.confirmationRequested()) return;
         if (!partialPreparation && inventoryConfirmationAction().replan) {
@@ -1072,6 +1077,9 @@ public final class CraftingPlanScreen extends Screen {
             int span = Math.max(1, r.width() / 5);
             int offset = (int) ((System.currentTimeMillis() / 12L) % Math.max(1, r.width() - span));
             g.fill(r.x() + offset, r.bottom() - 1, r.x() + offset + span, r.bottom(), Color.ACCENT.value());
+        } else if (plan.outcome() == PlanOutcome.BUDGET_EXHAUSTED) {
+            status = workspaceText("calculation_incomplete").getString();
+            statusColor = Color.WARNING;
         } else if (previewFeedback != null) {
             status = previewFeedback.getString();
             statusColor = previewFeedbackColor;
@@ -1094,9 +1102,12 @@ public final class CraftingPlanScreen extends Screen {
     private void renderWorkspaceSummary(GuiGraphics g) {
         Rect r = workspace.summary();
         boolean compact = workspace.compact();
+        boolean incomplete = plan.outcome() == PlanOutcome.BUDGET_EXHAUSTED;
         int labelWidth = compact ? 45 : 90;
-        chrome.heading(g, workspaceText("total_materials").getString(), r.x() + 9, r.y() + 9, labelWidth - 9, compact ? .85f : 1.05f);
-        if (!compact) chrome.label(g, workspaceText("need_stock").getString(), r.x() + 8, r.y() + 27, labelWidth - 6, Color.MUTED);
+        chrome.heading(g, workspaceText(incomplete ? "settled_materials" : "total_materials").getString(),
+                r.x() + 9, r.y() + 9, labelWidth - 9, compact ? .85f : 1.05f);
+        if (!compact) chrome.label(g, workspaceText(incomplete ? "need_snapshot_stock" : "need_stock").getString(),
+                r.x() + 8, r.y() + 27, labelWidth - 6, Color.MUTED);
         int left = r.x() + labelWidth;
         int leftoversWidth = cachedLeftoverStrip.isEmpty() || r.width() < 500 ? 0 : Math.min(140, r.width() / 5);
         int end = r.right() - leftoversWidth - 30;

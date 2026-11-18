@@ -6,12 +6,23 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
 import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.crafting.plan.IntegrationDiagnostic;
+import com.huanghuang.rsintegration.crafting.plan.IntegrationDiagnosticCode;
+import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
+import com.huanghuang.rsintegration.crafting.plan.PlanMaterialBill;
+import com.huanghuang.rsintegration.crafting.plan.PlanOutcome;
+import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
+import com.huanghuang.rsintegration.crafting.plan.PlanResponsePacket;
+import com.huanghuang.rsintegration.crafting.plan.PlanStep;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.NbtMatchMode;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
 import com.huanghuang.rsintegration.crafting.planning.PlanningPreferences;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
+import com.huanghuang.rsintegration.crafting.tree.PlanTreeLayout;
+import com.huanghuang.rsintegration.crafting.tree.PlanTreeModel;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
@@ -55,11 +66,11 @@ import static org.mockito.Mockito.withSettings;
 public final class PackTypedPlanningReplay extends BootstrapTest {
     private static boolean initialized;
     private final Map<MaterialRef, ItemStack> aliases = new HashMap<>();
+    private final Map<CraftingResolver.StackKey, ResourceLocation> materialsByAlias = new HashMap<>();
     private final Map<ResourceLocation, List<MaterialRef>> aliasesById = new HashMap<>();
     private final Map<Item, List<RecipeIndex.Entry>> index = new HashMap<>();
     private final Map<ResourceLocation, ModType> routes = new HashMap<>();
     private final Map<ResourceLocation, Counts> counts = new HashMap<>();
-    private final Map<ResourceLocation, ResourceLocation> realItems = new HashMap<>();
     private int latestCallbacks;
 
     public static void run(String label, ImmutableRecipeGraph graph, RecipeNode target,
@@ -86,20 +97,26 @@ public final class PackTypedPlanningReplay extends BootstrapTest {
         known.forEach(material -> itemIds.add(material.itemId()));
         stock.keySet().stream().filter(material -> itemIds.contains(material.itemId())).forEach(known::add);
         List<Item> pool = BuiltInRegistries.ITEM.stream().filter(item -> item != Items.AIR).toList();
-        int ordinal = 0;
-        for (var id : known.stream().map(MaterialRef::itemId).distinct().sorted().toList()) {
-            Item item = pool.get(ordinal % pool.size());
-            ResourceLocation alias = BuiltInRegistries.ITEM.getKey(item);
-            realItems.put(alias, id);
-            int group = ordinal++ / pool.size();
+        List<ResourceLocation> ids = itemIds.stream().sorted(Comparator
+                .comparing((ResourceLocation id) -> !forced.containsKey(id))
+                .thenComparing(Comparator.naturalOrder())).toList();
+        int reservedAliases = (int) ids.stream().filter(forced::containsKey).count();
+        int reusableAliases = pool.size() - reservedAliases;
+        for (int i = 0; i < ids.size(); i++) {
+            ResourceLocation id = ids.get(i);
+            // 强制路线按物品注册名匹配，因此它们的替身不能与其他材料共用。
+            int aliasIndex = i < reservedAliases ? i : reservedAliases + (i - reservedAliases) % reusableAliases;
+            Item item = pool.get(aliasIndex);
+            int group = i < reservedAliases ? 0 : (i - reservedAliases) / reusableAliases;
             var variants = known.stream().filter(material -> material.itemId().equals(id))
                     .sorted(Comparator.comparing(MaterialRef::nbt)).toList();
-            for (int i = 0; i < variants.size(); i++) {
-                MaterialRef material = variants.get(i);
+            for (int variant = 0; variant < variants.size(); variant++) {
+                MaterialRef material = variants.get(variant);
                 ItemStack stack = new ItemStack(item);
                 // 标签复用原版物品注册表，但不会让不同模组材料共享库存。
-                stack.getOrCreateTag().putString("rsi_replay", group + ":" + i);
+                stack.getOrCreateTag().putString("rsi_replay", group + ":" + variant);
                 aliases.put(material, stack);
+                materialsByAlias.put(CraftingResolver.StackKey.of(stack, true), id);
             }
             aliasesById.put(id, variants);
         }
@@ -149,11 +166,13 @@ public final class PackTypedPlanningReplay extends BootstrapTest {
         Map<ResourceLocation, ResourceLocation> overrides = new HashMap<>();
         forced.forEach((material, recipe) -> {
             var variants = aliasesById.get(material);
-            if (variants != null) {
-                var alias = BuiltInRegistries.ITEM.getKey(aliases.get(variants.get(0)).getItem());
-                if (material.equals(realItems.get(alias))) overrides.put(alias, recipe);
+            if (variants == null || !byId.containsKey(recipe)) {
+                throw new IllegalStateException("回放缺少强制路线材料或配方：" + material + " -> " + recipe);
             }
+            var alias = BuiltInRegistries.ITEM.getKey(aliases.get(variants.get(0)).getItem());
+            overrides.put(alias, recipe);
         });
+        System.out.printf("typed_%s materials=%d aliases=%d forced=%s%n", label, ids.size(), pool.size(), forced);
         var needed = target.inputs().stream().map(input -> ScaledIngredientSpec.of(spec(input), input.count())).toList();
         try (var recipes = mockStatic(RecipeIndex.class, withSettings().stubOnly());
              var handlers = mockStatic(ModRecipeHandlers.class, withSettings().stubOnly().defaultAnswer(call -> {
@@ -172,6 +191,49 @@ public final class PackTypedPlanningReplay extends BootstrapTest {
                         return true;
                     });
             for (int run = 0; run < 3; run++) measure(label, run, level, player, available, overrides, needed, target);
+            if ("saved_disks".equals(label)) measureTimeout(level, player, available, overrides, needed, target);
+        }
+    }
+
+    private void measureTimeout(Level level, ServerPlayer player,
+                                Map<CraftingResolver.StackKey, Long> stock, Map<ResourceLocation, ResourceLocation> forced,
+                                List<ScaledIngredientSpec> needed, RecipeNode target) {
+        ItemStack output = aliases.get(target.output());
+        var job = CraftingResolver.startTypedPreview(needed, stock, level, player, null, new ArrayList<>(),
+                forced, true, 80, new CraftingResolver.ActiveRootRecipe(target.recipeId(), output),
+                Map.of(), PlanningPreferences.empty());
+        long longest = 0;
+        try {
+            boolean done;
+            do {
+                long start = System.nanoTime();
+                try {
+                    done = job.advance(5_000_000L);
+                } finally {
+                    longest = Math.max(longest, System.nanoTime() - start);
+                }
+            } while (!done);
+            System.out.println("display_timeout_saved_disks completed_within_budget=true");
+        } catch (CraftingPlanningTimeoutException timeout) {
+            long start = System.nanoTime();
+            var graph = PlanGraphView.from(job.completedRootsGraph());
+            var response = PlanResponse.incomplete(target.recipeId(), output, 1, null, null, null, null, null,
+                    graph, stock, IntegrationDiagnostic.error(IntegrationDiagnosticCode.PLANNING_TIMEOUT));
+            byte[] payload = PlanResponsePacket.encodePayload(response, 1L);
+            long assembly = System.nanoTime() - start;
+            var decoded = PlanResponsePacket.decodePayload(payload).plan();
+            if (decoded.targetResult().isEmpty() || decoded.success() || !decoded.executionBlocked()
+                    || decoded.outcome() != PlanOutcome.BUDGET_EXHAUSTED
+                    || !decoded.missing().isEmpty() || decoded.graph().roots().size() != graph.roots().size()
+                    || !decoded.materials().equals(response.materials())
+                    || decoded.materials().values().stream().anyMatch(row -> row.missingCount() != 0)) {
+                throw new IllegalStateException("超时草稿未保留目标、已结算根、材料或执行限制");
+            }
+            var layout = new PlanTreeLayout();
+            layout.rebuild(PlanTreeModel.from(decoded).root);
+            System.out.printf("display_timeout_saved_disks outcome=%s roots=%d nodes=%d boxes=%d materials=%d bytes=%d maxSliceMs=%.1f encodeMs=%.1f%n",
+                    decoded.outcome(), graph.roots().size(), graph.nodes().size(), layout.boxes().size(),
+                    decoded.materials().size(), payload.length, longest / 1e6, assembly / 1e6);
         }
     }
 
@@ -196,7 +258,9 @@ public final class PackTypedPlanningReplay extends BootstrapTest {
         long graphTime = 0L;
         String status;
         int nodes = 0;
-        int rootsMissing = 0;
+        List<String> unresolvedSlots = new ArrayList<>();
+        Map<ResourceLocation, Long> unresolvedMaterials = new HashMap<>();
+        int unresolvedEdges = 0;
         try {
             boolean done;
             do {
@@ -213,22 +277,71 @@ public final class PackTypedPlanningReplay extends BootstrapTest {
             var result = job.graph();
             graphTime = System.nanoTime() - start;
             nodes = result.nodes().size();
-            rootsMissing = (int) result.rootDemands().stream().filter(root -> root.unresolvedQuantity() > 0).count();
-            status = rootsMissing == 0 && result.unresolvedDemands().isEmpty() ? "SUCCESS" : "PARTIAL";
+            for (int slot = 0, root = 0; slot < needed.size(); slot++) {
+                if (needed.get(slot).isEmpty()) continue;
+                long missingQuantity = result.rootDemands().get(root++).unresolvedQuantity();
+                if (missingQuantity > 0L) {
+                    unresolvedSlots.add(slot + ":" + target.inputs().get(slot).alternatives().get(0).itemId()
+                            + "*" + missingQuantity);
+                }
+            }
+            unresolvedEdges = result.unresolvedDemands().size();
+            for (var demand : result.unresolvedDemands()) {
+                ResourceLocation id = materialsByAlias.get(CraftingResolver.StackKey.of(demand.displayHint(), true));
+                if (id != null) unresolvedMaterials.merge(id, demand.quantity(), SaturatingLongMath::add);
+            }
+            status = unresolvedSlots.isEmpty() && unresolvedEdges == 0 ? "SUCCESS" : "PARTIAL";
+            if (run == 2) {
+                var view = PlanGraphView.from(result);
+                ItemStack output = aliases.get(target.output());
+                var terminal = new PlanStep(target.recipeId(), output, 1,
+                        target.inputs().stream().map(input -> aliases.get(input.alternatives().get(0))).toList());
+                boolean complete = status.equals("SUCCESS");
+                var bill = PlanMaterialBill.summarize(Map.of(), Map.of(), Map.of(), stock, output,
+                        List.of(terminal), 1, view, !complete);
+                var response = new PlanResponse(complete, "", output, List.of(terminal),
+                        bill.materials(), missing, target.recipeId().toString(), null, null, 0, 0, 0,
+                        List.of(), 1, null, null, null, 0, false, false, false,
+                        null, Set.of(), Map.of(), null, view);
+                byte[] payload = PlanResponsePacket.encodePayload(response, 1L);
+                var decoded = PlanResponsePacket.decodePayload(payload).plan();
+                if (decoded.graph().nodes().size() != nodes
+                        || decoded.graph().unresolved().size() != unresolvedEdges
+                        || decoded.graph().roots().stream().filter(root -> root.unresolvedQuantity() > 0).count()
+                                != unresolvedSlots.size()
+                        || decoded.outcome().ready() != complete) {
+                    throw new IllegalStateException("回包后计划节点或缺项不一致");
+                }
+                var model = PlanTreeModel.from(decoded);
+                var layout = new PlanTreeLayout();
+                layout.rebuild(model.root);
+                long missingBoxes = layout.boxes().stream().filter(box -> box.node().unresolved > 0).count();
+                if (layout.boxes().size() < 2 || !complete && missingBoxes == 0) {
+                    throw new IllegalStateException("回放计划未生成可展示的节点");
+                }
+                System.out.printf("display_%s outcome=%s bytes=%d boxes=%d missingBoxes=%d truncated=%s%n",
+                        label, decoded.outcome(), payload.length, layout.boxes().size(), missingBoxes, model.truncated());
+            }
         } catch (CraftingPlanningTimeoutException timeout) {
-            status = "TIMEOUT";
+            status = "TIMEOUT " + job.timeoutSummary();
         } catch (CraftingPlanningLimitException limit) {
             status = "LIMIT";
         }
-        System.out.printf("typed_%s run=%d status=%s nodes=%d unresolvedRoots=%d slices=%d activeMs=%.1f maxSliceMs=%.1f graphMs=%.1f "
-                        + "inputs=%d outputs=%d bindings=%d maxCallbacks=%d hottest=%s%n",
-                label, run, status, nodes, rootsMissing, slices, active / 1e6, longest / 1e6, graphTime / 1e6,
+        System.out.printf("typed_%s run=%d status=%s nodes=%d unresolvedRoots=%d unresolvedEdges=%d slices=%d activeMs=%.1f maxSliceMs=%.1f graphMs=%.1f "
+                        + "inputs=%d outputs=%d bindings=%d maxCallbacks=%d hottest=%s unresolvedMaterials=%s unresolvedSlots=%s%n",
+                label, run, status, nodes, unresolvedSlots.size(), unresolvedEdges, slices,
+                active / 1e6, longest / 1e6, graphTime / 1e6,
                 counts.values().stream().mapToInt(c -> c.inputs).sum(),
                 counts.values().stream().mapToInt(c -> c.outputs).sum(),
                 counts.values().stream().mapToInt(c -> c.bindings).sum(), worstCallbacks,
                 counts.entrySet().stream().sorted(Map.Entry.<ResourceLocation, Counts>comparingByValue(
                                 Comparator.comparingInt(Counts::total)).reversed())
-                        .limit(6).map(entry -> entry.getKey() + ":" + entry.getValue().total()).toList());
+                        .limit(6).map(entry -> entry.getKey() + ":" + entry.getValue().total()).toList(),
+                unresolvedMaterials.entrySet().stream()
+                        .sorted(Map.Entry.<ResourceLocation, Long>comparingByValue().reversed()
+                                .thenComparing(Map.Entry.comparingByKey()))
+                        .limit(8).map(entry -> entry.getKey() + "*" + entry.getValue()).toList(),
+                unresolvedSlots);
     }
 
     private IngredientSpec spec(IngredientRef input) {

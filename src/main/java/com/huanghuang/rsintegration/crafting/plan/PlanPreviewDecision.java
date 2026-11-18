@@ -25,7 +25,8 @@ public final class PlanPreviewDecision {
         }
         // 循环是规划器证明出的服务端终态。不要再从展示用 PlanStep 反推
         // 材料图：那里混合了展示代表物、可选配方和合法的自增配方。
-        if (recipeSwitch && incoming.outcome() == PlanOutcome.CYCLE) return true;
+        if (recipeSwitch && (incoming.outcome() == PlanOutcome.CYCLE
+                || incoming.outcome() == PlanOutcome.BUDGET_EXHAUSTED)) return true;
         return incoming.steps().stream().noneMatch(step ->
                 step.recipeId().toString().equals(incoming.recipeId()));
     }

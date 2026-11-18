@@ -636,6 +636,7 @@ public final class CraftingResolver {
         ctx.excludedRecipes = Set.copyOf(excludedRecipes);
         EdgeTracker edges = new EdgeTracker();
         Map<Integer, RootDemand> rootsByOrder = new TreeMap<>();
+        PreviewCheckpoint checkpoint = checkPreviewBudget ? new PreviewCheckpoint() : null;
         var stack = new PlanningStack();
         var job = stack.<List<RootDemand>>start(done -> {
             if (activeRoot != null && !activeRoot.output().isEmpty()) {
@@ -695,9 +696,11 @@ public final class CraftingResolver {
                     if (!resolved && ctx.missingCount() == rootMissingCheckpoint) {
                         recordFailureMissing(ctx, resolvedIngredient, rootMissingCheckpoint);
                     }
-                    rootsByOrder.put(spec.order(), new RootDemand(
+                    RootDemand demand = new RootDemand(
                             resolvedIngredient, spec.count(), missing,
-                            firstDisplayStack(resolvedIngredient), allocations, spec.role()));
+                            firstDisplayStack(resolvedIngredient), allocations, spec.role());
+                    rootsByOrder.put(spec.order(), demand);
+                    if (checkpoint != null) checkpoint.completedRoot(ctx, spec.order(), demand);
                     if (!resolved && !bestEffort) finish();
                     else stack.resume(this);
                     };
@@ -718,20 +721,76 @@ public final class CraftingResolver {
             }
             stack.resume(new Roots());
         });
-        return new TypedPreview(ctx, job, checkPreviewBudget);
+        return new TypedPreview(ctx, job, checkpoint);
+    }
+
+    /** 只保留已结算根对应的前缀。当前根可能还在试探配方，不能发布它的材料边。 */
+    private static final class PreviewCheckpoint {
+        private static final int MAX_NODES = RSIntegrationConfig.MIN_CRAFTING_MAX_GRAPH_NODES;
+        private static final int MAX_DETAILS = 4096;
+        private final Map<Integer, RootDemand> roots = new TreeMap<>();
+        private int nodes;
+        private int edges;
+        private int unresolved;
+        private long nodeDetails;
+        private long rootDetails;
+        private boolean frozen;
+
+        void completedRoot(ResolutionContext context, int order, RootDemand root) {
+            if (frozen) return;
+            if (context.timeoutReached()
+                    || context.graphNodes.size() > MAX_NODES || roots.size() == MAX_NODES) {
+                frozen = true;
+                return;
+            }
+            if (root.unresolvedQuantity() > 0 || context.graphUnresolved.size() > unresolved) {
+                try {
+                    context.requireKnownPreviewBudget();
+                } catch (CraftingPlanningTimeoutException | CraftingPlanningLimitException exhausted) {
+                    frozen = true;
+                    return;
+                }
+            }
+            long details = nodeDetails;
+            for (int i = nodes; i < context.graphNodes.size(); i++) {
+                CraftNode node = context.graphNodes.get(i);
+                details += (long) node.inputs().size() + node.outputs().size() + node.alternativeIds().size();
+            }
+            long rootSize = rootDetails + 1L + root.allocations().size();
+            if (details + rootSize + context.graphAllocations.size() + context.graphUnresolved.size()
+                    > MAX_DETAILS) {
+                frozen = true;
+                return;
+            }
+            roots.put(order, root);
+            nodes = context.graphNodes.size();
+            edges = context.graphAllocations.size();
+            unresolved = context.graphUnresolved.size();
+            nodeDetails = details;
+            rootDetails = rootSize;
+        }
+
+        CraftPlanGraph graph(ResolutionContext context) {
+            List<CraftNode> prefix = context.graphNodes.subList(0, nodes);
+            return new CraftPlanGraph(CraftPlanGraph.CURRENT_VERSION,
+                    prefix, context.graphAllocations.subList(0, edges), new ArrayList<>(roots.values()),
+                    context.graphUnresolved.subList(0, unresolved), prefix.stream().map(CraftNode::id).toList());
+        }
     }
 
     /** 必须在服务器线程推进；等待下一 tick 的时间不计入求解预算。 */
     public static final class TypedPreview {
         private final ResolutionContext context;
         private final PlanningStack.Job<List<RootDemand>> job;
-        private final boolean checkBudget;
+        @Nullable
+        private final PreviewCheckpoint checkpoint;
         private long suspendedAt;
 
-        private TypedPreview(ResolutionContext context, PlanningStack.Job<List<RootDemand>> job, boolean checkBudget) {
+        private TypedPreview(ResolutionContext context, PlanningStack.Job<List<RootDemand>> job,
+                             @Nullable PreviewCheckpoint checkpoint) {
             this.context = context;
             this.job = job;
-            this.checkBudget = checkBudget;
+            this.checkpoint = checkpoint;
             this.suspendedAt = System.nanoTime();
         }
 
@@ -745,7 +804,12 @@ public final class CraftingResolver {
             suspendedAt = 0L;
             // 实际机器状态可能在两个切片之间改变，不跨切片复用其可用性。
             context.beginCandidateSlice();
-            if (job.advance(sliceNanos, allowed)) return true;
+            if (job.advance(sliceNanos, () -> allowed.getAsBoolean()
+                    && (checkpoint == null || !context.timedOut()))) return true;
+            if (checkpoint != null && context.timeoutReached()) {
+                job.cancel();
+                throw new CraftingPlanningTimeoutException();
+            }
             suspendedAt = System.nanoTime();
             return false;
         }
@@ -764,10 +828,16 @@ public final class CraftingResolver {
                     + " attemptedRecipeTypes=" + context.busiestPreviewTypes();
         }
 
+        /** 超时草稿仅用于展示，不走执行图的校验、压缩或并行机器估算。 */
+        public CraftPlanGraph completedRootsGraph() {
+            if (checkpoint == null) throw new IllegalStateException("仅类型预览保留展示进度");
+            return checkpoint.graph(context);
+        }
+
         public CraftPlanGraph graph() {
             ResolutionContext ctx = context;
             List<RootDemand> roots = job.result();
-            if (checkBudget && (!ctx.graphUnresolved.isEmpty()
+            if (checkpoint != null && (!ctx.graphUnresolved.isEmpty()
                     || roots.stream().anyMatch(root -> root.unresolvedQuantity() > 0))) {
                 // 已找到完整替代路径时，早先失败的候选不应使整份计划失败。
                 ctx.requireKnownPreviewBudget();
@@ -1425,6 +1495,11 @@ public final class CraftingResolver {
             return;
         }
         ItemStack output = options[0];
+        var entries = ctx.index.get(output.getItem());
+        if (entries == null || entries.isEmpty()) {
+            stack.resume(next);
+            return;
+        }
         long availableSeed = ctx.countMatching(ingredient);
         if (availableSeed <= 0L || ctx.recipeCycles.containsOutput(output)) {
             stack.resume(next);
@@ -1508,11 +1583,6 @@ public final class CraftingResolver {
         }
         return List.copyOf(ordered);
     }
-        var entries = ctx.index.get(output.getItem());
-        if (entries == null || entries.isEmpty()) {
-            stack.resume(next);
-            return;
-        }
 
     static List<IngredientSpec> coalesceRootSpecs(List<IngredientSpec> specs) {
         return StepExecutor.coalesceSpecsForGraph(specs);

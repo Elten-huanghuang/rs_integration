@@ -12,6 +12,8 @@ import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.Ingre
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.NbtMatchMode;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceLocation;
@@ -28,8 +30,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.zip.ZipFile;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import java.util.zip.ZipFile;
 
 /** 用安装包中的固定配方和磁盘库存运行值规划器，不启动游戏。 */
 public final class PackPlanningReplay {
@@ -40,16 +43,23 @@ public final class PackPlanningReplay {
     private static final String INFINITY_CATALYST = "avaritia:infinity_catalyst";
     private static final String CATALYST_RECIPE = "crafttweaker:infinity_catalyst";
     private static final String VOID_FAVOR = "malum:favor_of_the_void";
+    private static final String CAULDRON = "irons_spellbooks:alchemist_cauldron_brew";
     private static final String ITEM_ID = "[a-z0-9_.-]+:[a-z0-9_./-]+";
+    private static final String SEED = "enigmaticdelicacy:enigmatic_seed";
+    private static final Map<String, String> ENIGMATIC_ITEM_OPTIONS = Map.of(
+            "enigmaticlegacy:evil_ingot", "NefariousIngotEnabled",
+            "enigmaticlegacy:cosmic_heart", "HeartoftheCosmosEnabled");
 
     private final Map<String, JsonObject> raw = new LinkedHashMap<>();
     private final Map<String, List<JsonElement>> tags = new HashMap<>();
     private final Set<String> unsupportedScriptRecipes = new HashSet<>();
+    private Set<String> enabledEnigmaticItems = Set.of();
 
     public static void main(String[] args) throws Exception {
         if (args[0].isBlank()) throw new IllegalArgumentException("需要 -PpackPlanningPath");
         Path root = Path.of(args[0]);
         PackPlanningReplay replay = new PackPlanningReplay();
+        replay.enabledEnigmaticItems = readEnigmaticOptions(root);
         replay.readVanilla(root);
         replay.readJars(root.resolve("mods"));
         Process node = new ProcessBuilder("node", args[1], root.toString())
@@ -62,6 +72,22 @@ public final class PackPlanningReplay {
         replay.applyScripts(scripts);
         replay.applyCraftTweaker(root.resolve("scripts/wujin.zs"));
         replay.solve(root, scripts, args.length > 2 && Boolean.parseBoolean(args[2]));
+    }
+
+    private static Set<String> readEnigmaticOptions(Path root) throws IOException {
+        Set<String> options = readOptions(root.resolve("config/enigmaticlegacy-common.omniconf"));
+        Set<String> enabled = ENIGMATIC_ITEM_OPTIONS.entrySet().stream()
+                .filter(entry -> options.contains("B:" + entry.getValue() + "=true"))
+                .map(Map.Entry::getKey).collect(Collectors.toCollection(HashSet::new));
+        if (readOptions(root.resolve("config/enigmaticdelicacy-common.omniconf")).contains("B:EnigmaticSeedEnabled=true")) {
+            enabled.add(SEED);
+        }
+        return Set.copyOf(enabled);
+    }
+
+    private static Set<String> readOptions(Path config) throws IOException {
+        if (!Files.isRegularFile(config)) return Set.of();
+        return Files.readAllLines(config).stream().map(String::strip).collect(Collectors.toSet());
     }
 
     private void readVanilla(Path root) throws IOException {
@@ -159,6 +185,9 @@ public final class PackPlanningReplay {
             }
             else recipes.computeIfAbsent(node.output(), ignored -> new ArrayList<>()).add(node);
         }
+        boolean cauldronBrewing = savedCauldronBrewing(root);
+        if (cauldronBrewing) addStrengthBrews(recipes);
+        System.out.println("saved_allow_cauldron_brewing=" + cauldronBrewing);
         var targetId = ResourceLocation.parse(TARGET_RECIPE);
         var graph = ImmutableRecipeGraphProjector.restrictToDependencies(new ImmutableRecipeGraph(recipes), targetId);
         RecipeNode target = graph.recipesById().get(targetId);
@@ -175,6 +204,15 @@ public final class PackPlanningReplay {
         if (forced.values().stream().anyMatch(id -> !graph.recipesById().containsKey(id))) {
             throw new IllegalStateException("指定的整合包路线未完整投影：" + forced);
         }
+        var incomplete = unprojectedOutputs.keySet().stream().map(ResourceLocation::parse)
+                .collect(Collectors.toSet());
+        var forcedGraph = ForcedRecipeGraphProjector.apply(graph, forced);
+        var coverage = PurePlanningCoverage.unprojectedDependency(
+                forcedGraph == null ? graph : forcedGraph, targetId, incomplete, forced,
+                PlanningPreferences.empty(), Long.MAX_VALUE);
+        var uncovered = coverage.uncovered() == null ? "-" : coverage.uncovered().itemId().toString();
+        System.out.printf("offline_projection coverage=%s uncovered=%s omittedTypes=%s%n",
+                coverage.status(), uncovered, unprojectedOutputs.getOrDefault(uncovered, Set.of()));
         solveCase("saved_disks", graph, target, stock, forced, unprojectedOutputs);
         Map<MaterialRef, Long> frontier = new HashMap<>();
         graph.recipesById().values().forEach(node -> node.inputs().forEach(input ->
@@ -198,6 +236,15 @@ public final class PackPlanningReplay {
             alternatives(new JsonPrimitive("#" + tag), Set.of())
                     .forEach(item -> gathered.putIfAbsent(item, 1_000_000_000_000L));
         }
+        // 模拟采矿、击杀和收获。玉和神秘果分别来自玉矿和成熟神秘灌木的掉落表。
+        // 金锭也可由整合包的火焰聚焦采矿事件掉落。
+        List<String> directDrops = List.of("minecraft:gold_ingot", "minecraft:gravel",
+                "minecraft:ghast_tear", "minecraft:blaze_rod", "minecraft:feather",
+                "goety:jade", "enigmaticdelicacy:enigmatic_fruit");
+        for (String id : directDrops) {
+            gathered.putIfAbsent(material(id), 1_000_000_000_000L);
+        }
+        System.out.println("assumed_direct_drops=" + directDrops);
         System.out.println("gathered_resource_keys=" + (gathered.size() - frontier.size()));
         solveCase("synthetic_gathered", graph, target, gathered, forced, unprojectedOutputs);
         Map<MaterialRef, List<RecipeNode>> abilityRecipes = new LinkedHashMap<>(recipes);
@@ -212,6 +259,7 @@ public final class PackPlanningReplay {
         }
         var abilityGraph = ImmutableRecipeGraphProjector.restrictToDependencies(
                 new ImmutableRecipeGraph(abilityRecipes), targetId);
+        if (cauldronBrewing) verifyFireShardSupply(abilityGraph);
         // 使用同一组物资，只将现在可以规划的虚空交易产物从假设供料中移除。
         Map<MaterialRef, Long> abilityStock = new HashMap<>(gathered);
         int virtualRecipes = 0;
@@ -223,21 +271,121 @@ public final class PackPlanningReplay {
         }
         System.out.println("hypothetical_void_favor_recipes=" + virtualRecipes);
         solveCase("synthetic_gathered_with_void_favor", abilityGraph, target, abilityStock, forced, unprojectedOutputs);
+        // Malum 的末影人和烈焰人灵魂数据允许这三种灵魂直接采集。
+        Map<MaterialRef, Long> spiritStock = new HashMap<>(abilityStock);
+        List<String> spiritDrops = List.of("malum:eldritch_spirit", "malum:arcane_spirit", "malum:infernal_spirit");
+        for (String id : spiritDrops) {
+            spiritStock.putIfAbsent(material(id), 1_000_000_000_000L);
+        }
+        System.out.println("assumed_spirit_drops=" + spiritDrops);
+        solveCase("synthetic_gathered_with_spirits", abilityGraph, target, spiritStock, forced, unprojectedOutputs);
+        Map<MaterialRef, Long> expandedGathered = new HashMap<>(spiritStock);
+        // 成熟马铃薯、凋灵骷髅和下界矿脉都有外部获取来源，即使整合包同时注册了生产路线。
+        List<String> additionalDrops = List.of(
+                "minecraft:poisonous_potato", "minecraft:wither_skeleton_skull", "minecraft:ancient_debris");
+        for (String id : additionalDrops) {
+            expandedGathered.putIfAbsent(material(id), 1_000_000_000_000L);
+        }
+        System.out.println("assumed_additional_drops=" + additionalDrops);
+        solveCase("synthetic_expanded_gathered", abilityGraph, target, expandedGathered, forced, unprojectedOutputs);
+        Map<MaterialRef, Long> farmStock = new HashMap<>(expandedGathered);
+        // 农夫乐事作物的方块掉落表、原版采集和酿造材料；余烬精华来自火焰首领或要塞守卫。
+        // 灵魂取自 Malum 的鸡、牛和蜘蛛数据，假设已使用能收魂的装备。
+        List<String> harvest = List.of("minecraft:flint", "minecraft:pumpkin", "minecraft:nether_wart",
+                "minecraft:glowstone_dust", "farmersdelight:cabbage", "farmersdelight:onion",
+                "farmersdelight:rice", "farmersdelight:tomato", "irons_spellbooks:cinder_essence",
+                "malum:aerial_spirit", "malum:sacred_spirit", "malum:earthen_spirit", "malum:wicked_spirit");
+        harvest.forEach(id -> farmStock.putIfAbsent(material(id), 1_000_000_000_000L));
+        System.out.println("assumed_harvest_and_spirits=" + harvest);
+        solveCase("synthetic_farm_and_spirits", abilityGraph, target, farmStock, forced, unprojectedOutputs);
+        verifySupplyChanges(abilityGraph, target, farmStock, forced, unprojectedOutputs);
         if (typed) {
             PackTypedPlanningReplay.run("saved_disks", graph, target, stock, forced);
-            PackTypedPlanningReplay.run("synthetic_gathered_with_void_favor", abilityGraph, target, abilityStock, forced);
+            PackTypedPlanningReplay.run("synthetic_gathered_with_spirits", abilityGraph, target, spiritStock, forced);
+            PackTypedPlanningReplay.run("synthetic_expanded_gathered", abilityGraph, target, expandedGathered, forced);
+            PackTypedPlanningReplay.run("synthetic_farm_and_spirits", abilityGraph, target, farmStock, forced);
         }
+        solveBranches("isolated_frontier", graph, target, frontier, forced);
+        solveBranches("isolated_gathered_with_void_favor", abilityGraph, target, abilityStock, forced);
+        solveBranches("isolated_gathered_with_spirits", abilityGraph, target, spiritStock, forced);
+        solveBranches("isolated_expanded_gathered", abilityGraph, target, expandedGathered, forced);
+        solveBranches("isolated_farm_and_spirits", abilityGraph, target, farmStock, forced);
+        for (String id : List.of("thaumcraft:fire_crystal", "thaumcraft:fire_shard")) {
+            solveBranch("isolated_farm_and_spirits", abilityGraph, target, farmStock, forced,
+                    new IngredientRef(List.of(material(id)), 1L, NbtMatchMode.ANY));
+        }
+        solveBranch("isolated_farm_and_spirits", abilityGraph, target, farmStock, forced,
+                new IngredientRef(List.of(material("minecraft:blaze_powder")), 1L, NbtMatchMode.ANY));
+        for (String id : List.of("thaumcraft:air_crystal", "thaumcraft:fire_crystal", "thaumcraft:fire_shard",
+                "makit_better:poplar_wood", "minecraft:netherite_scrap")) {
+            solveBranch("isolated_reported_dependency", abilityGraph, target, spiritStock, forced,
+                    new IngredientRef(List.of(material(id)), 1L, NbtMatchMode.ANY));
+        }
+    }
+
+    private static void verifySupplyChanges(ImmutableRecipeGraph graph, RecipeNode target,
+                                            Map<MaterialRef, Long> stock,
+                                            Map<ResourceLocation, ResourceLocation> forced,
+                                            Map<String, Set<String>> unprojectedOutputs) {
+        var roots = PureDemandNormalizer.mergeEquivalent(target.inputs()).stream()
+                .collect(Collectors.toMap(input -> input.alternatives().get(0).itemId().toString(), input -> input));
+        var voidMetal = roots.get("thaumcraft:void_metal_ingot");
+        var plan = solveBranch("void_metal_bill_baseline", graph, target, stock, forced, voidMetal);
+        if (plan.feasible()) {
+            // 按本次实际使用量构造有限库存，再独立求解一次。
+            Map<MaterialRef, Long> bill = new HashMap<>();
+            stock.forEach((material, count) -> {
+                long used = count - plan.remaining().getOrDefault(material, 0L);
+                if (used > 0) bill.put(material, used);
+            });
+            var verified = solveBranch("void_metal_finite_bill", graph, target, bill, forced, voidMetal);
+            System.out.printf("void_metal_finite_bill verified=%s inputs=%s types=%s%n", verified.feasible(),
+                    bill.entrySet().stream()
+                            .map(entry -> entry.getKey().itemId() + "*" + entry.getValue()
+                                    + (entry.getKey().nbt().isEmpty() ? "" : entry.getKey().nbt()))
+                            .sorted().toList(),
+                    verified.steps().stream().map(step -> graph.recipesById().get(step.recipeId()).recipeTypeId())
+                            .distinct().sorted().toList());
+        }
+        // 甜菜可通过种植取得。灵灾把水生之魂列为鱿鱼、溺尸等实体的掉落。
+        Map<MaterialRef, Long> supplied = new HashMap<>(stock);
+        supplied.put(material("minecraft:beetroot"), 100_000L);
+        supplied.put(material("malum:aqueous_spirit"), 100_000L);
+        solveCase("synthetic_with_beetroot_and_aqueous_spirit", graph, target, supplied, forced, unprojectedOutputs);
+        solveBranch("with_beetroot_and_aqueous_spirit", graph, target, supplied, forced,
+                roots.get("avaritia:infinity_ingot"));
+        solveBranch("with_beetroot_and_aqueous_spirit", graph, target, supplied, forced,
+                roots.get("enigmaticaddons:etherium_core"));
+
+        // 只用来辨别回溯瓶颈。生产烈焰粉的路线已由火碎片回归覆盖。
+        supplied.put(material("minecraft:blaze_powder"), 100_000L);
+        solveCase("synthetic_with_direct_blaze_powder", graph, target, supplied, forced, unprojectedOutputs);
+    }
+
+    private static void solveBranches(String label, ImmutableRecipeGraph graph, RecipeNode target,
+                                      Map<MaterialRef, Long> stock, Map<ResourceLocation, ResourceLocation> forced) {
         for (IngredientRef input : PureDemandNormalizer.mergeEquivalent(target.inputs())) {
-            long start = System.nanoTime();
-            var branch = PureRecipePlanner.resolve(graph, frontier, List.of(input), 4096, 65_536, 8192,
-                    start + 1_000_000_000L, System::nanoTime, Set.of(target.output()), forced,
-                    PlanningPreferences.empty(), false);
-            String firstMissing = branch.missing().isEmpty() ? "-"
-                    : branch.missing().get(0).alternatives().get(0).itemId().toString();
-            System.out.printf("isolated_frontier demand=%s*%d status=%s states=%d firstMissing=%s%n",
-                    input.alternatives().get(0).itemId(), input.count(),
-                    branch.status(), branch.expandedStates(), firstMissing);
+            solveBranch(label, graph, target, stock, forced, input);
         }
+    }
+
+    private static PureRecipePlanner.Result solveBranch(String label, ImmutableRecipeGraph graph, RecipeNode target,
+                                                        Map<MaterialRef, Long> stock,
+                                                        Map<ResourceLocation, ResourceLocation> forced,
+                                                        IngredientRef input) {
+        long start = System.nanoTime();
+        var branch = PureRecipePlanner.resolve(graph, stock, List.of(input), 4096, 65_536, 8192,
+                start + 1_000_000_000L, System::nanoTime, Set.of(target.output()), forced,
+                PlanningPreferences.empty(), false);
+        IngredientRef missing = branch.missing().isEmpty() ? null : branch.missing().get(0);
+        String firstMissing = missing == null ? "-" : missing.alternatives().get(0).itemId().toString();
+        long initial = missing == null ? 0 : stock.entrySet().stream()
+                .filter(entry -> ImmutableRecipeGraphProjector.matchesIngredient(entry.getKey(), missing))
+                .mapToLong(Map.Entry::getValue).sum();
+        System.out.printf("%s demand=%s*%d status=%s states=%d backtracks=%d firstMissing=%s missingCount=%d initial=%d%n",
+                label, input.alternatives().get(0).itemId(), input.count(), branch.status(),
+                branch.expandedStates(), branch.backtracks(), firstMissing, missing == null ? 0 : missing.count(), initial);
+        return branch;
     }
 
     private static void solveCase(String label, ImmutableRecipeGraph graph, RecipeNode target,
@@ -275,7 +423,8 @@ public final class PackPlanningReplay {
         if (!output.matches(ITEM_ID) || !id.matches(ITEM_ID) || !type.matches(ITEM_ID)
                 || unsupportedScriptRecipes.contains(id)
                 || output(recipe) instanceof JsonObject stack && stack.has("unsupported")
-                || recipe.has("conditions") || recipe.has("forge:conditions")) return null;
+                || !hasSupportedConditions(recipe)) return null;
+        if (CAULDRON.equals(type)) return cauldronItemBrew(id, recipe);
         List<JsonElement> slots = new ArrayList<>();
         if (recipe.get("pattern") instanceof JsonArray pattern && recipe.get("key") instanceof JsonObject keys) {
             for (JsonElement line : pattern) {
@@ -301,6 +450,13 @@ public final class PackPlanningReplay {
                 item.addProperty("count", count(spec));
                 slots.add(item);
             }
+        } else if (type.equals("ars_nouveau:enchanting_apparatus")
+                && output.equals("enigmaticaddons:etherium_core")
+                && recipe.get("reagent") instanceof JsonArray reagent
+                && recipe.get("pedestalItems") instanceof JsonArray pedestals) {
+            // 回放普通无标签原料。继承中心物品 NBT 的动态变体由游戏内处理器验证。
+            slots.add(reagent);
+            pedestals.forEach(slots::add);
         } else if (recipe.get("input") != null
                 && (Set.of("botania:mana_infusion", "ars_nouveau:imbuement").contains(type)
                     || assumeVoidFavor && type.equals(VOID_FAVOR))) {
@@ -333,6 +489,21 @@ public final class PackPlanningReplay {
                 ? count(recipe) : count(output(recipe));
         return new RecipeNode(ResourceLocation.parse(id), material(output, output(recipe)), outputCount,
                 inputs, type.substring(0, type.indexOf(':')), ResourceLocation.parse(type));
+    }
+
+    private boolean hasSupportedConditions(JsonObject recipe) {
+        if (recipe.has("forge:conditions")) return false;
+        if (!recipe.has("conditions")) return true;
+        if (!(recipe.get("conditions") instanceof JsonArray conditions)) return false;
+        for (JsonElement condition : conditions) {
+            if (!(condition instanceof JsonObject object)) return false;
+            String type = text(object.get("type"));
+            String item = text(object.get("item"));
+            boolean supported = type.equals("enigmaticlegacy:is_enabled") && ENIGMATIC_ITEM_OPTIONS.containsKey(item)
+                    || type.equals("enigmaticaddons:is_enabled") && item.equals(SEED);
+            if (!supported || !enabledEnigmaticItems.contains(item)) return false;
+        }
+        return true;
     }
 
     private List<MaterialRef> alternatives(JsonElement element, Set<String> visited) {
@@ -393,7 +564,81 @@ public final class PackPlanningReplay {
     }
 
     private static JsonElement output(JsonObject recipe) {
+        if (CAULDRON.equals(text(recipe.get("type"))) && recipe.get("results") instanceof JsonArray fluids
+                && fluids.isEmpty()) return recipe.get("byproduct");
         return recipe.has("result") ? recipe.get("result") : recipe.get("output");
+    }
+
+    private RecipeNode cauldronItemBrew(String id, JsonObject recipe) {
+        if (!(recipe.get("base_fluid") instanceof JsonObject base) || !(recipe.get("byproduct") instanceof JsonObject item)
+                || !(recipe.get("results") instanceof JsonArray fluids) || !fluids.isEmpty()) return null;
+        String fluid = text(base.get("FluidName"));
+        if (!fluid.matches(ITEM_ID) || !base.has("Amount") || base.get("Amount").getAsLong() <= 0) return null;
+        CompoundTag tag = new CompoundTag();
+        if (base.has("Tag")) {
+            if (!(base.get("Tag") instanceof JsonObject data)) return null;
+            for (var entry : data.entrySet()) {
+                if (!(entry.getValue() instanceof JsonPrimitive value) || !value.isString()) return null;
+                tag.putString(entry.getKey(), value.getAsString());
+            }
+        }
+        var reagent = alternatives(recipe.get("input"), Set.of());
+        if (reagent.isEmpty()) return null;
+        var mode = reagent.stream().anyMatch(m -> !m.nbt().isEmpty()) ? NbtMatchMode.EXACT : NbtMatchMode.ANY;
+        return new RecipeNode(ResourceLocation.parse(id), material(item(item), item), count(item), List.of(
+                new IngredientRef(List.of(MaterialRef.fluid(ResourceLocation.parse(fluid), tag.isEmpty() ? "" : tag.toString())),
+                        base.get("Amount").getAsLong(), NbtMatchMode.EXACT),
+                new IngredientRef(reagent, 1, mode)), "irons_spellbooks", ResourceLocation.parse(CAULDRON));
+    }
+
+    private static boolean savedCauldronBrewing(Path root) throws IOException {
+        // 回放读取各存档磁盘，因此只在所有相关存档实际开启酿造时启用这条条件路线。
+        try (var paths = Files.walk(root.resolve("saves"), 3)) {
+            var disks = paths.filter(p -> p.getFileName().toString().equals("refinedstorage_disks.dat")).toList();
+            for (Path disk : disks) {
+                var config = disk.getParent().getParent().resolve("serverconfig/irons_spellbooks-server.toml");
+                if (!readOptions(config).stream().anyMatch(s -> s.matches("allowCauldronBrewing\\s*=\\s*true"))) return false;
+            }
+            return !disks.isEmpty();
+        }
+    }
+
+    private static MaterialRef regularPotion(String potion) {
+        if (potion.equals("water")) return MaterialRef.fluid(ResourceLocation.parse("minecraft:water"));
+        CompoundTag tag = new CompoundTag();
+        tag.putString("irons_spellbooks:bottle_type", "REGULAR");
+        tag.putString("Potion", "minecraft:" + potion);
+        return MaterialRef.fluid(ResourceLocation.parse("irons_spellbooks:potion"), tag.toString());
+    }
+
+    private static void addStrengthBrews(Map<MaterialRef, List<RecipeNode>> recipes) {
+        // 对应原版三步力量药水，以及 IronSpellBooksRecipe.potionBrewRecipe 的整锅四瓶用量。
+        long volume = 4L * InkFluidSupport.BOTTLE_AMOUNT;
+        String previous = "water";
+        for (var step : List.of(List.of("awkward", "nether_wart"), List.of("strength", "blaze_powder"),
+                List.of("strong_strength", "glowstone_dust"))) {
+            MaterialRef output = regularPotion(step.get(0));
+            var recipe = new RecipeNode(ResourceLocation.parse("pack_replay:alchemist/" + step.get(0)), output,
+                    volume, List.of(new IngredientRef(List.of(regularPotion(previous)), volume),
+                    new IngredientRef(List.of(material("minecraft:" + step.get(1))), 1, NbtMatchMode.ANY)),
+                    "irons_spellbooks", ResourceLocation.parse(CAULDRON));
+            recipes.computeIfAbsent(output, ignored -> new ArrayList<>()).add(recipe);
+            previous = step.get(0);
+        }
+    }
+
+    private static void verifyFireShardSupply(ImmutableRecipeGraph graph) {
+        // 从烈焰棒和一锅水开始，验证烈焰粉生产、酿造消耗和剩余药水。
+        var stock = Map.of(regularPotion("water"), 1000L, material("minecraft:nether_wart"), 1L,
+                material("minecraft:blaze_rod"), 1L, material("minecraft:glowstone_dust"), 1L,
+                material("irons_spellbooks:cinder_essence"), 1L);
+        var demand = new IngredientRef(List.of(material("thaumcraft:fire_shard")), 8);
+        var plan = PureRecipePlanner.resolve(graph, stock, List.of(demand), 64, 65_536, 8192);
+        if (!plan.feasible() || !plan.remaining().equals(Map.of(
+                regularPotion("strong_strength"), 750L, material("minecraft:blaze_powder"), 1L))) {
+            throw new IllegalStateException("火碎片材料流与整包配方不符：" + plan.status() + " " + plan.remaining());
+        }
+        System.out.printf("verified_fire_shard_from_raw steps=%s remaining_strong_strength_mb=750%n", plan.steps());
     }
 
     private static String item(JsonElement element) {

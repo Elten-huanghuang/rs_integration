@@ -26,6 +26,9 @@ final class CraftPlanResultDispatcher {
     interface Sink {
         void success(PlanResponse plan, PlanningSnapshot snapshot);
         void error(PlanOutcome outcome, IntegrationDiagnostic diagnostic);
+        default void incomplete(PlanResponse plan) {
+            error(plan.outcome(), plan.diagnostics().get(0));
+        }
         default void cancelled(Component message) {}
         default void notice(Component message) {}
     }
@@ -55,6 +58,15 @@ final class CraftPlanResultDispatcher {
                 Component message = diagnostic.clientMessage();
                 PlanningProgressServer.fail(player, previewGeneration, message);
                 PlanResponsePublisher.sendError(player, outcome, diagnostic, requestId);
+            }
+
+            @Override
+            public void incomplete(PlanResponse plan) {
+                if (!gate.tryEnterTerminal(previewGeneration)) return;
+                RESULT_GATES.remove(key, gate);
+                // 进度表示将交付预览。超时原因由草稿携带，避免客户端先收到失败进度而关闭等待。
+                PlanningProgressServer.succeed(player, previewGeneration);
+                PlanResponsePublisher.send(player, plan, requestId);
             }
 
             @Override

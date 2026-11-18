@@ -31,7 +31,7 @@ public final class PlanMaterialTable {
     private boolean filterDirty = true;
     private final List<Hit> hits = new ArrayList<>();
     private Rect bounds;
-    private boolean onlyMissing;
+    private boolean onlyMissing, incomplete;
     private String query = "";
     private int scroll, maxScroll;
     private ItemStack hoveredItem = ItemStack.EMPTY;
@@ -46,6 +46,8 @@ public final class PlanMaterialTable {
     }
 
     public void update(PlanResponse plan) {
+        incomplete = plan.outcome() == PlanOutcome.BUDGET_EXHAUSTED;
+        if (incomplete) onlyMissing = false;
         List<Row> data = new ArrayList<>();
         plan.materials().forEach((key, value) -> data.add(new Row(key, value.needed(),
                 value.available(), value.missingCount(), false)));
@@ -67,10 +69,10 @@ public final class PlanMaterialTable {
         chrome.resetActions();
         PlanWorkspaceChrome.panel(g, bounds, Color.BACKGROUND, Color.BORDER);
         int x = bounds.x() + 7, width = bounds.width() - 14;
-        chrome.button(g, new Rect(x, bounds.y() + 6, 62, 18), text("all_materials"),
+        chrome.button(g, new Rect(x, bounds.y() + 6, 62, 18), text(incomplete ? "settled_materials" : "all_materials"),
                 !onlyMissing, true, mouseX, mouseY, () -> { onlyMissing = false; scroll = 0; filterDirty = true; });
         chrome.button(g, new Rect(x + 66, bounds.y() + 6, 62, 18), text("only_missing"),
-                onlyMissing, true, mouseX, mouseY, () -> { onlyMissing = true; scroll = 0; filterDirty = true; });
+                onlyMissing, !incomplete, mouseX, mouseY, () -> { onlyMissing = true; scroll = 0; filterDirty = true; });
         chrome.button(g, new Rect(bounds.right() - 105, bounds.y() + 6, 98, 18), text("bookmark_all_short"),
                 false, rows.stream().anyMatch(row -> row.missing() > 0), mouseX, mouseY, bookmarkAll);
         boolean wide = width >= 500;
@@ -83,7 +85,7 @@ public final class PlanMaterialTable {
         g.fill(x, headerY - 9, x + width, headerY + 14, Color.SURFACE.value());
         label(g, text("column_material"), x + 5, headerY, nameEnd - x - 10, Color.MUTED);
         label(g, text("column_need"), needX, headerY, countWidth - 2, Color.MUTED);
-        label(g, text("column_stock"), stockX, headerY, countWidth - 2, Color.MUTED);
+        label(g, text(incomplete ? "snapshot_stock" : "column_stock"), stockX, headerY, countWidth - 2, Color.MUTED);
         label(g, text("column_missing"), missingX, headerY, countWidth - 2, Color.MUTED);
         if (wide) label(g, text("column_source"), sourceX, headerY, actionX - sourceX - 4, Color.MUTED);
         int top = headerY + 17, bottom = bounds.bottom() - 19;
@@ -117,7 +119,8 @@ public final class PlanMaterialTable {
                                 y + 7, countWidth - 2, Color.MUTED);
                         label(g, row.missing() == 0 ? "—" : PlanRenderEngine.formatCompact(row.missing()),
                                 missingX, y + 7, countWidth - 2, row.missing() > 0 ? Color.WARNING : Color.MUTED);
-                        if (wide) label(g, text(row.leftover() ? "leftover_source" : row.missing() > 0 ? "missing_source"
+                        if (wide) label(g, text(incomplete ? "settled_source"
+                                        : row.leftover() ? "leftover_source" : row.missing() > 0 ? "missing_source"
                                         : row.available() < row.needed() ? "planned_source" : "ready_source"),
                                 sourceX, y + 7, actionX - sourceX - 4, row.missing() > 0 ? Color.WARNING : Color.READY);
                         label(g, text(row.missing() > 0 ? "locate_star" : "locate_short"), actionX, y + 7,
@@ -128,7 +131,8 @@ public final class PlanMaterialTable {
                 }
             } finally { g.disableScissor(); }
         }
-        label(g, text("table_hint"), x, bounds.bottom() - 13, width, Color.MUTED);
+        label(g, text(incomplete ? "settled_materials_only" : "table_hint"),
+                x, bounds.bottom() - 13, width, Color.MUTED);
         if (maxScroll > 0 && bottom > top) {
             int trackHeight = bottom - top;
             int thumbHeight = Math.min(trackHeight, Math.max(8, trackHeight * trackHeight / (trackHeight + maxScroll)));
@@ -136,7 +140,8 @@ public final class PlanMaterialTable {
             g.fill(bounds.right() - 5, top, bounds.right() - 3, bottom, Color.SURFACE.value());
             g.fill(bounds.right() - 5, thumbY, bounds.right() - 3, thumbY + thumbHeight, Color.ACCENT.value());
         }
-        if (visible.isEmpty()) label(g, text("empty"), x + 8, top + 6, width - 16, Color.MUTED);
+        if (visible.isEmpty()) label(g, text(incomplete && rows.isEmpty() ? "no_settled_materials" : "empty"),
+                x + 8, top + 6, width - 16, Color.MUTED);
         if (!hoveredItem.isEmpty()) g.renderTooltip(font, hoveredItem, mouseX, mouseY);
     }
 

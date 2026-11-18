@@ -141,8 +141,17 @@ public record PlanGraphView(
         return null;
     }
 
+    /** 只枚举已经分配到初始库存的材料，包括直接供给目标配方的材料。 */
+    public void visitInitialAllocations(ObjLongConsumer<ItemStack> accept) {
+        visitExternalDemand(accept, false);
+    }
+
     /** 只枚举外部承担的数量，生产者的输出不再计入初始库存。 */
     public void visitExternalDemand(ObjLongConsumer<ItemStack> accept) {
+        visitExternalDemand(accept, true);
+    }
+
+    private void visitExternalDemand(ObjLongConsumer<ItemStack> accept, boolean includeUnresolved) {
         for (EdgeView edge : edges) {
             if (edge.source().initial()) accept.accept(edge.material(), edge.quantity());
         }
@@ -150,9 +159,12 @@ public record PlanGraphView(
             for (RootEdgeView edge : root.allocations()) {
                 if (edge.source().initial()) accept.accept(edge.material(), edge.quantity());
             }
-            if (root.unresolvedQuantity() > 0) accept.accept(root.display(), root.unresolvedQuantity());
+            if (includeUnresolved && root.unresolvedQuantity() > 0)
+                accept.accept(root.display(), root.unresolvedQuantity());
         }
-        for (UnresolvedView input : unresolved) accept.accept(input.display(), input.quantity());
+        if (includeUnresolved) {
+            for (UnresolvedView input : unresolved) accept.accept(input.display(), input.quantity());
+        }
     }
 
     /** 卡片和递归树共用已经通过服务端可用性检查的候选，不改动执行节点或材料边。 */
