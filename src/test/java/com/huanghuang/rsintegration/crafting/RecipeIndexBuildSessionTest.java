@@ -45,6 +45,7 @@ import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.ModList;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraftforge.server.ServerLifecycleHooks;
+import org.apache.logging.log4j.Logger;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -65,6 +66,25 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class RecipeIndexBuildSessionTest extends BootstrapTest {
+    @Test
+    void budgetBoundaryDoesNotWarnAndRealOverrunsAreReportedOnce() {
+        var overruns = new RecipeIndex.CaptureOverruns();
+        Logger logger = mock(Logger.class);
+        for (int i = 0; i < 100; i++) overruns.record("vanilla brewing", 8_999_999L);
+        overruns.report(logger);
+        verifyNoInteractions(logger);
+
+        overruns.record("fluid containers", 9_000_000L);
+        overruns.record("vanilla brewing", 52_500_000L);
+        overruns.record("test:recipe", 13_000_000L);
+        verifyNoInteractions(logger);
+        overruns.report(logger);
+        overruns.report(logger);
+        verify(logger).warn("[RecipeCatalog] {} capture units exceeded the {}ms tick budget by at least 1ms; "
+                        + "slowest: {} ({}ms)", 3L, 8L, "vanilla brewing", 52L);
+        verifyNoMoreInteractions(logger);
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {
             "alkahestry/crafting/netherrack",

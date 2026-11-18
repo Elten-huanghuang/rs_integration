@@ -44,6 +44,7 @@ import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.level.Level;
+import org.apache.logging.log4j.Logger;
 import net.minecraftforge.registries.ForgeRegistries;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipe;
 import com.huanghuang.rsintegration.util.ItemStackUtils;
@@ -244,6 +245,7 @@ public final class RecipeIndex {
     }
 
     private static void discardBuild() {
+        if (activeBuild != null) activeBuild.captureOverruns.report(RSIntegrationMod.LOGGER);
         if (activeBuild != null && activeBuild.fluidIndex != null) activeBuild.fluidIndex.cancel();
         if (activeBuild != null && activeBuild.finalized != null) {
             activeBuild.finalized.cancel(false);
@@ -335,6 +337,7 @@ public final class RecipeIndex {
         Diagnostics.stopTimer("RecipeIndex.build", session.diagTimer);
         Diagnostics.record(Diagnostics.Category.INDEX_BUILD,
                 result.index.size() + " items, " + session.seen.size() + " entries");
+        session.captureOverruns.report(RSIntegrationMod.LOGGER);
         RSIntegrationMod.LOGGER.info(
                 "[RecipeCatalog] generation ready: {} items, {} entries, {} pure recipes, {}ms elapsed, "
                         + "{}ms capture, {}ms finalize; skipped {} unknown/{} empty/{} identity; slowest {} {}ms",
@@ -362,6 +365,32 @@ public final class RecipeIndex {
 
     enum BuildPhase { RECIPES, SOURCES, SPELL_SCROLLS, OUTPUT_IDS, COMPLETE }
 
+    static final class CaptureOverruns {
+        private long count;
+        private long slowestNanos;
+        private String slowestUnit;
+
+        void record(String unit, long elapsedNanos) {
+            // 分片在操作之间检查截止时间，正常让出时允许亚毫秒超出预算。
+            if (elapsedNanos < TICK_BUDGET_NANOS + 1_000_000L) return;
+            count++;
+            if (elapsedNanos > slowestNanos) {
+                slowestNanos = elapsedNanos;
+                slowestUnit = unit;
+            }
+        }
+
+        void report(Logger logger) {
+            if (count == 0) return;
+            logger.warn("[RecipeCatalog] {} capture units exceeded the {}ms tick budget by at least 1ms; "
+                            + "slowest: {} ({}ms)",
+                    count, TICK_BUDGET_NANOS / 1_000_000L, slowestUnit, slowestNanos / 1_000_000L);
+            count = 0;
+            slowestNanos = 0;
+            slowestUnit = null;
+        }
+    }
+
     static final class BuildSession {
         final Level level;
         final RecipeManager manager;
@@ -382,6 +411,7 @@ public final class RecipeIndex {
         final Map<ResourceLocation, Set<ResourceLocation>> producersByOutput = new HashMap<>();
         final Map<String, UnknownRecipeTypeStats> unknownRecipeTypes = new HashMap<>();
         final BuildTiming timing = new BuildTiming();
+        final CaptureOverruns captureOverruns = new CaptureOverruns();
         BuildPhase phase = BuildPhase.RECIPES;
         int sourceStep;
         int skippedUnknown;
@@ -407,7 +437,7 @@ public final class RecipeIndex {
             recipeCount = captured.size();
             recipes = captured.iterator();
             captureNanos = System.nanoTime() - started;
-            logSlowUnit("recipe collection", captureNanos);
+            captureOverruns.record("recipe collection", captureNanos);
         }
 
         boolean isCurrent() {
@@ -514,7 +544,7 @@ public final class RecipeIndex {
                 }
                 long elapsed = System.nanoTime() - unitStarted;
                 captureNanos += elapsed;
-                logSlowUnit(unit, elapsed);
+                captureOverruns.record(unit, elapsed);
                 // 第三方目录刷新可能改变 revision；下一 tick 必须重新开始采集。
                 if (!isCurrent()) return false;
             }
