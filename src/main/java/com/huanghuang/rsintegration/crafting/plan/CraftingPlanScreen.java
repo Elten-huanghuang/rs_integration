@@ -28,6 +28,7 @@ import com.huanghuang.rsintegration.client.gui.CraftingGlassBackground;
 import com.huanghuang.rsintegration.client.gui.CraftingThemeDecoration;
 import com.huanghuang.rsintegration.config.CraftingUiTheme;
 import com.huanghuang.rsintegration.config.PlanUiConfig.Color;
+import com.huanghuang.rsintegration.crafting.plan.PlanResponseRequestState.Confirmation;
 import com.huanghuang.rsintegration.crafting.plan.PlanWorkspaceLayout.Rect;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
@@ -183,6 +184,7 @@ public final class CraftingPlanScreen extends Screen {
     private int preparationModeX, preparationModeY, preparationModeW, preparationModeH;
     /** Per-operation opt-in; strict terminal crafting remains the default. */
     private boolean partialPreparation;
+    private final Set<Integer> heldConfirmationKeys = new HashSet<>();
     @Nullable
     private Button confirmButton;
     // 候选配方与主视图共用服务器分支选择，右侧面板只负责展示和导航。
@@ -287,7 +289,6 @@ public final class CraftingPlanScreen extends Screen {
     public void onClose() {
         preserveLatestPreview();
         stopInventoryWatch();
-        responseRequests.cancelConfirmation();
         if (responseRequests.pending()) {
             PlanBackgroundClient.detach(responseRequests.activeRequestId());
         }
@@ -303,7 +304,6 @@ public final class CraftingPlanScreen extends Screen {
         preserveLatestPreview();
         if (responseRequests.pending()) PlanBackgroundClient.detach(responseRequests.activeRequestId());
         stopInventoryWatch();
-        responseRequests.cancelConfirmation();
         treeMouseGesture.cancel();
         super.removed();
     }
@@ -323,10 +323,9 @@ public final class CraftingPlanScreen extends Screen {
                     responseRequests.expectedRecipeId());
             return false;
         }
-        // 新数量尚未发出时，旧请求的响应也不能覆盖当前输入或触发合成。
+        // 新数量尚未发出时，旧请求的响应不能覆盖当前输入。
         if (responseRequests.refreshScheduled()) return true;
         if (newPlan.recipeId() == null || newPlan.recipeId().isEmpty()) {
-            responseRequests.cancelConfirmation();
             if (minecraft != null && minecraft.player != null) {
                 List<Component> warnings = displayWarnings(newPlan);
                 if (!warnings.isEmpty()) {
@@ -343,7 +342,7 @@ public final class CraftingPlanScreen extends Screen {
         // 从候选面板切回上一条配方。
         if (externalRequest == null && PlanPreviewDecision.keepCurrentPlan(
                 plan, newPlan, pendingCandidateSwitch != null || pendingMaterialChoice != null)) {
-            responseRequests.cancelConfirmation();
+            responseRequests.requireRetry();
             if (minecraft != null && minecraft.player != null) {
                 List<Component> warnings = displayWarnings(newPlan);
                 minecraft.player.displayClientMessage(warnings.isEmpty()
@@ -359,13 +358,6 @@ public final class CraftingPlanScreen extends Screen {
         if (newPlan.outcome() != PlanOutcome.BUDGET_EXHAUSTED) {
             previewFeedback = workspaceText("recalculated");
             previewFeedbackColor = Color.READY;
-        }
-        boolean executable = (newPlan.success() && !newPlan.executionBlocked())
-                || (partialPreparation && newPlan.outcome() == PlanOutcome.MISSING_INPUTS);
-        if (responseRequests.consumeConfirmation(executable)) {
-            onConfirm();
-        } else {
-            updateConfirmButton();
         }
         return true;
     }
@@ -497,12 +489,10 @@ public final class CraftingPlanScreen extends Screen {
                                         .filter(candidate -> candidate.state() == MachineCandidateView.State.READY)
                                         .findFirst().map(candidate -> plan.machineCandidates().indexOf(candidate)).orElse(-1);
                             }
-                            cancelQueuedConfirmation();
                         }
                         @Override public void selectCandidate(int index) {
                             selectedMachineIndex = index;
                             if (machineSelectionMode == MachineSelectionMode.AUTO) machineSelectionMode = MachineSelectionMode.PREFERRED;
-                            cancelQueuedConfirmation();
                         }
                         @Override public void openTarget() { onOpenMachine(); }
                     });
@@ -557,7 +547,7 @@ public final class CraftingPlanScreen extends Screen {
         workspaceSearch.setValue(oldSearch);
         addWidget(workspaceSearch);
         confirmButton = addRenderableWidget(new PlanUiButton(0, 0, 150, 24,
-                executionActionLabel(), button -> onConfirm()).primary());
+                Component.empty(), button -> onConfirm()).primary());
         if (externalRequest == null) confirmButton.setTooltip(Tooltip.create(
                 Component.translatable("rsi.plan.machine_clear_notice")));
         cancelButton = addRenderableWidget(new PlanUiButton(0, 0, 72, 24,
@@ -566,13 +556,15 @@ public final class CraftingPlanScreen extends Screen {
         layoutWorkspace();
     }
 
-    private Component executionActionLabel() {
-        if (responseRequests.confirmationRequested()) {
+    private Component executionActionLabel(Confirmation confirmation, PlanConfirmationAction inventoryAction) {
+        if (confirmation == Confirmation.WAIT) {
             return Component.translatable("rsi.plan.confirm_waiting");
         }
+        if (confirmation == Confirmation.RECALCULATE && responseRequests.refreshRequired()) {
+            return Component.translatable("rsi.plan.recalculate");
+        }
         if (partialPreparation) return Component.translatable("rsi.plan.prepare.action");
-        PlanConfirmationAction action = inventoryConfirmationAction();
-        if (action.labelKey != null) return Component.translatable(action.labelKey);
+        if (inventoryAction.labelKey != null) return Component.translatable(inventoryAction.labelKey);
         return Component.translatable(selectedPath.isDirty()
                 ? "rsi.plan.confirm_branches" : "rsi.plan.confirm");
     }
@@ -586,16 +578,16 @@ public final class CraftingPlanScreen extends Screen {
 
     private void updateConfirmButton() {
         if (confirmButton == null) return;
-        confirmButton.setMessage(executionActionLabel());
-        confirmButton.active = !responseRequests.confirmationRequested()
-                && plan.outcome() != PlanOutcome.BUDGET_EXHAUSTED
-                && (responseRequests.waitingForPreview() || partialPreparation
-                || !plan.executionBlocked() || selectedPath.isDirty());
+        PlanConfirmationAction inventoryAction = inventoryConfirmationAction();
+        Confirmation confirmation = confirmation(inventoryAction);
+        confirmButton.setMessage(executionActionLabel(confirmation, inventoryAction));
+        confirmButton.active = confirmation == Confirmation.EXECUTE || confirmation == Confirmation.RECALCULATE;
     }
 
-    private void cancelQueuedConfirmation() {
-        responseRequests.cancelConfirmation();
-        updateConfirmButton();
+    private Confirmation confirmation(PlanConfirmationAction inventoryAction) {
+        return responseRequests.confirmation(plan.outcome() == PlanOutcome.BUDGET_EXHAUSTED,
+                !partialPreparation && inventoryAction.replan,
+                partialPreparation || !plan.executionBlocked() || selectedPath.isDirty());
     }
 
     private void createRepeatCountInput(Font font) {
@@ -677,7 +669,6 @@ public final class CraftingPlanScreen extends Screen {
                 ? OutputDestination.RS_NETWORK : destination;
         if (selected == outputDestination) return;
         outputDestination = selected;
-        cancelQueuedConfirmation();
         if (!CraftingPlanPreferences.saveOutputDestination(PLAN_PREFS_PATH, selected)) {
             RSIntegrationMod.LOGGER.debug("[RSI-Plan] Failed to save output destination preference");
         }
@@ -685,7 +676,6 @@ public final class CraftingPlanScreen extends Screen {
 
     private void toggleMaterialSource(Source source) {
         materialSources = materialSources.toggle(source);
-        cancelQueuedConfirmation();
         stopInventoryWatch();
         if (!CraftingPlanPreferences.saveMaterialSources(PLAN_PREFS_PATH, materialSources)) {
             RSIntegrationMod.LOGGER.warn("[RSI-Plan] 无法保存原材料来源偏好");
@@ -716,17 +706,12 @@ public final class CraftingPlanScreen extends Screen {
     private void onConfirm() {
         if (plan.outcome() == PlanOutcome.BUDGET_EXHAUSTED) return;
         commitRepeatCountInput();
-        if (responseRequests.confirmationRequested()) return;
-        if (!partialPreparation && inventoryConfirmationAction().replan) {
-            responseRequests.scheduleRefresh();
-        }
-        // 点击确认时立即发出防抖中的最新预览，避免执行请求打断仍在运行的规划。
-        if (responseRequests.refreshRequired()) refreshPlan();
-        if (responseRequests.requestConfirmation()) {
-            updateConfirmButton();
+        Confirmation confirmation = confirmation(inventoryConfirmationAction());
+        if (confirmation == Confirmation.RECALCULATE) {
+            refreshPlan();
             return;
         }
-        if (!partialPreparation && plan.executionBlocked() && !selectedPath.isDirty()) return;
+        if (confirmation != Confirmation.EXECUTE) return;
         String recipeId = plan.recipeId();
         ResourceLocation targetId = ResourceLocation.tryParse(recipeId);
         if (QuestSubmissionTargetIds
@@ -2247,7 +2232,7 @@ public final class CraftingPlanScreen extends Screen {
             if (button == 0) {
                 partialPreparation = !partialPreparation;
                 if (partialPreparation) selectOutputDestination(OutputDestination.RS_NETWORK);
-                cancelQueuedConfirmation();
+                updateConfirmButton();
             }
             return true;
         }
@@ -2305,7 +2290,6 @@ public final class CraftingPlanScreen extends Screen {
                     && mx >= embersModeCalcX && mx <= embersModeCalcX + embersModeCalcW
                     && my >= embersModeCalcY && my <= embersModeCalcY + embersModeCalcH) {
                 embersInferMode = false;
-                cancelQueuedConfirmation();
                 return true;
             }
             // Embers mode toggle: Infer
@@ -2313,7 +2297,6 @@ public final class CraftingPlanScreen extends Screen {
                     && mx >= embersModeInferX && mx <= embersModeInferX + embersModeInferW
                     && my >= embersModeInferY && my <= embersModeInferY + embersModeInferH) {
                 embersInferMode = true;
-                cancelQueuedConfirmation();
                 return true;
             }
         }
@@ -2336,6 +2319,11 @@ public final class CraftingPlanScreen extends Screen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        boolean enter = keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER;
+        boolean confirmWithSpace = keyCode == GLFW.GLFW_KEY_SPACE && confirmButton != null && confirmButton.isFocused();
+        // 长按产生的重复事件不算一次新的确认，即使期间已经收到预览。
+        if (heldConfirmationKeys.contains(keyCode)) return true;
+        if (enter || confirmWithSpace) heldConfirmationKeys.add(keyCode);
         if (themeButton != null && themeButton.wheelKeyPressed(keyCode)) return true;
         if (keyCode == GLFW.GLFW_KEY_ESCAPE && materialSourcesMenuOpen) {
             materialSourcesMenuOpen = false;
@@ -2346,7 +2334,7 @@ public final class CraftingPlanScreen extends Screen {
                 treeSearch.close(); workspaceSearch.setFocused(false); return true;
             }
             if (!materialView && !embersDetailsOpen && treeSearch.keyPressed(keyCode)) return true;
-            if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
+            if (enter) {
                 return true;
             }
             workspaceSearch.keyPressed(keyCode, scanCode, modifiers);
@@ -2355,7 +2343,7 @@ public final class CraftingPlanScreen extends Screen {
         if (keyCode == GLFW.GLFW_KEY_ESCAPE && quantityMenuOpen) { quantityMenuOpen = false; return true; }
 
         if (repeatCountBox != null && repeatCountBox.isFocused()) {
-            if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
+            if (enter) {
                 unfocusRepeatCountInput();
                 return true;
             }
@@ -2381,12 +2369,17 @@ public final class CraftingPlanScreen extends Screen {
             if (!detailsPanel.isOpen()) dropdownNode = null;
             return true;
         }
-        // Enter — one-click start (§2.5 speedrun): apply branch selections and execute.
-        if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
+        if (enter || confirmWithSpace) {
             onConfirm();
             return true;
         }
         return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+
+    @Override
+    public boolean keyReleased(int keyCode, int scanCode, int modifiers) {
+        heldConfirmationKeys.remove(keyCode);
+        return super.keyReleased(keyCode, scanCode, modifiers);
     }
 
     @Override

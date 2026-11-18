@@ -2,6 +2,10 @@ package com.huanghuang.rsintegration.crafting.plan;
 
 import org.junit.jupiter.api.Test;
 
+import static com.huanghuang.rsintegration.crafting.plan.PlanResponseRequestState.Confirmation.BLOCKED;
+import static com.huanghuang.rsintegration.crafting.plan.PlanResponseRequestState.Confirmation.EXECUTE;
+import static com.huanghuang.rsintegration.crafting.plan.PlanResponseRequestState.Confirmation.RECALCULATE;
+import static com.huanghuang.rsintegration.crafting.plan.PlanResponseRequestState.Confirmation.WAIT;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -75,10 +79,8 @@ class PlanResponseRequestStateTest {
         PlanResponseRequestState second = new PlanResponseRequestState(11L, POPPY);
         assertEquals(0L, first.beginPreview(12L, POPPY));
         assertEquals(0L, second.beginPreview(13L, POPPY));
-        first.requestConfirmation();
 
         assertEquals(12L, first.beginPreview(14L, DANDELION));
-        assertFalse(first.confirmationRequested());
         assertFalse(first.accept(12L, POPPY));
         assertTrue(second.pending());
         assertTrue(second.accept(13L, POPPY));
@@ -117,8 +119,11 @@ class PlanResponseRequestStateTest {
         assertFalse(state.accept(10L, ""));
         assertTrue(state.accept(11L, ""));
         assertFalse(state.accept(10L, POPPY));
+        assertFalse(state.calculating());
+        assertEquals(RECALCULATE, state.confirmation(false, false, true));
         state.beginPreview(12L, POPPY);
         assertTrue(state.accept(12L, POPPY));
+        assertEquals(EXECUTE, state.confirmation(false, false, true));
     }
 
     @Test
@@ -126,7 +131,7 @@ class PlanResponseRequestStateTest {
         PlanResponseRequestState state = new PlanResponseRequestState(10L, POPPY);
 
         assertFalse(state.pending());
-        assertFalse(state.calculating(), "重算失败后必须恢复路线修改和重试入口");
+        assertFalse(state.calculating());
         state.beginPreview(11L, POPPY);
         assertTrue(state.pending());
         assertTrue(state.accept(11L, POPPY));
@@ -134,156 +139,102 @@ class PlanResponseRequestStateTest {
     }
 
     @Test
-    void confirmationWaitsForTheLatestPreviewAndCanOnlyBeConsumedOnce() {
+    void inventoryRecalculationDoesNotAuthorizeExecutionWhileWaiting() {
         PlanResponseRequestState state = new PlanResponseRequestState(10L, POPPY);
+
+        assertEquals(RECALCULATE, state.confirmation(false, true, false));
         state.beginPreview(11L, POPPY);
 
-        assertTrue(state.requestConfirmation());
-        assertFalse(state.consumeConfirmation(true));
+        assertEquals(WAIT, state.confirmation(false, true, true));
+        assertEquals(WAIT, state.confirmation(false, false, true));
         assertFalse(state.accept(10L, POPPY));
-        assertFalse(state.consumeConfirmation(true));
+        assertEquals(WAIT, state.confirmation(false, false, true));
         assertTrue(state.accept(11L, POPPY));
-        assertTrue(state.consumeConfirmation(true));
-        assertFalse(state.consumeConfirmation(true));
+        assertEquals(EXECUTE, state.confirmation(false, false, true));
     }
 
     @Test
-    void confirmationBeforeDebounceExpiresWaitsForTheScheduledPreview() {
+    void confirmationBeforeDebounceExpiresRequestsOnlyTheLatestQuantityPreview() {
         PlanResponseRequestState state = new PlanResponseRequestState(10L, POPPY);
         state.scheduleRefresh();
-
-        assertFalse(state.pending());
-        assertTrue(state.waitingForPreview());
-        assertTrue(state.requestConfirmation());
-        assertFalse(state.consumeConfirmation(true));
+        assertEquals(RECALCULATE, state.confirmation(false, false, true));
 
         state.beginPreview(11L, POPPY);
         assertFalse(state.refreshScheduled());
-        assertTrue(state.requestConfirmation());
-        assertTrue(state.accept(11L, POPPY));
-        assertTrue(state.consumeConfirmation(true));
-    }
+        assertEquals(WAIT, state.confirmation(false, false, true));
 
-    @Test
-    void repeatedConfirmationDoesNotCreateMultipleExecutions() {
-        PlanResponseRequestState state = new PlanResponseRequestState(10L, POPPY);
-        state.beginPreview(11L, POPPY);
-
-        assertTrue(state.requestConfirmation());
-        assertTrue(state.requestConfirmation());
-        assertTrue(state.accept(11L, POPPY));
-        assertTrue(state.consumeConfirmation(true));
-        assertFalse(state.consumeConfirmation(true));
-    }
-
-    @Test
-    void editingAgainCancelsQueuedConfirmationAndWaitsForTheNewQuantity() {
-        PlanResponseRequestState state = new PlanResponseRequestState(10L, POPPY);
-        state.beginPreview(11L, POPPY);
-        state.requestConfirmation();
         state.scheduleRefresh();
+        assertEquals(RECALCULATE, state.confirmation(false, false, true));
 
-        assertFalse(state.confirmationRequested());
         assertTrue(state.accept(11L, POPPY));
         assertTrue(state.waitingForPreview());
-        assertFalse(state.consumeConfirmation(true));
+        assertEquals(RECALCULATE, state.confirmation(false, false, true));
         state.beginPreview(12L, POPPY);
-        assertTrue(state.accept(12L, POPPY));
-        assertFalse(state.consumeConfirmation(true));
-    }
-
-    @Test
-    void switchingRecipesCancelsConfirmationForThePreviousRecipe() {
-        PlanResponseRequestState state = new PlanResponseRequestState(10L, POPPY);
-        state.beginPreview(11L, POPPY);
-        state.requestConfirmation();
-        state.beginPreview(12L, DANDELION);
-
-        assertFalse(state.confirmationRequested());
         assertFalse(state.accept(11L, POPPY));
-        assertTrue(state.accept(12L, DANDELION));
-        assertFalse(state.consumeConfirmation(true));
-    }
-
-    @Test
-    void failedPreviewDoesNotLeaveAConfirmationForALaterResponse() {
-        PlanResponseRequestState state = new PlanResponseRequestState(10L, POPPY);
-        state.beginPreview(11L, POPPY);
-        state.requestConfirmation();
-
-        assertTrue(state.accept(11L, POPPY));
-        assertFalse(state.consumeConfirmation(false));
-        assertFalse(state.confirmationRequested());
-        assertFalse(state.accept(12L, POPPY));
-        state.beginPreview(12L, POPPY);
+        assertEquals(WAIT, state.confirmation(false, false, true));
         assertTrue(state.accept(12L, POPPY));
-        assertFalse(state.consumeConfirmation(true));
+        assertEquals(EXECUTE, state.confirmation(false, false, true));
     }
 
     @Test
-    void closingOrChangingExecutionSettingsCancelsQueuedConfirmation() {
+    void keepingTheOldTreeAfterAFailedPreviewRequiresARefreshBeforeExecution() {
         PlanResponseRequestState state = new PlanResponseRequestState(10L, POPPY);
         state.beginPreview(11L, POPPY);
-        state.requestConfirmation();
-        state.cancelConfirmation();
 
-        assertTrue(state.pending());
         assertTrue(state.accept(11L, POPPY));
-        assertFalse(state.consumeConfirmation(true));
+        state.requireRetry();
+        assertFalse(state.calculating(), "重算失败后必须恢复路线修改和重试入口");
+        assertEquals(RECALCULATE, state.confirmation(false, false, true));
+        state.beginPreview(12L, POPPY);
+        assertEquals(WAIT, state.confirmation(false, false, true));
+        assertTrue(state.accept(12L, POPPY));
+        assertEquals(EXECUTE, state.confirmation(false, false, true));
     }
 
     @Test
-    void readyPlanDoesNotNeedToQueueConfirmation() {
+    void readOnlyDraftRemainsBlockedEvenWithPreparationEnabledOrARefreshScheduled() {
         PlanResponseRequestState state = new PlanResponseRequestState(10L, POPPY);
 
-        assertFalse(state.requestConfirmation());
-        assertFalse(state.confirmationRequested());
-        assertFalse(state.waitingForPreview());
+        assertEquals(BLOCKED, state.confirmation(true, false, true));
+        state.scheduleRefresh();
+        assertEquals(BLOCKED, state.confirmation(true, true, true));
     }
 
     @Test
-    void progressOnlyFailureReleasesConfirmationAndAllowsAnExplicitRetry() {
+    void readyPlanCanExecuteAndBlockedPlanCannot() {
+        PlanResponseRequestState state = new PlanResponseRequestState(10L, POPPY);
+
+        assertEquals(EXECUTE, state.confirmation(false, false, true));
+        assertEquals(BLOCKED, state.confirmation(false, false, false));
+    }
+
+    @Test
+    void progressOnlyFailureAllowsAnExplicitRetryButNotExecutionOfTheOldPlan() {
         PlanResponseRequestState state = new PlanResponseRequestState(10L, POPPY);
         state.beginPreview(11L, POPPY);
-        state.requestConfirmation();
 
         assertFalse(state.failPreview(10L));
-        assertTrue(state.confirmationRequested());
         assertTrue(state.failPreview(11L));
         assertFalse(state.pending());
-        assertFalse(state.confirmationRequested());
         assertFalse(state.refreshScheduled());
         assertTrue(state.refreshRequired());
-        assertFalse(state.consumeConfirmation(true));
+        assertEquals(RECALCULATE, state.confirmation(false, false, true));
 
         state.beginPreview(12L, POPPY);
         assertFalse(state.refreshRequired());
-        assertTrue(state.requestConfirmation());
+        assertEquals(WAIT, state.confirmation(false, false, true));
         assertTrue(state.accept(12L, POPPY));
-        assertTrue(state.consumeConfirmation(true));
+        assertEquals(EXECUTE, state.confirmation(false, false, true));
     }
 
     @Test
     void fullResponseAfterFailureProgressStillFinishesThePreviewNormally() {
         PlanResponseRequestState state = new PlanResponseRequestState(10L, POPPY);
         state.beginPreview(11L, POPPY);
-        state.requestConfirmation();
         state.failPreview(11L);
 
         assertTrue(state.accept(11L, POPPY));
         assertFalse(state.waitingForPreview());
-        assertFalse(state.consumeConfirmation(true));
-    }
-
-    @Test
-    void questConfirmationWaitsForItsUncorrelatedPreview() {
-        String quest = "rs_integration:quest_submission/42";
-        PlanResponseRequestState state = new PlanResponseRequestState(0L, quest);
-        state.beginPreview(0L, quest);
-
-        assertTrue(state.requestConfirmation());
-        assertFalse(state.consumeConfirmation(true));
-        assertTrue(state.accept(0L, quest));
-        assertTrue(state.consumeConfirmation(true));
+        assertEquals(EXECUTE, state.confirmation(false, false, true));
     }
 }

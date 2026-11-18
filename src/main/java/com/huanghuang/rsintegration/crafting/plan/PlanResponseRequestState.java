@@ -2,14 +2,17 @@ package com.huanghuang.rsintegration.crafting.plan;
 
 import java.util.Objects;
 
-/** 关联最新预览及延迟刷新，并让提前确认等待对应计划完成。 */
+/** 关联最新预览及延迟刷新，未展示有效的新计划前不允许执行。 */
 final class PlanResponseRequestState {
+    enum Confirmation {
+        WAIT, RECALCULATE, EXECUTE, BLOCKED
+    }
+
     private long activeRequestId;
     private String expectedRecipeId;
     private boolean pending;
     private boolean refreshScheduled;
     private boolean retryRequired;
-    private boolean confirmationRequested;
 
     PlanResponseRequestState(long requestId, String recipeId) {
         activeRequestId = requestId;
@@ -24,13 +27,11 @@ final class PlanResponseRequestState {
         pending = true;
         refreshScheduled = false;
         retryRequired = false;
-        confirmationRequested = false;
         return supersededRequestId;
     }
 
     void scheduleRefresh() {
         refreshScheduled = true;
-        confirmationRequested = false;
     }
 
     boolean refreshScheduled() {
@@ -53,40 +54,30 @@ final class PlanResponseRequestState {
     boolean failPreview(long requestId) {
         if (!pending || requestId != activeRequestId) return false;
         pending = false;
-        retryRequired = true;
-        confirmationRequested = false;
+        requireRetry();
         return true;
     }
 
-    boolean requestConfirmation() {
-        confirmationRequested = waitingForPreview();
-        return confirmationRequested;
+    /** 失败响应可以保留旧树供查看，但旧树不能用于执行。 */
+    void requireRetry() {
+        retryRequired = true;
     }
 
-    boolean confirmationRequested() {
-        return confirmationRequested;
-    }
-
-    boolean consumeConfirmation(boolean executable) {
-        if (waitingForPreview()) return false;
-        boolean execute = confirmationRequested && executable;
-        confirmationRequested = false;
-        return execute;
-    }
-
-    void cancelConfirmation() {
-        confirmationRequested = false;
+    Confirmation confirmation(boolean readOnly, boolean inventoryRequiresReplan, boolean executable) {
+        if (readOnly) return Confirmation.BLOCKED;
+        if (refreshScheduled) return Confirmation.RECALCULATE;
+        if (pending) return Confirmation.WAIT;
+        if (retryRequired || inventoryRequiresReplan) return Confirmation.RECALCULATE;
+        return executable ? Confirmation.EXECUTE : Confirmation.BLOCKED;
     }
 
     boolean accept(long requestId, String recipeId) {
         // 配方相同也可能是独立任务；只有本页面发起的请求才能更新页面。
         if (requestId != activeRequestId) return false;
-        // 错误响应可能没有配方 ID，由页面显示错误并保留上一份方案。
-        if (recipeId != null && !recipeId.isEmpty()
-                && !Objects.equals(recipeId, expectedRecipeId)) return false;
-        activeRequestId = requestId;
+        boolean error = recipeId == null || recipeId.isEmpty();
+        if (!error && !Objects.equals(recipeId, expectedRecipeId)) return false;
         pending = false;
-        retryRequired = false;
+        retryRequired = error;
         return true;
     }
 
