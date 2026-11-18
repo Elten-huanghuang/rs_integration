@@ -7,12 +7,14 @@ import com.huanghuang.rsintegration.crafting.batch.CraftPlanDecisionRules.Planne
 import com.huanghuang.rsintegration.crafting.batch.CraftPlanDecisionRules.RouteDecision;
 import com.huanghuang.rsintegration.crafting.batch.CraftPlanDecisionRules.RouteReason;
 import com.huanghuang.rsintegration.crafting.CraftingPlanningTimeoutException;
+import com.huanghuang.rsintegration.crafting.CraftingPlanningLimitException;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.CraftPlanningRevision;
 import com.huanghuang.rsintegration.crafting.DirectMaterialAllocator;
+import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.ExecutionEquivalence;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
@@ -26,6 +28,7 @@ import com.huanghuang.rsintegration.crafting.plan.IntegrationDiagnostic;
 import com.huanghuang.rsintegration.crafting.plan.IntegrationDiagnosticCode;
 import com.huanghuang.rsintegration.crafting.plan.MachineCandidateView;
 import com.huanghuang.rsintegration.crafting.plan.ParallelPlanEstimator;
+import com.huanghuang.rsintegration.crafting.plan.ParallelPlan;
 import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
 import com.huanghuang.rsintegration.crafting.plan.PlanMaterialBill;
 import com.huanghuang.rsintegration.crafting.plan.PlanOutcome;
@@ -93,6 +96,7 @@ import com.huanghuang.rsintegration.util.LogSampler;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.util.PerformanceMonitor;
 import com.huanghuang.rsintegration.util.Reflect;
+import com.google.gson.JsonElement;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
@@ -127,6 +131,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.Objects;
+import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
@@ -483,6 +490,139 @@ final class CraftPlanningApplicationService {
         return pure || directTerminal || typed;
     }
 
+    private record CompletedTypedPreview(CraftPlanGraph graph, List<String> missing,
+                                         ItemStack output, List<TypedRootKey> roots,
+                                         Map<Integer, ParallelPlan> parallelPlans,
+                                         Map<ParallelPlanEstimator.DisplayKey, ParallelPlan> displayPlans) {}
+
+    private record TypedRootKey(Class<?> predicateType, Object predicate, long count,
+                                InputConsumption consumption) {}
+
+    private static List<TypedRootKey> typedRootKeys(List<ScaledIngredientSpec> roots) {
+        return roots.stream().filter(root -> root != null && !root.isEmpty())
+                .map(root -> {
+                    Object predicate;
+                    try {
+                        JsonElement serialized = root.ingredient().toJson();
+                        predicate = serialized.deepCopy();
+                    } catch (RuntimeException | LinkageError unsupported) {
+                        // 无法序列化的原生谓词只认同一实例，不能当作相同的材料集合。
+                        predicate = root.ingredient();
+                    }
+                    return new TypedRootKey(root.ingredient().getClass(), predicate, root.count(), root.consumption());
+                })
+                .toList();
+    }
+
+    private static void scheduleTypedPreview(ServerPlayer player, ResourceLocation recipeId, long generation,
+                                             PlanningSnapshot snapshot, CraftPlanResultDispatcher.Sink sink,
+                                             CraftingResolver.TypedPreview job, BooleanSupplier sameWorldContext,
+                                             Consumer<CompletedTypedPreview> completed,
+                                             List<String> missing, ItemStack output, List<TypedRootKey> roots) {
+        var queue = CraftPlanningRuntime.typedPreviewRequests();
+        class PreviewTask implements Runnable {
+            private boolean solved;
+            private CraftPlanGraph graph;
+            private long computeNanos;
+            private ParallelPlanEstimator.Request.GraphEstimate estimates;
+            private Map<Integer, ParallelPlan> parallelPlans;
+
+            void enqueue() {
+                var offered = queue.offer(new TypedPreviewAdmissionQueue.Request(player.getUUID(), generation,
+                        System.nanoTime(), this, () -> sink.error(PlanOutcome.RUNTIME_UNAVAILABLE,
+                                IntegrationDiagnostic.error(IntegrationDiagnosticCode.PLANNER_BUSY)), this::failed));
+                if (offered == TypedPreviewAdmissionQueue.OfferResult.FULL) {
+                    sink.error(PlanOutcome.RUNTIME_UNAVAILABLE,
+                            IntegrationDiagnostic.error(IntegrationDiagnosticCode.PLANNER_BUSY));
+                }
+            }
+
+            @Override
+            public void run() {
+                if (!isSnapshotActive(player, snapshot, generation) || !sameWorldContext.getAsBoolean()) {
+                    sink.error(PlanOutcome.RUNTIME_UNAVAILABLE,
+                            IntegrationDiagnostic.error(IntegrationDiagnosticCode.STALE_PLAN));
+                    return;
+                }
+                try (var scope = snapshot.preferences().materialSources().enter()) {
+                    if (!solved) {
+                        long budget = queue.remainingTickNanos();
+                        if (budget > 0L) {
+                            long start = System.nanoTime();
+                            try {
+                                solved = job.advance(budget);
+                            } finally {
+                                long elapsed = System.nanoTime() - start;
+                                computeNanos += elapsed;
+                                PerformanceMonitor.recordPlanningLatency(
+                                        PerformanceMonitor.PlanningLatencyPhase.TYPED_SLICE, elapsed);
+                            }
+                        }
+                        // 整图校验和响应组装分到后续 tick，避免与求解的最后切片叠加。
+                        enqueue();
+                        return;
+                    }
+                    if (graph == null) {
+                        long start = System.nanoTime();
+                        try {
+                            graph = job.graph();
+                        } finally {
+                            long elapsed = System.nanoTime() - start;
+                            PerformanceMonitor.recordTypedResolver(computeNanos + elapsed);
+                            PerformanceMonitor.recordPlanningLatency(
+                                    PerformanceMonitor.PlanningLatencyPhase.TYPED_GRAPH, elapsed);
+                        }
+                        enqueue();
+                        return;
+                    }
+                    if (parallelPlans == null) {
+                        long start = System.nanoTime();
+                        try {
+                            if (estimates == null) {
+                                var estimator = new ParallelPlanEstimator.Request(player,
+                                        aggregateAvailableItems(snapshot.availableItems()));
+                                estimates = estimator.start(graph);
+                            }
+                            long budget = queue.remainingTickNanos();
+                            if (budget > 0L && estimates.advance(budget)) parallelPlans = estimates.result();
+                        } finally {
+                            PerformanceMonitor.recordPlanningLatency(
+                                    PerformanceMonitor.PlanningLatencyPhase.TYPED_ESTIMATE, System.nanoTime() - start);
+                        }
+                        // 每个 tick 只推进一批机器探针，不与最终的展示组装叠加。
+                        enqueue();
+                        return;
+                    }
+                    long start = System.nanoTime();
+                    try {
+                        completed.accept(new CompletedTypedPreview(graph, missing, output, roots,
+                                parallelPlans, estimates.displayResult()));
+                    } finally {
+                        PerformanceMonitor.recordPlanningLatency(
+                                PerformanceMonitor.PlanningLatencyPhase.TYPED_ASSEMBLY, System.nanoTime() - start);
+                    }
+                }
+            }
+
+            private void failed(Throwable failure) {
+                if (failure instanceof CraftingPlanningLimitException) {
+                    RSIntegrationMod.LOGGER.debug("[RSI-plan] 兼容规划达到上限：recipe={} {}", recipeId, failure.getMessage());
+                    sink.error(PlanOutcome.BUDGET_EXHAUSTED,
+                            IntegrationDiagnostic.error(IntegrationDiagnosticCode.COMPLEXITY_LIMIT));
+                } else if (failure instanceof CraftingPlanningTimeoutException) {
+                    PerformanceMonitor.recordResolveTimeout();
+                    sink.error(PlanOutcome.BUDGET_EXHAUSTED,
+                            IntegrationDiagnostic.error(IntegrationDiagnosticCode.PLANNING_TIMEOUT));
+                } else {
+                    RSIntegrationMod.LOGGER.error("[RSI-plan] 兼容规划失败：recipe={}", recipeId, failure);
+                    sink.error(PlanOutcome.RUNTIME_UNAVAILABLE,
+                            IntegrationDiagnostic.error(IntegrationDiagnosticCode.INTERNAL_ERROR));
+                }
+            }
+        }
+        new PreviewTask().enqueue();
+    }
+
     static void tryBuildPlan(ServerPlayer player, ResourceLocation recipeId,
                                       Map<String, String> forcedRecipes,
                                       @Nullable ResourceLocation dim,
@@ -540,7 +680,7 @@ final class CraftPlanningApplicationService {
             tryBuildPlanWithSources(player, recipeId, forcedRecipes, dim, pos, repeatCount, baseItem,
                     clickedOutput, requestId, previewGeneration, precomputedPlan, precomputedSnapshot,
                     asyncAttempted, reuseValidatedSnapshot, sink, storageReference, materialLocks,
-                    routedPlan, selected);
+                    routedPlan, selected, null);
         }
     }
 
@@ -555,7 +695,8 @@ final class CraftPlanningApplicationService {
                              @Nullable StorageReference storageReference,
                              Map<String, ItemStack> materialLocks,
                              @Nullable AsyncPurePlanningService.RoutedPlan routedPlan,
-                             PlanningPreferences preferences) {
+                             PlanningPreferences preferences,
+                             @Nullable CompletedTypedPreview completedTyped) {
         long planStartNanos = System.nanoTime();
         PlanningPreferences safePreferences = preferences == null
                 ? PlanningPreferences.empty() : preferences;
@@ -1344,73 +1485,35 @@ final class CraftPlanningApplicationService {
             usedPurePlan = true;
         } else {
             selectedTypedResolver = true;
-            long typedResolverStarted = System.nanoTime();
-            int typedTimeoutMs = RSIntegrationConfig.CRAFTING_TYPED_PREVIEW_TIMEOUT_MS.get();
-            try {
-                CraftingResolver.ActiveRootRecipe activeRoot =
-                        new CraftingResolver.ActiveRootRecipe(recipeId, targetOutput);
-                planGraph = CraftExecutionPolicy.usesPhysicalMachineInputSlots(recipe)
-                        ? CraftingResolver.resolveMachineGraphForScaledSpecsWithTypes(
-                                recursiveRecipeSpecs, available, player.serverLevel(),
-                                player, planningEndpoint, missing, forcedOverrides, true, typedTimeoutMs,
-                                activeRoot, materialLocks, safePreferences)
-                        : CraftingResolver.resolveGraphForScaledSpecsWithTypes(
-                                recursiveRecipeSpecs, available, player.serverLevel(),
-                                player, planningEndpoint, missing, forcedOverrides, true, typedTimeoutMs,
-                                activeRoot, materialLocks, safePreferences);
-            } catch (CraftingPlanningTimeoutException timeout) {
-                PerformanceMonitor.recordResolveTimeout();
-                RSIntegrationMod.LOGGER.warn(
-                        "[RSI-plan] typed planner timeout recipe={} timeoutMs={} specs={} missing={} directReservation={} coverage={} unresolved={} catalystRoute={} targetCatalyst={} mainThreadOnly={} overrides={}",
-                        recipeId, typedTimeoutMs, recursiveRecipeSpecs.size(), missing,
-                        directTerminalPlan, demandTree.status(), demandTree.unresolved(),
-                        demandTree.catalystRouteAvailable(), targetUsesReusableCatalyst,
-                        planningSnapshot.mainThreadOnly(), !effectiveOverrides.isEmpty());
-                // A typed retry can time out after the immutable planner has already
-                // produced a bounded dependency trace. Keep that trace as an
-                // explicitly infeasible preview so the player can inspect and open
-                // recursive sub-recipes instead of losing the whole screen to a
-                // transient 500 ms resolver deadline. This path never authorizes
-                // execution: the response remains infeasible and retains its
-                // shortage/machine warnings below.
-                if (CraftPlanDecisionRules.canUseBoundedTraceAfterTypedTimeout(
-                        precomputedPlan, demandTree, directTerminalPlan,
-                        routedPlan == null ? PurePlanningCoverage.Probe.notChecked() : routedPlan.coverage())) {
-                    if (missing.isEmpty()) {
-                        for (var unresolved : precomputedPlan.missing()) {
-                            recordMissingMaterial(missing, unresolved);
-                        }
-                    }
-                    selectedTypedResolver = false;
-                    selectedPureResolver = true;
-                    usedPurePlan = true;
-                    resolutionSteps = PurePlanAdapter.toResolutionSteps(
-                            precomputedPlan, planningSnapshot.recipeGraph());
-                    planGraph = null;
-                } else {
-                    if (missing.isEmpty()) {
-                        sink.error(PlanOutcome.BUDGET_EXHAUSTED,
-                                IntegrationDiagnostic.error(
-                                        IntegrationDiagnosticCode.PLANNING_TIMEOUT));
-                    } else {
-                        sink.error(PlanOutcome.MISSING_INPUTS,
-                                IntegrationDiagnostic.error(
-                                        IntegrationDiagnosticCode.MISSING_MATERIALS));
-                    }
-                    return;
-                }
-            } catch (RuntimeException | LinkageError failure) {
-                RSIntegrationMod.LOGGER.error(
-                        "[RSI-plan] Typed resolver failed for {}", recipeId, failure);
-                sink.error(PlanOutcome.RUNTIME_UNAVAILABLE,
-                        IntegrationDiagnostic.error(IntegrationDiagnosticCode.INTERNAL_ERROR));
+            if (completedTyped == null) {
+                PlanningSnapshot typedSnapshot = planningSnapshot;
+                var level = player.serverLevel();
+                var bindingFingerprint = PlanningStateValidator.bindingFingerprint(player, planDimKey, planLookupPos);
+                var activeRoot = new CraftingResolver.ActiveRootRecipe(recipeId, targetOutput);
+                List<TypedRootKey> rootKeys = typedRootKeys(recursiveRecipeSpecs);
+                var job = CraftingResolver.startTypedPreview(
+                        recursiveRecipeSpecs, available, level, player, planningEndpoint,
+                        missing, forcedOverrides, CraftExecutionPolicy.usesPhysicalMachineInputSlots(recipe),
+                        RSIntegrationConfig.CRAFTING_TYPED_PREVIEW_TIMEOUT_MS.get(), activeRoot, materialLocks,
+                        safePreferences);
+                scheduleTypedPreview(player, recipeId, previewGeneration, typedSnapshot, sink, job,
+                        () -> player.serverLevel() == level && Objects.equals(bindingFingerprint,
+                                PlanningStateValidator.bindingFingerprint(player, planDimKey, planLookupPos)),
+                        preview -> tryBuildPlanWithSources(player, recipeId, forcedRecipes, dim, pos, repeatCount,
+                                baseItem, clickedOutput, requestId, previewGeneration, precomputedPlan, typedSnapshot,
+                                true, true, sink, planStorageReference, materialLocks, routedPlan, safePreferences,
+                                preview), missing, activeRoot.output(), rootKeys);
                 return;
-            } finally {
-                PerformanceMonitor.recordTypedResolver(System.nanoTime() - typedResolverStarted);
             }
-            if (planGraph != null) {
-                resolutionSteps = ExecutionEquivalence.projectFlatSteps(planGraph);
+            if (!ItemStack.matches(completedTyped.output(), targetOutput)
+                    || !completedTyped.roots().equals(typedRootKeys(recursiveRecipeSpecs))) {
+                sink.error(PlanOutcome.RUNTIME_UNAVAILABLE,
+                        IntegrationDiagnostic.error(IntegrationDiagnosticCode.STALE_PLAN));
+                return;
             }
+            planGraph = completedTyped.graph();
+            missing.addAll(completedTyped.missing());
+            resolutionSteps = ExecutionEquivalence.projectFlatSteps(planGraph);
         }
         if (usedPurePlan && precomputedPlan.feasible()) {
             try {
@@ -1486,10 +1589,7 @@ final class CraftPlanningApplicationService {
 
         // Compute itemAvailable early — needed for ingredient matching in both
         // PlanStep display and material calculation.
-        Map<Item, Long> itemAvailable = new HashMap<>();
-        for (var e : available.entrySet()) {
-            itemAvailable.merge(e.getKey().item(), e.getValue(), SaturatingLongMath::add);
-        }
+        Map<Item, Long> itemAvailable = aggregateAvailableItems(available);
         // RecipeIndex for OR alternative material checks — allows alternatives
         // whose ingredients are craftable (not just directly available).
         // Display copy: decremented on each match so the same tag ingredient
@@ -2039,9 +2139,11 @@ final class CraftPlanningApplicationService {
                 itemAvailable, itemSource, neededCounts, repeatCount);
 
         CraftPlanGraph displayGraph = planGraph != null ? planGraph : cacheInputGraph;
+        boolean reuseTypedEstimates = completedTyped != null && displayGraph == completedTyped.graph();
+        var parallelEstimates = reuseTypedEstimates ? null : new ParallelPlanEstimator.Request(player, itemAvailable);
         PlanGraphView planGraphView = displayGraph != null
-                ? PlanGraphView.from(displayGraph,
-                        ParallelPlanEstimator.estimate(player, displayGraph, itemAvailable))
+                ? PlanGraphView.from(displayGraph, reuseTypedEstimates
+                        ? completedTyped.parallelPlans() : parallelEstimates.estimate(displayGraph))
                         .withRecipeAlternatives(steps)
                 : null;
         if (planGraphView != null) {
@@ -2267,8 +2369,9 @@ final class CraftPlanningApplicationService {
         // 单层配方没有 CraftPlanGraph，但仍要让递归树显示会并行到几台机器、
         // 每台分多少、需要多少燃料/催化剂/耐久工具。
         List<PlanStep> displaySteps = steps.stream()
-                .map(step -> step.withParallelPlan(ParallelPlanEstimator.estimate(
-                        player, step, itemAvailable)))
+                .map(step -> step.withParallelPlan(reuseTypedEstimates
+                        ? ParallelPlanEstimator.forDisplay(completedTyped.displayPlans(), step)
+                        : parallelEstimates.estimateStep(step)))
                 .toList();
 
         PlanResponseDraft responseDraft = new PlanResponseDraft(
@@ -2317,6 +2420,14 @@ final class CraftPlanningApplicationService {
                 planDimKey, planLookupPos, planStorageReference, cacheKey,
                 responsePurePlan, resolvedGraphForCache, terminalEmbedded, responseStepCount,
                 responseGraphNodes, responseFeasible, planStartNanos, sink);
+    }
+
+    private static Map<Item, Long> aggregateAvailableItems(Map<StackKey, Long> available) {
+        Map<Item, Long> itemAvailable = new HashMap<>();
+        for (var entry : available.entrySet()) {
+            itemAvailable.merge(entry.getKey().item(), entry.getValue(), SaturatingLongMath::add);
+        }
+        return itemAvailable;
     }
 
     static boolean requiresFreshPreview(@Nullable ModType terminalType, @Nullable PlanResponse plan) {

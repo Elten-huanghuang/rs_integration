@@ -276,20 +276,6 @@ public final class CraftPlanDecisionRules {
                         && !plan.missing().isEmpty()));
     }
 
-    static boolean canUseBoundedTraceAfterTypedTimeout(
-            @Nullable PureRecipePlanner.Result plan,
-            PureDemandTreeInspector.Result demandTree,
-            boolean directTerminalPlan,
-            PurePlanningCoverage.Probe coverage) {
-        return !directTerminalPlan
-                && coverage.status() != PurePlanningCoverage.Status.GAP
-                && coverage.status() != PurePlanningCoverage.Status.UNCERTAIN
-                && plan != null
-                && !plan.missing().isEmpty()
-                && demandTree != null
-                && demandTree.status() == PureDemandTreeInspector.Status.MISSING_MATERIALS;
-    }
-
     static boolean matchesAsyncRequest(
             PlanningSnapshot snapshot, UUID playerId, ResourceLocation recipeId,
             long requestGeneration, Map<ResourceLocation, ResourceLocation> forcedRecipes) {

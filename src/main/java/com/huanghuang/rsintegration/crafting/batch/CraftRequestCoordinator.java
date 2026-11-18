@@ -318,7 +318,9 @@ public final class CraftRequestCoordinator {
         }
         TypedPreviewAdmissionQueue queue = CraftPlanningRuntime.typedPreviewRequests();
         int admitted = queue.run(Math.max(1, admissions), System.nanoTime(),
-                Math.max(1, timeoutMs) * 1_000_000L, request -> {
+                Math.max(1, timeoutMs) * 1_000_000L,
+                RSIntegrationConfig.serverInt(RSIntegrationConfig.CRAFTING_PLANNING_SLICE_MS) * 1_000_000L,
+                request -> {
                     ServerPlayer player = server.getPlayerList().getPlayer(request.playerId());
                     return player != null && !player.hasDisconnected()
                             && CraftPlanningRuntime.planRequests().isCurrent(request.playerId(), request.generation());

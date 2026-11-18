@@ -15,7 +15,8 @@ import java.util.List;
 public final class RSIntegrationConfig {
     public static final int REPEAT_COUNT_DEFAULT = 1024;
     public static final int REPEAT_COUNT_ABSOLUTE_MAX = 1024;
-    public static final int SERVER_CONFIG_SCHEMA = 8;
+    public static final int SERVER_CONFIG_SCHEMA = 9;
+    public static final int DEFAULT_CRAFTING_MAX_DEPTH = 1024;
     public static final List<String> DEFAULT_ANVIL_MEMORY_ADAPTERS = List.of(
             "minecraft_anvil", "goety_dark_anvil", "irons_spellbooks_arcane_anvil");
     public static final List<String> DEFAULT_FREE_WATER_MACHINES = List.of(
@@ -1225,9 +1226,9 @@ public final class RSIntegrationConfig {
                 .defineInRange("repeatCountMax", REPEAT_COUNT_DEFAULT,
                         1, REPEAT_COUNT_ABSOLUTE_MAX);
         CRAFTING_MAX_DEPTH = s
-                .comment("合成递归深度上限",
-                        "限制连续解析的子配方层数；深层整合包可提高，服务端严格限流时可降低。")
-                .defineInRange("craftingMaxDepth", 16, 4, 32);
+                .comment("兼容规划依赖深度上限",
+                        "限制需要原生配方语义的子配方层数；纯规划不受此限制。服务端严格限流时可降低。")
+                .defineInRange("craftingMaxDepth", DEFAULT_CRAFTING_MAX_DEPTH, 4, DEFAULT_CRAFTING_MAX_DEPTH);
         CRAFTING_MAX_STEPS = s
                 .comment("单次计划步骤上限",
                         "限制单个计划的总步骤；可配置到配方图协议允许的节点上限。",
@@ -1244,7 +1245,7 @@ public final class RSIntegrationConfig {
                         MAX_CRAFTING_MAX_GRAPH_NODES);
         CRAFTING_PLANNING_SLICE_MS = s
                 .comment("后台规划每个计算通道每 50ms 的协作时间片（毫秒）；检查点暂停并保留搜索现场。",
-                        "Cooperative planning time per worker per 50ms; paused jobs retain their search state.")
+                        "兼容预览求解在服务器每 tick 共用同样的预算，单个原生配方回调不可抢占。")
                 .defineInRange("craftingPlanningSliceMs", CraftingPlanningConfig.DEFAULT_SLICE_MS,
                         1, CraftingPlanningConfig.PERIOD_MS);
         CRAFTING_PLANNING_BACKGROUND_TIMEOUT_MS = s
@@ -1816,6 +1817,10 @@ public final class RSIntegrationConfig {
     public static int migratePurePlanningTimeoutMs(int schema, int currentValue) {
         return schema < 6 && currentValue == 500
                 ? DEFAULT_CRAFTING_PURE_PLANNING_TIMEOUT_MS : currentValue;
+    }
+
+    public static int migrateCraftingMaxDepth(int schema, int currentValue) {
+        return schema < 9 && currentValue == 16 ? DEFAULT_CRAFTING_MAX_DEPTH : currentValue;
     }
 
     public static int migratePlanCacheTtlMs(int schema, int currentValue) {

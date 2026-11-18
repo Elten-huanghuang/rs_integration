@@ -493,6 +493,12 @@ public final class RSIntegrationMod {
             LOGGER.info("[RSI-Config] Migrated craftingPurePlanningTimeoutMs from 500 to {}",
                     migratedPureTimeout);
         }
+        int currentDepth = RSIntegrationConfig.CRAFTING_MAX_DEPTH.get();
+        int migratedDepth = RSIntegrationConfig.migrateCraftingMaxDepth(schema, currentDepth);
+        if (migratedDepth != currentDepth) {
+            RSIntegrationConfig.CRAFTING_MAX_DEPTH.set(migratedDepth);
+            LOGGER.info("[RSI-Config] 已更新兼容规划默认深度上限：{}", migratedDepth);
+        }
         int currentPlanCacheTtl = RSIntegrationConfig.CRAFTING_PLAN_CACHE_TTL_MS.get();
         int migratedPlanCacheTtl = RSIntegrationConfig.migratePlanCacheTtlMs(
                 schema, currentPlanCacheTtl);

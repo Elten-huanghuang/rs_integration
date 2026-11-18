@@ -57,6 +57,7 @@ import net.minecraft.world.item.Items;
 import javax.annotation.Nullable;
 import java.util.*;
 import java.util.function.Function;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import com.huanghuang.rsintegration.magic.MagicResourceCost;
 
@@ -427,6 +428,28 @@ public final class CraftingResolver {
                 activeRoot, materialLocks, PlanningPreferences.empty());
     }
 
+    public static CraftPlanGraph resolveTypedPreviewGraph(
+            List<ScaledIngredientSpec> needed, Map<StackKey, ? extends Number> availableKeyed, Level level,
+            @Nullable ServerPlayer player, @Nullable CraftStorageEndpoint storageEndpoint,
+            @Nullable List<String> missingOut, @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
+            boolean singleVariantRoots, int timeoutMs, @Nullable ActiveRootRecipe activeRoot,
+            Map<String, ItemStack> materialLocks, PlanningPreferences preferences) {
+        return startTypedPreview(needed, availableKeyed, level, player, storageEndpoint, missingOut,
+                forcedOverrides, singleVariantRoots, timeoutMs, activeRoot, materialLocks, preferences)
+                .finishSynchronously();
+    }
+
+    public static TypedPreview startTypedPreview(
+            List<ScaledIngredientSpec> needed, Map<StackKey, ? extends Number> availableKeyed, Level level,
+            @Nullable ServerPlayer player, @Nullable CraftStorageEndpoint storageEndpoint,
+            @Nullable List<String> missingOut, @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
+            boolean singleVariantRoots, int timeoutMs, @Nullable ActiveRootRecipe activeRoot,
+            Map<String, ItemStack> materialLocks, PlanningPreferences preferences) {
+        return startRootResolution(rootSpecs(needed), availableKeyed, level, player, storageEndpoint,
+                missingOut, forcedOverrides, true, singleVariantRoots, timeoutMs, activeRoot,
+                materialLocks, preferences.excludedRecipes(), preferences, true);
+    }
+
     /**
      * Resolve the root inputs of one machine recipe. Each {@link IngredientSpec}
      * represents one physical machine slot, so a tag demand must be backed by one
@@ -584,6 +607,19 @@ public final class CraftingResolver {
             boolean singleVariantRoots, int timeoutMs, @Nullable ActiveRootRecipe activeRoot,
             Map<String, ItemStack> materialLocks, Set<ResourceLocation> excludedRecipes,
             PlanningPreferences preferences) {
+        return startRootResolution(needed, availableKeyed, level, player, storageEndpoint, missingOut,
+                forcedOverrides, bestEffort, singleVariantRoots, timeoutMs, activeRoot,
+                materialLocks, excludedRecipes, preferences, false).finishSynchronously();
+    }
+
+    private static TypedPreview startRootResolution(
+            List<RootSpec> needed, Map<StackKey, ? extends Number> availableKeyed, Level level,
+            @Nullable ServerPlayer player, @Nullable CraftStorageEndpoint storageEndpoint,
+            @Nullable List<String> missingOut,
+            @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides, boolean bestEffort,
+            boolean singleVariantRoots, int timeoutMs, @Nullable ActiveRootRecipe activeRoot,
+            Map<String, ItemStack> materialLocks, Set<ResourceLocation> excludedRecipes,
+            PlanningPreferences preferences, boolean checkPreviewBudget) {
         Map<ResourceLocation, ResourceLocation> prefs = mergeForcedOverrides(level, forcedOverrides);
         Map<Item, List<RecipeIndex.Entry>> index = RecipeIndex.get(level);
         ResolutionContext ctx = timeoutMs > 0
@@ -598,23 +634,22 @@ public final class CraftingResolver {
         ctx.withPreferences(preferences);
         EdgeTracker edges = new EdgeTracker();
         Map<Integer, RootDemand> rootsByOrder = new TreeMap<>();
-
-        boolean rootActive = activeRoot != null && !activeRoot.output().isEmpty();
-        if (rootActive) {
-            ctx.recipeCycles.enter(activeRoot.recipeId(), activeRoot.output());
-        }
-
-        try {
+        var stack = new PlanningStack();
+        var job = stack.<List<RootDemand>>start(done -> {
+            if (activeRoot != null && !activeRoot.output().isEmpty()) {
+                ctx.recipeCycles.enter(activeRoot.recipeId(), activeRoot.output());
+                stack.enter(() -> ctx.recipeCycles.leave(activeRoot.recipeId(), activeRoot.output()));
+            }
+            boolean rootActive = activeRoot != null && !activeRoot.output().isEmpty();
             // Crafting-grid roots are fungible planning demand and may be coalesced.
             // Machine roots are physical input slots and must retain their boundaries.
-            List<RootSpec> rootsToResolve = singleVariantRoots
+            List<RootSpec> rootsToResolve = new ArrayList<>(singleVariantRoots
                     ? machineRootDemands(needed)
-                    : coalesceRootDemands(needed);
+                    : coalesceRootDemands(needed));
             if (!singleVariantRoots) {
                 // Resolve reusable catalysts after ordinary inputs. This lets an
                 // intermediate CraftTweaker recipe return a shared catalyst before
                 // the terminal root reserves it.
-                rootsToResolve = new ArrayList<>(rootsToResolve);
                 rootsToResolve.sort(rootSpecComparator());
             }
             List<ScaledIngredientSpec> pendingRoots = new ArrayList<>();
@@ -624,29 +659,28 @@ public final class CraftingResolver {
                 pendingRoots.add(new ScaledIngredientSpec(input, root.count(), root.consumption()));
             }
             ctx.pendingInputs.push(pendingRoots);
-            try {
-                for (int rootIndex = 0; rootIndex < rootsToResolve.size(); rootIndex++) {
-                    RootSpec spec = rootsToResolve.get(rootIndex);
-                    pendingRoots.remove(0);
-                    if (spec.isEmpty()) continue;
-                    if (activeRoot != null) {
-                        spec = new RootSpec(ctx.lockedIngredient(
-                                activeRoot.recipeId(), spec.ingredient()),
-                                spec.count(), spec.consumption(), spec.order());
+            stack.enter(ctx.pendingInputs::pop);
+            class Roots implements Runnable {
+                private int index;
+
+                @Override
+                public void run() {
+                    if (index >= rootsToResolve.size()) {
+                        finish();
+                        return;
                     }
+                    RootSpec root = rootsToResolve.get(index++);
+                    Ingredient ingredient = pendingRoots.remove(0).ingredient();
+                    if (root.isEmpty()) {
+                        stack.resume(this);
+                        return;
+                    }
+                    RootSpec spec = new RootSpec(ingredient, root.count(), root.consumption(), root.order());
                     List<ResolutionContext.SupplySlice> consumed = new ArrayList<>();
-                    Ingredient resolvedIngredient = spec.ingredient();
                     int rootMissingCheckpoint = ctx.missingCount();
-                    boolean resolved;
-                    if (singleVariantRoots) {
-                        resolvedIngredient = StepExecutor.ensureSingleVariantMachineInput(
-                                spec.ingredient(), spec.count(), ctx, 0, edges, null, consumed);
-                        resolved = resolvedIngredient != null;
-                        if (!resolved) resolvedIngredient = spec.ingredient();
-                    } else {
-                        resolved = ensureIngredient(resolvedIngredient, spec.count(),
-                                ctx, 0, edges, null, consumed);
-                    }
+                    Consumer<Ingredient> resolvedRoot = selected -> {
+                    boolean resolved = selected != null;
+                    Ingredient resolvedIngredient = resolved ? selected : ingredient;
                     List<RootAllocation> allocations = new ArrayList<>(consumed.size());
                     for (ResolutionContext.SupplySlice slice : consumed) {
                         allocations.add(new RootAllocation(slice.source(), slice.material(), slice.quantity()));
@@ -661,27 +695,74 @@ public final class CraftingResolver {
                     rootsByOrder.put(spec.order(), new RootDemand(
                             resolvedIngredient, spec.count(), missing,
                             firstDisplayStack(resolvedIngredient), allocations, spec.role()));
-                    if (!resolved && !bestEffort) break;
+                    if (!resolved && !bestEffort) finish();
+                    else stack.resume(this);
+                    };
+                    if (singleVariantRoots) {
+                        StepExecutor.ensureSingleVariantMachineInput(ingredient, spec.count(), ctx, 0,
+                                edges, null, consumed, stack, resolvedRoot);
+                    } else {
+                        ensureIngredient(ingredient, spec.count(), ctx, 0, edges, null, consumed,
+                                stack, resolved -> resolvedRoot.accept(resolved ? ingredient : null));
+                    }
                 }
-            } finally {
-                ctx.pendingInputs.pop();
-            }
-        } finally {
-            if (rootActive) {
-                ctx.recipeCycles.leave(activeRoot.recipeId(), activeRoot.output());
-            }
-        }
-        List<RootDemand> roots = new ArrayList<>(rootsByOrder.values());
 
-        CraftPlanGraph graph = new CraftPlanGraph(CraftPlanGraph.CURRENT_VERSION,
-                ctx.graphNodes, ctx.graphAllocations, roots, ctx.graphUnresolved,
-                ctx.graphNodes.stream().map(CraftNode::id).toList());
-        CraftPlanValidator.validate(graph);
-        graph = CraftPlanGraphCompactor.compact(graph,
-                CraftNodeMergePolicy.forLevel(level));
-        ctx.logGuardSummary();
-        ctx.dumpDiagnostics();
-        return graph;
+                private void finish() {
+                    stack.leave();
+                    if (rootActive) stack.leave();
+                    stack.complete(done, new ArrayList<>(rootsByOrder.values()));
+                }
+            }
+            stack.resume(new Roots());
+        });
+        return new TypedPreview(ctx, job, checkPreviewBudget);
+    }
+
+    /** 必须在服务器线程推进；等待下一 tick 的时间不计入求解预算。 */
+    public static final class TypedPreview {
+        private final ResolutionContext context;
+        private final PlanningStack.Job<List<RootDemand>> job;
+        private final boolean checkBudget;
+        private long suspendedAt;
+
+        private TypedPreview(ResolutionContext context, PlanningStack.Job<List<RootDemand>> job, boolean checkBudget) {
+            this.context = context;
+            this.job = job;
+            this.checkBudget = checkBudget;
+            this.suspendedAt = System.nanoTime();
+        }
+
+        public boolean advance(long sliceNanos) {
+            long now = System.nanoTime();
+            if (suspendedAt != 0L) context.deadlineNanos += now - suspendedAt;
+            suspendedAt = 0L;
+            if (job.advance(sliceNanos)) return true;
+            suspendedAt = System.nanoTime();
+            return false;
+        }
+
+        private CraftPlanGraph finishSynchronously() {
+            advance(Long.MAX_VALUE);
+            return graph();
+        }
+
+        public CraftPlanGraph graph() {
+            ResolutionContext ctx = context;
+            List<RootDemand> roots = job.result();
+            if (checkBudget && (!ctx.graphUnresolved.isEmpty()
+                    || roots.stream().anyMatch(root -> root.unresolvedQuantity() > 0))) {
+                // 已找到完整替代路径时，早先失败的候选不应使整份计划失败。
+                ctx.requireKnownPreviewBudget();
+            }
+            CraftPlanGraph graph = new CraftPlanGraph(CraftPlanGraph.CURRENT_VERSION,
+                    ctx.graphNodes, ctx.graphAllocations, roots, ctx.graphUnresolved,
+                    ctx.graphNodes.stream().map(CraftNode::id).toList());
+            CraftPlanValidator.validate(graph);
+            graph = CraftPlanGraphCompactor.compact(graph, CraftNodeMergePolicy.forLevel(ctx.level));
+            ctx.logGuardSummary();
+            ctx.dumpDiagnostics();
+            return graph;
+        }
     }
 
     private record RootSpec(Ingredient ingredient, long count,
@@ -806,16 +887,29 @@ public final class CraftingResolver {
     static boolean ensureIngredient(Ingredient ingredient, long count, ResolutionContext ctx, int depth,
                                      EdgeTracker edges, @Nullable InputPortId consumer,
                                      @Nullable List<ResolutionContext.SupplySlice> consumedOut) {
-        prepareSharedAmplification(ingredient, count, ctx, depth, edges);
-        return ensureIngredient(ingredient, count, ctx, depth, edges, consumer, consumedOut, false);
+        var stack = new PlanningStack();
+        return stack.resolve(done -> ensureIngredient(ingredient, count, ctx, depth, edges,
+                consumer, consumedOut, stack, done));
     }
 
-    private static boolean ensureIngredient(Ingredient ingredient, long count, ResolutionContext ctx,
+    static void ensureIngredient(Ingredient ingredient, long count, ResolutionContext ctx, int depth,
+                                 EdgeTracker edges, @Nullable InputPortId consumer,
+                                 @Nullable List<ResolutionContext.SupplySlice> consumedOut,
+                                 PlanningStack stack, Consumer<Boolean> done) {
+        prepareSharedAmplification(ingredient, count, ctx, depth, edges, stack,
+                () -> resolveIngredient(ingredient, count, ctx, depth, edges, consumer,
+                        consumedOut, false, stack, done));
+    }
+
+    private static void resolveIngredient(Ingredient ingredient, long count, ResolutionContext ctx,
                                             int depth, EdgeTracker edges,
                                             @Nullable InputPortId consumer,
                                             @Nullable List<ResolutionContext.SupplySlice> consumedOut,
-                                            boolean prepareOnly) {
-        if (count <= 0) return true;
+                                            boolean prepareOnly, PlanningStack stack, Consumer<Boolean> done) {
+        if (count <= 0) {
+            stack.complete(done, true);
+            return;
+        }
         int missingCheckpoint = ctx.missingCount();
 
         int minReserve = RSIntegrationConfig.getProtectedReserve(ingredient);
@@ -837,7 +931,8 @@ public final class CraftingResolver {
                 recordSupplyConsumption(ctx, consumer, consumedOut, direct);
                 ctx.commitUndo();
                 edges.commitUndo();
-                return true;
+                stack.complete(done, true);
+                return;
             }
         }
         ctx.rollback();
@@ -852,17 +947,15 @@ public final class CraftingResolver {
         if (ctx.timedOut()) {
             PerformanceMonitor.recordResolveTimeout();
             if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient guard TIMEOUT depth=" + depth + " count=" + count);
-            if (recordBestEffortUnresolved(
-                    ctx, consumer, ingredient, count, "timeout-before-candidates")) {
-                return true;
-            }
-            recordFailureMissing(ctx, ingredient, missingCheckpoint);
-            return false;
+            finishMissing(ctx, consumer, ingredient, count, "timeout-before-candidates", missingCheckpoint, stack, done);
+            return;
         }
         if (++ctx.ensureCalls > maxEnsureCalls()) {
+            ctx.ensureLimitReached = true;
             if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient guard ENSURE_CALLS calls=" + ctx.ensureCalls
                     + " max=" + maxEnsureCalls() + " depth=" + depth + " count=" + count);
-            return false;
+            stack.complete(done, false);
+            return;
         }
 
         long alreadyHave = forceProduction ? 0L : ctx.countMatching(ingredient);
@@ -872,12 +965,16 @@ public final class CraftingResolver {
             Ingredient plainHeart = Ingredient.of(ForgeRegistries.ITEMS.getValue(EARTH_HEART_ID));
             NodeId nodeId = ctx.allocateNodeId();
             InputPortId inputPort = new InputPortId(nodeId, 0);
-            if (plainHeart.getItems().length > 0
-                    && ensureIngredient(plainHeart, remaining, ctx, depth + 1, edges, inputPort, null)) {
+            if (plainHeart.getItems().length > 0) {
+                ensureIngredient(plainHeart, remaining, ctx, depth + 1, edges, inputPort, null, stack, resolved -> {
+                if (resolved) {
                 ItemStack plainTemplate = plainHeart.getItems()[0].copyWithCount(1);
                 ItemStack taintedTemplate = ingredient.getItems().length > 0
                         ? ingredient.getItems()[0].copyWithCount(1) : ItemStack.EMPTY;
-                if (taintedTemplate.isEmpty()) return false;
+                if (taintedTemplate.isEmpty()) {
+                    stack.complete(done, false);
+                    return;
+                }
                 long taintedRemaining = remaining;
                 while (taintedRemaining > 0L) {
                     int executions = SaturatingLongMath.clampToInt(taintedRemaining);
@@ -898,10 +995,25 @@ public final class CraftingResolver {
                                     executions, OutputKind.SYNTHETIC)), step.magicCosts()));
                     taintedRemaining -= executions;
                 }
-                alreadyHave = ctx.countMatching(ingredient);
-                remaining = count - alreadyHave;
+                }
+                resolveCandidates(ingredient, count, ctx, depth, edges, consumer, consumedOut, prepareOnly,
+                        count - ctx.countMatching(ingredient), minReserve, forcedRecipeId, false,
+                        missingCheckpoint, consumeMs, stack, done);
+                });
+                return;
             }
         }
+        resolveCandidates(ingredient, count, ctx, depth, edges, consumer, consumedOut, prepareOnly,
+                remaining, minReserve, forcedRecipeId, forceProduction, missingCheckpoint, consumeMs, stack, done);
+    }
+
+    private static void resolveCandidates(Ingredient ingredient, long count, ResolutionContext ctx,
+                                          int depth, EdgeTracker edges, @Nullable InputPortId consumer,
+                                          @Nullable List<ResolutionContext.SupplySlice> consumedOut,
+                                          boolean prepareOnly, long remaining, int minReserve,
+                                          @Nullable ResourceLocation forcedRecipeId, boolean forceProduction,
+                                          int missingCheckpoint, long consumeMs,
+                                          PlanningStack stack, Consumer<Boolean> done) {
         if (!forceProduction && minReserve > 0) {
             remaining += minReserve;
         }
@@ -911,7 +1023,8 @@ public final class CraftingResolver {
                     ctx.consumeMatchingDetailed(ingredient, prepareOnly ? 0L : count);
             if (existing.complete()) recordSupplyConsumption(ctx, consumer, consumedOut, existing);
             if (existing.complete()) ctx.truncateMissing(missingCheckpoint);
-            return existing.complete();
+            stack.complete(done, existing.complete());
+            return;
         }
         if (ctx.isNoRecipe(ingredient)) {
             ctx.beginUndo();
@@ -924,12 +1037,9 @@ public final class CraftingResolver {
             if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient stop: no_recipe for "
                     + describeFirstItem(ingredient) + " missing="
                     + Math.max(0L, count - stocked.supplied()));
-            if (recordBestEffortUnresolved(
-                    ctx, consumer, ingredient, Math.max(0L, count - stocked.supplied()), "no-recipe")) {
-                return true;
-            }
-            recordFailureMissing(ctx, ingredient, missingCheckpoint);
-            return false;
+            finishMissing(ctx, consumer, ingredient, Math.max(0L, count - stocked.supplied()),
+                    "no-recipe", missingCheckpoint, stack, done);
+            return;
         }
 
         long candStart = System.nanoTime();
@@ -937,8 +1047,24 @@ public final class CraftingResolver {
         // 现有日志只能看到剩下几个候选，看不到是谁按什么规则被滤掉的。
         List<CandidateEngine.CandidateDiagnostic> candidateDiag =
                 RSIntegrationMod.isDebugLoggingEnabled() ? new ArrayList<>() : null;
-        List<RecipeIndex.Entry> candidates =
-                CandidateEngine.findCandidates(ingredient, ctx, candidateDiag, remaining);
+        long needed = remaining;
+        CandidateEngine.findCandidates(ingredient, ctx, candidateDiag, needed, stack, candidates ->
+                collectViableCandidates(ingredient, count, ctx, depth, edges, consumer, consumedOut, prepareOnly,
+                        needed, forcedRecipeId, forceProduction, missingCheckpoint, consumeMs,
+                        candStart, candidateDiag, candidates, stack, done));
+    }
+
+    private record AliveCandidate(RecipeIndex.Entry entry, ItemStack output, int netGain) {}
+
+    private static void collectViableCandidates(Ingredient ingredient, long count, ResolutionContext ctx,
+                                               int depth, EdgeTracker edges, @Nullable InputPortId consumer,
+                                               @Nullable List<ResolutionContext.SupplySlice> consumedOut,
+                                               boolean prepareOnly, long remaining,
+                                               @Nullable ResourceLocation forcedRecipeId, boolean forceProduction,
+                                               int missingCheckpoint, long consumeMs, long candStart,
+                                               @Nullable List<CandidateEngine.CandidateDiagnostic> candidateDiag,
+                                               List<RecipeIndex.Entry> candidates,
+                                               PlanningStack stack, Consumer<Boolean> done) {
         if (forceProduction) {
             candidates = prioritizeForcedCandidate(candidates,
                     candidate -> candidate.recipe().getId(), forcedRecipeId);
@@ -952,24 +1078,29 @@ public final class CraftingResolver {
         if (candidates.isEmpty()) {
             if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient FAILED: no candidates for " + describeFirstItem(ingredient));
             logSkippedCandidates("no-candidates", ingredient, candidateDiag);
-            if (recordBestEffortUnresolved(ctx, consumer, ingredient, count, "no-candidates")) {
-                return true;
-            }
-            recordFailureMissing(ctx, ingredient, missingCheckpoint);
-            return false;
+            finishMissing(ctx, consumer, ingredient, count, "no-candidates", missingCheckpoint, stack, done);
+            return;
         }
 
-        record AliveCandidate(RecipeIndex.Entry entry, ItemStack output, int netGain) {}
         List<AliveCandidate> alive = new ArrayList<>();
         long aliveStart = System.nanoTime();
-        for (RecipeIndex.Entry candidate : candidates) {
-            if (ctx.timedOut()) {
-                long aliveMs = (System.nanoTime() - aliveStart) / 1_000_000;
-                RSIntegrationMod.debug("[RSI-ensure] alive-building timed out after {}ms, keeping {}/{} candidates",
-                        aliveMs, alive.size(), candidates.size());
-                PerformanceMonitor.recordResolveTimeout();
-                break;
+        int candidateCount = candidates.size();
+        var entries = candidates.iterator();
+        class Outputs implements Runnable {
+            @Override
+            public void run() {
+                if (!entries.hasNext() || ctx.timedOut()) {
+                    if (entries.hasNext()) PerformanceMonitor.recordResolveTimeout();
+                    tryViableCandidates(ingredient, count, ctx, depth, edges, consumer, consumedOut,
+                            prepareOnly, remaining, forcedRecipeId, forceProduction, missingCheckpoint,
+                            candidateDiag, candidateCount, aliveStart, alive, stack, done);
+                    return;
+                }
+                stack.resume(this);
+                addIfViable(entries.next());
             }
+
+            private void addIfViable(RecipeIndex.Entry candidate) {
             ItemStack out = CandidateEngine.outputForDemand(candidate, ingredient, ctx);
             // If the result is bare (no NBT), scan fields for the real
             // NBT-carrying output — TACZ/Applied Armorer hide it there.
@@ -987,7 +1118,7 @@ public final class CraftingResolver {
                     ctx.diag("ensureIngredient REJECT " + candidate.recipe().getId()
                             + ": empty output class=" + candidate.recipe().getClass().getName());
                 }
-                continue;
+                return;
             }
             int ng = netGainPerBatch(candidate, out, ctx.level.registryAccess());
             if (ng <= 0) {
@@ -997,11 +1128,23 @@ public final class CraftingResolver {
                             + " selfConsumed=" + selfConsumedPerBatch(
                             candidate, out, ctx.level.registryAccess()));
                 }
-                continue;
+                return;
             }
             alive.add(new AliveCandidate(candidate, out, ng));
+            }
         }
+        stack.resume(new Outputs());
+    }
 
+    private static void tryViableCandidates(Ingredient ingredient, long count, ResolutionContext ctx,
+                                           int depth, EdgeTracker edges, @Nullable InputPortId consumer,
+                                           @Nullable List<ResolutionContext.SupplySlice> consumedOut,
+                                           boolean prepareOnly, long remaining,
+                                           @Nullable ResourceLocation forcedRecipeId, boolean forceProduction,
+                                           int missingCheckpoint,
+                                           @Nullable List<CandidateEngine.CandidateDiagnostic> candidateDiag,
+                                           int candidateCount, long aliveStart, List<AliveCandidate> alive,
+                                           PlanningStack stack, Consumer<Boolean> done) {
         // Forced selection controls which candidate may execute, but the complete viable list
         // must remain available as UI alternatives so the player can switch back afterwards.
         List<AliveCandidate> selectableAlive = List.copyOf(alive);
@@ -1015,18 +1158,15 @@ public final class CraftingResolver {
 
         long aliveMs = (System.nanoTime() - aliveStart) / 1_000_000;
         if (alive.isEmpty()) {
-            if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient FAILED: no viable candidates (total=" + candidates.size()
+            if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient FAILED: no viable candidates (total=" + candidateCount
                     + ", all rejected) for " + describeFirstItem(ingredient));
             if (RSIntegrationMod.isDebugLoggingEnabled()) {
                 RSIntegrationMod.debug("[RSI-ensure] no viable candidates for {} ({} total candidates rejected, alive-building took {}ms)",
-                        describeFirstItem(ingredient), candidates.size(), aliveMs);
+                        describeFirstItem(ingredient), candidateCount, aliveMs);
             }
             logSkippedCandidates("no-viable-candidates", ingredient, candidateDiag);
-            if (recordBestEffortUnresolved(ctx, consumer, ingredient, count, "no-viable-candidates")) {
-                return true;
-            }
-            recordFailureMissing(ctx, ingredient, missingCheckpoint);
-            return false;
+            finishMissing(ctx, consumer, ingredient, count, "no-viable-candidates", missingCheckpoint, stack, done);
+            return;
         }
 
         if (RSIntegrationMod.isDebugLoggingEnabled() && alive.size() > 1) {
@@ -1046,40 +1186,66 @@ public final class CraftingResolver {
             RSIntegrationMod.debug(sb.toString());
         }
 
+        List<AliveCandidate> viable = alive;
+        long needed = remaining;
         boolean ownsTwoPhase = ctx.bestEffort
                 && !ctx.strictCandidatePass && !ctx.bestEffortFallbackPass;
         int candidatePasses = ownsTwoPhase ? 2 : 1;
-        for (int candidatePass = 0; candidatePass < candidatePasses; candidatePass++) {
-            boolean previousStrict = ctx.strictCandidatePass;
-            boolean previousFallback = ctx.bestEffortFallbackPass;
-            if (ownsTwoPhase) {
-                ctx.strictCandidatePass = candidatePass == 0;
-                ctx.bestEffortFallbackPass = candidatePass == 1;
-                if (ctx.diagnosticsEnabled()) ctx.diag(candidatePass == 0
-                        ? "ensureIngredient candidate pass=strict"
-                        : "ensureIngredient candidate pass=best-effort-fallback");
+        boolean previousStrict = ctx.strictCandidatePass;
+        boolean previousFallback = ctx.bestEffortFallbackPass;
+        stack.enter(() -> {
+            ctx.strictCandidatePass = previousStrict;
+            ctx.bestEffortFallbackPass = previousFallback;
+        });
+        class Candidates implements Runnable {
+            private int pass;
+            private int position;
+
+            @Override
+            public void run() {
+                if (pass < candidatePasses) {
+                    if (position == 0 && ownsTwoPhase) {
+                        ctx.strictCandidatePass = pass == 0;
+                        ctx.bestEffortFallbackPass = pass == 1;
+                        if (ctx.diagnosticsEnabled()) ctx.diag(pass == 0
+                                ? "ensureIngredient candidate pass=strict"
+                                : "ensureIngredient candidate pass=best-effort-fallback");
+                    }
+                    if (position < viable.size()) {
+                        if (!tryCandidate(viable.get(position++))) stack.resume(this);
+                        return;
+                    }
+                    position = 0;
+                    pass++;
+                    stack.resume(this);
+                    return;
+                }
+                stack.leave();
+                if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient FAILED: exhausted " + viable.size()
+                        + " viable candidates for " + describeFirstItem(ingredient));
+                finishMissing(ctx, consumer, ingredient, count, "candidates-exhausted", missingCheckpoint, stack, done);
             }
-            try {
-                for (AliveCandidate a : alive) {
+
+            private boolean tryCandidate(AliveCandidate a) {
             // Don't check timedOut() before the first candidate — the alive-building
             // loop may have exhausted the deadline with expensive result-item probes
             // for mod recipes. The first candidate is the highest-scored and is near-
             // certain to be a vanilla recipe with fast craftBatched.
             if (ctx.recipeCycles.containsBranch(a.entry.recipe().getId(), a.output)) {
                 if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId() + ": cycle detected");
-                continue;
+                return false;
             }
 
             StackKey outKey = StackKey.of(a.output, a.output.hasTag());
             if (ctx.recipeCycles.containsOutput(a.output)) {
                 if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId()
                         + ": ancestor output cycle detected");
-                continue;
+                return false;
             }
 
             if (requiresMissingSelfInput(a.entry, a.output, ctx)) {
                 if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId() + ": self-input missing");
-                continue;
+                return false;
             }
 
             // Ping-pong guard using StackKey (Item + NBT) to correctly distinguish
@@ -1088,7 +1254,7 @@ public final class CraftingResolver {
             if (ctx.recipeCycles.containsAnyOutput(inKeys)) {
                 if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId()
                         + ": input consumes an ancestor output");
-                continue;
+                return false;
             }
             boolean isPingPong = false;
             for (StackKey inKey : inKeys) {
@@ -1100,7 +1266,7 @@ public final class CraftingResolver {
             if (isPingPong) {
                 if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId()
                         + ": ping-pong conversion cycle detected");
-                continue;
+                return false;
             }
 
             // 被循环/自输入检查排除的候选无需构造供界面展示的备选列表。
@@ -1113,7 +1279,7 @@ public final class CraftingResolver {
             }
 
             long batches = Math.max(1L,
-                    SaturatingLongMath.ceilDiv(remaining, a.netGain));
+                    SaturatingLongMath.ceilDiv(needed, a.netGain));
             int selfConsumed = selfConsumedPerBatch(a.entry, a.output,
                     ctx.level.registryAccess());
 
@@ -1125,15 +1291,21 @@ public final class CraftingResolver {
                     : Set.of();
             for (Set<Item> family : conversionFamilies) ctx.pushConversionFamily(family);
 
-            boolean allOk;
             boolean activatedForcedRecipe = forceProduction
                     && ctx.activateForcedRecipe(a.entry.recipe().getId());
-            try {
+            stack.enter(() -> {
+                if (activatedForcedRecipe) ctx.deactivateForcedRecipe(a.entry.recipe().getId());
+                ctx.recipeCycles.leave(a.entry.recipe().getId(), a.output);
+                for (Set<Item> family : conversionFamilies) ctx.popConversionFamily(family);
+            });
                 for (StackKey inKey : inKeys) {
                     edges.addEdge(inKey, outKey);
                 }
-                long batchesLeft = batches;
-                do {
+                class Batches implements Runnable {
+                    private long batchesLeft = batches;
+
+                    @Override
+                    public void run() {
                     int stageBatches = SaturatingLongMath.clampToInt(batchesLeft);
                     if (selfConsumed > 0) {
                         Ingredient exactOutput = ingredientOf(a.output, a.output.hasTag());
@@ -1147,36 +1319,30 @@ public final class CraftingResolver {
                                         + " available=" + ctx.countMatching(exactOutput)
                                         + " requiredSeed=" + selfConsumed);
                             }
-                            allOk = false;
-                            break;
+                            finishCandidate(a, false);
+                            return;
                         }
                     }
-                    allOk = StepExecutor.craftBatched(
-                            a.entry, ctx, depth, altIds, altModTypes, edges, stageBatches, a.output);
                     batchesLeft -= stageBatches;
-                } while (allOk && batchesLeft > 0);
-            } finally {
-                if (activatedForcedRecipe) {
-                    ctx.deactivateForcedRecipe(a.entry.recipe().getId());
+                    StepExecutor.craftBatched(a.entry, ctx, depth, altIds, altModTypes, edges, stageBatches,
+                            a.output, stack, ok -> {
+                                if (ok && batchesLeft > 0) stack.resume(this);
+                                else finishCandidate(a, ok);
+                            });
+                    }
                 }
-                ctx.recipeCycles.leave(a.entry.recipe().getId(), a.output);
-                for (Set<Item> family : conversionFamilies) ctx.popConversionFamily(family);
+                stack.resume(new Batches());
+                return true;
             }
 
+            private void finishCandidate(AliveCandidate a, boolean allOk) {
+            stack.leave();
             if (!allOk) {
                 if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId() + ": craftOnce failed");
                 ctx.rollback();
                 edges.rollback();
-                if (ctx.timedOut()) {
-                    PerformanceMonitor.recordResolveTimeout();
-                    if (recordBestEffortUnresolved(ctx, consumer, ingredient, count,
-                            "timeout-after-craft-failure")) {
-                        return true;
-                    }
-                    recordFailureMissing(ctx, ingredient, missingCheckpoint);
-                    return false;
-                }
-                continue;
+                retryOrTimeout("timeout-after-craft-failure");
+                return;
             }
 
             ResolutionContext.SupplyConsumption crafted = forceProduction && !prepareOnly
@@ -1188,35 +1354,38 @@ public final class CraftingResolver {
                 ctx.truncateMissing(missingCheckpoint);
                 ctx.commitUndo();
                 edges.commitUndo();
-                return true;
+                stack.leave();
+                stack.complete(done, true);
+                return;
             }
 
             if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId() + ": consumeMatching failed after craft");
             ctx.rollback();
             edges.rollback();
-            if (ctx.timedOut()) {
-                PerformanceMonitor.recordResolveTimeout();
-                if (recordBestEffortUnresolved(ctx, consumer, ingredient, count,
-                        "timeout-after-consume-failure")) {
-                    return true;
-                }
-                recordFailureMissing(ctx, ingredient, missingCheckpoint);
-                return false;
+            retryOrTimeout("timeout-after-consume-failure");
             }
-                }
-            } finally {
-                ctx.strictCandidatePass = previousStrict;
-                ctx.bestEffortFallbackPass = previousFallback;
-            }
-        }
 
-        if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient FAILED: exhausted " + alive.size() + " viable candidates for "
-                + describeFirstItem(ingredient));
-        if (recordBestEffortUnresolved(ctx, consumer, ingredient, count, "candidates-exhausted")) {
-            return true;
+            private void retryOrTimeout(String reason) {
+                if (!ctx.timedOut()) {
+                    stack.resume(this);
+                    return;
+                }
+                PerformanceMonitor.recordResolveTimeout();
+                boolean resolved = recordBestEffortUnresolved(ctx, consumer, ingredient, count, reason);
+                if (!resolved) recordFailureMissing(ctx, ingredient, missingCheckpoint);
+                stack.leave();
+                stack.complete(done, resolved);
+            }
         }
-        recordFailureMissing(ctx, ingredient, missingCheckpoint);
-        return false;
+        stack.resume(new Candidates());
+    }
+
+    private static void finishMissing(ResolutionContext ctx, @Nullable InputPortId consumer,
+                                      Ingredient ingredient, long count, String reason, int missingCheckpoint,
+                                      PlanningStack stack, Consumer<Boolean> done) {
+        boolean resolved = recordBestEffortUnresolved(ctx, consumer, ingredient, count, reason);
+        if (!resolved) recordFailureMissing(ctx, ingredient, missingCheckpoint);
+        stack.complete(done, resolved);
     }
 
     /**
@@ -1225,45 +1394,64 @@ public final class CraftingResolver {
      */
     private static void prepareSharedAmplification(Ingredient ingredient, long count,
                                                    ResolutionContext ctx, int depth,
-                                                   EdgeTracker edges) {
+                                                   EdgeTracker edges, PlanningStack stack, Runnable next) {
         if (count <= 0L || ctx.pendingInputs.isEmpty() || ctx.timedOut()
-                || ctx.forcedRecipeFor(ingredient) != null || ctx.isNoRecipe(ingredient)) return;
+                || ctx.forcedRecipeFor(ingredient) != null || ctx.isNoRecipe(ingredient)) {
+            stack.resume(next);
+            return;
+        }
         ItemStack[] options = ingredient.getItems();
-        if (options.length != 1 || options[0].isEmpty()) return;
+        if (options.length != 1 || options[0].isEmpty()) {
+            stack.resume(next);
+            return;
+        }
         ItemStack output = options[0];
+        long availableSeed = ctx.countMatching(ingredient);
+        if (availableSeed <= 0L || ctx.recipeCycles.containsOutput(output)) {
+            stack.resume(next);
+            return;
+        }
         long pending = ctx.pendingConsumption(output);
         long target = SaturatingLongMath.add(count, pending);
-        if (pending <= 0L || ctx.countMatching(ingredient) >= target
-                || ctx.recipeCycles.containsOutput(output)) return;
+        if (pending <= 0L || availableSeed >= target) {
+            stack.resume(next);
+            return;
+        }
         boolean seededCopy = false;
         for (RecipeIndex.Entry entry : ctx.index.getOrDefault(output.getItem(), List.of())) {
             ItemStack declared = CandidateEngine.outputForDemand(entry, ingredient, ctx);
             if (declared.isEmpty()) continue;
             int seed = selfConsumedPerBatch(entry, declared, ctx.level.registryAccess());
-            if (seed > 0 && ctx.countMatching(ingredient) >= seed
+            if (seed > 0 && availableSeed >= seed
                     && netGainPerBatch(entry, declared, ctx.level.registryAccess()) > 0) {
                 seededCopy = true;
                 break;
             }
         }
-        if (!seededCopy) return;
+        if (!seededCopy) {
+            stack.resume(next);
+            return;
+        }
         int missingCheckpoint = ctx.missingCount();
         boolean previousStrict = ctx.strictCandidatePass;
         ctx.beginUndo();
         edges.beginUndo();
         ctx.strictCandidatePass = true;
-        try {
-            if (ensureIngredient(ingredient, target, ctx, depth, edges, null, null, true)) {
+        stack.enter(() -> {
+            ctx.strictCandidatePass = previousStrict;
+            ctx.truncateMissing(missingCheckpoint);
+        });
+        stack.resume(() -> resolveIngredient(ingredient, target, ctx, depth, edges, null, null, true, stack, resolved -> {
+            if (resolved) {
                 ctx.commitUndo();
                 edges.commitUndo();
             } else {
                 ctx.rollback();
                 edges.rollback();
             }
-        } finally {
-            ctx.strictCandidatePass = previousStrict;
-            ctx.truncateMissing(missingCheckpoint);
-        }
+            stack.leave();
+            stack.resume(next);
+        }));
     }
 
     static <T> List<T> forcedExecutionCandidates(List<T> viable,
@@ -1969,56 +2157,38 @@ public final class CraftingResolver {
      *  Using StackKey (Item + NBT) instead of plain Item prevents false ping-pong
      *  detection for NBT-differentiated items like TACZ attachments. */
     public static class EdgeTracker {
-        private final Set<String> activeEdges = new HashSet<>();
-        private final List<List<String>> history = new ArrayList<>();
+        private record ConversionEdge(StackKey input, StackKey output) {}
+
+        private final Set<ConversionEdge> activeEdges = new HashSet<>();
+        private final List<ConversionEdge> undo = new ArrayList<>();
+        private final Deque<Integer> checkpoints = new ArrayDeque<>();
 
         public void beginUndo() {
-            history.add(new ArrayList<>());
+            checkpoints.push(undo.size());
         }
 
         public void commitUndo() {
-            if (history.size() > 1) {
-                List<String> current = history.remove(history.size() - 1);
-                history.get(history.size() - 1).addAll(current);
-            }
-            // When history.size() == 1 (outermost level), edges stay in activeEdges
-            // as committed — they prevent reverse edges across the entire plan.
-            // The level is kept as a permanent baseline so future rollback() calls
-            // only undo edges added by subsequent beginUndo() pushes.
+            if (checkpoints.isEmpty()) return;
+            checkpoints.pop();
+            // 已提交的边留在主集合中；提交子分支不再逐层复制整段变更记录。
+            if (checkpoints.isEmpty()) undo.clear();
         }
 
         public void rollback() {
-            if (!history.isEmpty()) {
-                List<String> current = history.remove(history.size() - 1);
-                activeEdges.removeAll(current);
-            }
+            if (checkpoints.isEmpty()) return;
+            int checkpoint = checkpoints.pop();
+            while (undo.size() > checkpoint) activeEdges.remove(undo.remove(undo.size() - 1));
         }
 
         public void addEdge(StackKey in, StackKey out) {
             // 自增配方的种子输入不是反向换算；净收益与种子数量由解析器另行校验。
             if (in.equals(out)) return;
-            ResourceLocation inRl = ForgeRegistries.ITEMS.getKey(in.item());
-            ResourceLocation outRl = ForgeRegistries.ITEMS.getKey(out.item());
-            if (inRl == null || outRl == null) return;
-
-            String inStr = inRl + (in.tag() != null ? "|" + in.tag() : "");
-            String outStr = outRl + (out.tag() != null ? "|" + out.tag() : "");
-
-            String edge = inStr + "->" + outStr;
-            if (activeEdges.add(edge) && !history.isEmpty()) {
-                history.get(history.size() - 1).add(edge);
-            }
+            var edge = new ConversionEdge(in, out);
+            if (activeEdges.add(edge) && !checkpoints.isEmpty()) undo.add(edge);
         }
 
         public boolean containsReverse(StackKey in, StackKey out) {
-            ResourceLocation inRl = ForgeRegistries.ITEMS.getKey(in.item());
-            ResourceLocation outRl = ForgeRegistries.ITEMS.getKey(out.item());
-            if (inRl == null || outRl == null) return false;
-
-            String inStr = inRl + (in.tag() != null ? "|" + in.tag() : "");
-            String outStr = outRl + (out.tag() != null ? "|" + out.tag() : "");
-
-            return activeEdges.contains(outStr + "->" + inStr);
+            return activeEdges.contains(new ConversionEdge(out, in));
         }
     }
 }

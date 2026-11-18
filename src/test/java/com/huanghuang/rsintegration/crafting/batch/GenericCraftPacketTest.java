@@ -702,33 +702,6 @@ class GenericCraftPacketTest extends BootstrapTest {
     }
 
     @Test
-    void typedTimeoutKeepsAConfirmedMissingTreeOpenForInspection() {
-        var missingMaterial = new ImmutableRecipeGraph.MaterialRef(
-                new ResourceLocation("minecraft", "prismarine_shard"), "");
-        PureRecipePlanner.Result incomplete = new PureRecipePlanner.Result(
-                PureRecipePlanner.Feasibility.INFEASIBLE, List.of(),
-                List.of(new ImmutableRecipeGraph.IngredientRef(
-                        List.of(missingMaterial), 7,
-                        ImmutableRecipeGraph.NbtMatchMode.ANY)), Map.of(),
-                PureRecipePlanner.Status.UNRESOLVABLE, 12, 3, 0);
-        var missing = new PureDemandTreeInspector.Result(
-                PureDemandTreeInspector.Status.MISSING_MATERIALS, 4,
-                missingMaterial, false);
-
-        assertTrue(CraftPlanDecisionRules.canUseBoundedTraceAfterTypedTimeout(
-                incomplete, missing, false, PurePlanningCoverage.Probe.notChecked()));
-        assertFalse(CraftPlanDecisionRules.canUseBoundedTraceAfterTypedTimeout(
-                incomplete, missing, true, PurePlanningCoverage.Probe.notChecked()));
-        assertFalse(CraftPlanDecisionRules.canUseBoundedTraceAfterTypedTimeout(
-                null, missing, false, PurePlanningCoverage.Probe.notChecked()));
-        for (var status : List.of(PurePlanningCoverage.Status.GAP, PurePlanningCoverage.Status.UNCERTAIN)) {
-            assertFalse(CraftPlanDecisionRules.canUseBoundedTraceAfterTypedTimeout(
-                    incomplete, missing, false, new PurePlanningCoverage.Probe(missingMaterial, status)),
-                    "保留下来的纯图失败不能在 typed 超时后变成未经证明的缺料报告");
-        }
-    }
-
-    @Test
     void typedResolverUsesPlanningLifetimeNotPerTickExecutionSlice() {
         assertEquals(2_000, CraftExecutionRequestService.typedResolverBudgetMs(2_000));
         assertEquals(1, CraftExecutionRequestService.typedResolverBudgetMs(0));

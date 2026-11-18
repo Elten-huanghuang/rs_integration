@@ -44,10 +44,10 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 /**
- * Executes recipe steps: material planning and result registration.
- * Delegates sub-ingredient resolution back to {@link CraftingResolver#ensureIngredient}.
+ * 规划配方槽位、登记产出，并在等待子材料时保存当前步骤。
  */
 final class StepExecutor {
 
@@ -65,35 +65,27 @@ final class StepExecutor {
         return (int) result;
     }
 
-    static boolean craftBatched(CraftingRecipe recipe, ResolutionContext ctx, int depth,
+    private static void craftBatched(CraftingRecipe recipe, ResolutionContext ctx, int depth,
                                 List<ResourceLocation> altIds, List<String> altModTypes,
-                                CraftingResolver.EdgeTracker edges, int batches) {
-        if (ctx.timedOut()) {
-            PerformanceMonitor.recordResolveTimeout();
-            return false;
-        }
-        if (depth > maxDepth()) {
-            ctx.recordDepthGuard(depth, maxDepth());
-            return false;
-        }
-        if (ctx.steps.size() + 1 > maxSteps()) {
-            ctx.recordStepGuard(ctx.steps.size(), maxSteps());
-            return false;
-        }
-
+                                CraftingResolver.EdgeTracker edges, int batches,
+                                PlanningStack stack, Consumer<Boolean> resultCallback) {
         ctx.beginUndo();
         edges.beginUndo();
         NodeId graphNodeId = ctx.allocateNodeId();
 
         List<IngredientSpec> specs = narrowMaterialLocks(
                 recipe.getId(), CraftPacketUtils.extractCraftingIngredientSpecs(recipe), ctx);
-        List<InputDemand> graphInputs = planRecipeSpecsForGraph(
-                recipe, specs, graphNodeId, ctx, depth, edges, batches);
-        if (graphInputs == null) {
-            ctx.rollback();
-            edges.rollback();
-            return false;
-        }
+        planRecipeSpecsForGraph(recipe, specs, graphNodeId, ctx, depth, edges, batches, stack,
+                graphInputs -> finishCraftingStep(recipe, ctx, altIds, altModTypes, edges, batches,
+                        graphNodeId, specs, graphInputs, stack, resultCallback));
+    }
+
+    private static void finishCraftingStep(CraftingRecipe recipe, ResolutionContext ctx,
+                                           List<ResourceLocation> altIds, List<String> altModTypes,
+                                           CraftingResolver.EdgeTracker edges, int batches, NodeId graphNodeId,
+                                           List<IngredientSpec> specs, List<InputDemand> graphInputs,
+                                           PlanningStack stack, Consumer<Boolean> done) {
+        if (!canFinishStep(graphInputs, ctx, edges, stack, done)) return;
 
         List<OutputDeclaration> graphOutputs = new ArrayList<>();
         for (ItemStack remainder : CraftPacketUtils.getRecipeRemainders(recipe)) {
@@ -117,28 +109,41 @@ final class StepExecutor {
 
         ctx.commitUndo();
         edges.commitUndo();
-        return true;
+        stack.complete(done, true);
     }
 
     static boolean craftBatched(RecipeIndex.Entry entry, ResolutionContext ctx, int depth,
                                 List<ResourceLocation> altIds, List<String> altModTypes,
                                 CraftingResolver.EdgeTracker edges, int batches,
                                 ItemStack demandedOutput) {
+        var stack = new PlanningStack();
+        return stack.resolve(done -> craftBatched(entry, ctx, depth, altIds, altModTypes,
+                edges, batches, demandedOutput, stack, done));
+    }
+
+    static void craftBatched(RecipeIndex.Entry entry, ResolutionContext ctx, int depth,
+                             List<ResourceLocation> altIds, List<String> altModTypes,
+                             CraftingResolver.EdgeTracker edges, int batches, ItemStack demandedOutput,
+                             PlanningStack stack, Consumer<Boolean> done) {
         if (ctx.timedOut()) {
             PerformanceMonitor.recordResolveTimeout();
-            return false;
+            stack.complete(done, false);
+            return;
         }
         if (depth > maxDepth()) {
             ctx.recordDepthGuard(depth, maxDepth());
-            return false;
+            stack.complete(done, false);
+            return;
         }
         if (ctx.steps.size() + 1 > maxSteps()) {
             ctx.recordStepGuard(ctx.steps.size(), maxSteps());
-            return false;
+            stack.complete(done, false);
+            return;
         }
 
         if (entry.modType() == ModType.GENERIC && entry.recipe() instanceof CraftingRecipe cr) {
-            return craftBatched(cr, ctx, depth, altIds, altModTypes, edges, batches);
+            craftBatched(cr, ctx, depth, altIds, altModTypes, edges, batches, stack, done);
+            return;
         }
 
         ctx.beginUndo();
@@ -159,7 +164,8 @@ final class StepExecutor {
             if (specs == null) {
                 ctx.rollback();
                 edges.rollback();
-                return false;
+                stack.complete(done, false);
+                return;
             }
         }
 
@@ -169,11 +175,11 @@ final class StepExecutor {
         if (!broken) {
             for (IngredientSpec spec : specs) {
                 if (spec.isEmpty()) continue;
-                for (ItemStack stack : spec.ingredient().getItems()) {
-                    if (stack.isEmpty()) continue;
-                    if (stack.getItem() == Items.AIR) { broken = true; break; }
-                    ResourceLocation rl = ForgeRegistries.ITEMS.getKey(stack.getItem());
-                    if (rl != null && !stack.hasTag()) {
+                for (ItemStack input : spec.ingredient().getItems()) {
+                    if (input.isEmpty()) continue;
+                    if (input.getItem() == Items.AIR) { broken = true; break; }
+                    ResourceLocation rl = ForgeRegistries.ITEMS.getKey(input.getItem());
+                    if (rl != null && !input.hasTag()) {
                         String ns = rl.getNamespace();
                         if ("tacz".equals(ns) || "applied_armorer".equals(ns)) { broken = true; break; }
                     }
@@ -186,9 +192,9 @@ final class StepExecutor {
                     entry.recipe(), ctx.level.registryAccess());
             if (!repaired.isEmpty()) {
                 specs = new ArrayList<>();
-                for (ItemStack stack : repaired) {
+                for (ItemStack input : repaired) {
                     specs.add(new IngredientSpec(
-                            CraftingResolver.ingredientOf(stack, stack.hasTag()), stack.getCount()));
+                            CraftingResolver.ingredientOf(input, input.hasTag()), input.getCount()));
                 }
             }
         }
@@ -211,16 +217,24 @@ final class StepExecutor {
         if (specs == null || specs.isEmpty()) {
             ctx.rollback();
             edges.rollback();
-            return false;
+            stack.complete(done, false);
+            return;
         }
 
-        List<InputDemand> graphInputs = planRecipeSpecsForGraph(
-                entry.recipe(), specs, graphNodeId, ctx, depth, edges, batches);
-        if (graphInputs == null) {
-            ctx.rollback();
-            edges.rollback();
-            return false;
-        }
+        List<IngredientSpec> plannedSpecs = specs;
+        ItemStack bladeOutput = plannedBladeOutput;
+        planRecipeSpecsForGraph(entry.recipe(), specs, graphNodeId, ctx, depth, edges, batches, stack,
+                graphInputs -> finishTypedStep(entry, ctx, altIds, altModTypes, edges, batches, demandedOutput,
+                        graphNodeId, goetyDynamic, plannedSpecs, bladeOutput, graphInputs, stack, done));
+    }
+
+    private static void finishTypedStep(RecipeIndex.Entry entry, ResolutionContext ctx,
+                                        List<ResourceLocation> altIds, List<String> altModTypes,
+                                        CraftingResolver.EdgeTracker edges, int batches, ItemStack demandedOutput,
+                                        NodeId graphNodeId, boolean goetyDynamic, List<IngredientSpec> specs,
+                                        ItemStack plannedBladeOutput, List<InputDemand> graphInputs,
+                                        PlanningStack stack, Consumer<Boolean> done) {
+        if (!canFinishStep(graphInputs, ctx, edges, stack, done)) return;
 
         List<OutputDeclaration> graphOutputs = new ArrayList<>();
         if (entry.recipe() instanceof CraftingRecipe cr) {
@@ -296,34 +310,26 @@ final class StepExecutor {
 
         ctx.commitUndo();
         edges.commitUndo();
-        return true;
+        stack.complete(done, true);
     }
 
-    private static List<InputDemand> planRecipeIngredientsForGraph(
-            List<Ingredient> ingredients, NodeId nodeId, ResolutionContext ctx, int depth,
-            CraftingResolver.EdgeTracker edges, int batches) {
-        if (depth > maxDepth() || ctx.steps.size() + 1 > maxSteps()) return null;
-        List<InputDemand> inputs = new ArrayList<>();
-        int index = 0;
-        for (Ingredient ingredient : ingredients) {
-            if (ingredient.isEmpty()) continue;
-            int quantity = mulCount(1, batches);
-            InputPortId port = new InputPortId(nodeId, index++);
-            if (!CraftingResolver.ensureIngredient(ingredient, quantity, ctx, depth + 1, edges, port, null)) {
-                return null;
-            }
-            inputs.add(new InputDemand(port, ingredient, quantity,
-                    InputConsumption.fromDemandRole(demandRole(ingredient)),
-                    firstDisplay(ingredient)));
-        }
-        return inputs;
+    private static boolean canFinishStep(List<InputDemand> inputs, ResolutionContext ctx,
+                                         CraftingResolver.EdgeTracker edges,
+                                         PlanningStack stack, Consumer<Boolean> done) {
+        // 子步骤已经提交到当前候选，回到父层时需要再次检查总步骤预算。
+        if (inputs != null && ctx.steps.size() < maxSteps()) return true;
+        if (inputs != null) ctx.recordStepGuard(ctx.steps.size(), maxSteps());
+        ctx.rollback();
+        edges.rollback();
+        stack.complete(done, false);
+        return false;
     }
 
-    private static List<InputDemand> planRecipeSpecsForGraph(
+    private static void planRecipeSpecsForGraph(
             Recipe<?> recipe, List<IngredientSpec> specs, NodeId nodeId,
             ResolutionContext ctx, int depth,
-            CraftingResolver.EdgeTracker edges, int batches) {
-        if (depth > maxDepth() || ctx.steps.size() + 1 > maxSteps()) return null;
+            CraftingResolver.EdgeTracker edges, int batches,
+            PlanningStack stack, Consumer<List<InputDemand>> done) {
         // Machine specs describe physical slots. Keep equal predicates as separate
         // ports: two wool slots may legally choose different colours, while each
         // individual slot must still be backed by one concrete stack variant.
@@ -356,8 +362,18 @@ final class StepExecutor {
             pendingInputs.add(ScaledIngredientSpec.of(spec, quantity));
         }
         ctx.pendingInputs.push(pendingInputs);
-        try {
-            for (int originalIndex : resolutionOrder) {
+        stack.enter(ctx.pendingInputs::pop);
+        class Slots implements Runnable {
+            private int next;
+
+            @Override
+            public void run() {
+                if (next == resolutionOrder.size()) {
+                    stack.leave();
+                    stack.complete(done, List.of(slotInputs));
+                    return;
+                }
+                int originalIndex = resolutionOrder.get(next++);
                 IngredientSpec spec = physicalSpecs.get(originalIndex);
                 long pendingCount = pendingInputs.remove(0).count();
                 int quantity = SaturatingLongMath.clampToInt(spec.consumption().kind()
@@ -365,29 +381,27 @@ final class StepExecutor {
                         ? ctx.requiredDurabilityItems(spec, batches) : pendingCount);
                 InputPortId port = new InputPortId(nodeId, originalIndex);
                 // 刀的展示栈只代表条件下限，不能把工作台原料锁成整份 NBT 相等。
-                Ingredient plannedIngredient;
+                Consumer<Ingredient> resolvedSlot = plannedIngredient -> {
+                    if (plannedIngredient == null) {
+                        stack.leave();
+                        stack.complete(done, null);
+                        return;
+                    }
+                    slotInputs[originalIndex] = new InputDemand(port, plannedIngredient, quantity,
+                            effectiveConsumption(spec), firstDisplay(plannedIngredient));
+                    stack.resume(this);
+                };
                 if (bladeCrafting) {
-                    boolean resolved = CraftingResolver.ensureIngredient(spec.ingredient(), quantity, ctx,
-                            depth + 1, edges, port, null);
-                    plannedIngredient = resolved ? spec.ingredient() : null;
+                    CraftingResolver.ensureIngredient(spec.ingredient(), quantity, ctx,
+                            depth + 1, edges, port, null, stack,
+                            resolved -> resolvedSlot.accept(resolved ? spec.ingredient() : null));
                 } else {
-                    plannedIngredient = ensureSingleVariantMachineInput(
-                            spec.ingredient(), quantity, ctx, depth + 1, edges, port, null);
+                    ensureSingleVariantMachineInput(spec.ingredient(), quantity, ctx, depth + 1,
+                            edges, port, null, stack, resolvedSlot);
                 }
-                if (plannedIngredient == null) {
-                    return null;
-                }
-                slotInputs[originalIndex] = new InputDemand(port, plannedIngredient, quantity,
-                        effectiveConsumption(spec), firstDisplay(plannedIngredient));
             }
-        } finally {
-            ctx.pendingInputs.pop();
         }
-        List<InputDemand> inputs = new ArrayList<>(slotInputs.length);
-        for (InputDemand input : slotInputs) {
-            if (input != null) inputs.add(input);
-        }
-        return inputs;
+        stack.resume(new Slots());
     }
 
     /**
@@ -402,18 +416,29 @@ final class StepExecutor {
             Ingredient ingredient, long quantity, ResolutionContext ctx, int depth,
             CraftingResolver.EdgeTracker edges, @Nullable InputPortId port,
             @Nullable List<ResolutionContext.SupplySlice> consumedOut) {
+        var stack = new PlanningStack();
+        return stack.resolve(done -> ensureSingleVariantMachineInput(
+                ingredient, quantity, ctx, depth, edges, port, consumedOut, stack, done));
+    }
+
+    static void ensureSingleVariantMachineInput(
+            Ingredient ingredient, long quantity, ResolutionContext ctx, int depth,
+            CraftingResolver.EdgeTracker edges, @Nullable InputPortId port,
+            @Nullable List<ResolutionContext.SupplySlice> consumedOut,
+            PlanningStack stack, Consumer<Ingredient> done) {
         // 单件材料不可能混用变体，保留完整谓词，让解析器直接选择可用材料。
         if (quantity <= 1L) {
-            return CraftingResolver.ensureIngredient(ingredient, quantity, ctx, depth, edges,
-                    port, consumedOut) ? ingredient : null;
+            CraftingResolver.ensureIngredient(ingredient, quantity, ctx, depth, edges,
+                    port, consumedOut, stack, resolved -> stack.complete(done, resolved ? ingredient : null));
+            return;
         }
         List<ItemStack> variants = Arrays.stream(ingredient.getItems())
-                .filter(stack -> stack != null && !stack.isEmpty())
-                .map(stack -> stack.copyWithCount(1))
+                .filter(item -> item != null && !item.isEmpty())
+                .map(item -> item.copyWithCount(1))
                 .collect(Collectors.collectingAndThen(
                         Collectors.toMap(
-                                stack -> CraftingResolver.StackKey.of(stack, stack.hasTag()),
-                                stack -> stack,
+                                item -> CraftingResolver.StackKey.of(item, item.hasTag()),
+                                item -> item,
                                 (first, ignored) -> first,
                                 LinkedHashMap::new),
                         map -> new ArrayList<>(map.values())));
@@ -425,11 +450,9 @@ final class StepExecutor {
             Ingredient selected = variants.isEmpty()
                     ? ingredient
                     : CraftingResolver.ingredientOf(variants.get(0), strictNbt);
-            List<ResolutionContext.SupplySlice> consumed = new ArrayList<>();
-            boolean resolved = CraftingResolver.ensureIngredient(
-                    selected, quantity, ctx, depth, edges, port, consumed);
-            if (resolved && consumedOut != null) consumedOut.addAll(consumed);
-            return resolved ? selected : null;
+            CraftingResolver.ensureIngredient(selected, quantity, ctx, depth, edges, port, consumedOut,
+                    stack, resolved -> stack.complete(done, resolved ? selected : null));
+            return;
         }
 
         MaterialVariantPreferences.Snapshot preferences =
@@ -440,16 +463,28 @@ final class StepExecutor {
                     CraftingResolver.ingredientOf(variant, strictNbt)));
         }
         // 库存多的变体优先；不足整槽时也先补已有变体的缺口，软偏好仅用于同库存量。
-        variants.sort(Comparator.comparingLong((ItemStack stack) -> availableByVariant.get(stack))
+        variants.sort(Comparator.comparingLong((ItemStack item) -> availableByVariant.get(item))
                 .reversed()
-                .thenComparingInt(stack -> preferences.rank(stack.getItem()))
-                .thenComparing(stack -> {
-                    ResourceLocation id = ForgeRegistries.ITEMS.getKey(stack.getItem());
+                .thenComparingInt(item -> preferences.rank(item.getItem()))
+                .thenComparing(item -> {
+                    ResourceLocation id = ForgeRegistries.ITEMS.getKey(item.getItem());
                     return id != null ? id.toString() : "";
                 }));
 
         List<String> variantFailures = new ArrayList<>();
-        for (ItemStack variant : variants) {
+        var candidates = variants.iterator();
+        class TryVariant implements Runnable {
+            @Override
+            public void run() {
+                if (!candidates.hasNext()) {
+                    recordVariantFailure(ingredient, quantity, variantFailures, ctx);
+                    stack.complete(done, null);
+                    return;
+                }
+                tryVariant(candidates.next());
+            }
+
+            private void tryVariant(ItemStack variant) {
             // A tagged display candidate does not make a vanilla Ingredient strict.
             // Preserve the source predicate when locking one physical machine slot.
             Ingredient selected = CraftingResolver.ingredientOf(variant, strictNbt);
@@ -457,13 +492,13 @@ final class StepExecutor {
             int variantMissingStart = ctx.missingCount();
             ctx.beginUndo();
             edges.beginUndo();
-            boolean resolved = CraftingResolver.ensureIngredient(
-                    selected, quantity, ctx, depth, edges, port, consumed);
+            CraftingResolver.ensureIngredient(selected, quantity, ctx, depth, edges, port, consumed, stack, resolved -> {
             if (resolved) {
                 ctx.commitUndo();
                 edges.commitUndo();
                 if (consumedOut != null) consumedOut.addAll(consumed);
-                return selected;
+                stack.complete(done, selected);
+                return;
             }
             List<String> details = ctx.missingSince(variantMissingStart);
             ctx.truncateMissing(variantMissingStart);
@@ -475,8 +510,15 @@ final class StepExecutor {
             for (int i = 0; i < details.size() && i < 6; i++) {
                 ctx.diag("machine variant " + variantName + " missing: " + details.get(i));
             }
+            stack.resume(this);
+            });
+            }
         }
+        stack.resume(new TryVariant());
+    }
 
+    private static void recordVariantFailure(Ingredient ingredient, long quantity, List<String> variantFailures,
+                                             ResolutionContext ctx) {
         // 机器槽位要求同一个 concrete variant 填满整槽。把每个变体的失败明细汇总成
         // 一条 tag 级缺料，避免把多个变体的深层缺料并集误当成顶层配方材料。
         String tagName = CraftPacketUtils.describeIngredient(ingredient).getString();
@@ -486,7 +528,6 @@ final class StepExecutor {
         String summary = "需要同一种「" + tagName + "」× " + quantity
                 + "（候选：" + candidates + "）";
         ctx.addMissing(summary);
-        return null;
     }
 
     /**

@@ -63,7 +63,9 @@ public final class PerformanceMonitor {
     private static final AtomicLong planningExecutionMaxNanos = new AtomicLong();
     private static final AtomicLong planningWorkerActive = new AtomicLong();
     private static final AtomicLong planningQueueDepth = new AtomicLong();
-    public enum PlanningLatencyPhase { PREPARATION, QUEUE_WAIT, HANDOFF_WAIT }
+    public enum PlanningLatencyPhase {
+        PREPARATION, QUEUE_WAIT, HANDOFF_WAIT, TYPED_SLICE, TYPED_GRAPH, TYPED_ESTIMATE, TYPED_ASSEMBLY
+    }
     private static final AtomicLongArray planningLatencyCalls =
             new AtomicLongArray(PlanningLatencyPhase.values().length);
     private static final AtomicLongArray planningLatencyNanos =
@@ -363,6 +365,10 @@ public final class PerformanceMonitor {
              + " previewPrepare=" + planningLatencySummary(PlanningLatencyPhase.PREPARATION)
              + " queueWait=" + planningLatencySummary(PlanningLatencyPhase.QUEUE_WAIT)
              + " handoffWait=" + planningLatencySummary(PlanningLatencyPhase.HANDOFF_WAIT)
+             + " typedSlice=" + planningLatencySummary(PlanningLatencyPhase.TYPED_SLICE)
+             + " typedGraph=" + planningLatencySummary(PlanningLatencyPhase.TYPED_GRAPH)
+             + " typedEstimate=" + planningLatencySummary(PlanningLatencyPhase.TYPED_ESTIMATE)
+             + " typedAssembly=" + planningLatencySummary(PlanningLatencyPhase.TYPED_ASSEMBLY)
              + " exec=" + (planningCompleted.get() == 0 ? 0
                      : planningExecutionNanos.get() / planningCompleted.get() / 1000)
              + "/" + planningExecutionMaxNanos.get() / 1000 + "us"

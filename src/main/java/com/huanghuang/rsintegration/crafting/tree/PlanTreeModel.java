@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.tree;
 
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
 import com.huanghuang.rsintegration.crafting.plan.ParallelPlan;
@@ -124,9 +125,8 @@ public final class PlanTreeModel {
     }
 
     private static TreeLimits treeLimits() {
-        // 递归树默认完整展开；这里仅保留防止环/异常数据无限递归的
-        // 内部安全上限，不再暴露为用户配置。
-        return new TreeLimits(128, 20_000);
+        // 兼容 1024 层依赖，另外为界面根、终端配方与原材料叶保留空间。
+        return new TreeLimits(RSIntegrationConfig.DEFAULT_CRAFTING_MAX_DEPTH + 4, 20_000);
     }
 
     private record TreeLimits(int maxDepth, int maxNodes) {}

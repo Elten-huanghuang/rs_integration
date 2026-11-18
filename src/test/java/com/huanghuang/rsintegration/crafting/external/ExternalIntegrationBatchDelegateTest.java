@@ -168,8 +168,12 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
             state.set(new MachineState(true, true, true, 1, 10, recipeId, processId, 2, null));
             inventory.setStackInSlot(1, new ItemStack(Items.STICK, 5));
             assertEquals(IBatchDelegate.CraftPhase.WORKING, delegate.observeCraft(level).phase());
+            assertEquals(5, inventory.getStackInSlot(1).getCount());
+            assertTrue(delegate.drainReceivedOutputs().isEmpty());
+            delegate.transferOutputs(level);
             assertEquals(5, delegate.drainReceivedOutputs().stream().mapToInt(ItemStack::getCount).sum());
             inventory.setStackInSlot(1, new ItemStack(Items.STICK, 3));
+            delegate.transferOutputs(level);
             assertEquals(IBatchDelegate.CraftPhase.WORKING, delegate.observeCraft(level).phase());
             assertEquals(3, delegate.drainReceivedOutputs().stream().mapToInt(ItemStack::getCount).sum());
             assertTrue(inventory.getStackInSlot(1).isEmpty());

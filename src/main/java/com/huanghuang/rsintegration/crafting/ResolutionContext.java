@@ -63,9 +63,11 @@ final class ResolutionContext {
     final RecipeCycleGuard recipeCycles;
     final Deque<Set<Item>> activeConversionFamilies = new ArrayDeque<>();
     final Deque<List<ScaledIngredientSpec>> pendingInputs = new ArrayDeque<>();
-    final long deadlineNanos;
+    long deadlineNanos;
     final boolean abortOnTimeout;
+    private boolean timeoutReached;
     int ensureCalls;
+    boolean ensureLimitReached;
     int depthGuardHits;
     int deepestGuardDepth;
     int depthGuardLimit;
@@ -294,7 +296,7 @@ final class ResolutionContext {
     }
 
     private Ingredient preferredIngredient(ResourceLocation recipeId, Ingredient ingredient) {
-        if (ingredient == null || ingredient.isEmpty()) return ingredient;
+        if (preferences.ingredientChoices().isEmpty() || ingredient == null || ingredient.isEmpty()) return ingredient;
         ItemStack requested = preferences.ingredientChoice(
                 MaterialLocks.key(recipeId, ingredient));
         if (requested == null) return ingredient;
@@ -305,7 +307,7 @@ final class ResolutionContext {
     }
 
     boolean isNoRecipe(Ingredient ingredient) {
-        if (ingredient == null || ingredient.isEmpty()) return false;
+        if (preferences.recipeChoices().isEmpty() || ingredient == null || ingredient.isEmpty()) return false;
         boolean found = false;
         for (ItemStack option : ingredient.getItems()) {
             if (option.isEmpty()) continue;
@@ -478,8 +480,18 @@ final class ResolutionContext {
 
     boolean timedOut() {
         boolean expired = System.nanoTime() - deadlineNanos >= 0L;
+        if (expired) timeoutReached = true;
         if (expired && abortOnTimeout) throw new CraftingPlanningTimeoutException();
         return expired;
+    }
+
+    void requireKnownPreviewBudget() {
+        if (timeoutReached) throw new CraftingPlanningTimeoutException();
+        if (depthGuardHits > 0) throw new CraftingPlanningLimitException(
+                "depth=" + deepestGuardDepth + " limit=" + depthGuardLimit);
+        if (stepGuardHits > 0) throw new CraftingPlanningLimitException(
+                "steps=" + largestGuardStepCount + " limit=" + stepGuardLimit);
+        if (ensureLimitReached) throw new CraftingPlanningLimitException("ensureCalls=" + ensureCalls);
     }
 
     static long deadlineAfterMillis(int timeoutMs) {

@@ -43,7 +43,7 @@ libs/
 # 本机依赖版本与离线打包快捷入口
 /build-release.bat
 
-# 文档目录：保留更新公告、使用指南、发布文案、API 文档、配置示例和 Goety 兼容说明
+# 文档目录：保留更新公告、使用指南、发布文案、API 文档、配置示例及指定设计说明
 /docs/*
 !/docs/announcements/
 !/docs/announcements/**
@@ -56,6 +56,9 @@ libs/
 !/docs/config/
 !/docs/config/**
 !/docs/GOETY_COMPATIBILITY.md
+!/docs/development/
+/docs/development/*
+!/docs/development/network-output-reception.md
 
 # 本地分析报告不入库，即使以后调整上面的文档白名单也继续忽略
 /docs/report/

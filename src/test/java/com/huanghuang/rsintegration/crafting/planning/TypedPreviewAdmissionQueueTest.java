@@ -44,6 +44,22 @@ class TypedPreviewAdmissionQueueTest {
     }
 
     @Test
+    void continuationsYieldUntilTheNextTickEvenWhenMoreAdmissionsAreAvailable() {
+        var queue = new TypedPreviewAdmissionQueue(2);
+        var player = UUID.randomUUID();
+        var events = new ArrayList<String>();
+        queue.offer(request(player, 1, 0, () -> {
+            events.add("first slice");
+            queue.offer(request(player, 1, 1, () -> events.add("second slice")));
+        }));
+        queue.offer(request(UUID.randomUUID(), 1, 0, () -> events.add("another player")));
+        assertEquals(2, queue.run(8, 1, 10, ignored -> true));
+        assertEquals(List.of("first slice", "another player"), events);
+        assertEquals(1, queue.run(8, 2, 10, ignored -> true));
+        assertEquals(List.of("first slice", "another player", "second slice"), events);
+    }
+
+    @Test
     void expiredRequestDoesNotConsumeAdmission() {
         TypedPreviewAdmissionQueue queue = new TypedPreviewAdmissionQueue(2);
         UUID first = UUID.randomUUID();

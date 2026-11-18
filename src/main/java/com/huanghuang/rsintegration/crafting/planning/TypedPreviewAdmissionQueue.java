@@ -3,6 +3,8 @@ package com.huanghuang.rsintegration.crafting.planning;
 import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Consumer;
@@ -30,6 +32,8 @@ public final class TypedPreviewAdmissionQueue {
     private final ArrayDeque<PlanningRequestKey> order = new ArrayDeque<>();
     private final Map<PlanningRequestKey, Request> latest = new HashMap<>();
     private Request admitted;
+    private long tickStarted;
+    private long tickBudgetNanos;
 
     public TypedPreviewAdmissionQueue(int capacity) {
         if (capacity <= 0) throw new IllegalArgumentException("capacity must be positive");
@@ -50,9 +54,17 @@ public final class TypedPreviewAdmissionQueue {
 
     public int run(int maximum, long nowNanos, long maxQueueNanos,
                    Predicate<Request> current) {
+        return run(maximum, nowNanos, maxQueueNanos, Long.MAX_VALUE, current);
+    }
+
+    public int run(int maximum, long nowNanos, long maxQueueNanos, long budgetNanos,
+                   Predicate<Request> current) {
         int executed = 0;
-        while (executed < Math.max(0, maximum)) {
-            Request request = poll();
+        tickStarted = System.nanoTime();
+        tickBudgetNanos = budgetNanos;
+        Set<PlanningRequestKey> ranThisTick = new HashSet<>();
+        while (executed < Math.max(0, maximum) && remainingTickNanos() > 0L) {
+            Request request = poll(ranThisTick);
             if (request == null) break;
             if (!current.test(request)) continue;
             if (maxQueueNanos >= 0L && nowNanos - request.queuedNanos() > maxQueueNanos) {
@@ -75,9 +87,14 @@ public final class TypedPreviewAdmissionQueue {
                     admitted = null;
                 }
             }
+            ranThisTick.add(new PlanningRequestKey(request.playerId(), request.generation()));
             executed++;
         }
         return executed;
+    }
+
+    public long remainingTickNanos() {
+        return Math.max(0L, tickBudgetNanos - (System.nanoTime() - tickStarted));
     }
 
     public synchronized boolean isAdmitted(UUID playerId, long generation) {
@@ -106,8 +123,9 @@ public final class TypedPreviewAdmissionQueue {
         admitted = null;
     }
 
-    private synchronized Request poll() {
+    private synchronized Request poll(Set<PlanningRequestKey> ranThisTick) {
         while (!order.isEmpty()) {
+            if (ranThisTick.contains(order.peek())) return null;
             PlanningRequestKey key = order.poll();
             Request request = latest.remove(key);
             if (request != null) return request;

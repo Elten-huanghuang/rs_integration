@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.magic.MagicResourceCost;
 import com.mojang.logging.LogUtils;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import org.slf4j.Logger;
@@ -47,15 +48,38 @@ public final class CraftPlanGraphCompactor {
         if (graph == null || graph.nodes().size() < 2) return graph;
         if (mergeEligible == null) throw new IllegalArgumentException("mergeEligible");
 
-        Map<NodeSignature, List<CraftNode>> groups = new LinkedHashMap<>();
+        Set<ResourceLocation> seenRecipes = new HashSet<>();
+        Set<ResourceLocation> repeatedRecipes = new HashSet<>();
         for (CraftNode node : graph.nodes()) {
+            if (!seenRecipes.add(node.recipeId())) repeatedRecipes.add(node.recipeId());
+        }
+        if (repeatedRecipes.isEmpty()) return graph;
+
+        Map<NodeSignature, List<CraftNode>> groups = new LinkedHashMap<>();
+        Map<NodeId, NodeSignature> signatures = new HashMap<>();
+        Map<NodeId, NodeId> remap = new LinkedHashMap<>();
+        for (CraftNode node : graph.nodes()) {
+            if (!repeatedRecipes.contains(node.recipeId())) {
+                remap.put(node.id(), node.id());
+                continue;
+            }
             NodeSignature signature = NodeSignature.from(node);
             groups.computeIfAbsent(signature, ignored -> new ArrayList<>()).add(node);
+            signatures.put(node.id(), signature);
         }
 
-        Map<NodeId, NodeId> remap = new LinkedHashMap<>();
-        for (List<CraftNode> group : groups.values()) {
-            if (!canMerge(group, graph.allocations(), mergeEligible)) {
+        // 一次检查所有材料分配，标记组内存在生产依赖的配方，避免每组扫描整图。
+        Set<NodeSignature> dependentGroups = new HashSet<>();
+        for (MaterialAllocation allocation : graph.allocations()) {
+            if (!(allocation.source() instanceof MaterialSource.ProducerOutput producer)) continue;
+            NodeSignature consumer = signatures.get(allocation.consumer().nodeId());
+            if (consumer != null && consumer.equals(signatures.get(producer.outputPort().nodeId()))) {
+                dependentGroups.add(consumer);
+            }
+        }
+        for (var entry : groups.entrySet()) {
+            List<CraftNode> group = entry.getValue();
+            if (dependentGroups.contains(entry.getKey()) || !canMerge(group, mergeEligible)) {
                 for (CraftNode node : group) remap.put(node.id(), node.id());
                 continue;
             }
@@ -157,7 +181,6 @@ public final class CraftPlanGraphCompactor {
     }
 
     private static boolean canMerge(List<CraftNode> group,
-                                    List<MaterialAllocation> allocations,
                                     Predicate<CraftNode> mergeEligible) {
         if (group.size() < 2) return false;
         CraftNode first = group.get(0);
@@ -172,19 +195,10 @@ public final class CraftPlanGraphCompactor {
             return false;
         }
         long executions = 0L;
-        Set<NodeId> ids = new HashSet<>();
         for (CraftNode node : group) {
             if (!isExecutionScaled(node)) return false;
             executions += node.executions();
             if (executions > Integer.MAX_VALUE) return false;
-            ids.add(node.id());
-        }
-        for (MaterialAllocation allocation : allocations) {
-            if (!(allocation.source() instanceof MaterialSource.ProducerOutput producer)) continue;
-            if (ids.contains(allocation.consumer().nodeId())
-                    && ids.contains(producer.outputPort().nodeId())) {
-                return false;
-            }
         }
         return true;
     }

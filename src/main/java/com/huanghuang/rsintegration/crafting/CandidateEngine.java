@@ -23,6 +23,7 @@ import net.minecraftforge.common.crafting.StrictNBTIngredient;
 import net.minecraftforge.registries.ForgeRegistries;
 import com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 import javax.annotation.Nullable;
 import net.minecraft.core.RegistryAccess;
@@ -78,53 +79,107 @@ final class CandidateEngine {
     static List<RecipeIndex.Entry> findCandidates(Ingredient ingredient, ResolutionContext ctx,
                                                    @Nullable List<CandidateDiagnostic> diag,
                                                    long remaining) {
+        PlanningStack stack = new PlanningStack();
+        return stack.resolve(done -> findCandidates(ingredient, ctx, diag, remaining, stack, done));
+    }
+
+    static void findCandidates(Ingredient ingredient, ResolutionContext ctx,
+                               @Nullable List<CandidateDiagnostic> diag, long remaining,
+                               PlanningStack stack, Consumer<List<RecipeIndex.Entry>> done) {
+        new CandidateSearch(ingredient, ctx, diag, remaining, stack, done).start();
+    }
+
+    private static final class CandidateSearch {
+        private final Ingredient ingredient;
+        private final ResolutionContext ctx;
+        private final List<CandidateDiagnostic> diag;
+        private final long remaining;
+        private final PlanningStack stack;
+        private final Consumer<List<RecipeIndex.Entry>> done;
+        private final ItemStack[] items;
+        private final boolean nbtStrict;
+        private final boolean ingredientAllNbt;
         // Shared recipes can have distinct machine routes and runtime outputs.
-        Map<CandidateKey, RecipeIndex.Entry> byId = new LinkedHashMap<>();
-        long p1Start = System.nanoTime();
-        ItemStack[] items = ingredient.getItems();
-        long itemsMs = (System.nanoTime() - p1Start) / 1_000_000;
+        private final Map<CandidateKey, RecipeIndex.Entry> byId = new LinkedHashMap<>();
+        private final List<RecipeIndex.Entry> result = new ArrayList<>();
+        private int nextItem;
+        private Item item;
+        private Iterator<RecipeIndex.Entry> indexed = Collections.emptyIterator();
+        private Iterator<RecipeIndex.Entry> outputs;
+        private boolean checkingCrafting = true;
+        private int nextScore;
+        private Map<Ingredient, Long> matchCache;
+        private Map<CandidateKey, Integer> scoreCache;
+        private Map<CandidateKey, Integer> availCache;
+        private Map<CandidateKey, Integer> inputGroupCache;
+        private Map<CandidateKey, Integer> operationCache;
+        private Map<ResourceLocation, Integer> scrollLevels;
+        private Map<ResourceLocation, Integer> scrollRarities;
+        private int nextScroll;
+        private int nextDiagnostic;
 
-        // Diagnostic: Tag ingredient audit
-        boolean isTag = items.length > 1;
-        int itemsWithRecipes = 0;
+        CandidateSearch(Ingredient ingredient, ResolutionContext ctx, @Nullable List<CandidateDiagnostic> diag,
+                        long remaining, PlanningStack stack, Consumer<List<RecipeIndex.Entry>> done) {
+            this.ingredient = ingredient;
+            this.ctx = ctx;
+            this.diag = diag;
+            this.remaining = remaining;
+            this.stack = stack;
+            this.done = done;
+            items = ingredient.getItems();
+            nbtStrict = ingredient instanceof StrictNBTIngredient;
+            ingredientAllNbt = !nbtStrict && allItemsHaveNbt(ingredient);
+        }
 
-        long loopStart = System.nanoTime();
-        for (int idx = 0; idx < items.length; idx++) {
-            if (ctx.timedOut()) break;
-            ItemStack stack = items[idx];
-            if (stack.isEmpty()) continue;
-            if (ctx.isNoRecipe(stack)) {
+        void start() {
+            stack.resume(this::gather);
+        }
+
+        // 每次只筛一个配方或展开一个标签成员，原生调用之间允许让出当前 tick。
+        private void gather() {
+            if (ctx.timedOut() || (!indexed.hasNext() && nextItem == items.length)) {
+                outputs = byId.values().iterator();
+                stack.resume(this::checkOutput);
+                return;
+            }
+            stack.resume(this::gather);
+            if (indexed.hasNext()) {
+                gatherEntry(indexed.next());
+                return;
+            }
+            ItemStack variant = items[nextItem++];
+            if (variant.isEmpty()) return;
+            if (ctx.isNoRecipe(variant)) {
                 if (diag != null) {
-                    logDiag(diag, stack.getItem(), null, 0, null, true,
+                    logDiag(diag, variant.getItem(), null, 0, null, true,
                             "NoRecipe preference disables this material");
                 }
-                continue;
+                return;
             }
-            Item item = stack.getItem();
-
-            List<RecipeIndex.Entry> recipes = semanticSpellRecipes(stack, ctx);
+            item = variant.getItem();
+            List<RecipeIndex.Entry> recipes = semanticSpellRecipes(variant, ctx);
             if (recipes == null) recipes = ctx.index.get(item);
             if (recipes == null) {
                 if (diag != null) logDiag(diag, item, null, 0, null, true, "No recipes indexed for this item");
-                continue;
+                return;
             }
-            itemsWithRecipes++;
+            indexed = recipes.iterator();
+        }
 
-            for (RecipeIndex.Entry entry : recipes) {
-                if (ctx.timedOut()) break;
+        private void gatherEntry(RecipeIndex.Entry entry) {
                 ResourceLocation rid = entry.recipe().getId();
-                if (ctx.excludedRecipes.contains(rid)) continue;
+                if (ctx.excludedRecipes.contains(rid)) return;
                 CandidateKey candidateKey = CandidateKey.of(entry);
-                if (byId.containsKey(candidateKey)) continue;
+                if (byId.containsKey(candidateKey)) return;
                 if (ctx.genericCandidatesOnly && entry.modType() != ModType.GENERIC) {
                     if (diag != null) logDiag(diag, item, entry, 0, entry.modType(), true,
                             "非通用合成候选不能内联执行");
-                    continue;
+                    return;
                 }
                 if (HistoryStagesCompat.isRecipeLocked(entry.recipe(), ctx.player)) {
                     if (diag != null) logDiag(diag, item, entry, 0, entry.modType(), true,
                             "History Stages recipe lock");
-                    continue;
+                    return;
                 }
                 if (entry.modType() != ModType.GENERIC) {
                     var handler = ModRecipeHandlers.claimFor(entry.recipe()).winner();
@@ -132,102 +187,70 @@ final class CandidateEngine {
                             && !handler.isAvailableForPlanning(entry.recipe(), ctx.player)) {
                         if (diag != null) logDiag(diag, item, entry, 0, entry.modType(), true,
                                 "Execution context unavailable");
-                        continue;
+                        return;
                     }
                     if (!isMachineAvailable(entry, ctx)) {
                         if (diag != null) logDiag(diag, item, entry, 0, entry.modType(), true, "Machine not available");
-                        continue;
+                        return;
                     }
                     if (!entry.modType().isVirtual()) {
                         var allowlist = RSIntegrationConfig.MULTIBLOCK_RECIPE_ALLOWLIST.get();
                         if (!allowlist.isEmpty() && !allowlist.contains(rid.toString())) {
                             if (diag != null) logDiag(diag, item, entry, 0, entry.modType(), true, "Not in allowlist");
-                            continue;
+                            return;
                         }
                         if (RSIntegrationConfig.MULTIBLOCK_RECIPE_BLACKLIST.get().contains(rid.toString())) {
                             if (diag != null) logDiag(diag, item, entry, 0, entry.modType(), true, "Blocklisted");
-                            continue;
+                            return;
                         }
                     }
                 }
                 byId.put(candidateKey, entry);
-            }
-        }
-        long loopMs = (System.nanoTime() - loopStart) / 1_000_000;
-
-        // Diagnostic: log Tag ingredient candidate search summary
-        if (isTag && RSIntegrationMod.LOGGER.isDebugEnabled()) {
-            Set<ResourceLocation> firstItems = new LinkedHashSet<>();
-            for (int s = 0; s < Math.min(items.length, 10); s++) {
-                if (!items[s].isEmpty()) firstItems.add(ForgeRegistries.ITEMS.getKey(items[s].getItem()));
-            }
-            RSIntegrationMod.LOGGER.debug(
-                    "[RSI-Candidate] Phase1: getItems={}ms, loop={}ms, {} items, {} recipes, {} unique candidates, first items: {}",
-                    itemsMs, loopMs, items.length, items.length, byId.size(), firstItems);
         }
 
-        boolean nbtStrict = ingredient instanceof StrictNBTIngredient;
-        boolean ingredientAllNbt = !nbtStrict && allItemsHaveNbt(ingredient);
-        Map<CandidateKey, RecipeIndex.Entry> dedup = new LinkedHashMap<>();
-
-        // Phase 2: validate outputs.  Vanilla CraftingRecipe entries are
-        // instant (getResultItem is pre-computed); mod recipes go through
-        // ModRecipeHandlers.tryGetResultItem() which uses a global cache.
-        // Both contribute to the candidate pool so players with mod-only
-        // ingredients (e.g. Botany glass but no vanilla glass) can still
-        // resolve recipes like glass → glass_pane.
-        long phase2Start = System.nanoTime();
-        int vanillaCount = 0;
-        for (RecipeIndex.Entry entry : byId.values()) {
-            if (ctx.timedOut()) break;
-            if (!(entry.recipe() instanceof CraftingRecipe cr)) continue;
-            vanillaCount++;
+        private void checkOutput() {
+            if (ctx.timedOut() || (!outputs.hasNext() && !checkingCrafting)) {
+                if (result.size() < 2 && diag == null) {
+                    stack.complete(done, result);
+                    return;
+                }
+                matchCache = new HashMap<>();
+                scoreCache = new HashMap<>();
+                availCache = new HashMap<>();
+                inputGroupCache = new HashMap<>();
+                operationCache = new HashMap<>();
+                stack.resume(this::score);
+                return;
+            }
+            stack.resume(this::checkOutput);
+            if (!outputs.hasNext()) {
+                checkingCrafting = false;
+                outputs = byId.values().iterator();
+                return;
+            }
+            RecipeIndex.Entry entry = outputs.next();
+            if ((entry.recipe() instanceof CraftingRecipe) != checkingCrafting) return;
             ItemStack output = outputForDemand(entry, ingredient, ctx);
-            if (passesOutputCheck(entry, output, ingredient, ingredientAllNbt, nbtStrict, diag)) {
-                boolean skipConversion = variantGuardEnabled()
+            if (!passesOutputCheck(entry, output, ingredient, ingredientAllNbt, nbtStrict, diag)) return;
+            if (entry.recipe() instanceof CraftingRecipe cr
+                    && variantGuardEnabled()
                         && (NonProductiveTagConversionGuard.shouldSkip(ingredient, cr, output)
-                        || ctx.shouldSkipActiveConversion(cr, output));
-                if (skipConversion) {
+                        || ctx.shouldSkipActiveConversion(cr, output))) {
                     if (ctx.diagnosticsEnabled()) ctx.diag("candidate SKIP " + entry.recipe().getId()
                             + ": non-productive tag conversion");
                     if (diag != null) logDiag(diag, null, entry, 0, entry.modType(), true,
                             "Non-productive tag conversion");
-                    continue;
-                }
-                dedup.put(CandidateKey.of(entry), entry);
+                    return;
             }
+            result.add(entry);
         }
-        int modCount = 0;
-        for (RecipeIndex.Entry entry : byId.values()) {
-            if (ctx.timedOut()) break;
-            if (entry.recipe() instanceof CraftingRecipe) continue;
-            modCount++;
-            ItemStack output = outputForDemand(entry, ingredient, ctx);
-            if (passesOutputCheck(entry, output, ingredient, ingredientAllNbt, nbtStrict, diag)) {
-                dedup.put(CandidateKey.of(entry), entry);
+
+        private void score() {
+            if (ctx.timedOut() || nextScore == result.size()) {
+                stack.resume(this::sort);
+                return;
             }
-        }
-        long phase2Elapsed = System.nanoTime() - phase2Start;
-
-        if (isTag) {
-            RSIntegrationMod.LOGGER.debug(
-                    "[RSI-Candidate] Phase2: {} vanilla + {} mod recipes in {}ms, dedup={}",
-                    vanillaCount, modCount, phase2Elapsed / 1_000_000, dedup.size());
-        }
-
-        List<RecipeIndex.Entry> result = new ArrayList<>(dedup.values());
-
-        // Pre-compute score and availability before sorting so each entry is
-        // evaluated exactly once — NOT O(N log N) times inside the comparator.
-        // Use an ingredient→count cache so countMatching (which iterates all
-        // 546+ inventory item types) is called at most once per unique ingredient.
-        Map<Ingredient, Long> matchCache = new HashMap<>();
-        Map<CandidateKey, Integer> scoreCache = new HashMap<>();
-        Map<CandidateKey, Integer> availCache = new HashMap<>();
-        Map<CandidateKey, Integer> inputGroupCache = new HashMap<>();
-        Map<CandidateKey, Integer> operationCache = new HashMap<>();
-        for (RecipeIndex.Entry entry : result) {
-            if (ctx.timedOut()) break; // don't burn remaining budget on scoring
+            RecipeIndex.Entry entry = result.get(nextScore++);
             CandidateKey key = CandidateKey.of(entry);
             scoreCache.put(key, scoreEntry(entry, ctx, nbtStrict, matchCache));
             availCache.put(key, countAvailableIngredients(entry, ctx, matchCache));
@@ -235,53 +258,58 @@ final class CandidateEngine {
             operationCache.put(key, remaining > 0L
                     ? estimatedOperations(entry, ctx, remaining)
                     : Integer.MAX_VALUE);
+            stack.resume(this::score);
         }
 
-        long sortStart = System.nanoTime();
-        result.sort((a, b) -> {
-            CandidateKey keyA = CandidateKey.of(a);
-            CandidateKey keyB = CandidateKey.of(b);
-            int cmp = compareCandidateMetrics(keyA, keyB,
-                    scoreCache, availCache, inputGroupCache, operationCache);
-            if (cmp != 0) return cmp;
-            cmp = a.recipe().getId().compareTo(b.recipe().getId());
-            return cmp != 0 ? cmp : a.modType().id().compareTo(b.modType().id());
-        });
+        private void sort() {
+            result.sort((a, b) -> {
+                CandidateKey keyA = CandidateKey.of(a);
+                CandidateKey keyB = CandidateKey.of(b);
+                int cmp = compareCandidateMetrics(keyA, keyB,
+                        scoreCache, availCache, inputGroupCache, operationCache);
+                if (cmp != 0) return cmp;
+                cmp = a.recipe().getId().compareTo(b.recipe().getId());
+                return cmp != 0 ? cmp : a.modType().id().compareTo(b.modType().id());
+            });
+            if (SpellScrollSelection.acceptsAnyScroll(ingredient)) {
+                scrollLevels = new HashMap<>();
+                scrollRarities = new HashMap<>();
+                stack.resume(this::scoreScroll);
+            } else {
+                stack.resume(this::diagnose);
+            }
+        }
 
-        if (SpellScrollSelection.acceptsAnyScroll(ingredient)) {
-            Map<ResourceLocation, Integer> scrollLevels = new HashMap<>();
-            Map<ResourceLocation, Integer> scrollRarities = new HashMap<>();
-            for (RecipeIndex.Entry entry : result) {
+        private void scoreScroll() {
+            if (nextScroll < result.size() && !ctx.timedOut()) {
+                RecipeIndex.Entry entry = result.get(nextScroll++);
                 ItemStack output = ModRecipeHandlers.tryGetResultItem(
                         entry.recipe(), ctx.level.registryAccess());
                 scrollLevels.put(entry.recipe().getId(), SpellScrollSelection.level(output));
                 scrollRarities.put(entry.recipe().getId(), SpellScrollSelection.rarity(output));
+                stack.resume(this::scoreScroll);
+                return;
             }
-            // List.sort is stable: recipes at the same rarity and level retain
-            // the normal availability/material-cost score calculated above.
+            // 排序保持同稀有度、同等级配方的原有优先顺序。
             result.sort(Comparator
                     .comparingInt((RecipeIndex.Entry entry) -> scrollRarities.getOrDefault(
                             entry.recipe().getId(), Integer.MAX_VALUE))
                     .thenComparingInt(entry -> scrollLevels.getOrDefault(
                             entry.recipe().getId(), Integer.MAX_VALUE)));
+            stack.resume(this::diagnose);
         }
 
-        if (isTag && RSIntegrationMod.LOGGER.isDebugEnabled()) {
-            long sortElapsed = System.nanoTime() - sortStart;
-            RSIntegrationMod.LOGGER.debug(
-                    "[RSI-Candidate] Phase2 sort: {} entries in {}ms",
-                    result.size(), sortElapsed / 1_000_000);
-        }
-
-        if (diag != null) {
-            for (RecipeIndex.Entry e : result) {
-                int s = scoreEntry(e, ctx, nbtStrict, null);
-                String pref = isPreferred(e, ctx) ? " (PREFERRED)" : "";
-                logDiag(diag, null, e, s, e.modType(), false, "Score=" + s + pref);
+        private void diagnose() {
+            if (diag == null || nextDiagnostic == result.size() || ctx.timedOut()) {
+                stack.complete(done, result);
+                return;
             }
+            RecipeIndex.Entry entry = result.get(nextDiagnostic++);
+            int score = scoreCache.getOrDefault(CandidateKey.of(entry), 0);
+            String pref = isPreferred(entry, ctx) ? " (PREFERRED)" : "";
+            logDiag(diag, null, entry, score, entry.modType(), false, "Score=" + score + pref);
+            stack.resume(this::diagnose);
         }
-
-        return result;
     }
 
     static <K> int compareCandidateMetrics(K keyA, K keyB,

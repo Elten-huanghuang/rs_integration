@@ -401,6 +401,16 @@ tasks.register('planningPerformanceProbe', JavaExec) {
     }
 }
 
+tasks.register('deepPlanningBenchmark', JavaExec) {
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(17) }
+    dependsOn tasks.named('benchmarkClasspath')
+    classpath = files(tasks.named('benchmarkClasspath').flatMap { it.archiveFile })
+    mainClass = 'com.huanghuang.rsintegration.crafting.DeepPlanningBenchmark'
+    minHeapSize = '512m'
+    maxHeapSize = '2g'
+    args providers.gradleProperty('deepPlanningDepth').getOrElse('default')
+}
+
 tasks.register('diskLimitCheck', JavaExec) {
     javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(17) }
     dependsOn tasks.named('benchmarkClasspath')

@@ -26,6 +26,7 @@ import net.minecraftforge.common.ForgeHooks;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -42,13 +43,7 @@ public final class ParallelPlanEstimator {
 
     public static Map<Integer, ParallelPlan> estimate(ServerPlayer player, CraftPlanGraph graph,
                                                       Map<Item, Long> available) {
-        Map<Integer, ParallelPlan> plans = new HashMap<>();
-        if (graph == null) return plans;
-        for (CraftNode node : graph.nodes()) {
-            ParallelPlan plan = estimateNode(player, node, available);
-            if (plan != null) plans.put(node.id().value(), plan);
-        }
-        return plans;
+        return new Request(player, available).estimate(graph);
     }
 
     /**
@@ -58,96 +53,173 @@ public final class ParallelPlanEstimator {
     @Nullable
     public static ParallelPlan estimate(ServerPlayer player, PlanStep step,
                                         Map<Item, Long> available) {
-        if (step == null || step.modType() == null) return null;
-        List<InputAmount> inputs = new ArrayList<>();
-        List<ItemStack> stacks = step.inputs();
-        List<DemandRole> roles = step.inputRoles();
-        for (int i = 0; i < stacks.size(); i++) {
-            DemandRole role = i < roles.size() ? roles.get(i) : DemandRole.CONSUMED;
-            inputs.add(new InputAmount(stacks.get(i), role,
-                    Math.max(1L, stacks.get(i).getCount())));
-        }
-        long executions = Math.max(1L, step.batches());
-        return estimate(player, step.recipeId(), step.modType().id(),
-                (int) Math.min(Integer.MAX_VALUE, executions), inputs, available,
-                false);
+        return new Request(player, available).estimateStep(step);
     }
 
     @Nullable
-    private static ParallelPlan estimateNode(ServerPlayer player, CraftNode node,
-                                             Map<Item, Long> available) {
-        List<InputAmount> inputs = new ArrayList<>();
-        for (var input : node.inputs()) {
-            inputs.add(new InputAmount(input.displayHint(), input.role(),
-                    Math.max(1L, input.quantity())));
-        }
-        return estimate(player, node.recipeId(), node.modTypeId(),
-                Math.max(1, node.executions()), inputs, available, node.inferMode());
+    public static ParallelPlan forDisplay(Map<DisplayKey, ParallelPlan> plans, PlanStep step) {
+        return step.modType() == null ? null : plans.get(new DisplayKey(step.recipeId(), step.modType().id()));
     }
 
-    @Nullable
-    private static ParallelPlan estimate(ServerPlayer player, ResourceLocation recipeId, String modTypeId,
-                                         int executions, List<InputAmount> inputs,
-                                         Map<Item, Long> available, boolean inferMode) {
-        ModType type = ModType.byId(modTypeId);
-        if (type == null) return null;
-        List<AltarBindingRegistry.BoundMachine> machines = deduplicateLoaded(
-                AltarBindingRegistry.getBoundMachinesForRecipe(player, type, recipeId), player);
-        if (machines.isEmpty()) return null;
+    /** 只在同一份预览内复用无上下文探针结果及燃料库存；执行端仍独立重验。 */
+    public static final class Request {
+        private final ServerPlayer player;
+        private final Map<Item, Long> available;
+        private final Map<ProbeKey, ProbeDecision> probes = new HashMap<>();
+        private final Map<BindingKey, List<AltarBindingRegistry.BoundMachine>> bindings = new HashMap<>();
+        private int burnTicks = -1;
 
-        int reusableLimit = reusableLimit(inputs, available);
-        int machineLimit = Math.min(executions, machines.size());
-        int workerCount = Math.max(1, Math.min(machineLimit, reusableLimit));
-        String contractLimit = null;
-        boolean inferencePending = inferMode
-                && ModIds.ID_EMBERS_ALCHEMY.equals(type.id())
-                && !embersCodeKnown(player, recipeId);
-        try {
-            IBatchDelegate probe = inferencePending
-                    ? type.createInferDelegate()
-                    : type.createDelegate();
-            if (probe == null
-                    || GraphConcurrencyPolicy.decide(type.id(), probe).exclusive()) {
-                workerCount = 1;
-                contractLimit = inferencePending
-                        ? "配方代码未知，需先推断"
-                        : "机器契约不支持并行";
+        public Request(ServerPlayer player, Map<Item, Long> available) {
+            this.player = player;
+            this.available = available;
+        }
+
+        public Map<Integer, ParallelPlan> estimate(CraftPlanGraph graph) {
+            GraphEstimate work = start(graph);
+            work.advance(Long.MAX_VALUE);
+            return work.result();
+        }
+
+        public GraphEstimate start(@Nullable CraftPlanGraph graph) {
+            return new GraphEstimate(graph == null ? List.of() : graph.nodes());
+        }
+
+        public final class GraphEstimate {
+            private final Iterator<CraftNode> nodes;
+            private final Map<Integer, ParallelPlan> plans = new HashMap<>();
+            private final Map<DisplayKey, List<ParallelPlan>> displayPlans = new HashMap<>();
+
+            private GraphEstimate(List<CraftNode> nodes) {
+                this.nodes = nodes.iterator();
             }
-        } catch (RuntimeException exception) {
-            // 计划展示不能因为某个模组 delegate 初始化失败而整体失败。
-            workerCount = 1;
-            contractLimit = inferencePending ? "配方代码未知，需先推断" : "机器契约不可用";
+
+            public boolean advance(long budgetNanos) {
+                long start = System.nanoTime();
+                while (nodes.hasNext()) {
+                    CraftNode node = nodes.next();
+                    ParallelPlan plan = estimateNode(node);
+                    if (plan != null) {
+                        plans.put(node.id().value(), plan);
+                        displayPlans.computeIfAbsent(
+                                new DisplayKey(node.recipeId(), node.modTypeId()), ignored -> new ArrayList<>())
+                                .add(plan);
+                    }
+                    if (System.nanoTime() - start >= budgetNanos) break;
+                }
+                return !nodes.hasNext();
+            }
+
+            public Map<Integer, ParallelPlan> result() {
+                if (nodes.hasNext()) throw new IllegalStateException("并行估算尚未完成");
+                return Map.copyOf(plans);
+            }
+
+            public Map<DisplayKey, ParallelPlan> displayResult() {
+                if (nodes.hasNext()) throw new IllegalStateException("并行估算尚未完成");
+                Map<DisplayKey, ParallelPlan> result = new HashMap<>();
+                displayPlans.forEach((key, values) -> {
+                    ParallelPlan merged = values.size() == 1 ? values.get(0) : ParallelPlan.mergeForDisplay(values);
+                    if (merged != null) result.put(key, merged);
+                });
+                return Map.copyOf(result);
+            }
         }
 
-        Recipe<?> recipe = player.serverLevel().getRecipeManager()
-                .byKey(recipeId).orElse(null);
-        boolean cooking = recipe instanceof AbstractCookingRecipe;
-        int cookTicks = cooking ? Math.max(1, ((AbstractCookingRecipe) recipe).getCookingTime()) : 1;
-        int burnTicks = bestBurnTicks(available);
-        long catalystPerWorker = perWorkerAmount(inputs, DemandRole.CATALYST);
-        long durabilityPerWorker = perWorkerAmount(inputs, DemandRole.DURABILITY);
-        String limitedBy = contractLimit != null
-                ? contractLimit
-                : limitedBy(executions, machines.size(), reusableLimit, cooking, burnTicks,
-                        catalystPerWorker > 0L, durabilityPerWorker > 0L);
-
-        int base = executions / workerCount;
-        int remainder = executions % workerCount;
-        List<ParallelPlan.WorkerShare> workers = new ArrayList<>(workerCount);
-        long totalFuel = 0L;
-        for (int i = 0; i < workerCount; i++) {
-            int operations = base + (i < remainder ? 1 : 0);
-            long fuel = cooking && burnTicks > 0
-                    ? FuelMath.requiredItems((long) operations * cookTicks, burnTicks) : 0L;
-            totalFuel += fuel;
-            AltarBindingRegistry.BoundMachine machine = machines.get(i);
-            workers.add(new ParallelPlan.WorkerShare(machine.pos(), machine.type().id(),
-                    operations, fuel, catalystPerWorker, durabilityPerWorker));
+        @Nullable
+        public ParallelPlan estimateStep(PlanStep step) {
+            if (step == null || step.modType() == null) return null;
+            List<InputAmount> inputs = new ArrayList<>();
+            List<ItemStack> stacks = step.inputs();
+            List<DemandRole> roles = step.inputRoles();
+            for (int i = 0; i < stacks.size(); i++) {
+                DemandRole role = i < roles.size() ? roles.get(i) : DemandRole.CONSUMED;
+                inputs.add(new InputAmount(stacks.get(i), role, Math.max(1L, stacks.get(i).getCount())));
+            }
+            long executions = Math.max(1L, step.batches());
+            return estimate(step.recipeId(), step.modType().id(),
+                    (int) Math.min(Integer.MAX_VALUE, executions), inputs, step.inferMode());
         }
-        long totalCatalyst = catalystPerWorker * workerCount;
-        long totalDurability = durabilityPerWorker * workerCount;
-        return new ParallelPlan(workers, executions, totalFuel, totalCatalyst, totalDurability,
-                limitedBy);
+
+        @Nullable
+        private ParallelPlan estimateNode(CraftNode node) {
+            List<InputAmount> inputs = new ArrayList<>();
+            for (var input : node.inputs()) {
+                inputs.add(new InputAmount(input.displayHint(), input.role(), Math.max(1L, input.quantity())));
+            }
+            return estimate(node.recipeId(), node.modTypeId(),
+                    Math.max(1, node.executions()), inputs, node.inferMode());
+        }
+
+        @Nullable
+        private ParallelPlan estimate(ResourceLocation recipeId, String modTypeId, int executions,
+                                      List<InputAmount> inputs, boolean inferMode) {
+            ModType type = ModType.findById(modTypeId);
+            if (type == null) return null;
+            List<AltarBindingRegistry.BoundMachine> machines = bindings.computeIfAbsent(
+                    new BindingKey(type, recipeId), key -> deduplicateLoaded(
+                            AltarBindingRegistry.getBoundMachinesForRecipe(player, type, recipeId), player));
+            if (machines.isEmpty()) return null;
+
+            int reusableLimit = reusableLimit(inputs, available);
+            int machineLimit = Math.min(executions, machines.size());
+            int workerCount = Math.max(1, Math.min(machineLimit, reusableLimit));
+            boolean inferencePending = inferMode
+                    && ModIds.ID_EMBERS_ALCHEMY.equals(type.id())
+                    && !embersCodeKnown(player, recipeId);
+            ProbeDecision decision = probes.computeIfAbsent(new ProbeKey(type, inferencePending),
+                    ParallelPlanEstimator::probe);
+            if (decision.limit() != null) workerCount = 1;
+
+            Recipe<?> recipe = player.serverLevel().getRecipeManager().byKey(recipeId).orElse(null);
+            boolean cooking = recipe instanceof AbstractCookingRecipe;
+            int cookTicks = cooking ? Math.max(1, ((AbstractCookingRecipe) recipe).getCookingTime()) : 1;
+            if (cooking && burnTicks < 0) burnTicks = bestBurnTicks(available);
+            long catalystPerWorker = perWorkerAmount(inputs, DemandRole.CATALYST);
+            long durabilityPerWorker = perWorkerAmount(inputs, DemandRole.DURABILITY);
+            String limitedBy = decision.limit() != null
+                    ? decision.limit()
+                    : limitedBy(executions, machines.size(), reusableLimit, cooking, burnTicks,
+                            catalystPerWorker > 0L, durabilityPerWorker > 0L);
+
+            int base = executions / workerCount;
+            int remainder = executions % workerCount;
+            List<ParallelPlan.WorkerShare> workers = new ArrayList<>(workerCount);
+            long totalFuel = 0L;
+            for (int i = 0; i < workerCount; i++) {
+                int operations = base + (i < remainder ? 1 : 0);
+                long fuel = cooking && burnTicks > 0
+                        ? FuelMath.requiredItems((long) operations * cookTicks, burnTicks) : 0L;
+                totalFuel += fuel;
+                AltarBindingRegistry.BoundMachine machine = machines.get(i);
+                workers.add(new ParallelPlan.WorkerShare(machine.pos(), machine.type().id(),
+                        operations, fuel, catalystPerWorker, durabilityPerWorker));
+            }
+            long totalCatalyst = catalystPerWorker * workerCount;
+            long totalDurability = durabilityPerWorker * workerCount;
+            return new ParallelPlan(workers, executions, totalFuel, totalCatalyst, totalDurability, limitedBy);
+        }
+    }
+
+    public record DisplayKey(ResourceLocation recipeId, String modTypeId) {}
+
+    private record ProbeKey(ModType type, boolean inference) {}
+
+    private record BindingKey(ModType type, ResourceLocation recipeId) {}
+
+    private record ProbeDecision(@Nullable String limit) {}
+
+    private static ProbeDecision probe(ProbeKey key) {
+        try {
+            IBatchDelegate delegate = key.inference()
+                    ? key.type().createInferDelegate() : key.type().createDelegate();
+            if (delegate != null && !GraphConcurrencyPolicy.decide(key.type().id(), delegate).exclusive()) {
+                return new ProbeDecision(null);
+            }
+            return new ProbeDecision(key.inference() ? "配方代码未知，需先推断" : "机器契约不支持并行");
+        } catch (RuntimeException | LinkageError failure) {
+            // 可选模组的探针失败只影响并行提示，不影响完整材料计划。
+            return new ProbeDecision(key.inference() ? "配方代码未知，需先推断" : "机器契约不可用");
+        }
     }
 
     /**
@@ -195,7 +267,7 @@ public final class ParallelPlanEstimator {
         for (AltarBindingRegistry.BoundMachine machine : machines) {
             if (machine == null || machine.dim() == null || machine.pos() == null) continue;
             ResourceKey<Level> dimension = ResourceKey.create(Registries.DIMENSION, machine.dim());
-            ServerLevel level = player.server.getLevel(dimension);
+            ServerLevel level = player.getServer().getLevel(dimension);
             if (level == null || !level.isLoaded(machine.pos())) continue;
             unique.putIfAbsent(machine.dim() + "@" + machine.pos().asLong()
                     + "/" + machine.type().id(), machine);
