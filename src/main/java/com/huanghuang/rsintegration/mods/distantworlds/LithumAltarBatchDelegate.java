@@ -97,7 +97,7 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
             releaseNetworkStaff();
             return false;
         }
-        this.ledger = new ExtractionLedger();
+        this.ledger = materialAccess().newLedger();
         this.ledger.setStorageEndpoint(storageEndpoint());
         List<ItemStack> materials = new ArrayList<>();
         for (IngredientSpec spec : definition.allMaterials()) {
@@ -198,7 +198,7 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
     private boolean acquireStaff(ServerPlayer player) {
         if (hasStaff(player)) return true;
         if (storageEndpoint() != null) {
-            var snapshot = storageEndpoint().snapshot(player).snapshot().orElse(null);
+            var snapshot = materialAccess().snapshot(player, storageEndpoint()).snapshot().orElse(null);
             if (snapshot == null) return false;
             for (var entry : snapshot.items()) {
                 ItemStack candidate = entry.stack();
@@ -367,7 +367,7 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
                 LithumAltarStateReader.Snapshot snapshot = LithumAltarStateReader.read(level, pos);
                 if (snapshot != null && snapshot.maxEnergy() > 0
                         && snapshot.currentEnergy() < snapshot.maxEnergy()
-                        && !fuelHelper.ensureFuel(level, storageEndpoint(), player)) {
+                        && !fuelHelper.ensureFuel(materialAccess(), level, storageEndpoint(), player)) {
                     warnOnce("fuel", "[RSI-DW] No Lithum Furnace fuel available for altar at {}", pos);
                 }
             }
@@ -442,13 +442,13 @@ public final class LithumAltarBatchDelegate extends AbstractBatchDelegate {
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         clearPlacedMaterials();
-        fuelHelper.refundUnused(level, storageEndpoint(), player);
+        fuelHelper.refundUnused(materialAccess(), level, storageEndpoint(), player);
         releaseNetworkStaff();
     }
 
     @Override
     public void onBatchFinished(ServerPlayer player) {
-        fuelHelper.refundUnused(level, storageEndpoint(), player);
+        fuelHelper.refundUnused(materialAccess(), level, storageEndpoint(), player);
         releaseNetworkStaff();
         pendingResult = ItemStack.EMPTY;
         clearedRecipeTicks = 0;

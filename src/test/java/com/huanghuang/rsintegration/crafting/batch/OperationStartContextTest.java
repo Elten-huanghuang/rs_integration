@@ -28,7 +28,7 @@ class OperationStartContextTest extends BootstrapTest {
                 new MaterialPlan.Entry("base", iron, MaterialPlan.Allocation.GRAPH, 0)));
         ItemStack tip = new ItemStack(Items.IRON_INGOT);
         tip.getOrCreateTag().putString("variant", "polished");
-        var context = new OperationStartContext(mock(ServerPlayer.class), new ExtractionLedger(),
+        var context = new OperationStartContext(mock(ServerPlayer.class), ExtractionLedger.external(),
                 OperationStartContext.MaterialOwnership.CHAIN_RESERVED, plan,
                 List.of(new ReservedMaterial("base", new ItemStack(Items.IRON_INGOT)),
                         new ReservedMaterial("tip", tip)), null, null);
@@ -47,7 +47,7 @@ class OperationStartContextTest extends BootstrapTest {
                 .add(Origin.INITIAL, new ItemStack(Items.IRON_INGOT), 2);
         var plan = new MaterialPlan(List.of(new MaterialPlan.Entry("base", iron, MaterialPlan.Allocation.GRAPH, 4)));
         var counted = new CountedOperationMaterials.Builder(1, 1).add(plan.entries().get(0), pool).build();
-        var context = OperationStartContext.chainReserved(mock(ServerPlayer.class), new ExtractionLedger(),
+        var context = OperationStartContext.chainReserved(mock(ServerPlayer.class), ExtractionLedger.external(),
                 plan, counted.batchMaterials(0, 0, 1), null);
         assertEquals(3, context.inputSlots().get(4).getCount());
         assertEquals(1, counted.materials(Origin.PRODUCER, 0, 1).get(0).getCount());
@@ -59,7 +59,7 @@ class OperationStartContextTest extends BootstrapTest {
         ServerPlayer player = mock(ServerPlayer.class);
         OperationStartContext context = new OperationStartContext(
                 player,
-                new ExtractionLedger(),
+                ExtractionLedger.external(),
                 OperationStartContext.MaterialOwnership.CHAIN_RESERVED,
                 MaterialPlan.none(),
                 List.of(),
@@ -77,7 +77,7 @@ class OperationStartContextTest extends BootstrapTest {
         ServerPlayer player = mock(ServerPlayer.class);
         OperationStartContext context = new OperationStartContext(
                 player,
-                new ExtractionLedger(),
+                ExtractionLedger.external(),
                 OperationStartContext.MaterialOwnership.CHAIN_RESERVED,
                 MaterialPlan.none(),
                 List.of(),
@@ -99,7 +99,7 @@ class OperationStartContextTest extends BootstrapTest {
         assertThrows(IllegalArgumentException.class, () ->
                 new OperationStartContext(
                         player,
-                        new ExtractionLedger(),
+                        ExtractionLedger.external(),
                         OperationStartContext.MaterialOwnership.CHAIN_RESERVED,
                         MaterialPlan.none(),
                         List.of(),

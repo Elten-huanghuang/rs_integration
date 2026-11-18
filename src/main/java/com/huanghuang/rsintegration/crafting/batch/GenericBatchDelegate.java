@@ -123,7 +123,7 @@ public class GenericBatchDelegate extends AbstractBatchDelegate {
     private boolean startExtractedOperation(ServerPlayer player) {
         if (!validateExecutionContext(player)) return false;
         this.player = player;
-        this.ledger = new ExtractionLedger();
+        this.ledger = materialAccess().newLedger();
         // The chain may have already selected an endpoint. Only resolve the
         // current/default endpoint when none was injected.
         if (storageEndpoint() == null) {

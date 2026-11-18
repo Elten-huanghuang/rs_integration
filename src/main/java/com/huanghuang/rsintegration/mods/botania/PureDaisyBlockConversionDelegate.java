@@ -119,7 +119,7 @@ public final class PureDaisyBlockConversionDelegate extends AbstractBatchDelegat
     @Override
     public boolean startSingleOperation(@Nonnull ServerPlayer player) {
         if (storageEndpoint() == null) return false;
-        List<ItemStack> materials = BotaniaDelegateSupport.extractAtomically(
+        List<ItemStack> materials = BotaniaDelegateSupport.extractAtomically(materialAccess(),
                 storageEndpoint(), player, recipeSlots());
         return !materials.isEmpty() && start(materials.get(0));
     }

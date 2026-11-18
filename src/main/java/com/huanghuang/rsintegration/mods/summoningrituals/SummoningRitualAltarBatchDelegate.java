@@ -182,7 +182,7 @@ public final class SummoningRitualAltarBatchDelegate extends AbstractBatchDelega
     @Override
     public boolean startSingleOperation(@Nonnull ServerPlayer player) {
         // 兼容仍使用委托自提入口的旧执行器；无材料时账本不会产生提取记录。
-        return startPreparedOperation(player, List.of(), new ExtractionLedger());
+        return startPreparedOperation(player, List.of(), materialAccess().newLedger());
     }
 
     @Override

@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.eidolon;
 
+import com.huanghuang.rsintegration.crafting.MaterialAccess;
+
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
@@ -46,7 +48,7 @@ class EidolonWaterSupplyTest extends BootstrapTest {
         TestCrucible crucible = new TestCrucible();
         crucible.tank.fill(water(750), IFluidHandler.FluidAction.EXECUTE);
         assertFalse(crucible.hasWater);
-        assertTrue(EidolonWaterSupply.ensureWater(crucible.tank, 250, null, null, crucible::setChanged));
+        assertTrue(EidolonWaterSupply.ensureWater(MaterialAccess.EXTERNAL, crucible.tank, 250, null, null, crucible::setChanged));
         assertEquals(1000, crucible.tank.getFluidAmount());
         assertTrue(crucible.hasWater);
         assertEquals(1, crucible.changes);
@@ -56,7 +58,7 @@ class EidolonWaterSupplyTest extends BootstrapTest {
     void existingFullBucketDoesNotRequireAStorageEndpoint() {
         TestCrucible crucible = new TestCrucible();
         crucible.tank.fill(water(1000), IFluidHandler.FluidAction.EXECUTE);
-        assertTrue(EidolonWaterSupply.ensureWater(crucible.tank, 1000, null, null, crucible::setChanged));
+        assertTrue(EidolonWaterSupply.ensureWater(MaterialAccess.EXTERNAL, crucible.tank, 1000, null, null, crucible::setChanged));
         assertEquals(1000, crucible.tank.getFluidAmount());
         assertEquals(0, crucible.changes);
     }
@@ -65,7 +67,7 @@ class EidolonWaterSupplyTest extends BootstrapTest {
     void incompatibleExistingFluidIsNotDiscarded() {
         TestCrucible crucible = new TestCrucible();
         crucible.tank.fill(new FluidStack(Fluids.LAVA, 500), IFluidHandler.FluidAction.EXECUTE);
-        assertFalse(EidolonWaterSupply.ensureWater(crucible.tank, 1000, null, null, crucible::setChanged));
+        assertFalse(EidolonWaterSupply.ensureWater(MaterialAccess.EXTERNAL, crucible.tank, 1000, null, null, crucible::setChanged));
         assertEquals(Fluids.LAVA, crucible.tank.getFluid().getFluid());
         assertEquals(500, crucible.tank.getFluidAmount());
         assertEquals(0, crucible.changes);
@@ -80,7 +82,7 @@ class EidolonWaterSupplyTest extends BootstrapTest {
         crucible.tank.fill(water(750), IFluidHandler.FluidAction.EXECUTE);
         try {
             RSIntegrationConfig.SERVER_SPEC.setConfig(config);
-            assertFalse(EidolonWaterSupply.ensureWater(crucible.tank, 250, null, null, crucible::setChanged));
+            assertFalse(EidolonWaterSupply.ensureWater(MaterialAccess.EXTERNAL, crucible.tank, 250, null, null, crucible::setChanged));
             assertEquals(750, crucible.tank.getFluidAmount());
             assertFalse(crucible.hasWater);
         } finally {

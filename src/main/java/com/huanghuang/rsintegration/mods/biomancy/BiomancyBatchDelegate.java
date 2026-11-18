@@ -124,7 +124,7 @@ final class BiomancyBatchDelegate extends InstantBatchDelegate {
         if (storageEndpoint() == null && !hasStorageAccess()) return false;
 
         List<ItemStack> inputs = new ArrayList<>();
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = materialAccess().newLedger()) {
             ledger.setStorageEndpoint(storageEndpoint());
             for (IngredientSpec spec : specs) {
                 if (spec.isEmpty()) continue;
@@ -512,7 +512,7 @@ final class BiomancyBatchDelegate extends InstantBatchDelegate {
             ItemStack fuel = reserveFuel(player, nutrientPasteIngredient(), deficit);
             if (fuel.isEmpty() && !triedAutoCraft) {
                 triedAutoCraft = true;
-                try (ExtractionLedger fuelLedger = new ExtractionLedger()) {
+                try (ExtractionLedger fuelLedger = materialAccess().newLedger()) {
                     fuelLedger.setStorageEndpoint(storageEndpoint());
                     ItemStack paste = CraftPacketUtils.ensureMaterialAvailable(player, dimension, pos,
                             nutrientPasteIngredient(), 1, fuelLedger, storageEndpoint());
@@ -615,7 +615,7 @@ final class BiomancyBatchDelegate extends InstantBatchDelegate {
         ItemStack template = options[0];
         int requested = BiomancyFuelPolicy.requiredItems(deficit, fuelValue(template), template.getMaxStackSize());
         for (int count = requested; count > 0; count /= 2) {
-            try (ExtractionLedger fuelLedger = new ExtractionLedger()) {
+            try (ExtractionLedger fuelLedger = materialAccess().newLedger()) {
                 fuelLedger.setStorageEndpoint(storageEndpoint());
                 ItemStack fuel = fuelLedger.reserve(
                         ingredient, count, storageEndpoint(), player, dimension, pos);
@@ -626,7 +626,7 @@ final class BiomancyBatchDelegate extends InstantBatchDelegate {
     }
 
     private ItemStack reserveFallbackFuel(ServerPlayer player, int deficit) {
-        Map<StackKey, Long> available = MaterialSources.listAllAvailable(player, storageEndpoint());
+        Map<StackKey, Long> available = materialAccess().available(player, storageEndpoint());
         List<ItemStack> fuels = new ArrayList<>();
         for (Map.Entry<StackKey, Long> entry : available.entrySet()) {
             ItemStack candidate = entry.getKey().toStack();

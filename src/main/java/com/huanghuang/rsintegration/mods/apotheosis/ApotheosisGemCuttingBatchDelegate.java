@@ -86,7 +86,7 @@ public final class ApotheosisGemCuttingBatchDelegate extends InstantBatchDelegat
     public boolean startSingleOperation(@Nonnull ServerPlayer player) {
         List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.size() != 3) return false;
-        ExtractionLedger privateLedger = new ExtractionLedger();
+        ExtractionLedger privateLedger = materialAccess().newLedger();
         this.ledger = privateLedger;
         this.usingSharedLedger = false;
         if (storageEndpoint() == null) {

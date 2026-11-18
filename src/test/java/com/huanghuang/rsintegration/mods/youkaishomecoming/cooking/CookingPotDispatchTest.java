@@ -122,7 +122,7 @@ class CookingPotDispatchTest extends BootstrapTest {
                 UUID.randomUUID(), new NodeId(0), budget);
         int initialZones = CraftOutputInterceptor.activeZoneCount();
 
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = ExtractionLedger.external()) {
             assertTrue(ledger.commitToEndpoint(null, player));
             try {
                 assertTrue(group.startOperation(OperationStartContext.chainReserved(

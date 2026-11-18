@@ -2821,7 +2821,7 @@ public final class ExternalIntegrationBatchDelegate extends AbstractBatchDelegat
 
     private void captureFluidSource(ServerPlayer player) {
         if (fluidSourceCaptured) return;
-        taskFluids = TaskFluidAccess.capture(player, storageEndpoint());
+        taskFluids = materialAccess().fluids(player, storageEndpoint());
         fluidSourceCaptured = true;
     }
 

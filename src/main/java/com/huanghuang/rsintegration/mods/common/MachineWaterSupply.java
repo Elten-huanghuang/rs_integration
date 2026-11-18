@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.mods.common;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.MaterialAccess;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.storage.StorageOperationStatus;
 import com.huanghuang.rsintegration.storage.StorageCapability;
@@ -35,24 +36,24 @@ public final class MachineWaterSupply {
         return configured.contains(machine);
     }
 
-    public static int fill(String machine, IFluidHandler tank, int amount,
+    public static int fill(MaterialAccess access, String machine, IFluidHandler tank, int amount,
                            CraftStorageEndpoint endpoint, ServerPlayer player) {
         return fill(tank, amount, isFree(machine),
-                requested -> extractWater(endpoint, player, requested),
-                water -> refundWater(endpoint, player, water));
+                requested -> extractWater(access, endpoint, player, requested),
+                water -> refundToken(access, endpoint, player, InkFluidSupport.token(water)));
     }
 
     public static boolean canFill(String machine, IFluidHandler tank, int amount,
                                   CraftStorageEndpoint endpoint, ServerPlayer player) {
         if (amount <= 0) return true;
         if (tank.fill(new FluidStack(Fluids.WATER, amount), IFluidHandler.FluidAction.SIMULATE) != amount) return false;
-        return isFree(machine) || extractWater(endpoint, player, amount, true).getAmount() == amount;
+        return isFree(machine) || extractWater(MaterialAccess.EXTERNAL, endpoint, player, amount, true).getAmount() == amount;
     }
 
-    public static boolean fillProperty(String machine, int amount, CraftStorageEndpoint endpoint,
-                                        ServerPlayer player, BooleanSupplier update) {
-        return fillProperty(amount, isFree(machine), requested -> extractWater(endpoint, player, requested),
-                water -> refundWater(endpoint, player, water), update);
+    public static boolean fillProperty(MaterialAccess access, String machine, int amount, CraftStorageEndpoint endpoint,
+                                       ServerPlayer player, BooleanSupplier update) {
+        return fillProperty(amount, isFree(machine), requested -> extractWater(access, endpoint, player, requested),
+                water -> refundToken(access, endpoint, player, InkFluidSupport.token(water)), update);
     }
 
     static boolean fillProperty(int amount, boolean free, IntFunction<FluidStack> extract,
@@ -93,22 +94,22 @@ public final class MachineWaterSupply {
         return filled - recovered;
     }
 
-    private static FluidStack extractWater(CraftStorageEndpoint endpoint, ServerPlayer player, int amount) {
-        if (extractWater(endpoint, player, amount, true).getAmount() != amount) return FluidStack.EMPTY;
-        return extractWater(endpoint, player, amount, false);
+    private static FluidStack extractWater(MaterialAccess access, CraftStorageEndpoint endpoint, ServerPlayer player, int amount) {
+        if (extractWater(access, endpoint, player, amount, true).getAmount() != amount) return FluidStack.EMPTY;
+        return extractWater(access, endpoint, player, amount, false);
     }
 
-    private static FluidStack extractWater(CraftStorageEndpoint endpoint, ServerPlayer player, int amount, boolean simulate) {
+    private static FluidStack extractWater(MaterialAccess access, CraftStorageEndpoint endpoint, ServerPlayer player, int amount, boolean simulate) {
         if (endpoint == null || player == null || amount <= 0
                 || !supportsFluidStorage(endpoint)) return FluidStack.EMPTY;
         ItemStack template = InkFluidSupport.token(new FluidStack(Fluids.WATER, 1));
-        var result = endpoint.extractExact(player, template, amount, simulate);
+        var result = access.extractExact(player, endpoint, template, amount, simulate);
         if (simulate && result.status() != StorageOperationStatus.SUCCESS) return FluidStack.EMPTY;
         List<ItemStack> extractedStacks = result.extractedStacks();
-        if (!simulate) result.recoveryStacks().forEach(stack -> refundToken(endpoint, player, stack));
+        if (!simulate) result.recoveryStacks().forEach(stack -> refundToken(access, endpoint, player, stack));
         FluidStack requested = new FluidStack(Fluids.WATER, amount);
         if (extractedStacks.stream().anyMatch(stack -> !InkFluidSupport.fluid(stack).isFluidEqual(requested))) {
-            if (!simulate) extractedStacks.forEach(stack -> refundToken(endpoint, player, stack));
+            if (!simulate) extractedStacks.forEach(stack -> refundToken(access, endpoint, player, stack));
             return FluidStack.EMPTY;
         }
         int extracted = extractedStacks.stream().mapToInt(ItemStack::getCount).sum();
@@ -117,11 +118,11 @@ public final class MachineWaterSupply {
 
     public static void refundWater(CraftStorageEndpoint endpoint, ServerPlayer player, FluidStack water) {
         if (water.isEmpty()) return;
-        refundToken(endpoint, player, InkFluidSupport.token(water));
+        refundToken(MaterialAccess.EXTERNAL, endpoint, player, InkFluidSupport.token(water));
     }
 
-    private static void refundToken(CraftStorageEndpoint endpoint, ServerPlayer player, ItemStack token) {
-        ItemStack remainder = endpoint.insert(player, token, false).remainder().orElse(token);
+    private static void refundToken(MaterialAccess access, CraftStorageEndpoint endpoint, ServerPlayer player, ItemStack token) {
+        ItemStack remainder = access.refund(player, endpoint, token).remainder().orElse(token);
         if (!remainder.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, remainder);
     }
 }

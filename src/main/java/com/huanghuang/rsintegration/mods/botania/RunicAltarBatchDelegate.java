@@ -118,7 +118,7 @@ public final class RunicAltarBatchDelegate extends AbstractBatchDelegate {
     public boolean startSingleOperation(@Nonnull ServerPlayer player) {
         if (!canStartNow()) return false;
         if (storageEndpoint() == null) return false;
-        List<ItemStack> extracted = BotaniaDelegateSupport.extractAtomically(
+        List<ItemStack> extracted = BotaniaDelegateSupport.extractAtomically(materialAccess(),
                 storageEndpoint(), player, recipeSlots());
         if (extracted.isEmpty()) return false;
         if (start(player, extracted)) return true;

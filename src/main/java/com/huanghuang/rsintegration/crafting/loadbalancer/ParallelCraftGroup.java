@@ -43,6 +43,7 @@ import com.huanghuang.rsintegration.crafting.batch.PreparationMessageScope;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry.BoundMachine;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.MaterialAccess;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
@@ -105,7 +106,7 @@ public final class ParallelCraftGroup implements IBatchDelegate {
     private MagicResourceTaskReservation magicResourceTaskReservation;
     private ServerPlayer player;
     private ExtractionLedger sharedLedger;
-    private final ExtractionLedger delegateExtractedLedger = new ExtractionLedger();
+    private final ExtractionLedger delegateExtractedLedger;
     /** 复杂分配保留旧矩阵；普通同质消费输入使用 bulkOperationMaterials。 */
     @Nullable
     private RepeatedOperationPlan repeatedOperationPlan;
@@ -321,6 +322,18 @@ public final class ParallelCraftGroup implements IBatchDelegate {
                               @Nullable CraftStorageEndpoint storageEndpoint, int maxWorkers,
                               @Nullable Function<BoundMachine, IBatchDelegate> delegateFactory,
                               @Nullable IBatchDelegate preparedDelegate) {
+        this(machines, modType, recipeId, player, totalOperations, inferMode, concurrencyCapabilities,
+                storageEndpoint, maxWorkers, delegateFactory, preparedDelegate, MaterialAccess.EXTERNAL);
+    }
+
+    public ParallelCraftGroup(List<BoundMachine> machines, ModType modType,
+                              ResourceLocation recipeId, ServerPlayer player,
+                              int totalOperations, boolean inferMode,
+                              @Nullable BatchConcurrencyCapabilities concurrencyCapabilities,
+                              @Nullable CraftStorageEndpoint storageEndpoint, int maxWorkers,
+                              @Nullable Function<BoundMachine, IBatchDelegate> delegateFactory,
+                              @Nullable IBatchDelegate preparedDelegate, MaterialAccess materialAccess) {
+        delegateExtractedLedger = materialAccess.newLedger();
         this.modType = modType;
         this.recipeId = recipeId;
         this.inferMode = inferMode;

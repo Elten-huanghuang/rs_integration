@@ -21,7 +21,7 @@ class CuttingBoardStartFailureDetailTest extends BootstrapTest {
     void rejectedStartExposesReasonForTheCraftLogAndFailureReport() {
         CuttingBoardBatchDelegate delegate = new CuttingBoardBatchDelegate();
 
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = ExtractionLedger.external()) {
             // 未经过 validateAndInit 时配方尚未解析，启动必须被拒绝；
             // 该分支在触碰玩家与方块实体之前返回，因此可以传入 null 玩家。
             boolean started = delegate.startPreparedOperation(null, List.of(), ledger);

@@ -402,7 +402,7 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
         setField(delegate, "executionPlan", customPlan(view, List.of(),
                 List.of(outputPort(view.outputs().get(0)))));
         setField(delegate, "operationStartContext", new OperationStartContext(player,
-                new ExtractionLedger(), OperationStartContext.MaterialOwnership.CHAIN_RESERVED,
+                ExtractionLedger.external(), OperationStartContext.MaterialOwnership.CHAIN_RESERVED,
                 MaterialPlan.none(), List.of(), null, null, UUID.randomUUID(), UUID.randomUUID(), 1));
         Method collect = ExternalIntegrationBatchDelegate.class.getDeclaredMethod("collectCustomStep");
         collect.setAccessible(true);
@@ -612,7 +612,7 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
         delegate = spy(delegate);
         doReturn(false).when(delegate).supportsOutputReception();
         delegate.prepareGraphBatch(2);
-        assertTrue(delegate.startOperation(OperationStartContext.chainReserved(player, new ExtractionLedger(),
+        assertTrue(delegate.startOperation(OperationStartContext.chainReserved(player, ExtractionLedger.external(),
                 delegate.materialPlan(), List.of(reservedDiamond("input/1"), reservedDiamond("input/0")), null)));
         assertEquals(Items.DIAMOND, inputSlot.get().getItem());
         assertEquals(4, inputSlot.get().getCount());
@@ -952,7 +952,7 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
         setField(delegate, "operationStartContext",
                 new OperationStartContext(
                         player,
-                        new ExtractionLedger(),
+                        ExtractionLedger.external(),
                         OperationStartContext.MaterialOwnership.CHAIN_RESERVED,
                         MaterialPlan.none(),
                         List.of(),
@@ -1015,7 +1015,7 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
         ServerPlayer player = mock(ServerPlayer.class);
         OperationStartContext start = new OperationStartContext(
                 player,
-                new ExtractionLedger(),
+                ExtractionLedger.external(),
                 OperationStartContext.MaterialOwnership.CHAIN_RESERVED,
                 MaterialPlan.none(),
                 List.of(),
@@ -1163,7 +1163,7 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
         setField(delegate, "operationStartContext",
                 new OperationStartContext(
                         mock(ServerPlayer.class),
-                        new ExtractionLedger(),
+                        ExtractionLedger.external(),
                         OperationStartContext.MaterialOwnership.CHAIN_RESERVED,
                         MaterialPlan.none(),
                         List.of(),
@@ -1217,7 +1217,7 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
         setField(delegate, "operationStartContext",
                 new OperationStartContext(
                         mock(ServerPlayer.class),
-                        new ExtractionLedger(),
+                        ExtractionLedger.external(),
                         OperationStartContext.MaterialOwnership.CHAIN_RESERVED,
                         MaterialPlan.none(),
                         List.of(),
@@ -1325,7 +1325,7 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
         setField(delegate, "operationStartContext",
                 new OperationStartContext(
                         player,
-                        new ExtractionLedger(),
+                        ExtractionLedger.external(),
                         OperationStartContext.MaterialOwnership.CHAIN_RESERVED,
                         MaterialPlan.none(),
                         List.of(),
@@ -1442,7 +1442,7 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
         setField(delegate, "operationStartContext",
                 new OperationStartContext(
                         player,
-                        new ExtractionLedger(),
+                        ExtractionLedger.external(),
                         OperationStartContext.MaterialOwnership.CHAIN_RESERVED,
                         MaterialPlan.none(),
                         List.of(),
@@ -1551,7 +1551,7 @@ class ExternalIntegrationBatchDelegateTest extends BootstrapTest {
     }
 
     private static boolean startWithDiamond(ExternalIntegrationBatchDelegate delegate, ServerPlayer player) {
-        return delegate.startOperation(OperationStartContext.chainReserved(player, new ExtractionLedger(),
+        return delegate.startOperation(OperationStartContext.chainReserved(player, ExtractionLedger.external(),
                 delegate.materialPlan(), List.of(reservedDiamond("input")), null));
     }
 

@@ -15,7 +15,7 @@ final class QuestSubmissionEscrow implements AutoCloseable {
 
     record Entry(long taskId, ItemStack stack, ExtractionLedger.ReservationToken token) {}
 
-    private final ExtractionLedger ledger = new ExtractionLedger();
+    private final ExtractionLedger ledger = ExtractionLedger.external();
     private final List<Entry> entries = new ArrayList<>();
     private final ServerPlayer player;
     private final CraftStorageEndpoint endpoint;

@@ -140,7 +140,7 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     private CrockPotCategoryPlanning.Context categoryContext() {
-        return CrockPotCategoryPlanning.capture(recipe, null, storageEndpoint(), player, myLevel, potLevel);
+        return CrockPotCategoryPlanning.capture(materialAccess(), recipe, null, storageEndpoint(), player, myLevel, potLevel);
     }
 
     @Override
@@ -167,7 +167,7 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
         }
         if (!hasStorageAccess()) return false;
 
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = materialAccess().newLedger()) {
             ledger.setStorageEndpoint(storageEndpoint());
             List<ItemStack> materials = new ArrayList<>();
 
@@ -582,7 +582,7 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
         ItemStack remainder = handler.insertItem(fuelSlot, extracted, false);
         int inserted = extracted.getCount() - remainder.getCount();
         if (!remainder.isEmpty()) {
-            insertIntoStorage(player, remainder, false);
+            refundMaterial(player, remainder);
         }
         if (inserted > 0) {
             if (suppliedFuelType.isEmpty()) {
@@ -599,7 +599,7 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
         List<ItemStack> candidates = new ArrayList<>();
         var endpoint = storageEndpoint();
         if (endpoint == null) return ItemStack.EMPTY;
-        var snapshot = endpoint.snapshot(player).snapshot().orElse(null);
+        var snapshot = materialAccess().snapshot(player, endpoint).snapshot().orElse(null);
         if (snapshot == null) return ItemStack.EMPTY;
         for (var entry : snapshot.items()) {
             candidates.add(entry.stack());
@@ -655,7 +655,10 @@ public final class CrockPotBatchDelegate extends AbstractBatchDelegate {
                 baselineFuel, suppliedFuelType, suppliedFuelCount, current);
         if (refundable > 0) {
             ItemStack refund = handler.extractItem(potLevel, refundable, false);
-            if (!refund.isEmpty()) refundToRSNetwork(refund);
+            if (!refund.isEmpty()) {
+                ItemStack remainder = refundMaterial(player, refund);
+                if (!remainder.isEmpty()) refundToRSNetwork(remainder);
+            }
         }
         suppliedFuelType = ItemStack.EMPTY;
         suppliedFuelCount = 0;

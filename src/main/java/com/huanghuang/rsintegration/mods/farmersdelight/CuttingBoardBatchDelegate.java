@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
 
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.MaterialAccess;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
@@ -196,7 +197,7 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
     @Nullable
     @Override
     public Component materialReservationFailureMessage(@NotNull ServerPlayer player) {
-        return selectTool(player, recipe, storageEndpoint()) == null
+        return selectTool(materialAccess(), player, recipe, storageEndpoint()) == null
                 ? Component.translatable("rsi.farmersdelight.cutting_board.tool_missing")
                 : null;
     }
@@ -206,7 +207,7 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
         List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.size() != 2) return false;
         List<ItemStack> materials = new ArrayList<>();
-        try (ExtractionLedger local = new ExtractionLedger()) {
+        try (ExtractionLedger local = materialAccess().newLedger()) {
             if (storageEndpoint() == null) {
                 setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
             }
@@ -532,7 +533,7 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
     public static ToolPlanCheck getPlanCheck(ServerPlayer player, Recipe<?> recipe,
                                              @Nullable CraftStorageEndpoint endpoint,
                                              List<PlanStep> plannedSteps) {
-        ToolSelection selection = selectTool(player, recipe, endpoint);
+        ToolSelection selection = selectTool(MaterialAccess.EXTERNAL, player, recipe, endpoint);
         if (selection == null) {
             return missingToolCheck(
                     FarmersDelightRecipeHandler.getCuttingBoardToolIngredient(recipe),
@@ -591,7 +592,7 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Nullable
-    private static ToolSelection selectTool(ServerPlayer player, Recipe<?> recipe,
+    private static ToolSelection selectTool(MaterialAccess access, ServerPlayer player, Recipe<?> recipe,
                                             @Nullable CraftStorageEndpoint endpoint) {
         var toolIngredient = FarmersDelightRecipeHandler.getCuttingBoardToolIngredient(recipe);
         if (toolIngredient == null || endpoint == null) return null;
@@ -604,7 +605,7 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
                 }
             }
         }
-        var snapshot = endpoint.snapshot(player).snapshot().orElse(null);
+        var snapshot = access.snapshot(player, endpoint).snapshot().orElse(null);
         if (snapshot == null) return null;
         for (var stored : snapshot.match(toolIngredient).items()) {
             ItemStack stack = stored.stack();
@@ -631,7 +632,7 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
                     .mapToInt(CuttingBoardToolSemantics::remainingDurability).max().orElse(0)));
         }
         if (player == null || recipe == null) return 1;
-        ToolSelection selection = selectTool(player, recipe, storageEndpoint());
+        ToolSelection selection = selectTool(materialAccess(), player, recipe, storageEndpoint());
         if (selection == null) return 1;
         int remaining = CuttingBoardToolSemantics.remainingDurability(selection.stack());
         return Math.max(1, Math.min(MAX_INSTANT_BATCH, remaining));

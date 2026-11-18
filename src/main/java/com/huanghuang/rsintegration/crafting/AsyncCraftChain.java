@@ -226,7 +226,8 @@ public final class AsyncCraftChain {
      * flushing it never overlaps the ledger refund.
      */
     private final List<ItemStack> committedVirtual = new ArrayList<>();
-    private final ExtractionLedger ledger = new ExtractionLedger();
+    private MaterialAccess materialAccess = MaterialAccess.EXTERNAL;
+    private ExtractionLedger ledger = materialAccess.newLedger();
     private final CraftLogContext ctx;
 
     private int currentStepIdx;
@@ -453,7 +454,10 @@ public final class AsyncCraftChain {
         materialCoordinator = coordinator;
         materialAccount = coordinator.open(craftId, playerId, server, storageEndpoint);
         materialAccount.setMaterialSources(materialSources);
-        ledger.setMaterialAccount(materialAccount);
+        materialAccess = materialAccount.access;
+        ledger = materialAccess.newLedger();
+        ledger.setLogContext(ctx);
+        if (storageEndpoint != null) ledger.setStorageEndpoint(storageEndpoint);
         materialAdmissionStartedTick = server.getTickCount();
         nextMaterialAdmissionTick = materialAdmissionStartedTick;
         bindMaterialStorageChanges();
@@ -944,8 +948,7 @@ public final class AsyncCraftChain {
     boolean tick(VanillaCraftingTickBudget.ChainAllowance vanillaAllowance,
                  BooleanSupplier dispatchAllowed) {
         if (isDone()) return true;
-        try (MaterialSourceSelection.Scope sources = materialSources.enter();
-             RuntimeMaterialAccount.Scope ignored = RuntimeMaterialAccount.enter(materialAccount)) {
+        try (MaterialSourceSelection.Scope sources = materialSources.enter()) {
             if (!acquireInitialMaterials()) return isDone();
             return tickWithMaterials(vanillaAllowance, dispatchAllowed);
         }
@@ -1562,10 +1565,10 @@ public final class AsyncCraftChain {
             graphScheduler.releaseClaim(nodeId);
             return null;
         }
-        ExtractionLedger nodeLedger = new ExtractionLedger();
+        ExtractionLedger nodeLedger = materialAccess.newLedger();
         nodeLedger.setLogContext(ctx);
         if (storageEndpoint != null) nodeLedger.setStorageEndpoint(storageEndpoint);
-        ExtractionLedger executionLedger = new ExtractionLedger();
+        ExtractionLedger executionLedger = materialAccess.newLedger();
         executionLedger.setLogContext(ctx);
         if (storageEndpoint != null) executionLedger.setStorageEndpoint(storageEndpoint);
         OperationExecutionKernel.Session operation = operationKernel.prepareLogical();
@@ -1831,7 +1834,7 @@ public final class AsyncCraftChain {
             needed.merge(request.material(), request.quantity(), SaturatingLongMath::add);
         }
         Map<StackKey, Long> available =
-                new LinkedHashMap<>(MaterialSources.listAllAvailable(online, storageEndpoint));
+                new LinkedHashMap<>(materialAccess.available(online, storageEndpoint));
         for (ItemStack stack : virtualInventory) {
             if (stack == null || stack.isEmpty()) continue;
             available.merge(StackKey.of(stack, true), (long) stack.getCount(),
@@ -1908,7 +1911,7 @@ public final class AsyncCraftChain {
         inputs = MaterialLocks.narrowSpecs(step.recipeId(), inputs, supplementalMaterialLocks);
         MaterialSources.invalidateFor(player, storageEndpoint);
         Map<StackKey, Long> available =
-                new LinkedHashMap<>(MaterialSources.listAllAvailable(player, storageEndpoint));
+                new LinkedHashMap<>(materialAccess.available(player, storageEndpoint));
         for (ItemStack stack : virtualInventory) {
             available.merge(StackKey.of(stack, true), (long) stack.getCount(),
                     MaterialSources::saturatedAdd);
@@ -2708,11 +2711,11 @@ public final class AsyncCraftChain {
      * A missing snapshot is treated conservatively as one worker; the broker
      * admission still remains authoritative for planned producer outputs.
      */
-    static int reusableWorkerCapacity(List<IngredientSpec> specs,
+    private int reusableWorkerCapacity(List<IngredientSpec> specs,
                                       ServerPlayer online, @Nullable CraftStorageEndpoint endpoint) {
         if (specs == null || specs.isEmpty() || online == null) return 1;
         return reusableWorkerCapacity(specs,
-                MaterialSources.listAllAvailable(online, endpoint));
+                materialAccess.available(online, endpoint));
     }
 
     static int reusableWorkerCapacity(List<IngredientSpec> specs,
@@ -2752,7 +2755,7 @@ public final class AsyncCraftChain {
         ParallelCraftGroup group = new ParallelCraftGroup(prepared.machines(), step.modType(),
                 step.recipeId(), online, atomicBatch ? 1 : step.executions(), step.inferMode(), capability,
                 storageEndpoint, atomicBatch ? 1 : prepared.operationCost(),
-                machine -> createStepDelegate(step, machine.type()), prepared.delegate());
+                machine -> createStepDelegate(step, machine.type()), prepared.delegate(), materialAccess);
         if (atomicBatch) group.setAtomicBatchOperations(step.executions());
         group.setMachineServer(server);
         group.setMachineLeases(machineLeases);
@@ -2794,7 +2797,7 @@ public final class AsyncCraftChain {
     private GraphDispatchResult dispatchPreparedGraphNode(
             NodeId nodeId, PreparedGraphNode prepared, ServerPlayer online,
             NodeAdmissionCoordinator.Admission admission) {
-        ExtractionLedger nodeLedger = new ExtractionLedger();
+        ExtractionLedger nodeLedger = materialAccess.newLedger();
         nodeLedger.setLogContext(ctx);
         if (storageEndpoint != null) nodeLedger.setStorageEndpoint(storageEndpoint);
         ParallelCraftGroup group = null;
@@ -3235,7 +3238,7 @@ public final class AsyncCraftChain {
                     || !plan.supplementalEntries().isEmpty()
                     || group.getChildCount() > 1 && !plan.reusableEntries().isEmpty();
             if (needsAvailable) {
-                for (Map.Entry<StackKey, Long> entry : MaterialSources.listAllAvailable(online, storageEndpoint).entrySet()) {
+                for (Map.Entry<StackKey, Long> entry : materialAccess.available(online, storageEndpoint).entrySet()) {
                     available.add(Origin.INITIAL, entry.getKey().toStack(), entry.getValue());
                 }
             }
@@ -4983,6 +4986,7 @@ public final class AsyncCraftChain {
     private ItemStack reserveIngredient(ExtractionLedger target, Ingredient ingredient,
                                         int amount, ServerPlayer player) {
         if (amount <= 0 || ingredient.isEmpty()) return ItemStack.EMPTY;
+        if (target.usesTaskAccount()) return target.reserve(ingredient, amount, storageEndpoint, player, null, null);
         Map<String, CraftStorageEndpoint> candidates = new LinkedHashMap<>();
         if (storageEndpoint != null) {
             candidates.put(endpointKey(storageEndpoint), storageEndpoint);
@@ -5541,7 +5545,7 @@ public final class AsyncCraftChain {
         boolean codeKnown = embersCodeKnown(step);
         boolean useInference = EreAlchemyDelegateMode.shouldUseInference(
                 step.modType().id(), step.inferMode(), codeKnown);
-        return useInference ? step.modType().createInferDelegate() : createDelegate(step.modType());
+        return bindMaterials(useInference ? step.modType().createInferDelegate() : createDelegate(step.modType()));
     }
 
     /**
@@ -5567,7 +5571,12 @@ public final class AsyncCraftChain {
         // Compatible binding aliases describe the recipe using one type and the
         // physical worker using another. Inference is a recipe-type feature and
         // no current alias supports it, so the concrete machine delegate wins.
-        return createDelegate(machineType);
+        return bindMaterials(createDelegate(machineType));
+    }
+
+    private IBatchDelegate bindMaterials(IBatchDelegate delegate) {
+        if (delegate instanceof AbstractBatchDelegate machine) machine.setMaterialAccess(materialAccess);
+        return delegate;
     }
 
     private static IBatchDelegate createDelegate(ModType type) {

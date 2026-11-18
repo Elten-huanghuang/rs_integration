@@ -175,7 +175,7 @@ public final class MythicBotanyManaInfuserBatchDelegate extends AbstractBatchDel
         }
         if (storageEndpoint() == null) return false;
 
-        this.ledger = new ExtractionLedger();
+        this.ledger = materialAccess().newLedger();
         this.ledger.setStorageEndpoint(storageEndpoint());
         List<ItemStack> materials = new ArrayList<>();
         for (IngredientSpec spec : requiredMaterials) {

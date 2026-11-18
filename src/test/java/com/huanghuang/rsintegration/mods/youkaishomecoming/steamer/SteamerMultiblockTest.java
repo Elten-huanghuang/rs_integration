@@ -85,7 +85,7 @@ class SteamerMultiblockTest extends BootstrapTest {
     void allRackBlocksShareOneBatchAndKeepTheirOwnInventoryOwner(String namespace, int layers)
             throws Exception {
         try (SteamerFixture fixture = new SteamerFixture(namespace, layers);
-             ExtractionLedger ledger = new ExtractionLedger();
+             ExtractionLedger ledger = ExtractionLedger.external();
              var tickets = mockStatic(ForcedChunkTicketManager.class)) {
             assertTrue(fixture.delegate.supportsInputBuffer());
             int operations = Math.min(layers * 4, 64);
@@ -138,7 +138,7 @@ class SteamerMultiblockTest extends BootstrapTest {
     @Test
     void missingLidRejectsTheWholeStackBeforePlacingAnyInputs() throws Exception {
         try (SteamerFixture fixture = new SteamerFixture("youkaishomecoming", 3);
-             ExtractionLedger ledger = new ExtractionLedger();
+             ExtractionLedger ledger = ExtractionLedger.external();
              var tickets = mockStatic(ForcedChunkTicketManager.class)) {
             fixture.setState(BASE.above(), false);
             assertFalse(fixture.delegate.supportsInputBuffer());

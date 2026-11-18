@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.crockpot;
 
+import com.huanghuang.rsintegration.crafting.MaterialAccess;
+
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -248,7 +250,7 @@ class CrockPotCategoryPlanningTest extends BootstrapTest {
         var items = counts.entrySet().stream().map(e -> new StoredItem(
                 StorageItemKey.fromItemStack(backend, e.getKey().toStack()), e.getValue())).toList();
         when(endpoint.snapshot(player)).thenReturn(StorageSnapshotResult.success(new StorageSnapshot(backend, items)));
-        var fromEndpoint = CrockPotCategoryPlanning.capture(recipe, null, endpoint, player, level, 4);
+        var fromEndpoint = CrockPotCategoryPlanning.capture(MaterialAccess.EXTERNAL, recipe, null, endpoint, player, level, 4);
         var fromCounts = CrockPotCategoryPlanning.capture(recipe, null, counts, level, 4);
         verify(endpoint).snapshot(player);
         clearInvocations(endpoint, player, level);

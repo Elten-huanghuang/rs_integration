@@ -162,7 +162,7 @@ public final class CraftingTickPerformanceProbe extends BootstrapTest {
                                     return delegate;
                                 });
                         check(group.startOperation(OperationStartContext.delegateExtracted(
-                                player, new ExtractionLedger())));
+                                player, ExtractionLedger.external())));
                         while (group.getRunningOperations() < count) {
                             tick.incrementAndGet();
                             group.observeCraft(level);
@@ -329,7 +329,7 @@ public final class CraftingTickPerformanceProbe extends BootstrapTest {
                                     BatchConcurrencyCapabilities.machineSlot(), null, groupSize,
                                     machine -> newSlotDelegate());
                             check(group.startOperation(OperationStartContext.delegateExtracted(
-                                    player, new ExtractionLedger())));
+                                    player, ExtractionLedger.external())));
                             while (group.getRunningOperations() < groupSize) {
                                 tick.incrementAndGet();
                                 group.observeCraft(player.serverLevel());

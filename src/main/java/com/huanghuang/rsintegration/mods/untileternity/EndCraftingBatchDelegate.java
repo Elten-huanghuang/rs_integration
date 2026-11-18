@@ -84,7 +84,7 @@ public final class EndCraftingBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean startSingleOperation(ServerPlayer player) {
         if (!validateExecutionContext(player)) return false;
-        ExtractionLedger ownLedger = new ExtractionLedger();
+        ExtractionLedger ownLedger = materialAccess().newLedger();
         if (storageEndpoint() == null) {
             setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, level.dimension(), pos).orElse(null));
         }

@@ -94,7 +94,7 @@ public final class CrabTrapBatchDelegate extends AbstractBatchDelegate {
         if (specs == null || specs.isEmpty()) return false;
 
         List<ItemStack> materials = new ArrayList<>();
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = materialAccess().newLedger()) {
             if (storageEndpoint() == null) setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
             if (storageEndpoint() == null && !hasStorageAccess()) return false;
             ledger.setStorageEndpoint(storageEndpoint());

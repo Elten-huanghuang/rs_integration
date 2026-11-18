@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.common;
 
+import com.huanghuang.rsintegration.crafting.MaterialAccess;
+
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
@@ -68,7 +70,7 @@ class MachineWaterSupplyEndpointTest extends BootstrapTest {
         extracted(250, new FluidStack(Fluids.WATER, 250), true);
         extracted(250, new FluidStack(Fluids.WATER, 250), false);
         FluidTank tank = tankWithWater(750);
-        assertEquals(250, MachineWaterSupply.fill("eidolon_crucible", tank, 250, endpoint, player));
+        assertEquals(250, MachineWaterSupply.fill(MaterialAccess.EXTERNAL, "eidolon_crucible", tank, 250, endpoint, player));
         assertEquals(1000, tank.getFluidAmount());
         verify(endpoint).extractExact(eq(player), any(ItemStack.class), eq(250L), eq(true));
         verify(endpoint).extractExact(eq(player), any(ItemStack.class), eq(250L), eq(false));
@@ -79,7 +81,7 @@ class MachineWaterSupplyEndpointTest extends BootstrapTest {
     void insufficientPreflightDoesNotPerformAnExtraction() {
         extracted(250, new FluidStack(Fluids.WATER, 100), true);
         FluidTank tank = tankWithWater(750);
-        assertEquals(0, MachineWaterSupply.fill("eidolon_crucible", tank, 250, endpoint, player));
+        assertEquals(0, MachineWaterSupply.fill(MaterialAccess.EXTERNAL, "eidolon_crucible", tank, 250, endpoint, player));
         assertEquals(750, tank.getFluidAmount());
         verify(endpoint, never()).extractExact(eq(player), any(ItemStack.class), eq(250L), eq(false));
     }
@@ -90,7 +92,7 @@ class MachineWaterSupplyEndpointTest extends BootstrapTest {
         extracted(250, new FluidStack(Fluids.WATER, 100), false);
         acceptRefund();
         FluidTank tank = tankWithWater(750);
-        assertEquals(0, MachineWaterSupply.fill("eidolon_crucible", tank, 250, endpoint, player));
+        assertEquals(0, MachineWaterSupply.fill(MaterialAccess.EXTERNAL, "eidolon_crucible", tank, 250, endpoint, player));
         assertEquals(750, tank.getFluidAmount());
         assertEquals(100, refund().getCount());
     }
@@ -101,7 +103,7 @@ class MachineWaterSupplyEndpointTest extends BootstrapTest {
         extracted(250, new FluidStack(Fluids.LAVA, 250), false);
         acceptRefund();
         FluidTank tank = tankWithWater(750);
-        assertEquals(0, MachineWaterSupply.fill("eidolon_crucible", tank, 250, endpoint, player));
+        assertEquals(0, MachineWaterSupply.fill(MaterialAccess.EXTERNAL, "eidolon_crucible", tank, 250, endpoint, player));
         assertEquals(750, tank.getFluidAmount());
         assertEquals(Fluids.LAVA, fluid(refund()).getFluid());
     }
@@ -111,7 +113,7 @@ class MachineWaterSupplyEndpointTest extends BootstrapTest {
         when(endpoint.session().reference()).thenReturn(new StorageReference(new StorageBackendId("beyonddimensions"), "test"));
         FluidTank tank = tankWithWater(750);
         assertFalse(MachineWaterSupply.canFill("eidolon_crucible", tank, 250, endpoint, player));
-        assertEquals(0, MachineWaterSupply.fill("eidolon_crucible", tank, 250, endpoint, player));
+        assertEquals(0, MachineWaterSupply.fill(MaterialAccess.EXTERNAL, "eidolon_crucible", tank, 250, endpoint, player));
         assertEquals(750, tank.getFluidAmount());
         verify(endpoint, never()).extractExact(eq(player), any(ItemStack.class), eq(250L), eq(false));
         tokens.verifyNoInteractions();
@@ -125,7 +127,7 @@ class MachineWaterSupplyEndpointTest extends BootstrapTest {
         extracted(250, new FluidStack(Fluids.WATER, 100), false);
         acceptRefund();
         FluidTank tank = tankWithWater(750);
-        assertEquals(0, MachineWaterSupply.fill("eidolon_crucible", tank, 250, endpoint, player));
+        assertEquals(0, MachineWaterSupply.fill(MaterialAccess.EXTERNAL, "eidolon_crucible", tank, 250, endpoint, player));
         assertEquals(750, tank.getFluidAmount());
         assertEquals(100, refund().getCount());
         verify(endpoint).extractExact(eq(player), any(ItemStack.class), eq(250L), eq(false));
@@ -138,7 +140,7 @@ class MachineWaterSupplyEndpointTest extends BootstrapTest {
         extracted(250, new FluidStack(Fluids.WATER, 250), true);
         extracted(250, new FluidStack(Fluids.WATER, 250), false);
         FluidTank tank = tankWithWater(750);
-        assertEquals(250, MachineWaterSupply.fill("eidolon_crucible", tank, 250, endpoint, player));
+        assertEquals(250, MachineWaterSupply.fill(MaterialAccess.EXTERNAL, "eidolon_crucible", tank, 250, endpoint, player));
         assertEquals(1000, tank.getFluidAmount());
         verify(endpoint, never()).insert(eq(player), any(ItemStack.class), eq(false));
     }

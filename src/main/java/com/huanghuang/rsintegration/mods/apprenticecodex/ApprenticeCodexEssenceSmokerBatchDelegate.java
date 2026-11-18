@@ -189,7 +189,7 @@ public final class ApprenticeCodexEssenceSmokerBatchDelegate extends AbstractBat
     @Override public boolean startSingleOperation(@Nonnull ServerPlayer player) {
         List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.size() != 2) return false;
-        ExtractionLedger privateLedger = new ExtractionLedger();
+        ExtractionLedger privateLedger = materialAccess().newLedger();
         this.ledger = privateLedger;
         this.usingSharedLedger = false;
         if (storageEndpoint() == null) {

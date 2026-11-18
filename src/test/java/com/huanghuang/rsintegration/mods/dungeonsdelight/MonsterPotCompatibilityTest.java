@@ -144,7 +144,7 @@ class MonsterPotCompatibilityTest extends BootstrapTest {
         assertEquals(32, fixture.delegate.prepareFlatBatch(64));
         plan = fixture.delegate.inputBufferPlan(4);
 
-        try (ExtractionLedger ledger = new ExtractionLedger();
+        try (ExtractionLedger ledger = ExtractionLedger.external();
              MockedStatic<ForcedChunkTicketManager> tickets = mockStatic(ForcedChunkTicketManager.class)) {
             assertTrue(fixture.delegate.startBufferedOperation(fixture.player, plan, ledger));
         }
@@ -173,7 +173,7 @@ class MonsterPotCompatibilityTest extends BootstrapTest {
         assertFalse(fixture.delegate.supportsInputBuffer());
         assertEquals(1, fixture.delegate.prepareFlatBatch(20));
         assertFalse(fixture.delegate.inputBufferPlan(20).enabled());
-        try (ExtractionLedger ledger = new ExtractionLedger();
+        try (ExtractionLedger ledger = ExtractionLedger.external();
              MockedStatic<ForcedChunkTicketManager> tickets = mockStatic(ForcedChunkTicketManager.class)) {
             assertTrue(fixture.delegate.startPreparedOperation(fixture.player,
                     List.of(new ItemStack(Items.MILK_BUCKET), new ItemStack(Items.BOWL)), ledger));
@@ -187,7 +187,7 @@ class MonsterPotCompatibilityTest extends BootstrapTest {
         assertTrue(fixture.prepare());
         when(fixture.machine.isHeated()).thenReturn(false);
         InputBufferPlan plan = fixture.delegate.inputBufferPlan(2);
-        try (ExtractionLedger ledger = new ExtractionLedger();
+        try (ExtractionLedger ledger = ExtractionLedger.external();
              MockedStatic<ForcedChunkTicketManager> tickets = mockStatic(ForcedChunkTicketManager.class)) {
             assertFalse(fixture.delegate.startBufferedOperation(fixture.player, plan, ledger));
         }
@@ -201,7 +201,7 @@ class MonsterPotCompatibilityTest extends BootstrapTest {
         Fixture fixture = new Fixture(Ingredient.of(Items.CARROT), 2);
         assertTrue(fixture.prepare());
         InputBufferPlan plan = fixture.delegate.inputBufferPlan(4);
-        try (ExtractionLedger ledger = new ExtractionLedger();
+        try (ExtractionLedger ledger = ExtractionLedger.external();
              MockedStatic<ForcedChunkTicketManager> tickets = mockStatic(ForcedChunkTicketManager.class)) {
             assertTrue(fixture.delegate.startBufferedOperation(fixture.player, plan, ledger));
         }
@@ -220,7 +220,7 @@ class MonsterPotCompatibilityTest extends BootstrapTest {
         Fixture second = new Fixture(Ingredient.of(Items.CARROT), 2, new BlockPos(4, 64, 0));
         assertTrue(first.prepare());
         assertTrue(second.prepare());
-        try (ExtractionLedger ledger = new ExtractionLedger();
+        try (ExtractionLedger ledger = ExtractionLedger.external();
              MockedStatic<ForcedChunkTicketManager> tickets = mockStatic(ForcedChunkTicketManager.class)) {
             assertTrue(first.delegate.startBufferedOperation(first.player,
                     first.delegate.inputBufferPlan(3), ledger));

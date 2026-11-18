@@ -219,7 +219,7 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
     /** Extract the infusion input through the selected backend. */
     private ItemStack extractInput(ServerPlayer player) {
         if (storageEndpoint() == null) return ItemStack.EMPTY;
-        var result = storageEndpoint().extractMatching(player,
+        var result = materialAccess().extractMatching(player, storageEndpoint(),
                 recipe.getIngredients().get(0), 1, false);
         ItemStack combined = ItemStack.EMPTY;
         for (ItemStack stack : result.extractedStacks()) {
@@ -370,7 +370,7 @@ public final class ManaPoolBatchDelegate extends AbstractBatchDelegate {
 
     private void refundStandalone(@Nullable ServerPlayer player, ItemStack stack) {
         if (stack == null || stack.isEmpty()) return;
-        ItemStack leftover = insertIntoStorage(player, stack, false);
+        ItemStack leftover = refundMaterial(player, stack);
         if (leftover.isEmpty()) return;
         if (player != null) {
             PlayerUtils.safeGiveToStorage(player, leftover, storageEndpoint());

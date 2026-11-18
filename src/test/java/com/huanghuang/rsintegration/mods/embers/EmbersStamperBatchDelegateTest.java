@@ -118,7 +118,7 @@ class EmbersStamperBatchDelegateTest extends BootstrapTest {
         doReturn(true).when(next).validateExecutionContext(fixture.player);
         try (MockedStatic<ForcedChunkTicketManager> tickets = mockStatic(ForcedChunkTicketManager.class)) {
             assertTrue(next.startPreparedOperation(fixture.player,
-                    List.of(new ItemStack(Items.CLAY_BALL), fixture.stamp.copy()), new ExtractionLedger()));
+                    List.of(new ItemStack(Items.CLAY_BALL), fixture.stamp.copy()), ExtractionLedger.external()));
         }
         input.extractItem(0, 1, false);
         assertTrue(next.collectAllResults(fixture.player).isEmpty());

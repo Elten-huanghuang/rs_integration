@@ -116,7 +116,7 @@ public final class MalumRunicWorkbenchBatchDelegate extends InstantBatchDelegate
     @Override
     public boolean startSingleOperation(ServerPlayer player) {
         this.player = player;
-        this.ledger = new ExtractionLedger();
+        this.ledger = materialAccess().newLedger();
         this.usingSharedLedger = false;
         this.craftDone = false;
         if (storageEndpoint() == null) {

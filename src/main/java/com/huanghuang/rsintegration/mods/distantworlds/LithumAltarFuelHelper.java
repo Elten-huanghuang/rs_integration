@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.mods.distantworlds;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.MaterialAccess;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceLocation;
@@ -63,7 +64,7 @@ public final class LithumAltarFuelHelper {
         return false;
     }
 
-    public boolean ensureFuel(ServerLevel level, CraftStorageEndpoint endpoint,
+    public boolean ensureFuel(MaterialAccess access, ServerLevel level, CraftStorageEndpoint endpoint,
                               ServerPlayer player) {
         if (furnacePos == null || endpoint == null) return false;
         BlockEntity furnace = level.getBlockEntity(furnacePos);
@@ -72,7 +73,7 @@ public final class LithumAltarFuelHelper {
         if (handler == null || handler.getSlots() <= FUEL_SLOT) return false;
         ItemStack current = handler.getStackInSlot(FUEL_SLOT);
         if (!current.isEmpty() && current.is(FUEL_TAG)) return true;
-        ItemStack candidate = selectFuel(endpoint, player);
+        ItemStack candidate = selectFuel(access, endpoint, player);
         if (candidate.isEmpty()) return false;
         int requested = Math.min(RSIntegrationConfig.DISTANT_WORLDS_FUEL_BATCH_SIZE.get(),
                 LithumFuelInventoryLogic.insertionRoom(current, candidate, handler.getSlotLimit(FUEL_SLOT)));
@@ -80,17 +81,17 @@ public final class LithumAltarFuelHelper {
         ItemStack simulated = handler.insertItem(FUEL_SLOT, candidate.copyWithCount(requested), true);
         int accepted = requested - simulated.getCount();
         if (accepted <= 0) return false;
-        var simulatedExtract = endpoint.extractExact(player, candidate.copyWithCount(1), accepted, true);
+        var simulatedExtract = access.extractExact(player, endpoint, candidate.copyWithCount(1), accepted, true);
         if (simulatedExtract.transferredAmount().orElse(0L) != accepted) return false;
-        var extractedResult = endpoint.extractExact(player, candidate.copyWithCount(1), accepted, false);
+        var extractedResult = access.extractExact(player, endpoint, candidate.copyWithCount(1), accepted, false);
         ItemStack extracted = extractedResult.extractedStacks().stream().findFirst()
                 .map(ItemStack::copy).orElse(ItemStack.EMPTY);
         if (extracted.getCount() != accepted) {
-            if (!extracted.isEmpty()) endpoint.insert(player, extracted, false);
+            if (!extracted.isEmpty()) access.refund(player, endpoint, extracted);
             return false;
         }
         ItemStack remainder = handler.insertItem(FUEL_SLOT, extracted, false);
-        if (!remainder.isEmpty()) endpoint.insert(player, remainder, false);
+        if (!remainder.isEmpty()) access.refund(player, endpoint, remainder);
         int inserted = extracted.getCount() - remainder.getCount();
         if (inserted <= 0) return false;
         fuelType = candidate.copyWithCount(1);
@@ -100,7 +101,7 @@ public final class LithumAltarFuelHelper {
         return true;
     }
 
-    public void refundUnused(ServerLevel level, CraftStorageEndpoint endpoint,
+    public void refundUnused(MaterialAccess access, ServerLevel level, CraftStorageEndpoint endpoint,
                              ServerPlayer player) {
         if (endpoint == null || furnacePos == null || insertedCount <= 0) return;
         BlockEntity furnace = level.getBlockEntity(furnacePos);
@@ -110,7 +111,7 @@ public final class LithumAltarFuelHelper {
         int count = LithumFuelInventoryLogic.refundableAddedCount(baseline, insertedCount, current);
         if (count <= 0) return;
         ItemStack extracted = handler.extractItem(FUEL_SLOT, count, false);
-        ItemStack remainder = extracted.isEmpty() ? ItemStack.EMPTY : endpoint.insert(player, extracted, false).remainder().orElse(ItemStack.EMPTY);
+        ItemStack remainder = extracted.isEmpty() ? ItemStack.EMPTY : access.refund(player, endpoint, extracted).remainder().orElse(ItemStack.EMPTY);
         if (!remainder.isEmpty() && player != null) {
             ItemHandlerHelper.giveItemToPlayer(player, remainder);
         } else if (!remainder.isEmpty()) {
@@ -127,9 +128,9 @@ public final class LithumAltarFuelHelper {
         return be == null ? null : be.getCapability(ForgeCapabilities.ITEM_HANDLER, null).orElse(null);
     }
 
-    private static ItemStack selectFuel(CraftStorageEndpoint endpoint,
+    private static ItemStack selectFuel(MaterialAccess access, CraftStorageEndpoint endpoint,
                                         ServerPlayer player) {
-        var snapshot = endpoint.snapshot(player).snapshot().orElse(null);
+        var snapshot = access.snapshot(player, endpoint).snapshot().orElse(null);
         if (snapshot == null) return ItemStack.EMPTY;
         List<? extends String> priority = RSIntegrationConfig.DISTANT_WORLDS_FUEL_PRIORITY.get();
         List<ItemStack> candidates = new ArrayList<>();

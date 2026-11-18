@@ -380,7 +380,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
 
     private boolean initCraftState(ServerPlayer player) {
         this.player = player;
-        this.ledger = new ExtractionLedger();
+        this.ledger = materialAccess().newLedger();
         if (storageEndpoint() == null) {
             setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
         }

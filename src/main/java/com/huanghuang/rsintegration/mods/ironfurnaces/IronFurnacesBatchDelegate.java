@@ -338,7 +338,7 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public boolean startSingleOperation(@NotNull ServerPlayer player) {
-        this.ledger = new ExtractionLedger();
+        this.ledger = materialAccess().newLedger();
         this.usingSharedLedger = false;
         return reserveAndStart(player, ledger, true);
     }
@@ -614,7 +614,7 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
 
         List<ItemStack> candidates = new ArrayList<>();
         if (storageEndpoint() != null) {
-            var snapshot = storageEndpoint().snapshot(player).snapshot().orElse(null);
+            var snapshot = materialAccess().snapshot(player, storageEndpoint()).snapshot().orElse(null);
             if (snapshot == null) return false;
             for (var entry : snapshot.items()) {
                 ItemStack stack = entry.stack();
@@ -642,7 +642,7 @@ public final class IronFurnacesBatchDelegate extends AbstractBatchDelegate {
     private ItemStack extractExact(ItemStack template, int amount) {
         ItemStack extracted = extractExactFromStorage(player, template.copyWithCount(1), amount, false);
         if (extracted.getCount() == amount) return extracted;
-        if (!extracted.isEmpty()) insertIntoStorage(player, extracted, false);
+        if (!extracted.isEmpty()) refundMaterial(player, extracted);
         return ItemStack.EMPTY;
     }
 

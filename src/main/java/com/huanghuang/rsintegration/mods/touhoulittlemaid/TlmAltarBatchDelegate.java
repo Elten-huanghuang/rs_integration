@@ -348,7 +348,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean startSingleOperation(ServerPlayer player) {
         this.player = player;
-        this.ledger = new ExtractionLedger();
+        this.ledger = materialAccess().newLedger();
         this.ledger.setStorageEndpoint(storageEndpoint());
         if (storageEndpoint() == null) {
             setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
@@ -491,7 +491,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
                     materials.size(), storageBlockEntities.size());
             return false;
         }
-        if (!reservePowerTopUp(player, new ExtractionLedger(), true)) return false;
+        if (!reservePowerTopUp(player, materialAccess().newLedger(), true)) return false;
         if (!applyReservedPowerTopUp(player)) return false;
 
         ServerLevel level = resolveMachineLevel(player);

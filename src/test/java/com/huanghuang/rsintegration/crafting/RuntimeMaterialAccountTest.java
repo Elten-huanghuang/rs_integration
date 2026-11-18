@@ -146,6 +146,32 @@ class RuntimeMaterialAccountTest extends BootstrapTest {
         endpoint = () -> session;
     }
 
+    @Test
+    void nestedFailureRefundsOnlyItsOwnAccountAndEndpointStaysExternal() {
+        stock.put(IRON, 8L);
+        RuntimeMaterialAccount outer = account();
+        RuntimeMaterialAccount inner = account();
+        assertTrue(acquire(outer, IRON, 3));
+        assertTrue(acquire(inner, IRON, 2));
+        try (var outerNode = outer.access.newLedger()) {
+            assertEquals(2, outerNode.reserveFromEndpoint(Ingredient.of(Items.IRON_INGOT), 2, endpoint, player).getCount());
+            assertThrows(IllegalStateException.class, () -> {
+                try (var innerNode = inner.access.newLedger()) {
+                    assertEquals(1, innerNode.reserveFromInventory(Ingredient.of(Items.IRON_INGOT), 1, player).getCount());
+                    assertEquals(3L, endpoint.snapshot(player).snapshot().orElseThrow()
+                            .countExact(session.itemKey(IRON.toStack(1))));
+                    assertEquals(1L, endpoint.extractExact(player, IRON.toStack(1), 1, false)
+                            .transferredAmount().orElseThrow());
+                    throw new IllegalStateException("模拟节点准备失败");
+                }
+            });
+            assertEquals(2L, inner.count(IRON));
+            assertEquals(1L, outer.count(IRON));
+        }
+        assertEquals(3L, outer.count(IRON));
+        assertEquals(2L, stock.get(IRON));
+    }
+
     private RuntimeMaterialAccount account() {
         return new RuntimeMaterialAccount(UUID.randomUUID(), player.getUUID(), server, endpoint);
     }
@@ -242,17 +268,15 @@ class RuntimeMaterialAccountTest extends BootstrapTest {
         stock.put(IRON, 2L);
         RuntimeMaterialAccount account = account();
         assertTrue(acquire(account, IRON, 2));
-        try (var ignored = RuntimeMaterialAccount.enter(account)) {
-            ExtractionLedger first = new ExtractionLedger();
-            ExtractionLedger second = new ExtractionLedger();
-            assertEquals(2, first.reserveFromEndpoint(Ingredient.of(Items.IRON_INGOT), 2, endpoint, player).getCount());
-            assertTrue(second.reserveFromEndpoint(Ingredient.of(Items.IRON_INGOT), 1, endpoint, player).isEmpty());
-            assertTrue(first.commitToEndpoint(endpoint, player));
-            first.refundCommittedToEndpoint(endpoint, player);
-            first.refundCommittedToEndpoint(endpoint, player);
-            assertEquals(2L, account.count(IRON));
-            assertEquals(0L, stock.get(IRON));
-        }
+        ExtractionLedger first = account.access.newLedger();
+        ExtractionLedger second = account.access.newLedger();
+        assertEquals(2, first.reserveFromEndpoint(Ingredient.of(Items.IRON_INGOT), 2, endpoint, player).getCount());
+        assertTrue(second.reserveFromEndpoint(Ingredient.of(Items.IRON_INGOT), 1, endpoint, player).isEmpty());
+        assertTrue(first.commitToEndpoint(endpoint, player));
+        first.refundCommittedToEndpoint(endpoint, player);
+        first.refundCommittedToEndpoint(endpoint, player);
+        assertEquals(2L, account.count(IRON));
+        assertEquals(0L, stock.get(IRON));
         account.close();
         account.close();
         assertEquals(2L, stock.get(IRON));
@@ -264,17 +288,15 @@ class RuntimeMaterialAccountTest extends BootstrapTest {
         stock.put(IRON, 2L);
         RuntimeMaterialAccount account = account();
         assertTrue(acquire(account, IRON, 2));
-        try (var ignored = RuntimeMaterialAccount.enter(account)) {
-            ExtractionLedger node = new ExtractionLedger();
-            assertEquals(1, node.reserveFromInventory(Ingredient.of(Items.IRON_INGOT), 1, player).getCount());
-            node.cancelLastReservation();
-            assertEquals(2L, account.count(IRON));
-            node.reserveFromInventory(Ingredient.of(Items.IRON_INGOT), 1, player);
-            node.close();
-            assertEquals(2L, account.count(IRON));
-            node.reset();
-            assertEquals(2L, account.count(IRON));
-        }
+        ExtractionLedger node = account.access.newLedger();
+        assertEquals(1, node.reserveFromInventory(Ingredient.of(Items.IRON_INGOT), 1, player).getCount());
+        node.cancelLastReservation();
+        assertEquals(2L, account.count(IRON));
+        node.reserveFromInventory(Ingredient.of(Items.IRON_INGOT), 1, player);
+        node.close();
+        assertEquals(2L, account.count(IRON));
+        node.reset();
+        assertEquals(2L, account.count(IRON));
     }
 
     @Test
@@ -282,13 +304,11 @@ class RuntimeMaterialAccountTest extends BootstrapTest {
         stock.put(IRON, 5L);
         RuntimeMaterialAccount account = account();
         assertTrue(acquire(account, IRON, 5));
-        try (var ignored = RuntimeMaterialAccount.enter(account)) {
-            ExtractionLedger node = new ExtractionLedger();
-            node.reserveExactAcrossNetworkAndInventory(IRON.toStack(1), 3, endpoint, player);
-            assertTrue(node.commitToEndpoint(endpoint, player));
-            node.settleAllCommitted();
-            node.reset();
-        }
+        ExtractionLedger node = account.access.newLedger();
+        node.reserveExactAcrossNetworkAndInventory(IRON.toStack(1), 3, endpoint, player);
+        assertTrue(node.commitToEndpoint(endpoint, player));
+        node.settleAllCommitted();
+        node.reset();
         account.close();
         assertEquals(2L, stock.get(IRON));
     }
@@ -298,12 +318,10 @@ class RuntimeMaterialAccountTest extends BootstrapTest {
         stock.put(IRON, 2L);
         RuntimeMaterialAccount account = account();
         assertTrue(acquire(account, IRON, 1));
-        try (var ignored = RuntimeMaterialAccount.enter(account)) {
-            ExtractionLedger node = new ExtractionLedger();
-            node.reserveExactAcrossNetworkAndInventory(IRON.toStack(1), 2, endpoint, player);
-            assertTrue(node.commitToEndpoint(endpoint, player));
-            node.refundCommittedToEndpoint(endpoint, player);
-        }
+        ExtractionLedger node = account.access.newLedger();
+        node.reserveExactAcrossNetworkAndInventory(IRON.toStack(1), 2, endpoint, player);
+        assertTrue(node.commitToEndpoint(endpoint, player));
+        node.refundCommittedToEndpoint(endpoint, player);
         account.close();
         assertEquals(2L, stock.get(IRON));
         assertEquals(2, extractions.get());
@@ -501,19 +519,15 @@ class RuntimeMaterialAccountTest extends BootstrapTest {
     }
 
     @Test
-    void scopeRestoresPreviousTaskAfterNestedFailure() {
-        RuntimeMaterialAccount first = account();
-        RuntimeMaterialAccount second = account();
-        try (var ignored = RuntimeMaterialAccount.enter(first)) {
-            assertThrows(IllegalStateException.class, () -> {
-                try (var nested = RuntimeMaterialAccount.enter(second)) {
-                    assertSame(second, RuntimeMaterialAccount.current());
-                    throw new IllegalStateException();
-                }
-            });
-            assertSame(first, RuntimeMaterialAccount.current());
-        }
-        assertNull(RuntimeMaterialAccount.current());
+    void wrongPlayerCannotReadOrSpendTaskStock() {
+        RuntimeMaterialAccount account = account();
+        account.add(IRON.toStack(2));
+        ServerPlayer other = mock(ServerPlayer.class);
+        when(other.getUUID()).thenReturn(UUID.randomUUID());
+        assertTrue(account.access.available(other, endpoint).isEmpty());
+        assertFalse(account.access.snapshot(other, endpoint).successful());
+        assertTrue(account.access.newLedger().reserveFromInventory(Ingredient.of(Items.IRON_INGOT), 1, other).isEmpty());
+        assertEquals(2L, account.count(IRON));
     }
 
     @Test
@@ -593,57 +607,50 @@ class RuntimeMaterialAccountTest extends BootstrapTest {
         stock.put(IRON, 3L);
         RuntimeMaterialAccount account = account();
         assertTrue(acquire(account, IRON, 3));
-        try (var ignored = RuntimeMaterialAccount.enter(account)) {
-            assertEquals(2L, ExtractionLedger.extractTaskMaterial(player, endpoint,
-                    Ingredient.of(Items.IRON_INGOT), IRON.toStack(1), 2, true)
-                    .transferredAmount().orElseThrow());
-            assertEquals(3L, account.count(IRON));
-            assertEquals(2L, ExtractionLedger.extractTaskMaterial(player, endpoint,
-                    Ingredient.of(Items.IRON_INGOT), IRON.toStack(1), 2, false)
-                    .transferredAmount().orElseThrow());
-        }
+        assertEquals(2L, account.access.extractExact(player, endpoint, IRON.toStack(1), 2, true)
+                .transferredAmount().orElseThrow());
+        assertEquals(3L, account.count(IRON));
+        assertEquals(2L, account.access.extractExact(player, endpoint, IRON.toStack(1), 2, false)
+                .transferredAmount().orElseThrow());
         account.close();
         assertEquals(1L, stock.get(IRON));
         assertEquals(1, extractions.get());
     }
 
     @Test
-    void endpointSnapshotIncludesOnlyCurrentTasksHeldMaterialsOnce() {
+    void taskSnapshotIncludesOnlyItsOwnMaterialsAndExternalSnapshotStaysPublic() {
         stock.put(IRON, 5L);
         stock.put(GOLD, 2L);
         RuntimeMaterialAccount first = account();
         RuntimeMaterialAccount second = account();
         assertTrue(acquire(first, IRON, 2));
         assertTrue(acquire(second, IRON, 1));
-        try (var ignored = RuntimeMaterialAccount.enter(first)) {
-            StorageItemKey ironKey = session.itemKey(IRON.toStack(1));
-            assertEquals(4L, endpoint.snapshot(player).snapshot().orElseThrow().countExact(ironKey));
-            assertEquals(4L, endpoint.snapshot(player, Set.of(Items.IRON_INGOT))
-                    .snapshot().orElseThrow().countExact(ironKey));
-            assertEquals(4L, MaterialSources.listAllAvailableFresh(player, endpoint)
-                    .get(CraftingResolver.StackKey.of(IRON.toStack(1), true)));
-            CraftStorageEndpoint sameNetwork = () -> session;
-            assertEquals(4L, sameNetwork.snapshot(player).snapshot().orElseThrow().countExact(ironKey));
-        }
+        StorageItemKey ironKey = session.itemKey(IRON.toStack(1));
+        assertEquals(4L, first.access.snapshot(player, endpoint).snapshot().orElseThrow().countExact(ironKey));
+        assertEquals(2L, endpoint.snapshot(player, Set.of(Items.IRON_INGOT))
+                .snapshot().orElseThrow().countExact(ironKey));
+        assertEquals(4L, first.access.available(player, endpoint)
+                .get(CraftingResolver.StackKey.of(IRON.toStack(1), true)));
+        CraftStorageEndpoint sameNetwork = () -> session;
+        assertEquals(4L, first.access.snapshot(player, sameNetwork).snapshot().orElseThrow().countExact(ironKey));
+        assertEquals(3L, second.access.snapshot(player, sameNetwork).snapshot().orElseThrow().countExact(ironKey));
         assertEquals(2L, endpoint.snapshot(player).snapshot().orElseThrow()
                 .countExact(session.itemKey(IRON.toStack(1))));
     }
 
     @Test
-    void endpointExactAndMatchingExtractionUseAccountAndPreserveSimulation() {
+    void taskExactAndMatchingExtractionPreserveSimulation() {
         stock.put(IRON, 3L);
         RuntimeMaterialAccount account = account();
         assertTrue(acquire(account, IRON, 3));
-        try (var ignored = RuntimeMaterialAccount.enter(account)) {
-            assertEquals(2L, endpoint.extractExact(player, IRON.toStack(1), 2, true)
-                    .transferredAmount().orElseThrow());
-            assertEquals(3L, account.count(IRON));
-            assertEquals(2L, endpoint.extractExact(player, IRON.toStack(1), 2, false)
-                    .transferredAmount().orElseThrow());
-            assertEquals(1L, endpoint.extractMatching(player, Ingredient.of(Items.IRON_INGOT), 2, false)
-                    .transferredAmount().orElseThrow());
-            assertEquals(0L, account.count(IRON));
-        }
+        assertEquals(2L, account.access.extractExact(player, endpoint, IRON.toStack(1), 2, true)
+                .transferredAmount().orElseThrow());
+        assertEquals(3L, account.count(IRON));
+        assertEquals(2L, account.access.extractExact(player, endpoint, IRON.toStack(1), 2, false)
+                .transferredAmount().orElseThrow());
+        assertEquals(1L, account.access.extractMatching(player, endpoint, Ingredient.of(Items.IRON_INGOT), 2, false)
+                .transferredAmount().orElseThrow());
+        assertEquals(0L, account.count(IRON));
         assertEquals(1, extractions.get());
     }
 
@@ -659,12 +666,14 @@ class RuntimeMaterialAccountTest extends BootstrapTest {
         StorageOperationResult empty = StorageOperationResult.extracted(StorageOperationMode.PERFORM, 1, List.of());
         when(otherSession.extractExact(eq(player), any(), eq(1L), eq(false))).thenReturn(empty);
         CraftStorageEndpoint other = () -> otherSession;
-        try (var ignored = RuntimeMaterialAccount.enter(account)) {
-            assertTrue(other.snapshot(player).snapshot().orElseThrow().items().isEmpty());
-            assertTrue(MaterialSources.listAllAvailableFresh(player, other).isEmpty());
-            assertSame(empty, other.extractExact(player, IRON.toStack(1), 1, false));
-            assertEquals(2L, account.count(IRON));
-        }
+        assertFalse(account.access.snapshot(player, other).successful());
+        assertTrue(account.access.extractExact(player, other, IRON.toStack(1), 1, false).extractedStacks().isEmpty());
+        assertTrue(account.access.newLedger().reserveFromEndpoint(Ingredient.of(Items.IRON_INGOT), 1, other, player).isEmpty());
+        verify(otherSession, never()).extractExact(any(), any(), anyLong(), anyBoolean());
+        assertTrue(other.snapshot(player).snapshot().orElseThrow().items().isEmpty());
+        assertTrue(MaterialSources.listAllAvailableFresh(player, other).isEmpty());
+        assertSame(empty, other.extractExact(player, IRON.toStack(1), 1, false));
+        assertEquals(2L, account.count(IRON));
     }
 
     @Test

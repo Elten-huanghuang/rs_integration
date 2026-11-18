@@ -218,7 +218,7 @@ public final class WRAlchemyBatchDelegate extends AbstractBatchDelegate {
 
     @Override public boolean startSingleOperation(ServerPlayer player) {
         if (started || !validateExecutionContext(player) || !recoverOldContents(player)) return false;
-        this.ledger = new ExtractionLedger();
+        this.ledger = materialAccess().newLedger();
         ledger.setStorageEndpoint(storageEndpoint());
         List<ItemStack> materials = new ArrayList<>();
         for (IngredientSpec spec : required) {

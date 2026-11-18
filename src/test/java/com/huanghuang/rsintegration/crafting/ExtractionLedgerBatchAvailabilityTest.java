@@ -22,7 +22,7 @@ class ExtractionLedgerBatchAvailabilityTest extends BootstrapTest {
         ServerPlayer player = mock(ServerPlayer.class);
         when(player.getInventory()).thenReturn(inventory);
 
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = ExtractionLedger.external()) {
             assertEquals(3_000_000_000L,
                     ledger.countAvailableExactForBatch(
                             new ItemStack(Items.COBBLESTONE), player));

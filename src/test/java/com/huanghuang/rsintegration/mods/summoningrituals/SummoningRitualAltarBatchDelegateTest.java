@@ -164,7 +164,7 @@ class SummoningRitualAltarBatchDelegateTest extends BootstrapTest {
         Fixture fixture = new Fixture();
 
         assertFalse(fixture.delegate.startPreparedOperation(fixture.player,
-                List.of(new ItemStack(Items.STICK)), new ExtractionLedger()));
+                List.of(new ItemStack(Items.STICK)), ExtractionLedger.external()));
         assertEquals(CraftPhase.FAILED, fixture.delegate.observeCraft(fixture.level).phase());
         assertFalse(fixture.delegate.isCraftComplete(fixture.level));
     }
@@ -440,7 +440,7 @@ class SummoningRitualAltarBatchDelegateTest extends BootstrapTest {
         }
 
         boolean start(List<ItemStack> materials) {
-            return delegate.startPreparedOperation(player, materials, new ExtractionLedger());
+            return delegate.startPreparedOperation(player, materials, ExtractionLedger.external());
         }
 
         void hideItemCapability() {

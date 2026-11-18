@@ -79,7 +79,7 @@ class StableRecipeBatchTest extends BootstrapTest {
         Fixture fixture = fixture(Map.of(tier1, first, tier2, second, tier3, third));
 
         List<ItemStack> inventory = new ArrayList<>(List.of(new ItemStack(Items.COBBLESTONE, 729)));
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = ExtractionLedger.external()) {
             assertEquals(StableRecipeBatch.Outcome.SUCCESS, execute(
                     fixture, tier1, 81, inventory, ledger));
             assertEquals(StableRecipeBatch.Outcome.SUCCESS, execute(
@@ -101,7 +101,7 @@ class StableRecipeBatchTest extends BootstrapTest {
         List<ItemStack> inventory = new ArrayList<>(
                 List.of(new ItemStack(Items.COBBLESTONE, 9000)));
 
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = ExtractionLedger.external()) {
             assertEquals(StableRecipeBatch.Outcome.SUCCESS, execute(
                     fixture, tier1, 1000, inventory, ledger));
         }
@@ -122,7 +122,7 @@ class StableRecipeBatchTest extends BootstrapTest {
         List<ItemStack> inventory = new ArrayList<>(
                 List.of(new ItemStack(Items.COBBLESTONE, executions)));
 
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = ExtractionLedger.external()) {
             assertEquals(StableRecipeBatch.Outcome.SUCCESS,
                     execute(fixture, recipeId, executions, inventory, ledger));
         }
@@ -145,7 +145,7 @@ class StableRecipeBatchTest extends BootstrapTest {
                 new ItemStack(Items.DIAMOND, 1),
                 new ItemStack(Items.REDSTONE, 7)));
 
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = ExtractionLedger.external()) {
             assertEquals(StableRecipeBatch.Outcome.SUCCESS,
                     execute(fixture, recipeId, 1, inventory, ledger));
             assertEquals(StableRecipeBatch.Outcome.SUCCESS,
@@ -173,7 +173,7 @@ class StableRecipeBatchTest extends BootstrapTest {
         List<ItemStack> inventory = new ArrayList<>(
                 List.of(new ItemStack(Items.OAK_LOG, 3)));
 
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = ExtractionLedger.external()) {
             assertEquals(StableRecipeBatch.Outcome.SUCCESS, execute(
                     fixture, recipeId, 3, inventory, ledger));
         }
@@ -206,7 +206,7 @@ class StableRecipeBatchTest extends BootstrapTest {
 
         assertTrue(StableRecipeBatch.isEligible(
                 fixture.level(), firstStep, target, Map.of()));
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = ExtractionLedger.external()) {
             assertEquals(StableRecipeBatch.Outcome.SUCCESS,
                     StableRecipeBatch.tryExecute(fixture.level(), firstStep,
                             fixture.player(), inventory, ledger, context));
@@ -240,7 +240,7 @@ class StableRecipeBatchTest extends BootstrapTest {
         List<ItemStack> inventory = new ArrayList<>(
                 List.of(new ItemStack(Items.COBBLESTONE, 243)));
 
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = ExtractionLedger.external()) {
             assertEquals(StableRecipeBatch.Outcome.SUCCESS,
                     StableRecipeBatch.tryExecute(fixture.level(), genericStep,
                             fixture.player(), inventory, ledger, context));
@@ -263,7 +263,7 @@ class StableRecipeBatchTest extends BootstrapTest {
         fixture.player().getInventory().setItem(0, taggedSword);
         List<ItemStack> inventory = new ArrayList<>();
 
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = ExtractionLedger.external()) {
             assertEquals(StableRecipeBatch.Outcome.SUCCESS,
                     execute(fixture, recipeId, 1, inventory, ledger));
         }
@@ -288,7 +288,7 @@ class StableRecipeBatchTest extends BootstrapTest {
         List<ItemStack> inventory = new ArrayList<>(
                 List.of(new ItemStack(Items.COBBLESTONE, 9)));
 
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = ExtractionLedger.external()) {
             assertEquals(StableRecipeBatch.Outcome.NOT_APPLICABLE, execute(
                     fixture, recipeId, 1, inventory, ledger));
         }
@@ -303,7 +303,7 @@ class StableRecipeBatchTest extends BootstrapTest {
         List<ItemStack> inventory = new ArrayList<>(
                 List.of(new ItemStack(Items.IRON_SWORD)));
 
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = ExtractionLedger.external()) {
             assertEquals(StableRecipeBatch.Outcome.NOT_APPLICABLE, execute(
                     fixture, recipeId, 64, inventory, ledger));
         }
@@ -321,7 +321,7 @@ class StableRecipeBatchTest extends BootstrapTest {
         List<ItemStack> inventory = new ArrayList<>(
                 List.of(new ItemStack(Items.COBBLESTONE, 90)));
 
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = ExtractionLedger.external()) {
             assertEquals(StableRecipeBatch.Outcome.SUCCESS, execute(
                     fixture, recipeId, 10, inventory, ledger));
         }
@@ -340,7 +340,7 @@ class StableRecipeBatchTest extends BootstrapTest {
         List<ItemStack> inventory = new ArrayList<>(
                 List.of(new ItemStack(Items.STONE, 90)));
 
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = ExtractionLedger.external()) {
             assertEquals(StableRecipeBatch.Outcome.SUCCESS, execute(
                     fixture, recipeId, 10, inventory, ledger));
         }
@@ -360,7 +360,7 @@ class StableRecipeBatchTest extends BootstrapTest {
                 new ItemStack(Items.COBBLESTONE, 45),
                 new ItemStack(Items.STONE, 45)));
 
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = ExtractionLedger.external()) {
             assertEquals(StableRecipeBatch.Outcome.SUCCESS, execute(
                     fixture, recipeId, 10, inventory, ledger));
         }
@@ -384,7 +384,7 @@ class StableRecipeBatchTest extends BootstrapTest {
                 fixture.level(), CraftLogContext.create(UUID.randomUUID(), recipeId),
                 List.of(step), null, host, Map.of());
 
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = ExtractionLedger.external()) {
             assertTrue(FlatCraftExecutor.execute(
                     List.of(step), fixture.player(), inventory, ledger, true, context));
         }
@@ -411,7 +411,7 @@ class StableRecipeBatchTest extends BootstrapTest {
                 fixture.level(), CraftLogContext.create(UUID.randomUUID(), recipeId),
                 List.of(step), null, mock(FlatCraftExecutor.Host.class), Map.of());
 
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = ExtractionLedger.external()) {
             ledger.setStorageEndpoint(endpoint);
             FlatCraftExecutor.ExecutionResult result = FlatCraftExecutor.executeDetailed(
                     List.of(step), fixture.player(), new ArrayList<>(), ledger, true, context);
@@ -428,7 +428,7 @@ class StableRecipeBatchTest extends BootstrapTest {
         List<ItemStack> inventory = new ArrayList<>(
                 List.of(new ItemStack(Items.COBBLESTONE, 512)));
 
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = ExtractionLedger.external()) {
             assertEquals(StableRecipeBatch.Outcome.DEFERRED,
                     execute(fixture, recipeId, 1024, inventory, ledger));
         }
@@ -446,7 +446,7 @@ class StableRecipeBatchTest extends BootstrapTest {
         List<ItemStack> inventory = new ArrayList<>(
                 List.of(new ItemStack(Items.COBBLESTONE, 8)));
 
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = ExtractionLedger.external()) {
             assertEquals(StableRecipeBatch.Outcome.DEFERRED,
                     execute(fixture, recipeId, 1, inventory, ledger));
         }
@@ -468,7 +468,7 @@ class StableRecipeBatchTest extends BootstrapTest {
         List<ItemStack> inventory = new ArrayList<>();
 
         try (var endpointCandidates = mockStatic(CraftPacketUtils.class, CALLS_REAL_METHODS);
-             ExtractionLedger ledger = new ExtractionLedger()) {
+             ExtractionLedger ledger = ExtractionLedger.external()) {
             endpointCandidates.when(() -> CraftPacketUtils.resolveEndpointCandidatesForCraft(
                     fixture.player(), null, null)).thenReturn(List.of(preferred, fallback));
             ledger.setStorageEndpoint(preferred);
@@ -494,8 +494,8 @@ class StableRecipeBatchTest extends BootstrapTest {
                 fixture.player(), "graph-fresh", new ItemStack(Items.COBBLESTONE, 9));
         List<ItemStack> inventory = new ArrayList<>();
 
-        try (ExtractionLedger nodeLedger = new ExtractionLedger();
-             ExtractionLedger executionLedger = new ExtractionLedger()) {
+        try (ExtractionLedger nodeLedger = ExtractionLedger.external();
+             ExtractionLedger executionLedger = ExtractionLedger.external()) {
             nodeLedger.setStorageEndpoint(endpoint);
             assertTrue(nodeLedger.commitToEndpoint(endpoint, fixture.player()));
             assertTrue(nodeLedger.isCommitted());
@@ -527,7 +527,7 @@ class StableRecipeBatchTest extends BootstrapTest {
         List<ItemStack> inventory = new ArrayList<>(
                 List.of(new ItemStack(Items.COBBLESTONE, 300)));
 
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = ExtractionLedger.external()) {
             assertEquals(StableRecipeBatch.Outcome.SUCCESS, execute(
                     fixture, recipeId, 100, inventory, ledger));
         }

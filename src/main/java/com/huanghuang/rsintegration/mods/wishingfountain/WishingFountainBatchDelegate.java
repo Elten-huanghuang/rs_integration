@@ -135,7 +135,7 @@ public final class WishingFountainBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean startSingleOperation(@Nonnull ServerPlayer player) {
         if (!canStartNow()) return false;
-        this.ledger = new ExtractionLedger();
+        this.ledger = materialAccess().newLedger();
         this.ledger.setStorageEndpoint(storageEndpoint());
         this.usingSharedLedger = false;
         List<ItemStack> materials = reserveMaterials(player, ledger);

@@ -88,7 +88,7 @@ class FluidContainerExecutionTest extends BootstrapTest {
         GenericBatchDelegate delegate = delegate(recipe, 3);
         assertTrue(startPrepared(delegate, player,
                 List.of(new ItemStack(Items.BUCKET, 3), FluidContainerCatalogTest.token(new FluidStack(Fluids.WATER, 3000))),
-                new ExtractionLedger()));
+                ExtractionLedger.external()));
         var results = delegate.collectAllResults(player);
         assertEquals(1, results.size());
         assertTrue(results.get(0).is(Items.WATER_BUCKET));
@@ -102,7 +102,7 @@ class FluidContainerExecutionTest extends BootstrapTest {
         ServerPlayer player = player();
         GenericBatchDelegate delegate = delegate(recipe, 2);
         assertTrue(startPrepared(delegate, player,
-                List.of(new ItemStack(Items.WATER_BUCKET, 2)), new ExtractionLedger()));
+                List.of(new ItemStack(Items.WATER_BUCKET, 2)), ExtractionLedger.external()));
         var results = delegate.collectAllResults(player);
         assertEquals(2, results.size());
         assertEquals(2000, InkFluidSupport.fluid(results.get(0)).getAmount());
@@ -124,7 +124,7 @@ class FluidContainerExecutionTest extends BootstrapTest {
         assertTrue(startPrepared(fillDelegate, player,
                 List.of(new ItemStack(buckets.empty(), 2),
                         FluidContainerCatalogTest.token(new FluidStack(Fluids.WATER, 2000))),
-                new ExtractionLedger()));
+                ExtractionLedger.external()));
         var filled = fillDelegate.collectAllResults(player);
         assertEquals(1, filled.size());
         assertTrue(filled.get(0).is(buckets.filled()));
@@ -132,7 +132,7 @@ class FluidContainerExecutionTest extends BootstrapTest {
 
         GenericBatchDelegate drainDelegate = delegate(drain, 2);
         assertTrue(startPrepared(
-                drainDelegate, player, filled, new ExtractionLedger()));
+                drainDelegate, player, filled, ExtractionLedger.external()));
         var drained = drainDelegate.collectAllResults(player);
         assertEquals(2, drained.size());
         assertEquals(2000, InkFluidSupport.fluid(drained.get(0)).getAmount());
@@ -153,7 +153,7 @@ class FluidContainerExecutionTest extends BootstrapTest {
         GenericBatchDelegate fillDelegate = delegate(fill, 2);
         assertTrue(startPrepared(fillDelegate, player,
                 List.of(new ItemStack(Items.BUCKET, 2), FluidContainerCatalogTest.token(
-                        new FluidStack(((BucketItem) buckets.filled()).getFluid(), 2000))), new ExtractionLedger()));
+                        new FluidStack(((BucketItem) buckets.filled()).getFluid(), 2000))), ExtractionLedger.external()));
         var filled = fillDelegate.collectAllResults(player);
         assertEquals(1, filled.size());
         assertTrue(filled.get(0).is(buckets.filled()));
@@ -161,7 +161,7 @@ class FluidContainerExecutionTest extends BootstrapTest {
 
         GenericBatchDelegate drainDelegate = delegate(drain, 2);
         assertTrue(startPrepared(
-                drainDelegate, player, filled, new ExtractionLedger()));
+                drainDelegate, player, filled, ExtractionLedger.external()));
         var drained = drainDelegate.collectAllResults(player);
         assertEquals(2, drained.size());
         assertEquals(2000, InkFluidSupport.fluid(drained.get(0)).getAmount());
@@ -189,7 +189,7 @@ class FluidContainerExecutionTest extends BootstrapTest {
         delegate.setStorageEndpoint(() -> session);
         assertTrue(delegate.startOperation(
                 OperationStartContext.delegateExtracted(
-                        player, new ExtractionLedger())));
+                        player, ExtractionLedger.external())));
         var results = delegate.collectAllResults(player);
         assertEquals(2, results.size());
         assertEquals(1000, InkFluidSupport.fluid(results.get(0)).getAmount());
@@ -211,7 +211,7 @@ class FluidContainerExecutionTest extends BootstrapTest {
             GenericBatchDelegate delegate = delegate(recipe, 1);
             ServerPlayer player = player();
             assertFalse(startPrepared(
-                    delegate, player, materials, new ExtractionLedger()));
+                    delegate, player, materials, ExtractionLedger.external()));
             assertTrue(delegate.collectAllResults(player).isEmpty());
         }
     }
@@ -223,7 +223,7 @@ class FluidContainerExecutionTest extends BootstrapTest {
             catalog.when(() -> FluidContainerCatalog.isValid(recipe)).thenReturn(false);
             assertFalse(startPrepared(delegate, player(), List.of(new ItemStack(Items.BUCKET),
                     FluidContainerCatalogTest.token(new FluidStack(Fluids.WATER, 1000))),
-                    new ExtractionLedger()));
+                    ExtractionLedger.external()));
         }
     }
 
@@ -258,7 +258,7 @@ class FluidContainerExecutionTest extends BootstrapTest {
         FluidContainerRecipe recipe = FluidContainerCatalogTest.waterDrain();
         ServerPlayer player = player();
         GenericBatchDelegate delegate = delegate(recipe, 1);
-        ExtractionLedger ledger = new ExtractionLedger();
+        ExtractionLedger ledger = ExtractionLedger.external();
         delegate.useSharedLedger(ledger);
         StorageSession session = mock(StorageSession.class);
         delegate.setStorageEndpoint(() -> session);
@@ -296,7 +296,7 @@ class FluidContainerExecutionTest extends BootstrapTest {
             refunded.add(stack.copy());
             return StorageOperationResult.inserted(StorageOperationMode.PERFORM, stack, ItemStack.EMPTY);
         }).when(session).insert(eq(player), any(ItemStack.class), eq(false));
-        ExtractionLedger ledger = new ExtractionLedger();
+        ExtractionLedger ledger = ExtractionLedger.external();
         assertEquals(1, ledger.reserveFromEndpoint(bucketSpec.ingredient(), 1, () -> session, player).getCount());
         assertEquals(1000, ledger.reserveFromEndpoint(waterSpec.ingredient(), 1000, () -> session, player).getCount());
         assertFalse(ledger.commitToEndpoint(null, player));

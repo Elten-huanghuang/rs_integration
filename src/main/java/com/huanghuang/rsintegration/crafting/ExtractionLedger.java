@@ -80,14 +80,23 @@ public final class ExtractionLedger implements AutoCloseable {
     private final List<UncertainMaterialTransfer> uncertainMaterialTransfers = new ArrayList<>();
     private final Set<Class<?>> unreadableBackpackTypes = ConcurrentHashMap.newKeySet();
     private State state = State.IDLE;
-    @Nullable private RuntimeMaterialAccount materialAccount;
-    private boolean externalMaterialAccess;
+    @Nullable private final RuntimeMaterialAccount materialAccount;
+    private final boolean strictAcquisition;
     private boolean uncertainTransfers;
     @Nullable private StorageOperationStatus commitFailureStatus;
     private String commitFailureDetail = "";
 
-    void setExternalMaterialAccess() { externalMaterialAccess = true; materialAccount = null; }
-    void setMaterialAccount(RuntimeMaterialAccount account) { materialAccount = account; }
+    ExtractionLedger(@Nullable RuntimeMaterialAccount account, boolean strictAcquisition) {
+        this.materialAccount = account;
+        this.strictAcquisition = strictAcquisition;
+    }
+
+    public static ExtractionLedger external() { return MaterialAccess.EXTERNAL.newLedger(); }
+
+    boolean usesTaskAccount() { return materialAccount != null; }
+
+    /** 准入账必须取得指定身份，不允许按机器原料回退。 */
+    static ExtractionLedger forAcquisition() { return new ExtractionLedger(null, true); }
     boolean hasUncertainTransfers() { return uncertainTransfers; }
     List<UncertainMaterialTransfer> uncertainMaterialTransfers() {
         return uncertainMaterialTransfers.stream().map(UncertainMaterialTransfer::copy).toList();
@@ -98,24 +107,10 @@ public final class ExtractionLedger implements AutoCloseable {
         return entries.stream().flatMap(entry -> entry.extracted.stream()).map(ItemStack::copy).toList();
     }
 
-    @Nullable
-    private RuntimeMaterialAccount account(ServerPlayer player) {
-        if (externalMaterialAccess) return null;
-        if (materialAccount == null) {
-            RuntimeMaterialAccount current = RuntimeMaterialAccount.current();
-            if (current != null && current.belongsTo(player)) materialAccount = current;
-        }
-        return materialAccount;
-    }
-
-    /** 少数直接取料的委托也必须优先领取任务持有物，返回 null 表示当前不在合成链内。 */
-    @Nullable
-    public static StorageOperationResult extractTaskMaterial(ServerPlayer player, CraftStorageEndpoint endpoint,
+    static StorageOperationResult takeFromAccount(RuntimeMaterialAccount account, ServerPlayer player,
                                                              Ingredient ingredient,
                                                              @Nullable ItemStack exact, long amount,
                                                              boolean simulate) {
-        RuntimeMaterialAccount account = RuntimeMaterialAccount.current();
-        if (account == null || !account.belongsTo(player) || !account.usesEndpoint(endpoint)) return null;
         if (!account.usable()) return StorageOperationResult.extracted(
                 simulate ? StorageOperationMode.SIMULATE : StorageOperationMode.PERFORM, amount, List.of());
         List<ItemStack> selected = new ArrayList<>();
@@ -134,10 +129,10 @@ public final class ExtractionLedger implements AutoCloseable {
             if (remaining == 0) break;
         }
         if (simulate) return StorageOperationResult.extracted(StorageOperationMode.SIMULATE, amount, selected);
-        ExtractionLedger node = new ExtractionLedger();
+        ExtractionLedger node = account.access.newLedger();
         try {
             for (ItemStack stack : selected) {
-                if (node.reserveAccount(Ingredient.of(stack), stack, stack.getCount(), player).isEmpty()) {
+                if (node.reserveAccount(Ingredient.of(stack), stack, stack.getCount(), player, null).isEmpty()) {
                     node.rollback(player);
                     return StorageOperationResult.extracted(StorageOperationMode.PERFORM, amount, List.of());
                 }
@@ -153,10 +148,10 @@ public final class ExtractionLedger implements AutoCloseable {
     }
 
     private ItemStack reserveAccount(Ingredient ingredient, @Nullable ItemStack exact,
-                                     int count, ServerPlayer player) {
+                                     int count, ServerPlayer player, @Nullable CraftStorageEndpoint endpoint) {
         if (count <= 0 || ingredient.isEmpty()) return ItemStack.EMPTY;
-        RuntimeMaterialAccount account = account(player);
-        if (account == null || !account.usable()) return ItemStack.EMPTY;
+        RuntimeMaterialAccount account = materialAccount;
+        if (!canUseAccount(player, endpoint)) return ItemStack.EMPTY;
         Map<MaterialKey, Long> selected = selectAccountMaterials(account.heldMaterials(), ingredient, exact, count);
         if (selected == null) selected = selectAccountMaterials(account.available(player), ingredient, exact, count);
         if (selected == null) return ItemStack.EMPTY;
@@ -174,6 +169,12 @@ public final class ExtractionLedger implements AutoCloseable {
             if (first.isEmpty()) first = stack.copyWithCount(count);
         }
         return first;
+    }
+
+    private boolean canUseAccount(ServerPlayer player, @Nullable CraftStorageEndpoint requested) {
+        CraftStorageEndpoint selected = requested != null ? requested : storageEndpoint;
+        return materialAccount.belongsTo(player) && materialAccount.usable()
+                && (selected == null || materialAccount.usesEndpoint(selected));
     }
 
     @Nullable
@@ -278,10 +279,11 @@ public final class ExtractionLedger implements AutoCloseable {
                                                        @Nonnull ServerPlayer player) {
         requireState(State.IDLE, State.RESERVING);
         if (template.isEmpty()) return new BatchAvailability(0L, true, "empty ingredient");
-        if (account(player) != null) {
-            long amount = account(player).available(player).getOrDefault(
+        if (materialAccount != null) {
+            if (!canUseAccount(player, null)) return new BatchAvailability(0L, false, "任务材料来源不符或不可用");
+            long amount = materialAccount.available(player).getOrDefault(
                     CraftingResolver.StackKey.of(template, true), 0L);
-            return new BatchAvailability(amount, account(player).usable(), "task account");
+            return new BatchAvailability(amount, materialAccount.usable(), "task account");
         }
         long available = countExactAvailableInInventoryLong(player, template);
         if (storageEndpoint != null) {
@@ -310,14 +312,15 @@ public final class ExtractionLedger implements AutoCloseable {
         requireState(State.IDLE, State.RESERVING);
         if (ingredient.isEmpty()) return new BatchMatch(true, List.of(), "empty ingredient");
 
-        if (account(player) != null) {
+        if (materialAccount != null) {
+            if (!canUseAccount(player, null)) return new BatchMatch(false, List.of(), "任务材料来源不符或不可用");
             List<ItemStack> available = new ArrayList<>();
-            account(player).available(player).forEach((key, amount) -> {
+            materialAccount.available(player).forEach((key, amount) -> {
                 if (IngredientMatcher.test(ingredient, key.toStack())) {
                     available.add(key.toStack().copyWithCount((int) Math.min(Integer.MAX_VALUE, amount)));
                 }
             });
-            return new BatchMatch(account(player).usable(), List.copyOf(available), "task account");
+            return new BatchMatch(materialAccount.usable(), List.copyOf(available), "task account");
         }
         Map<CraftingResolver.StackKey, ItemStack> matches = new LinkedHashMap<>();
         Map<CraftingResolver.StackKey, Long> counts = new LinkedHashMap<>();
@@ -477,7 +480,7 @@ public final class ExtractionLedger implements AutoCloseable {
             @Nullable CraftStorageEndpoint endpoint, @Nonnull ServerPlayer player,
             @Nullable ResourceKey<Level> altarDim, @Nullable BlockPos altarPos) {
         requireState(State.IDLE, State.RESERVING);
-        if (account(player) != null) return reserveAccount(Ingredient.of(template), template, count, player);
+        if (materialAccount != null) return reserveAccount(Ingredient.of(template), template, count, player, endpoint);
         if (count <= 0 || template.isEmpty()) return ItemStack.EMPTY;
         if (state == State.IDLE) transition(State.RESERVING);
 
@@ -516,7 +519,7 @@ public final class ExtractionLedger implements AutoCloseable {
                              @Nullable CraftStorageEndpoint endpoint, ServerPlayer player,
                              @Nullable ResourceKey<Level> altarDim, @Nullable BlockPos altarPos) {
         requireState(State.IDLE, State.RESERVING);
-        if (account(player) != null) return reserveAccount(ingredient, null, count, player);
+        if (materialAccount != null) return reserveAccount(ingredient, null, count, player, endpoint);
         if (count <= 0 || ingredient.isEmpty()) return ItemStack.EMPTY;
         if (state == State.IDLE) transition(State.RESERVING);
 
@@ -605,7 +608,7 @@ public final class ExtractionLedger implements AutoCloseable {
             @Nonnull ItemStack template, int count,
             @Nullable CraftStorageEndpoint endpoint, @Nonnull ServerPlayer player) {
         requireState(State.IDLE, State.RESERVING);
-        if (account(player) != null) return reserveAccount(Ingredient.of(template), template, count, player);
+        if (materialAccount != null) return reserveAccount(Ingredient.of(template), template, count, player, endpoint);
         if (count <= 0 || template.isEmpty()) return ItemStack.EMPTY;
         if (state == State.IDLE) transition(State.RESERVING);
         CraftStorageEndpoint selected = endpoint != null ? endpoint : storageEndpoint;
@@ -669,7 +672,7 @@ public final class ExtractionLedger implements AutoCloseable {
     @Nonnull
     public ItemStack reserveFromInventory(@Nonnull Ingredient ingredient, int count, @Nonnull ServerPlayer player) {
         requireState(State.IDLE, State.RESERVING);
-        if (account(player) != null) return reserveAccount(ingredient, null, count, player);
+        if (materialAccount != null) return reserveAccount(ingredient, null, count, player, null);
         if (count <= 0 || ingredient.isEmpty()) return ItemStack.EMPTY;
         if (state == State.IDLE) transition(State.RESERVING);
 
@@ -687,7 +690,7 @@ public final class ExtractionLedger implements AutoCloseable {
                                          @Nonnull CraftStorageEndpoint endpoint,
                                          @Nonnull ServerPlayer player) {
         requireState(State.IDLE, State.RESERVING);
-        if (account(player) != null) return reserveAccount(ingredient, null, count, player);
+        if (materialAccount != null) return reserveAccount(ingredient, null, count, player, endpoint);
         if (count <= 0 || ingredient.isEmpty()) return ItemStack.EMPTY;
         if (state == State.IDLE) transition(State.RESERVING);
         setStorageEndpoint(endpoint);
@@ -790,12 +793,13 @@ public final class ExtractionLedger implements AutoCloseable {
             @Nullable CraftStorageEndpoint endpoint) {
         requireState(State.IDLE, State.RESERVING);
         if (limit <= 0 || ingredient.isEmpty()) return 0;
-        if (account(player) != null) {
-            long available = account(player).available(player).entrySet().stream()
+        if (materialAccount != null) {
+            if (!canUseAccount(player, endpoint)) return 0;
+            long available = materialAccount.available(player).entrySet().stream()
                     .filter(entry -> IngredientMatcher.test(ingredient, entry.getKey().toStack()))
                     .mapToLong(Map.Entry::getValue).reduce(0L, ExtractionLedger::saturatedAdd);
             int count = (int) Math.min(limit, available);
-            return reserveAccount(ingredient, null, count, player).getCount();
+            return reserveAccount(ingredient, null, count, player, endpoint).getCount();
         }
 
 
@@ -1010,7 +1014,7 @@ public final class ExtractionLedger implements AutoCloseable {
      * availability (correcting for any race with other systems).
      */
     private boolean preCheck(@Nullable CraftStorageEndpoint endpoint, ServerPlayer player) {
-        if (materialAccount != null) return materialAccount.usable();
+        if (materialAccount != null) return canUseAccount(player, endpoint);
         CraftStorageEndpoint selected = endpoint != null ? endpoint : storageEndpoint;
         if (selected != null) {
             // Group reservations by ingredient for accurate per-type checking.
@@ -1491,7 +1495,7 @@ public final class ExtractionLedger implements AutoCloseable {
                     ? sourceEndpoint.extractExact(player, entry.template, entry.count, false)
                     : sourceEndpoint.extractMatching(
                             player, entry.originalIngredient, entry.count, false);
-            if (entry.exactIdentity && !externalMaterialAccess
+            if (entry.exactIdentity && !strictAcquisition
                     && result.status() == StorageOperationStatus.NOT_FOUND) {
                 // 机器输入只要求“能放进机器”，显示输入的 NBT 可能在规划后漂移。
                 // 精确身份失败时先按配方原料匹配，仍失败再按物品类型兜底；机器

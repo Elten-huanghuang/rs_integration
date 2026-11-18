@@ -123,7 +123,7 @@ public abstract class VirtualExchangeBatchDelegate extends AbstractBatchDelegate
         }
         if (!hasStorageAccess()) return false;
 
-        ExtractionLedger directLedger = new ExtractionLedger();
+        ExtractionLedger directLedger = materialAccess().newLedger();
         directLedger.setStorageEndpoint(storageEndpoint());
         this.ledger = directLedger;
         List<ItemStack> reusableInputs = new ArrayList<>();

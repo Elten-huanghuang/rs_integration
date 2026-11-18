@@ -128,7 +128,7 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
         if (specs == null || specs.isEmpty()) return false;
 
         List<ItemStack> materials = new ArrayList<>();
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = materialAccess().newLedger()) {
             if (storageEndpoint() == null) setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
             if (storageEndpoint() == null && !hasStorageAccess()) return false;
             ledger.setStorageEndpoint(storageEndpoint());
@@ -562,7 +562,7 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
         }
         int amount = Math.max(0, Math.min(1000, tank.getTankCapacity(0)) - tankFluid.getAmount());
         if (amount == 0) return false;
-        if (amount > 0 && MachineWaterSupply.fill("youkaishomecoming_kettle", tank, amount,
+        if (amount > 0 && MachineWaterSupply.fill(materialAccess(), "youkaishomecoming_kettle", tank, amount,
                 storageEndpoint(), player) == amount) {
             be.setChanged();
             return true;

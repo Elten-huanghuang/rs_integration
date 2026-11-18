@@ -171,7 +171,7 @@ public final class WRWandCraftPacket {
 
 
         List<ItemStack> templates = new ArrayList<>();
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = ExtractionLedger.external()) {
             ledger.setStorageEndpoint(endpoint);
             // Phase 1: reserve all ingredients + validate slots
             for (int i = 0; i < ingredients.size() && i < totalSlots; i++) {
@@ -278,7 +278,7 @@ public final class WRWandCraftPacket {
 
 
         List<ItemStack> templates = new ArrayList<>();
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = ExtractionLedger.external()) {
             ledger.setStorageEndpoint(endpoint);
             // Phase 1: reserve all ingredients
             for (int i = 0; i < ingredients.size(); i++) {
@@ -378,7 +378,7 @@ public final class WRWandCraftPacket {
 
 
         List<ItemStack> templates = new ArrayList<>();
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = ExtractionLedger.external()) {
             ledger.setStorageEndpoint(endpoint);
             // Phase 1: reserve all ingredients + validate slots
             for (int i = 0; i < ingredients.size(); i++) {
@@ -516,7 +516,7 @@ public final class WRWandCraftPacket {
 
 
         List<ItemStack> templates = new ArrayList<>();
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = ExtractionLedger.external()) {
             ledger.setStorageEndpoint(endpoint);
             // Phase 1: reserve all ingredients
             for (int i = 0; i < ingredients.size(); i++) {

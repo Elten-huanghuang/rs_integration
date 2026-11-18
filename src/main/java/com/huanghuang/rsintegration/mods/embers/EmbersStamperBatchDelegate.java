@@ -205,7 +205,7 @@ public final class EmbersStamperBatchDelegate extends AbstractBatchDelegate {
 
     @Override public boolean startSingleOperation(ServerPlayer player) {
         if (!validateExecutionContext(player)) return false;
-        ledger = new ExtractionLedger();
+        ledger = materialAccess().newLedger();
         ledger.setStorageEndpoint(storageEndpoint());
         List<ItemStack> materials = new ArrayList<>();
         for (IngredientSpec spec : required) {

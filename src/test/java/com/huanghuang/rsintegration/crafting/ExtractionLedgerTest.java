@@ -87,7 +87,7 @@ class ExtractionLedgerTest {
 
     @Test
     void freshLedgerStartsIdleAndEmpty() {
-        ExtractionLedger ledger = new ExtractionLedger();
+        ExtractionLedger ledger = ExtractionLedger.external();
         assertEquals(ExtractionLedger.State.IDLE, ledger.state());
         assertEquals(0, ledger.size());
         assertFalse(ledger.isCommitted());
@@ -95,7 +95,7 @@ class ExtractionLedgerTest {
 
     @Test
     void rollbackOnIdleIsNoopAndIdempotent() {
-        ExtractionLedger ledger = new ExtractionLedger();
+        ExtractionLedger ledger = ExtractionLedger.external();
         // rollback() returns early for IDLE/ROLLED_BACK without a state change.
         ledger.rollback(null);
         assertEquals(ExtractionLedger.State.IDLE, ledger.state());
@@ -105,7 +105,7 @@ class ExtractionLedgerTest {
 
     @Test
     void closeOnEmptyIdleLedgerIsIdempotent() {
-        ExtractionLedger ledger = new ExtractionLedger();
+        ExtractionLedger ledger = ExtractionLedger.external();
         ledger.close();
         assertEquals(ExtractionLedger.State.ROLLED_BACK, ledger.state());
         // Second close() is a no-op terminal guard — no exception, no state churn.
@@ -115,7 +115,7 @@ class ExtractionLedgerTest {
 
     @Test
     void resetReturnsLedgerToIdle() {
-        ExtractionLedger ledger = new ExtractionLedger();
+        ExtractionLedger ledger = ExtractionLedger.external();
         ledger.close();
         assertEquals(ExtractionLedger.State.ROLLED_BACK, ledger.state());
         ledger.reset();
@@ -125,27 +125,27 @@ class ExtractionLedgerTest {
 
     @Test
     void reservationMarkOnIdleIsZero() {
-        ExtractionLedger ledger = new ExtractionLedger();
+        ExtractionLedger ledger = ExtractionLedger.external();
         assertEquals(0, ledger.reservationMark());
     }
 
     @Test
     void tokenSinceZeroIsEmptyWhenNothingReserved() {
-        ExtractionLedger ledger = new ExtractionLedger();
+        ExtractionLedger ledger = ExtractionLedger.external();
         ExtractionLedger.ReservationToken token = ledger.tokenSince(0);
         assertTrue(token.entryIds().isEmpty());
     }
 
     @Test
     void tokenSinceRejectsOutOfRangeMark() {
-        ExtractionLedger ledger = new ExtractionLedger();
+        ExtractionLedger ledger = ExtractionLedger.external();
         assertThrows(IllegalArgumentException.class, () -> ledger.tokenSince(-1));
         assertThrows(IllegalArgumentException.class, () -> ledger.tokenSince(1));
     }
 
     @Test
     void cancelReservationsSinceRejectsInvalidMarkAndAcceptsCurrentEnd() {
-        ExtractionLedger ledger = new ExtractionLedger();
+        ExtractionLedger ledger = ExtractionLedger.external();
 
         ledger.cancelReservationsSince(0);
 
@@ -156,7 +156,7 @@ class ExtractionLedgerTest {
 
     @Test
     void settleCommittedRejectedWhenNotCommitted() {
-        ExtractionLedger ledger = new ExtractionLedger();
+        ExtractionLedger ledger = ExtractionLedger.external();
         ExtractionLedger.ReservationToken token =
                 new ExtractionLedger.ReservationToken(List.of(1));
         // requireState(COMMITTED) rejects settlement on an IDLE ledger.
@@ -165,7 +165,7 @@ class ExtractionLedgerTest {
 
     @Test
     void releaseCommittedEntriesRejectedWhenNotCommitted() {
-        ExtractionLedger ledger = new ExtractionLedger();
+        ExtractionLedger ledger = ExtractionLedger.external();
         assertThrows(RSICraftException.class, () -> ledger.releaseCommittedEntries(List.of()));
     }
 

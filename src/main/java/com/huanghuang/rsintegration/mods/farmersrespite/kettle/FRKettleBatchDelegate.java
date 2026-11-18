@@ -242,7 +242,7 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
         if (specs == null || specs.isEmpty()) return false;
 
         List<ItemStack> materials = new ArrayList<>();
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = materialAccess().newLedger()) {
             if (storageEndpoint() == null) setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
             if (storageEndpoint() == null && !hasStorageAccess()) return false;
             ledger.setStorageEndpoint(storageEndpoint());
@@ -453,7 +453,7 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
 
         int filled = 0;
         if (!fluidToFill.isEmpty()) {
-            filled = MachineWaterSupply.fill("farmersrespite_kettle", fluidHandler, fluidToFill.getAmount(),
+            filled = MachineWaterSupply.fill(materialAccess(), "farmersrespite_kettle", fluidHandler, fluidToFill.getAmount(),
                     storageEndpoint(), player);
             if (filled < fluidToFill.getAmount()) {
                 refundAll(materials);

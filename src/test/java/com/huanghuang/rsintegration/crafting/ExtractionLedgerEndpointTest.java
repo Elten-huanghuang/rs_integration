@@ -78,7 +78,7 @@ class ExtractionLedgerEndpointTest extends BootstrapTest {
             return StorageOperationResult.inserted(StorageOperationMode.PERFORM, stack, ItemStack.EMPTY);
         }).when(session).insert(eq(player), any(ItemStack.class), eq(false));
         endpoint = () -> session;
-        ledger = new ExtractionLedger();
+        ledger = ExtractionLedger.external();
     }
 
     @Test

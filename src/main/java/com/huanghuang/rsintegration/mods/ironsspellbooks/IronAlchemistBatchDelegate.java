@@ -189,7 +189,7 @@ public final class IronAlchemistBatchDelegate extends AbstractBatchDelegate {
             IFluidHandler tank = level.getBlockEntity(pos).getCapability(ForgeCapabilities.FLUID_HANDLER).resolve().orElse(null);
             if (!emptyTank(tank, storageEndpoint(), player, InkFluidSupport::token)) return false;
         }
-        ExtractionLedger privateLedger = new ExtractionLedger();
+        ExtractionLedger privateLedger = materialAccess().newLedger();
         ledger = privateLedger;
         usingSharedLedger = false;
         privateLedger.setStorageEndpoint(storageEndpoint());
@@ -238,7 +238,7 @@ public final class IronAlchemistBatchDelegate extends AbstractBatchDelegate {
         IFluidHandler tank = tile.getCapability(ForgeCapabilities.FLUID_HANDLER).resolve().orElseThrow();
         if (!emptyTank(tank, storageEndpoint(), player, InkFluidSupport::token)) return false;
         int missingWater = missingWater(tank);
-        if (missingWater > 0 && MachineWaterSupply.fill(IronSpellBooksRSModule.ALCHEMIST_CAULDRON_TYPE,
+        if (missingWater > 0 && MachineWaterSupply.fill(materialAccess(), IronSpellBooksRSModule.ALCHEMIST_CAULDRON_TYPE,
                 tank, missingWater, storageEndpoint(), player) != missingWater) return false;
         if (missingWater(tank) != 0 || !canFitRecycledInk(tank,
                 InkFluidSupport.fluid(recipe.getResultItem(level.registryAccess())))) return false;

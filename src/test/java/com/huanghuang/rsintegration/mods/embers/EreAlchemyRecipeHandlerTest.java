@@ -232,7 +232,7 @@ class EreAlchemyRecipeHandlerTest extends BootstrapTest {
             assertTrue(next.startPreparedOperation(fixture.player, List.of(
                     new ItemStack(Items.CLAY_BALL), new ItemStack(Items.GOLD_INGOT),
                     new ItemStack(Items.BONE_MEAL), new ItemStack(Items.GOLD_INGOT),
-                    new ItemStack(Items.BONE_MEAL)), new ExtractionLedger()));
+                    new ItemStack(Items.BONE_MEAL)), ExtractionLedger.external()));
             for (InventoryBlockEntity bottom : fixture.bottoms) {
                 assertEquals("actual", bottom.inventory.getStackInSlot(0)
                         .getTag().getString("owner"));

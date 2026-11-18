@@ -677,7 +677,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean startSingleOperation(ServerPlayer player) {
         this.player = player;
-        this.ledger = new ExtractionLedger();
+        this.ledger = materialAccess().newLedger();
         resolveStorageEndpointIfMissing(() -> CraftPacketUtils
                 .resolveEndpointForCraft(player, myDim, myPos).orElse(null));
         this.ledger.setStorageEndpoint(storageEndpoint());
@@ -834,7 +834,7 @@ public final class WRBatchDelegate extends AbstractBatchDelegate {
         // book requirement with that exact book ingredient.
         List<Ingredient> effectiveIngredients = new ArrayList<>(ingredients);
         if (iteratorTargetLevel >= 2 && !effectiveIngredients.isEmpty()) {
-            var available = MaterialSources.listAllAvailable(player, storageEndpoint());
+            var available = materialAccess().available(player, storageEndpoint());
             for (int lvl = iteratorTargetLevel - 1; lvl >= 1; lvl--) {
                 ItemStack candidate = WRRecipeHandler.buildEnchantedBookOutput(recipe, lvl);
                 if (candidate.isEmpty()) break;

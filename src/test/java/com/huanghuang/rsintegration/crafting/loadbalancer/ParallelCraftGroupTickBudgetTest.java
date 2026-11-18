@@ -100,7 +100,7 @@ class ParallelCraftGroupTickBudgetTest extends BootstrapTest {
                         return delegate;
                     });
             assertTrue(group.startOperation(OperationStartContext.delegateExtracted(
-                    player, new ExtractionLedger())));
+                    player, ExtractionLedger.external())));
             assertEquals(2, group.getRunningOperations());
             group.setObservationAllowed(allowed::get);
         }

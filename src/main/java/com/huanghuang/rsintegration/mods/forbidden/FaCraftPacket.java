@@ -18,6 +18,7 @@ import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.MaterialAccess;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
@@ -304,7 +305,7 @@ public final class FaCraftPacket {
         List<Object> filledPedestals = new ArrayList<>();
         ItemStack mainTemplate = ItemStack.EMPTY;
         List<ItemStack> inputTemplates = new ArrayList<>();
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = ExtractionLedger.external()) {
             ledger.setStorageEndpoint(endpoint);
             if (mainIng != null && !mainIng.isEmpty()) {
                 mainTemplate = ensureMaterialAvailable(player, altarDim, pos, mainIng, 1, ledger);
@@ -378,7 +379,7 @@ public final class FaCraftPacket {
 
             // Phase 3: require a RitualStarterItem
             final FaRitualHelper.StarterResult starterResult =
-                    FaRitualHelper.findRitualStarterItem(player, endpoint);
+                    FaRitualHelper.findRitualStarterItem(MaterialAccess.EXTERNAL, player, endpoint);
             final ItemStack starterStack = starterResult.stack();
             final CraftStorageEndpoint starterEndpoint = starterResult.sourceEndpoint();
             if (starterStack.isEmpty()) {
@@ -392,7 +393,7 @@ public final class FaCraftPacket {
             if (!ledger.commitToEndpoint(endpoint, player)) {
                 RSIntegrationMod.LOGGER.error("[RSI-FA] Ledger commit failed for ritual {}", ritualId);
                 rollbackAll(player, be, filledPedestals, endpoint);
-                if (starterEndpoint != null) FaRitualHelper.returnStarterToSource(starterStack, player, starterEndpoint);
+                if (starterEndpoint != null) FaRitualHelper.returnStarterToSource(MaterialAccess.EXTERNAL, starterStack, player, starterEndpoint);
                 player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed"));
                 return;
             }
@@ -414,7 +415,7 @@ public final class FaCraftPacket {
                 if (callback.rejected) {
                     RSIntegrationMod.LOGGER.debug("[RSI-FA] tryStartRitual: ritual rejected by forge");
                     rollbackAll(player, be, filledPedestals, endpoint);
-                    if (starterEndpoint != null) FaRitualHelper.returnStarterToSource(starterStack, player, starterEndpoint);
+                    if (starterEndpoint != null) FaRitualHelper.returnStarterToSource(MaterialAccess.EXTERNAL, starterStack, player, starterEndpoint);
                     player.sendSystemMessage(Component.translatable("rsi.fa.warn.ritual_rejected"));
                     return;
                 }
@@ -422,21 +423,21 @@ public final class FaCraftPacket {
                 Throwable root = e.getCause() != null ? e.getCause() : e;
                 RSIntegrationMod.LOGGER.error("[RSI-FA] tryStartRitual failed — forge rejected", root);
                 rollbackAll(player, be, filledPedestals, endpoint);
-                if (starterEndpoint != null) FaRitualHelper.returnStarterToSource(starterStack, player, starterEndpoint);
+                if (starterEndpoint != null) FaRitualHelper.returnStarterToSource(MaterialAccess.EXTERNAL, starterStack, player, starterEndpoint);
                 player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed"));
                 return;
             } catch (Exception e) {
                 RSIntegrationMod.LOGGER.error("[RSI-FA] Failed to start ritual {}:", ritualId, e);
                 rollbackAll(player, be, filledPedestals, endpoint);
                 if (starterEndpoint != null) {
-                    FaRitualHelper.returnStarterToSource(starterStack, player, starterEndpoint);
+                    FaRitualHelper.returnStarterToSource(MaterialAccess.EXTERNAL, starterStack, player, starterEndpoint);
                 }
                 player.sendSystemMessage(Component.translatable("rsi.fa.error.craft_failed"));
                 return;
             }
 
             // Only consume the starter AFTER everything succeeded
-            FaRitualHelper.consumeRitualStarterUse(starterStack, player, starterEndpoint);
+            FaRitualHelper.consumeRitualStarterUse(MaterialAccess.EXTERNAL, starterStack, player, starterEndpoint);
 
             Object result = FaRitualHelper.invoke(FaRitualHelper.invoke(ritual, "result"), "getResult");
             // Keep the name as a Component: this is server-side, and the client

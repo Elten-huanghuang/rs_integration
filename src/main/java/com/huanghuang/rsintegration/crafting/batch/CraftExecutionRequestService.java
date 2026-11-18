@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
+import com.huanghuang.rsintegration.crafting.MaterialAccess;
+
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftingPlanningTimeoutException;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
@@ -103,7 +105,7 @@ final class CraftExecutionRequestService {
             return new DirectReservationCheck(false, material, nbtMode);
         }
 
-        try (ExtractionLedger probe = new ExtractionLedger()) {
+        try (ExtractionLedger probe = ExtractionLedger.external()) {
             if (endpoint != null) probe.setStorageEndpoint(endpoint);
             for (DirectMaterialAllocator.Allocation fragment : allocation.allocations()) {
                 ItemStack template = fragment.material().toStack();
@@ -158,7 +160,7 @@ final class CraftExecutionRequestService {
             @Nullable ResourceLocation dimension, @Nullable BlockPos position) {
         ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dimension, player);
         var specs = CrockPotCategoryPlanning.ingredients(CrockPotCategoryPlanning.capture(
-                recipe, target, endpoint, player, level, CrockPotInventory.planningSlots(level, position)));
+                MaterialAccess.EXTERNAL, recipe, target, endpoint, player, level, CrockPotInventory.planningSlots(level, position)));
         if (specs == null) player.sendSystemMessage(Component.translatable("rsi.crockpot.error.food_values"));
         return specs;
     }

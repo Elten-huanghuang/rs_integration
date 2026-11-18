@@ -402,7 +402,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         if (specs == null || specs.isEmpty()) return false;
 
         List<ItemStack> materials = new ArrayList<>();
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = materialAccess().newLedger()) {
             resolveStorageEndpointIfMissing(() -> CraftPacketUtils
                     .resolveEndpointForCraft(player, myDim, myPos).orElse(null));
             if (storageEndpoint() == null && !hasStorageAccess()) return false;
@@ -919,13 +919,13 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
         ItemStack extracted = extractExactFromStorage(
                 player, fuelType.copyWithCount(1), missing, false);
         if (extracted.getCount() != missing) {
-            if (!extracted.isEmpty()) insertIntoStorage(player, extracted, false);
+            if (!extracted.isEmpty()) refundMaterial(player, extracted);
             return FuelFillResult.failed();
         }
 
         ItemStack remainder = handler.insertItem(1, extracted, false);
         if (!remainder.isEmpty()) {
-            insertIntoStorage(player, remainder, false);
+            refundMaterial(player, remainder);
         }
         int inserted = extracted.getCount() - remainder.getCount();
         ItemStack insertedFuel = inserted > 0 ? extracted.copyWithCount(inserted) : ItemStack.EMPTY;
@@ -954,7 +954,7 @@ public final class AetherFurnaceBatchDelegate extends AbstractBatchDelegate {
                                         long requiredBurnUnits) {
         var endpoint = storageEndpoint();
         if (endpoint == null) return ItemStack.EMPTY;
-        var snapshot = endpoint.snapshot(player).snapshot().orElse(null);
+        var snapshot = materialAccess().snapshot(player, endpoint).snapshot().orElse(null);
         if (snapshot == null) return ItemStack.EMPTY;
         Map<Item, Long> available = new HashMap<>();
         for (var entry : snapshot.items()) {

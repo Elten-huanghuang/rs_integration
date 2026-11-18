@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
+import com.huanghuang.rsintegration.crafting.MaterialAccess;
+
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.CraftPlanDecisionRules.PlannerAction;
 import com.huanghuang.rsintegration.crafting.batch.CraftPlanDecisionRules.RouteDecision;
@@ -805,7 +807,7 @@ final class CraftPlanningApplicationService {
                 }
                 var level = CraftPacketUtils.resolveLevel(player.server, dim, player);
                 specs = CrockPotCategoryPlanning.ingredients(CrockPotCategoryPlanning.capture(
-                        recipe, clickedOutput, storageContext.endpoint(), player, level, CrockPotInventory.planningSlots(level, pos)));
+                        MaterialAccess.EXTERNAL, recipe, clickedOutput, storageContext.endpoint(), player, level, CrockPotInventory.planningSlots(level, pos)));
                 if (specs == null || specs.isEmpty()) {
                     sink.error(PlanOutcome.NO_RECIPE,
                             IntegrationDiagnostic.error(

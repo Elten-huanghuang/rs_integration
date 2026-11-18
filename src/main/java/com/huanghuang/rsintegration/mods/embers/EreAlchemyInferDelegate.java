@@ -824,7 +824,7 @@ extends AbstractBatchDelegate {
             return CraftPacketUtils.ensureMaterialAvailable((ServerPlayer)this.player, this.level.dimension(), (BlockPos)this.machinePos, (Ingredient)ing, (int)1, (ExtractionLedger)this.sharedLedger);
         }
         if (storageEndpoint() != null) {
-            var result = storageEndpoint().extractExact(this.player, ing.getItems().length == 0
+            var result = materialAccess().extractExact(this.player, storageEndpoint(), ing.getItems().length == 0
                     ? ItemStack.EMPTY : ing.getItems()[0], 1, false);
             return result.extractedStacks().stream().findFirst().map(ItemStack::copy).orElse(ItemStack.EMPTY);
         }
@@ -846,7 +846,7 @@ extends AbstractBatchDelegate {
         for (ItemStack s : stacks) {
             ItemStack leftover;
             if (s.isEmpty()) continue;
-            if ((leftover = insertIntoStorage(player, s, false)).isEmpty()) continue;
+            if ((leftover = refundMaterial(player, s)).isEmpty()) continue;
             RSIntegrationMod.LOGGER.warn("[RSI-Embers-Infer] Refund leftover: {} x{}", (Object)leftover.getHoverName().getString(), (Object)leftover.getCount());
             if (this.player == null) continue;
             ItemHandlerHelper.giveItemToPlayer(this.player, (ItemStack)leftover);

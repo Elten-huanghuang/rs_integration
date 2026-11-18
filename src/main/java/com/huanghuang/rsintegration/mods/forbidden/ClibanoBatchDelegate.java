@@ -627,7 +627,7 @@ public final class ClibanoBatchDelegate extends AbstractBatchDelegate {
     private List<ItemStack> storageItems() {
         List<ItemStack> candidates = new ArrayList<>();
         if (storageEndpoint() != null) {
-            var snapshot = storageEndpoint().snapshot(player).snapshot().orElse(null);
+            var snapshot = materialAccess().snapshot(player, storageEndpoint()).snapshot().orElse(null);
             if (snapshot == null) return List.of();
             for (var entry : snapshot.items()) {
                 ItemStack stack = entry.stack();

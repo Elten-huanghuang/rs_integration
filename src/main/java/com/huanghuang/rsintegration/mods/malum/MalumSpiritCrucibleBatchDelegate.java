@@ -580,7 +580,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             return false;
         }
 
-        ExtractionLedger localLedger = usingSharedLedger ? sharedLedger : new ExtractionLedger();
+        ExtractionLedger localLedger = usingSharedLedger ? sharedLedger : materialAccess().newLedger();
         boolean ownsLedger = !usingSharedLedger || sharedLedger == null;
         try {
         if (!usingSharedLedger || sharedLedger == null) {

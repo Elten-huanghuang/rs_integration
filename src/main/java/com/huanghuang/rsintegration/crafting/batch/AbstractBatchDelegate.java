@@ -13,6 +13,7 @@ import net.minecraft.world.item.ItemStack;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.MaterialAccess;
 import com.huanghuang.rsintegration.util.ForcedChunkTicketManager;
 import com.huanghuang.rsintegration.magic.MagicResourceTaskReservation;
 import net.minecraft.core.BlockPos;
@@ -51,6 +52,20 @@ import java.util.function.Supplier;
  * via a {@link HashSet} of seen state keys, cleared on {@link #resetState()}.</p>
  */
 public abstract class AbstractBatchDelegate implements IBatchDelegate {
+    private MaterialAccess materialAccess = MaterialAccess.EXTERNAL;
+
+    public final void setMaterialAccess(MaterialAccess access) {
+        this.materialAccess = Objects.requireNonNull(access);
+    }
+
+    protected final MaterialAccess materialAccess() { return materialAccess; }
+
+    /** 只退还已确认取回的输入；产物发布仍使用存储端点。 */
+    protected final ItemStack refundMaterial(@Nullable ServerPlayer player, ItemStack stack) {
+        CraftStorageEndpoint endpoint = storageEndpoint();
+        if (endpoint == null || player == null) return stack.copy();
+        return materialAccess.refund(player, endpoint, stack).remainder().orElse(stack);
+    }
 
     @Nullable private TaskOutputReception.Session outputReception;
     @Nullable protected TaskOutputReception.Batch outputBatch;
@@ -624,7 +639,7 @@ public abstract class AbstractBatchDelegate implements IBatchDelegate {
         if (player == null || amount <= 0) return ItemStack.EMPTY;
         CraftStorageEndpoint endpoint = storageEndpoint();
         if (endpoint == null) return ItemStack.EMPTY;
-        var result = endpoint.extractExact(player, template, amount, simulate);
+        var result = materialAccess.extractExact(player, endpoint, template, amount, simulate);
         ItemStack combined = ItemStack.EMPTY;
         for (ItemStack extracted : result.extractedStacks()) {
             if (extracted == null || extracted.isEmpty()) continue;

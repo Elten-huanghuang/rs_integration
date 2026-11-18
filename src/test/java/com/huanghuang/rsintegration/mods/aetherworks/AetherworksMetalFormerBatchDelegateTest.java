@@ -129,7 +129,7 @@ class AetherworksMetalFormerBatchDelegateTest extends BootstrapTest {
         try {
             assertEquals(2, group.getChildCount());
             assertTrue(group.startOperation(OperationStartContext.delegateExtracted(
-                    player, new ExtractionLedger())));
+                    player, ExtractionLedger.external())));
             assertEquals(2, craftBudget.active());
             assertEquals(2, machines.size());
             assertEquals(0, captures.size());
@@ -204,7 +204,7 @@ class AetherworksMetalFormerBatchDelegateTest extends BootstrapTest {
                     .thenReturn(new FluidStack(Fluids.WATER, 360));
             assertTrue(fixture.delegate.startPreparedOperation(mock(ServerPlayer.class),
                     List.of(new ItemStack(Items.DIAMOND), new ItemStack(Items.POTION, 360)),
-                    new ExtractionLedger()));
+                    ExtractionLedger.external()));
             assertEquals(360, fixture.tank.getFluidAmount());
             assertEquals(2600.0, fixture.heat.getHeat());
             assertEquals(Items.DIAMOND, fixture.machine.inventory.getStackInSlot(0).getItem());
@@ -261,7 +261,7 @@ class AetherworksMetalFormerBatchDelegateTest extends BootstrapTest {
         assertEquals(PreparationState.RETRY, fixture.prepare().state());
         assertFalse(fixture.delegate.startPreparedOperation(mock(ServerPlayer.class),
                 List.of(new ItemStack(Items.DIAMOND), new ItemStack(Items.POTION, 360)),
-                new ExtractionLedger()));
+                ExtractionLedger.external()));
         assertTrue(fixture.machine.inventory.getStackInSlot(0).isEmpty());
         assertTrue(fixture.tank.isEmpty());
         assertEquals(0.0, fixture.heat.getHeat());

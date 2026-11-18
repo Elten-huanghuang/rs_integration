@@ -325,7 +325,7 @@ class ArsInputRecoveryTest extends BootstrapTest {
         final ServerLevel level = mock(ServerLevel.class);
         final ServerPlayer player = mock(ServerPlayer.class);
         final CraftStorageEndpoint endpoint = mock(CraftStorageEndpoint.class);
-        final ExtractionLedger ledger = new ExtractionLedger();
+        final ExtractionLedger ledger = ExtractionLedger.external();
         final AbstractBatchDelegate delegate;
         final Machine machine;
         final Machine pedestal;

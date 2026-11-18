@@ -102,7 +102,7 @@ class FleshAltarIntegrationTest extends BootstrapTest {
         Fixture fixture = fixture(new CountedRecipe(2, 4, 2));
         InputBufferPlan plan = fixture.delegate.inputBufferPlan(3);
         assertTrue(fixture.delegate.startOperation(OperationStartContext.chainReserved(
-                mock(ServerPlayer.class), new ExtractionLedger(), fixture.delegate.materialPlan(),
+                mock(ServerPlayer.class), ExtractionLedger.external(), fixture.delegate.materialPlan(),
                 List.of(new ReservedMaterial("slot:0", new ItemStack(Items.NETHERRACK, 6)), new ReservedMaterial("slot:1", new ItemStack(Items.DIAMOND, 12))), plan)));
         assertEquals(6, fixture.delegate.getExpectedProduction().count());
         fixture.inventory.setItem(0, new ItemStack(Items.NETHERRACK, 4));
@@ -162,7 +162,7 @@ class FleshAltarIntegrationTest extends BootstrapTest {
     void cancellationRecoversOnlyRemainingOwnedInputsAndKeepsPartialOutput() throws Exception {
         Fixture fixture = fixture(new CountedRecipe(2, 4, 1));
         assertTrue(fixture.delegate.startBufferedOperation(mock(ServerPlayer.class),
-                fixture.delegate.inputBufferPlan(3), new ExtractionLedger()));
+                fixture.delegate.inputBufferPlan(3), ExtractionLedger.external()));
         fixture.inventory.setItem(0, new ItemStack(Items.NETHERRACK, 4));
         fixture.inventory.setItem(1, new ItemStack(Items.DIAMOND, 8));
         fixture.inventory.setItem(2, new ItemStack(Items.GOLD_INGOT));
@@ -191,7 +191,7 @@ class FleshAltarIntegrationTest extends BootstrapTest {
         Fixture fixture = fixture(recipe);
         assertFalse(fixture.delegate.supportsInputBuffer());
         assertTrue(fixture.delegate.startPreparedOperation(mock(ServerPlayer.class),
-                List.of(new ItemStack(Items.MILK_BUCKET), new ItemStack(Items.DIAMOND)), new ExtractionLedger()));
+                List.of(new ItemStack(Items.MILK_BUCKET), new ItemStack(Items.DIAMOND)), ExtractionLedger.external()));
         fixture.inventory.setItem(0, new ItemStack(Items.BUCKET));
         fixture.inventory.setItem(1, ItemStack.EMPTY);
         fixture.inventory.setItem(2, new ItemStack(Items.GOLD_INGOT));
@@ -204,7 +204,7 @@ class FleshAltarIntegrationTest extends BootstrapTest {
     private static boolean startSingle(Fixture fixture, int first, int second) {
         return fixture.delegate.startPreparedOperation(mock(ServerPlayer.class),
                 List.of(new ItemStack(Items.NETHERRACK, first), new ItemStack(Items.DIAMOND, second)),
-                new ExtractionLedger());
+                ExtractionLedger.external());
     }
 
     private static Fixture fixture(CountedRecipe recipe) throws Exception {

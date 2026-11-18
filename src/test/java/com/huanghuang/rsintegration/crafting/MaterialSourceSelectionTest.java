@@ -107,7 +107,7 @@ class MaterialSourceSelectionTest extends BootstrapTest {
                             MaterialSources.listAllAvailable(player, endpoint).getOrDefault(key, 0L),
                             "同一 tick 切换来源不能复用另一组选项的库存缓存");
                 }
-                try (ExtractionLedger ledger = new ExtractionLedger()) {
+                try (ExtractionLedger ledger = ExtractionLedger.external()) {
                     if (expected == 0) {
                         assertTrue(ledger.reserveExactAcrossNetworkAndInventory(
                                 new ItemStack(Items.STONE), 1, endpoint, player).isEmpty());

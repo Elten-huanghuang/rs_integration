@@ -330,7 +330,7 @@ class PlayerUtilsTest extends BootstrapTest {
         assertEquals(8, clientInventory.getItem(9).getCount());
         slotPackets.clear();
 
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = ExtractionLedger.external()) {
             assertEquals(8, ledger.reserveFromInventory(
                     Ingredient.of(Items.IRON_INGOT), 8, player).getCount());
             assertTrue(ledger.commitToEndpoint(null, player));

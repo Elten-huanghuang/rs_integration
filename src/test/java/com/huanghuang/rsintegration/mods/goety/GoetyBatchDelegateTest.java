@@ -185,7 +185,7 @@ class GoetyBatchDelegateTest extends BootstrapTest {
         RitualHolder altar = holder(level, BlockPos.ZERO);
         GoetyBatchDelegate delegate = offlineDelegate(level, altar);
         ServerPlayer player = mock(ServerPlayer.class);
-        ExtractionLedger ledger = new ExtractionLedger();
+        ExtractionLedger ledger = ExtractionLedger.external();
         set(delegate, "player", player);
         set(delegate, "altar", altar);
         Field ledgerField = AbstractBatchDelegate.class.getDeclaredField("ledger");

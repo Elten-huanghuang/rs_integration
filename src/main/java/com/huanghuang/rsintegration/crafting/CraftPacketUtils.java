@@ -239,7 +239,7 @@ public final class CraftPacketUtils {
         ResourceLocation primaryRecipe = steps.isEmpty() ? new ResourceLocation("rsintegration", "empty_chain")
                 : steps.get(0).recipeId();
         CraftLogContext ctx = CraftLogContext.create(player.getUUID(), primaryRecipe);
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = ExtractionLedger.external()) {
             ledger.setLogContext(ctx);
             if (endpoint != null) ledger.setStorageEndpoint(endpoint);
             List<ItemStack> virtualInventory = new ArrayList<>();
@@ -1439,6 +1439,7 @@ public final class CraftPacketUtils {
         if (ledger != null) {
             CraftStorageEndpoint endpoint = preferredEndpoint != null
                     ? preferredEndpoint : ledger.storageEndpoint();
+            if (ledger.usesTaskAccount()) return ledger.reserve(ingredient, count, endpoint, player, altarDim, altarPos);
             List<CraftStorageEndpoint> candidates = new ArrayList<>();
             if (endpoint != null) {
                 ItemStack preferred = ledger.reserve(

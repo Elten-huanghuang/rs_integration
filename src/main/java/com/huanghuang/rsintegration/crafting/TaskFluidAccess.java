@@ -28,8 +28,8 @@ public final class TaskFluidAccess {
 
     /** 仅没有任务账户时返回 null；身份不匹配或冻结的账户仍阻止回退到网络。 */
     @Nullable
-    public static TaskFluidAccess capture(ServerPlayer player, @Nullable CraftStorageEndpoint endpoint) {
-        RuntimeMaterialAccount account = RuntimeMaterialAccount.current();
+    static TaskFluidAccess capture(@Nullable RuntimeMaterialAccount account, ServerPlayer player,
+                                   @Nullable CraftStorageEndpoint endpoint) {
         return account == null ? null : new TaskFluidAccess(account,
                 account.belongsTo(player) && account.usesEndpoint(endpoint));
     }

@@ -124,7 +124,7 @@ public final class BirdcageBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean startSingleOperation(ServerPlayer player) {
         if (recipe == null || !hasCagedParrot() || isOnCooldown() || hasPendingOutput()) return false;
-        this.ledger = new ExtractionLedger();
+        this.ledger = materialAccess().newLedger();
         ledger.setStorageEndpoint(storageEndpoint());
         List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.size() != 1) return false;

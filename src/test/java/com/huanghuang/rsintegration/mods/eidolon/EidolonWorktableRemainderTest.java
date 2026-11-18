@@ -36,7 +36,7 @@ class EidolonWorktableRemainderTest extends BootstrapTest {
 
         try (MockedStatic<PlayerUtils> delivery = mockStatic(PlayerUtils.class)) {
             assertTrue(delegate.startPreparedOperation(player,
-                    List.of(new ItemStack(Items.WATER_BUCKET)), new ExtractionLedger()));
+                    List.of(new ItemStack(Items.WATER_BUCKET)), ExtractionLedger.external()));
             delivery.verifyNoInteractions();
 
             List<ItemStack> results = delegate.collectAllResults(player);
@@ -55,7 +55,7 @@ class EidolonWorktableRemainderTest extends BootstrapTest {
 
         try (MockedStatic<PlayerUtils> delivery = mockStatic(PlayerUtils.class)) {
             assertTrue(delegate.startPreparedOperation(player,
-                    List.of(new ItemStack(Items.WATER_BUCKET)), new ExtractionLedger()));
+                    List.of(new ItemStack(Items.WATER_BUCKET)), ExtractionLedger.external()));
             delegate.onBatchFailed(player, "cancelled before collection");
 
             delivery.verifyNoInteractions();

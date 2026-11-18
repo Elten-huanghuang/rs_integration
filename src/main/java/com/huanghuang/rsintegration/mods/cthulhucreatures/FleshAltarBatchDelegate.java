@@ -159,7 +159,7 @@ public final class FleshAltarBatchDelegate extends AbstractBatchDelegate {
     @Override public boolean startSingleOperation(ServerPlayer player) {
         if (!idle()) return false;
         if (storageEndpoint() == null) setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, level.dimension(), pos).orElse(null));
-        ExtractionLedger privateLedger = new ExtractionLedger();
+        ExtractionLedger privateLedger = materialAccess().newLedger();
         privateLedger.setStorageEndpoint(storageEndpoint());
         List<ItemStack> materials = new ArrayList<>();
         for (IngredientSpec spec : specs) {

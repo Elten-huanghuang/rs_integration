@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.mods.crockpot;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.MaterialAccess;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotFoodValues.Candidate;
@@ -47,12 +48,12 @@ public final class CrockPotCategoryPlanning {
     }
 
     @Nullable
-    public static Context capture(Recipe<?> recipe, @Nullable ItemStack target,
+    public static Context capture(MaterialAccess access, Recipe<?> recipe, @Nullable ItemStack target,
                                   @Nullable CraftStorageEndpoint endpoint, ServerPlayer player,
                                   Level level, int slots) {
         requireCaptureThread(level);
         if (endpoint == null) return null;
-        var snapshot = endpoint.snapshot(player).snapshot().orElse(null);
+        var snapshot = access.snapshot(player, endpoint).snapshot().orElse(null);
         if (snapshot == null) return null;
         Map<StackKey, Long> stock = new LinkedHashMap<>();
         for (var item : snapshot.items()) {

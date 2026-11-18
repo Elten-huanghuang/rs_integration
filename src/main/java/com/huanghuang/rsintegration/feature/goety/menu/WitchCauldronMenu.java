@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.feature.goety.menu;
 
+import com.huanghuang.rsintegration.crafting.MaterialAccess;
+
 import com.Polarice3.Goety.common.blocks.BrewCauldronBlock;
 import com.Polarice3.Goety.common.blocks.entities.BrewCauldronBlockEntity;
 import com.Polarice3.Goety.common.items.ModItems;
@@ -163,7 +165,7 @@ public final class WitchCauldronMenu extends AbstractContainerMenu {
         if (water >= 3) { message = text("water_full"); return; }
         boolean free = MachineWaterSupply.isFree("goety_witch_cauldron");
         var link = free ? null : RsiStorageLink.resolve(player).orElse(null);
-        if (MachineWaterSupply.fillProperty("goety_witch_cauldron", ((3 - water) * 1000 + 2) / 3,
+        if (MachineWaterSupply.fillProperty(MaterialAccess.EXTERNAL, "goety_witch_cauldron", ((3 - water) * 1000 + 2) / 3,
                 free ? null : RsiStorageLink.endpoint(player, link), player, () -> {
                     boolean updated = target.getLevel().setBlockAndUpdate(position,
                             target.getBlockState().setValue(BrewCauldronBlock.LEVEL, 3));

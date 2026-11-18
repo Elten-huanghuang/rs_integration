@@ -367,7 +367,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean startSingleOperation(ServerPlayer player) {
         this.player = player;
-        this.ledger = new ExtractionLedger();
+        this.ledger = materialAccess().newLedger();
         this.usingSharedLedger = false;
         if (storageEndpoint() == null) {
             setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
@@ -844,7 +844,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         List<ItemStack> candidates = new ArrayList<>();
         var endpoint = storageEndpoint();
         if (endpoint == null) return false;
-        var snapshot = endpoint.snapshot(player).snapshot().orElse(null);
+        var snapshot = materialAccess().snapshot(player, endpoint).snapshot().orElse(null);
         if (snapshot == null) return false;
         for (var entry : snapshot.items()) {
             // 展示栈只表示物品身份，数量固定为 1；真实库存来自 amount。
@@ -914,7 +914,7 @@ public final class VanillaMachineBatchDelegate extends AbstractBatchDelegate {
         ItemStack extracted = extractExactFromStorage(player, fuelType.copyWithCount(1), amount, false);
         if (extracted.getCount() == amount) return extracted;
         if (!extracted.isEmpty()) {
-            insertIntoStorage(player, extracted, false);
+            refundMaterial(player, extracted);
         }
         return ItemStack.EMPTY;
     }

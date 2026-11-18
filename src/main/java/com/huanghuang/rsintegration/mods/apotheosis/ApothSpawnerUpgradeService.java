@@ -224,7 +224,7 @@ public final class ApothSpawnerUpgradeService {
             for (int i = 0; i < requested; i++) {
                 Entry fresh = describe(modifier, context.tile, endpoint, player);
                 if (fresh == null || fresh.complete()) break;
-                try (ExtractionLedger ledger = new ExtractionLedger()) {
+                try (ExtractionLedger ledger = ExtractionLedger.external()) {
                     ledger.setStorageEndpoint(endpoint);
                     ItemStack reserved = ledger.reserveFromEndpoint(
                             modifier.getMainhandInput(), 1, endpoint, player);

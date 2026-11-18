@@ -183,7 +183,7 @@ public final class MalumCraftPacket {
         CraftStorageEndpoint endpoint = CraftPacketUtils.resolveEndpointForCraft(
                 player, altarDim, pos).orElse(null);
         List<Integer> filledPedestalIndices = new ArrayList<>();
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = ExtractionLedger.external()) {
             ledger.setStorageEndpoint(endpoint);
             try {
                 // 1. Center item -> altar inventory slot 0

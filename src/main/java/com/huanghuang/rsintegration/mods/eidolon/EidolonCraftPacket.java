@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.mods.eidolon;
 
+import com.huanghuang.rsintegration.crafting.MaterialAccess;
+
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
@@ -236,7 +238,7 @@ public final class EidolonCraftPacket {
         List<Object> crucibleSteps = new ArrayList<>();
         List<ItemStack> allExtracted = new ArrayList<>(); // actual items extracted, for refund
 
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = ExtractionLedger.external()) {
             ledger.setStorageEndpoint(endpoint);
             for (CrucibleStepInput si : stepInputs) {
                 List<ItemStack> stepItems = new ArrayList<>();
@@ -267,7 +269,7 @@ public final class EidolonCraftPacket {
                 return;
             }
 
-            if (!EidolonWaterSupply.ensureWater(be, EidolonBatchDelegate.readWaterAmountStatic(recipe),
+            if (!EidolonWaterSupply.ensureWater(MaterialAccess.EXTERNAL, be, EidolonBatchDelegate.readWaterAmountStatic(recipe),
                     endpoint, player)) {
                 player.sendSystemMessage(Component.translatable("rsi.eidolon.error.fill_failed"));
                 return;

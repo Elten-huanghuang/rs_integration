@@ -150,9 +150,7 @@ class TaskFluidExecutionTest extends BootstrapTest {
         account.add(InkFluidSupport.token(water(1000)));
         tank.setCapacity(400);
         ExternalIntegrationBatchDelegate delegate = delegate(1000);
-        try (var scope = RuntimeMaterialAccount.enter(account)) {
-            assertFalse((boolean) invoke(delegate, "insertFluidInputs", new Class<?>[]{ServerPlayer.class}, player));
-        }
+        assertFalse((boolean) invoke(delegate, "insertFluidInputs", new Class<?>[]{ServerPlayer.class}, player));
         assertEquals(600, held());
         assertEquals(400, tank.getFluidAmount());
         invoke(delegate, "clearMachineState", new Class<?>[]{BlockEntity.class, ServerPlayer.class}, machine, null);
@@ -165,11 +163,9 @@ class TaskFluidExecutionTest extends BootstrapTest {
         account.add(InkFluidSupport.token(water(1000)));
         ExternalIntegrationBatchDelegate delegate = spy(delegate(1000));
         doReturn(true).when(delegate).validateExecutionContext(player);
-        try (var scope = RuntimeMaterialAccount.enter(account)) {
-            assertTrue(delegate.usesTaskFluidInputs());
-            assertTrue(delegate.startOperation(OperationStartContext.chainReserved(player, new ExtractionLedger(),
-                    MaterialPlan.none(), List.of(), InputBufferPlan.none())));
-        }
+        assertTrue(delegate.usesTaskFluidInputs());
+        assertTrue(delegate.startOperation(OperationStartContext.chainReserved(player, ExtractionLedger.external(),
+                MaterialPlan.none(), List.of(), InputBufferPlan.none())));
         assertEquals(1000, tank.getFluidAmount());
         assertEquals(0, held());
         verifyNoInteractions(session);
@@ -180,10 +176,8 @@ class TaskFluidExecutionTest extends BootstrapTest {
         doAnswer(call -> { tank.setFluid(water(400)); throw new IllegalStateException("after side effect"); })
                 .when(tank).fill(any(), eq(FluidAction.EXECUTE));
         ExternalIntegrationBatchDelegate delegate = delegate(1000);
-        try (var scope = RuntimeMaterialAccount.enter(account)) {
-            assertFalse((boolean) invoke(delegate, "insertFluidInputs", new Class<?>[]{ServerPlayer.class}, player));
-            assertFalse((boolean) invoke(delegate, "insertFluidInputs", new Class<?>[]{ServerPlayer.class}, player));
-        }
+        assertFalse((boolean) invoke(delegate, "insertFluidInputs", new Class<?>[]{ServerPlayer.class}, player));
+        assertFalse((boolean) invoke(delegate, "insertFluidInputs", new Class<?>[]{ServerPlayer.class}, player));
         assertTrue(account.uncertain());
         assertEquals(1000, held());
         invoke(delegate, "clearMachineState", new Class<?>[]{BlockEntity.class, ServerPlayer.class}, machine, player);
@@ -194,16 +188,12 @@ class TaskFluidExecutionTest extends BootstrapTest {
 
     @Test void missingOrUnauthorizedAccountCannotFallBackToNetwork() throws Exception {
         ExternalIntegrationBatchDelegate missing = delegate(1000);
-        try (var scope = RuntimeMaterialAccount.enter(account)) {
-            assertFalse((boolean) invoke(missing, "insertFluidInputs", new Class<?>[]{ServerPlayer.class}, player));
-        }
+        assertFalse((boolean) invoke(missing, "insertFluidInputs", new Class<?>[]{ServerPlayer.class}, player));
         account.add(InkFluidSupport.token(water(1000)));
         ServerPlayer other = mock(ServerPlayer.class);
         when(other.getUUID()).thenReturn(UUID.randomUUID());
-        try (var scope = RuntimeMaterialAccount.enter(account)) {
-            assertFalse((boolean) invoke(delegate(1000), "reserveCustomFluids",
-                    new Class<?>[]{ServerPlayer.class, List.class}, other, new ArrayList<ReservedMaterial>()));
-        }
+        assertFalse((boolean) invoke(delegate(1000), "reserveCustomFluids",
+                new Class<?>[]{ServerPlayer.class, List.class}, other, new ArrayList<ReservedMaterial>()));
         assertEquals(1000, held());
         verifyNoInteractions(session);
     }
@@ -212,10 +202,8 @@ class TaskFluidExecutionTest extends BootstrapTest {
         account.add(InkFluidSupport.token(water(1000)));
         ExternalIntegrationBatchDelegate delegate = delegate(1000);
         List<ReservedMaterial> reserved = new ArrayList<>();
-        try (var scope = RuntimeMaterialAccount.enter(account)) {
-            assertTrue((boolean) invoke(delegate, "reserveCustomFluids",
-                    new Class<?>[]{ServerPlayer.class, List.class}, player, reserved));
-        }
+        assertTrue((boolean) invoke(delegate, "reserveCustomFluids",
+                new Class<?>[]{ServerPlayer.class, List.class}, player, reserved));
         assertEquals(0, held());
         List<MaterialDisposition> receipts = List.of(disposition(600, MaterialOutcome.CONSUMED),
                 disposition(400, MaterialOutcome.RECOVERED));
@@ -228,10 +216,8 @@ class TaskFluidExecutionTest extends BootstrapTest {
     @Test void unknownFragmentsOfSameEntryAreDistinctAndCleanupDoesNotRepeatThem() throws Exception {
         account.add(InkFluidSupport.token(water(1000)));
         ExternalIntegrationBatchDelegate delegate = delegate(1000);
-        try (var scope = RuntimeMaterialAccount.enter(account)) {
-            assertTrue((boolean) invoke(delegate, "reserveCustomFluids",
-                    new Class<?>[]{ServerPlayer.class, List.class}, player, new ArrayList<ReservedMaterial>()));
-        }
+        assertTrue((boolean) invoke(delegate, "reserveCustomFluids",
+                new Class<?>[]{ServerPlayer.class, List.class}, player, new ArrayList<ReservedMaterial>()));
         MaterialTransferAuditLedger ledger = new MaterialTransferAuditLedger();
         try (var ledgers = mockStatic(MaterialTransferAuditLedger.class)) {
             ledgers.when(() -> MaterialTransferAuditLedger.get(server)).thenReturn(ledger);
@@ -270,15 +256,13 @@ class TaskFluidExecutionTest extends BootstrapTest {
     @Test void startExceptionHandsReservationToAuditOnlyOnceAcrossCleanup() throws Exception {
         account.add(InkFluidSupport.token(water(1000)));
         ExternalIntegrationBatchDelegate delegate = delegate(1000);
-        try (var scope = RuntimeMaterialAccount.enter(account)) {
-            assertTrue((boolean) invoke(delegate, "reserveCustomFluids",
-                    new Class<?>[]{ServerPlayer.class, List.class}, player, new ArrayList<ReservedMaterial>()));
-        }
+        assertTrue((boolean) invoke(delegate, "reserveCustomFluids",
+                new Class<?>[]{ServerPlayer.class, List.class}, player, new ArrayList<ReservedMaterial>()));
         RecipeExecutionIntegration execution = mock(RecipeExecutionIntegration.class);
         when(execution.start(any(), any())).thenThrow(new IllegalStateException("交付后异常"));
         set(delegate, "executionIntegration", execution);
         set(delegate, "executionPlan", mock(ExecutionPlan.class));
-        set(delegate, "operationStartContext", new OperationStartContext(player, new ExtractionLedger(),
+        set(delegate, "operationStartContext", new OperationStartContext(player, ExtractionLedger.external(),
                 OperationStartContext.MaterialOwnership.CHAIN_RESERVED, MaterialPlan.none(), List.of(),
                 InputBufferPlan.none(), null, UUID.randomUUID(), UUID.randomUUID(), 1));
         MaterialTransferAuditLedger ledger = new MaterialTransferAuditLedger();
@@ -297,10 +281,8 @@ class TaskFluidExecutionTest extends BootstrapTest {
     @Test void customCancelledBeforeStartReturnsToOriginalAccountOnlyOnce() throws Exception {
         account.add(InkFluidSupport.token(water(1000)));
         ExternalIntegrationBatchDelegate delegate = delegate(1000);
-        try (var scope = RuntimeMaterialAccount.enter(account)) {
-            assertTrue((boolean) invoke(delegate, "reserveCustomFluids",
-                    new Class<?>[]{ServerPlayer.class, List.class}, player, new ArrayList<ReservedMaterial>()));
-        }
+        assertTrue((boolean) invoke(delegate, "reserveCustomFluids",
+                new Class<?>[]{ServerPlayer.class, List.class}, player, new ArrayList<ReservedMaterial>()));
         invoke(delegate, "clearCustomOperation", new Class<?>[]{ServerPlayer.class}, (Object) null);
         invoke(delegate, "clearCustomOperation", new Class<?>[]{ServerPlayer.class}, (Object) null);
         assertEquals(1000, held());
@@ -310,10 +292,8 @@ class TaskFluidExecutionTest extends BootstrapTest {
     @Test void unknownCustomTransferDoesNotRefundOriginalReservation() throws Exception {
         account.add(InkFluidSupport.token(water(1000)));
         ExternalIntegrationBatchDelegate delegate = delegate(1000);
-        try (var scope = RuntimeMaterialAccount.enter(account)) {
-            assertTrue((boolean) invoke(delegate, "reserveCustomFluids",
-                    new Class<?>[]{ServerPlayer.class, List.class}, player, new ArrayList<ReservedMaterial>()));
-        }
+        assertTrue((boolean) invoke(delegate, "reserveCustomFluids",
+                new Class<?>[]{ServerPlayer.class, List.class}, player, new ArrayList<ReservedMaterial>()));
         invoke(delegate, "settleCustomFluidInputs", new Class<?>[]{List.class, ServerPlayer.class},
                 List.of(disposition(1000, MaterialOutcome.UNCERTAIN)), player);
         invoke(delegate, "clearCustomOperation", new Class<?>[]{ServerPlayer.class}, player);
@@ -362,7 +342,7 @@ class TaskFluidExecutionTest extends BootstrapTest {
         when(group.materialPlan()).thenReturn(MaterialPlan.graphSlots(specs));
         assertNotNull(invoke(chain, "reserveCountedOperationMaterials",
                 new Class<?>[]{ParallelCraftGroup.class, ServerPlayer.class, ExtractionLedger.class,
-                        MaterialBroker.ReservationToken.class}, group, player, new ExtractionLedger(), token));
+                        MaterialBroker.ReservationToken.class}, group, player, ExtractionLedger.external(), token));
         assertEquals(0, broker.available(producer, fluid), "物品预留完成后不能释放图内流体");
         assertEquals(3, broker.checkout(token).fragments().size());
         broker.commit(token);
@@ -421,15 +401,13 @@ class TaskFluidExecutionTest extends BootstrapTest {
         RuntimeMaterialAccount secondAccount = new RuntimeMaterialAccount(UUID.randomUUID(), player.getUUID(),
                 mock(MinecraftServer.class), endpoint);
         secondAccount.add(InkFluidSupport.token(water(500)));
-        try (var scope = RuntimeMaterialAccount.enter(secondAccount)) {
-            TaskFluidAccess second = TaskFluidAccess.capture(player, endpoint);
-            assertEquals(0, second.extract(key, 1000, false).transferredAmount());
-            var extracted = first.extract(key, 1000, false);
-            assertEquals(1000, extracted.transferredAmount());
-            first.refund(extracted.transferredFluids());
-            assertEquals(500, second.snapshot().countExact(key));
-            assertEquals(1000, first.snapshot().countExact(key));
-        }
+        TaskFluidAccess second = secondAccount.access.fluids(player, endpoint);
+        assertEquals(0, second.extract(key, 1000, false).transferredAmount());
+        var extracted = first.extract(key, 1000, false);
+        assertEquals(1000, extracted.transferredAmount());
+        first.refund(extracted.transferredFluids());
+        assertEquals(500, second.snapshot().countExact(key));
+        assertEquals(1000, first.snapshot().countExact(key));
         verifyNoInteractions(session);
     }
 
@@ -447,11 +425,9 @@ class TaskFluidExecutionTest extends BootstrapTest {
         when(view.materials()).thenReturn(List.of(item));
         MaterialPlan plan = new MaterialPlan(List.of(new MaterialPlan.Entry(id("iron").toString(),
                 new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 1), MaterialPlan.Allocation.GRAPH, 0)));
-        try (var scope = RuntimeMaterialAccount.enter(account)) {
-            assertFalse(delegate.startOperation(OperationStartContext.chainReserved(player, new ExtractionLedger(),
-                    plan, List.of(new OperationStartContext.ReservedMaterial(id("iron").toString(),
-                            new ItemStack(Items.IRON_INGOT))), null)));
-        }
+        assertFalse(delegate.startOperation(OperationStartContext.chainReserved(player, ExtractionLedger.external(),
+                plan, List.of(new OperationStartContext.ReservedMaterial(id("iron").toString(),
+                        new ItemStack(Items.IRON_INGOT))), null)));
         invoke(delegate, "clearMachineState", new Class<?>[]{BlockEntity.class, ServerPlayer.class}, machine, player);
         assertEquals(400, tank.getFluidAmount());
         assertEquals(0, held());
@@ -462,10 +438,8 @@ class TaskFluidExecutionTest extends BootstrapTest {
         account.add(InkFluidSupport.token(water(1000)));
         ExternalIntegrationBatchDelegate delegate = delegate(1000);
         List<ReservedMaterial> reserved = new ArrayList<>();
-        try (var scope = RuntimeMaterialAccount.enter(account)) {
-            assertTrue((boolean) invoke(delegate, "reserveCustomFluids",
-                    new Class<?>[]{ServerPlayer.class, List.class}, player, reserved));
-        }
+        assertTrue((boolean) invoke(delegate, "reserveCustomFluids",
+                new Class<?>[]{ServerPlayer.class, List.class}, player, reserved));
         ReservedMaterialView materials = mock(ReservedMaterialView.class);
         when(materials.materials()).thenReturn(reserved);
         when(materials.find(WATER_INPUT.toString())).thenReturn(Optional.of(reserved.get(0)));
@@ -475,7 +449,7 @@ class TaskFluidExecutionTest extends BootstrapTest {
                 List.of(disposition(400, MaterialOutcome.RECOVERED), disposition(600, MaterialOutcome.CONSUMED)),
                 List.of(), List.of()));
         set(delegate, "runningOperation", operation);
-        set(delegate, "operationStartContext", OperationStartContext.chainReserved(player, new ExtractionLedger(),
+        set(delegate, "operationStartContext", OperationStartContext.chainReserved(player, ExtractionLedger.external(),
                 MaterialPlan.none(), List.of(), InputBufferPlan.none()).withOperationIdentity(UUID.randomUUID(), UUID.randomUUID(), 1));
         delegate.prepareCancellation(player, CancelReason.PLAYER_REQUEST);
         invoke(delegate, "clearCustomOperation", new Class<?>[]{ServerPlayer.class}, player);
@@ -503,10 +477,8 @@ class TaskFluidExecutionTest extends BootstrapTest {
                     1000, InputConsumption.consumed(), "fluid", null, true)));
             set(delegate, "recipeView", view);
             List<ReservedMaterial> reserved = new ArrayList<>();
-            try (var scope = RuntimeMaterialAccount.enter(account)) {
-                assertTrue((boolean) invoke(delegate, "reserveCustomFluids",
-                        new Class<?>[]{ServerPlayer.class, List.class}, player, reserved), mode.name());
-            }
+            assertTrue((boolean) invoke(delegate, "reserveCustomFluids",
+                    new Class<?>[]{ServerPlayer.class, List.class}, player, reserved), mode.name());
             assertEquals(fullTag, reserved.get(0).resource().identity());
             assertEquals(0, held());
         }
@@ -518,6 +490,7 @@ class TaskFluidExecutionTest extends BootstrapTest {
         constructor.setAccessible(true);
         ExternalIntegrationBatchDelegate delegate = constructor.newInstance((Object) null);
         delegate.setStorageEndpoint(endpoint);
+        delegate.setMaterialAccess(account.access);
         RecipeView view = mock(RecipeView.class);
         when(view.materials()).thenReturn(List.of());
         when(view.outputs()).thenReturn(List.of());
@@ -537,7 +510,7 @@ class TaskFluidExecutionTest extends BootstrapTest {
     }
 
     private TaskFluidAccess capture() {
-        try (var scope = RuntimeMaterialAccount.enter(account)) { return TaskFluidAccess.capture(player, endpoint); }
+        return account.access.fluids(player, endpoint);
     }
     private long held() { return account.heldMaterials().values().stream().mapToLong(Long::longValue).sum(); }
     private static FluidStack water(int amount) { return new FluidStack(Fluids.WATER, amount); }

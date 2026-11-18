@@ -124,12 +124,12 @@ public final class ElvenTradeBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean startSingleOperation(@Nonnull ServerPlayer player) {
         if (storageEndpoint() == null) return false;
-        List<ItemStack> materials = BotaniaDelegateSupport.extractAtomically(
+        List<ItemStack> materials = BotaniaDelegateSupport.extractAtomically(materialAccess(),
                 storageEndpoint(), player, recipeSlots());
         if (materials.isEmpty()) return false;
         requestedBatch = 1;
         if (start(materials)) return true;
-        BotaniaDelegateSupport.refund(storageEndpoint(), player, materials);
+        BotaniaDelegateSupport.refund(materialAccess(), storageEndpoint(), player, materials);
         return false;
     }
 

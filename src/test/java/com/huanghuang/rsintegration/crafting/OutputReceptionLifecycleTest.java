@@ -42,7 +42,7 @@ class OutputReceptionLifecycleTest extends BootstrapTest {
             return accepted;
         }).when(delegate).startSingleOperation(player);
         assertEquals(accepted, delegate.startOperation(OperationStartContext.delegateExtracted(
-                player, new ExtractionLedger())));
+                player, ExtractionLedger.external())));
         try (var session = delegate.outputReception()) {
             assertEquals(!accepted, session.closed());
             assertEquals(2, delegate.drainReceivedOutputs().get(0).getCount());

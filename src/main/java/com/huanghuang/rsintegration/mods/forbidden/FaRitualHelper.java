@@ -4,6 +4,7 @@ import java.lang.reflect.Field;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.MaterialAccess;
 import com.huanghuang.rsintegration.reflection.probes.FAReflection;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.util.Reflect;
@@ -643,7 +644,7 @@ public final class FaRitualHelper {
         public static final StarterResult EMPTY = new StarterResult(ItemStack.EMPTY, null);
     }
 
-    static StarterResult findRitualStarterItem(ServerPlayer player,
+    static StarterResult findRitualStarterItem(MaterialAccess access, ServerPlayer player,
                                                 @Nullable CraftStorageEndpoint endpoint) {
         if (FAReflection.ritualStarterItemClass == null) {
             RSIntegrationMod.LOGGER.warn(
@@ -652,7 +653,7 @@ public final class FaRitualHelper {
         }
 
         if (endpoint != null) {
-            var snapshot = endpoint.snapshot(player).snapshot().orElse(null);
+            var snapshot = access.snapshot(player, endpoint).snapshot().orElse(null);
             if (snapshot != null) {
                 for (var entry : snapshot.items()) {
                     ItemStack candidate = entry.stack();
@@ -660,8 +661,8 @@ public final class FaRitualHelper {
                     // canStartRitual() may call ItemStack#getOrCreateTag().
                     // Preserve the exact identity returned by RS for extraction.
                     ItemStack extractionTemplate = candidate.copyWithCount(1);
-                    ItemStack extracted = endpoint.extractExact(
-                                    player, extractionTemplate, 1, false)
+                    ItemStack extracted = access.extractExact(
+                                    player, endpoint, extractionTemplate, 1, false)
                             .extractedStacks().stream()
                             .findFirst().map(ItemStack::copy).orElse(ItemStack.EMPTY);
                     if (!extracted.isEmpty()) return new StarterResult(extracted, endpoint);
@@ -727,14 +728,14 @@ public final class FaRitualHelper {
      * is in creative mode.  If the item was extracted from RS, re-inserts
      * it after modifying durability.
      */
-    static void returnStarterToSource(ItemStack stack, ServerPlayer player,
+    static void returnStarterToSource(MaterialAccess access, ItemStack stack, ServerPlayer player,
                                       @Nullable CraftStorageEndpoint endpoint) {
         if (stack.isEmpty() || endpoint == null) return;
-        ItemStack leftover = endpoint.insert(player, stack, false).remainder().orElse(ItemStack.EMPTY);
+        ItemStack leftover = access.refund(player, endpoint, stack).remainder().orElse(stack);
         if (!leftover.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, leftover);
     }
 
-    static void consumeRitualStarterUse(ItemStack starterStack, ServerPlayer player,
+    static void consumeRitualStarterUse(MaterialAccess access, ItemStack starterStack, ServerPlayer player,
                                         @Nullable CraftStorageEndpoint endpoint) {
         if (starterStack.isEmpty()) return;
         if (!player.isCreative()) {
@@ -751,10 +752,7 @@ public final class FaRitualHelper {
                 RSIntegrationMod.LOGGER.warn("[RSI-FA] consume BD RitualStarterItem failed", e);
             }
         }
-        if (endpoint != null) {
-            ItemStack leftover = endpoint.insert(player, starterStack, false).remainder().orElse(ItemStack.EMPTY);
-            if (!leftover.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, leftover);
-        }
+        returnStarterToSource(access, starterStack, player, endpoint);
     }
 
     // ── Display ───────────────────────────────────────────────────

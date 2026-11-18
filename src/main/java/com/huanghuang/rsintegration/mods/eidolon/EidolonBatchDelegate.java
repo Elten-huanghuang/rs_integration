@@ -263,7 +263,7 @@ public final class EidolonBatchDelegate extends InstantBatchDelegate {
     @Override
     public boolean startSingleOperation(ServerPlayer player) {
         this.player = player;
-        this.ledger = new ExtractionLedger();
+        this.ledger = materialAccess().newLedger();
         if (storageEndpoint() == null) {
             setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
         }
@@ -311,7 +311,7 @@ public final class EidolonBatchDelegate extends InstantBatchDelegate {
 
         if (!boiling) return false;
         if (!hasWater) {
-            if (!EidolonWaterSupply.ensureWater(crucible, readWaterAmount(), storageEndpoint(), player)) return false;
+            if (!EidolonWaterSupply.ensureWater(materialAccess(), crucible, readWaterAmount(), storageEndpoint(), player)) return false;
         }
         if (!stepsEmpty) {
             try {
@@ -1005,7 +1005,7 @@ public final class EidolonBatchDelegate extends InstantBatchDelegate {
 
         if (!boiling) return false;
         if (!hasWater) {
-            if (!EidolonWaterSupply.ensureWater(crucible, readWaterAmount(), storageEndpoint(), player)) return false;
+            if (!EidolonWaterSupply.ensureWater(materialAccess(), crucible, readWaterAmount(), storageEndpoint(), player)) return false;
         }
         if (!stepsEmpty) {
             try {
@@ -1317,7 +1317,7 @@ public final class EidolonBatchDelegate extends InstantBatchDelegate {
         if (crucible == null) return true;
         int required = readWaterAmount();
         if (required <= 0) return true;
-        if (EidolonWaterSupply.ensureWater(crucible, required, storageEndpoint(), player)) return true;
+        if (EidolonWaterSupply.ensureWater(materialAccess(), crucible, required, storageEndpoint(), player)) return true;
         int current = readCurrentWaterAmount();
         player.sendSystemMessage(Component.translatable(
                 "rsi.eidolon.error.insufficient_water", current, required));

@@ -80,7 +80,7 @@ public final class BrewingStandBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean startSingleOperation(ServerPlayer player) {
         if (recipe == null || stand == null) return false;
-        this.ledger = new ExtractionLedger();
+        this.ledger = materialAccess().newLedger();
         if (storageEndpoint() == null) {
             setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, level.dimension(), pos).orElse(null));
         }

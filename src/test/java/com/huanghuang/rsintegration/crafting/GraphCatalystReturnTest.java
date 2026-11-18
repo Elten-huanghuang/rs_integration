@@ -517,7 +517,7 @@ class GraphCatalystReturnTest extends BootstrapTest {
             var step = new CraftingResolver.ResolutionStep(RECIPE, ModType.GENERIC,
                     new ResourceLocation("minecraft", "crafting"), List.of(), List.of(), false, executions);
             try (var utils = mockStatic(CraftPacketUtils.class, CALLS_REAL_METHODS);
-                 ExtractionLedger ledger = new ExtractionLedger()) {
+                 ExtractionLedger ledger = ExtractionLedger.external()) {
                 utils.when(() -> CraftPacketUtils.extractCraftingIngredientSpecs(recipe)).thenAnswer(call -> specs);
                 return FlatCraftExecutor.executeDetailed(List.of(step), player, inventory, ledger, false,
                         new FlatCraftExecutor.Context(level, CraftLogContext.create(player.getUUID(), RECIPE),

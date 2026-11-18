@@ -256,7 +256,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean startSingleOperation(ServerPlayer player) {
         this.player = player;
-        this.ledger = new ExtractionLedger();
+        this.ledger = materialAccess().newLedger();
         if (storageEndpoint() == null) {
             setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, myPos).orElse(null));
         }
@@ -797,7 +797,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
         if (starterFromEndpoint != null) {
             ItemStack source = starterFromEndpoint;
             ItemStack leftover = storageEndpoint() != null
-                    ? insertIntoStorage(player, source, false)
+                    ? refundMaterial(player, source)
                     : ItemStack.EMPTY;
             if (!leftover.isEmpty()) {
                 ItemHandlerHelper.giveItemToPlayer(player, leftover);
@@ -903,14 +903,14 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
     private void returnStarterToSource(ItemStack stack) {
         if (stack.isEmpty()) return;
         if (starterFromEndpoint != null && storageEndpoint() != null) {
-            FaRitualHelper.returnStarterToSource(stack, player, storageEndpoint());
+            FaRitualHelper.returnStarterToSource(materialAccess(), stack, player, storageEndpoint());
         }
         starterFromEndpoint = null;
     }
 
     private ItemStack findRitualStarterItem(ServerPlayer player) {
         FaRitualHelper.StarterResult result =
-                FaRitualHelper.findRitualStarterItem(player, storageEndpoint());
+                FaRitualHelper.findRitualStarterItem(materialAccess(), player, storageEndpoint());
         starterFromEndpoint = result.sourceEndpoint() != null ? result.stack() : null;
         return result.stack();
     }
@@ -920,7 +920,7 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
     }
 
     private void consumeRitualStarterUse(ItemStack starterStack, ServerPlayer player) {
-        FaRitualHelper.consumeRitualStarterUse(
+        FaRitualHelper.consumeRitualStarterUse(materialAccess(),
                 starterStack, player,
                 starterFromEndpoint != null ? storageEndpoint() : null);
         starterFromEndpoint = null;

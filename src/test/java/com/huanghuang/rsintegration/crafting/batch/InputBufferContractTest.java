@@ -139,7 +139,7 @@ class InputBufferContractTest extends BootstrapTest {
                 new IngredientSpec(Ingredient.of(Items.RAW_IRON), 1)));
 
         OperationStartContext context = OperationStartContext.chainReserved(
-                mock(ServerPlayer.class), new ExtractionLedger(), materials,
+                mock(ServerPlayer.class), ExtractionLedger.external(), materials,
                 List.of(new ReservedMaterial("slot:0", reserved)), contract.plan(63));
 
         assertTrue(context.buffered());

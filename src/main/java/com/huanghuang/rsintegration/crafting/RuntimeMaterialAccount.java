@@ -33,7 +33,6 @@ import java.util.UUID;
  * 不接管产物存储端点，也不承诺崩溃后的事务重放。
  */
 final class RuntimeMaterialAccount {
-    private static final ThreadLocal<RuntimeMaterialAccount> CURRENT = new ThreadLocal<>();
     private final UUID craftId;
     private final UUID playerId;
     private final MinecraftServer server;
@@ -54,18 +53,9 @@ final class RuntimeMaterialAccount {
         this.endpoint = endpoint;
     }
 
-    @Nullable static RuntimeMaterialAccount current() { return CURRENT.get(); }
-
     void setMaterialSources(MaterialSourceSelection sources) { materialSources = sources; }
 
-    /** 只在当前链的同步推进期间继承账户；嵌套开链和异常退出都会恢复原作用域。 */
-    static Scope enter(@Nullable RuntimeMaterialAccount account) {
-        RuntimeMaterialAccount previous = CURRENT.get();
-        if (account == null) CURRENT.remove(); else CURRENT.set(account);
-        return () -> { if (previous == null) CURRENT.remove(); else CURRENT.set(previous); };
-    }
-
-    interface Scope extends AutoCloseable { @Override void close(); }
+    final MaterialAccess access = new MaterialAccess(this);
 
     boolean belongsTo(ServerPlayer player) { return playerId.equals(player.getUUID()); }
     boolean usesEndpoint(@Nullable CraftStorageEndpoint candidate) {
@@ -161,7 +151,7 @@ final class RuntimeMaterialAccount {
 
     Map<StackKey, Long> available(ServerPlayer player) {
         Map<StackKey, Long> result = heldMaterials();
-        try (MaterialSourceSelection.Scope sources = materialSources.enter(); Scope ignored = enter(null)) {
+        try (MaterialSourceSelection.Scope sources = materialSources.enter()) {
             MaterialSources.listAllAvailableFresh(player, endpoint).forEach(
                     (key, amount) -> result.merge(key, amount, MaterialSources::saturatedAdd));
         }
@@ -180,11 +170,10 @@ final class RuntimeMaterialAccount {
         acquiring = true;
         ExtractionLedger acquisition;
         try (MaterialSourceSelection.Scope sources = materialSources.enter()) {
-            acquisition = new ExtractionLedger();
+            acquisition = ExtractionLedger.forAcquisition();
         }
-        acquisition.setExternalMaterialAccess();
         acquisition.setStorageEndpoint(endpoint);
-        try (Scope ignored = enter(null)) {
+        try {
             for (Ingredient ingredient : reusable) acquisition.preferResonanceFor(ingredient);
             for (Map.Entry<MaterialKey, Long> entry : missing.entrySet()) {
                 long remaining = entry.getValue();
@@ -389,108 +378,106 @@ final class RuntimeMaterialAccount {
         if (closed) return;
         closed = true;
         ServerPlayer online = server.getPlayerList().getPlayer(playerId);
-        try (Scope ignored = enter(null)) {
-            for (ExtractionLedger acquisition : acquisitions) {
-                if (!acquisition.isCommitted()) continue;
-                List<ItemStack> remaining = new ArrayList<>();
-                for (ItemStack original : acquisition.committedFragments()) {
-                    MaterialKey key = MaterialKey.of(original);
-                    int amount = (int) Math.min(original.getCount(), count(key));
-                    if (amount > 0) {
-                        remaining.add(original.copyWithCount(amount));
-                        if (InkFluidSupport.isToken(original)) {
-                            FluidStack fluid = InkFluidSupport.fluid(original);
-                            subtractFluid(TaskFluidKey.of(fluid), amount);
-                        } else {
-                            subtractItem(key, amount);
-                        }
-                    }
-                }
-                int previousUnknownTransfers = acquisition.uncertainMaterialTransfers().size();
-                acquisition.retainCommittedRefunds(remaining);
-                acquisition.refundCommittedToEndpoint(endpoint, online);
-                if (acquisition.hasUncertainTransfers()) {
-                    uncertain = true;
-                    List<ExtractionLedger.UncertainMaterialTransfer> transfers =
-                            acquisition.uncertainMaterialTransfers();
-                    for (int index = previousUnknownTransfers; index < transfers.size(); index++) {
-                        ExtractionLedger.UncertainMaterialTransfer transfer = transfers.get(index);
-                        recordUnknownStack(transfer.stack(), transfer.amount(), "准入材料退款结果不明");
-                    }
-                    if (transfers.isEmpty()) {
-                        recordUnknown(ResourceType.UNKNOWN, null, null, 0L,
-                                "准入材料退款结果不明");
+        for (ExtractionLedger acquisition : acquisitions) {
+            if (!acquisition.isCommitted()) continue;
+            List<ItemStack> remaining = new ArrayList<>();
+            for (ItemStack original : acquisition.committedFragments()) {
+                MaterialKey key = MaterialKey.of(original);
+                int amount = (int) Math.min(original.getCount(), count(key));
+                if (amount > 0) {
+                    remaining.add(original.copyWithCount(amount));
+                    if (InkFluidSupport.isToken(original)) {
+                        FluidStack fluid = InkFluidSupport.fluid(original);
+                        subtractFluid(TaskFluidKey.of(fluid), amount);
+                    } else {
+                        subtractItem(key, amount);
                     }
                 }
             }
-            // 无原始外部账本的部分来自图内产物，分别按资源类型退回。
-            boolean itemRecoveryRetained = false;
-            boolean fluidRecoveryRetained = false;
-            for (Map.Entry<MaterialKey, Long> entry : heldItems.entrySet()) {
-                long remaining = entry.getValue();
-                while (remaining > 0) {
-                    int amount = (int) Math.min(Integer.MAX_VALUE, remaining);
-                    ItemStack stack = entry.getKey().toStack(amount);
-                    if (endpoint != null && online != null) {
-                        try {
-                            StorageOperationResult receipt = CraftStorageEndpoint.insertInternal(endpoint, online, stack.copy(), false);
-                            stack = confirmedItemRemainder(receipt, stack);
-                        } catch (RuntimeException | LinkageError failure) {
-                            uncertain = true;
-                            recordUnknown(ResourceType.ITEM, stack, null, stack.getCount(),
-                                    "物品余料退回异常");
-                            RSIntegrationMod.LOGGER.error("[RSI-Materials] 任务 {} 余料退回结果不明", craftId, failure);
-                            stack = ItemStack.EMPTY;
-                        }
-                    }
-                    if (!stack.isEmpty()) {
-                        try {
-                            CraftItemRecovery.get(server).retain(playerId, stack);
-                            itemRecoveryRetained = true;
-                        } catch (RuntimeException | LinkageError failure) {
-                            uncertain = true;
-                            recordUnknown(ResourceType.ITEM, stack, null, stack.getCount(), "物品恢复队列写入失败");
-                            RSIntegrationMod.LOGGER.error("[RSI-Materials] 任务 {} 物品恢复记录失败", craftId, failure);
-                        }
-                    }
-                    remaining -= amount;
+            int previousUnknownTransfers = acquisition.uncertainMaterialTransfers().size();
+            acquisition.retainCommittedRefunds(remaining);
+            acquisition.refundCommittedToEndpoint(endpoint, online);
+            if (acquisition.hasUncertainTransfers()) {
+                uncertain = true;
+                List<ExtractionLedger.UncertainMaterialTransfer> transfers =
+                        acquisition.uncertainMaterialTransfers();
+                for (int index = previousUnknownTransfers; index < transfers.size(); index++) {
+                    ExtractionLedger.UncertainMaterialTransfer transfer = transfers.get(index);
+                    recordUnknownStack(transfer.stack(), transfer.amount(), "准入材料退款结果不明");
+                }
+                if (transfers.isEmpty()) {
+                    recordUnknown(ResourceType.UNKNOWN, null, null, 0L,
+                            "准入材料退款结果不明");
                 }
             }
-            heldItems.clear();
-            for (Map.Entry<TaskFluidKey, Long> entry : heldFluids.entrySet()) {
-                long remaining = entry.getValue();
-                while (remaining > 0L) {
-                    int amount = (int) Math.min(Integer.MAX_VALUE, remaining);
-                    FluidStack stack = entry.getKey().toStack(amount);
-                    if (endpoint != null && online != null && !stack.isEmpty()) {
-                        try {
-                            StorageFluidOperationResult receipt = CraftStorageEndpoint.insertFluidInternal(endpoint, online, stack.copy(), false);
-                            stack = confirmedFluidRemainder(receipt, stack);
-                        } catch (RuntimeException | LinkageError failure) {
-                            uncertain = true;
-                            recordUnknown(ResourceType.FLUID, null, stack, stack.getAmount(),
-                                    "流体余料退回异常");
-                            RSIntegrationMod.LOGGER.error("[RSI-Materials] 任务 {} 流体余料退回结果不明", craftId, failure);
-                            stack = FluidStack.EMPTY;
-                        }
-                    }
-                    if (!stack.isEmpty()) {
-                        try {
-                            FluidRecoveryStore recovery = FluidRecoveryStore.get(server);
-                            recovery.retainRaw(playerId, stack.writeToNBT(new CompoundTag()), null);
-                            fluidRecoveryRetained = true;
-                        } catch (RuntimeException | LinkageError failure) {
-                            uncertain = true;
-                            recordUnknown(ResourceType.FLUID, null, stack, stack.getAmount(), "流体恢复队列写入失败");
-                            RSIntegrationMod.LOGGER.error("[RSI-Materials] 任务 {} 流体恢复记录失败", craftId, failure);
-                        }
-                    }
-                    remaining -= amount;
-                }
-            }
-            heldFluids.clear();
-            if (online != null && itemRecoveryRetained) CraftItemRecovery.get(server).claim(online);
-            if (online != null && fluidRecoveryRetained) FluidRecoveryDelivery.claim(online);
         }
+        // 无原始外部账本的部分来自图内产物，分别按资源类型退回。
+        boolean itemRecoveryRetained = false;
+        boolean fluidRecoveryRetained = false;
+        for (Map.Entry<MaterialKey, Long> entry : heldItems.entrySet()) {
+            long remaining = entry.getValue();
+            while (remaining > 0) {
+                int amount = (int) Math.min(Integer.MAX_VALUE, remaining);
+                ItemStack stack = entry.getKey().toStack(amount);
+                if (endpoint != null && online != null) {
+                    try {
+                        StorageOperationResult receipt = CraftStorageEndpoint.insertInternal(endpoint, online, stack.copy(), false);
+                        stack = confirmedItemRemainder(receipt, stack);
+                    } catch (RuntimeException | LinkageError failure) {
+                        uncertain = true;
+                        recordUnknown(ResourceType.ITEM, stack, null, stack.getCount(),
+                                "物品余料退回异常");
+                        RSIntegrationMod.LOGGER.error("[RSI-Materials] 任务 {} 余料退回结果不明", craftId, failure);
+                        stack = ItemStack.EMPTY;
+                    }
+                }
+                if (!stack.isEmpty()) {
+                    try {
+                        CraftItemRecovery.get(server).retain(playerId, stack);
+                        itemRecoveryRetained = true;
+                    } catch (RuntimeException | LinkageError failure) {
+                        uncertain = true;
+                        recordUnknown(ResourceType.ITEM, stack, null, stack.getCount(), "物品恢复队列写入失败");
+                        RSIntegrationMod.LOGGER.error("[RSI-Materials] 任务 {} 物品恢复记录失败", craftId, failure);
+                    }
+                }
+                remaining -= amount;
+            }
+        }
+        heldItems.clear();
+        for (Map.Entry<TaskFluidKey, Long> entry : heldFluids.entrySet()) {
+            long remaining = entry.getValue();
+            while (remaining > 0L) {
+                int amount = (int) Math.min(Integer.MAX_VALUE, remaining);
+                FluidStack stack = entry.getKey().toStack(amount);
+                if (endpoint != null && online != null && !stack.isEmpty()) {
+                    try {
+                        StorageFluidOperationResult receipt = CraftStorageEndpoint.insertFluidInternal(endpoint, online, stack.copy(), false);
+                        stack = confirmedFluidRemainder(receipt, stack);
+                    } catch (RuntimeException | LinkageError failure) {
+                        uncertain = true;
+                        recordUnknown(ResourceType.FLUID, null, stack, stack.getAmount(),
+                                "流体余料退回异常");
+                        RSIntegrationMod.LOGGER.error("[RSI-Materials] 任务 {} 流体余料退回结果不明", craftId, failure);
+                        stack = FluidStack.EMPTY;
+                    }
+                }
+                if (!stack.isEmpty()) {
+                    try {
+                        FluidRecoveryStore recovery = FluidRecoveryStore.get(server);
+                        recovery.retainRaw(playerId, stack.writeToNBT(new CompoundTag()), null);
+                        fluidRecoveryRetained = true;
+                    } catch (RuntimeException | LinkageError failure) {
+                        uncertain = true;
+                        recordUnknown(ResourceType.FLUID, null, stack, stack.getAmount(), "流体恢复队列写入失败");
+                        RSIntegrationMod.LOGGER.error("[RSI-Materials] 任务 {} 流体恢复记录失败", craftId, failure);
+                    }
+                }
+                remaining -= amount;
+            }
+        }
+        heldFluids.clear();
+        if (online != null && itemRecoveryRetained) CraftItemRecovery.get(server).claim(online);
+        if (online != null && fluidRecoveryRetained) FluidRecoveryDelivery.claim(online);
     }
 }

@@ -122,7 +122,7 @@ class FluidContainerFlatExecutorTest extends BootstrapTest {
                 FluidContainerRecipe.TYPE_ID, List.of(), List.of(), false, executions);
         FlatCraftExecutor.Host host = mock(FlatCraftExecutor.Host.class);
         return FlatCraftExecutor.execute(List.of(step), mock(ServerPlayer.class), inventory,
-                new ExtractionLedger(), false, new FlatCraftExecutor.Context(level,
+                ExtractionLedger.external(), false, new FlatCraftExecutor.Context(level,
                         CraftLogContext.create(UUID.randomUUID(), recipe.getId()), List.of(step), null, host));
     }
 }

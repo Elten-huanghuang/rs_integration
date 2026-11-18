@@ -110,7 +110,7 @@ class GraphLedgerRecoveryContractTest extends BootstrapTest {
         RuntimeMaterialAccount account = (RuntimeMaterialAccount) field(fixture.chain, "materialAccount");
         assertTrue(account.ensure(Map.of(fixture.goldKey, 2L), List.of(), fixture.player));
         assertTrue(fixture.stock.isEmpty());
-        ExtractionLedger privateLedger = new ExtractionLedger();
+        ExtractionLedger privateLedger = account.access.newLedger();
         IBatchDelegate delegate = mock(IBatchDelegate.class);
         when(delegate.startOperation(any())).thenAnswer(call -> {
             assertTrue(fixture.stock.isEmpty(), "图内产物不能短暂进入公共库存供其他任务取走");
@@ -123,11 +123,9 @@ class GraphLedgerRecoveryContractTest extends BootstrapTest {
             privateLedger.refundCommittedToEndpoint(fixture.endpoint, fixture.player);
             return null;
         }).when(delegate).onBatchFailed(isNull(), anyString());
-        try (var ignored = RuntimeMaterialAccount.enter(account)) {
-            fixture.dispatchPrivate(delegate, new ExtractionLedger());
-            fixture.cleanupTwice();
-            assertTrue(fixture.stock.isEmpty(), "委托失败的退款也应先回任务账户");
-        }
+        fixture.dispatchPrivate(delegate, account.access.newLedger());
+        fixture.cleanupTwice();
+        assertTrue(fixture.stock.isEmpty(), "委托失败的退款也应先回任务账户");
         coordinator.release(fixture.chain.getCraftId());
         assertAmounts(List.of(tagged("first", 2), tagged("second", 3), gold(2)), fixture.stock);
         assertAmounts(List.of(tagged("first", 1)), fixture.broker.drainAvailableProducerAssets());
@@ -154,8 +152,8 @@ class GraphLedgerRecoveryContractTest extends BootstrapTest {
     void privateLedgerStartFailureDoesNotRefundExternalizedProducerClaimsTwice(
             FailurePoint failurePoint) throws Exception {
         Fixture fixture = new Fixture();
-        ExtractionLedger privateLedger = new ExtractionLedger();
-        ExtractionLedger nodeLedger = new ExtractionLedger();
+        ExtractionLedger privateLedger = ExtractionLedger.external();
+        ExtractionLedger nodeLedger = ExtractionLedger.external();
         IBatchDelegate delegate = mock(IBatchDelegate.class);
         when(delegate.startOperation(any())).thenAnswer(call -> {
             OperationStartContext context = call.getArgument(0);
@@ -222,7 +220,7 @@ class GraphLedgerRecoveryContractTest extends BootstrapTest {
     void sharedLedgerAndBrokerRefundOnlyTheirOwnPhysicallyRecoveredFragments(
             int recoveredProducerCount) throws Exception {
         Fixture fixture = new Fixture();
-        ExtractionLedger nodeLedger = new ExtractionLedger();
+        ExtractionLedger nodeLedger = ExtractionLedger.external();
         assertEquals(2, nodeLedger.reserveFromEndpoint(
                 GOLD, 2, fixture.endpoint, fixture.player).getCount());
         assertTrue(nodeLedger.commit(null, fixture.player));

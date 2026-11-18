@@ -117,7 +117,7 @@ public final class ApotheosisFletchingBatchDelegate extends InstantBatchDelegate
         List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.size() != INPUT_COUNT) return false;
 
-        ExtractionLedger privateLedger = new ExtractionLedger();
+        ExtractionLedger privateLedger = materialAccess().newLedger();
         this.ledger = privateLedger;
         this.usingSharedLedger = false;
         if (storageEndpoint() == null) {

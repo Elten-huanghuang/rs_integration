@@ -222,7 +222,7 @@ public final class NativeItemTaskSubmissionService {
     private static SubmissionResult submitTransaction(
             ItemTask task, TeamData data, ServerPlayer player,
             @Nullable CraftStorageEndpoint endpoint, int count, ItemStack display) {
-        try (ExtractionLedger ledger = new ExtractionLedger()) {
+        try (ExtractionLedger ledger = ExtractionLedger.external()) {
             ledger.setStorageEndpoint(endpoint);
             int mark = ledger.reservationMark();
             Ingredient ingredient = new ItemTaskIngredient(task, display);

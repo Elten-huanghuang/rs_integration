@@ -99,7 +99,7 @@ public abstract class ReflectiveMenuBatchDelegate extends InstantBatchDelegate {
     @Override public boolean startSingleOperation(@Nonnull ServerPlayer player) {
         List<IngredientSpec> specs = recipeSlots();
         if (specs == null || specs.size() > inputCount) return false;
-        ExtractionLedger privateLedger = new ExtractionLedger();
+        ExtractionLedger privateLedger = materialAccess().newLedger();
         this.ledger = privateLedger;
         this.usingSharedLedger = false;
         if (storageEndpoint() == null) {

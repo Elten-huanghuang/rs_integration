@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.eidolon;
 
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.MaterialAccess;
 import com.huanghuang.rsintegration.mods.common.MachineWaterSupply;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -40,22 +41,22 @@ public final class EidolonWaterSupply {
         }
     }
 
-    public static boolean ensureWater(BlockEntity crucible, int required,
+    public static boolean ensureWater(MaterialAccess access, BlockEntity crucible, int required,
                                       CraftStorageEndpoint endpoint, ServerPlayer player) {
         if (required <= 0) return true;
         IFluidHandler tank = crucible.getCapability(ForgeCapabilities.FLUID_HANDLER).resolve().orElse(null);
-        return ensureWater(tank, required, endpoint, player, crucible::setChanged);
+        return ensureWater(access, tank, required, endpoint, player, crucible::setChanged);
     }
 
-    static boolean ensureWater(IFluidHandler tank, int required, CraftStorageEndpoint endpoint,
-                               ServerPlayer player, Runnable changed) {
+    static boolean ensureWater(MaterialAccess access, IFluidHandler tank, int required, CraftStorageEndpoint endpoint,
+                                       ServerPlayer player, Runnable changed) {
         if (required <= 0) return true;
         if (tank == null || tank.getTanks() == 0) return false;
         FluidStack existing = tank.getFluidInTank(0);
         if (!existing.isEmpty() && existing.getFluid() != Fluids.WATER) return false;
         int missing = Math.max(0, Math.max(1000, required) - existing.getAmount());
         if (missing == 0) return true;
-        if (MachineWaterSupply.fill("eidolon_crucible", tank, missing, endpoint, player) != missing) return false;
+        if (MachineWaterSupply.fill(access, "eidolon_crucible", tank, missing, endpoint, player) != missing) return false;
         changed.run();
         return true;
     }
