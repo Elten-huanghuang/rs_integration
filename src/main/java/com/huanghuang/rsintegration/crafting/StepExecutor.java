@@ -22,7 +22,7 @@ import com.huanghuang.rsintegration.crafting.graph.OutputKind;
 import com.huanghuang.rsintegration.crafting.graph.OutputPortId;
 import com.huanghuang.rsintegration.crafting.graph.OutputProbability;
 import com.huanghuang.rsintegration.util.PerformanceMonitor;
-import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
+import com.huanghuang.rsintegration.mods.crockpot.CrockPotCategoryPlanning;
 import com.huanghuang.rsintegration.mods.goety.GoetyDynamicRitualRecipe;
 import com.huanghuang.rsintegration.mods.farmersdelight.MinersDelightCopperPotSupport;
 import com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler;
@@ -154,9 +154,13 @@ final class StepExecutor {
                 entry.modType(), specs, entry.recipe(), ctx.level.registryAccess());
         if (entry.modType() == ModType.byId("crockpot")
                 && CrockPotRecipeHandler.hasCategoryConstraints(entry.recipe())) {
-            List<IngredientSpec> categorySpecs = CrockPotBatchDelegate.buildCategoryPlanIngredients(
-                    entry.recipe(), ctx.storageEndpoint, ctx.player, ctx.level, null);
-            if (categorySpecs != null && !categorySpecs.isEmpty()) specs = categorySpecs;
+            specs = CrockPotCategoryPlanning.ingredients(CrockPotCategoryPlanning.capture(
+                    entry.recipe(), demandedOutput, ctx.counts, ctx.level, CrockPotRecipeHandler.INPUT_SLOT_COUNT));
+            if (specs == null) {
+                ctx.rollback();
+                edges.rollback();
+                return false;
+            }
         }
 
         // If the standard ingredient path returned garbage (AIR, bare items

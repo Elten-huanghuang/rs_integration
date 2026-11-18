@@ -60,7 +60,7 @@ class ConsumerCraftingRuntimeTest extends BootstrapTest {
             assertNull(handler.getIngredients(recipe));
 
             List<IngredientSpec> specs = ConsumerCraftingRuntime.typedPlanningIngredients(
-                    recipe, handler, player, Map.of(
+                    recipe, handler, player, new ItemStack(Items.COOKED_COD), Map.of(
                             new StackKey(Items.COD, null), 1L,
                             new StackKey(Items.STICK, null), 3L));
 
@@ -80,7 +80,7 @@ class ConsumerCraftingRuntimeTest extends BootstrapTest {
             var recipe = CrockPotTestFixtures.fishSticksRecipe();
 
             List<IngredientSpec> specs = ConsumerCraftingRuntime.typedPlanningIngredients(
-                    recipe, new CrockPotRecipeHandler(), player, Map.of(
+                    recipe, new CrockPotRecipeHandler(), player, new ItemStack(Items.COOKED_COD), Map.of(
                             new StackKey(Items.STICK, null), 64L,
                             new StackKey(Items.COD, null), 1L,
                             new StackKey(Items.CARROT, null), 2L));
@@ -100,7 +100,7 @@ class ConsumerCraftingRuntimeTest extends BootstrapTest {
             when(player.serverLevel()).thenReturn(mock(ServerLevel.class));
 
             assertNull(ConsumerCraftingRuntime.typedPlanningIngredients(
-                    CrockPotTestFixtures.fishSticksRecipe(), new CrockPotRecipeHandler(), player,
+                    CrockPotTestFixtures.fishSticksRecipe(), new CrockPotRecipeHandler(), player, new ItemStack(Items.COOKED_COD),
                     Map.of(new StackKey(Items.STICK, null), 64L)));
         }
     }
@@ -116,7 +116,7 @@ class ConsumerCraftingRuntimeTest extends BootstrapTest {
         when(handler.getPlanningIngredients(recipe, player, declared)).thenReturn(contextual);
 
         assertEquals(contextual, ConsumerCraftingRuntime.typedPlanningIngredients(
-                recipe, handler, player, Map.of()));
+                recipe, handler, player, ItemStack.EMPTY, Map.of()));
     }
 
     @Test

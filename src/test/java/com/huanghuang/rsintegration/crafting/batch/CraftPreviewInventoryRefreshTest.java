@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
+import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.crafting.plan.PlanStep;
 import com.huanghuang.rsintegration.crafting.plan.IntegrationDiagnostic;
 import com.huanghuang.rsintegration.crafting.plan.IntegrationDiagnosticCode;
 import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
@@ -31,6 +33,19 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class CraftPreviewInventoryRefreshTest extends BootstrapTest {
+    @Test
+    void crockPotTerminalAndNestedStepBothRequireFreshPreview() {
+        var type = mock(ModType.class);
+        when(type.id()).thenReturn("crockpot");
+        assertTrue(CraftPlanningApplicationService.requiresFreshPreview(type, null));
+        var step = mock(PlanStep.class);
+        when(step.modType()).thenReturn(type);
+        var plan = mock(PlanResponse.class);
+        when(plan.steps()).thenReturn(List.of(step));
+        assertTrue(CraftPlanningApplicationService.requiresFreshPreview(null, plan));
+        assertFalse(CraftPlanningApplicationService.requiresFreshPreview(null, null));
+    }
+
     @Test
     void liveGraphPublishesWithoutInventoryRevalidationOrRestart() {
         CraftPlanResultDispatcher.Sink destination = mock(CraftPlanResultDispatcher.Sink.class);

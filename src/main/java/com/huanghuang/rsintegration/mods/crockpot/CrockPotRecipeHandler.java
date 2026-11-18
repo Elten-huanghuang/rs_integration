@@ -74,6 +74,10 @@ public final class CrockPotRecipeHandler extends AbstractRecipeHandler {
 
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
+        return declaredOutput(recipe, access);
+    }
+
+    static ItemStack declaredOutput(Recipe<?> recipe, RegistryAccess access) {
         // CrockPotCookingRecipe exposes its real output through getResult();
         try {
             Method getResult = recipe.getClass().getMethod("getResult");

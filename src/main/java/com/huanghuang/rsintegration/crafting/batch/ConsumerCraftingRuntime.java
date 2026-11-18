@@ -76,7 +76,7 @@ import com.huanghuang.rsintegration.crafting.planning.PurePlanAdapter;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
-import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
+import com.huanghuang.rsintegration.mods.crockpot.CrockPotCategoryPlanning;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotFoodValues;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotRecipeHandler;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
@@ -1189,7 +1189,7 @@ public final class ConsumerCraftingRuntime {
             );
         }
         List<IngredientSpec> contextual = typedPlanningIngredients(
-                recipe, handler, player, session.capture.available);
+                recipe, handler, player, target, session.capture.available);
         if (contextual == null) {
             return unavailable(
                     key,
@@ -1507,11 +1507,11 @@ public final class ConsumerCraftingRuntime {
 
     @Nullable
     static List<IngredientSpec> typedPlanningIngredients(
-            Recipe<?> recipe, ModRecipeHandler handler, ServerPlayer player,
+            Recipe<?> recipe, ModRecipeHandler handler, ServerPlayer player, ItemStack target,
             Map<CraftingResolver.StackKey, Long> available) {
         if (CrockPotRecipeHandler.hasCategoryConstraints(recipe)) {
-            return CrockPotBatchDelegate.buildCategoryPlanIngredients(
-                    recipe, available, player.serverLevel(), CrockPotRecipeHandler.INPUT_SLOT_COUNT);
+            return CrockPotCategoryPlanning.ingredients(CrockPotCategoryPlanning.capture(
+                    recipe, target, available, player.serverLevel(), CrockPotRecipeHandler.INPUT_SLOT_COUNT));
         }
         List<IngredientSpec> declared = handler.getIngredients(recipe);
         return declared == null ? null

@@ -1,22 +1,17 @@
 package com.huanghuang.rsintegration.mods.crockpot;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.reflection.probes.CrockPotReflection;
-import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.level.Level;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Shared Crock Pot food-value logic used by both plan building and batch execution.
@@ -40,16 +35,7 @@ public final class CrockPotFoodValues {
     private static volatile Method fvGet;                // FoodValues.get(FoodCategory)
     private static volatile Method fvIsEmpty;            // FoodValues.isEmpty()
 
-    // Food values are static per-item data; a global cache survives across recipes and delegates.
-    private static final Map<Item, float[]> CACHE = new ConcurrentHashMap<>();
-
-    // Sentinel cached for items with an EMPTY FoodValues (non-food). Lets us skip
-    // re-running reflection for the same item while still reporting "not food" (null)
-    // to callers. Compared by identity, never returned.
-    private static final float[] NON_FOOD = new float[0];
-
-    /** One network item and how many are available for selection. */
-    public record Candidate(ItemStack stack, int available) {}
+    record Candidate(MaterialKey key, float[] values, boolean preferred) {}
 
     public static boolean isReady() {
         ensureReflection();
@@ -81,10 +67,6 @@ public final class CrockPotFoodValues {
     @Nullable
     public static float[] compute(ItemStack stack, Level level) {
         if (stack.isEmpty()) return null;
-        Item item = stack.getItem();
-        float[] cached = CACHE.get(item);
-        if (cached == NON_FOOD) return null;   // known non-food, skip reflection
-        if (cached != null) return cached;
         ensureReflection();
         if (getFoodValues == null || fvGet == null || categoryValues == null) return null;
         try {
@@ -100,14 +82,12 @@ public final class CrockPotFoodValues {
             // "neutral" filler and get auto-selected (e.g. an angler trophy accessory).
             // Treat empty as non-food so select()'s null-checks skip it entirely.
             if (fvIsEmpty != null && (boolean) fvIsEmpty.invoke(fv)) {
-                CACHE.put(item, NON_FOOD);
                 return null;
             }
             float[] result = new float[CAT];
             for (int i = 0; i < CAT; i++) {
                 result[i] = (float) fvGet.invoke(fv, categoryValues[i]);
             }
-            CACHE.put(item, result);
             return result;
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-CrockPot] computeFoodValues failed for {}",
@@ -116,21 +96,9 @@ public final class CrockPotFoodValues {
         }
     }
 
-    /** Sum the food values of a set of already-chosen stacks (count-aware). */
-    public static float[] combined(List<ItemStack> items, Level level) {
-        float[] total = new float[CAT];
-        for (ItemStack stack : items) {
-            float[] fv = compute(stack, level);
-            if (fv == null) continue;
-            int count = Math.max(1, stack.getCount());
-            for (int c = 0; c < CAT; c++) total[c] += fv[c] * count;
-        }
-        return total;
-    }
-
     /**
      * 选出恰好 {@code remaining} 个材料，与 {@code startFV} 合计后满足所有属性上下限。
-     * 此方法不消耗材料，实际取出由调用方负责。
+     * 只扣减当前分支的库存副本，实际取出由调用方负责。
      *
      * <p>先贪心选择能补足属性下限的食材，再优先用配置的填充物补位；填充物不可用时，
      * 选择属性影响最小且不突破上限的食材。烹饪锅必须填满四个输入槽才能开煮，
@@ -139,16 +107,12 @@ public final class CrockPotFoodValues {
      * @return 每组数量为 1 的已选材料；无法满足条件时返回 null。
      */
     @Nullable
-    public static List<ItemStack> select(float[] startFV, float[] catMins, float[] catMaxs,
-                                         int remaining, List<Candidate> candidates, Level level) {
-        if (!isReady() || remaining < 0) return null;
+    static List<ItemStack> select(float[] startFV, float[] catMins, float[] catMaxs,
+                                  int remaining, List<Candidate> candidates, Map<MaterialKey, Integer> avail) {
+        if (remaining < 0) return null;
 
         float[] current = Arrays.copyOf(startFV, CAT);
         if (breachesMax(current, catMaxs, new float[CAT])) return null;
-        Map<MaterialKey, Integer> avail = new HashMap<>();
-        for (Candidate c : candidates) {
-            avail.merge(MaterialKey.of(c.stack()), c.available(), Integer::sum);
-        }
 
         List<ItemStack> chosen = new ArrayList<>();
 
@@ -156,58 +120,53 @@ public final class CrockPotFoodValues {
         for (int r = 0; r < remaining; r++) {
             if (meetsMins(current, catMins)) break;
 
-            ItemStack best = ItemStack.EMPTY;
+            Candidate best = null;
             float bestScore = Float.NEGATIVE_INFINITY;
             for (Candidate cand : candidates) {
-                ItemStack stack = cand.stack();
-                if (stack.isEmpty() || avail.getOrDefault(MaterialKey.of(stack), 0) <= 0) continue;
-                float[] fv = compute(stack, level);
+                if (avail.getOrDefault(cand.key(), 0) <= 0) continue;
+                float[] fv = cand.values();
                 if (fv == null || !reducesDeficit(current, catMins, fv) || breachesMax(current, catMaxs, fv)) continue;
                 float score = deficitScore(current, catMins, fv);
-                if (score > bestScore) { bestScore = score; best = stack; }
+                if (score > bestScore) { bestScore = score; best = cand; }
             }
-            if (best.isEmpty()) return null; // no item can make progress toward a minimum
-
-            avail.merge(MaterialKey.of(best), -1, Integer::sum);
-            chosen.add(best.copyWithCount(1));
-            float[] fv = compute(best, level);
-            if (fv != null) for (int c = 0; c < CAT; c++) current[c] += fv[c];
+            if (best == null) return null;
+            take(best, avail, chosen, current);
         }
 
         if (!meetsMins(current, catMins)) return null;
         if (remaining == 0) return chosen;
 
         // 默认填充物也有食材属性，只有不突破配方上限时才能优先用于补位。
-        Ingredient preferredFiller = CrockPotRecipeHandler.resolveFillerIngredient();
         int slotsLeft = remaining - chosen.size();
         for (int r = 0; r < slotsLeft; r++) {
-            ItemStack best = ItemStack.EMPTY;
+            Candidate best = null;
             float bestImpact = Float.POSITIVE_INFINITY; // lower = more neutral
             boolean bestPreferred = false;
             for (Candidate cand : candidates) {
-                ItemStack stack = cand.stack();
-                if (stack.isEmpty() || avail.getOrDefault(MaterialKey.of(stack), 0) <= 0) continue;
-                float[] fv = compute(stack, level);
+                if (avail.getOrDefault(cand.key(), 0) <= 0) continue;
+                float[] fv = cand.values();
                 if (fv == null || breachesMax(current, catMaxs, fv)) continue;
                 float impact = foodValueMagnitude(fv);
-                boolean preferred = preferredFiller != null
-                        && IngredientMatcher.test(preferredFiller, stack);
-                if (best.isEmpty() || (preferred && !bestPreferred)
+                boolean preferred = cand.preferred();
+                if (best == null || (preferred && !bestPreferred)
                         || (preferred == bestPreferred && impact < bestImpact)) {
                     bestImpact = impact;
-                    best = stack;
+                    best = cand;
                     bestPreferred = preferred;
                 }
             }
-            if (best.isEmpty()) return null; // 四个输入槽未填满时不能开煮。
-
-            avail.merge(MaterialKey.of(best), -1, Integer::sum);
-            chosen.add(best.copyWithCount(1));
-            float[] fv = compute(best, level);
-            if (fv != null) for (int c = 0; c < CAT; c++) current[c] += fv[c];
+            if (best == null) return null;
+            take(best, avail, chosen, current);
         }
 
         return chosen;
+    }
+
+    private static void take(Candidate candidate, Map<MaterialKey, Integer> avail,
+                             List<ItemStack> chosen, float[] current) {
+        avail.merge(candidate.key(), -1, Integer::sum);
+        chosen.add(candidate.key().toStack(1));
+        for (int c = 0; c < CAT; c++) current[c] += candidate.values()[c];
     }
 
     private static boolean meetsMins(float[] current, float[] mins) {

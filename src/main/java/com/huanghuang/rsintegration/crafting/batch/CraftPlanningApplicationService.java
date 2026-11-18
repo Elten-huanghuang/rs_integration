@@ -12,7 +12,6 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.CraftPlanningRevision;
 import com.huanghuang.rsintegration.crafting.DirectMaterialAllocator;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
-import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.ExecutionEquivalence;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
@@ -59,6 +58,8 @@ import com.huanghuang.rsintegration.feature.ftbquests.QuestSubmissionTargetIds;
 import com.huanghuang.rsintegration.mods.aether.AetherFurnaceBatchDelegate;
 import com.huanghuang.rsintegration.mods.arsnouveau.ArsDynamicApparatusRecipe;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
+import com.huanghuang.rsintegration.mods.crockpot.CrockPotCategoryPlanning;
+import com.huanghuang.rsintegration.mods.crockpot.CrockPotInventory;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotRecipeHandler;
 import com.huanghuang.rsintegration.mods.embers.EmbersPlanInfo;
 import com.huanghuang.rsintegration.mods.farmersdelight.CookingPotBatchDelegate;
@@ -649,6 +650,7 @@ final class CraftPlanningApplicationService {
         List<ScaledIngredientSpec> recipeSpecs;
         ItemStack targetOutput;
         ModType recipeModType = previewModType;
+        CraftPlanStorageService.Context storageContext = null;
 
         // Arcane Iterator per-level chain: when the player clicks a level-N enchant
         // book (N>=2), the machine reaches it by leveling a book one step per craft
@@ -796,20 +798,14 @@ final class CraftPlanningApplicationService {
             }
             boolean crockCategory = CrockPotRecipeHandler.hasCategoryConstraints(recipe);
             if (crockCategory) {
-                // For any category-constrained recipe (pure or mixed), run
-                // the food-value-aware selection so the plan preview shows
-                // exactly the items the batch delegate will place — both
-                // specific MustContain ingredients and filler items.
-                ResourceKey<Level> cpDim = dim != null
-                        ? ResourceKey.create(Registries.DIMENSION, dim)
-                        : player.serverLevel().dimension();
-                BlockPos cpPos = pos != null ? pos : player.blockPosition();
-                CraftStorageEndpoint cpEndpoint = storageReference != null
-                        ? CraftStorageEndpoints.resolve(storageReference, player).orElse(null)
-                        : CraftPacketUtils.resolveEndpointForCraft(
-                                player, cpDim, cpPos).orElse(null);
-                specs = CrockPotBatchDelegate.buildCategoryPlanIngredients(
-                        recipe, cpEndpoint, player, player.serverLevel(), cpPos);
+                storageContext = CraftPlanStorageService.resolvePlanContext(player, dim, pos, recipeModType, storageReference);
+                if (storageContext.failed()) {
+                    sink.error(PlanOutcome.RUNTIME_UNAVAILABLE, IntegrationDiagnostic.error(storageContext.failure()));
+                    return;
+                }
+                var level = CraftPacketUtils.resolveLevel(player.server, dim, player);
+                specs = CrockPotCategoryPlanning.ingredients(CrockPotCategoryPlanning.capture(
+                        recipe, clickedOutput, storageContext.endpoint(), player, level, CrockPotInventory.planningSlots(level, pos)));
                 if (specs == null || specs.isEmpty()) {
                     sink.error(PlanOutcome.NO_RECIPE,
                             IntegrationDiagnostic.error(
@@ -927,9 +923,9 @@ final class CraftPlanningApplicationService {
                         Registries.DIMENSION, dim)
                 : player.serverLevel().dimension();
         BlockPos planLookupPos = pos != null ? pos : player.blockPosition();
-        CraftPlanStorageService.Context storageContext =
-                CraftPlanStorageService.resolvePlanContext(
-                        player, dim, pos, recipeModType, storageReference);
+        if (storageContext == null) {
+            storageContext = CraftPlanStorageService.resolvePlanContext(player, dim, pos, recipeModType, storageReference);
+        }
         if (storageContext.failed()) {
             sink.error(PlanOutcome.RUNTIME_UNAVAILABLE,
                     IntegrationDiagnostic.error(storageContext.failure()));
@@ -940,8 +936,8 @@ final class CraftPlanningApplicationService {
         List<StorageNetworkDescriptor> storageNetworks = storageContext.networks();
 
         PlanCache.Entry cached = CraftPlanningRuntime.planCache().get(cacheKey, System.nanoTime());
-        // 印模槽和祭坛材料属于机器实时状态，不能复用旧快照决定材料缺口。
-        if (machineInventoryAffectsPlan(previewModType, cached == null ? null : cached.plan())) {
+        // 新出现的食材也可能改变最优选料，只检查旧计划用过的材料不够。
+        if (requiresFreshPreview(previewModType, cached == null ? null : cached.plan())) {
             cached = null;
         }
         if (cached != null && cached.snapshot().preferences().equals(safePreferences)
@@ -1108,7 +1104,7 @@ final class CraftPlanningApplicationService {
                     planningSnapshot.availableItems(), demandMaxNodes,
                     reusableCatalystOutputIds, reusableCatalystRecipeIds, pureIncompatibleOutputIds);
             PlanCache.Entry previous = CraftPlanningRuntime.planCache().findForReplan(cacheKey);
-            if (previous != null && !machineInventoryAffectsPlan(previewModType, previous.plan())) {
+            if (previous != null && !requiresFreshPreview(previewModType, previous.plan())) {
                 routing = routing.withPreviousRoute(PlanningRouteHint.from(previous));
             }
             CraftPlanningRuntime.planRequests().submitRouted(planningSnapshot, routing, repeatCount, player.getServer()::execute,
@@ -2321,12 +2317,13 @@ final class CraftPlanningApplicationService {
                 responseGraphNodes, responseFeasible, planStartNanos, sink);
     }
 
-    private static boolean machineInventoryAffectsPlan(@Nullable ModType terminalType,
-                                                 @Nullable PlanResponse plan) {
+    static boolean requiresFreshPreview(@Nullable ModType terminalType, @Nullable PlanResponse plan) {
         if (terminalType != null && (ModIds.ID_EMBERS_STAMPER.equals(terminalType.id())
+                || "crockpot".equals(terminalType.id())
                 || ModIds.ID_SUMMONING_RITUALS.equals(terminalType.id()))) return true;
         return plan != null && plan.steps().stream().anyMatch(step ->
-                step.modType() != null && ModIds.ID_EMBERS_STAMPER.equals(step.modType().id()));
+                step.modType() != null && (ModIds.ID_EMBERS_STAMPER.equals(step.modType().id())
+                        || "crockpot".equals(step.modType().id())));
     }
 
     /** Projects each physical stack once so broad and exact-NBT demands cannot reuse it. */

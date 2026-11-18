@@ -15,7 +15,7 @@ import com.huanghuang.rsintegration.crafting.batch.RecipeAvailabilityChecker;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.feature.foodorder.network.FoodOrderListPacket;
-import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
+import com.huanghuang.rsintegration.mods.crockpot.CrockPotCategoryPlanning;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotFoodValues;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotRecipeHandler;
 import com.huanghuang.rsintegration.mods.historystages.HistoryStagesCompat;
@@ -261,7 +261,7 @@ public final class FoodOrderListService {
                 if (attempted++ >= maxRecipes) {
                     break;
                 }
-                Evaluation evaluation = evaluate(player, entry, available);
+                Evaluation evaluation = evaluate(player, entry, new ItemStack(food), available);
                 FoodOrderKind evaluated = evaluation.kind();
                 if (evaluated == FoodOrderKind.READY) {
                     kind = evaluated;
@@ -291,7 +291,7 @@ public final class FoodOrderListService {
     }
 
     private static Evaluation evaluate(ServerPlayer player,
-                                       RecipeIndex.Entry entry,
+                                       RecipeIndex.Entry entry, ItemStack target,
                                        Map<CraftingResolver.StackKey, Long> available) {
         Recipe<?> recipe = entry.recipe();
         if (recipe == null) {
@@ -312,8 +312,8 @@ public final class FoodOrderListService {
             }
             List<IngredientSpec> specs;
             if (crockCategory) {
-                specs = CrockPotBatchDelegate.buildCategoryPlanIngredients(
-                        recipe, available, player.serverLevel(), CrockPotRecipeHandler.INPUT_SLOT_COUNT);
+                specs = CrockPotCategoryPlanning.ingredients(CrockPotCategoryPlanning.capture(
+                        recipe, target, available, player.serverLevel(), CrockPotRecipeHandler.INPUT_SLOT_COUNT));
             } else if (recipe instanceof CraftingRecipe craftingRecipe) {
                 specs = CraftPacketUtils.extractCraftingIngredientSpecs(craftingRecipe);
             } else {

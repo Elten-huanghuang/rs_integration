@@ -24,7 +24,8 @@ import com.huanghuang.rsintegration.crafting.planning.PlanningPreferences;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.crafting.ScaledIngredientSpec;
 import com.huanghuang.rsintegration.mods.arsnouveau.ArsDynamicApparatusRecipe;
-import com.huanghuang.rsintegration.mods.crockpot.CrockPotBatchDelegate;
+import com.huanghuang.rsintegration.mods.crockpot.CrockPotCategoryPlanning;
+import com.huanghuang.rsintegration.mods.crockpot.CrockPotInventory;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotRecipeHandler;
 import com.huanghuang.rsintegration.mods.farmersdelight.MinersDelightCopperPotSupport;
 import com.huanghuang.rsintegration.mods.goety.GoetyBatchDelegate;
@@ -149,6 +150,17 @@ final class CraftExecutionRequestService {
 
     static int typedResolverBudgetMs(int resolveTimeoutMs) {
         return Math.max(1, resolveTimeoutMs);
+    }
+
+    @Nullable
+    private static List<IngredientSpec> crockPotInputs(Recipe<?> recipe, @Nullable ItemStack target,
+            @Nullable CraftStorageEndpoint endpoint, ServerPlayer player,
+            @Nullable ResourceLocation dimension, @Nullable BlockPos position) {
+        ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dimension, player);
+        var specs = CrockPotCategoryPlanning.ingredients(CrockPotCategoryPlanning.capture(
+                recipe, target, endpoint, player, level, CrockPotInventory.planningSlots(level, position)));
+        if (specs == null) player.sendSystemMessage(Component.translatable("rsi.crockpot.error.food_values"));
+        return specs;
     }
 
     private static boolean tryExecuteCachedCraftingPlan(
@@ -417,10 +429,7 @@ final class CraftExecutionRequestService {
                     specs, recipe, player.serverLevel().registryAccess());
         }
         if (specs == null || specs.isEmpty()) {
-            // CrockPot pure-category recipes carry no fixed ingredient list — the batch delegate
-            // selects items by food value at run time (Phase 2). Let these through with an empty
-            // spec list so they reach the machine dispatch below; the no-bound-machine guard still
-            // blocks genuinely unrunnable cases.
+            // 纯类别配方可没有固定原料，选定库存端点和机器后才能求解。
             if (!CrockPotRecipeHandler.hasCategoryConstraints(recipe)) {
                 player.sendSystemMessage(Component.translatable("rsi.generic.error.no_ingredients"));
                 return;
@@ -579,6 +588,10 @@ final class CraftExecutionRequestService {
             ItemStack preparationOutput = CraftMachineBindingSupport.routeRecipeOutput(modType,
                     ModRecipeHandlers.tryGetResultItem(
                             recipe, player.serverLevel().registryAccess()));
+            if (CrockPotRecipeHandler.hasCategoryConstraints(recipe)) {
+                specs = crockPotInputs(recipe, targetOutput, storageEndpoint, player, effectiveDim, effectivePos);
+                if (specs == null) return;
+            }
             List<ScaledIngredientSpec> preparationSpecs =
                     CraftIngredientPlanMath.scaleTerminalIngredientSpecs(
                     recipe, specs, preparationOutput, repeatCount);
@@ -624,18 +637,8 @@ final class CraftExecutionRequestService {
             if (modType != null) {
                 List<IngredientSpec> executionSpecs = specs;
                 if (CrockPotRecipeHandler.hasCategoryConstraints(recipe)) {
-                    ServerLevel crockPotLevel = CraftPacketUtils.resolveLevel(
-                            player.server, effectiveDim, player);
-                    // 使用请求已经选定的端点，避免类别解析重新选择其他后端。
-                    List<IngredientSpec> categorySpecs =
-                            CrockPotBatchDelegate.buildCategoryPlanIngredients(
-                                    recipe, storageEndpoint, player, crockPotLevel, effectivePos);
-                    if (categorySpecs == null || categorySpecs.isEmpty()) {
-                        player.sendSystemMessage(Component.translatable(
-                                "rsi.crockpot.error.food_values"));
-                        return;
-                    }
-                    executionSpecs = categorySpecs;
+                    executionSpecs = crockPotInputs(recipe, targetOutput, storageEndpoint, player, effectiveDim, effectivePos);
+                    if (executionSpecs == null) return;
                 }
                 // The terminal executes repeatCount times, so its input DAG must
                 // cover the complete batch so every terminal run has a planned
