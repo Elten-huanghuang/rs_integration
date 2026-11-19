@@ -5,11 +5,13 @@ import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.AnnotationNode;
 import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 
 import java.io.InputStream;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.zip.ZipFile;
 
@@ -28,14 +30,18 @@ class MagnetUpgradeCompatibilityTest {
     private static final String GROUP = "Lorg/spongepowered/asm/mixin/injection/Group;";
     private static final String CALLBACK =
             "Lorg/spongepowered/asm/mixin/injection/callback/CallbackInfoReturnable;";
+    private static final String WRAP_OPERATION =
+            "Lcom/llamalad7/mixinextras/injector/wrapoperation/WrapOperation;";
+    private static final String DRAGON_EGG_COLLECTOR =
+            "com/huanghuang/rsintegration/mods/sophisticatedbackpacks/RSMagnetDragonEggCollector";
 
     @Test
-    void legacyCoreHasMatchingHeadAndReturnCallbacks() throws Exception {
+    void legacyCoreHasMatchingMagnetHooks() throws Exception {
         verifyCallbacks(Path.of("libs/sophisticatedcore-1.20.1-1.2.55.975.jar"), 1);
     }
 
     @Test
-    void installedCoreHasMatchingHeadAndReturnCallbacks() throws Exception {
+    void installedCoreHasMatchingMagnetHooks() throws Exception {
         String configured = System.getProperty("rsintegration.sophisticatedcore.compatibilityJar");
         assumeTrue(configured != null && !configured.isBlank());
         verifyCallbacks(Path.of(configured), 0);
@@ -102,10 +108,30 @@ class MagnetUpgradeCompatibilityTest {
             }
             assertEquals(1, matching.size(), jarPath + ": " + site);
         }
-        assertTrue(target.methods.stream().anyMatch(method -> method.name.equals("pickupItems")
-                && method.desc.equals("(Lnet/minecraft/world/entity/Entity;"
-                + "Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;)I")),
-                "磁铁的玩家上下文包装入口必须保持有效");
+        verifySharedPickupHook(target, mixin);
+    }
+
+    private static void verifySharedPickupHook(ClassNode target, ClassNode mixin) {
+        MethodNode hook = mixin.methods.stream()
+                .filter(method -> annotation(method, WRAP_OPERATION) != null)
+                .findFirst().orElseThrow();
+        AnnotationNode wrap = annotation(hook, WRAP_OPERATION);
+        List<?> methods = (List<?>) value(wrap, "method");
+        List<?> locations = (List<?>) value(wrap, "at");
+        List<Object> wrappedCalls = locations.stream().map(AnnotationNode.class::cast)
+                .map(at -> value(at, "target")).toList();
+        long matchingCalls = target.methods.stream()
+                .filter(method -> methods.contains(method.name))
+                .flatMap(method -> Arrays.stream(method.instructions.toArray()))
+                .filter(instruction -> instruction instanceof MethodInsnNode call
+                        && wrappedCalls.contains("L" + call.owner + ";" + call.name + call.desc))
+                .count();
+        assertEquals(1, matchingCalls, "龙蛋转换需要接在共用的物品吸取调用上");
+
+        assertTrue(Arrays.stream(hook.instructions.toArray())
+                .anyMatch(instruction -> instruction instanceof MethodInsnNode call
+                        && DRAGON_EGG_COLLECTOR.equals(call.owner) && "collect".equals(call.name)),
+                "共用入口必须转换龙蛋");
     }
 
     private static ClassNode read(InputStream input) throws Exception {

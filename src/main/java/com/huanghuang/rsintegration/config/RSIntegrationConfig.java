@@ -260,6 +260,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.BooleanValue ENABLE_FTB_QUEST_EXTERNAL_ITEM_PROGRESS;
     public static ForgeConfigSpec.BooleanValue ENABLE_FTB_QUEST_CHECKMARK_BUTTON;
     public static ForgeConfigSpec.BooleanValue ENABLE_FTB_QUEST_STORAGE_SCAN_BUTTON;
+    public static ForgeConfigSpec.BooleanValue ENABLE_MAGNET_DRAGON_EGG;
     public static ForgeConfigSpec.BooleanValue ENABLE_JEI;
     public static ForgeConfigSpec.BooleanValue ENABLE_JEI_NETWORK_OVERLAY;
     public static ForgeConfigSpec.BooleanValue ENABLE_JEI_CRAFTING_SHORTAGE_OVERLAY;
@@ -951,6 +952,10 @@ public final class RSIntegrationConfig {
                 .comment("书签匹配时锁定村民交易",
                         "当前村民交易结果已在 JEI 收藏时锁定交易刷新；支持 Retraining 和 Trade Cycling。")
                 .define("enableVillagerTradeLock", true);
+        ENABLE_MAGNET_DRAGON_EGG = s
+                .comment("启用普通、高级和次元磁铁升级采集龙蛋",
+                        "磁铁会将范围内、符合物品过滤器的原版龙蛋方块转为掉落物，遵循玩家破坏权限。")
+                .define("enableMagnetDragonEgg", true);
         FTB_QUEST_CHECKMARK_BLACKLIST = s
                 .comment("FTB 任务批量确认黑名单",
                         "使用任务节点的十六进制 ID，不加 0x，不能使用内部子任务 ID；仅排除批量确认，仍可手动确认。")

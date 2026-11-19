@@ -2,7 +2,9 @@ package com.huanghuang.rsintegration.mixin.sophisticatedbackpacks;
 
 import java.lang.reflect.Method;
 
+import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.sophisticatedbackpacks.BackpackOperationOwner;
+import com.huanghuang.rsintegration.mods.sophisticatedbackpacks.RSMagnetDragonEggCollector;
 import com.huanghuang.rsintegration.mods.sophisticatedbackpacks.StorageBackpackUtils;
 import com.huanghuang.rsintegration.crafting.CraftOutputInterceptor;
 import com.mojang.authlib.GameProfile;
@@ -19,6 +21,7 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
@@ -43,6 +46,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import net.minecraftforge.common.util.FakePlayer;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.List;
 import java.util.Optional;
@@ -72,6 +76,8 @@ public abstract class MagnetUpgradeWrapperMixin
     private boolean rsi$operationOwnerResolved;
     @Unique
     private ServerPlayer rsi$placedBackpackPlayer;
+    @Unique
+    private RSMagnetDragonEggCollector rsi$dragonEggCollector;
 
     @Unique
     private static boolean rsi$isDebrisEntity(Entity e) {
@@ -189,10 +195,23 @@ public abstract class MagnetUpgradeWrapperMixin
             remap = false)
     private int rsi$withPlayerContext(MagnetUpgradeWrapper instance, Entity entity,
                                       Level level, BlockPos pos, Operation<Integer> original) {
-        AABB scanArea = new AABB(pos).inflate(this.upgradeItem.getRadius());
+        int radius = this.upgradeItem.getRadius();
+        AABB scanArea = new AABB(pos).inflate(radius);
         if (CraftOutputInterceptor.intersectsActiveZone(level, scanArea)) return 0;
+        ServerLevel serverLevel = level instanceof ServerLevel server ? server : null;
+        boolean collectDragonEgg = serverLevel != null && isEnabled()
+                && RSIntegrationConfig.enabled(RSIntegrationConfig.SERVER_SPEC,
+                        RSIntegrationConfig.ENABLE_MAGNET_DRAGON_EGG)
+                && rsi$isBackpackMagnet();
+        boolean needsPlacedPlayer = this.rsi$storageReference != null || (collectDragonEgg && entity == null);
         ServerPlayer player = entity instanceof ServerPlayer serverPlayer ? serverPlayer
-                : rsi$getPlacedBackpackPlayer(level, pos);
+                : needsPlacedPlayer ? rsi$getPlacedBackpackPlayer(level, pos) : null;
+        if (collectDragonEgg && player != null) {
+            if (this.rsi$dragonEggCollector == null) {
+                this.rsi$dragonEggCollector = new RSMagnetDragonEggCollector();
+            }
+            this.rsi$dragonEggCollector.collect(serverLevel, pos, radius, player, this.getFilterLogic());
+        }
         return StorageCacheChangeBatch.call(() -> {
             if (player == null) return original.call(instance, entity, level, pos);
             try (RsOperationPlayerContext.Scope ignored = RsOperationPlayerContext.push(player)) {
@@ -202,10 +221,21 @@ public abstract class MagnetUpgradeWrapperMixin
     }
 
     @Unique
+    private boolean rsi$isBackpackMagnet() {
+        ResourceLocation id = ForgeRegistries.ITEMS.getKey(this.upgradeItem);
+        if (id == null) return false;
+        if ("sophisticatedbackpacks".equals(id.getNamespace())) {
+            return "magnet_upgrade".equals(id.getPath()) || "advanced_magnet_upgrade".equals(id.getPath());
+        }
+        return RSIntegrationMod.MOD_ID.equals(id.getNamespace()) && "rs_magnet_upgrade".equals(id.getPath());
+    }
+
+    @Unique
     private ServerPlayer rsi$getPlacedBackpackPlayer(Level level, BlockPos pos) {
-        if (this.rsi$storageReference == null || level.getServer() == null) return null;
+        if (level.getServer() == null) return null;
         if (this.rsi$placedBackpackPlayer != null
                 && this.rsi$placedBackpackPlayer.serverLevel() == level) {
+            this.rsi$placedBackpackPlayer.setPos(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
             return this.rsi$placedBackpackPlayer;
         }
         if (!this.rsi$operationOwnerResolved) {
