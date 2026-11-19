@@ -14,6 +14,8 @@ import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.Test;
 
 import java.io.InputStreamReader;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -24,6 +26,13 @@ import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.mock;
 
 class MalumSpiritMatchingTest extends BootstrapTest {
+    @Test
+    void staticAltarSpiritHelperMeetsMixinLoadingVisibilityRules() throws Exception {
+        Method helper = extraAltarSpiritsHelper();
+        assertTrue(Modifier.isStatic(helper.getModifiers()));
+        assertTrue(Modifier.isPrivate(helper.getModifiers()));
+    }
+
     @Test
     void singleSpiritRecipesDoNotShadowMultiSpiritCrucibleRecipes() throws Exception {
         Map<String, Item> testSpirits = Map.of(
@@ -65,8 +74,21 @@ class MalumSpiritMatchingTest extends BootstrapTest {
     }
 
     private static boolean matches(AbstractSpiritListMalumRecipe recipe, List<ItemStack> spirits) {
-        return recipe.doSpiritsMatch(spirits)
-                || AbstractSpiritListMalumRecipeMixin.rsi$acceptsExtraAltarSpirits(recipe, spirits);
+        if (recipe.doSpiritsMatch(spirits)) {
+            return true;
+        }
+        try {
+            Method helper = extraAltarSpiritsHelper();
+            helper.setAccessible(true);
+            return (boolean) helper.invoke(null, recipe, spirits);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError(e);
+        }
+    }
+
+    private static Method extraAltarSpiritsHelper() throws NoSuchMethodException {
+        return AbstractSpiritListMalumRecipeMixin.class.getDeclaredMethod(
+                "rsi$acceptsExtraAltarSpirits", AbstractSpiritListMalumRecipe.class, List.class);
     }
 
     private static JsonObject crucibleRecipe(String name) throws Exception {

@@ -23,7 +23,7 @@ public class AbstractSpiritListMalumRecipeMixin {
     }
 
     @Unique
-    static boolean rsi$acceptsExtraAltarSpirits(AbstractSpiritListMalumRecipe recipe, List<ItemStack> offered) {
+    private static boolean rsi$acceptsExtraAltarSpirits(AbstractSpiritListMalumRecipe recipe, List<ItemStack> offered) {
         // 只放宽祭坛的匹配；坩埚必须用精魂种类区分共用促符的配方。
         return recipe instanceof SpiritInfusionRecipe && offered.size() > recipe.spirits.size()
                 && recipe.getSortedSpirits(offered).size() == recipe.spirits.size();
