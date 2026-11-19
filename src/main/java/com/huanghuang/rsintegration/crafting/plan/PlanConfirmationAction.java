@@ -16,6 +16,12 @@ enum PlanConfirmationAction {
         this.replan = replan;
     }
 
+    static PlanConfirmationAction forPlan(PlanResponse plan, PreviewInventoryModel.Status status) {
+        PlanConfirmationAction action = forInventory(status);
+        if (plan.requiresMaterialReplan() && !action.replan) return COMPLETE_ROUTE;
+        return action;
+    }
+
     static PlanConfirmationAction forInventory(PreviewInventoryModel.Status status) {
         if (status == null) return CONFIRM;
         return switch (status) {

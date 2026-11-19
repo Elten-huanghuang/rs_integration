@@ -95,8 +95,8 @@ class MaterialRecipeOptionsTest extends BootstrapTest {
                 ScaledIngredientSpec.of(new IngredientSpec(Ingredient.of(shards), 4), 4),
                 ScaledIngredientSpec.of(new IngredientSpec(
                         Ingredient.of(pickaxe), 1, DemandRole.DURABILITY), 1));
-        Map<StackKey, Long> stock = Map.of(new StackKey(Items.AMETHYST_SHARD, null), 20L,
-                new StackKey(Items.IRON_PICKAXE, null), 1L);
+        Map<StackKey, Long> stock = Map.of(StackKey.of(shards, true), 20L,
+                StackKey.of(pickaxe, true), 1L);
         PlanGraphView graph = PlanGraphView.from(CraftIngredientPlanMath.directTerminalInputGraph(
                 specs, DirectMaterialAllocator.allocateScaled(specs, stock)));
         CuttingBoardRecipe cutting = new CuttingBoardRecipe(

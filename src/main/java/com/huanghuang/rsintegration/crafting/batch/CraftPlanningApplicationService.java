@@ -276,7 +276,7 @@ final class CraftPlanningApplicationService {
                     recipeId, confirmedPreviewRequestId, mismatch, repeatCount, forcedRecipes,
                     modType == null ? "generic" : modType.id(),
                     targetOutput == null ? null : targetOutput.getTag());
-            return new ExecutionPlanLookup(null, true);
+            return ExecutionPlanLookup.invalid();
         }
         boolean semanticLease = false;
         if (!explicitPreview && entry == null && materialLocks.isEmpty()) {
@@ -289,28 +289,37 @@ final class CraftPlanningApplicationService {
             }
         }
         if (entry == null) {
-            return new ExecutionPlanLookup(null, false);
+            return new ExecutionPlanLookup(null, null);
         }
         ResourceKey<Level> levelKey = dimension != null
                 ? ResourceKey.create(Registries.DIMENSION, dimension)
                 : player.serverLevel().dimension();
         BlockPos lookupPos = position != null ? position : player.blockPosition();
-        boolean valid = entry.snapshot().preferences().materialSources()
-                .equals(MaterialSourceSelection.current())
-                && CraftPlanDecisionRules.canExecuteCachedPlan(
-                entry.plan(), entry.resolvedGraph())
-                && PlanningStateValidator.revalidateForExecution(
-                player, entry.snapshot(), entry.plan(),
-                levelKey, lookupPos, storageReference);
-        if (!valid) return new ExecutionPlanLookup(null, true);
+        if (!entry.snapshot().preferences().materialSources().equals(MaterialSourceSelection.current())) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-Generic] Rejected execution: recipeId={} reason=material-sources-changed", recipeId);
+            return ExecutionPlanLookup.invalid();
+        }
+        if (!CraftPlanDecisionRules.canExecuteCachedPlan(entry.plan(), entry.resolvedGraph())) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RSI-Generic] Rejected execution: recipeId={} reason=preview-not-executable outcome={}",
+                    recipeId, entry.plan().outcome());
+            return entry.plan().requiresMaterialReplan()
+                    ? new ExecutionPlanLookup(null, "rsi.plan.failure.confirmation_needs_replan")
+                    : ExecutionPlanLookup.invalid();
+        }
+        if (!PlanningStateValidator.revalidateForExecution(
+                player, entry.snapshot(), entry.plan(), levelKey, lookupPos, storageReference)) {
+            return ExecutionPlanLookup.invalid();
+        }
         boolean consumed = explicitPreview
                 ? cache.consumeForRequest(player.getUUID(), confirmedPreviewRequestId, entry)
                 : semanticLease
                 ? cache.consumeLatestForExecution(player.getUUID(), entry)
                 : cache.consumeForExecution(exactKey, entry);
         return consumed
-                ? new ExecutionPlanLookup(entry, false)
-                : new ExecutionPlanLookup(null, true);
+                ? new ExecutionPlanLookup(entry, null)
+                : ExecutionPlanLookup.invalid();
     }
 
     static boolean matchesExecutionLease(
@@ -485,7 +494,15 @@ final class CraftPlanningApplicationService {
                 || ModIds.ID_EMBERS_ALCHEMY.equals(node.modTypeId());
     }
 
-    record ExecutionPlanLookup(@Nullable PlanCache.Entry entry, boolean rejected) {}
+    record ExecutionPlanLookup(@Nullable PlanCache.Entry entry, @Nullable String rejectionKey) {
+        boolean rejected() {
+            return rejectionKey != null;
+        }
+
+        static ExecutionPlanLookup invalid() {
+            return new ExecutionPlanLookup(null, "rsi.plan.failure.confirmation_invalid");
+        }
+    }
     private static void recordMissingMaterial(
             List<String> missing,
             ImmutableRecipeGraph.IngredientRef unresolved) {
@@ -1162,8 +1179,9 @@ final class CraftPlanningApplicationService {
         List<StorageNetworkDescriptor> storageNetworks = storageContext.networks();
 
         PlanCache.Entry cached = CraftPlanningRuntime.planCache().get(cacheKey, System.nanoTime());
-        // 新出现的食材也可能改变最优选料，只检查旧计划用过的材料不够。
-        if (requiresFreshPreview(previewModType, cached == null ? null : cached.plan())) {
+        // 失败的预览只供展示或提供路线提示，重新请求时必须从新库存再求解。
+        boolean freshPreview = requiresFreshPreview(previewModType, cached == null ? null : cached.plan());
+        if (freshPreview) {
             cached = null;
         }
         if (cached != null && cached.snapshot().preferences().equals(safePreferences)
@@ -1195,7 +1213,9 @@ final class CraftPlanningApplicationService {
         } else {
             long snapshotStarted = System.nanoTime();
             try {
-                available = MaterialSources.listAllAvailable(player, planningEndpoint);
+                available = freshPreview
+                        ? MaterialSources.listAllAvailableFresh(player, planningEndpoint)
+                        : MaterialSources.listAllAvailable(player, planningEndpoint);
                 boolean backgroundProjectable = RecipeIndex.isBackgroundProjectable(recipe);
                 boolean projectable = recipe instanceof CraftingRecipe || backgroundProjectable;
                 var level = player.serverLevel();
@@ -1351,7 +1371,7 @@ final class CraftPlanningApplicationService {
                     planningSnapshot.availableItems(), demandMaxNodes,
                     reusableCatalystOutputIds, reusableCatalystRecipeIds, pureIncompatibleOutputIds);
             PlanCache.Entry previous = CraftPlanningRuntime.planCache().findForReplan(cacheKey);
-            if (previous != null && !requiresFreshPreview(previewModType, previous.plan())) {
+            if (previous != null && !requiresContextualPreview(previewModType, previous.plan())) {
                 routing = routing.withPreviousRoute(PlanningRouteHint.from(previous));
             }
             CraftPlanningRuntime.planRequests().submitRouted(planningSnapshot, routing, repeatCount, player.getServer()::execute,
@@ -2563,6 +2583,10 @@ final class CraftPlanningApplicationService {
     }
 
     static boolean requiresFreshPreview(@Nullable ModType terminalType, @Nullable PlanResponse plan) {
+        return plan != null && !plan.canConfirmExecution() || requiresContextualPreview(terminalType, plan);
+    }
+
+    private static boolean requiresContextualPreview(@Nullable ModType terminalType, @Nullable PlanResponse plan) {
         if (terminalType != null && (ModIds.ID_EMBERS_STAMPER.equals(terminalType.id())
                 || "crockpot".equals(terminalType.id())
                 || ModIds.ID_SUMMONING_RITUALS.equals(terminalType.id()))) return true;

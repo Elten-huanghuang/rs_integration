@@ -322,6 +322,9 @@ dependencies {
     testImplementation fg.deobf("local:ironfurnaces:${ironFurnacesTestVersion}")
     // 原生沸腾配方会调用 Minecraft 方法，测试依赖必须实际完成名称映射。
     testImplementation fg.deobf('local:embersrekindled:1.20.1-1.3.9')
+    // 使用 Malum 的原生精魂匹配和配方数据验证祭坛与坩埚的隔离。
+    testImplementation fg.deobf('local.compile:malum-1.20.1-1.6.6:local')
+    testImplementation fg.deobf('local.compile:lodestone-1.20.1-1.6.4.1:local')
     testImplementation fg.deobf('local:aetherworks:1.20.1-1.1.2')
     testImplementation fg.deobf('local:until_eternity:1.2.0-all')
     testImplementation fg.deobf('local:tacz:1.20.1-1.1.4-hotfix-all')
@@ -419,6 +422,9 @@ tasks.register('packPlanningReplay', JavaExec) {
     maxHeapSize = '2g'
     args providers.gradleProperty('packPlanningPath').getOrElse(''), file('src/benchmark/scripts/pack-recipes.cjs')
     args providers.gradleProperty('packPlanningTyped').getOrElse('false')
+    systemProperty 'rsi.replay.maxSteps', providers.gradleProperty('packPlanningMaxSteps').getOrElse('4096')
+    systemProperty 'rsi.replay.activeMs', providers.gradleProperty('packPlanningActiveMs').getOrElse('4000')
+    systemProperty 'rsi.replay.restock', providers.gradleProperty('packPlanningRestock').getOrElse('false')
 }
 
 tasks.register('diskLimitCheck', JavaExec) {

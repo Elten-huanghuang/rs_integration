@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.plan.IntegrationDiagnostic;
 import com.huanghuang.rsintegration.crafting.plan.IntegrationDiagnosticCode;
 import com.huanghuang.rsintegration.crafting.plan.PlanOutcome;
@@ -46,6 +47,7 @@ final class CraftPlanResultDispatcher {
             public void success(PlanResponse plan, PlanningSnapshot snapshot) {
                 if (!gate.tryEnterTerminal(previewGeneration)) return;
                 RESULT_GATES.remove(key, gate);
+                logIncomplete(plan, requestId, previewGeneration);
                 PlanningProgressServer.succeed(player, previewGeneration);
                 CraftPlanningRuntime.planCache().retainForRequest(player.getUUID(), requestId, snapshot);
                 PlanResponsePublisher.send(player, plan, requestId);
@@ -64,6 +66,7 @@ final class CraftPlanResultDispatcher {
             public void incomplete(PlanResponse plan) {
                 if (!gate.tryEnterTerminal(previewGeneration)) return;
                 RESULT_GATES.remove(key, gate);
+                logIncomplete(plan, requestId, previewGeneration);
                 // 进度表示将交付预览。超时原因由草稿携带，避免客户端先收到失败进度而关闭等待。
                 PlanningProgressServer.succeed(player, previewGeneration);
                 PlanResponsePublisher.send(player, plan, requestId);
@@ -86,6 +89,21 @@ final class CraftPlanResultDispatcher {
                 }
             }
         };
+    }
+
+    private static void logIncomplete(PlanResponse plan, long requestId, long previewGeneration) {
+        if (plan.outcome() != PlanOutcome.MISSING_INPUTS
+                && plan.outcome() != PlanOutcome.BUDGET_EXHAUSTED) return;
+        var graph = plan.graph();
+        long missingRoots = graph == null ? 0 : graph.roots().stream()
+                .filter(root -> root.unresolvedQuantity() > 0).count();
+        var diagnostic = plan.diagnostics().isEmpty() ? null : plan.diagnostics().get(0).code();
+        RSIntegrationMod.LOGGER.info(
+                "[RSI-plan] recipe={} request={} generation={} outcome={} diagnostic={} nodes={} allocatedRoots={} missingRoots={} missingInputs={}",
+                plan.recipeId(), requestId, previewGeneration, plan.outcome(), diagnostic,
+                graph == null ? 0 : graph.nodes().size(),
+                graph == null ? 0 : graph.roots().size() - missingRoots,
+                missingRoots, graph == null ? 0 : graph.unresolved().size());
     }
 
     static void clear(@Nullable UUID playerId) {

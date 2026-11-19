@@ -58,8 +58,9 @@ class PlanMaterialBillTest extends BootstrapTest {
         var bill = PlanMaterialBill.summarize(Map.of(), Map.of(), Map.of(), Map.of(), target,
                 List.of(first, unknownParent), 1, null, true);
         assertFalse(bill.feasible());
-        assertEquals(new PlanResponse.Availability(6, 0, 0),
-                bill.materials().get(IngredientKey.of(new ItemStack(Items.REDSTONE))));
+        var raw = bill.materials().get(IngredientKey.of(new ItemStack(Items.REDSTONE)));
+        assertEquals(new PlanResponse.Availability(6, 0, 0), raw);
+        assertEquals("unconfirmed_source", PlanMaterialTable.materialSourceKey(raw, false));
     }
 
     @Test
@@ -69,7 +70,7 @@ class PlanMaterialBillTest extends BootstrapTest {
                 PlanGraphView.SourceView.fromInitial(), iron, 2)));
         var graph = new PlanGraphView(1, List.of(), List.of(), List.of(root), List.of(), List.of());
         var bill = PlanMaterialBill.summarize(Map.of(), Map.of(), Map.of(Items.IRON_INGOT, 2L),
-                Map.of(), iron, List.of(), 1, graph, true);
+                Map.of(StackKey.of(iron, true), 2L), iron, List.of(), 1, graph, true);
         assertEquals(new PlanResponse.Availability(5, 2, 3), bill.materials().get(IngredientKey.of(iron)));
         var plan = new PlanResponse(false, "", iron, List.of(), bill.materials(), List.of(), "test:target",
                 null, null, 0, 0, 0, List.of(), 1, null, null, null, 0L, false, false, false,
@@ -77,6 +78,21 @@ class PlanMaterialBillTest extends BootstrapTest {
         var inventory = new PreviewInventoryModel(plan);
         inventory.update(IngredientKey.of(iron), 5);
         assertEquals(PreviewInventoryModel.Status.REPLAN, inventory.status());
+    }
+
+    @Test
+    void aDisplayHintWithMatchingStockIsStillNotAnAllocation() {
+        ItemStack wheat = new ItemStack(Items.WHEAT);
+        var root = new PlanGraphView.RootView(wheat, 4, 4, List.of());
+        var graph = new PlanGraphView(1, List.of(), List.of(), List.of(root), List.of(), List.of());
+        var bill = PlanMaterialBill.summarize(Map.of(), Map.of(), Map.of(Items.WHEAT, 4L),
+                Map.of(StackKey.of(wheat, true), 4L), wheat, List.of(), 1, graph, false);
+        assertFalse(bill.feasible());
+        var row = bill.materials().get(IngredientKey.of(wheat));
+        assertEquals(new PlanResponse.Availability(4, 4, 4), row);
+        assertEquals("missing_source", PlanMaterialTable.materialSourceKey(row, true));
+        assertEquals("unconfirmed_source", PlanMaterialTable.materialSourceKey(
+                new PlanResponse.Availability(4, 4, 0), true));
     }
 
     @Test

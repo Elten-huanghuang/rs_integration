@@ -42,8 +42,20 @@ class CraftPreviewInventoryRefreshTest extends BootstrapTest {
         when(step.modType()).thenReturn(type);
         var plan = mock(PlanResponse.class);
         when(plan.steps()).thenReturn(List.of(step));
+        when(plan.canConfirmExecution()).thenReturn(true);
         assertTrue(CraftPlanningApplicationService.requiresFreshPreview(null, plan));
         assertFalse(CraftPlanningApplicationService.requiresFreshPreview(null, null));
+    }
+
+    @Test
+    void aNewPreviewReadsFreshStockInsteadOfReusingAMissingResult() {
+        var target = new ItemStack(Items.DIAMOND);
+        var missing = new PlanResponse(false, "target", target,
+                List.of(), Map.of(), List.of("wheat"), "test:target");
+        var ready = new PlanResponse(true, "target", target,
+                List.of(), Map.of(), List.of(), "test:target");
+        assertTrue(CraftPlanningApplicationService.requiresFreshPreview(null, missing));
+        assertFalse(CraftPlanningApplicationService.requiresFreshPreview(null, ready));
     }
 
     @Test

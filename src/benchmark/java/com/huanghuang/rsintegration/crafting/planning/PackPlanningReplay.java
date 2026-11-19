@@ -43,6 +43,7 @@ public final class PackPlanningReplay {
     private static final String INFINITY_CATALYST = "avaritia:infinity_catalyst";
     private static final String CATALYST_RECIPE = "crafttweaker:infinity_catalyst";
     private static final String VOID_FAVOR = "malum:favor_of_the_void";
+    private static final String SPIRIT_FOCUSING = "malum:spirit_focusing";
     private static final String CAULDRON = "irons_spellbooks:alchemist_cauldron_brew";
     private static final String ITEM_ID = "[a-z0-9_.-]+:[a-z0-9_./-]+";
     private static final String SEED = "enigmaticdelicacy:enigmatic_seed";
@@ -61,6 +62,7 @@ public final class PackPlanningReplay {
         PackPlanningReplay replay = new PackPlanningReplay();
         replay.enabledEnigmaticItems = readEnigmaticOptions(root);
         replay.readVanilla(root);
+        replay.readForge(root);
         replay.readJars(root.resolve("mods"));
         Process node = new ProcessBuilder("node", args[1], root.toString())
                 .redirectError(ProcessBuilder.Redirect.INHERIT).start();
@@ -94,6 +96,34 @@ public final class PackPlanningReplay {
         String folder = root.getFileName().toString();
         Path vanilla = root.resolve(folder + ".jar");
         if (Files.isRegularFile(vanilla)) readJar(vanilla);
+    }
+
+    private void readForge(Path root) throws IOException {
+        Path absolute = root.toAbsolutePath().normalize();
+        Path launcher = absolute.getParent() == null ? null : absolute.getParent().getParent();
+        if (launcher == null) return;
+        Path profile = absolute.resolve(absolute.getFileName() + ".json");
+        if (!Files.isRegularFile(profile)) return;
+        JsonObject manifest = JsonParser.parseString(Files.readString(profile)).getAsJsonObject();
+        if (!(manifest.get("arguments") instanceof JsonObject args)
+                || !(args.get("game") instanceof JsonArray gameArgs)) return;
+        String minecraft = launchArgument(gameArgs, "--fml.mcVersion");
+        String forge = launchArgument(gameArgs, "--fml.forgeVersion");
+        if (!minecraft.matches("[0-9]+(?:\\.[0-9]+)+") || !forge.matches("[0-9]+(?:\\.[0-9]+)+")) return;
+        // Forge 的标准物品标签在启动器的 libraries 目录中。
+        String version = minecraft + "-" + forge;
+        Path universal = launcher.resolve("libraries/net/minecraftforge/forge").resolve(version)
+                .resolve("forge-" + version + "-universal.jar");
+        boolean present = Files.isRegularFile(universal);
+        System.out.printf("forge_recipe_data version=%s present=%s%n", version, present);
+        if (present) readJar(universal);
+    }
+
+    private static String launchArgument(JsonArray args, String key) {
+        for (int i = 0; i + 1 < args.size(); i++) {
+            if (key.equals(text(args.get(i)))) return text(args.get(i + 1));
+        }
+        return "";
     }
 
     private void readJars(Path mods) throws IOException {
@@ -259,6 +289,7 @@ public final class PackPlanningReplay {
         }
         var abilityGraph = ImmutableRecipeGraphProjector.restrictToDependencies(
                 new ImmutableRecipeGraph(abilityRecipes), targetId);
+        inspectMissingMaterialRoutes(graph, abilityGraph, target, stock, forced);
         if (cauldronBrewing) verifyFireShardSupply(abilityGraph);
         // 使用同一组物资，只将现在可以规划的虚空交易产物从假设供料中移除。
         Map<MaterialRef, Long> abilityStock = new HashMap<>(gathered);
@@ -300,7 +331,13 @@ public final class PackPlanningReplay {
         solveCase("synthetic_farm_and_spirits", abilityGraph, target, farmStock, forced, unprojectedOutputs);
         verifySupplyChanges(abilityGraph, target, farmStock, forced, unprojectedOutputs);
         if (typed) {
-            PackTypedPlanningReplay.run("saved_disks", graph, target, stock, forced);
+            // 固定物品替身和库存，只切换虚空交易权限假设。
+            PackTypedPlanningReplay.run("saved_disks", graph, abilityGraph, target, stock, forced);
+            PackTypedPlanningReplay.run("saved_disks_void_favor_enabled", abilityGraph, target, stock, forced);
+            // 掉落表允许直接采集，按磁盘库存回放的缺口作有限供料对照。
+            Map<MaterialRef, Long> restocked = new HashMap<>(stock);
+            restocked.merge(material("alexscaves:pewen_branch"), 18L, Long::sum);
+            PackTypedPlanningReplay.run("saved_disks_pewen_restock", abilityGraph, target, restocked, forced);
             PackTypedPlanningReplay.run("synthetic_gathered_with_spirits", abilityGraph, target, spiritStock, forced);
             PackTypedPlanningReplay.run("synthetic_expanded_gathered", abilityGraph, target, expandedGathered, forced);
             PackTypedPlanningReplay.run("synthetic_farm_and_spirits", abilityGraph, target, farmStock, forced);
@@ -321,6 +358,21 @@ public final class PackPlanningReplay {
             solveBranch("isolated_reported_dependency", abilityGraph, target, spiritStock, forced,
                     new IngredientRef(List.of(material(id)), 1L, NbtMatchMode.ANY));
         }
+    }
+
+    private static void inspectMissingMaterialRoutes(ImmutableRecipeGraph graph, ImmutableRecipeGraph abilityGraph,
+                                                     RecipeNode target, Map<MaterialRef, Long> stock,
+                                                     Map<ResourceLocation, ResourceLocation> forced) {
+        var design = new IngredientRef(List.of(material("malum:anomalous_design")), 13L, NbtMatchMode.ANY);
+        solveBranch("isolated_saved_design_without_ability", graph, target, stock, forced, design);
+        solveBranch("isolated_saved_design_with_ability", abilityGraph, target, stock, forced, design);
+        // 用有限原料验证配方声明，虚空交易权限和机器状态仍由回放假设提供。
+        solveBranch("isolated_iron_to_design", abilityGraph, target,
+                Map.of(material("minecraft:iron_block"), 13L), forced, design);
+        var focus = new IngredientRef(List.of(material("goety:empty_focus")), 8L, NbtMatchMode.ANY);
+        solveBranch("isolated_saved_focus", graph, target, stock, forced, focus);
+        solveBranch("isolated_amethyst_to_focus", graph, target,
+                Map.of(material("minecraft:amethyst_shard"), 8L), forced, focus);
     }
 
     private static void verifySupplyChanges(ImmutableRecipeGraph graph, RecipeNode target,
@@ -425,6 +477,10 @@ public final class PackPlanningReplay {
                 || output(recipe) instanceof JsonObject stack && stack.has("unsupported")
                 || !hasSupportedConditions(recipe)) return null;
         if (CAULDRON.equals(type)) return cauldronItemBrew(id, recipe);
+        boolean reusableFocusing = SPIRIT_FOCUSING.equals(type)
+                && recipe.get("durabilityCost") instanceof JsonPrimitive cost
+                && cost.isNumber() && cost.getAsDouble() == 0;
+        if (SPIRIT_FOCUSING.equals(type) && !reusableFocusing) return null;
         List<JsonElement> slots = new ArrayList<>();
         if (recipe.get("pattern") instanceof JsonArray pattern && recipe.get("key") instanceof JsonObject keys) {
             for (JsonElement line : pattern) {
@@ -436,7 +492,7 @@ public final class PackPlanningReplay {
             inputs.forEach(slots::add);
         } else if (recipe.get("ingredient") != null) {
             slots.add(recipe.get("ingredient"));
-        } else if (type.equals("malum:spirit_infusion")
+        } else if ((type.equals("malum:spirit_infusion") || reusableFocusing)
                 && recipe.get("input") instanceof JsonObject input
                 && recipe.get("spirits") instanceof JsonArray spirits) {
             slots.add(input);
@@ -473,7 +529,9 @@ public final class PackPlanningReplay {
             if (alternatives.isEmpty()) return null;
             var mode = alternatives.stream().anyMatch(item -> !item.nbt().isEmpty())
                     ? NbtMatchMode.EXACT : NbtMatchMode.ANY;
-            inputs.add(new IngredientRef(alternatives, count(slot), mode));
+            DemandRole role = reusableFocusing && slot == recipe.get("input")
+                    ? DemandRole.CATALYST : DemandRole.CONSUMED;
+            inputs.add(new IngredientRef(alternatives, count(slot), mode, role));
         }
         if (type.equals("ars_nouveau:imbuement") && recipe.get("pedestalItems") instanceof JsonArray pedestals) {
             for (JsonElement pedestal : pedestals) {

@@ -143,15 +143,6 @@ public record PlanGraphView(
 
     /** 只枚举已经分配到初始库存的材料，包括直接供给目标配方的材料。 */
     public void visitInitialAllocations(ObjLongConsumer<ItemStack> accept) {
-        visitExternalDemand(accept, false);
-    }
-
-    /** 只枚举外部承担的数量，生产者的输出不再计入初始库存。 */
-    public void visitExternalDemand(ObjLongConsumer<ItemStack> accept) {
-        visitExternalDemand(accept, true);
-    }
-
-    private void visitExternalDemand(ObjLongConsumer<ItemStack> accept, boolean includeUnresolved) {
         for (EdgeView edge : edges) {
             if (edge.source().initial()) accept.accept(edge.material(), edge.quantity());
         }
@@ -159,12 +150,26 @@ public record PlanGraphView(
             for (RootEdgeView edge : root.allocations()) {
                 if (edge.source().initial()) accept.accept(edge.material(), edge.quantity());
             }
-            if (includeUnresolved && root.unresolvedQuantity() > 0)
+        }
+    }
+
+    /** 只枚举外部承担的数量，生产者的输出不再计入初始库存。 */
+    public void visitExternalDemand(ObjLongConsumer<ItemStack> accept) {
+        visitInitialAllocations(accept);
+        visitUnresolvedDemand(accept);
+    }
+
+    /** 展示物品只是未分配需求的代表，不能据此认定现货已通过配方匹配。 */
+    public void visitUnresolvedDemand(ObjLongConsumer<ItemStack> accept) {
+        for (RootView root : roots) {
+            if (root.unresolvedQuantity() > 0)
                 accept.accept(root.display(), root.unresolvedQuantity());
         }
-        if (includeUnresolved) {
-            for (UnresolvedView input : unresolved) accept.accept(input.display(), input.quantity());
-        }
+        for (UnresolvedView input : unresolved) accept.accept(input.display(), input.quantity());
+    }
+
+    public boolean hasUnresolvedDemands() {
+        return !unresolved.isEmpty() || roots.stream().anyMatch(root -> root.unresolvedQuantity() > 0);
     }
 
     /** 卡片和递归树共用已经通过服务端可用性检查的候选，不改动执行节点或材料边。 */

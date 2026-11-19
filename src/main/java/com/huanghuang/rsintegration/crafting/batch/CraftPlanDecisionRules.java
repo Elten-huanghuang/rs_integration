@@ -3,7 +3,6 @@ package com.huanghuang.rsintegration.crafting.batch;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.plan.IntegrationDiagnosticCode;
-import com.huanghuang.rsintegration.crafting.plan.PlanOutcome;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.planning.PurePlanningCoverage;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector;
@@ -33,21 +32,10 @@ public final class CraftPlanDecisionRules {
 
     static boolean canExecuteCachedPlan(PlanResponse plan,
                                         @Nullable CraftPlanGraph resolvedGraph) {
+        if (!plan.canConfirmExecution()) return false;
         if (plan.success()) return true;
         // 机器租用只影响即时可用性，完整计划可交给调度器等待；执行前仍须复验库存和绑定。
-        return plan.outcome() == PlanOutcome.RUNTIME_UNAVAILABLE
-                && !plan.executionBlocked()
-                && !plan.diagnostics().isEmpty()
-                && plan.diagnostics().stream().allMatch(diagnostic ->
-                        diagnostic.code() == IntegrationDiagnosticCode.MACHINES_LEASED)
-                && plan.missing().isEmpty()
-                && plan.materials().values().stream()
-                        .allMatch(material -> material.missingCount() == 0)
-                && plan.stepIssues().values().stream().noneMatch(PlanResponse.StepIssue::blocked)
-                && plan.graph() != null
-                && plan.graph().unresolved().isEmpty()
-                && plan.graph().roots().stream().allMatch(root -> root.unresolvedQuantity() == 0)
-                && resolvedGraph != null
+        return resolvedGraph != null
                 && resolvedGraph.unresolvedDemands().isEmpty()
                 && resolvedGraph.rootDemands().stream()
                         .allMatch(root -> root.unresolvedQuantity() == 0);

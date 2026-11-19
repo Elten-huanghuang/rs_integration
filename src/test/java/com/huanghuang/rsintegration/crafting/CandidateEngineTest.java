@@ -17,6 +17,7 @@ import net.minecraft.world.item.crafting.ShapedRecipe;
 import net.minecraft.core.NonNullList;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
+import net.minecraftforge.common.crafting.StrictNBTIngredient;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -65,7 +66,11 @@ class CandidateEngineTest extends BootstrapTest {
                     List.of(), null, player, null);
             ctx.deadlineNanos = Long.MAX_VALUE;
             Ingredient demand = Ingredient.of(Items.IRON_INGOT);
+            ItemStack otherVariant = new ItemStack(Items.IRON_INGOT);
+            otherVariant.getOrCreateTag().putString("grade", "other");
             ctx.beginCandidateSlice();
+            assertTrue(CandidateEngine.findCandidates(StrictNBTIngredient.of(otherVariant), ctx).isEmpty());
+            assertEquals(0, probes[0]);
             assertTrue(CandidateEngine.findCandidates(demand, ctx).isEmpty());
             assertTrue(CandidateEngine.findCandidates(demand, ctx).isEmpty());
             assertEquals(1, probes[0]);

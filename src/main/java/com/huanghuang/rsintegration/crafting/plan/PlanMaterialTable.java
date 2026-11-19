@@ -16,14 +16,17 @@ import net.minecraft.core.registries.BuiltInRegistries;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 /** 主内容区的材料整页，与树视图切换时保留相机和选中节点。 */
 public final class PlanMaterialTable {
-    private record Row(IngredientKey key, long needed, long available, long missing, boolean leftover) {}
+    private record Row(IngredientKey key, long needed, long available, long missing, boolean leftover,
+                       String sourceKey) {}
     private record Hit(Rect bounds, Row row) {}
     private final Font font;
     private final PlanWorkspaceChrome chrome;
@@ -36,6 +39,8 @@ public final class PlanMaterialTable {
     private final List<Hit> hits = new ArrayList<>();
     private Rect bounds;
     private boolean onlyMissing, incomplete;
+    private PlanGraphView graph;
+    private final Set<IngredientKey> unresolved = new HashSet<>();
     private String query = "";
     private int scroll, maxScroll;
     private ItemStack hoveredItem = ItemStack.EMPTY;
@@ -52,14 +57,28 @@ public final class PlanMaterialTable {
     public void update(PlanResponse plan) {
         incomplete = plan.outcome() == PlanOutcome.BUDGET_EXHAUSTED;
         if (incomplete) onlyMissing = false;
+        if (graph != plan.graph()) {
+            graph = plan.graph();
+            unresolved.clear();
+            if (graph != null && !incomplete) {
+                graph.visitUnresolvedDemand((stack, count) -> unresolved.add(IngredientKey.of(stack)));
+            }
+        }
         List<Row> data = new ArrayList<>();
         plan.materials().forEach((key, value) -> data.add(new Row(key, value.needed(),
-                value.available(), value.missingCount(), false)));
+                value.available(), value.missingCount(), false, materialSourceKey(value, unresolved.contains(key)))));
         data.sort(Comparator.comparing((Row row) -> row.missing() == 0)
                 .thenComparing(row -> row.key().stack(1).getHoverName().getString()));
-        plan.leftovers().forEach((key, count) -> data.add(new Row(key, count, 0, 0, true)));
+        plan.leftovers().forEach((key, count) -> data.add(new Row(key, count, 0, 0, true, "leftover_source")));
         rows = List.copyOf(data);
         filterDirty = true;
+    }
+
+    static String materialSourceKey(PlanResponse.Availability value, boolean unresolved) {
+        if (value.missingCount() > 0) return "missing_source";
+        // 无图轨迹的需求差额可能来自未展开步骤或替代材料，不能当成已安排生产。
+        if (unresolved || value.available() < value.needed()) return "unconfirmed_source";
+        return "ready_source";
     }
 
     public void search(String query) {
@@ -128,10 +147,9 @@ public final class PlanMaterialTable {
                                 y + 7, countWidth - 2, Color.MUTED);
                         label(g, row.missing() == 0 ? "—" : PlanRenderEngine.formatCompact(row.missing()),
                                 missingX, y + 7, countWidth - 2, row.missing() > 0 ? Color.WARNING : Color.MUTED);
-                        if (wide) label(g, text(incomplete ? "settled_source"
-                                        : row.leftover() ? "leftover_source" : row.missing() > 0 ? "missing_source"
-                                        : row.available() < row.needed() ? "planned_source" : "ready_source"),
-                                sourceX, y + 7, actionX - sourceX - 4, row.missing() > 0 ? Color.WARNING : Color.READY);
+                        if (wide) label(g, text(incomplete ? "settled_source" : row.sourceKey()),
+                                sourceX, y + 7, actionX - sourceX - 4, row.missing() > 0 ? Color.WARNING
+                                        : row.sourceKey().equals("ready_source") ? Color.READY : Color.MUTED);
                         label(g, text(row.missing() > 0 ? "locate_star" : "locate_short"), actionX, y + 7,
                                 bounds.right() - actionX - 8, Color.MUTED);
                         if (!notes.isEmpty()) label(g, notes.stream().map(MaterialNote::note)

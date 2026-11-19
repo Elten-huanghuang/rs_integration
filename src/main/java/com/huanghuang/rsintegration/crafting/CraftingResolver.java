@@ -47,6 +47,7 @@ import net.minecraftforge.common.crafting.StrictNBTIngredient;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.registries.ForgeRegistries;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
+import com.huanghuang.rsintegration.recipe.RecipeOutputSpec;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.Locale;
@@ -1209,7 +1210,7 @@ public final class CraftingResolver {
                 return;
             }
             int selfConsumed = selfConsumedPerBatch(candidate, out, ctx.level.registryAccess(), ctx);
-            int ng = netGain(declaredOutputCount(candidate, out, ctx.level.registryAccess()), selfConsumed);
+            int ng = netGain(declaredOutputCount(ctx.declaredRecipeOutputs(candidate.recipe()), out), selfConsumed);
             if (ng <= 0) {
                 if (ctx.diagnosticsEnabled()) {
                     ctx.diag("ensureIngredient REJECT " + candidate.recipe().getId()
@@ -1386,6 +1387,8 @@ public final class CraftingResolver {
                 if (activatedForcedRecipe) ctx.deactivateForcedRecipe(a.entry.recipe().getId());
                 ctx.recipeCycles.leave(a.entry.recipe().getId(), a.output);
                 for (Set<Item> family : conversionFamilies) ctx.popConversionFamily(family);
+                // 转换边只属于正在展开的路径。相邻分支可使用独立库存做合法的反向转换。
+                edges.rollback();
             });
                 for (StackKey inKey : inKeys) {
                     edges.addEdge(inKey, outKey);
@@ -1429,7 +1432,6 @@ public final class CraftingResolver {
             if (!allOk) {
                 if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId() + ": craftOnce failed");
                 ctx.rollback();
-                edges.rollback();
                 retryOrTimeout("timeout-after-craft-failure");
                 return;
             }
@@ -1442,7 +1444,6 @@ public final class CraftingResolver {
                 if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient OK " + a.entry.recipe().getId());
                 ctx.truncateMissing(missingCheckpoint);
                 ctx.commitUndo();
-                edges.commitUndo();
                 stack.leave();
                 stack.complete(done, true);
                 return;
@@ -1450,7 +1451,6 @@ public final class CraftingResolver {
 
             if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId() + ": consumeMatching failed after craft");
             ctx.rollback();
-            edges.rollback();
             retryOrTimeout("timeout-after-consume-failure");
             }
 
@@ -1525,7 +1525,8 @@ public final class CraftingResolver {
                 if (!declared.isEmpty()) {
                     RegistryAccess access = ctx.level.registryAccess();
                     int seed = selfConsumedPerBatch(entry, declared, access, ctx);
-                    if (seed > 0 && availableSeed >= seed && declaredOutputCount(entry, declared, access) > seed) {
+                    if (seed > 0 && availableSeed >= seed
+                            && declaredOutputCount(ctx.declaredRecipeOutputs(entry.recipe()), declared) > seed) {
                         resolveSharedAmplification(ingredient, ctx, depth, edges, stack, next, target);
                         return;
                     }
@@ -1785,21 +1786,22 @@ public final class CraftingResolver {
     static long declaredOutputCount(RecipeIndex.Entry entry, ItemStack output,
                                     RegistryAccess access) {
         ModRecipeHandler handler = ModRecipeHandlers.claimFor(entry.recipe()).winner();
-        if (handler != null) {
-            long total = 0L;
-            for (var declaration : handler.getDeclaredOutputs(entry.recipe(), access)) {
-                MaterialKey material = declaration.material();
-                if (material == null
-                        || !MaterialMatcher.equivalentRuntimeFragment(
-                        material.toStack(1), output)) continue;
-                long credited = declaration.probability().isGuaranteed()
-                        ? declaration.minimumPerOperation()
-                        : declaration.expectedPerOperation();
-                total = SaturatingLongMath.add(total, credited);
-            }
-            if (total > 0L) return total;
+        return handler == null ? output.getCount()
+                : declaredOutputCount(handler.getDeclaredOutputs(entry.recipe(), access), output);
+    }
+
+    static long declaredOutputCount(List<RecipeOutputSpec> declarations, ItemStack output) {
+        long total = 0L;
+        for (RecipeOutputSpec declaration : declarations) {
+            MaterialKey material = declaration.material();
+            if (material == null
+                    || !MaterialMatcher.equivalentRuntimeFragment(material.toStack(1), output)) continue;
+            long credited = declaration.probability().isGuaranteed()
+                    ? declaration.minimumPerOperation()
+                    : declaration.expectedPerOperation();
+            total = SaturatingLongMath.add(total, credited);
         }
-        return output.getCount();
+        return total > 0L ? total : output.getCount();
     }
 
     private static int selfConsumedPerBatch(RecipeIndex.Entry entry, ItemStack output,

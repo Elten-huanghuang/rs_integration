@@ -16,6 +16,8 @@ import com.huanghuang.rsintegration.mods.goety.GoetySoulTotemCrafting;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.graph.UnresolvedDemand;
 import com.huanghuang.rsintegration.crafting.planning.PlanningPreferences;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+import com.huanghuang.rsintegration.recipe.RecipeOutputSpec;
 import com.huanghuang.rsintegration.util.Diagnostics;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
@@ -26,6 +28,7 @@ import net.minecraft.world.level.Level;
 import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraft.nbt.TagParser;
 import net.minecraft.world.item.crafting.CraftingRecipe;
+import net.minecraft.world.item.crafting.Recipe;
 
 import javax.annotation.Nullable;
 import java.util.*;
@@ -114,6 +117,7 @@ final class ResolutionContext {
     private final Map<CraftingResolver.StackKey, CachedStack> stacksByKey = new HashMap<>();
     // 同一请求会多次经过共享配方；只缓存不依赖搜索中模拟库存的配方数据。
     private final Map<RecipeIndex.Entry, List<IngredientSpec>> declaredRecursiveInputs = new HashMap<>();
+    private final Map<Recipe<?>, List<RecipeOutputSpec>> declaredRecipeOutputs = new IdentityHashMap<>();
     final Map<RecipeIndex.Entry, Set<CraftingResolver.StackKey>> candidateCycleInputs = new HashMap<>();
     @Nullable private Map<RecipeIndex.Entry, String> candidateRouteChecks;
     private long nextInventoryOrder;
@@ -131,6 +135,13 @@ final class ResolutionContext {
     @Nullable List<IngredientSpec> declaredRecursiveInputs(RecipeIndex.Entry entry) {
         return declaredRecursiveInputs.computeIfAbsent(entry,
                 candidate -> CraftPacketUtils.extractSingleOperationRecursiveIngredientSpecs(candidate.recipe()));
+    }
+
+    List<RecipeOutputSpec> declaredRecipeOutputs(Recipe<?> recipe) {
+        return declaredRecipeOutputs.computeIfAbsent(recipe, candidate -> {
+            var handler = ModRecipeHandlers.claimFor(candidate).winner();
+            return handler == null ? List.of() : List.copyOf(handler.getDeclaredOutputs(candidate, level.registryAccess()));
+        });
     }
 
     private final Map<ResourceLocation, Integer> previewCandidateAttempts = new HashMap<>();

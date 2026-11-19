@@ -39,8 +39,7 @@ public final class PreviewInventoryModel {
         graph.visitExternalDemand(this::require);
         // 缺料图的展示模板不携带完整 Ingredient 谓词；补入展示物品也必须重新规划，
         // 不能据此宣布标签、动态 NBT 或未展开分支已经可以执行。
-        complete = plan.success() && plan.outcome().ready() && graph.unresolved().isEmpty()
-                && graph.roots().stream().allMatch(root -> root.unresolvedQuantity() == 0);
+        complete = plan.canConfirmExecution();
         shortages = required.size();
         dirty.addAll(keys);
     }

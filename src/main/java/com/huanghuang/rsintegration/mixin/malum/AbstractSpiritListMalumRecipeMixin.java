@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.mixin.malum;
 
-import java.lang.reflect.Method;
-
+import com.sammy.malum.common.recipe.AbstractSpiritListMalumRecipe;
+import com.sammy.malum.common.recipe.SpiritInfusionRecipe;
 import net.minecraft.world.item.ItemStack;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
@@ -9,75 +9,23 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-import java.lang.reflect.Field;
 import java.util.List;
 
-/**
- * Relaxes Malum's spirit matching so that extra spirit types on the altar
- * no longer prevent crafting. The vanilla check requires exact type-count
- * equality ({@code recipe.spirits.size() != altarSpirits.size() → fail}),
- * which blocks recipes when unrelated spirits are nearby.
- * <p>
- * After this change, only the required spirits must be present with
- * sufficient counts — extra types are silently tolerated.
- */
-@Mixin(value = com.sammy.malum.common.recipe.AbstractSpiritListMalumRecipe.class, remap = false)
+@Mixin(value = AbstractSpiritListMalumRecipe.class, remap = false)
 public class AbstractSpiritListMalumRecipeMixin {
 
-    @Unique
-    private static Field rsi$spiritsField;
-
-    private static Field findSpiritsField(Class<?> clazz) {
-        Class<?> scan = clazz;
-        while (scan != null && scan != Object.class) {
-            try {
-                Field f = scan.getDeclaredField("spirits");
-                f.setAccessible(true);
-                return f;
-            } catch (NoSuchFieldException e) {
-                scan = scan.getSuperclass();
-            }
+    @Inject(method = "doSpiritsMatch", at = @At("RETURN"), cancellable = true)
+    private void rsi$relaxedDoSpiritsMatch(List<ItemStack> offered, CallbackInfoReturnable<Boolean> cir) {
+        if (!cir.getReturnValueZ()
+                && rsi$acceptsExtraAltarSpirits((AbstractSpiritListMalumRecipe) (Object) this, offered)) {
+            cir.setReturnValue(true);
         }
-        return null;
     }
 
-    @Inject(method = "doSpiritsMatch", at = @At("HEAD"), cancellable = true)
-    @SuppressWarnings("unchecked")
-    private void rsi$relaxedDoSpiritsMatch(List<ItemStack> altarSpirits, CallbackInfoReturnable<Boolean> cir) {
-        List<?> requiredSpirits;
-        try {
-            if (rsi$spiritsField == null) {
-                rsi$spiritsField = findSpiritsField(this.getClass());
-                if (rsi$spiritsField == null) return;
-            }
-            requiredSpirits = (List<?>) rsi$spiritsField.get(this);
-        } catch (Exception e) {
-            return; // fall through to original logic
-        }
-
-        if (requiredSpirits == null || requiredSpirits.isEmpty()) {
-            cir.setReturnValue(true);
-            return;
-        }
-
-        for (Object required : requiredSpirits) {
-            boolean found = false;
-            for (ItemStack altarStack : altarSpirits) {
-                try {
-                    Object requiredItem = required.getClass().getMethod("getItem").invoke(required);
-                    int requiredCount = (int) required.getClass().getMethod("getCount").invoke(required);
-                    if (altarStack.getItem().equals(requiredItem)
-                            && altarStack.getCount() >= requiredCount) {
-                        found = true;
-                        break;
-                    }
-                } catch (Exception ignored) {}
-            }
-            if (!found) {
-                cir.setReturnValue(false);
-                return;
-            }
-        }
-        cir.setReturnValue(true);
+    @Unique
+    static boolean rsi$acceptsExtraAltarSpirits(AbstractSpiritListMalumRecipe recipe, List<ItemStack> offered) {
+        // 只放宽祭坛的匹配；坩埚必须用精魂种类区分共用促符的配方。
+        return recipe instanceof SpiritInfusionRecipe && offered.size() > recipe.spirits.size()
+                && recipe.getSortedSpirits(offered).size() == recipe.spirits.size();
     }
 }

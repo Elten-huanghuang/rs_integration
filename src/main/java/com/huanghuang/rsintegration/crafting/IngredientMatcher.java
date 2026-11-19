@@ -15,6 +15,7 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.alchemy.PotionUtils;
 import net.minecraft.world.item.alchemy.Potions;
+import net.minecraftforge.common.crafting.CompoundIngredient;
 import net.minecraftforge.common.crafting.StrictNBTIngredient;
 import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraft.nbt.NumericTag;
@@ -38,6 +39,13 @@ public final class IngredientMatcher {
 
     public static boolean hasCompleteItemList(Ingredient ingredient) {
         Class<?> type = ingredient.getClass();
+        if (type == CompoundIngredient.class) {
+            // 任选配方的清单只有在每个子条件都能完整列出物品时才可靠。
+            for (Ingredient child : ((CompoundIngredient) ingredient).getChildren()) {
+                if (!hasCompleteItemList(child)) return false;
+            }
+            return true;
+        }
         return type == Ingredient.class || type == StrictNBTIngredient.class
                 || type == PartialNBTIngredient.class;
     }

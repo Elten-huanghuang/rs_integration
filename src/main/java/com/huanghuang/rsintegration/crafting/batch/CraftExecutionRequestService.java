@@ -615,7 +615,7 @@ final class CraftExecutionRequestService {
                 player, recipeId, forcedRecipes, repeatCount, targetOutput, modType,
                 dim, pos, executionStorageReference, materialLocks, confirmedPreviewRequestId);
         if (cachedPreview.rejected()) {
-            player.sendSystemMessage(Component.translatable("rsi.plan.failure.confirmation_invalid"));
+            player.sendSystemMessage(Component.translatable(cachedPreview.rejectionKey()));
             return;
         }
         if (cachedPreview.entry() != null

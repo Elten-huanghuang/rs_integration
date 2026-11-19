@@ -61,6 +61,39 @@ class PlanInventoryClientStateTest extends BootstrapTest {
     }
 
     @Test
+    void fourIngredientRecipeRequiresNewPreviewAndSeparateConfirmationAfterRestocking() {
+        var wheat = new ItemStack(Items.WHEAT);
+        var key = IngredientKey.of(wheat);
+        var unresolved = new PlanGraphView.UnresolvedView(0, 0, wheat, 3);
+        var oldPreview = plan(List.of(initial(wheat, 1)), List.of(unresolved), Map.of(key, 1L));
+        var inventory = new PreviewInventoryModel(oldPreview);
+        var requests = new PlanResponseRequestState(10, oldPreview.recipeId());
+        assertEquals(PlanConfirmationAction.COMPLETE_ROUTE, PlanConfirmationAction.forPlan(oldPreview, null));
+        assertEquals(PlanConfirmationAction.COMPLETE_ROUTE, PlanConfirmationAction.forPlan(
+                oldPreview, PreviewInventoryModel.Status.UNAVAILABLE));
+        assertFalse(oldPreview.canConfirmExecution());
+
+        inventory.update(key, 1);
+        assertEquals(3, inventory.drain(true).get(0).missing());
+        inventory.update(key, 4);
+        assertEquals(0, inventory.drain(false).get(0).missing());
+        assertEquals(PreviewInventoryModel.Status.REPLAN, inventory.status());
+        var action = PlanConfirmationAction.forPlan(oldPreview, inventory.status());
+        assertEquals(PlanResponseRequestState.Confirmation.RECALCULATE,
+                requests.confirmation(false, action.replan, oldPreview.canConfirmExecution()));
+        requests.beginPreview(12, oldPreview.recipeId());
+        assertEquals(PlanResponseRequestState.Confirmation.WAIT,
+                requests.confirmation(false, action.replan, oldPreview.canConfirmExecution()));
+        assertFalse(requests.accept(10, oldPreview.recipeId()));
+
+        var newPreview = plan(List.of(initial(wheat, 4)), List.of(), Map.of(key, 4L));
+        assertTrue(requests.accept(12, newPreview.recipeId()));
+        var newAction = PlanConfirmationAction.forPlan(newPreview, null);
+        assertEquals(PlanResponseRequestState.Confirmation.EXECUTE,
+                requests.confirmation(false, newAction.replan, newPreview.canConfirmExecution()));
+    }
+
+    @Test
     void jeiDemandContextAppliesOnlyChangedMaterials() {
         var source = source();
         var state = new PlanInventoryClientState(10, 11, source);

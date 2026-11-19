@@ -80,6 +80,39 @@ class TypedSelfAmplificationTest extends BootstrapTest {
     }
 
     @Test
+    void siblingRootsMayUnpackAndRepackWithAdditionalStock() {
+        CraftingRecipe unpack = craftingRecipe("a_unpack", Items.IRON_INGOT, 9, Items.IRON_BLOCK);
+        CraftingRecipe smelt = craftingRecipe("z_smelt", Items.IRON_INGOT, 1, Items.RAW_IRON);
+        CraftingRecipe pack = craftingRecipe("pack", Items.IRON_BLOCK, 1,
+                Items.IRON_INGOT, Items.IRON_INGOT, Items.IRON_INGOT,
+                Items.IRON_INGOT, Items.IRON_INGOT, Items.IRON_INGOT,
+                Items.IRON_INGOT, Items.IRON_INGOT, Items.IRON_INGOT);
+        Level level = mock(Level.class);
+        when(level.registryAccess()).thenReturn(RegistryAccess.EMPTY);
+        var missing = new ArrayList<String>();
+        try (var index = mockStatic(RecipeIndex.class)) {
+            index.when(() -> RecipeIndex.reusableCatalystRoutes(level)).thenReturn(Map.of());
+            index.when(() -> RecipeIndex.get(level)).thenReturn(Map.of(
+                    Items.IRON_INGOT, List.of(craftingEntry(unpack), craftingEntry(smelt)),
+                    Items.IRON_BLOCK, List.of(craftingEntry(pack))));
+
+            CraftPlanGraph graph = CraftingResolver.resolveMachineGraphForSpecsWithTypes(
+                    List.of(new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 1),
+                            new IngredientSpec(Ingredient.of(Items.IRON_BLOCK), 1)),
+                    Map.of(new StackKey(Items.IRON_BLOCK, null), 1L,
+                            new StackKey(Items.RAW_IRON, null), 1L),
+                    level, null, null, missing, null, false, 10_000);
+
+            CraftPlanValidator.validate(graph);
+            assertEquals(List.of(unpack.getId(), smelt.getId(), pack.getId()),
+                    graph.nodes().stream().map(node -> node.recipeId()).toList());
+            assertTrue(missing.isEmpty(), missing.toString());
+            assertTrue(graph.unresolvedDemands().isEmpty());
+            assertEquals(0L, graph.rootDemands().stream().mapToLong(root -> root.unresolvedQuantity()).sum());
+        }
+    }
+
+    @Test
     void sharedSeedProbeYieldsBetweenCandidateRecipes() {
         var probes = new AtomicInteger();
         List<RecipeIndex.Entry> candidates = new ArrayList<>();

@@ -13,12 +13,14 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.level.Level;
 import net.minecraftforge.common.crafting.PartialNBTIngredient;
 import net.minecraftforge.common.crafting.StrictNBTIngredient;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -26,6 +28,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class CraftingResolverSelfConsumptionTest extends BootstrapTest {
@@ -120,6 +124,36 @@ class CraftingResolverSelfConsumptionTest extends BootstrapTest {
 
             assertEquals(2L, CraftingResolver.declaredOutputCount(
                     entry, diamond, RegistryAccess.EMPTY));
+        }
+    }
+
+    @Test
+    void previewReusesOutputDeclarationsAndMatchesEachRequestedVariant() {
+        Level level = mock(Level.class);
+        when(level.registryAccess()).thenReturn(RegistryAccess.EMPTY);
+        Recipe<?> recipe = mock(Recipe.class);
+        ModRecipeHandler handler = mock(ModRecipeHandler.class);
+        ItemStack copper = fluidToken("embers:molten_copper", 1);
+        ItemStack gold = fluidToken("embers:molten_gold", 1);
+        when(handler.getDeclaredOutputs(recipe, RegistryAccess.EMPTY)).thenReturn(List.of(
+                RecipeOutputSpec.item(MaterialKey.of(copper), 2, OutputKind.PRIMARY),
+                RecipeOutputSpec.item(MaterialKey.of(gold), 3, OutputKind.SECONDARY)));
+
+        try (var handlers = mockStatic(ModRecipeHandlers.class);
+             var index = mockStatic(RecipeIndex.class)) {
+            index.when(() -> RecipeIndex.reusableCatalystRoutes(level)).thenReturn(Map.of());
+            handlers.when(() -> ModRecipeHandlers.claimFor(recipe))
+                    .thenReturn(new ModRecipeHandlers.Claim(handler, List.of(handler)));
+            var context = new ResolutionContext(level, Map.of(), List.of(), null);
+            context.beginCandidateSlice();
+            assertEquals(2L, CraftingResolver.declaredOutputCount(context.declaredRecipeOutputs(recipe), copper));
+            context.beginCandidateSlice();
+            assertEquals(3L, CraftingResolver.declaredOutputCount(context.declaredRecipeOutputs(recipe), gold));
+            verify(handler, times(1)).getDeclaredOutputs(recipe, RegistryAccess.EMPTY);
+
+            var next = new ResolutionContext(level, Map.of(), List.of(), null);
+            assertEquals(3L, CraftingResolver.declaredOutputCount(next.declaredRecipeOutputs(recipe), gold));
+            verify(handler, times(2)).getDeclaredOutputs(recipe, RegistryAccess.EMPTY);
         }
     }
 

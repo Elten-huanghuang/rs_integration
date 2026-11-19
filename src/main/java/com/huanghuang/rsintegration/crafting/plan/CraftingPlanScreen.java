@@ -136,6 +136,8 @@ public final class CraftingPlanScreen extends Screen {
     private int stepsTop = STEPS_TOP_MIN; // dynamic — grows when title wraps
 
     private PlanResponse plan;
+    // 实时库存只更新展示，不改变服务端已发布预览的执行资格。
+    private PlanResponse executionPreview;
     private int currentRepeat = 1;
     private final PlanResponseRequestState responseRequests;
     private int selectedMachineIndex = -1;
@@ -261,6 +263,7 @@ public final class CraftingPlanScreen extends Screen {
         super(Component.translatable("rsi.plan.title",
                 plan.targetResult().getHoverName().getString()));
         this.plan = plan;
+        this.executionPreview = plan;
         this.externalRequest = externalRequest;
         this.returnToParent = returnToParent;
         this.responseRequests = new PlanResponseRequestState(requestId, plan.recipeId());
@@ -365,7 +368,7 @@ public final class CraftingPlanScreen extends Screen {
             return true;
         }
         updatePlan(newPlan);
-        if (newPlan.outcome() != PlanOutcome.BUDGET_EXHAUSTED) {
+        if (newPlan.canConfirmExecution()) {
             previewFeedback = workspaceText("recalculated");
             previewFeedbackColor = Color.READY;
         }
@@ -380,6 +383,7 @@ public final class CraftingPlanScreen extends Screen {
         publishPlanExtensions = true;
         MachineCandidateView previous = selectedMachineCandidate();
         this.plan = newPlan;
+        this.executionPreview = newPlan;
         this.currentRepeat = clampRepeatCount(newPlan.repeatCount());
         this.lastRefreshCount = currentRepeat;
         JeiCraftingPlanContext.INSTANCE.activate(newPlan);
@@ -582,10 +586,8 @@ public final class CraftingPlanScreen extends Screen {
     }
 
     private PlanConfirmationAction inventoryConfirmationAction() {
-        PlanConfirmationAction action = PlanConfirmationAction.forInventory(
+        return PlanConfirmationAction.forPlan(executionPreview,
                 inventoryState == null ? null : inventoryState.status());
-        return action == PlanConfirmationAction.CHECK_STOCK && !plan.success()
-                ? PlanConfirmationAction.COMPLETE_ROUTE : action;
     }
 
     private void updateConfirmButton() {
@@ -599,7 +601,7 @@ public final class CraftingPlanScreen extends Screen {
     private Confirmation confirmation(PlanConfirmationAction inventoryAction) {
         return responseRequests.confirmation(plan.outcome() == PlanOutcome.BUDGET_EXHAUSTED,
                 !partialPreparation && inventoryAction.replan,
-                partialPreparation || !plan.executionBlocked() || selectedPath.isDirty());
+                partialPreparation || executionPreview.canConfirmExecution());
     }
 
     private void createRepeatCountInput(Font font) {
@@ -2480,8 +2482,10 @@ public final class CraftingPlanScreen extends Screen {
         // Append availability info
         String availStr = hoveredTooltipAvail + " / " + hoveredTooltipNeeded
                 + (InkFluidSupport.isToken(hoveredItemForTooltip) ? " mB" : "");
+        PlanResponse.Availability availability = plan.availability(hoveredItemForTooltip);
         int statusColor;
-        if (hoveredTooltipAvail >= hoveredTooltipNeeded)
+        if (hoveredTooltipAvail >= hoveredTooltipNeeded
+                && (availability == null || availability.missingCount() == 0))
             statusColor = Color.READY.value();
         else if (hoveredTooltipAvail > 0)
             statusColor = Color.WARNING.value();
@@ -2499,9 +2503,8 @@ public final class CraftingPlanScreen extends Screen {
             hoveredTooltipReference = false;
         }
 
-        PlanResponse.Availability availability = plan.availability(hoveredItemForTooltip);
         if (availability != null && !availability.isEnough() && availability.missingCount() == 0) {
-            lines.add(Component.translatable("rsi.plan.tooltip.planned")
+            lines.add(Component.translatable("rsi.plan.workspace.unconfirmed_source")
                     .withStyle(ChatFormatting.GOLD));
         }
         if (availability != null) {

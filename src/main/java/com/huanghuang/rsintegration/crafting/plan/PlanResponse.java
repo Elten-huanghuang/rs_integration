@@ -171,6 +171,25 @@ public record PlanResponse(
         }
     }
 
+    public boolean requiresMaterialReplan() {
+        return outcome == PlanOutcome.MISSING_INPUTS
+                || !success && (!missing.isEmpty() || graph != null && graph.hasUnresolvedDemands()
+                        || materials.values().stream().anyMatch(material -> material.missingCount() > 0));
+    }
+
+    /** 客户端可确认的路线；服务端仍需验证实际分配、库存和机器。 */
+    public boolean canConfirmExecution() {
+        if (executionBlocked || outcome == PlanOutcome.BUDGET_EXHAUSTED
+                || graph != null && graph.hasUnresolvedDemands()) return false;
+        if (success) return outcome.ready();
+        // 只有完整且仅因机器租用而等待的计划可以直接交给调度器。
+        return outcome == PlanOutcome.RUNTIME_UNAVAILABLE && graph != null
+                && !diagnostics.isEmpty()
+                && diagnostics.stream().allMatch(diagnostic -> diagnostic.code() == IntegrationDiagnosticCode.MACHINES_LEASED)
+                && !requiresMaterialReplan()
+                && stepIssues.values().stream().noneMatch(StepIssue::blocked);
+    }
+
     /** 仅替换展示材料视图，保持路线、机器条件和原始求解结论不变。 */
     public PlanResponse withMaterialAvailability(Map<IngredientKey, Availability> updated) {
         return new PlanResponse(success, targetName, targetResult, steps, updated, missing,
@@ -265,7 +284,7 @@ public record PlanResponse(
             if (missingCount < 0) throw new IllegalArgumentException("negative material shortage");
         }
 
-        public boolean isEnough() { return available >= needed; }
+        public boolean isEnough() { return available >= needed && missingCount == 0; }
         public boolean isPartial() { return available > 0 && available < needed; }
     }
 

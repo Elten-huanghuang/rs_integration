@@ -167,39 +167,32 @@ final class CandidateEngine {
         }
 
         private void gatherEntry(RecipeIndex.Entry entry) {
-                ResourceLocation rid = entry.recipe().getId();
-                if (ctx.excludedRecipes.contains(rid)) return;
-                CandidateKey candidateKey = CandidateKey.of(entry);
-                if (byId.containsKey(candidateKey)) return;
-                if (ctx.genericCandidatesOnly && entry.modType() != ModType.GENERIC) {
-                    if (diag != null) logDiag(diag, item, entry, 0, entry.modType(), true,
-                            "非通用合成候选不能内联执行");
+            ResourceLocation rid = entry.recipe().getId();
+            if (ctx.excludedRecipes.contains(rid)) return;
+            CandidateKey candidateKey = CandidateKey.of(entry);
+            if (byId.containsKey(candidateKey)) return;
+            if (ctx.genericCandidatesOnly && entry.modType() != ModType.GENERIC) {
+                if (diag != null) logDiag(diag, item, entry, 0, entry.modType(), true,
+                        "非通用合成候选不能内联执行");
+                return;
+            }
+            if (HistoryStagesCompat.isRecipeLocked(entry.recipe(), ctx.player)) {
+                if (diag != null) logDiag(diag, item, entry, 0, entry.modType(), true,
+                        "History Stages recipe lock");
+                return;
+            }
+            if (entry.modType() != ModType.GENERIC && !entry.modType().isVirtual()) {
+                var allowlist = RSIntegrationConfig.MULTIBLOCK_RECIPE_ALLOWLIST.get();
+                if (!allowlist.isEmpty() && !allowlist.contains(rid.toString())) {
+                    if (diag != null) logDiag(diag, item, entry, 0, entry.modType(), true, "Not in allowlist");
                     return;
                 }
-                if (HistoryStagesCompat.isRecipeLocked(entry.recipe(), ctx.player)) {
-                    if (diag != null) logDiag(diag, item, entry, 0, entry.modType(), true,
-                            "History Stages recipe lock");
+                if (RSIntegrationConfig.MULTIBLOCK_RECIPE_BLACKLIST.get().contains(rid.toString())) {
+                    if (diag != null) logDiag(diag, item, entry, 0, entry.modType(), true, "Blocklisted");
                     return;
                 }
-                if (entry.modType() != ModType.GENERIC) {
-                    String unavailable = ctx.candidateRouteCheck(entry, () -> checkRoute(entry, ctx));
-                    if (!unavailable.isEmpty()) {
-                        if (diag != null) logDiag(diag, item, entry, 0, entry.modType(), true, unavailable);
-                        return;
-                    }
-                    if (!entry.modType().isVirtual()) {
-                        var allowlist = RSIntegrationConfig.MULTIBLOCK_RECIPE_ALLOWLIST.get();
-                        if (!allowlist.isEmpty() && !allowlist.contains(rid.toString())) {
-                            if (diag != null) logDiag(diag, item, entry, 0, entry.modType(), true, "Not in allowlist");
-                            return;
-                        }
-                        if (RSIntegrationConfig.MULTIBLOCK_RECIPE_BLACKLIST.get().contains(rid.toString())) {
-                            if (diag != null) logDiag(diag, item, entry, 0, entry.modType(), true, "Blocklisted");
-                            return;
-                        }
-                    }
-                }
-                byId.put(candidateKey, entry);
+            }
+            byId.put(candidateKey, entry);
         }
 
         private void checkOutput() {
@@ -235,6 +228,14 @@ final class CandidateEngine {
                     if (diag != null) logDiag(diag, null, entry, 0, entry.modType(), true,
                             "Non-productive tag conversion");
                     return;
+            }
+            // 同物品的不同 NBT 变体共用索引，产物匹配后才探测世界中的机器。
+            if (entry.modType() != ModType.GENERIC) {
+                String unavailable = ctx.candidateRouteCheck(entry, () -> checkRoute(entry, ctx));
+                if (!unavailable.isEmpty()) {
+                    if (diag != null) logDiag(diag, output.getItem(), entry, 0, entry.modType(), true, unavailable);
+                    return;
+                }
             }
             result.add(entry);
         }

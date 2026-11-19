@@ -106,6 +106,27 @@ class ConfirmedPreviewExecutionTest extends BootstrapTest {
     }
 
     @Test
+    void repeatedConfirmationOfMissingPreviewRequiresASeparateNewPreview() {
+        Fixture fixture = new Fixture();
+        try (var validator = mockStatic(PlanningStateValidator.class)) {
+            fixture.retain(10, 1, List.of("wheat"));
+            for (int click = 0; click < 2; click++) {
+                var rejected = fixture.confirm(10);
+                assertNull(rejected.entry());
+                assertEquals("rsi.plan.failure.confirmation_needs_replan", rejected.rejectionKey());
+            }
+            validator.verifyNoInteractions();
+
+            fixture.retain(20, 2);
+            var ready = fixture.cache.peekForRequest(fixture.key, 20);
+            validator.when(() -> PlanningStateValidator.revalidateForExecution(fixture.player,
+                    ready.snapshot(), ready.plan(), Level.OVERWORLD, BlockPos.ZERO, null)).thenReturn(true);
+            assertTrue(fixture.confirm(10).rejected());
+            assertSame(ready, fixture.confirm(20).entry());
+        } finally { fixture.cache.removePlayer(fixture.player.getUUID()); }
+    }
+
+    @Test
     void selectingARemoteAltarStillValidatesAtTheOriginalPreviewLocation() {
         Fixture fixture = new Fixture();
         ServerLevel level = fixture.player.serverLevel();
@@ -175,10 +196,14 @@ class ConfirmedPreviewExecutionTest extends BootstrapTest {
         }
 
         void retain(long request, long generation) {
+            retain(request, generation, List.of());
+        }
+
+        void retain(long request, long generation, List<String> missing) {
             var snapshot = new PlanningSnapshot(player.getUUID(), generation, key.recipeRevision(), recipe,
                     Map.of(), Map.of(), new ImmutableRecipeGraph(Map.of()), "", "", false);
-            var plan = new PlanResponse(true, "target", new ItemStack(Items.DIAMOND),
-                    List.of(), Map.of(), List.of(), recipe.toString());
+            var plan = new PlanResponse(missing.isEmpty(), "target", new ItemStack(Items.DIAMOND),
+                    List.of(), Map.of(), missing, recipe.toString());
             cache.put(key, plan, snapshot, System.nanoTime());
             cache.retainForRequest(player.getUUID(), request, snapshot);
         }

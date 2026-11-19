@@ -49,9 +49,10 @@ public final class PlanMaterialBill {
         Map<IngredientKey, PlanResponse.Availability> netMaterials = graph == null
                 ? buildTraceNetMaterials(neededCounts, itemSources, itemAvailable, stackAvailable,
                         targetOutput, steps, traceDemand)
-                : buildGraphNetMaterials(graph, itemAvailable, stackAvailable);
+                : buildGraphNetMaterials(graph, stackAvailable);
         boolean feasible = !hasMissing
-                && netMaterials.values().stream().allMatch(PlanResponse.Availability::isEnough);
+                && (graph == null || !graph.hasUnresolvedDemands())
+                && netMaterials.values().stream().allMatch(material -> material.missingCount() == 0);
 
         Map<IngredientKey, Long> leftovers = new LinkedHashMap<>();
         for (Map.Entry<Item, ? extends Number> entry : neededCounts.entrySet()) {
@@ -167,8 +168,8 @@ public final class PlanMaterialBill {
         return materials;
     }
 
-    private static long countOf(Map<Item, ? extends Number> counts, Item item) {
-        Number count = counts.get(item);
+    private static <K> long countOf(Map<K, ? extends Number> counts, K key) {
+        Number count = counts.get(key);
         return count == null ? 0L : count.longValue();
     }
 
@@ -216,19 +217,27 @@ public final class PlanMaterialBill {
      */
     private static Map<IngredientKey, PlanResponse.Availability> buildGraphNetMaterials(
             PlanGraphView graph,
-            Map<Item, ? extends Number> itemAvailable,
             Map<StackKey, ? extends Number> stackAvailable) {
-        Map<IngredientKey, Long> needed = new LinkedHashMap<>();
-        graph.visitExternalDemand((stack, count) -> mergeDemand(needed, stack, count));
+        Map<IngredientKey, Long> initial = new LinkedHashMap<>();
+        Map<IngredientKey, Long> unresolved = new LinkedHashMap<>();
+        graph.visitInitialAllocations((stack, count) -> mergeDemand(initial, stack, count));
+        graph.visitUnresolvedDemand((stack, count) -> mergeDemand(unresolved, stack, count));
 
         Map<IngredientKey, PlanResponse.Availability> result = new LinkedHashMap<>();
-        for (Map.Entry<IngredientKey, Long> entry : needed.entrySet()) {
+        initial.forEach((key, count) -> {
+            long available = countOf(stackAvailable, StackKey.of(key.stack(1), true));
+            result.put(key, new PlanResponse.Availability(count, available));
+        });
+        for (Map.Entry<IngredientKey, Long> entry : unresolved.entrySet()) {
             IngredientKey key = entry.getKey();
-            ItemStack display = key.stack(1);
-            long available = display.hasTag()
-                    ? countExactStack(display, stackAvailable)
-                    : countAvailable(itemAvailable, key.item());
-            result.put(key, new PlanResponse.Availability(entry.getValue(), available));
+            long quantity = entry.getValue();
+            PlanResponse.Availability allocated = result.get(key);
+            // 未分配需求不能被同名库存冲销，只能在新规划中重新匹配。
+            result.put(key, allocated == null
+                    ? new PlanResponse.Availability(quantity,
+                            countOf(stackAvailable, StackKey.of(key.stack(1), true)), quantity)
+                    : new PlanResponse.Availability(SaturatingLongMath.add(allocated.needed(), quantity),
+                            allocated.available(), SaturatingLongMath.add(allocated.missingCount(), quantity)));
         }
         return result;
     }

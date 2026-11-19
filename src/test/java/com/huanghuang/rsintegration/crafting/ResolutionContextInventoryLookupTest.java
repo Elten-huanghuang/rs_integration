@@ -9,6 +9,8 @@ import net.minecraft.nbt.TagParser;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraftforge.common.crafting.CompoundIngredient;
+import net.minecraftforge.common.crafting.IIngredientSerializer;
 import net.minecraftforge.common.crafting.PartialNBTIngredient;
 import net.minecraftforge.common.crafting.StrictNBTIngredient;
 import net.minecraftforge.eventbus.api.IEventBus;
@@ -19,6 +21,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
 
@@ -95,6 +98,45 @@ class ResolutionContextInventoryLookupTest extends BootstrapTest {
         assertEquals(2, context.countMatching(demand));
         assertTrue(context.consumeMatchingDetailed(demand, 2).complete());
         context.addProduced(second, source);
+        assertEquals(3, context.countMatching(demand));
+        assertTrue(context.consumeMatchingDetailed(demand, 3).complete());
+    }
+
+    @Test
+    void compoundWithKnownChildrenIndexesOnlyTheirItemTypes() throws Exception {
+        ItemStack iron = new ItemStack(Items.IRON_INGOT, 2);
+        iron.setTag(TagParser.parseTag("{grade:1}"));
+        ItemStack otherIron = iron.copyWithCount(5);
+        otherIron.getTag().putInt("grade", 2);
+        Ingredient demand = CompoundIngredient.of(
+                CompoundIngredient.of(StrictNBTIngredient.of(iron), Ingredient.of(Items.GOLD_INGOT)),
+                PartialNBTIngredient.of(Items.COPPER_INGOT, TagParser.parseTag("{grade:2}")));
+        assertEquals(Set.of(Items.IRON_INGOT, Items.GOLD_INGOT, Items.COPPER_INGOT),
+                IngredientMatcher.itemTypesForMatching(demand));
+        var context = new ResolutionContext(null, Map.of(), List.of(
+                iron, otherIron, new ItemStack(Items.GOLD_INGOT, 3), new ItemStack(Items.DIRT, 64)), null);
+        assertEquals(5, context.countMatching(demand));
+        assertTrue(context.consumeMatchingDetailed(demand, 5).complete());
+        assertEquals(0, context.countMatching(demand));
+    }
+
+    @Test
+    void compoundWithCustomChildStillChecksStockOutsideDisplayItems() {
+        IIngredientSerializer<?> serializer = mock(IIngredientSerializer.class);
+        Ingredient custom = new Ingredient(Stream.of(new Ingredient.ItemValue(new ItemStack(Items.IRON_INGOT)))) {
+            @Override
+            public IIngredientSerializer<? extends Ingredient> getSerializer() {
+                return serializer;
+            }
+
+            @Override
+            public boolean test(ItemStack stack) {
+                return stack.is(Items.DIAMOND);
+            }
+        };
+        Ingredient demand = CompoundIngredient.of(custom, StrictNBTIngredient.of(new ItemStack(Items.GOLD_INGOT)));
+        assertNull(IngredientMatcher.itemTypesForMatching(demand));
+        var context = new ResolutionContext(null, Map.of(), List.of(new ItemStack(Items.DIAMOND, 3)), null);
         assertEquals(3, context.countMatching(demand));
         assertTrue(context.consumeMatchingDetailed(demand, 3).complete());
     }
