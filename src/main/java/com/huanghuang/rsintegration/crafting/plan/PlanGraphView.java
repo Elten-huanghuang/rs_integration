@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.plan;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.graph.CraftNode;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
+import com.huanghuang.rsintegration.crafting.graph.GraphWork;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.graph.MaterialSource;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
@@ -74,57 +75,71 @@ public record PlanGraphView(
      */
     public static PlanGraphView from(CraftPlanGraph graph,
                                      Map<Integer, ParallelPlan> parallelPlans) {
-        List<NodeView> nodes = new ArrayList<>(graph.nodes().size());
-        for (CraftNode node : graph.nodes()) {
-            ItemStack primary = node.outputs().stream()
-                    .filter(output -> output.kind() == OutputKind.PRIMARY
-                            || output.kind() == OutputKind.DYNAMIC)
-                    .findFirst()
-                    .map(output -> output.material().toStack(
-                            Math.max(1, SaturatingLongMath.clampToInt(
-                                    output.quantity() / Math.max(1, node.executions())))))
-                    .orElseGet(() -> node.syntheticOutput() != null
-                            ? node.syntheticOutput().copy() : ItemStack.EMPTY);
-            List<InputView> inputs = node.inputs().stream()
-                    .map(input -> new InputView(input.id().index(), input.displayHint(),
-                            input.quantity(), input.role().ordinal()))
-                    .toList();
-            List<OutputView> outputs = node.outputs().stream()
-                .map(output -> new OutputView(output.id().index(),
-                            output.material().toStack(SaturatingLongMath.clampToInt(output.quantity())),
-                            output.quantity(), output.kind().ordinal()))
-                    .toList();
-            nodes.add(new NodeView(node.id().value(), node.recipeId(), node.modTypeId(),
-                    node.executions(), primary, node.alternativeIds(), node.alternativeModTypeIds(),
-                    inputs, outputs, parallelPlans.get(node.id().value())));
+        Projection work = new Projection(graph, parallelPlans);
+        work.advance(Long.MAX_VALUE);
+        return work.result();
+    }
+
+    public static final class Projection extends GraphWork {
+        private PlanGraphView result;
+
+        public Projection(CraftPlanGraph graph, Map<Integer, ParallelPlan> parallelPlans) {
+            List<NodeView> nodes = new ArrayList<>(graph.nodes().size());
+            scan(graph.nodes()::iterator, node -> {
+                ItemStack primary = node.outputs().stream()
+                        .filter(output -> output.kind() == OutputKind.PRIMARY
+                                || output.kind() == OutputKind.DYNAMIC)
+                        .findFirst()
+                        .map(output -> output.material().toStack(
+                                Math.max(1, SaturatingLongMath.clampToInt(
+                                        output.quantity() / Math.max(1, node.executions())))))
+                        .orElseGet(() -> node.syntheticOutput() != null
+                                ? node.syntheticOutput().copy() : ItemStack.EMPTY);
+                List<InputView> inputs = node.inputs().stream()
+                        .map(input -> new InputView(input.id().index(), input.displayHint(),
+                                input.quantity(), input.role().ordinal()))
+                        .toList();
+                List<OutputView> outputs = node.outputs().stream()
+                    .map(output -> new OutputView(output.id().index(),
+                                output.material().toStack(SaturatingLongMath.clampToInt(output.quantity())),
+                                output.quantity(), output.kind().ordinal()))
+                        .toList();
+                nodes.add(new NodeView(node.id().value(), node.recipeId(), node.modTypeId(),
+                        node.executions(), primary, node.alternativeIds(), node.alternativeModTypeIds(),
+                        inputs, outputs, parallelPlans.get(node.id().value())));
+            });
+
+            List<EdgeView> edges = new ArrayList<>(graph.allocations().size());
+            scan(graph.allocations()::iterator, allocation -> {
+                SourceView source = source(allocation.source());
+                edges.add(new EdgeView(allocation.consumer().nodeId().value(),
+                        allocation.consumer().index(), source,
+                        allocation.material().toStack(
+                                SaturatingLongMath.clampToInt(allocation.quantity())),
+                        allocation.quantity()));
+            });
+
+            List<RootView> roots = new ArrayList<>();
+            scan(graph.rootDemands()::iterator, root -> roots.add(new RootView(root.displayHint(), root.quantity(), root.unresolvedQuantity(),
+                            root.allocations().stream()
+                                    .map(allocation -> new RootEdgeView(source(allocation.source()),
+                                            allocation.material().toStack(
+                                                    SaturatingLongMath.clampToInt(allocation.quantity())),
+                                            allocation.quantity()))
+                                    .toList(), root.role().ordinal())));
+
+            List<UnresolvedView> unresolved = new ArrayList<>();
+            scan(graph.unresolvedDemands()::iterator, missing -> unresolved.add(new UnresolvedView(missing.consumer().nodeId().value(),
+                            missing.consumer().index(), missing.displayHint(), missing.quantity())));
+            once(() -> result = new PlanGraphView(graph.version(), nodes, edges, roots, unresolved,
+                    graph.topologicalOrder().stream().map(NodeId::value).toList(),
+                    graph.magicCosts()));
         }
 
-        List<EdgeView> edges = graph.allocations().stream().map(allocation -> {
-            SourceView source = source(allocation.source());
-            return new EdgeView(allocation.consumer().nodeId().value(),
-                    allocation.consumer().index(), source,
-                    allocation.material().toStack(
-                            SaturatingLongMath.clampToInt(allocation.quantity())),
-                    allocation.quantity());
-        }).toList();
-
-        List<RootView> roots = graph.rootDemands().stream()
-                .map(root -> new RootView(root.displayHint(), root.quantity(), root.unresolvedQuantity(),
-                        root.allocations().stream()
-                                .map(allocation -> new RootEdgeView(source(allocation.source()),
-                                        allocation.material().toStack(
-                                                SaturatingLongMath.clampToInt(allocation.quantity())),
-                                        allocation.quantity()))
-                                .toList(), root.role().ordinal()))
-                .toList();
-
-        List<UnresolvedView> unresolved = graph.unresolvedDemands().stream()
-                .map(missing -> new UnresolvedView(missing.consumer().nodeId().value(),
-                        missing.consumer().index(), missing.displayHint(), missing.quantity()))
-                .toList();
-        return new PlanGraphView(graph.version(), nodes, edges, roots, unresolved,
-                graph.topologicalOrder().stream().map(NodeId::value).toList(),
-                graph.magicCosts());
+        public PlanGraphView result() {
+            requireComplete();
+            return result;
+        }
     }
 
     private static SourceView source(MaterialSource source) {

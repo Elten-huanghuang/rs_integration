@@ -5,12 +5,17 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.mods.vanilla.VanillaMachineRecipeHandler;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.crafting.BlastingRecipe;
+import net.minecraft.world.item.crafting.CookingBookCategory;
 import net.minecraft.world.item.crafting.CraftingBookCategory;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.ShapedRecipe;
@@ -22,6 +27,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.List;
 
@@ -30,8 +36,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static com.huanghuang.rsintegration.testutil.SlashBladeFixtures.blade;
 import static com.huanghuang.rsintegration.testutil.SlashBladeFixtures.ingredient;
 
@@ -40,6 +50,97 @@ class CandidateEngineTest extends BootstrapTest {
     @BeforeAll
     static void initializeMod() {
         DeepPlanningFixture.initializeMod();
+    }
+
+    @Test
+    void reusedScoreGroupsStillReadStockAndContextualInputs() {
+        var ore = Ingredient.of(Items.RAW_IRON);
+        var recipe = new BlastingRecipe(ResourceLocation.parse("test:score_context"), "", CookingBookCategory.MISC,
+                ore, new ItemStack(Items.IRON_INGOT), 0, 100);
+        var entry = new RecipeIndex.Entry(recipe, ModType.GENERIC, ResourceLocation.parse("minecraft:blasting"));
+        var level = mock(Level.class);
+        when(level.registryAccess()).thenReturn(RegistryAccess.EMPTY);
+        var handler = mock(ModRecipeHandler.class);
+        var current = new ArrayList<>(List.of(new IngredientSpec(ore, 1)));
+        int[] calls = {0};
+        when(handler.getPlanningIngredients(eq(recipe), isNull(), any())).thenAnswer(call -> {
+            calls[0]++;
+            return current;
+        });
+        try (var handlers = mockStatic(ModRecipeHandlers.class);
+             var index = mockStatic(RecipeIndex.class);
+             var utils = mockStatic(CraftPacketUtils.class, CALLS_REAL_METHODS)) {
+            handlers.when(() -> ModRecipeHandlers.claimFor(recipe)).thenReturn(new ModRecipeHandlers.Claim(handler, List.of(handler)));
+            handlers.when(() -> ModRecipeHandlers.tryGetResultItem(recipe, RegistryAccess.EMPTY))
+                    .thenReturn(new ItemStack(Items.IRON_INGOT));
+            utils.when(() -> CraftPacketUtils.extractSingleOperationRecursiveIngredientSpecs(recipe))
+                    .thenReturn(List.copyOf(current));
+            var ctx = new ResolutionContext(level, Map.of(Items.IRON_INGOT, List.of(entry)),
+                    List.of(new ItemStack(Items.RAW_IRON)), null);
+            ctx.deadlineNanos = Long.MAX_VALUE;
+            ctx.profile = new CompatibilityProfile();
+            int stocked = diagnosticScore(ctx);
+            ctx.beginUndo();
+            assertTrue(ctx.consumeMatchingDetailed(ore, 1).complete());
+            assertEquals(stocked - 10, diagnosticScore(ctx));
+            assertEquals(1, ctx.profile.groupHits);
+            ctx.rollback();
+            assertEquals(stocked, diagnosticScore(ctx));
+            current.set(0, new IngredientSpec(Ingredient.of(Items.DIAMOND), 3));
+            assertEquals(stocked - 12, diagnosticScore(ctx));
+            assertEquals(2, ctx.profile.groupHits);
+            assertEquals(4, calls[0]);
+        }
+    }
+
+    private static int diagnosticScore(ResolutionContext ctx) {
+        var diagnostics = new ArrayList<CandidateEngine.CandidateDiagnostic>();
+        CandidateEngine.findCandidates(Ingredient.of(Items.IRON_INGOT), ctx, diagnostics);
+        assertEquals(1, diagnostics.size());
+        assertFalse(diagnostics.get(0).skipped());
+        return diagnostics.get(0).score();
+    }
+
+    @Test
+    void changingDisplayedNbtInvalidatesGroupedSlots() {
+        var ore = Ingredient.of(Items.RAW_IRON);
+        var other = Ingredient.of(Items.RAW_IRON);
+        var specs = List.of(new IngredientSpec(ore, 1), new IngredientSpec(other, 2));
+        var groups = CandidateEngine.specDemands(specs).values();
+        assertEquals(1, groups.size());
+        var fixed = FixedScoreDemands.capture(specs, groups);
+        assertTrue(fixed.matches(specs));
+        other.getItems()[0].getOrCreateTag().putString("grade", "high");
+        assertFalse(fixed.matches(specs));
+        assertEquals(2, CandidateEngine.specDemands(specs).size());
+    }
+
+    @Test
+    void frozenMachineReusesSelectionProbeOnlyWithinCurrentSlice() {
+        ServerPlayer player = mock(ServerPlayer.class);
+        ModType route = ModType.register("test_frozen_blast",
+                new String[0], new String[0], new String[0], GenericBatchDelegate::new);
+        var recipe = new BlastingRecipe(ResourceLocation.parse("test:frozen_blast"), "",
+                CookingBookCategory.MISC, Ingredient.of(Items.RAW_IRON), new ItemStack(Items.IRON_INGOT), 0, 100);
+        var entry = new RecipeIndex.Entry(recipe, route, ResourceLocation.parse("minecraft:blasting"));
+        var ctx = new ResolutionContext(null, Map.of(), List.of(), null, player, null);
+        var handler = new VanillaMachineRecipeHandler();
+        int[] probes = {0};
+        try (var handlers = mockStatic(ModRecipeHandlers.class);
+             var bindings = mockStatic(AltarBindingRegistry.class)) {
+            handlers.when(() -> ModRecipeHandlers.claimFor(recipe))
+                    .thenReturn(new ModRecipeHandlers.Claim(handler, List.of(handler)));
+            bindings.when(() -> AltarBindingRegistry.hasBindingForRecipe(player, recipe, route))
+                    .thenAnswer(call -> ++probes[0] == 1);
+            ctx.beginCandidateSlice();
+            assertEquals("", ctx.candidateRouteCheck(entry,
+                    () -> AltarBindingRegistry.hasBindingForRecipe(player, recipe, route) ? "" : "unavailable"));
+            assertTrue(CandidateEngine.frozenRouteStillAvailable(entry, ctx));
+            assertEquals(1, probes[0]);
+            ctx.beginCandidateSlice();
+            assertFalse(CandidateEngine.frozenRouteStillAvailable(entry, ctx));
+            assertEquals(2, probes[0]);
+        }
     }
 
     @Test

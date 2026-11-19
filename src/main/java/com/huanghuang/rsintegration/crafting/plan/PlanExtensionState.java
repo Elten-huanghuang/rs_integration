@@ -79,7 +79,7 @@ public final class PlanExtensionState {
         Context context = new Context(planId, revision, recipe, plan.repeatCount(),
                 Optional.ofNullable(plan.storageReference())
                         .map(reference -> new Network(reference.backendId().value(), reference.networkId())),
-                sources, materials, plan.graph() != null && plan.outcome() != PlanOutcome.BUDGET_EXHAUSTED);
+                sources, materials, plan.graph() != null && !plan.outcome().incomplete());
         registered.forEach((id, provider) -> {
             responses.put(id, new Response(0, null));
             AtomicLong sequence = new AtomicLong();

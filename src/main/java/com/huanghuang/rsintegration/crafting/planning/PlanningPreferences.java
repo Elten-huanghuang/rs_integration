@@ -120,10 +120,12 @@ public record PlanningPreferences(
 
     @Nullable
     public RecipeChoice choiceFor(ItemStack output) {
-        if (output == null || output.isEmpty()) return null;
-        ResourceLocation exact = CraftingResolver.preferenceKey(output);
-        RecipeChoice choice = exact == null ? null : recipeChoices.get(exact.toString());
-        if (choice != null) return choice;
+        if (recipeChoices.isEmpty() || output == null || output.isEmpty()) return null;
+        if (output.hasTag()) {
+            ResourceLocation exact = CraftingResolver.preferenceKey(output);
+            RecipeChoice choice = exact == null ? null : recipeChoices.get(exact.toString());
+            if (choice != null) return choice;
+        }
         ResourceLocation itemId = ForgeRegistries.ITEMS.getKey(output.getItem());
         return itemId == null ? null : recipeChoices.get(itemId.toString());
     }

@@ -9,6 +9,9 @@ import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.planning.PlanningSnapshot;
 import com.huanghuang.rsintegration.crafting.planning.PlanningStateValidator;
+import com.huanghuang.rsintegration.crafting.planning.PureDemandTreeInspector;
+import com.huanghuang.rsintegration.crafting.planning.PurePlanningCoverage;
+import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
 import com.huanghuang.rsintegration.feature.resonance.bridge.ResonanceInventoryBridge;
 import com.huanghuang.rsintegration.network.binding.MachineFavoritesSavedData;
 import io.netty.buffer.Unpooled;
@@ -21,10 +24,17 @@ import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.level.Level;
 
 import java.util.HashMap;
+import javax.annotation.Nullable;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.Executor;
+import java.util.function.IntSupplier;
+import com.huanghuang.rsintegration.crafting.CraftingResolver;
+import com.huanghuang.rsintegration.crafting.ScaledIngredientSpec;
+import com.huanghuang.rsintegration.crafting.planning.PlanRequestService;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -36,6 +46,26 @@ import static org.mockito.Mockito.when;
 /** 使用回放库存替代网络读数，保留正式确认流程的材料复验与预览编号校验。 */
 public final class PackReplayConfirmation {
     private PackReplayConfirmation() {}
+
+    public record RouteEvidence(ImmutableRecipeGraph projected, PureDemandTreeInspector.Result inspection,
+                                @Nullable PureRecipePlanner.Result pure, PurePlanningCoverage.Probe coverage,
+                                long inspectNanos, long proofNanos, long searchNanos) {}
+
+    public static CraftingResolver.TypedPreview start(RouteEvidence evidence, PlanningSnapshot snapshot, PlanRequestService requests,
+            Executor server, IntSupplier tick, List<ScaledIngredientSpec> roots, Level level, ServerPlayer player,
+            List<String> missing, int timeout, CraftingResolver.ActiveRootRecipe root) {
+        var route = CraftPlanDecisionRules.completedRoute(snapshot, false, true, evidence.inspection(),
+                evidence.pure(), evidence.coverage(), Set.of(), false);
+        if (route.action() != CraftPlanDecisionRules.PlannerAction.RUN_TYPED) {
+            throw new IllegalStateException("创造之心未触发兼容路由：" + route);
+        }
+        System.out.printf("production_route recipe=%s action=%s reason=%s pure=%s coverage=%s witness=%s%n",
+                snapshot.recipeId(), route.action(), route.reason(),
+                evidence.pure() == null ? "SKIPPED" : evidence.pure().status(), evidence.coverage().status(),
+                evidence.coverage().noSupply());
+        return CraftPlanningApplicationService.startCompatiblePreview(snapshot, requests, server, tick,
+                types -> snapshot.availableItems(), roots, level, player, null, missing, true, timeout, root, Map.of());
+    }
 
     public static void verify(RecipeManager recipes, PlanResponse plan, PlanResponse displayed, long requestId,
                               CraftPlanGraph graph, Map<StackKey, Long> stock,

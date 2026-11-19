@@ -93,7 +93,7 @@ final class CraftPlanResultDispatcher {
 
     private static void logIncomplete(PlanResponse plan, long requestId, long previewGeneration) {
         if (plan.outcome() != PlanOutcome.MISSING_INPUTS
-                && plan.outcome() != PlanOutcome.BUDGET_EXHAUSTED) return;
+                && !plan.outcome().incomplete()) return;
         var graph = plan.graph();
         long missingRoots = graph == null ? 0 : graph.roots().stream()
                 .filter(root -> root.unresolvedQuantity() > 0).count();

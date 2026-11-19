@@ -8,6 +8,7 @@ import com.huanghuang.rsintegration.crafting.batch.CraftPlanDecisionRules.RouteD
 import com.huanghuang.rsintegration.crafting.batch.CraftPlanDecisionRules.RouteReason;
 import com.huanghuang.rsintegration.crafting.CraftingPlanningTimeoutException;
 import com.huanghuang.rsintegration.crafting.CraftingPlanningLimitException;
+import com.huanghuang.rsintegration.crafting.PlanningCallbackException;
 import com.huanghuang.rsintegration.crafting.CraftingResolver;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
@@ -120,6 +121,9 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.Executor;
+import java.util.function.IntSupplier;
+import com.huanghuang.rsintegration.crafting.planning.PlanRequestService;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.function.Function;
 import java.util.function.LongPredicate;
@@ -518,7 +522,7 @@ final class CraftPlanningApplicationService {
 
     private record CompletedTypedPreview(CraftPlanGraph graph, List<String> missing,
                                          ItemStack output, List<TypedRootKey> roots,
-                                         Map<Integer, ParallelPlan> parallelPlans) {}
+                                         Map<Integer, ParallelPlan> parallelPlans, @Nullable PlanGraphView view) {}
 
     private record TypedRootKey(Class<?> predicateType, Object predicate, long count,
                                 InputConsumption consumption) {}
@@ -615,6 +619,8 @@ final class CraftPlanningApplicationService {
             private IntegrationDiagnostic budgetFailure;
             private ParallelPlanEstimator.Request.GraphEstimate estimates;
             private Map<Integer, ParallelPlan> parallelPlans;
+            private PlanGraphView.Projection projection;
+            private PlanGraphView view;
 
             void enqueue() {
                 var offered = queue.offer(new TypedPreviewAdmissionQueue.Request(player.getUUID(), generation,
@@ -629,6 +635,7 @@ final class CraftPlanningApplicationService {
             @Override
             public void run() {
                 if (!isSnapshotActive(player, snapshot, generation) || !sameWorldContext.getAsBoolean()) {
+                    job.cancel();
                     sink.error(PlanOutcome.RUNTIME_UNAVAILABLE,
                             IntegrationDiagnostic.error(IntegrationDiagnosticCode.STALE_PLAN));
                     return;
@@ -659,10 +666,12 @@ final class CraftPlanningApplicationService {
                     if (graph == null) {
                         long start = System.nanoTime();
                         try {
-                            graph = job.graph();
+                            long budget = queue.remainingTickNanos();
+                            if (budget > 0 && job.advanceGraph(budget)) graph = job.graph();
                         } finally {
                             long elapsed = System.nanoTime() - start;
-                            PerformanceMonitor.recordTypedResolver(computeNanos + elapsed);
+                            computeNanos += elapsed;
+                            if (graph != null) PerformanceMonitor.recordTypedResolver(computeNanos);
                             PerformanceMonitor.recordPlanningLatency(
                                     PerformanceMonitor.PlanningLatencyPhase.TYPED_GRAPH, elapsed);
                         }
@@ -689,8 +698,15 @@ final class CraftPlanningApplicationService {
                     }
                     long start = System.nanoTime();
                     try {
+                        if (view == null) {
+                            if (projection == null) projection = new PlanGraphView.Projection(graph, parallelPlans);
+                            long budget = queue.remainingTickNanos();
+                            if (budget > 0 && projection.advance(budget)) view = projection.result();
+                            enqueue();
+                            return;
+                        }
                         completed.accept(new CompletedTypedPreview(graph, missing, output, roots,
-                                parallelPlans));
+                                parallelPlans, view));
                     } finally {
                         PerformanceMonitor.recordPlanningLatency(
                                 PerformanceMonitor.PlanningLatencyPhase.TYPED_ASSEMBLY, System.nanoTime() - start);
@@ -699,7 +715,17 @@ final class CraftPlanningApplicationService {
             }
 
             private void failed(Throwable failure) {
-                if (failure instanceof CraftingPlanningLimitException) {
+                if (failure instanceof StalePlanningResultException) {
+                    job.cancel();
+                    sink.error(PlanOutcome.RUNTIME_UNAVAILABLE, IntegrationDiagnostic.error(IntegrationDiagnosticCode.STALE_PLAN));
+                    return;
+                }
+                if (failure instanceof PlanningCallbackException unavailable) {
+                    RSIntegrationMod.LOGGER.warn("[RSI-plan] 规划探针失败 recipe={} request={}",
+                            unavailable.recipe(), generation, unavailable);
+                    budgetFailure = IntegrationDiagnostic.error(IntegrationDiagnosticCode.UNSUPPORTED_RECIPE,
+                            unavailable.recipe().toString());
+                } else if (failure instanceof CraftingPlanningLimitException) {
                     RSIntegrationMod.LOGGER.debug("[RSI-plan] 兼容规划达到上限：recipe={} {}", recipeId, failure.getMessage());
                     budgetFailure = IntegrationDiagnostic.error(IntegrationDiagnosticCode.COMPLEXITY_LIMIT);
                 } else if (failure instanceof CraftingPlanningTimeoutException) {
@@ -721,6 +747,47 @@ final class CraftPlanningApplicationService {
             }
         }
         new PreviewTask().enqueue();
+    }
+
+    static CraftingResolver.TypedPreview startCompatiblePreview(
+            PlanningSnapshot snapshot, PlanRequestService requests, Executor server, IntSupplier tick,
+            Function<Set<Item>, Map<StackKey, Long>> readStock, List<ScaledIngredientSpec> roots, Level level,
+            ServerPlayer player, CraftStorageEndpoint endpoint, List<String> missing, boolean physical,
+            int timeout, CraftingResolver.ActiveRootRecipe activeRoot, Map<String, ItemStack> locks) {
+        // 同一 tick 内共享精确物品的只读库存探针。账本中的中间产物没有对应的实物扣款。
+        var validate = new CraftingResolver.BranchStockValidator() {
+            int lastTick = Integer.MIN_VALUE;
+            final Map<StackKey, Long> checked = new HashMap<>();
+            final Set<Item> checkedItems = new HashSet<>();
+            final Map<StackKey, Long> corrections = new HashMap<>();
+
+            public boolean check(Set<StackKey> touched, CraftingResolver.StockCorrection correction) {
+                if (!requests.isCurrent(snapshot.playerId(), snapshot.requestGeneration())
+                        || !CraftPlanningRevision.isCurrent(snapshot.recipeRevision())) throw new StalePlanningResultException(snapshot);
+                int current = tick.getAsInt();
+                if (current != lastTick) {
+                    checked.clear();
+                    checkedItems.clear();
+                    lastTick = current;
+                }
+                Set<Item> needed = new HashSet<>();
+                for (StackKey key : touched) if (checkedItems.add(key.item())) needed.add(key.item());
+                if (!needed.isEmpty()) checked.putAll(readStock.apply(needed));
+                boolean unchanged = true;
+                for (StackKey key : touched) {
+                    long previous = corrections.getOrDefault(key, snapshot.availableItems().getOrDefault(key, 0L));
+                    long live = checked.getOrDefault(key, 0L);
+                    if (live == previous) continue;
+                    if (!correction.apply(key, previous, live)) throw new StalePlanningResultException(snapshot);
+                    corrections.put(key, live);
+                    unchanged = false;
+                }
+                return unchanged;
+            }
+        };
+        return CraftingResolver.startHybridPreview(roots, snapshot.availableItems(), level, player, endpoint,
+                missing, snapshot.forcedRecipes(), physical, timeout, activeRoot, locks, snapshot.preferences(),
+                requests.branchDispatcher(snapshot, server), validate);
     }
 
     static void tryBuildPlan(ServerPlayer player, ResourceLocation recipeId,
@@ -1619,11 +1686,13 @@ final class CraftPlanningApplicationService {
                 var bindingFingerprint = PlanningStateValidator.bindingFingerprint(player, planDimKey, pos);
                 var activeRoot = new CraftingResolver.ActiveRootRecipe(recipeId, targetOutput);
                 List<TypedRootKey> rootKeys = typedRootKeys(recursiveRecipeSpecs);
-                var job = CraftingResolver.startTypedPreview(
-                        recursiveRecipeSpecs, available, level, player, planningEndpoint,
-                        missing, forcedOverrides, CraftExecutionPolicy.usesPhysicalMachineInputSlots(recipe),
-                        RSIntegrationConfig.CRAFTING_TYPED_PREVIEW_TIMEOUT_MS.get(), activeRoot, materialLocks,
-                        safePreferences);
+                var job = startCompatiblePreview(typedSnapshot, CraftPlanningRuntime.planRequests(),
+                        player.getServer()::execute, player.getServer()::getTickCount,
+                        types -> MaterialSources.listAvailableForTypes(player, planningEndpoint, types,
+                                typedSnapshot.preferences().materialSources()),
+                        recursiveRecipeSpecs, level, player, planningEndpoint, missing,
+                        CraftExecutionPolicy.usesPhysicalMachineInputSlots(recipe),
+                        RSIntegrationConfig.CRAFTING_TYPED_PREVIEW_TIMEOUT_MS.get(), activeRoot, materialLocks);
                 scheduleTypedPreview(player, recipeId, previewGeneration, typedSnapshot, sink, job,
                         () -> player.serverLevel() == level && Objects.equals(bindingFingerprint,
                                 PlanningStateValidator.bindingFingerprint(player, planDimKey, pos)),
@@ -1691,7 +1760,7 @@ final class CraftPlanningApplicationService {
                                 baseItem, clickedOutput, requestId, previewGeneration, precomputedPlan, currentSnapshot,
                                 true, reuseValidatedSnapshot, sink, planStorageReference, materialLocks, routedPlan,
                                 safePreferences, new CompletedTypedPreview(graph, List.of(), planTargetOutput,
-                                        roots, work.result())), sink);
+                                        roots, work.result(), null)), sink);
                 return;
             }
             resolutionSteps = ExecutionEquivalence.projectFlatSteps(planGraph);
@@ -2296,8 +2365,9 @@ final class CraftPlanningApplicationService {
         Map<Integer, PlanStep> nodeTemplates = new HashMap<>();
         for (var entry : templateIndices.entrySet()) nodeTemplates.put(entry.getKey(), steps.get(entry.getValue()));
         PlanGraphView planGraphView = displayGraph != null
-                ? PlanGraphView.from(displayGraph, reuseTypedEstimates
-                        ? completedTyped.parallelPlans() : parallelEstimates.estimate(displayGraph))
+                ? (reuseTypedEstimates && completedTyped.view() != null ? completedTyped.view()
+                        : PlanGraphView.from(displayGraph, reuseTypedEstimates
+                        ? completedTyped.parallelPlans() : parallelEstimates.estimate(displayGraph)))
                         .withNodePresentations(nodeTemplates)
                 : null;
         if (planGraphView != null) {

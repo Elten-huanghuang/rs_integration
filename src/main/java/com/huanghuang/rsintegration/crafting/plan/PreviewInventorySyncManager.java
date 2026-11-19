@@ -62,7 +62,7 @@ public final class PreviewInventorySyncManager {
     /** 按玩家和请求保留已发送的结果；仅当前打开的窗口挂原生监听器。 */
     public static void offer(ServerPlayer player, PlanResponse plan, long requestId) {
         if (!enabled() || plan.graph() == null || plan.recipeId().isEmpty()
-                || plan.outcome() == PlanOutcome.BUDGET_EXHAUSTED) return;
+                || plan.outcome().incomplete()) return;
         offer(player.getUUID(), plan, requestId, player.getServer().getTickCount());
         prune(player.getServer().getTickCount(),
                 RSIntegrationConfig.serverInt(RSIntegrationConfig.CRAFTING_PREVIEW_INVENTORY_PENDING_TICKS),

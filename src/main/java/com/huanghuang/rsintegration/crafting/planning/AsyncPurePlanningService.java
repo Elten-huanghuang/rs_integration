@@ -6,6 +6,7 @@ import com.mojang.logging.LogUtils;
 import com.huanghuang.rsintegration.crafting.SelfAmplifyingRecipePolicy;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
 import net.minecraft.resources.ResourceLocation;
 import org.slf4j.Logger;
@@ -26,6 +27,8 @@ public final class AsyncPurePlanningService {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final long COVERAGE_GAP_PROBE_NANOS = 3_000_000_000L;
     private static final int COVERAGE_GAP_PROBE_STATES = 4_096;
+    private static final int SUPPLY_PROOF_WORK = 16_384;
+    private static final long SUPPLY_PROOF_NANOS = 100_000_000L;
     private final AsyncPlanningCoordinator coordinator;
 
     public AsyncPurePlanningService(AsyncPlanningCoordinator coordinator) {
@@ -130,57 +133,75 @@ public final class AsyncPurePlanningService {
                     snapshot.forcedRecipes().isEmpty() || forcedGraph != null;
             ImmutableRecipeGraph routingGraph = forcedGraph != null ? forcedGraph : scopedGraph;
             long projectionNanos = System.nanoTime() - projectionStarted;
-            long inspectionStarted = System.nanoTime();
-            PureDemandTreeInspector.Result inspection;
-            try {
-                setPhase(session, snapshot, PlanningSession.Phase.DEMAND_TREE);
-                inspection = PureDemandTreeInspector.inspectWithDeadline(routingGraph,
-                        routing.available(), snapshot.recipeId(), repeatCount, routing.maxNodes(),
-                        routing.catalystOutputs(), routing.catalystRecipes(), routing.incompatibleOutputs(),
-                        session.deadlineNanos());
-            } finally {
-                PerformanceMonitor.recordDemandTreeInspection(
-                        System.nanoTime() - inspectionStarted);
-            }
-            long inspectionNanos = System.nanoTime() - inspectionStarted;
-            PlanningThreadContext.throwIfCancelled();
-            long searchStarted = System.nanoTime();
-            // 贪心检查可能先访问副产物，或先选到不产该副产物的配方。只在依赖图有对应
-            // 保证产量时试探，仍由求解器用原始库存、完整根列表和玩家选择重新验证。
-            boolean probeCoProduct = inspection.status() == PureDemandTreeInspector.Status.UNPROJECTED_DEPENDENCY
-                    && inspection.coProductRouteAvailable();
-            boolean canSearch = forcedRecipesProjected && (inspection.backgroundCompatible() || probeCoProduct)
-                    && !snapshot.mainThreadOnly();
-            var coverage = canSearch ? PurePlanningCoverage.unprojectedDependency(routingGraph,
-                    snapshot.recipeId(), routing.incompatibleOutputs(), snapshot.forcedRecipes(),
-                    snapshot.preferences(), Math.min(session.deadlineNanos(), System.nanoTime() + 100_000_000L))
-                    : PurePlanningCoverage.Probe.notChecked();
-            boolean boundedProbe = probeCoProduct || coverage.status() == PurePlanningCoverage.Status.GAP;
-            // 截止时间包含协作式等待。按 5ms/50ms 运行时，旧的 250ms 只给了约
-            // 25ms 计算机会；仍保留状态上限，确保无解的纯图能及时交接给类型规划。
-            long searchDeadline = boundedProbe
-                    ? Math.min(session.deadlineNanos(), System.nanoTime() + COVERAGE_GAP_PROBE_NANOS)
-                    : session.deadlineNanos();
-            PureRecipePlanner.Result plan = canSearch
-                    ? computeInScope(snapshot, repeatCount, maxSteps,
-                            boundedProbe ? Math.min(maxSearchStates, COVERAGE_GAP_PROBE_STATES) : maxSearchStates,
-                            maxMemoizedFailures, session, routingGraph,
-                            routing.projectedAvailabilityFor(snapshot), searchDeadline) : null;
-            if (probeCoProduct && canSearch) {
-                if (plan.feasible() && plan.materialFlow() != null) {
-                    inspection = new PureDemandTreeInspector.Result(PureDemandTreeInspector.Status.COMPLETE,
-                            inspection.visitedNodes(), null, inspection.catalystRouteAvailable());
-                } else {
-                    // 类型配方仍可能供料，保留原检查结果并交回类型规划。
-                    plan = null;
-                }
-            }
-            // 保留原始结果和覆盖证据，由调用方共用的路由规则决定是否需要类型解析。
-            RoutedPlan result = new RoutedPlan(snapshot, routing, inspection, plan, forcedRecipesProjected, coverage);
-            logSlowRoute(result, started, replayNanos, projectionNanos, inspectionNanos,
-                    System.nanoTime() - searchStarted, routing.previousRoute() == null ? "none" : "fallback");
-            return result;
+            var measured = inspectAndSearch(snapshot, routing, repeatCount, maxSteps, maxSearchStates,
+                    maxMemoizedFailures, session, routingGraph, forcedRecipesProjected,
+                    routing.projectedAvailabilityFor(snapshot), true);
+            logSlowRoute(measured.result(), started, replayNanos, projectionNanos, measured.inspectionNanos(),
+                    measured.searchNanos(), routing.previousRoute() == null ? "none" : "fallback");
+            return measured.result();
         });
+    }
+
+    record MeasuredRoute(RoutedPlan result, long inspectionNanos, long proofNanos, long searchNanos) {}
+
+    /** 生产与离线对照共用相同的覆盖检查、供给证明和搜索预算。 */
+    static MeasuredRoute inspectAndSearch(PlanningSnapshot snapshot, RouteInputs routing, int repeatCount,
+            int maxSteps, int maxSearchStates, int maxMemoizedFailures, PlanningSession session,
+            ImmutableRecipeGraph routingGraph, boolean forcedRecipesProjected,
+            @Nullable Map<MaterialRef, Long> projectedStock, boolean proofEnabled) {
+        long inspectionStarted = System.nanoTime();
+        PureDemandTreeInspector.Result inspection;
+        try {
+            setPhase(session, snapshot, PlanningSession.Phase.DEMAND_TREE);
+            inspection = PureDemandTreeInspector.inspectWithDeadline(routingGraph,
+                    routing.available(), snapshot.recipeId(), repeatCount, routing.maxNodes(),
+                    routing.catalystOutputs(), routing.catalystRecipes(), routing.incompatibleOutputs(),
+                    session.deadlineNanos());
+        } finally {
+            PerformanceMonitor.recordDemandTreeInspection(System.nanoTime() - inspectionStarted);
+        }
+        long inspectionNanos = System.nanoTime() - inspectionStarted;
+        PlanningThreadContext.throwIfCancelled();
+        // 贪心检查可能先访问副产物，或先选到不产该副产物的配方。保留有保证产量时的完整根试探。
+        boolean probeCoProduct = inspection.status() == PureDemandTreeInspector.Status.UNPROJECTED_DEPENDENCY
+                && inspection.coProductRouteAvailable();
+        boolean canSearch = forcedRecipesProjected && (inspection.backgroundCompatible() || probeCoProduct)
+                && !snapshot.mainThreadOnly();
+        var coverage = canSearch ? PurePlanningCoverage.unprojectedDependency(routingGraph,
+                snapshot.recipeId(), routing.incompatibleOutputs(), snapshot.forcedRecipes(),
+                snapshot.preferences(), Math.min(session.deadlineNanos(), System.nanoTime() + 100_000_000L))
+                : PurePlanningCoverage.Probe.notChecked();
+        boolean boundedProbe = probeCoProduct || coverage.status() == PurePlanningCoverage.Status.GAP;
+        long proofNanos = 0L;
+        if (proofEnabled && projectedStock != null && coverage.status() == PurePlanningCoverage.Status.GAP) {
+            long start = System.nanoTime();
+            coverage = PureSupplyProof.check(coverage, routingGraph, snapshot.recipeId(), projectedStock,
+                    snapshot.forcedRecipes(), snapshot.preferences(), routing.catalystOutputs(), routing.catalystRecipes(),
+                    SUPPLY_PROOF_WORK, Math.min(session.deadlineNanos(), start + SUPPLY_PROOF_NANOS));
+            proofNanos = System.nanoTime() - start;
+        }
+        // 截止时间包含协作式等待。保留原有时间和状态上限。
+        long searchDeadline = boundedProbe
+                ? Math.min(session.deadlineNanos(), System.nanoTime() + COVERAGE_GAP_PROBE_NANOS)
+                : session.deadlineNanos();
+        long searchStarted = System.nanoTime();
+        boolean runSearch = canSearch && coverage.noSupply() == null;
+        PureRecipePlanner.Result plan = runSearch
+                ? computeInScope(snapshot, repeatCount, maxSteps,
+                        boundedProbe ? Math.min(maxSearchStates, COVERAGE_GAP_PROBE_STATES) : maxSearchStates,
+                        maxMemoizedFailures, session, routingGraph, projectedStock, searchDeadline) : null;
+        long searchNanos = runSearch ? System.nanoTime() - searchStarted : 0L;
+        if (probeCoProduct && runSearch) {
+            if (plan.feasible() && plan.materialFlow() != null) {
+                inspection = new PureDemandTreeInspector.Result(PureDemandTreeInspector.Status.COMPLETE,
+                        inspection.visitedNodes(), null, inspection.catalystRouteAvailable());
+            } else {
+                // 类型配方仍可能供料，保留原检查结果并交回类型规划。
+                plan = null;
+            }
+        }
+        var result = new RoutedPlan(snapshot, routing, inspection, plan, forcedRecipesProjected, coverage);
+        return new MeasuredRoute(result, inspectionNanos, proofNanos, searchNanos);
     }
 
     @Nullable

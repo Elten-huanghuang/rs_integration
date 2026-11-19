@@ -6,7 +6,9 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
+import com.huanghuang.rsintegration.config.CraftingPlanningConfig;
 import com.huanghuang.rsintegration.crafting.PackTypedPlanningReplay;
+import com.huanghuang.rsintegration.crafting.batch.PackReplayConfirmation.RouteEvidence;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
@@ -30,6 +32,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.zip.ZipFile;
@@ -330,6 +333,31 @@ public final class PackPlanningReplay {
         System.out.println("assumed_harvest_and_spirits=" + harvest);
         solveCase("synthetic_farm_and_spirits", abilityGraph, target, farmStock, forced, unprojectedOutputs);
         verifySupplyChanges(abilityGraph, target, farmStock, forced, unprojectedOutputs);
+        if (Boolean.getBoolean("rsi.replay.hybrid")) {
+            logVoidSupply("saved_disks", forcedGraph, stock);
+            PackTypedPlanningReplay.run("saved_disks", graph, abilityGraph, target, stock, forced,
+                    enabled -> routeEvidence(forcedGraph, target, stock, forced, incomplete, coverage, enabled));
+            var fixed = new HashMap<>(farmStock);
+            Map.ofEntries(
+                    Map.entry("apotheosis:mythic_material", 24), Map.entry("avaritia:eternal_singularity", 8),
+                    Map.entry("avaritia:infinity", 2), Map.entry("botania:terrasteel_block", 2),
+                    Map.entry("cataclysm:ancient_metal_block", 3), Map.entry("cataclysm:cursium_block", 3),
+                    Map.entry("cataclysm:ignitium_block", 3), Map.entry("corn_delight:corn_crate", 1),
+                    Map.entry("ecologics:seashell_block", 3), Map.entry("legendary_monsters:portal_shard", 12),
+                    Map.entry("malum:block_of_cthonic_gold", 2), Map.entry("malum:block_of_null_slate", 2),
+                    Map.entry("minecraft:clay", 1), Map.entry("thaumcraft:thaumium_block", 2),
+                    Map.entry("thaumcraft:water_crystal", 6), Map.entry("twilightforest:steeleaf_block", 1),
+                    Map.entry("vintagedelight:cucumber_crate", 1), Map.entry("vintagedelight:gearo_berry_bag", 1),
+                    Map.entry("vintagedelight:ghost_pepper_crate", 1), Map.entry("vintagedelight:peanut_crate", 1),
+                    Map.entry("wizards_reborn:alchemy_calx_block", 1), Map.entry("wizards_reborn:arcane_linen_hay", 1),
+                    Map.entry("wizards_reborn:natural_calx_block", 1), Map.entry("youkaishomecoming:pod_crate", 1),
+                    Map.entry("youkaishomecoming:redbean_bag", 1), Map.entry("youkaishomecoming:tea_leaf_bag", 1)
+            ).forEach((id, quantity) -> fixed.merge(material(id), quantity.longValue(), Math::addExact));
+            logVoidSupply("fixed_restock", forcedGraph, fixed);
+            PackTypedPlanningReplay.run("fixed_restock", abilityGraph, abilityGraph, target, fixed, forced,
+                    enabled -> routeEvidence(forcedGraph, target, fixed, forced, incomplete, coverage, enabled));
+            return;
+        }
         if (typed) {
             // 固定物品替身和库存，只切换虚空交易权限假设。
             PackTypedPlanningReplay.run("saved_disks", graph, abilityGraph, target, stock, forced);
@@ -438,6 +466,40 @@ public final class PackPlanningReplay {
                 label, input.alternatives().get(0).itemId(), input.count(), branch.status(),
                 branch.expandedStates(), branch.backtracks(), firstMissing, missing == null ? 0 : missing.count(), initial);
         return branch;
+    }
+
+    private static void logVoidSupply(String label, ImmutableRecipeGraph graph, Map<MaterialRef, Long> stock) {
+        for (var id : List.of("thaumcraft:void_metal_ingot", "thaumcraft:void_seed")) {
+            var wanted = material(id);
+            var inventory = stock.entrySet().stream().filter(e -> ImmutableRecipeGraphProjector.matchesAlternative(
+                    e.getKey(), wanted, NbtMatchMode.ANY)).toList();
+            var sources = ImmutableRecipeGraphProjector.candidates(graph, wanted, NbtMatchMode.ANY).stream()
+                    .map(recipe -> recipe.recipeId() + "(" + recipe.recipeTypeId() + ")").toList();
+            System.out.printf("void_supply label=%s material=%s mode=ANY stock=%s sources=%s coproducts=%s%n",
+                    label, id, inventory, sources, graph.coProductsByItem().getOrDefault(wanted.resourceId(), Set.of()));
+        }
+    }
+
+    private static RouteEvidence routeEvidence(ImmutableRecipeGraph projected, RecipeNode target,
+                                                Map<MaterialRef, Long> stock, Map<ResourceLocation, ResourceLocation> forced,
+                                                Set<ResourceLocation> incomplete, PurePlanningCoverage.Probe coverage,
+                                                boolean proofEnabled) {
+        if (Boolean.getBoolean("rsi.replay.skipPure")) {
+            long start = System.nanoTime();
+            var inspection = PureDemandTreeInspector.inspect(projected, stock, target.recipeId(), 1);
+            return new RouteEvidence(projected, inspection, null, coverage, System.nanoTime() - start, 0L, 0L);
+        }
+        var snapshot = new PlanningSnapshot(new UUID(0, 1), 1L, 1L, target.recipeId(), Map.of(), forced,
+                projected, "offline", "offline", false);
+        var routing = new AsyncPurePlanningService.RouteInputs(stock, CraftingPlanningConfig.DEFAULT_DEMAND_TREE_NODES,
+                Set.of(), Set.of(), incomplete);
+        var measure = PlanningLookupCache.run(() -> AsyncPurePlanningService.inspectAndSearch(snapshot, routing,
+                1, 4096, CraftingPlanningConfig.DEFAULT_SEARCH_STATES, CraftingPlanningConfig.DEFAULT_MEMOIZED_FAILURES,
+                new PlanningSession(1L, CraftingPlanningConfig.DEFAULT_PURE_TIMEOUT_MS), projected, true,
+                routing.available(), proofEnabled));
+        var result = measure.result();
+        return new RouteEvidence(projected, result.inspection(), result.plan(), result.coverage(),
+                measure.inspectionNanos(), measure.proofNanos(), measure.searchNanos());
     }
 
     private static void solveCase(String label, ImmutableRecipeGraph graph, RecipeNode target,

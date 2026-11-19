@@ -17,7 +17,10 @@ public final class PurePlanningCoverage {
     public enum Status { NOT_CHECKED, COMPLETE, GAP, UNCERTAIN }
 
     /** 未完成探测的前沿材料不是已证实缺口，更不是缺料结论。 */
-    public record Probe(@Nullable MaterialRef uncovered, Status status) {
+    public record Probe(@Nullable MaterialRef uncovered, Status status, @Nullable PureSupplyProof.Witness noSupply) {
+        public Probe(@Nullable MaterialRef uncovered, Status status) {
+            this(uncovered, status, null);
+        }
         public static Probe notChecked() {
             return new Probe(null, Status.NOT_CHECKED);
         }

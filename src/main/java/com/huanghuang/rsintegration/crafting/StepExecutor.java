@@ -141,6 +141,17 @@ final class StepExecutor {
             return;
         }
 
+        Runnable compatible = () -> craftCompatible(entry, ctx, depth, altIds, altModTypes, edges,
+                batches, demandedOutput, stack, done);
+        if (ctx.hybrid != null && ctx.hybrid.start(entry, ctx, depth, batches, altIds, altModTypes,
+                demandedOutput, stack, compatible, done)) return;
+        compatible.run();
+    }
+
+    private static void craftCompatible(RecipeIndex.Entry entry, ResolutionContext ctx, int depth,
+                             List<ResourceLocation> altIds, List<String> altModTypes,
+                             CraftingResolver.EdgeTracker edges, int batches, ItemStack demandedOutput,
+                             PlanningStack stack, Consumer<Boolean> done) {
         if (entry.modType() == ModType.GENERIC && entry.recipe() instanceof CraftingRecipe cr) {
             craftBatched(cr, ctx, depth, altIds, altModTypes, edges, batches, stack, done);
             return;
@@ -154,7 +165,7 @@ final class StepExecutor {
                 && demandedOutput != null && !demandedOutput.isEmpty();
         List<IngredientSpec> specs = goetyDynamic
                 ? GoetyDynamicRitualRecipe.buildMaterials(entry.recipe(), demandedOutput)
-                : CraftPacketUtils.extractIngredientSpecs(entry.recipe());
+                : ctx.readRecipe(entry.recipe(), () -> CraftPacketUtils.extractIngredientSpecs(entry.recipe()));
         specs = MinersDelightCopperPotSupport.adaptIngredientSpecs(
                 entry.modType(), specs, entry.recipe(), ctx.level.registryAccess());
         if (entry.modType() == ModType.byId("crockpot")
@@ -249,7 +260,7 @@ final class StepExecutor {
                 ? GoetyDynamicRitualRecipe.validatedOutput(entry.recipe(), demandedOutput)
                 : ItemStack.EMPTY;
         if (result.isEmpty() && handler != null) {
-            result = handler.getResultItem(entry.recipe(), ctx.level.registryAccess());
+            result = ctx.readRecipe(entry.recipe(), () -> handler.getResultItem(entry.recipe(), ctx.level.registryAccess()));
         }
         if (result.isEmpty()) {
             result = ModRecipeHandlers.tryGetResultItem(entry.recipe(), ctx.level.registryAccess());
@@ -643,7 +654,7 @@ final class StepExecutor {
         ctx.addProduced(planned, new MaterialSource.ProducerOutput(port));
     }
 
-    private static CraftNode toGraphNode(NodeId nodeId, CraftingResolver.ResolutionStep step,
+    static CraftNode toGraphNode(NodeId nodeId, CraftingResolver.ResolutionStep step,
                                          List<InputDemand> inputs, List<OutputDeclaration> outputs) {
         return new CraftNode(nodeId, step.recipeId(), step.modType().id(), step.recipeTypeId(),
                 step.executions(), step.alternativeIds(), step.alternativeModTypes(), step.inferMode(),

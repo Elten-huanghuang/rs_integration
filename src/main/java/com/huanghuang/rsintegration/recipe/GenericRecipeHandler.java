@@ -8,6 +8,8 @@ import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.item.crafting.ShapedRecipe;
+import net.minecraft.world.item.crafting.ShapelessRecipe;
 
 import javax.annotation.Nullable;
 import java.util.List;
@@ -25,6 +27,11 @@ final class GenericRecipeHandler extends AbstractRecipeHandler {
     @Override
     public int claimPriority() {
         return CLAIM_PRIORITY_GENERIC;
+    }
+
+    @Override
+    public boolean supportsFixedBranchPlanning(Recipe<?> recipe) {
+        return recipe.getClass() == ShapedRecipe.class || recipe.getClass() == ShapelessRecipe.class;
     }
 
     @Override

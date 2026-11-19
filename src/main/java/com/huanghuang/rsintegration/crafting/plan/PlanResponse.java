@@ -92,7 +92,9 @@ public record PlanResponse(
                 position == null ? 0 : position.getX(), position == null ? 0 : position.getY(),
                 position == null ? 0 : position.getZ(), List.of(), repeat,
                 null, null, null, 0L, false, false, false, base, Set.of(), Map.of(), clicked,
-                graph, true, List.of(), Map.of(), storage, List.of(), PlanOutcome.BUDGET_EXHAUSTED,
+                graph, true, List.of(), Map.of(), storage, List.of(),
+                diagnostic.code() == IntegrationDiagnosticCode.UNSUPPORTED_RECIPE
+                        ? PlanOutcome.UNSUPPORTED_SEMANTICS : PlanOutcome.BUDGET_EXHAUSTED,
                 List.of(diagnostic));
     }
 
@@ -179,7 +181,7 @@ public record PlanResponse(
 
     /** 客户端可确认的路线；服务端仍需验证实际分配、库存和机器。 */
     public boolean canConfirmExecution() {
-        if (executionBlocked || outcome == PlanOutcome.BUDGET_EXHAUSTED
+        if (executionBlocked || outcome.incomplete()
                 || graph != null && graph.hasUnresolvedDemands()) return false;
         if (success) return outcome.ready();
         // 只有完整且仅因机器租用而等待的计划可以直接交给调度器。

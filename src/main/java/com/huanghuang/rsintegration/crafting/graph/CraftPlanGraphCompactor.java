@@ -13,6 +13,7 @@ import org.slf4j.Logger;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -48,48 +49,71 @@ public final class CraftPlanGraphCompactor {
         if (graph == null || graph.nodes().size() < 2) return graph;
         if (mergeEligible == null) throw new IllegalArgumentException("mergeEligible");
 
-        Set<ResourceLocation> seenRecipes = new HashSet<>();
-        Set<ResourceLocation> repeatedRecipes = new HashSet<>();
-        for (CraftNode node : graph.nodes()) {
-            if (!seenRecipes.add(node.recipeId())) repeatedRecipes.add(node.recipeId());
-        }
-        if (repeatedRecipes.isEmpty()) return graph;
+        Compaction work = start(graph, mergeEligible);
+        work.advance(Long.MAX_VALUE);
+        return work.result();
+    }
 
-        Map<NodeSignature, List<CraftNode>> groups = new LinkedHashMap<>();
-        Map<NodeId, NodeSignature> signatures = new HashMap<>();
-        Map<NodeId, NodeId> remap = new LinkedHashMap<>();
-        for (CraftNode node : graph.nodes()) {
-            if (!repeatedRecipes.contains(node.recipeId())) {
-                remap.put(node.id(), node.id());
-                continue;
-            }
-            NodeSignature signature = NodeSignature.from(node);
-            groups.computeIfAbsent(signature, ignored -> new ArrayList<>()).add(node);
-            signatures.put(node.id(), signature);
+    public static Compaction start(CraftPlanGraph graph, Predicate<CraftNode> eligible) {
+        return new Compaction(graph, eligible);
+    }
+
+    public static final class Compaction extends GraphWork {
+        private CraftPlanGraph result;
+        private boolean changed;
+
+        private Compaction(CraftPlanGraph graph, Predicate<CraftNode> mergeEligible) {
+            result = graph;
+            Set<ResourceLocation> seenRecipes = new HashSet<>();
+            Set<ResourceLocation> repeatedRecipes = new HashSet<>();
+            scan(graph.nodes()::iterator, node -> {
+                if (!seenRecipes.add(node.recipeId())) repeatedRecipes.add(node.recipeId());
+            });
+
+            Map<NodeSignature, List<CraftNode>> groups = new LinkedHashMap<>();
+            Map<NodeId, NodeSignature> signatures = new HashMap<>();
+            Map<NodeId, NodeId> remap = new LinkedHashMap<>();
+            scan(() -> repeatedRecipes.isEmpty() ? Collections.<CraftNode>emptyIterator() : graph.nodes().iterator(), node -> {
+                if (!repeatedRecipes.contains(node.recipeId()) || !mergeEligible.test(node)) {
+                    remap.put(node.id(), node.id());
+                    return;
+                }
+                NodeSignature signature = NodeSignature.from(node);
+                groups.computeIfAbsent(signature, ignored -> new ArrayList<>()).add(node);
+                signatures.put(node.id(), signature);
+            });
+
+            // 一次检查所有材料分配，标记组内存在生产依赖的配方，避免每组扫描整图。
+            Set<NodeSignature> dependentGroups = new HashSet<>();
+            scan(() -> groups.isEmpty() ? Collections.<MaterialAllocation>emptyIterator() : graph.allocations().iterator(), allocation -> {
+                if (!(allocation.source() instanceof MaterialSource.ProducerOutput producer)) return;
+                NodeSignature consumer = signatures.get(allocation.consumer().nodeId());
+                if (consumer != null && consumer.equals(signatures.get(producer.outputPort().nodeId()))) {
+                    dependentGroups.add(consumer);
+                }
+            });
+            scan(groups.entrySet()::iterator, entry -> {
+                List<CraftNode> group = entry.getValue();
+                if (dependentGroups.contains(entry.getKey()) || !canMerge(group)) {
+                    for (CraftNode node : group) remap.put(node.id(), node.id());
+                    return;
+                }
+                changed = true;
+                NodeId canonical = group.get(0).id();
+                for (CraftNode node : group) remap.put(node.id(), canonical);
+            });
+            once(() -> {
+                if (changed) result = compactGroups(graph, remap);
+            });
         }
 
-        // 一次检查所有材料分配，标记组内存在生产依赖的配方，避免每组扫描整图。
-        Set<NodeSignature> dependentGroups = new HashSet<>();
-        for (MaterialAllocation allocation : graph.allocations()) {
-            if (!(allocation.source() instanceof MaterialSource.ProducerOutput producer)) continue;
-            NodeSignature consumer = signatures.get(allocation.consumer().nodeId());
-            if (consumer != null && consumer.equals(signatures.get(producer.outputPort().nodeId()))) {
-                dependentGroups.add(consumer);
-            }
+        public CraftPlanGraph result() {
+            requireComplete();
+            return result;
         }
-        for (var entry : groups.entrySet()) {
-            List<CraftNode> group = entry.getValue();
-            if (dependentGroups.contains(entry.getKey()) || !canMerge(group, mergeEligible)) {
-                for (CraftNode node : group) remap.put(node.id(), node.id());
-                continue;
-            }
-            NodeId canonical = group.get(0).id();
-            for (CraftNode node : group) remap.put(node.id(), canonical);
-        }
-        if (remap.entrySet().stream().allMatch(entry -> entry.getKey().equals(entry.getValue()))) {
-            return graph;
-        }
+    }
 
+    private static CraftPlanGraph compactGroups(CraftPlanGraph graph, Map<NodeId, NodeId> remap) {
         Map<NodeId, List<CraftNode>> mergedMembers = new LinkedHashMap<>();
         for (CraftNode node : graph.nodes()) {
             mergedMembers.computeIfAbsent(remap.get(node.id()), ignored -> new ArrayList<>()).add(node);
@@ -180,11 +204,9 @@ public final class CraftPlanGraphCompactor {
         return List.copyOf(ordered);
     }
 
-    private static boolean canMerge(List<CraftNode> group,
-                                    Predicate<CraftNode> mergeEligible) {
+    private static boolean canMerge(List<CraftNode> group) {
         if (group.size() < 2) return false;
         CraftNode first = group.get(0);
-        if (!mergeEligible.test(first)) return false;
         if (first.inputs().stream().anyMatch(input -> input.role() == DemandRole.CATALYST)) {
             return false;
         }

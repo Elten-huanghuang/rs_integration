@@ -11,6 +11,7 @@ import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.Ingre
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
 import com.huanghuang.rsintegration.crafting.planning.PlanningPreferences;
+import com.huanghuang.rsintegration.crafting.planning.FrozenRecipeBranch;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
 import com.huanghuang.rsintegration.crafting.plan.ParallelPlanEstimator;
 import com.huanghuang.rsintegration.mods.embers.EmbersStamperBatchDelegate;
@@ -113,10 +114,16 @@ public final class DeepPlanningFixture implements AutoCloseable {
     public static DeepPlanningFixture fullTree(int levels, int trunkDepth, int routeCount,
                                                int rootAlternatives, Consumer<ModType> planningCallback) {
         return new DeepPlanningFixture(levels, trunkDepth,
-                new NativeRoutes(routeCount, planningCallback), rootAlternatives);
+                new NativeRoutes(routeCount, planningCallback), rootAlternatives, false);
     }
 
-    private DeepPlanningFixture(int levels, int trunkDepth, NativeRoutes routes, int rootAlternatives) {
+    public static DeepPlanningFixture hybridTree(int levels, int trunkDepth, int routeCount,
+                                                 int rootAlternatives, Consumer<ModType> planningCallback) {
+        return new DeepPlanningFixture(levels, trunkDepth,
+                new NativeRoutes(routeCount, planningCallback), rootAlternatives, true);
+    }
+
+    private DeepPlanningFixture(int levels, int trunkDepth, NativeRoutes routes, int rootAlternatives, boolean hybrid) {
         when(level.registryAccess()).thenReturn(RegistryAccess.EMPTY);
         when(level.getRecipeManager()).thenReturn(routes.manager);
         nativeRoutes = routes;
@@ -134,7 +141,19 @@ public final class DeepPlanningFixture implements AutoCloseable {
             Item output = items.get(i);
             int child = 2 * i + 1;
             List<Item> inputs = child < nodes ? List.of(items.get(child), items.get(child + 1)) : List.of(Items.STICK);
-            addNativeRecipe(routes, outputs, output, inputs, i, i == 0 ? rootAlternatives : 1);
+            int ancestor = i;
+            while (ancestor > 3) ancestor = (ancestor - 1) / 2;
+            if (hybrid && ancestor == 3) {
+                var id = ResourceLocation.fromNamespaceAndPath("wide_tree", "grid_" + i);
+                var slots = NonNullList.<Ingredient>create();
+                inputs.forEach(item -> slots.add(Ingredient.of(item)));
+                var recipe = new ShapelessRecipe(id, "", CraftingBookCategory.MISC, new ItemStack(output), slots);
+                index.put(output, List.of(new RecipeIndex.Entry(recipe, ModType.GENERIC,
+                        ResourceLocation.parse("minecraft:crafting"), false)));
+                routes.byId.put(id, recipe);
+                outputs.put(material(output), List.of(new RecipeNode(id, material(output), 1,
+                        inputs.stream().map(DeepPlanningFixture::need).toList())));
+            } else addNativeRecipe(routes, outputs, output, inputs, i, i == 0 ? rootAlternatives : 1);
         }
         firstRoot = target;
         demands = List.of(ScaledIngredientSpec.of(new IngredientSpec(Ingredient.of(firstRoot), 1), 1));
@@ -173,6 +192,7 @@ public final class DeepPlanningFixture implements AutoCloseable {
         private final Map<Recipe<?>, ModRecipeHandlers.Claim> claims = new IdentityHashMap<>();
         private final List<ModType> types = new ArrayList<>();
         private final Consumer<ModType> callback;
+        private Runnable availabilityCheck = () -> {};
         private final ModType stamper;
         private MockedStatic<ModRecipeHandlers> handlers;
         private MockedStatic<AltarBindingRegistry> bindings;
@@ -238,6 +258,7 @@ public final class DeepPlanningFixture implements AutoCloseable {
                     return specs;
                 }
                 @Override public boolean isAvailableForPlanning(Recipe<?> candidate, ServerPlayer context) {
+                    availabilityCheck.run();
                     callback.accept(type);
                     return true;
                 }
@@ -298,6 +319,10 @@ public final class DeepPlanningFixture implements AutoCloseable {
         return NativeRoutes.PROBE_CALLS.get()[0];
     }
 
+    void onAvailabilityCheck(Runnable check) {
+        nativeRoutes.availabilityCheck = check;
+    }
+
     private Item addRecipe(Map<MaterialRef, List<RecipeNode>> outputs, Item output, Item input, boolean mixed) {
         ResourceLocation id = new ResourceLocation("test", "deep_" + index.size());
         ResourceLocation type = new ResourceLocation("minecraft", "crafting");
@@ -322,6 +347,28 @@ public final class DeepPlanningFixture implements AutoCloseable {
         return CraftingResolver.startTypedPreview(demands, available(withStock), level,
                 nativeRoutes == null ? null : nativeRoutes.player, null,
                 missing, null, true, timeoutMs, null, Map.of(), PlanningPreferences.empty());
+    }
+
+    public CraftingResolver.TypedPreview hybrid(List<String> missing, FrozenRecipeBranch.Dispatcher dispatcher) {
+        return hybrid(missing, dispatcher, (keys, correct) -> true, demands);
+    }
+
+    CraftingResolver.TypedPreview hybrid(List<String> missing, FrozenRecipeBranch.Dispatcher dispatcher,
+                                         CraftingResolver.BranchStockValidator validate, List<ScaledIngredientSpec> roots) {
+        return CraftingResolver.startHybridPreview(roots, available(true), level,
+                nativeRoutes == null ? null : nativeRoutes.player, null, missing, null, true,
+                RSIntegrationConfig.CRAFTING_TYPED_PREVIEW_TIMEOUT_MS.get(), null, Map.of(),
+                PlanningPreferences.empty(), dispatcher, validate);
+    }
+
+    List<ScaledIngredientSpec> joinedRoots() {
+        Item target = Items.NETHER_STAR;
+        var slots = NonNullList.<Ingredient>create();
+        demands.forEach(slot -> slots.add(slot.ingredient()));
+        var recipe = new ShapelessRecipe(ResourceLocation.parse("test:join"), "", CraftingBookCategory.MISC,
+                new ItemStack(target), slots);
+        index.put(target, List.of(new RecipeIndex.Entry(recipe, ModType.GENERIC, ResourceLocation.parse("minecraft:crafting"), false)));
+        return List.of(ScaledIngredientSpec.of(new IngredientSpec(Ingredient.of(target), 1), 1));
     }
 
     CraftingResolver.TypedPreview supplemental(Set<ResourceLocation> excluded, List<String> missing) {

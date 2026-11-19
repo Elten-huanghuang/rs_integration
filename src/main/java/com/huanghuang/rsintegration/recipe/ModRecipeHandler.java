@@ -207,6 +207,9 @@ public interface ModRecipeHandler {
         return getDeclaredOutputs(recipe, RegistryAccess.EMPTY);
     }
 
+    /** 显式保证该族可按固定耗料与唯一产物重放。分支采集器仍须核验槽位与余料。 */
+    default boolean supportsFixedBranchPlanning(Recipe<?> recipe) { return false; }
+
     /** Whether one execution is guaranteed to produce the item returned by {@link #getResultItem}. */
     default boolean hasDeterministicPrimaryOutput(@Nonnull Recipe<?> recipe) {
         return !hasStructuredOutputContract(recipe)

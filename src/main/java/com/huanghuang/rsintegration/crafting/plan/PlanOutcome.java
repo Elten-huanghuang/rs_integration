@@ -14,7 +14,10 @@ public enum PlanOutcome {
     BUDGET_EXHAUSTED,
     RUNTIME_UNAVAILABLE,
     STALE,
-    CANCELLED;
+    CANCELLED,
+    UNSUPPORTED_SEMANTICS;
+
+    public boolean incomplete() { return this == BUDGET_EXHAUSTED || this == UNSUPPORTED_SEMANTICS; }
 
     public static PlanOutcome infer(
             boolean success, Map<IngredientKey, PlanResponse.Availability> materials,

@@ -73,8 +73,14 @@ public final class AsyncPlanningCoordinator implements AutoCloseable {
                            Predicate<PlanningSnapshot> revalidator,
                            Consumer<T> commit,
                            Consumer<Throwable> rollback) {
-        submitInternal(null, snapshot, computation, serverExecutor, revalidator,
+        submitInternal(null, false, snapshot, computation, serverExecutor, revalidator,
                 (ignored, result) -> commit.accept(result), rollback);
+    }
+
+    void submitBranch(PlanningSnapshot snapshot, FrozenRecipeBranch branch, Executor serverExecutor,
+                      Predicate<PlanningSnapshot> revalidator, Consumer<FrozenRecipeBranch.Candidate> completed) {
+        submitInternal(null, branch.fitsShortSlice(), snapshot, ignored -> branch.solve(), serverExecutor,
+                revalidator, (ignored, candidate) -> completed.accept(candidate), failure -> completed.accept(null));
     }
 
     /**
@@ -87,7 +93,7 @@ public final class AsyncPlanningCoordinator implements AutoCloseable {
                                  Executor serverExecutor,
                                  Predicate<PlanningSnapshot> revalidator,
                                  Consumer<T> commit, Consumer<Throwable> rollback) {
-        submitInternal(key, snapshot, computation, serverExecutor, revalidator,
+        submitInternal(key, false, snapshot, computation, serverExecutor, revalidator,
                 (ignored, result) -> commit.accept(result), rollback);
     }
 
@@ -97,10 +103,10 @@ public final class AsyncPlanningCoordinator implements AutoCloseable {
                                  Predicate<PlanningSnapshot> revalidator,
                                  BiConsumer<PlanningSnapshot, T> commit,
                                  Consumer<Throwable> rollback) {
-        submitInternal(key, snapshot, computation, serverExecutor, revalidator, commit, rollback);
+        submitInternal(key, false, snapshot, computation, serverExecutor, revalidator, commit, rollback);
     }
 
-    private <T> void submitInternal(Object sharedKey, PlanningSnapshot snapshot,
+    private <T> void submitInternal(Object sharedKey, boolean shortBranch, PlanningSnapshot snapshot,
                            Function<PlanningSnapshot, T> computation,
                            Executor serverExecutor,
                            Predicate<PlanningSnapshot> revalidator,
@@ -120,7 +126,8 @@ public final class AsyncPlanningCoordinator implements AutoCloseable {
         if (previous != null) previous.cancel();
 
         try {
-            Future<?> task = workers.submit(() -> execute(request, computation));
+            Runnable work = () -> execute(request, computation);
+            Future<?> task = shortBranch ? workers.submitShortBranch(work) : workers.submit(work);
             request.attach(task);
             PerformanceMonitor.recordPlanningSubmitted(workers.getActiveCount(), workers.queuedCount());
         } catch (RejectedExecutionException rejected) {

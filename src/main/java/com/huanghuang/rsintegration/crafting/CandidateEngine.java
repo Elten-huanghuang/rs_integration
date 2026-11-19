@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
+import com.huanghuang.rsintegration.crafting.CompatibilityProfile.Phase;
 import com.huanghuang.rsintegration.mods.historystages.HistoryStagesCompat;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
@@ -22,6 +23,7 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraftforge.common.crafting.StrictNBTIngredient;
 import net.minecraftforge.registries.ForgeRegistries;
 import com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler;
+import com.huanghuang.rsintegration.mods.vanilla.VanillaMachineRecipeHandler;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
@@ -247,7 +249,9 @@ final class CandidateEngine {
             }
             RecipeIndex.Entry entry = result.get(nextScore++);
             CandidateKey key = CandidateKey.of(entry);
+            long start = ctx.profileStart();
             var score = scoreEntry(entry, ctx, nbtStrict, matchCache);
+            ctx.profileEnd(Phase.SCORE, start);
             scoreCache.put(key, score.score());
             availCache.put(key, score.availableGroups());
             inputGroupCache.put(key, score.inputGroups());
@@ -527,10 +531,32 @@ final class CandidateEngine {
 
     private static String checkRoute(RecipeIndex.Entry entry, ResolutionContext ctx) {
         var handler = ModRecipeHandlers.claimFor(entry.recipe()).winner();
-        if (handler != null && !handler.isAvailableForPlanning(entry.recipe(), ctx.player)) {
+        if (handler != null && !ctx.readRecipe(entry.recipe(), () -> handler.isAvailableForPlanning(entry.recipe(), ctx.player))) {
             return "Execution context unavailable";
         }
-        return isMachineAvailable(entry, ctx) ? "" : "Machine not available";
+        return ctx.readRecipe(entry.recipe(), () -> isMachineAvailable(entry, ctx)) ? "" : "Machine not available";
+    }
+
+    static boolean routeStillAvailable(RecipeIndex.Entry entry, ResolutionContext ctx) {
+        return !HistoryStagesCompat.isRecipeLocked(entry.recipe(), ctx.player)
+                && (entry.modType() == ModType.GENERIC || checkRoute(entry, ctx).isEmpty());
+    }
+
+    static boolean frozenRouteStillAvailable(RecipeIndex.Entry entry, ResolutionContext ctx) {
+        if (entry.modType() == ModType.GENERIC || !HybridBranchPlanning.nativeMachine(entry.recipe().getClass())
+                || !(ModRecipeHandlers.claimFor(entry.recipe()).winner() instanceof VanillaMachineRecipeHandler)) {
+            return routeStillAvailable(entry, ctx);
+        }
+        // 固定原版机器只沿用当前切片内的候选检查；跨切片交回的结果会重新探测。
+        return !HistoryStagesCompat.isRecipeLocked(entry.recipe(), ctx.player)
+                && ctx.candidateRouteCheck(entry, () -> checkRoute(entry, ctx)).isEmpty();
+    }
+
+    static boolean safeFrozenGrid(RecipeIndex.Entry entry, ItemStack output, ResolutionContext ctx) {
+        if (!(entry.recipe() instanceof CraftingRecipe grid) || !routeStillAvailable(entry, ctx)) return false;
+        Ingredient exact = CraftingResolver.ingredientOf(output, output.hasTag());
+        return !variantGuardEnabled() || !NonProductiveTagConversionGuard.shouldSkip(exact, grid, output)
+                && !ctx.shouldSkipActiveConversion(grid, output);
     }
 
     private static boolean isPreferred(RecipeIndex.Entry entry, ResolutionContext ctx) {
@@ -550,9 +576,11 @@ final class CandidateEngine {
         List<IngredientSpec> specs = entry.recipe() instanceof CraftingRecipe recipe
                 ? CraftPacketUtils.extractCraftingIngredientSpecs(recipe)
                 : ingredientSpecs(entry, ctx);
-        Map<String, IngredientDemand> demands = specs == null ? Map.of() : specDemands(specs);
+        long start = ctx.profileStart();
+        Collection<IngredientDemand> demands = specs == null ? List.of() : ctx.scoreDemands(entry, specs);
+        ctx.profileEnd(Phase.GROUP, start);
         int availableGroups = 0;
-        for (IngredientDemand demand : demands.values()) {
+        for (IngredientDemand demand : demands) {
             long available = cachedCountMatching(ctx, demand.ingredient(), matchCache);
             if (available >= demand.required()) {
                 availableGroups++;
@@ -562,7 +590,7 @@ final class CandidateEngine {
             }
             score -= demand.required();
         }
-        if (specs != null) score += reusableCatalystPreferenceScore(specs, demands.values(), ctx, matchCache);
+        if (specs != null) score += reusableCatalystPreferenceScore(specs, demands, ctx, matchCache);
 
         ItemStack declared = ModRecipeHandlers.tryGetResultItem(entry.recipe(), ctx.level.registryAccess());
         ItemStack output = adaptOutputForDemand(entry, declared, Ingredient.EMPTY, ctx);
@@ -580,8 +608,10 @@ final class CandidateEngine {
 
     private static long cachedCountMatching(ResolutionContext ctx, Ingredient ing,
                                             @Nullable Map<Ingredient, Long> cache) {
-        if (cache == null) return ctx.countMatching(ing);
-        return cache.computeIfAbsent(ing, ctx::countMatching);
+        long start = ctx.profileStart();
+        long count = cache == null ? ctx.countMatching(ing) : cache.computeIfAbsent(ing, ctx::countMatching);
+        ctx.profileEnd(Phase.COUNT, start);
+        return count;
     }
 
     private static int reusableCatalystPreferenceScore(

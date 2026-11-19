@@ -26,6 +26,29 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ResolutionContextSupplyTest extends BootstrapTest {
 
     @Test
+    void singleKeySortShortcutRestoresBothSourcesAfterRollback() {
+        var stack = taggedDiamond("blue", 2);
+        var ctx = new ResolutionContext(null, Map.of(), List.of(stack), null);
+        var source = new MaterialSource.ProducerOutput(new OutputPortId(new NodeId(0), 0));
+        ctx.addProduced(stack.copyWithCount(1), source);
+        var demand = Ingredient.of(Items.DIAMOND);
+        ctx.profile = new CompatibilityProfile();
+        ctx.beginUndo();
+        var produced = ctx.consumeProducedMatchingDetailed(demand, 2);
+        assertEquals(1, produced.supplied());
+        assertEquals(source, produced.slices().get(0).source());
+        var initial = ctx.consumeMatchingDetailed(demand, 2);
+        assertTrue(initial.complete());
+        assertTrue(initial.slices().get(0).source() instanceof MaterialSource.InitialPool);
+        ctx.rollback();
+        assertEquals(2, ctx.profile.skippedSorts);
+        ctx.skipTrivialSort = false;
+        assertEquals(produced, ctx.consumeProducedMatchingDetailed(demand, 2));
+        assertEquals(initial, ctx.consumeMatchingDetailed(demand, 2));
+        assertEquals(0, ctx.countMatching(demand));
+    }
+
+    @Test
     void strictPreviewDeadlineAbortsInsteadOfReturningMissingMaterial() {
         ResolutionContext context = new ResolutionContext(null, Map.of(), Map.of(), null,
                 false, null, System.nanoTime() - 1L, true);

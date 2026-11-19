@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Timeout;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -17,6 +18,75 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @Timeout(10)
 class CooperativePlanningExecutorTest {
+    @Test
+    void shortBurstSpendsOnlyFourGrantsAndLeavesNextWindowForQueuedSearch() throws Exception {
+        var executor = executor(1, 8, 30, 800, 0);
+        try {
+            executor.submit(() -> {}).get(2, TimeUnit.SECONDS);
+            Thread.sleep(50);
+            var order = new ArrayList<Integer>();
+            Future<?> ordinary = executor.submit(() -> order.add(-1));
+            for (int i = 0; i < CooperativePlanningExecutor.MAX_SLACK_GRANTS; i++) {
+                int value = i;
+                executor.submitShortBranch(() -> order.add(value)).get(400, TimeUnit.MILLISECONDS);
+            }
+            assertFalse(ordinary.isDone());
+            var overflow = executor.submitShortBranch(() -> order.add(99));
+            overflow.get(2, TimeUnit.SECONDS);
+            ordinary.get(2, TimeUnit.SECONDS);
+            assertEquals(List.of(0, 1, 2, 3, -1, 99), order);
+        } finally { executor.shutdownNow(); }
+    }
+
+    @Test
+    void overBudgetBranchResumesItsExistingStackBehindQueuedLongJob() throws Exception {
+        var executor = executor(1, 4, 30, 500, 0);
+        try {
+            executor.submit(() -> {}).get(2, TimeUnit.SECONDS);
+            Thread.sleep(50);
+            var order = new ArrayList<Integer>();
+            var ordinary = executor.submit(() -> order.add(2));
+            var shortJob = executor.submitShortBranch(() -> {
+                order.add(1);
+                long until = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(3);
+                while (System.nanoTime() < until) Thread.onSpinWait();
+                PlanningThreadContext.throwIfCancelled();
+                order.add(3);
+            });
+            shortJob.get(2, TimeUnit.SECONDS);
+            ordinary.get(2, TimeUnit.SECONDS);
+            assertEquals(List.of(1, 2, 3), order);
+        } finally { executor.shutdownNow(); }
+    }
+
+    @Test
+    void queuedAndInFlightShortBranchesShareCapacityAndCanBeCancelled() throws Exception {
+        var executor = executor(1, 1, 10, 100, 0);
+        try {
+            CountDownLatch started = new CountDownLatch(1);
+            CountDownLatch exited = new CountDownLatch(1);
+            var running = executor.submitShortBranch(() -> {
+                started.countDown();
+                try {
+                    new CountDownLatch(1).await();
+                } catch (InterruptedException cancelled) {
+                    Thread.currentThread().interrupt();
+                } finally { exited.countDown(); }
+            });
+            assertTrue(started.await(2, TimeUnit.SECONDS));
+            AtomicInteger runs = new AtomicInteger();
+            var queued = executor.submitShortBranch(runs::incrementAndGet);
+            assertThrows(RejectedExecutionException.class, () -> executor.submitShortBranch(runs::incrementAndGet));
+            assertTrue(queued.cancel(true));
+            executor.remove((Runnable) queued);
+            var replacement = executor.submitShortBranch(runs::incrementAndGet);
+            assertTrue(running.cancel(true));
+            assertTrue(exited.await(2, TimeUnit.SECONDS));
+            replacement.get(2, TimeUnit.SECONDS);
+            assertEquals(1, runs.get());
+        } finally { executor.shutdownNow(); }
+    }
+
     @Test
     void singleLaneLetsShortJobFinishWhileLongSearchRetainsItsStack() throws Exception {
         var executor = executor(1, 4, 1, 20, 0);

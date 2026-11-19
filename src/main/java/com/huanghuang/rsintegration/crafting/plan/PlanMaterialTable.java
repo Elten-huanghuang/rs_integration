@@ -55,7 +55,7 @@ public final class PlanMaterialTable {
     }
 
     public void update(PlanResponse plan) {
-        incomplete = plan.outcome() == PlanOutcome.BUDGET_EXHAUSTED;
+        incomplete = plan.outcome().incomplete();
         if (incomplete) onlyMissing = false;
         if (graph != plan.graph()) {
             graph = plan.graph();

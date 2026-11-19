@@ -2,7 +2,11 @@ package com.huanghuang.rsintegration.crafting;
 
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.crafting.ReplaySliceTimes.CompatMode;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
+import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
+import com.huanghuang.rsintegration.util.PerformanceMonitor;
+import com.huanghuang.rsintegration.util.PerformanceMonitor.PlanningLatencyPhase;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import com.sun.management.ThreadMXBean;
 
@@ -10,8 +14,17 @@ import java.lang.management.ManagementFactory;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.function.Supplier;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
+import net.minecraft.resources.ResourceLocation;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
+import com.huanghuang.rsintegration.crafting.planning.PlanRequestService;
+import com.huanghuang.rsintegration.crafting.planning.PlanningSnapshotFactory;
 
 /** 测量生产规划入口，不计入配方目录、世界替身和库存夹具初始化。 */
 public final class DeepPlanningBenchmark extends BootstrapTest {
@@ -25,6 +38,18 @@ public final class DeepPlanningBenchmark extends BootstrapTest {
         var config = CommentedConfig.inMemory();
         RSIntegrationConfig.SERVER_SPEC.correct(config);
         RSIntegrationConfig.SERVER_SPEC.setConfig(config);
+        if (args[0].equals("compat")) {
+            for (var mode : List.of(CompatMode.BASE, CompatMode.BOTH)) {
+                runMixedTree(10, 0, 48, true, mode);
+                runMixedTree(9, 320, 32, true, mode);
+            }
+            return;
+        }
+        if (args[0].equals("hybrid")) {
+            runHybridTree(10, 0, 48);
+            runHybridTree(9, 320, 32);
+            return;
+        }
         if (args[0].equals("legacy")) RSIntegrationConfig.CRAFTING_MAX_DEPTH.set(16);
         else if (!args[0].equals("default")) RSIntegrationConfig.CRAFTING_MAX_DEPTH.set(Integer.parseInt(args[0]));
         boolean legacy = args[0].equals("legacy");
@@ -41,6 +66,99 @@ public final class DeepPlanningBenchmark extends BootstrapTest {
             runFullTree(9, 0, 32, 64);
             runFullTree(10, 0, 48, 96);
             runFullTree(9, 320, 32, 64);
+            runHybridTree(10, 0, 48);
+            runHybridTree(9, 320, 32);
+        }
+    }
+
+    private static void runHybridTree(int levels, int trunk, int routes) {
+        runMixedTree(levels, trunk, routes, false, null);
+        runMixedTree(levels, trunk, routes, true, null);
+    }
+
+    private static void runMixedTree(int levels, int trunk, int routes, boolean hybrid, CompatMode mode) {
+        var seen = new HashSet<String>();
+        int[] calls = {0};
+        int[] runs = {-WARMUP};
+        String planner = mode != null ? "compat_" + mode.name() : hybrid ? "hybrid" : "typed";
+        String label = planner + "_" + (levels + trunk);
+        try (var fixture = DeepPlanningFixture.hybridTree(levels, trunk, routes, 64, type -> {
+            seen.add(type.id());
+            calls[0]++;
+        }); var requests = new PlanRequestService(1)) {
+            var id = UUID.randomUUID();
+            var server = new LinkedBlockingQueue<Runnable>();
+            measure("mixed_tree", planner, levels + trunk, 1 << (levels - 1), () -> {
+                seen.clear();
+                calls[0] = 0;
+                long generation = requests.begin(id);
+                var snapshot = PlanningSnapshotFactory.capture(id, generation, ResourceLocation.parse("test:order"),
+                        Map.of(), Map.of(), new ImmutableRecipeGraph(Map.of()), "offline", "offline", true);
+                var missing = new ArrayList<String>();
+                var worker = PerformanceMonitor.planningLatency(PlanningLatencyPhase.HYBRID_WORKER);
+                var job = hybrid ? fixture.hybrid(missing, requests.branchDispatcher(snapshot, server::add))
+                        : fixture.sliced(true, RSIntegrationConfig.CRAFTING_TYPED_PREVIEW_TIMEOUT_MS.get(), missing);
+                ReplaySliceTimes times = new ReplaySliceTimes(job, mode);
+                long longest = 0;
+                int peak = 0;
+                boolean done;
+                do {
+                    if (job.waitingForBranch()) {
+                        try {
+                            var callback = server.poll(30, TimeUnit.SECONDS);
+                            if (callback == null) throw new IllegalStateException("后台候选未返回");
+                            callback.run();
+                        } catch (InterruptedException e) { throw new IllegalStateException(e); }
+                    }
+                    int before = calls[0];
+                    times.begin();
+                    long start = System.nanoTime();
+                    done = job.advance(5_000_000L);
+                    longest = Math.max(longest, System.nanoTime() - start);
+                    times.end();
+                    peak = Math.max(peak, calls[0] - before);
+                } while (!done);
+                long graphMax = 0;
+                do {
+                    times.begin();
+                    long start = System.nanoTime();
+                    done = job.advanceGraph(5_000_000L);
+                    graphMax = Math.max(graphMax, System.nanoTime() - start);
+                    times.end();
+                } while (!done);
+                var graph = job.graph();
+                var estimates = fixture.parallelEstimator().start(graph);
+                do {
+                    long start = System.nanoTime();
+                    done = estimates.advance(5_000_000L);
+                    times.estimate = Math.max(times.estimate, System.nanoTime() - start);
+                } while (!done);
+                var projection = new PlanGraphView.Projection(graph, estimates.result());
+                do {
+                    long start = System.nanoTime();
+                    done = projection.advance(5_000_000L);
+                    times.projection = Math.max(times.projection, System.nanoTime() - start);
+                } while (!done);
+                times.graph = graphMax;
+                int run = runs[0]++;
+                if (run >= 0) {
+                    times.print(label, run, job.longestCallbackNanos());
+                    var after = PerformanceMonitor.planningLatency(PlanningLatencyPhase.HYBRID_WORKER);
+                    System.out.printf(Locale.ROOT, "routes_%s run=%d admitted=%d probes=%d callbacks=%d workerMs=%.3f%n",
+                            label, run, job.admittedBranches(), fixture.probeCalls(), calls[0],
+                            (after.totalNanos() - worker.totalNanos()) / 1e6);
+                }
+                if (hybrid && job.admittedBranches() == 0 || seen.size() != routes || fixture.probeCalls() != routes
+                        || !missing.isEmpty() || !graph.unresolvedDemands().isEmpty()
+                        || graph.nodes().size() != (1 << levels) - 1 + trunk
+                        || graph.rootDemands().stream().anyMatch(root -> root.unresolvedQuantity() > 0)) {
+                    throw new IllegalStateException("混合满树未通过，分支=" + job.admittedBranches()
+                            + " 路由=" + seen.size() + " delegate=" + fixture.probeCalls() + " 节点=" + graph.nodes().size()
+                            + " " + job.timeoutSummary());
+                }
+                requests.complete(id, generation);
+                return new Run("SUCCESS", graph.nodes().size(), 0, longest, 0, graphMax, seen.size(), peak);
+            });
         }
     }
 

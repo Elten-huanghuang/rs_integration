@@ -132,6 +132,11 @@ public final class PlanRequestService implements AutoCloseable {
                         result.plan(), result.snapshot())), rollback);
     }
 
+    public FrozenRecipeBranch.Dispatcher branchDispatcher(PlanningSnapshot snapshot, Executor serverExecutor) {
+        return (branch, completed) -> coordinator.submitBranch(snapshot, branch, serverExecutor,
+                current -> isCurrent(current.playerId(), current.requestGeneration()), completed);
+    }
+
     public record MaxCraftableResult(boolean determined, int maximum,
                                      PureRecipePlanner.Result plan,
                                      PlanningSnapshot snapshot) {}

@@ -1,4 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
+
+import com.huanghuang.rsintegration.util.PerformanceMonitor;
+import com.huanghuang.rsintegration.crafting.CompatibilityProfile.Phase;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 
 import com.huanghuang.rsintegration.ModType;
@@ -41,6 +44,7 @@ import java.util.function.Supplier;
  * <p>Extracted from {@link CraftingResolver} as part of Phase 3 refactoring.</p>
  */
 final class ResolutionContext {
+    HybridBranchPlanning hybrid;
 
     private static final int MAX_DIAGNOSTIC_LINES = 4096;
 
@@ -98,6 +102,8 @@ final class ResolutionContext {
     long nextAllocationId;
     @Nullable final Map<ResourceLocation, ResourceLocation> preferredRecipes;
     @Nullable final Map<ResourceLocation, ResourceLocation> forcedRecipes;
+    private final boolean preferredRecipesUseTags;
+    private final boolean forcedRecipesUseTags;
     private Map<String, ItemStack> materialLocks = Map.of();
     private PlanningPreferences preferences = PlanningPreferences.empty();
     final Set<ResourceLocation> activeForcedRecipes = new HashSet<>();
@@ -117,10 +123,35 @@ final class ResolutionContext {
     private final Map<CraftingResolver.StackKey, CachedStack> stacksByKey = new HashMap<>();
     // 同一请求会多次经过共享配方；只缓存不依赖搜索中模拟库存的配方数据。
     private final Map<RecipeIndex.Entry, List<IngredientSpec>> declaredRecursiveInputs = new HashMap<>();
+    private final Map<RecipeIndex.Entry, FixedScoreDemands> scoreGroups = new IdentityHashMap<>();
+    boolean reuseScoreGroups = true;
+    boolean skipTrivialSort = true;
+    @Nullable CompatibilityProfile profile;
     private final Map<Recipe<?>, List<RecipeOutputSpec>> declaredRecipeOutputs = new IdentityHashMap<>();
     final Map<RecipeIndex.Entry, Set<CraftingResolver.StackKey>> candidateCycleInputs = new HashMap<>();
     @Nullable private Map<RecipeIndex.Entry, String> candidateRouteChecks;
+    long longestCallbackNanos;
     private long nextInventoryOrder;
+
+    long profileStart() { return profile == null ? 0L : System.nanoTime(); }
+
+    void profileEnd(Phase phase, long start) {
+        if (profile != null) profile.finish(phase, start);
+    }
+
+    Collection<CandidateEngine.IngredientDemand> scoreDemands(RecipeIndex.Entry entry, List<IngredientSpec> specs) {
+        if (!reuseScoreGroups || entry.recipe() instanceof CraftingRecipe) return CandidateEngine.specDemands(specs).values();
+        var prior = scoreGroups.get(entry);
+        if (prior != null && prior.matches(specs)) {
+            if (profile != null) profile.groupHits++;
+            return prior.demands();
+        }
+        var groups = CandidateEngine.specDemands(specs).values();
+        var fixed = FixedScoreDemands.capture(specs, groups);
+        if (fixed != null) scoreGroups.put(entry, fixed);
+        else if (prior != null) scoreGroups.remove(entry);
+        return groups;
+    }
 
     void beginCandidateSlice() {
         if (candidateRouteChecks == null) candidateRouteChecks = new HashMap<>();
@@ -128,19 +159,36 @@ final class ResolutionContext {
     }
 
     String candidateRouteCheck(RecipeIndex.Entry entry, Supplier<String> probe) {
-        return candidateRouteChecks == null ? probe.get()
-                : candidateRouteChecks.computeIfAbsent(entry, ignored -> probe.get());
+        return candidateRouteChecks == null ? probe.get() : candidateRouteChecks.computeIfAbsent(entry, ignored -> probe.get());
+    }
+
+    <T> T readRecipe(Recipe<?> recipe, Supplier<T> read) {
+        if (candidateRouteChecks == null) return read.get();
+        long start = System.nanoTime();
+        try {
+            return read.get();
+        } catch (CraftingPlanningTimeoutException | CraftingPlanningLimitException | PlanningCallbackException guard) {
+            throw guard;
+        } catch (RuntimeException | LinkageError unavailable) {
+            throw new PlanningCallbackException(recipe.getId(), unavailable);
+        } finally {
+            long elapsed = System.nanoTime() - start;
+            longestCallbackNanos = Math.max(longestCallbackNanos, elapsed);
+            PerformanceMonitor.recordPlanningLatency(PerformanceMonitor.PlanningLatencyPhase.DYNAMIC_ROUTE, elapsed);
+        }
     }
 
     @Nullable List<IngredientSpec> declaredRecursiveInputs(RecipeIndex.Entry entry) {
         return declaredRecursiveInputs.computeIfAbsent(entry,
-                candidate -> CraftPacketUtils.extractSingleOperationRecursiveIngredientSpecs(candidate.recipe()));
+                candidate -> readRecipe(candidate.recipe(), () ->
+                        CraftPacketUtils.extractSingleOperationRecursiveIngredientSpecs(candidate.recipe())));
     }
 
     List<RecipeOutputSpec> declaredRecipeOutputs(Recipe<?> recipe) {
         return declaredRecipeOutputs.computeIfAbsent(recipe, candidate -> {
             var handler = ModRecipeHandlers.claimFor(candidate).winner();
-            return handler == null ? List.of() : List.copyOf(handler.getDeclaredOutputs(candidate, level.registryAccess()));
+            return handler == null ? List.of() : readRecipe(candidate,
+                    () -> List.copyOf(handler.getDeclaredOutputs(candidate, level.registryAccess())));
         });
     }
 
@@ -204,6 +252,8 @@ final class ResolutionContext {
         this.recipeCycles = new RecipeCycleGuard();
         this.preferredRecipes = immutableOrNull(preferredRecipes);
         this.forcedRecipes = immutableOrNull(forcedRecipes);
+        this.preferredRecipesUseTags = hasStackPreferenceKey(this.preferredRecipes);
+        this.forcedRecipesUseTags = hasStackPreferenceKey(this.forcedRecipes);
         this.player = player;
         this.storageEndpoint = storageEndpoint;
         this.deadlineNanos = resolveDeadlineNanos();
@@ -283,6 +333,8 @@ final class ResolutionContext {
         this.recipeCycles = new RecipeCycleGuard();
         this.preferredRecipes = immutableOrNull(preferredRecipes);
         this.forcedRecipes = immutableOrNull(forcedRecipes);
+        this.preferredRecipesUseTags = hasStackPreferenceKey(this.preferredRecipes);
+        this.forcedRecipesUseTags = hasStackPreferenceKey(this.forcedRecipes);
         this.player = player;
         this.storageEndpoint = storageEndpoint;
         this.deadlineNanos = deadlineNanos;
@@ -305,6 +357,10 @@ final class ResolutionContext {
     private static Map<ResourceLocation, ResourceLocation> immutableOrNull(
             @Nullable Map<ResourceLocation, ResourceLocation> values) {
         return values == null || values.isEmpty() ? null : Map.copyOf(values);
+    }
+
+    private static boolean hasStackPreferenceKey(@Nullable Map<ResourceLocation, ResourceLocation> recipes) {
+        return recipes != null && recipes.keySet().stream().anyMatch(CraftingResolver::isStackPreferenceKey);
     }
 
     ResolutionContext withMaterialLocks(@Nullable Map<String, ItemStack> locks) {
@@ -372,13 +428,7 @@ final class ResolutionContext {
         if (output == null || output.isEmpty()) return null;
         ResourceLocation stored = preferences.preferredRecipe(output);
         if (stored != null) return stored;
-        if (preferredRecipes == null) return null;
-        ResourceLocation key = CraftingResolver.preferenceKey(output);
-        ResourceLocation preferred = key == null ? null : preferredRecipes.get(key);
-        if (preferred == null) {
-            preferred = preferredRecipes.get(ForgeRegistries.ITEMS.getKey(output.getItem()));
-        }
-        return preferred;
+        return recipeForStack(output, preferredRecipes, preferredRecipesUseTags);
     }
 
     @Nullable
@@ -386,14 +436,25 @@ final class ResolutionContext {
         if (forcedRecipes == null || ingredient == null || ingredient.isEmpty()) return null;
         for (ItemStack option : ingredient.getItems()) {
             if (option == null || option.isEmpty()) continue;
-            ResourceLocation exactKey = CraftingResolver.preferenceKey(option);
-            ResourceLocation forced = exactKey == null ? null : forcedRecipes.get(exactKey);
-            if (forced != null) return forced;
-            ResourceLocation itemKey = ForgeRegistries.ITEMS.getKey(option.getItem());
-            forced = itemKey == null ? null : forcedRecipes.get(itemKey);
+            ResourceLocation forced = recipeForStack(option, forcedRecipes, forcedRecipesUseTags);
             if (forced != null) return forced;
         }
         return null;
+    }
+
+    @Nullable
+    private static ResourceLocation recipeForStack(ItemStack stack,
+                                                    @Nullable Map<ResourceLocation, ResourceLocation> recipes,
+                                                    boolean usesTags) {
+        if (recipes == null) return null;
+        // 只有偏好表包含精确变体时才序列化 NBT 并计算哈希。
+        if (usesTags && stack.hasTag()) {
+            ResourceLocation exactKey = CraftingResolver.preferenceKey(stack);
+            ResourceLocation exact = exactKey == null ? null : recipes.get(exactKey);
+            if (exact != null) return exact;
+        }
+        ResourceLocation itemKey = ForgeRegistries.ITEMS.getKey(stack.getItem());
+        return itemKey == null ? null : recipes.get(itemKey);
     }
 
     boolean activateForcedRecipe(ResourceLocation recipeId) {
@@ -631,6 +692,20 @@ final class ResolutionContext {
         addProduced(stack, stack.getCount(), source);
     }
 
+    /** 只调整尚未分配、且没有旧事务会恢复的初始库存。中间产物或已结算供料须重新取快照。 */
+    boolean reduceUnusedInitial(CraftingResolver.StackKey key, long previous, long current) {
+        if (current < 0 || current >= previous || counts.getOrDefault(key, 0L) != previous) return false;
+        var lots = suppliesByMaterial.get(new MaterialKey(key.item(), key.tag()));
+        if (lots == null || lots.size() != 1) return false;
+        var lot = lots.get(0);
+        if (!(lot.source instanceof MaterialSource.InitialPool) || lot.remaining != previous
+                || undoStack.stream().anyMatch(entry -> entry.key.equals(key))) return false;
+        lot.remaining = current;
+        if (current == 0) counts.remove(key);
+        else counts.put(key, current);
+        return true;
+    }
+
     void addProduced(ItemStack stack, long amount, MaterialSource.ProducerOutput source) {
         if (stack.isEmpty() || amount <= 0L) return;
         addCount(CraftingResolver.StackKey.of(stack, true), amount);
@@ -813,7 +888,7 @@ final class ResolutionContext {
         long remaining = needed;
         List<SupplySlice> slices = new ArrayList<>();
         List<CraftingResolver.StackKey> sortedKeys = sortedMatchingKeys(ingredient);
-
+        long start = profileStart();
         for (CraftingResolver.StackKey key : sortedKeys) {
             if (remaining <= 0) break;
             long available = counts.getOrDefault(key, 0L);
@@ -829,13 +904,17 @@ final class ResolutionContext {
             addRemainder(key, supplied);
             if (!producedOnly && supplied != requested) break;
         }
-        return new SupplyConsumption(List.copyOf(slices), needed, needed - remaining);
+        var result = new SupplyConsumption(List.copyOf(slices), needed, needed - remaining);
+        profileEnd(Phase.TAKE, start);
+        return result;
     }
 
     boolean consumeMatching(Ingredient ingredient, long needed) {
         long remaining = needed;
-        for (CraftingResolver.StackKey key : sortedMatchingKeys(ingredient)) {
-            if (remaining <= 0) return true;
+        var keys = sortedMatchingKeys(ingredient);
+        long start = profileStart();
+        for (CraftingResolver.StackKey key : keys) {
+            if (remaining <= 0) break;
             long available = counts.getOrDefault(key, 0L);
             if (available <= 0 || !matches(ingredient, key)) continue;
             long take = Math.min(available, remaining);
@@ -843,12 +922,20 @@ final class ResolutionContext {
             remaining -= take;
             addRemainder(key, take);
         }
+        profileEnd(Phase.TAKE, start);
         return remaining <= 0;
     }
 
     private List<CraftingResolver.StackKey> sortedMatchingKeys(Ingredient ingredient) {
+        long start = profileStart();
         List<CraftingResolver.StackKey> sortedKeys = new ArrayList<>();
         candidateKeys(ingredient).forEach(sortedKeys::add);
+        profileEnd(Phase.COLLECT, start);
+        if (skipTrivialSort && sortedKeys.size() <= 1) {
+            if (profile != null) profile.skippedSorts++;
+            return sortedKeys;
+        }
+        start = profileStart();
         if (GoetySoulTotemCrafting.isSoulTotemIngredient(ingredient)) {
             sortedKeys.sort(Comparator
                     .comparingInt((CraftingResolver.StackKey key) ->
@@ -882,6 +969,7 @@ final class ResolutionContext {
                     .thenComparingLong(key -> currentInsertionOrder
                             ? stacksByKey.get(key).inventoryOrder : 0L));
         }
+        profileEnd(Phase.SORT, start);
         return sortedKeys;
     }
 

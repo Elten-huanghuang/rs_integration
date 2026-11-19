@@ -147,4 +147,27 @@ class TypedPlanningPreferencesTest extends BootstrapTest {
         assertFalse(context.isNoRecipe(mixed));
         assertTrue(context.isNoRecipe(Ingredient.of(Items.DIAMOND)));
     }
+
+    @Test
+    void exactTaggedRouteOverridesItemRouteOnlyForTheMatchingVariant() {
+        ItemStack tagged = new ItemStack(Items.DIAMOND);
+        tagged.getOrCreateTag().putInt("variant", 1);
+        ItemStack other = new ItemStack(Items.DIAMOND);
+        other.getOrCreateTag().putInt("variant", 2);
+        var item = new ResourceLocation("minecraft", "diamond");
+        var fallback = new ResourceLocation("test", "item_route");
+        var exact = new ResourceLocation("test", "tagged_route");
+        var variants = Map.of(item, fallback, CraftingResolver.preferenceKey(tagged), exact);
+        var context = new ResolutionContext(null, Map.of(), List.of(), variants, variants);
+
+        assertEquals(exact, context.preferredRecipeFor(tagged));
+        assertEquals(fallback, context.preferredRecipeFor(other));
+        assertEquals(exact, context.forcedRecipeFor(CraftingResolver.ingredientOf(tagged, true)));
+        assertEquals(fallback, context.forcedRecipeFor(CraftingResolver.ingredientOf(other, true)));
+
+        var itemRoutes = Map.of(item, fallback);
+        var generic = new ResolutionContext(null, Map.of(), List.of(), itemRoutes, itemRoutes);
+        assertEquals(fallback, generic.preferredRecipeFor(tagged));
+        assertEquals(fallback, generic.forcedRecipeFor(CraftingResolver.ingredientOf(tagged, true)));
+    }
 }

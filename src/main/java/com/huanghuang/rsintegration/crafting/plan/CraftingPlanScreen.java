@@ -115,7 +115,7 @@ public final class CraftingPlanScreen extends Screen {
 
     private void watchInventory() {
         if (externalRequest != null || plan.graph() == null || responseRequests.waitingForPreview()
-                || plan.outcome() == PlanOutcome.BUDGET_EXHAUSTED) return;
+                || plan.outcome().incomplete()) return;
         if (inventoryState != null && inventoryState.needsResync()) stopInventoryWatch();
         if (inventoryState != null) return;
         inventoryState = new PlanInventoryClientState(responseRequests.activeRequestId(), PlanningRequestIds.next(), plan);
@@ -599,7 +599,7 @@ public final class CraftingPlanScreen extends Screen {
     }
 
     private Confirmation confirmation(PlanConfirmationAction inventoryAction) {
-        return responseRequests.confirmation(plan.outcome() == PlanOutcome.BUDGET_EXHAUSTED,
+        return responseRequests.confirmation(plan.outcome().incomplete(),
                 !partialPreparation && inventoryAction.replan,
                 partialPreparation || executionPreview.canConfirmExecution());
     }
@@ -719,7 +719,7 @@ public final class CraftingPlanScreen extends Screen {
     }
 
     private void onConfirm() {
-        if (plan.outcome() == PlanOutcome.BUDGET_EXHAUSTED) return;
+        if (plan.outcome().incomplete()) return;
         commitRepeatCountInput();
         Confirmation confirmation = confirmation(inventoryConfirmationAction());
         if (confirmation == Confirmation.RECALCULATE) {
@@ -1105,7 +1105,7 @@ public final class CraftingPlanScreen extends Screen {
             int span = Math.max(1, r.width() / 5);
             int offset = (int) ((System.currentTimeMillis() / 12L) % Math.max(1, r.width() - span));
             g.fill(r.x() + offset, r.bottom() - 1, r.x() + offset + span, r.bottom(), Color.ACCENT.value());
-        } else if (plan.outcome() == PlanOutcome.BUDGET_EXHAUSTED) {
+        } else if (plan.outcome().incomplete()) {
             status = workspaceText("calculation_incomplete").getString();
             statusColor = Color.WARNING;
         } else if (previewFeedback != null) {
@@ -1130,7 +1130,7 @@ public final class CraftingPlanScreen extends Screen {
     private void renderWorkspaceSummary(GuiGraphics g) {
         Rect r = workspace.summary();
         boolean compact = workspace.compact();
-        boolean incomplete = plan.outcome() == PlanOutcome.BUDGET_EXHAUSTED;
+        boolean incomplete = plan.outcome().incomplete();
         int labelWidth = compact ? 45 : 90;
         chrome.heading(g, workspaceText(incomplete ? "settled_materials" : "total_materials").getString(),
                 r.x() + 9, r.y() + 9, labelWidth - 9, compact ? .85f : 1.05f);

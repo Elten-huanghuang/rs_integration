@@ -1,4 +1,6 @@
 package com.huanghuang.rsintegration.crafting;
+
+import com.huanghuang.rsintegration.crafting.planning.FrozenRecipeBranch;
 import com.huanghuang.rsintegration.crafting.batch.VirtualExchangeRecipe;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 
@@ -452,6 +454,29 @@ public final class CraftingResolver {
                 materialLocks, preferences.excludedRecipes(), preferences, true);
     }
 
+    @FunctionalInterface
+    public interface StockCorrection {
+        boolean apply(StackKey key, long previous, long current);
+    }
+
+    @FunctionalInterface
+    public interface BranchStockValidator {
+        /** 返回 false 表示已更新初始供料，需要重新求解当前分支。 */
+        boolean check(Set<StackKey> touched, StockCorrection correction);
+    }
+
+    public static TypedPreview startHybridPreview(
+            List<ScaledIngredientSpec> needed, Map<StackKey, ? extends Number> available, Level level,
+            ServerPlayer player, @Nullable CraftStorageEndpoint endpoint, List<String> missing,
+            @Nullable Map<ResourceLocation, ResourceLocation> forced, boolean machineSlots, int timeoutMs,
+            @Nullable ActiveRootRecipe root, Map<String, ItemStack> locks, PlanningPreferences preferences,
+            FrozenRecipeBranch.Dispatcher dispatcher, BranchStockValidator validateStock) {
+        var preview = startTypedPreview(needed, available, level, player, endpoint, missing, forced,
+                machineSlots, timeoutMs, root, locks, preferences);
+        preview.context.hybrid = new HybridBranchPlanning(dispatcher, validateStock);
+        return preview;
+    }
+
     /**
      * Resolve the root inputs of one machine recipe. Each {@link IngredientSpec}
      * represents one physical machine slot, so a tag demand must be backed by one
@@ -786,6 +811,10 @@ public final class CraftingResolver {
         @Nullable
         private final PreviewCheckpoint checkpoint;
         private long suspendedAt;
+        private CraftPlanGraph rawGraph;
+        private CraftPlanGraph finishedGraph;
+        private CraftPlanValidator.Validation validation;
+        private CraftPlanGraphCompactor.Compaction compaction;
 
         private TypedPreview(ResolutionContext context, PlanningStack.Job<List<RootDemand>> job,
                              @Nullable PreviewCheckpoint checkpoint) {
@@ -806,6 +835,7 @@ public final class CraftingResolver {
             // 实际机器状态可能在两个切片之间改变，不跨切片复用其可用性。
             context.beginCandidateSlice();
             if (job.advance(sliceNanos, () -> allowed.getAsBoolean()
+                    && (context.hybrid == null || !context.hybrid.waiting())
                     && (checkpoint == null || !context.timedOut()))) return true;
             if (checkpoint != null && context.timeoutReached()) {
                 job.cancel();
@@ -815,8 +845,22 @@ public final class CraftingResolver {
             return false;
         }
 
-        void cancel() {
+        public void cancel() {
+            if (context.hybrid != null) context.hybrid.cancel();
             job.cancel();
+        }
+
+        public int admittedBranches() { return context.hybrid == null ? 0 : context.hybrid.accepted; }
+
+        public boolean waitingForBranch() { return context.hybrid != null && context.hybrid.waiting(); }
+
+        public long longestCallbackNanos() { return context.longestCallbackNanos; }
+
+        CompatibilityProfile profileCompatibility(boolean reuseGroups, boolean skipSort) {
+            context.reuseScoreGroups = reuseGroups;
+            context.skipTrivialSort = skipSort;
+            context.profile = new CompatibilityProfile();
+            return context.profile;
         }
 
         private CraftPlanGraph finishSynchronously() {
@@ -826,7 +870,8 @@ public final class CraftingResolver {
 
         public String timeoutSummary() {
             return "rootSlot=" + context.timeoutRootSlot + " ensureCalls=" + context.ensureCalls
-                    + " attemptedRecipeTypes=" + context.busiestPreviewTypes();
+                    + " attemptedRecipeTypes=" + context.busiestPreviewTypes()
+                    + (context.hybrid == null ? "" : " " + context.hybrid.summary());
         }
 
         /** 超时草稿仅用于展示，不走执行图的校验、压缩或并行机器估算。 */
@@ -836,6 +881,41 @@ public final class CraftingResolver {
         }
 
         public CraftPlanGraph graph() {
+            while (!advanceGraph(Long.MAX_VALUE)) { /* 同步调用者在当前线程完成剩余阶段。 */ }
+            return finishedGraph;
+        }
+
+        public boolean advanceGraph(long budget) {
+            if (finishedGraph != null) return true;
+            if (rawGraph == null) {
+                rawGraph = buildRawGraph();
+                validation = CraftPlanValidator.start(rawGraph);
+                return false;
+            }
+            if (compaction == null) {
+                long start = System.nanoTime();
+                try {
+                    if (validation.advance(budget)) {
+                        validation.check();
+                        compaction = CraftPlanGraphCompactor.start(rawGraph, CraftNodeMergePolicy.forLevel(context.level));
+                        validation = null;
+                    }
+                } finally {
+                    PerformanceMonitor.recordPlanningLatency(PerformanceMonitor.PlanningLatencyPhase.GRAPH_VALIDATE,
+                            System.nanoTime() - start);
+                }
+                return false;
+            }
+            if (!compaction.advance(budget)) return false;
+            finishedGraph = compaction.result();
+            compaction = null;
+            rawGraph = null;
+            context.logGuardSummary();
+            context.dumpDiagnostics();
+            return true;
+        }
+
+        private CraftPlanGraph buildRawGraph() {
             ResolutionContext ctx = context;
             List<RootDemand> roots = job.result();
             if (checkpoint != null && (!ctx.graphUnresolved.isEmpty()
@@ -843,14 +923,9 @@ public final class CraftingResolver {
                 // 已找到完整替代路径时，早先失败的候选不应使整份计划失败。
                 ctx.requireKnownPreviewBudget();
             }
-            CraftPlanGraph graph = new CraftPlanGraph(CraftPlanGraph.CURRENT_VERSION,
+            return new CraftPlanGraph(CraftPlanGraph.CURRENT_VERSION,
                     ctx.graphNodes, ctx.graphAllocations, roots, ctx.graphUnresolved,
                     ctx.graphNodes.stream().map(CraftNode::id).toList());
-            CraftPlanValidator.validate(graph);
-            graph = CraftPlanGraphCompactor.compact(graph, CraftNodeMergePolicy.forLevel(ctx.level));
-            ctx.logGuardSummary();
-            ctx.dumpDiagnostics();
-            return graph;
         }
     }
 

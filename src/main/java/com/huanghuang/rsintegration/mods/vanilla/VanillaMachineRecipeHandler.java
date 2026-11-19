@@ -34,6 +34,13 @@ public final class VanillaMachineRecipeHandler implements ModRecipeHandler {
     }
 
     @Override
+    public boolean supportsFixedBranchPlanning(Recipe<?> recipe) {
+        Class<?> type = recipe.getClass();
+        return type == SmeltingRecipe.class || type == BlastingRecipe.class
+                || type == SmokingRecipe.class || type == StonecutterRecipe.class;
+    }
+
+    @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
         return recipe.getResultItem(access);
     }

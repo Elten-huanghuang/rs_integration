@@ -47,7 +47,7 @@ public final class CraftPlanDecisionRules {
         PROJECTABLE, MAIN_THREAD_REQUIRED, MATERIAL_LOCK, FORCED_RECIPE_UNPROJECTED,
         TARGET_NOT_PROJECTED, TYPED_CATALYST_REQUIRED, UNPROJECTED_DEPENDENCY,
         COVERAGE_UNCERTAIN, BINDING_BLOCKED_DEPENDENCY, PURE_SUCCESS,
-        PROVEN_INFEASIBLE, BUDGET_EXHAUSTED, PURE_NOT_RUN
+        PROVEN_INFEASIBLE, BUDGET_EXHAUSTED, PURE_NOT_RUN, PROVEN_NO_PURE_SUPPLY
     }
 
     record RouteDecision(PlannerAction action, RouteReason reason) {}
@@ -73,6 +73,7 @@ public final class CraftPlanDecisionRules {
                 forcedRecipesProjected,
                 inspection.status() != PureDemandTreeInspector.Status.TARGET_NOT_PROJECTED);
         if (eligibility.action() == PlannerAction.RUN_TYPED) return eligibility;
+        if (result == null && coverage.noSupply() != null) return typed(RouteReason.PROVEN_NO_PURE_SUPPLY);
         if (requiresTypedCatalystRoute(inspection.catalystRouteAvailable(),
                 targetUsesReusableCatalyst, result, catalystOutputs)) {
             return typed(RouteReason.TYPED_CATALYST_REQUIRED);
