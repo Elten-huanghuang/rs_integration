@@ -19,6 +19,7 @@ import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.farmersdelight.FarmersDelightRecipeHandler;
+import com.huanghuang.rsintegration.mods.goetydelight.GoetyDelightCookingPotSupport;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.reflection.probes.FarmersDelightReflection;
 import net.minecraft.core.BlockPos;
@@ -61,6 +62,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     protected Recipe<?> recipe;
     private boolean craftDone;
     private boolean arcaneCookingPot;
+    private boolean goetyDelightCookingPot;
     private int plannedOperations = 1;
     private final List<ItemStack> placedInputs = new ArrayList<>();
     private final List<ItemStack> detachedRecoveredInputs = new ArrayList<>();
@@ -100,6 +102,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         this.detachedRecoveredInputs.clear();
         this.placedContainer = ItemStack.EMPTY;
         BlockEntity existing = level.getBlockEntity(pos);
+        this.goetyDelightCookingPot = GoetyDelightCookingPotSupport.isCookingPot(existing);
         this.arcaneCookingPot = ArcaneStoveSupport.isArcaneCookingPot(existing);
         IItemHandler existingInventory = existing != null
                 && isSupportedBlockEntity(existing)
@@ -199,7 +202,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public boolean supportsInputBuffer() {
-        if (!inputBufferEnabled() || arcaneCookingPot || recipe == null
+        if (!inputBufferEnabled() || arcaneCookingPot || goetyDelightCookingPot || recipe == null
                 || myLevel == null || myPos == null || !myLevel.hasChunkAt(myPos)) return false;
         BlockEntity machine = myLevel.getBlockEntity(myPos);
         if (machine == null || !supportsBufferedMachine(machine)) return false;
@@ -770,6 +773,9 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     protected IItemHandler getInventory(BlockEntity be) {
+        if (GoetyDelightCookingPotSupport.isCookingPot(be)) {
+            return GoetyDelightCookingPotSupport.getInventory(be);
+        }
         probeReflection();
         if (inventoryField != null) {
             try {
@@ -819,7 +825,9 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     private boolean matchesRecipeOutput(ItemStack stack) {
         ItemStack expected = getExpectedRecipeResult(recipe,
                 myLevel != null ? myLevel.registryAccess() : null);
-        return matchesRecipeOutputStack(stack, expected, arcaneCookingPot);
+        return goetyDelightCookingPot
+                ? GoetyDelightCookingPotSupport.matchesOutputIgnoringNbt(stack, expected)
+                : matchesRecipeOutputStack(stack, expected, arcaneCookingPot);
     }
 
     static boolean matchesRecipeOutputStack(ItemStack stack, ItemStack expected,
@@ -967,7 +975,8 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     protected boolean isSupportedBlockEntity(BlockEntity blockEntity) {
-        return FarmersDelightReflection.cookingPotBEClass.isInstance(blockEntity);
+        return GoetyDelightCookingPotSupport.isCookingPot(blockEntity)
+                || FarmersDelightReflection.cookingPotBEClass.isInstance(blockEntity);
     }
 
     protected int inputSlots() { return INPUT_SLOTS; }

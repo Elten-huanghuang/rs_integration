@@ -127,6 +127,17 @@ public final class FarmersDelightRSModule implements IModIntegration {
                 "farmersdelight_cooking_pot", true
         ));
 
+        if (ModList.get().isLoaded(ModIds.GOETYDELIGHT)) {
+            BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
+                    ModIds.GOETYDELIGHT, ModType.byId(ModIds.ID_FD_COOKING_POT),
+                    RSIntegrationConfig.ENABLE_FARMERSDELIGHT,
+                    List.of("net.v_black_cat.goetydelight.block.CursedIngotPotBlock",
+                            "net.v_black_cat.goetydelight.compat.goetyrevelation.block.ApocalyptiumCookingPotBlock"),
+                    List.of("goetydelight:cursed_ingot_pot", "goetydelight:apocalyptium_cooking_pot"),
+                    ModIds.ID_FD_COOKING_POT, true
+            ));
+        }
+
         // Skillet — no GUI, world-interaction (QUICK)
         BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
                 "farmersdelight", ModType.byId("farmersdelight_skillet"),
