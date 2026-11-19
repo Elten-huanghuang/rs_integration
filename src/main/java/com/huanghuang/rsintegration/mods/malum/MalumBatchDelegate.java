@@ -22,6 +22,7 @@ import com.huanghuang.rsintegration.crafting.MaterialMatcher;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.reflection.probes.MalumReflection;
+import com.huanghuang.rsintegration.util.LogSampler;
 import com.huanghuang.rsintegration.util.Reflect;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -49,6 +50,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
     static final String CENTER_ENTRY_ID = "malum:altar:center";
     private static final int EXTRA_SLOT_BASE = 1;
     private static final int SPIRIT_SLOT_BASE = 16;
+    private static final LogSampler PREPARATION_LOGS = new LogSampler(2_000L);
     static String extraEntryId(int index) { return "malum:altar:pedestal:" + index; }
     static String spiritEntryId(int index) { return "malum:altar:spirit:" + index; }
 
@@ -122,7 +124,16 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         }
         this.recipe = foundRecipe;
 
-        // Resolve inventories
+        // 忙碌时只读取运行状态，等祭坛空闲后再查三个物品栏。
+        Boolean crafting = (Boolean) getField(altar, "isCrafting");
+        if (crafting == null || Boolean.TRUE.equals(crafting)) {
+            validationFailureDetail = crafting == null
+                    ? "Malum altar crafting state is unreadable"
+                    : "Malum altar is still crafting";
+            logPreparationRejection(recipeId, "crafting");
+            return false;
+        }
+
         this.invMain = getField(altar, "inventory");
         this.invExtras = getField(altar, "extrasInventory");
         this.invSpirit = getField(altar, "spiritInventory");
@@ -130,27 +141,11 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
             player.sendSystemMessage(Component.translatable("rsi.malum.error.inventory_error"));
             return false;
         }
-
-        // Validate idle — null means we couldn't read the field; assume busy
-        Boolean crafting = (Boolean) getField(altar, "isCrafting");
-        if (crafting == null || Boolean.TRUE.equals(crafting)) {
-            // Preparation is polled while a parallel group waits for this altar.
-            // The progress HUD reports MACHINE_BUSY; chat must remain silent here.
-            validationFailureDetail = crafting == null
-                    ? "Malum altar crafting state is unreadable"
-                    : "Malum altar is still crafting";
-            RSIntegrationMod.LOGGER.info(
-                    "[RSI-Batch-Malum] Preparation rejected: recipe={} pos={} reason={}",
-                    recipeId, pos, validationFailureDetail);
-            return false;
-        }
         try {
             boolean mainEmpty = (boolean) invMain.getClass().getMethod("isEmpty").invoke(invMain);
             if (!mainEmpty) {
                 validationFailureDetail = "祭坛主槽已有物品，请先清空";
-                RSIntegrationMod.LOGGER.info(
-                        "[RSI-Batch-Malum] Preparation rejected: recipe={} pos={} reason={}",
-                        recipeId, pos, validationFailureDetail);
+                logPreparationRejection(recipeId, "occupied");
                 return false;
             }
         } catch (Exception e) {
@@ -195,15 +190,22 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
                 validationFailureDetail = "祭坛空间过小：需要 " + needed
                         + " 个空底座，实际只有 " + emptyPedCount
                         + " 个；请清理周围的符文木物品台，或扩大祭坛位置";
-                RSIntegrationMod.LOGGER.info(
-                        "[RSI-Batch-Malum] Preparation rejected: recipe={} pos={} reason={}",
-                        recipeId, pos, validationFailureDetail);
+                logPreparationRejection(recipeId, "pedestals");
                 return false;
             }
         }
 
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-Malum] validateAndInit OK: recipe={}", recipeId);
         return true;
+    }
+
+    private void logPreparationRejection(ResourceLocation recipeId, String check) {
+        // 同一座祭坛会被多个配方轮询，按位置去重并保留各类失败原因。
+        if (PREPARATION_LOGS.allow(myDim.location() + ":" + myPos.asLong() + ":" + check)) {
+            RSIntegrationMod.LOGGER.info(
+                    "[RSI-Batch-Malum] Preparation rejected: recipe={} pos={} reason={}",
+                    recipeId, myPos, validationFailureDetail);
+        }
     }
 
     @Override

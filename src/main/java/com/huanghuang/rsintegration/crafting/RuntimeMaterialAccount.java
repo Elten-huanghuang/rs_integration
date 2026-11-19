@@ -16,6 +16,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraftforge.fluids.FluidStack;
@@ -23,6 +24,7 @@ import net.minecraftforge.fluids.FluidStack;
 import javax.annotation.Nullable;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -167,10 +169,12 @@ final class RuntimeMaterialAccount {
             if (shortfall > 0) missing.put(key, shortfall);
         });
         if (missing.isEmpty()) return true;
+        var missingTypes = new HashSet<Item>();
+        for (MaterialKey key : missing.keySet()) missingTypes.add(key.item());
         acquiring = true;
         ExtractionLedger acquisition;
         try (MaterialSourceSelection.Scope sources = materialSources.enter()) {
-            acquisition = ExtractionLedger.forAcquisition();
+            acquisition = ExtractionLedger.forAcquisition(missingTypes);
         }
         acquisition.setStorageEndpoint(endpoint);
         try {
@@ -194,8 +198,9 @@ final class RuntimeMaterialAccount {
                 }
                 return false;
             }
+            List<ItemStack> fragments = acquisition.committedFragments();
             Map<MaterialKey, Long> received = new LinkedHashMap<>();
-            for (ItemStack stack : acquisition.committedFragments()) {
+            for (ItemStack stack : fragments) {
                 received.merge(MaterialKey.of(stack), (long) stack.getCount(), Math::addExact);
             }
             if (!received.equals(missing)) {
@@ -206,7 +211,7 @@ final class RuntimeMaterialAccount {
                 return false;
             }
             acquisitions.add(acquisition);
-            for (ItemStack stack : acquisition.committedFragments()) add(stack);
+            for (ItemStack stack : fragments) add(stack);
             return true;
         } catch (RuntimeException | LinkageError failure) {
             // 已开始提取后无法证明没有副作用，不把它当作普通缺料重试。

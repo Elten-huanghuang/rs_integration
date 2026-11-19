@@ -181,6 +181,26 @@ class RuntimeMaterialAccountTest extends BootstrapTest {
     }
 
     @Test
+    void admissionReadsOnlyMissingItemTypesForReservationAndPrecheck() {
+        stock.put(IRON, 8L);
+        stock.put(GOLD, 5L);
+        var required = Set.of(Items.IRON_INGOT);
+        var iron = new StoredItem(session.itemKey(IRON.toStack(1)), 8);
+        when(session.snapshotItems(player, required)).thenReturn(
+                StorageSnapshotResult.success(new StorageSnapshot(BACKEND, List.of(iron))));
+        clearInvocations(session);
+
+        RuntimeMaterialAccount account = account();
+        assertTrue(acquire(account, IRON, 3));
+
+        verify(session, times(2)).snapshotItems(player, required);
+        verify(session, never()).snapshotItems(player);
+        assertEquals(3L, account.count(IRON));
+        assertEquals(5L, stock.get(IRON));
+        assertEquals(5L, stock.get(GOLD));
+    }
+
+    @Test
     void laterAdmissionKeepsTheSourceSelectionCapturedAtTaskCreation() {
         stock.put(IRON, 100L);
         player.getInventory().items.set(0, IRON.toStack(7));

@@ -36,6 +36,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.level.Level;
@@ -81,14 +82,19 @@ public final class ExtractionLedger implements AutoCloseable {
     private final Set<Class<?>> unreadableBackpackTypes = ConcurrentHashMap.newKeySet();
     private State state = State.IDLE;
     @Nullable private final RuntimeMaterialAccount materialAccount;
-    private final boolean strictAcquisition;
+    @Nullable private final Set<Item> acquisitionItemTypes;
     private boolean uncertainTransfers;
     @Nullable private StorageOperationStatus commitFailureStatus;
     private String commitFailureDetail = "";
 
-    ExtractionLedger(@Nullable RuntimeMaterialAccount account, boolean strictAcquisition) {
+    ExtractionLedger(@Nullable RuntimeMaterialAccount account) {
+        this(account, null);
+    }
+
+    private ExtractionLedger(@Nullable RuntimeMaterialAccount account,
+                             @Nullable Set<Item> acquisitionItemTypes) {
         this.materialAccount = account;
-        this.strictAcquisition = strictAcquisition;
+        this.acquisitionItemTypes = acquisitionItemTypes;
     }
 
     public static ExtractionLedger external() { return MaterialAccess.EXTERNAL.newLedger(); }
@@ -96,7 +102,9 @@ public final class ExtractionLedger implements AutoCloseable {
     boolean usesTaskAccount() { return materialAccount != null; }
 
     /** 准入账必须取得指定身份，不允许按机器原料回退。 */
-    static ExtractionLedger forAcquisition() { return new ExtractionLedger(null, true); }
+    static ExtractionLedger forAcquisition(Set<Item> itemTypes) {
+        return new ExtractionLedger(null, Set.copyOf(itemTypes));
+    }
     boolean hasUncertainTransfers() { return uncertainTransfers; }
     List<UncertainMaterialTransfer> uncertainMaterialTransfers() {
         return uncertainMaterialTransfers.stream().map(UncertainMaterialTransfer::copy).toList();
@@ -249,7 +257,7 @@ public final class ExtractionLedger implements AutoCloseable {
                 && reservationSnapshotTick == currentTick) {
             return reservationSnapshotResult;
         }
-        StorageSnapshotResult loaded = endpoint.snapshot(player);
+        StorageSnapshotResult loaded = endpoint.snapshot(player, acquisitionItemTypes);
         reservationSnapshotEndpoint = endpoint;
         reservationSnapshotResult = loaded;
         reservationSnapshot = loaded.snapshot().orElse(null);
@@ -1495,7 +1503,7 @@ public final class ExtractionLedger implements AutoCloseable {
                     ? sourceEndpoint.extractExact(player, entry.template, entry.count, false)
                     : sourceEndpoint.extractMatching(
                             player, entry.originalIngredient, entry.count, false);
-            if (entry.exactIdentity && !strictAcquisition
+            if (entry.exactIdentity && acquisitionItemTypes == null
                     && result.status() == StorageOperationStatus.NOT_FOUND) {
                 // 机器输入只要求“能放进机器”，显示输入的 NBT 可能在规划后漂移。
                 // 精确身份失败时先按配方原料匹配，仍失败再按物品类型兜底；机器

@@ -26,6 +26,25 @@ final class OperationRangeSet {
         return ranges.entrySet().stream().map(entry -> new Range(entry.getKey(), entry.getValue())).toList();
     }
 
+    /** 两组区间均有序，只需顺序扫描就能找出未被排除的部分。 */
+    List<Range> rangesExcluding(OperationRangeSet excluded) {
+        List<Range> result = new ArrayList<>();
+        var exclusions = excluded.ranges.entrySet().iterator();
+        var exclusion = exclusions.hasNext() ? exclusions.next() : null;
+        for (var range : ranges.entrySet()) {
+            int first = range.getKey();
+            int end = range.getValue();
+            while (exclusion != null && exclusion.getKey() < end) {
+                if (first < exclusion.getKey()) result.add(new Range(first, exclusion.getKey()));
+                first = Math.max(first, exclusion.getValue());
+                if (first >= end) break;
+                exclusion = exclusions.hasNext() ? exclusions.next() : null;
+            }
+            if (first < end) result.add(new Range(first, end));
+        }
+        return result;
+    }
+
     /** 移除并返回原集合内实际存在的部分，重复结算不会再扣料。 */
     List<Range> remove(int first, int end) {
         if (first >= end) return List.of();

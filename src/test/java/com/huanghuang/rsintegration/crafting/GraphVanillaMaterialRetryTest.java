@@ -46,6 +46,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -116,6 +118,25 @@ class GraphVanillaMaterialRetryTest extends BootstrapTest {
         for (int tick = 0; tick < 20; tick++) fixture.attempt(tick);
 
         assertEquals(DagScheduler.NodeState.FAILED, fixture.scheduler.state(NODE));
+        assertEquals(1, fixture.extractions);
+        assertEquals(2, fixture.stockCount());
+    }
+
+    @Test
+    void exhaustedTickTimeDefersReadyVanillaNodeWithoutTouchingInventory() throws Exception {
+        Fixture fixture = new Fixture(StorageOperationStatus.PARTIAL);
+        Field allowance = AsyncCraftChain.class.getDeclaredField("dispatchAllowed");
+        allowance.setAccessible(true);
+        var timeLeft = new AtomicBoolean(false);
+        allowance.set(fixture.chain, (BooleanSupplier) timeLeft::get);
+
+        fixture.attempt(0);
+        assertEquals(DagScheduler.NodeState.READY, fixture.scheduler.state(NODE));
+        assertEquals(0, fixture.extractions);
+        assertEquals(2, fixture.stockCount());
+
+        timeLeft.set(true);
+        fixture.attempt(1);
         assertEquals(1, fixture.extractions);
         assertEquals(2, fixture.stockCount());
     }

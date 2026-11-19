@@ -1357,8 +1357,9 @@ public final class ParallelCraftGroup implements IBatchDelegate, MachineOperatio
     public boolean appendMonitorMaterials(CraftMaterialView.Builder view) {
         if (countedMaterials == null) return false;
         if (sharedLedger == null || !sharedLedger.isCommitted()) return true;
-        OperationRangeSet dispatched = new OperationRangeSet(operations.totalOperations());
-        for (var queued : safelyRecoverableVirtual.ranges()) dispatched.remove(queued.first(), queued.end());
+        var recoverable = safelyRecoverableVirtual.ranges();
+        var processing = physicalFailureCleanupCompleted ? List.<OperationRangeSet.Range>of()
+                : unsettledOperations.rangesExcluding(safelyRecoverableVirtual);
         for (Origin origin : Origin.values()) {
             boolean recovered = switch (origin) {
                 case INITIAL -> bulkInitialRecovered;
@@ -1366,7 +1367,7 @@ public final class ParallelCraftGroup implements IBatchDelegate, MachineOperatio
                 case PRODUCER -> bulkProducerRecovered;
             };
             if (!recovered) {
-                for (var range : safelyRecoverableVirtual.ranges()) {
+                for (var range : recoverable) {
                     appendMonitorRange(view, origin, range.first(), range.count(), false, false);
                 }
                 for (WorkerSlot worker : workers) if (!worker.reusableDispatched) {
@@ -1374,9 +1375,8 @@ public final class ParallelCraftGroup implements IBatchDelegate, MachineOperatio
                 }
             }
             if (!physicalFailureCleanupCompleted) {
-                for (var unresolved : unsettledOperations.ranges()) for (var range : dispatched.ranges()) {
-                    int first = Math.max(unresolved.first(), range.first()), end = Math.min(unresolved.end(), range.end());
-                    if (first < end) appendMonitorRange(view, origin, first, end - first, false, true);
+                for (var range : processing) {
+                    appendMonitorRange(view, origin, range.first(), range.count(), false, true);
                 }
                 for (WorkerSlot worker : workers) if (worker.reusableDispatched
                         && (worker.id >= reusableReservationsSettled.length || !reusableReservationsSettled[worker.id])) {

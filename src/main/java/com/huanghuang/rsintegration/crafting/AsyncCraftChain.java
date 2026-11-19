@@ -141,6 +141,8 @@ public final class AsyncCraftChain {
     private static final int MATERIAL_ADMISSION_POLL_TICKS = 20;
     private static final int SUBSCRIBED_MATERIAL_FALLBACK_TICKS = 100;
     private static final LogSampler GRAPH_RETRY_LOGS = new LogSampler(2_000L);
+    private static final LogSampler SLOW_EXECUTION_LOGS = new LogSampler(10_000L);
+    private static final long SLOW_EXECUTION_PHASE_NANOS = 50_000_000L;
     private static final int GRAPH_RETRY_MAX_DELAY_TICKS = 40;
     /**
      * 机器被占用时的重试上限。机器通常几个 tick 内就会释放，用 40 tick 的退避会让
@@ -487,6 +489,7 @@ public final class AsyncCraftChain {
                 ? MATERIAL_ADMISSION_POLL_TICKS : SUBSCRIBED_MATERIAL_FALLBACK_TICKS);
         refreshMaterialWakeKeys();
         boolean admitted;
+        long start = System.nanoTime();
         materialAdmissionInProgress = true;
         try {
             admitted = materialAccount.ensure(
@@ -496,6 +499,7 @@ public final class AsyncCraftChain {
             // 本次提取和回滚产生的库存通知不能唤醒自己的下一次准入。
             materialStorageChanged = false;
             materialInventoryRevision = player.getInventory().getTimesChanged();
+            logSlowExecutionPhase("initial_materials", start);
         }
         if (admitted) {
             initialMaterialsReady = true;
@@ -504,7 +508,13 @@ public final class AsyncCraftChain {
             fluidWakeKeys = Set.of();
             closeMaterialStorageSubscription();
             if (storageEndpoint == null || CraftStorageEndpoints.isRefinedStorage(storageEndpoint)) {
-                magicResourceTaskReservation = MagicResourceTaskReservation.reserve(server, craftId, magicCostsForPlan());
+                long magicStart = System.nanoTime();
+                try {
+                    magicResourceTaskReservation = MagicResourceTaskReservation.reserve(
+                            server, craftId, magicCostsForPlan());
+                } finally {
+                    logSlowExecutionPhase("initial_magic", magicStart);
+                }
             }
             return true;
         }
@@ -743,6 +753,7 @@ public final class AsyncCraftChain {
         if (isDone()) return true;
         try (MaterialSourceSelection.Scope sources = materialSources.enter()) {
             if (!acquireInitialMaterials()) return isDone();
+            if (!dispatchAllowed.getAsBoolean()) return false;
             return tickWithMaterials(vanillaAllowance, dispatchAllowed);
         }
     }
@@ -797,8 +808,13 @@ public final class AsyncCraftChain {
                     this::recordGraphRuntimeFailure,
                     graphDispatchPerTick, graphDispatchPerCraft,
                     this::isConcurrentGraphNode);
-            sendStartedPacket(online);
-            sendProgressSnapshot(online, buildProgressSnapshot(false));
+            long start = System.nanoTime();
+            try {
+                sendStartedPacket(online);
+                sendProgressSnapshot(online, buildProgressSnapshot(false));
+            } finally {
+                logSlowExecutionPhase("initial_progress", start);
+            }
         }
 
         if (graphExecutor == null) {
@@ -807,17 +823,24 @@ public final class AsyncCraftChain {
             return true;
         }
 
-        // Process synchronous GENERIC nodes outside the executor.
-        // They complete immediately and don't wait for observation ticks.
+        if (!dispatchAllowed.getAsBoolean()) return false;
+        // 原版节点单独推进，但与机器节点共用服务端时间预算。
         if (!graphExecutor.hasPendingRound()) {
-            refreshBlockedGraphNodes();
-            settleReadyVanillaNodes(online, vanillaAllowance);
-            refreshBlockedGraphNodes();
+            long start = System.nanoTime();
+            try {
+                refreshBlockedGraphNodes();
+                settleReadyVanillaNodes(online, vanillaAllowance);
+                if (dispatchAllowed.getAsBoolean()) refreshBlockedGraphNodes();
+            } finally {
+                logSlowExecutionPhase("vanilla_nodes", start);
+            }
         }
 
         // 预算耗尽时保留本轮阶段，避免重复观察、发布或结算。
+        long start = System.nanoTime();
         try {
             graphExecutor.tick(dispatchAllowed);
+            logSlowExecutionPhase("machine_nodes", start);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error(ctx.format("Graph executor tick error"), e);
             abort("Graph executor error: " + e.getMessage(),
@@ -876,7 +899,7 @@ public final class AsyncCraftChain {
     private void settleReadyVanillaNodes(
             ServerPlayer online, VanillaCraftingTickBudget.ChainAllowance vanillaAllowance) {
         if (!resumeGraphVanillaJobs(online, vanillaAllowance)) return;
-        while (true) {
+        while (dispatchAllowed.getAsBoolean()) {
             if (vanillaAllowance.remaining() <= 0) {
                 waitingForVanillaBudget = !graphVanillaJobs.isEmpty();
                 break;
@@ -921,6 +944,7 @@ public final class AsyncCraftChain {
             VanillaCraftingTickBudget.ChainAllowance vanillaAllowance
     ) {
         for (GraphVanillaJob job : List.copyOf(graphVanillaJobs.values())) {
+            if (!dispatchAllowed.getAsBoolean()) return false;
             int granted = claimGraphVanillaExecutions(
                     vanillaAllowance, job.remainingExecutions, false);
             if (granted <= 0) {
@@ -4089,7 +4113,19 @@ public final class AsyncCraftChain {
         }
         progressTickCounter++;
         if (progressTickCounter % 20 != 0) return;
-        sendProgressSnapshot(online, buildProgressSnapshot(false));
+        long start = System.nanoTime();
+        try {
+            sendProgressSnapshot(online, buildProgressSnapshot(false));
+        } finally {
+            logSlowExecutionPhase("periodic_progress", start);
+        }
+    }
+
+    private void logSlowExecutionPhase(String phase, long start) {
+        long elapsed = System.nanoTime() - start;
+        if (elapsed < SLOW_EXECUTION_PHASE_NANOS || !SLOW_EXECUTION_LOGS.allow(craftId + ":" + phase)) return;
+        RSIntegrationMod.LOGGER.warn("[RSI-ExecutionSlow] craft={} tick={} phase={} elapsedMs={} nodes={}",
+                craftId, server.getTickCount(), phase, elapsed / 1_000_000L, stepsCount());
     }
 
     private void sendTerminalProgress(ServerPlayer online) {

@@ -24,7 +24,7 @@ public final class MaterialAccess {
 
     MaterialAccess(@Nullable RuntimeMaterialAccount account) { this.account = account; }
 
-    public ExtractionLedger newLedger() { return new ExtractionLedger(account, false); }
+    public ExtractionLedger newLedger() { return new ExtractionLedger(account); }
 
     private boolean authorized(ServerPlayer player, @Nullable CraftStorageEndpoint endpoint) {
         return account != null && account.belongsTo(player) && account.usesEndpoint(endpoint);
