@@ -15,6 +15,8 @@ import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.machine.FurnaceMachineAccess;
+import com.huanghuang.rsintegration.mods.bd.BdFurnaceBatchDelegate;
+import com.huanghuang.rsintegration.mods.bd.BdFurnaceOutputHook;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -67,6 +69,7 @@ public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
         if (level == null) return null;
         if (!level.hasChunkAt(pos)) return null;
         BlockEntity be = level.getBlockEntity(pos);
+        if (be instanceof BdFurnaceOutputHook<?>) return new BdFurnaceBatchDelegate();
         if (FurnaceMachineAccess.isIronFurnace(be)) {
             try {
                 return (IBatchDelegate) Class.forName(IRON_DELEGATE).getDeclaredConstructor().newInstance();
@@ -97,6 +100,17 @@ public final class CookingMachineBatchDelegate extends AbstractBatchDelegate {
     @Override
     public int prepareFlatBatch(int remainingOperations) {
         return active().prepareFlatBatch(remainingOperations);
+    }
+
+    @Override
+    public int flatBatchOperationLimit(int configuredLimit) {
+        return delegate == null ? super.flatBatchOperationLimit(configuredLimit)
+                : delegate.flatBatchOperationLimit(configuredLimit);
+    }
+
+    @Override
+    public boolean expandsFlatBatchOperationLimit() {
+        return delegate != null && delegate.expandsFlatBatchOperationLimit();
     }
 
     @Override

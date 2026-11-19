@@ -12,6 +12,7 @@ import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
+import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
@@ -63,6 +64,9 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     private boolean craftDone;
     private boolean arcaneCookingPot;
     private boolean goetyDelightCookingPot;
+    private BlockEntity spellPotEntity;
+    private FarmersSpellPotAccess spellPot;
+    private ItemStack placedScroll = ItemStack.EMPTY;
     private int plannedOperations = 1;
     private final List<ItemStack> placedInputs = new ArrayList<>();
     private final List<ItemStack> detachedRecoveredInputs = new ArrayList<>();
@@ -102,6 +106,9 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         this.detachedRecoveredInputs.clear();
         this.placedContainer = ItemStack.EMPTY;
         BlockEntity existing = level.getBlockEntity(pos);
+        this.spellPotEntity = existing instanceof FarmersSpellPotAccess ? existing : null;
+        this.spellPot = existing instanceof FarmersSpellPotAccess pot ? pot : null;
+        if (FarmersSpellPotSupport.isRecipe(found) && spellPot == null) return false;
         this.goetyDelightCookingPot = GoetyDelightCookingPotSupport.isCookingPot(existing);
         this.arcaneCookingPot = ArcaneStoveSupport.isArcaneCookingPot(existing);
         IItemHandler existingInventory = existing != null
@@ -142,7 +149,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             }
             specs.add(new IngredientSpec(Ingredient.of(container.copyWithCount(1)),
                     container.getCount()));
-        } else if (declared.isEmpty() && !container.isEmpty()) {
+        } else if (declared.isEmpty() && !container.isEmpty() && !FarmersSpellPotSupport.isRecipe(recipe)) {
             specs.add(new IngredientSpec(Ingredient.of(container.copyWithCount(1)),
                     container.getCount()));
         }
@@ -202,7 +209,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public boolean supportsInputBuffer() {
-        if (!inputBufferEnabled() || arcaneCookingPot || goetyDelightCookingPot || recipe == null
+        if (spellPot != null || !inputBufferEnabled() || arcaneCookingPot || goetyDelightCookingPot || recipe == null
                 || myLevel == null || myPos == null || !myLevel.hasChunkAt(myPos)) return false;
         BlockEntity machine = myLevel.getBlockEntity(myPos);
         if (machine == null || !supportsBufferedMachine(machine)) return false;
@@ -382,6 +389,9 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] Wrong BE type: {}", be.getClass().getName());
             return false;
         }
+        if ((be instanceof FarmersSpellPotAccess || spellPot != null) && be != spellPotEntity) {
+            return false;
+        }
 
         IItemHandler itemHandler = getInventory(be);
         if (itemHandler == null || itemHandler.getSlots() < inventorySize()) {
@@ -395,6 +405,39 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         if (storageEndpoint() == null) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] 未选择存储端点 pos={}", myPos);
             return false;
+        }
+        List<IngredientSpec> requiredSpecs = recipeSlots();
+        ItemStack selectedScroll = ItemStack.EMPTY;
+        if (spellPot != null) {
+            ResourceLocation school = FarmersSpellPotSupport.requiredSchool(recipe);
+            if (school != null) {
+                if (requiredSpecs == null || materials.size() != requiredSpecs.size()) return false;
+                int scrollIndex = (int) recipe.getIngredients().stream()
+                        .filter(ingredient -> !ingredient.isEmpty()).count();
+                if (scrollIndex >= materials.size() || requiredSpecs.get(scrollIndex).role() != DemandRole.CATALYST) {
+                    return false;
+                }
+                selectedScroll = materials.get(scrollIndex);
+                if (selectedScroll.getCount() != 1 || !school.equals(FarmersSpellPotSupport.schoolOf(selectedScroll))
+                        || !spellPot.rsi$scrollInventory().isItemValid(0, selectedScroll)) {
+                    player.sendSystemMessage(Component.translatable("rsi.farmers_spell.scroll_required", school.toString()));
+                    return false;
+                }
+                materials = new ArrayList<>(materials);
+                materials.remove(scrollIndex);
+                requiredSpecs = new ArrayList<>(requiredSpecs);
+                requiredSpecs.remove(scrollIndex);
+            }
+            boolean needsContainer = !getRequiredContainer(recipe, myLevel.registryAccess()).isEmpty();
+            if (!FarmersSpellPotSupport.matchesNativeChoice(myLevel, recipe, materials, selectedScroll, needsContainer)) {
+                player.sendSystemMessage(Component.translatable("rsi.farmers_spell.recipe_conflict"));
+                return false;
+            }
+            if (!FarmersSpellPotSupport.hasHeat(be, myLevel, myPos, selectedScroll)) {
+                player.sendSystemMessage(Component.translatable("rsi.farmersdelight.no_heat"));
+                return false;
+            }
+            if (!prepareScrollSlot(selectedScroll)) return false;
         }
         if (!drainExistingContentsToNetwork(itemHandler)) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] 无法清空机器原有内容 pos={}", myPos);
@@ -429,7 +472,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         }
 
         // Ordinary cooking pots still use their original heat-source behavior.
-        if (!isHeated(be)) {
+        if (spellPot == null && !isHeated(be)) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] No heat source under cooking pot at {}", myPos);
             player.sendSystemMessage(Component.translatable("rsi.farmersdelight.no_heat"));
             return false;
@@ -472,7 +515,6 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
-        List<IngredientSpec> requiredSpecs = recipeSlots();
         int requiredInputCount = requiredSpecs == null ? 0
                 : requiredSpecs.size() - (requiredContainer.isEmpty() ? 0 : 1);
         if (requiredInputCount != inputMaterials.size()) {
@@ -550,9 +592,25 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             placedContainer = containerMaterial.copy();
         }
 
+        if (spellPot != null) {
+            if (!installScroll(selectedScroll)) return false;
+            spellPot.rsi$setManagedCooking(true);
+        }
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-CookingPot] Materials inserted, cooking should start next tick");
         markCraftStarted();
         return true;
+    }
+
+    @Override
+    protected CraftObservation observeMachineCraft(ServerLevel level, BlockEntity be) {
+        if (spellPot != null) {
+            if (be != spellPotEntity) return failObservation("Arcane Cooking Pot replaced");
+            if (!ItemStack.matches(placedScroll, spellPot.rsi$scrollInventory().getStackInSlot(0))
+                    && !isMachineCraftFinished(level, be)) {
+                return failObservation("Arcane Cooking Pot scroll changed during cooking");
+            }
+        }
+        return super.observeMachineCraft(level, be);
     }
 
     @Override
@@ -572,7 +630,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         ItemStack inferred = getRequiredContainer(recipe, level.registryAccess());
         ItemStack storedContainer = itemHandler.getStackInSlot(containerSlot());
         ItemStack meal = itemHandler.getStackInSlot(mealDisplaySlot());
-        return !inferred.isEmpty()
+        return !inferred.isEmpty() && storedContainer.getCount() >= inferred.getCount()
                 && ItemStack.isSameItemSameTags(inferred, storedContainer)
                 && matchesRecipeOutput(meal) && meal.getCount() >= expectedCount;
     }
@@ -594,11 +652,11 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             ItemStack declared = getDeclaredContainerItem(recipe);
             ItemStack inferred = getRequiredContainer(recipe, myLevel.registryAccess());
             ItemStack storedContainer = itemHandler.getStackInSlot(containerSlot());
-            if (declared.isEmpty() && !inferred.isEmpty()
+            if (declared.isEmpty() && !inferred.isEmpty() && storedContainer.getCount() >= inferred.getCount()
                     && ItemStack.isSameItemSameTags(inferred, storedContainer)
                     && matchesRecipeOutput(meal)) {
                 result = itemHandler.extractItem(mealDisplaySlot(), meal.getCount(), false);
-                itemHandler.extractItem(containerSlot(), 1, false);
+                itemHandler.extractItem(containerSlot(), inferred.getCount(), false);
             }
         }
         be.setChanged();
@@ -609,6 +667,9 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         List<ItemStack> recovered = recoverFailureInputs(be);
+        ItemStack scroll = takeOwnedScroll();
+        if (!scroll.isEmpty()) recovered.add(scroll);
+        stopManagedCooking();
         recordFailureRecoveredInputs(recovered);
         forceChunkLoad(false);
         craftDone = false;
@@ -616,12 +677,88 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
+    protected void clearMissingMachineState(@Nullable ServerPlayer player) {
+        stopManagedCooking();
+    }
+
+    @Override
+    protected void clearUnavailableMachineState(@Nullable ServerPlayer player) {
+        stopManagedCooking();
+    }
+
+    @Override
     public void cleanup(@NotNull ServerPlayer player) {
+        stopManagedCooking();
         forceChunkLoad(false);
         clearMachineSlotsAndRefund();
         craftDone = false;
         plannedOperations = 1;
-        setStorageEndpoint(null);
+        if (placedScroll.isEmpty()) setStorageEndpoint(null);
+    }
+
+    private boolean prepareScrollSlot(ItemStack selectedScroll) {
+        var slot = spellPot.rsi$scrollInventory();
+        if (!placedScroll.isEmpty()) {
+            // 后续批次沿用同一个 worker 已预留的卷轴。
+            return ItemStack.matches(placedScroll, selectedScroll)
+                    && ItemStack.matches(placedScroll, slot.getStackInSlot(0));
+        }
+        ItemStack previous = slot.getStackInSlot(0);
+        if (!previous.isEmpty()) {
+            ItemStack extracted = slot.extractItem(0, previous.getCount(), false);
+            if (!extracted.isEmpty()) refundToRSNetwork(extracted);
+        }
+        return slot.getStackInSlot(0).isEmpty();
+    }
+
+    private boolean installScroll(ItemStack selectedScroll) {
+        if (selectedScroll.isEmpty() || !placedScroll.isEmpty()) return true;
+        var slot = spellPot.rsi$scrollInventory();
+        if (!slot.getStackInSlot(0).isEmpty() || !slot.insertItem(0, selectedScroll.copy(), false).isEmpty()) return false;
+        placedScroll = selectedScroll.copy();
+        return true;
+    }
+
+    private void stopManagedCooking() {
+        if (spellPot != null) spellPot.rsi$setManagedCooking(false);
+    }
+
+    private boolean isSameSpellPotLoaded() {
+        return spellPot != null && myLevel.hasChunkAt(myPos) && !spellPotEntity.isRemoved()
+                && myLevel.getBlockEntity(myPos) == spellPotEntity;
+    }
+
+    private ItemStack takeOwnedScroll() {
+        if (placedScroll.isEmpty() || !isSameSpellPotLoaded()) return ItemStack.EMPTY;
+        var slot = spellPot.rsi$scrollInventory();
+        if (!ItemStack.matches(placedScroll, slot.getStackInSlot(0))) return ItemStack.EMPTY;
+        ItemStack recovered = slot.extractItem(0, placedScroll.getCount(), false);
+        if (!recovered.isEmpty()) placedScroll = ItemStack.EMPTY;
+        return recovered;
+    }
+
+    @Override
+    public List<ItemStack> collectReusableMaterials(ServerPlayer player) {
+        ItemStack scroll = takeOwnedScroll();
+        return scroll.isEmpty() ? List.of() : List.of(scroll);
+    }
+
+    @Override
+    public void releaseReusableMaterials(ServerPlayer player) {
+        for (ItemStack scroll : collectReusableMaterials(player)) {
+            ItemStack leftover = insertIntoStorage(player, scroll, false);
+            if (!leftover.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, leftover);
+        }
+    }
+
+    @Override
+    public boolean transferReusableMaterialsTo(IBatchDelegate successor) {
+        if (placedScroll.isEmpty()) return true;
+        if (!(successor instanceof CookingPotBatchDelegate next) || !isSameSpellPotLoaded()
+                || next.spellPotEntity != spellPotEntity || !next.placedScroll.isEmpty()) return false;
+        next.placedScroll = placedScroll;
+        placedScroll = ItemStack.EMPTY;
+        return true;
     }
 
     @Override
@@ -743,6 +880,12 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             warnings.add(Component.translatable("rsi.farmersdelight.container_needed",
                     container.getHoverName()));
         }
+        ResourceLocation school = FarmersSpellPotSupport.requiredSchool(recipe);
+        if (school != null) {
+            warnings.add(Component.translatable("rsi.farmers_spell.scroll_required", school.toString()));
+            warnings.add(Component.translatable("rsi.farmers_spell.heat_warning"));
+            return warnings;
+        }
         boolean arcaneCombination = false;
         if (pos != null) {
             ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
@@ -773,6 +916,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     protected IItemHandler getInventory(BlockEntity be) {
+        if (be instanceof FarmersSpellPotAccess pot) return pot.rsi$foodInventory();
         if (GoetyDelightCookingPotSupport.isCookingPot(be)) {
             return GoetyDelightCookingPotSupport.getInventory(be);
         }
@@ -975,8 +1119,9 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     protected boolean isSupportedBlockEntity(BlockEntity blockEntity) {
-        return GoetyDelightCookingPotSupport.isCookingPot(blockEntity)
-                || FarmersDelightReflection.cookingPotBEClass.isInstance(blockEntity);
+        return blockEntity instanceof FarmersSpellPotAccess || GoetyDelightCookingPotSupport.isCookingPot(blockEntity)
+                || FarmersDelightReflection.cookingPotBEClass != null
+                && FarmersDelightReflection.cookingPotBEClass.isInstance(blockEntity);
     }
 
     protected int inputSlots() { return INPUT_SLOTS; }

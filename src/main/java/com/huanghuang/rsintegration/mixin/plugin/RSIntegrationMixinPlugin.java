@@ -78,6 +78,17 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
                     "(ILcom/wintercogs/beyonddimensions/api/storage/key/KeyAmount;IZ)V")
                     && isClassPresent("com.wintercogs.beyonddimensions.common.menu.widget.slot.DisorderedStackTypedSlot");
         }
+        if (mixinClassName.endsWith(".beyonddimensions.BdFurnaceOutputMixin")) {
+            return hasMethod(targetClassName, "workEnd", "()V")
+                    && hasField(targetClassName, "quickChecks", "Ljava/util/List;")
+                    && hasField(targetClassName, "recipeType", "Lnet/minecraft/world/item/crafting/RecipeType;");
+        }
+        if (mixinClassName.endsWith(".farmersspell.AlchemistPotMixin")) {
+            return hasMethod(targetClassName, "moveMealToOutput", "()V")
+                    && hasMethod(targetClassName, "useStoredContainersOnMeal", "()V")
+                    && hasField(targetClassName, "inventory", "Lnet/minecraftforge/items/ItemStackHandler;")
+                    && hasField(targetClassName, "scrollHandler", "Lnet/minecraftforge/items/ItemStackHandler;");
+        }
         if (mixinClassName.endsWith(".beyonddimensions.BDFluidContainerModifiersMixin")) {
             // 0.8 起的新版：第四个参数换成 GLFW 修饰键掩码。
             return isModernBeyondDimensions()

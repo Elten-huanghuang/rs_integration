@@ -700,6 +700,12 @@ public final class RSIntegrationMod {
                             List.of("net.minecraft.world.level.block.SmokerBlock"),
                             "vanilla_smoker"));
 
+            if (ModList.get().isLoaded(ModIds.BEYOND_DIMENSIONS)) {
+                registerBdFurnaceBinding("vanilla_furnace", "NetFurnaceBlock");
+                registerBdFurnaceBinding("vanilla_blast_furnace", "NetBlastFurnaceBlock");
+                registerBdFurnaceBinding("vanilla_smoker", "NetSmokerBlock");
+            }
+
             // Campfire (no GUI)
             // When FD is loaded, farmersdelight_skillet handles all
             // CampfireCookingRecipe classification and campfire binding.
@@ -1050,6 +1056,12 @@ public final class RSIntegrationMod {
         ContractValidation.validateAll();
 
         LOGGER.info("{} initialized.", MOD_NAME);
+    }
+
+    private static void registerBdFurnaceBinding(String type, String blockClass) {
+        BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
+                ModIds.BEYOND_DIMENSIONS, ModType.byId(type), RSIntegrationConfig.ENABLE_VANILLA_MACHINES,
+                List.of("com.wintercogs.beyonddimensions.common.block." + blockClass), type));
     }
 
     private void onLoadComplete(final FMLLoadCompleteEvent event) {

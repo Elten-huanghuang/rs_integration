@@ -47,6 +47,8 @@
     "constructionwand.ConstructionWandNetworkMixin",
     "constructionwand.SupplierInventoryNetworkMixin",
     "beyonddimensions.NetMagnetItemMixin",
+    "beyonddimensions.BdFurnaceOutputMixin",
+    "farmersspell.AlchemistPotMixin",
     "beyonddimensions.BDFluidContainerMixin",
     "beyonddimensions.BDFluidContainerModifiersMixin",
     "minecraft.SmithingTransformRecipeAccessor",

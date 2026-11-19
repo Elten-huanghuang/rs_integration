@@ -24,6 +24,7 @@ public final class ModIds {
     public static final String TERRA_CURIO = "terra_curio";
     public static final String IMMORTERS_DELIGHT = "immortalers_delight";
     public static final String FARMERSDELIGHT = "farmersdelight";
+    public static final String FARMERS_SPELL = "farmers_spell";
     public static final String GOETYDELIGHT = "goetydelight";
     public static final String DUNGEONS_DELIGHT = "dungeonsdelight";
     public static final String MINERS_DELIGHT = "miners_delight";

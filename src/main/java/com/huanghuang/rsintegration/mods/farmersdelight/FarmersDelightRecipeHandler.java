@@ -57,8 +57,14 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
     @Override
     public boolean canHandle(Recipe<?> recipe) {
         return recipe.getClass().getName().equals(COOKING_POT_CLASS)
+                || FarmersSpellPotSupport.isRecipe(recipe)
                 || isDoughRecipe(recipe)
                 || recipe instanceof CampfireCookingRecipe;
+    }
+
+    @Override
+    public boolean isCompatibleBinding(Recipe<?> recipe, @Nullable String blockKey) {
+        return !FarmersSpellPotSupport.isRecipe(recipe) || FarmersSpellPotSupport.isPotBinding(blockKey);
     }
 
     static boolean isCuttingBoardRecipe(@Nullable Recipe<?> recipe) {
@@ -128,16 +134,24 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
             }
             return null;
         }
-        if (recipe.getClass().getName().equals(COOKING_POT_CLASS)) {
+        if (COOKING_POT_CLASS.equals(recipe.getClass().getName()) || FarmersSpellPotSupport.isRecipe(recipe)) {
             List<Ingredient> ingredients = recipe.getIngredients();
             if (ingredients.isEmpty()) return null;
             List<IngredientSpec> specs = new ArrayList<>();
             for (Ingredient ing : ingredients) {
                 if (!ing.isEmpty()) specs.add(new IngredientSpec(ing, 1));
             }
-            return specs.isEmpty()
-                    ? null
-                    : appendOutputContainerSpec(specs, getOutputContainer(recipe));
+            ResourceLocation school = FarmersSpellPotSupport.requiredSchool(recipe);
+            if (school != null) {
+                IngredientSpec scroll = FarmersSpellPotSupport.scrollSpec(school);
+                if (scroll.isEmpty()) return null;
+                specs.add(scroll);
+            }
+            if (specs.isEmpty()) return null;
+            ItemStack container = FarmersSpellPotSupport.isRecipe(recipe)
+                    ? CookingPotBatchDelegate.getContainerItem(recipe, RegistryAccess.EMPTY)
+                    : getOutputContainer(recipe);
+            return appendOutputContainerSpec(specs, container);
         }
         return null;
     }
@@ -177,6 +191,7 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
         if (recipe == null) return false;
         String name = recipe.getClass().getName();
         return COOKING_POT_CLASS.equals(name)
+                || FarmersSpellPotSupport.isRecipe(recipe)
                 || DungeonsDelightRecipeHandler.RECIPE_CLASS.equals(name);
     }
 

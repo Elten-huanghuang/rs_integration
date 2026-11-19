@@ -33,15 +33,20 @@ public final class FarmersDelightRSModule implements IModIntegration {
 
     @Override
     public void registerModType() {
+        boolean farmersSpell = ModList.get().isLoaded(ModIds.FARMERS_SPELL);
+        String cookingRecipe = "vectorwing.farmersdelight.common.crafting.CookingPotRecipe";
         // Specific: Cooking Pot recipes
         ModType.register("farmersdelight_cooking_pot",
-                new String[]{"vectorwing.farmersdelight.common.crafting.CookingPotRecipe"},
+                farmersSpell ? new String[]{cookingRecipe, FarmersSpellPotSupport.RECIPE_CLASS}
+                        : new String[]{cookingRecipe},
                 new String[]{"cooking_pot"},
                 new String[]{"farmersdelight_cooking_pot"},
                 CookingPotBatchDelegate::new);
         ModType.configureJei("farmersdelight_cooking_pot",
-                new String[][]{{"farmersdelight:cooking"}},
-                new String[][]{{"vectorwing.farmersdelight.common.crafting.CookingPotRecipe", "farmersdelight_cooking_pot"}},
+                farmersSpell ? new String[][]{{"farmersdelight:cooking"}, {FarmersSpellPotSupport.RECIPE_TYPE_ID}}
+                        : new String[][]{{"farmersdelight:cooking"}},
+                farmersSpell ? new String[][]{{cookingRecipe}, {FarmersSpellPotSupport.RECIPE_CLASS}}
+                        : new String[][]{{cookingRecipe}},
                 "gui.rs_integration.jei.fd_cooking_pot_craft");
 
         if (ModList.get().isLoaded(ModIds.MINERS_DELIGHT)) {
@@ -126,6 +131,13 @@ public final class FarmersDelightRSModule implements IModIntegration {
                 List.of("vectorwing.farmersdelight.common.block.CookingPotBlock"),
                 "farmersdelight_cooking_pot", true
         ));
+
+        if (ModList.get().isLoaded(ModIds.FARMERS_SPELL)) {
+            BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
+                    ModIds.FARMERS_SPELL, ModType.byId(ModIds.ID_FD_COOKING_POT),
+                    RSIntegrationConfig.ENABLE_FARMERSDELIGHT, List.of(FarmersSpellPotSupport.BLOCK_CLASS),
+                    List.of(FarmersSpellPotSupport.BLOCK_ID), ModIds.ID_FD_COOKING_POT, true));
+        }
 
         if (ModList.get().isLoaded(ModIds.GOETYDELIGHT)) {
             BindingEventHandler.registerTarget(new BindingEventHandler.MachineBindingTarget(
