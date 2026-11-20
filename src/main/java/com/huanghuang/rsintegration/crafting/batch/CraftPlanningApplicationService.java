@@ -17,6 +17,7 @@ import com.huanghuang.rsintegration.crafting.CraftPlanningRevision;
 import com.huanghuang.rsintegration.crafting.DirectMaterialAllocator;
 import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.ExecutionEquivalence;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
@@ -74,6 +75,7 @@ import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketRecipeWrappe
 import com.huanghuang.rsintegration.mods.forbidden.FaRitualWrapper;
 import com.huanghuang.rsintegration.mods.goety.GoetyBatchDelegate;
 import com.huanghuang.rsintegration.mods.goety.GoetyDynamicRitualRecipe;
+import com.huanghuang.rsintegration.mods.goety.GoetyInitialMaterials;
 import com.huanghuang.rsintegration.mods.goety.GoetyRecipeHandler;
 import com.huanghuang.rsintegration.mods.historystages.HistoryStagesCompat;
 import com.huanghuang.rsintegration.mods.immortalersdelight.EnchantalCoolerBatchDelegate;
@@ -312,8 +314,21 @@ final class CraftPlanningApplicationService {
                     ? new ExecutionPlanLookup(null, "rsi.plan.failure.confirmation_needs_replan")
                     : ExecutionPlanLookup.invalid();
         }
-        if (!PlanningStateValidator.revalidateForExecution(
-                player, entry.snapshot(), entry.plan(), levelKey, lookupPos, storageReference)) {
+        CraftPlanGraph graph = entry.resolvedGraph();
+        CraftPlanGraph refreshed = graph;
+        if (graph != null && materialLocks.isEmpty()
+                && entry.snapshot().preferences().ingredientChoices().isEmpty()) {
+            refreshed = GoetyInitialMaterials.refresh(graph, modType != null && ModIds.GOETY.equals(modType.id()),
+                    player, () -> storageReference == null
+                            ? CraftPacketUtils.resolveEndpointForCraft(player, levelKey, lookupPos).orElse(null)
+                            : CraftStorageEndpoints.resolve(storageReference, player).orElse(null));
+        }
+        boolean current = refreshed != graph
+                ? PlanningStateValidator.revalidateGraphForExecution(
+                        player, entry.snapshot(), PlanGraphView.from(refreshed), levelKey, lookupPos, storageReference)
+                : PlanningStateValidator.revalidateForExecution(
+                        player, entry.snapshot(), entry.plan(), levelKey, lookupPos, storageReference);
+        if (!current) {
             return ExecutionPlanLookup.invalid();
         }
         boolean consumed = explicitPreview
@@ -321,9 +336,12 @@ final class CraftPlanningApplicationService {
                 : semanticLease
                 ? cache.consumeLatestForExecution(player.getUUID(), entry)
                 : cache.consumeForExecution(exactKey, entry);
-        return consumed
-                ? new ExecutionPlanLookup(entry, null)
-                : ExecutionPlanLookup.invalid();
+        if (!consumed) return ExecutionPlanLookup.invalid();
+        if (refreshed != graph) {
+            entry = new PlanCache.Entry(entry.plan(), entry.snapshot(), entry.purePlan(), refreshed,
+                    entry.terminalEmbedded(), entry.createdNanos());
+        }
+        return new ExecutionPlanLookup(entry, null);
     }
 
     static boolean matchesExecutionLease(
