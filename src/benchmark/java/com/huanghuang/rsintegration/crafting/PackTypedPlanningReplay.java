@@ -491,23 +491,6 @@ public final class PackTypedPlanningReplay extends BootstrapTest {
             }
             if (!unresolvedSlots.isEmpty()) firstMissing = unresolvedSlots.get(0);
             status = unresolvedSlots.isEmpty() && unresolvedEdges == 0 ? "SUCCESS" : "PARTIAL";
-            if (Boolean.getBoolean("rsi.restock.probe") && run == 0 && status.equals("SUCCESS")) {
-                Map<MaterialRef, Long> required = new HashMap<>();
-                java.util.function.BiConsumer<com.huanghuang.rsintegration.crafting.graph.MaterialSource, Long> collect =
-                        (source, quantity) -> {
-                            if (source instanceof com.huanghuang.rsintegration.crafting.graph.MaterialSource.InitialPool initial) {
-                                var key = initial.key();
-                                MaterialRef material = materialsByAlias.get(new CraftingResolver.StackKey(key.item(), key.tag()));
-                                if (material == null) throw new IllegalStateException("未知供料 " + key);
-                                required.merge(material, quantity, Math::addExact);
-                            }
-                        };
-                result.allocations().forEach(allocation -> collect.accept(allocation.source(), allocation.quantity()));
-                result.rootDemands().forEach(root -> root.allocations().forEach(
-                        allocation -> collect.accept(allocation.source(), allocation.quantity())));
-                required.entrySet().stream().map(entry -> "restock_need\t" + entry.getKey().itemId() + "\t"
-                        + entry.getValue() + "\t" + entry.getKey().nbt()).sorted().forEach(System.out::println);
-            }
             if (run == 2 || Boolean.getBoolean("rsi.replay.hybrid")) {
                 Map<Item, Long> byItem = new HashMap<>();
                 stock.forEach((key, quantity) -> byItem.merge(key.item(), quantity, SaturatingLongMath::add));
