@@ -253,6 +253,7 @@
   "experience.rs_integration.uncertain": "已暂停：%s mB 提交结果不明，请检查服务端日志",
   "item.rs_integration.fluid_refund": "流体退款物品",
   "item.rs_integration.fluid_refund.named": "%s退款物品",
+  "item.rs_integration.infinity_water_disk": "无限水流体盘",
   "item.rs_integration.unified_storage_disk": "万界归墟盘",
   "item.rs_integration.unified_storage_disk.desc": "同一磁盘以 long 数量储存物品与流体，并使用原版 RS 磁盘仓",
   "item.rs_integration.unified_storage_disk.limit": "每个精确条目最高 9,223,372,036,854,775,807；RS 原生操作按 int 分片",

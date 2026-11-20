@@ -101,7 +101,8 @@ public final class RSJeiPlugin implements IModPlugin {
     public void onRuntimeAvailable(@NotNull IJeiRuntime jeiRuntime) {
         cachedRuntime = jeiRuntime;
         jeiRuntime.getIngredientManager().removeIngredientsAtRuntime(VanillaTypes.ITEM_STACK,
-                List.of(new ItemStack(ModItems.ALCHEMIST_INK_FLUID.get())));
+                List.of(new ItemStack(ModItems.ALCHEMIST_INK_FLUID.get()),
+                        new ItemStack(ModItems.INFINITY_WATER_DISK.get())));
         unifiedDiskRemoved = false;
         refreshUnifiedDiskVisibility();
         TetraWorkbenchMaterialState.refreshForJei();

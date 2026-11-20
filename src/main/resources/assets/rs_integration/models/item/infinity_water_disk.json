@@ -1,0 +1,4 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": { "layer0": "rs_integration:item/infinity_water_disk" }
+}

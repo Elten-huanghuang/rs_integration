@@ -49,6 +49,8 @@ public final class ModItems {
             ITEMS.register("order_terminal", FoodOrderTerminalItem::new);
     public static final RegistryObject<Item> RESONANT_EXPERIENCE_WAND =
             ITEMS.register("resonant_experience_wand", ResonantExperienceWandItem::new);
+    public static final RegistryObject<Item> INFINITY_WATER_DISK =
+            ITEMS.register("infinity_water_disk", () -> new Item(new Item.Properties().stacksTo(1)));
     public static final RegistryObject<MenuType<?>> RESONANCE_BACKPACK = MENUS.register(
             "resonance_backpack",
             () -> IForgeMenuType.create(ResonanceBackpackContainer::new));
@@ -74,6 +76,7 @@ public final class ModItems {
                             output.accept(RESONANT_SOURCE_TANK.get());
                         }
                         if (UnifiedDiskVisibility.visible()) output.accept(UNIFIED_STORAGE_DISK.get());
+                        output.accept(INFINITY_WATER_DISK.get());
                         // Backpack upgrades are only registered when Sophisticated
                         // Backpacks is present. Look them up by registry name so we
                         // never link SophisticatedBackpacksItems (which would throw
