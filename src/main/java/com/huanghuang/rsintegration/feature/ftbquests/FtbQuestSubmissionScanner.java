@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.feature.ftbquests;
 
+import com.google.gson.JsonParseException;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import dev.ftb.mods.ftbquests.quest.BaseQuestFile;
 import dev.ftb.mods.ftbquests.quest.Quest;
@@ -9,8 +10,10 @@ import dev.ftb.mods.ftbquests.quest.reward.ChoiceReward;
 import dev.ftb.mods.ftbquests.quest.reward.ItemReward;
 import dev.ftb.mods.ftbquests.quest.task.ItemTask;
 import dev.ftb.mods.ftbquests.quest.task.Task;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
+import net.minecraftforge.fml.loading.FMLEnvironment;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
@@ -101,9 +104,27 @@ public final class FtbQuestSubmissionScanner {
                         reward.getItem().copyWithCount(Math.max(1, reward.getCount()))))
                 .toList();
         boolean hasChoice = quest.getRewards().stream().anyMatch(ChoiceReward.class::isInstance);
-        return new QuestSubmissionSnapshot(FtbQuestObjectId.getId(quest), quest.getTitle().getString(), icon,
+        long questId = FtbQuestObjectId.getId(quest);
+        return new QuestSubmissionSnapshot(questId, resolveTitle(quest, questId, icon), icon,
                 quest.canBeRepeated(), quest.getRequireSequentialTasks(), eligibility,
                 requirements, itemRewards, quest.getRewards().size(), hasChoice);
+    }
+
+    private static String resolveTitle(Quest quest, long questId, ItemStack icon) {
+        // FTB 的 getTitle() 会被 Forge 从独立服务端移除。
+        if (FMLEnvironment.dist.isClient()) return quest.getTitle().getString();
+
+        String title = quest.getRawTitle().strip();
+        if (title.startsWith("{") || title.startsWith("[")) {
+            try {
+                Component parsed = Component.Serializer.fromJson(title);
+                if (parsed != null) title = parsed.getString();
+            } catch (JsonParseException ignored) {
+                // 普通标题也可以用括号开头。
+            }
+        }
+        if (!title.isBlank()) return title;
+        return icon.isEmpty() ? "#" + Long.toHexString(questId) : icon.getHoverName().getString();
     }
 
     /** Supports both FTB Quests 2001.4.13's no-arg API and 2001.4.22's TeamData API. */

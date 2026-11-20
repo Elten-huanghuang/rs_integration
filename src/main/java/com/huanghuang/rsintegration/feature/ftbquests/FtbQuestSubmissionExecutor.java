@@ -129,7 +129,7 @@ public final class FtbQuestSubmissionExecutor {
             ensureCompletionTimestamps(data, quest, tasks.values());
         }
         claimSafeRewards(player, data, quest);
-        player.sendSystemMessage(Component.translatable("rsi.ftb_quest.complete", quest.getTitle()));
+        player.sendSystemMessage(Component.translatable("rsi.ftb_quest.complete", snapshot.title()));
         return true;
     }
 
