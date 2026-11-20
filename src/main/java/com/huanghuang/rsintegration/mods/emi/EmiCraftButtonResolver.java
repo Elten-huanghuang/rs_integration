@@ -346,8 +346,10 @@ final class EmiCraftButtonResolver {
         if (recipeType == null || recipeType == ModType.GENERIC) return true;
         Recipe<?> nativeRecipe = recipe instanceof Recipe<?> nativeEntry
                 ? nativeEntry : backingRecipe;
+        var level = Minecraft.getInstance().level;
         return nativeRecipe == null || AltarBindingRegistry.isRecipeBindingCompatible(
-                nativeRecipe, recipeType, entry.blockKey());
+                nativeRecipe, recipeType, entry.blockKey(),
+                level != null && level.dimension().location().equals(entry.dim()) ? level : null, entry.pos());
     }
 
     private static boolean bindingMatchesFilter(BindingStorage.BindingEntry entry, String filter) {

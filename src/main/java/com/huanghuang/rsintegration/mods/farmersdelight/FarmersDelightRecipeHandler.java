@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.farmersdelight;
 
 import com.huanghuang.rsintegration.mods.dungeonsdelight.DungeonsDelightRecipeHandler;
+import com.huanghuang.rsintegration.mods.goetydelight.GoetyDelightCookingPotSupport;
 import com.huanghuang.rsintegration.recipe.AbstractRecipeHandler;
 import com.huanghuang.rsintegration.recipe.CampfireRecipeSupport;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
@@ -8,6 +9,7 @@ import com.huanghuang.rsintegration.recipe.RecipeOutputSpec;
 
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.api.recipe.OutputSemantics;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.ScaledIngredientSpec;
@@ -55,16 +57,24 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
     public ModType modType() { return ModType.byId("farmersdelight"); }
 
     @Override
+    public ModType modType(Recipe<?> recipe) {
+        return GoetyDelightCookingPotSupport.isWorkstationRecipe(recipe)
+                ? ModType.byId(ModIds.ID_FD_COOKING_POT) : modType();
+    }
+
+    @Override
     public boolean canHandle(Recipe<?> recipe) {
         return recipe.getClass().getName().equals(COOKING_POT_CLASS)
                 || FarmersSpellPotSupport.isRecipe(recipe)
+                || GoetyDelightCookingPotSupport.isWorkstationRecipe(recipe)
                 || isDoughRecipe(recipe)
                 || recipe instanceof CampfireCookingRecipe;
     }
 
     @Override
     public boolean isCompatibleBinding(Recipe<?> recipe, @Nullable String blockKey) {
-        return !FarmersSpellPotSupport.isRecipe(recipe) || FarmersSpellPotSupport.isPotBinding(blockKey);
+        return (!FarmersSpellPotSupport.isRecipe(recipe) || FarmersSpellPotSupport.isPotBinding(blockKey))
+                && GoetyDelightCookingPotSupport.isCompatibleBinding(recipe, blockKey);
     }
 
     static boolean isCuttingBoardRecipe(@Nullable Recipe<?> recipe) {
@@ -134,7 +144,7 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
             }
             return null;
         }
-        if (COOKING_POT_CLASS.equals(recipe.getClass().getName()) || FarmersSpellPotSupport.isRecipe(recipe)) {
+        if (isHandledCookingPotRecipe(recipe)) {
             List<Ingredient> ingredients = recipe.getIngredients();
             if (ingredients.isEmpty()) return null;
             List<IngredientSpec> specs = new ArrayList<>();
@@ -187,12 +197,15 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
         return ItemStack.EMPTY;
     }
 
-    private static boolean isCookingPotRecipe(Recipe<?> recipe) {
-        if (recipe == null) return false;
-        String name = recipe.getClass().getName();
-        return COOKING_POT_CLASS.equals(name)
+    private static boolean isHandledCookingPotRecipe(Recipe<?> recipe) {
+        return COOKING_POT_CLASS.equals(recipe.getClass().getName())
                 || FarmersSpellPotSupport.isRecipe(recipe)
-                || DungeonsDelightRecipeHandler.RECIPE_CLASS.equals(name);
+                || GoetyDelightCookingPotSupport.isWorkstationRecipe(recipe);
+    }
+
+    private static boolean isCookingPotRecipe(Recipe<?> recipe) {
+        return recipe != null && (isHandledCookingPotRecipe(recipe)
+                || DungeonsDelightRecipeHandler.RECIPE_CLASS.equals(recipe.getClass().getName()));
     }
 
     @Override

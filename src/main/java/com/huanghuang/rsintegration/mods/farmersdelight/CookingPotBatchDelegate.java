@@ -109,6 +109,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         this.spellPotEntity = existing instanceof FarmersSpellPotAccess ? existing : null;
         this.spellPot = existing instanceof FarmersSpellPotAccess pot ? pot : null;
         if (FarmersSpellPotSupport.isRecipe(found) && spellPot == null) return false;
+        if (!GoetyDelightCookingPotSupport.acceptsRecipe(existing, found)) return false;
         this.goetyDelightCookingPot = GoetyDelightCookingPotSupport.isCookingPot(existing);
         this.arcaneCookingPot = ArcaneStoveSupport.isArcaneCookingPot(existing);
         IItemHandler existingInventory = existing != null
@@ -127,9 +128,10 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         PreparationResult result = super.prepare(player, recipeId, dim, pos);
         if (result.state() != PreparationState.READY || spellPot != null) return result;
         // 奥术炉灶可以在启动时点火，魔法食事锅则要等选定卷轴后才能判断热源。
-        if (arcaneStoveBelow() != null || isHeated(myLevel.getBlockEntity(pos))) return result;
-        return PreparationResult.waiting("cooking pot has no heat at " + pos,
-                Component.translatable("rsi.farmersdelight.no_heat"));
+        if (arcaneStoveBelow() != null) return result;
+        Component requirement = missingCookingRequirement(myLevel.getBlockEntity(pos));
+        return requirement == null ? result
+                : PreparationResult.waiting("cooking pot lacks its required heat or soul energy at " + pos, requirement);
     }
 
     @Override
@@ -403,6 +405,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         if ((be instanceof FarmersSpellPotAccess || spellPot != null) && be != spellPotEntity) {
             return false;
         }
+        if (!GoetyDelightCookingPotSupport.acceptsRecipe(be, recipe)) return false;
 
         IItemHandler itemHandler = getInventory(be);
         if (itemHandler == null || itemHandler.getSlots() < inventorySize()) {
@@ -418,6 +421,12 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
         List<IngredientSpec> requiredSpecs = recipeSlots();
+        ItemStack requiredContainer = getRequiredContainer(recipe, myLevel.registryAccess());
+        if (goetyDelightCookingPot && !GoetyDelightCookingPotSupport.matchesNativeChoice(
+                be, recipe, materials, !requiredContainer.isEmpty())) {
+            player.sendSystemMessage(Component.translatable("rsi.goetydelight.recipe_conflict"));
+            return false;
+        }
         ItemStack selectedScroll = ItemStack.EMPTY;
         if (spellPot != null) {
             ResourceLocation school = FarmersSpellPotSupport.requiredSchool(recipe);
@@ -439,7 +448,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
                 requiredSpecs = new ArrayList<>(requiredSpecs);
                 requiredSpecs.remove(scrollIndex);
             }
-            boolean needsContainer = !getRequiredContainer(recipe, myLevel.registryAccess()).isEmpty();
+            boolean needsContainer = !requiredContainer.isEmpty();
             if (!FarmersSpellPotSupport.matchesNativeChoice(myLevel, recipe, materials, selectedScroll, needsContainer)) {
                 player.sendSystemMessage(Component.translatable("rsi.farmers_spell.recipe_conflict"));
                 return false;
@@ -451,7 +460,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             if (!prepareScrollSlot(selectedScroll)) return false;
         }
         BlockEntity heatSource = arcaneStoveBelow();
-        if (spellPot == null && heatSource == null && !checkHeatForStart(player, be)) return false;
+        if (spellPot == null && heatSource == null && !checkCookingRequirement(player, be)) return false;
         if (!drainExistingContentsToNetwork(itemHandler)) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] 无法清空机器原有内容 pos={}", myPos);
             return false;
@@ -483,12 +492,11 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
-        if (heatSource != null && spellPot == null && !checkHeatForStart(player, be)) {
+        if (heatSource != null && spellPot == null && !checkCookingRequirement(player, be)) {
             forceChunkLoad(false);
             return false;
         }
 
-        ItemStack requiredContainer = getRequiredContainer(recipe, myLevel.registryAccess());
         List<ItemStack> inputMaterials = new ArrayList<>();
         ItemStack containerMaterial = ItemStack.EMPTY;
         int inputEnd = materials.size();
@@ -901,6 +909,12 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
             if (level != null && level.hasChunkAt(pos) && level.hasChunkAt(pos.below())) {
                 BlockEntity pot = level.getBlockEntity(pos);
+                if (GoetyDelightCookingPotSupport.usesNecroticCooking(pot, recipe)) {
+                    if (!GoetyDelightCookingPotSupport.canPowerNecroticCooking(pot)) {
+                        warnings.add(Component.translatable("rsi.goetydelight.soul_required"));
+                    }
+                    return warnings;
+                }
                 BlockEntity stove = level.getBlockEntity(pos.below());
                 arcaneCombination = ArcaneStoveSupport.isArcaneCookingPot(pot)
                         && ArcaneStoveSupport.isArcaneStove(stove);
@@ -947,11 +961,22 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         return ArcaneStoveSupport.isArcaneStove(stove) ? stove : null;
     }
 
-    private boolean checkHeatForStart(ServerPlayer player, BlockEntity pot) {
-        if (isHeated(pot)) return true;
-        RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] No heat source under cooking pot at {}", myPos);
-        player.sendSystemMessage(Component.translatable("rsi.farmersdelight.no_heat"));
+    private boolean checkCookingRequirement(ServerPlayer player, BlockEntity pot) {
+        Component requirement = missingCookingRequirement(pot);
+        if (requirement == null) return true;
+        RSIntegrationMod.LOGGER.debug("[RSI-Batch-CookingPot] Missing cooking requirement at {}: {}",
+                myPos, requirement);
+        player.sendSystemMessage(requirement);
         return false;
+    }
+
+    @Nullable
+    private Component missingCookingRequirement(@Nullable BlockEntity pot) {
+        if (GoetyDelightCookingPotSupport.usesNecroticCooking(pot, recipe)) {
+            return GoetyDelightCookingPotSupport.canPowerNecroticCooking(pot) ? null
+                    : Component.translatable("rsi.goetydelight.soul_required");
+        }
+        return pot != null && isHeated(pot) ? null : Component.translatable("rsi.farmersdelight.no_heat");
     }
 
     protected boolean isHeated(BlockEntity be) {
@@ -1138,7 +1163,8 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     protected boolean isSupportedRecipe(Recipe<?> candidate) {
-        return FarmersDelightReflection.cookingPotRecipeClass != null
+        return GoetyDelightCookingPotSupport.isWorkstationRecipe(candidate)
+                || FarmersDelightReflection.cookingPotRecipeClass != null
                 && FarmersDelightReflection.cookingPotRecipeClass.isInstance(candidate);
     }
 

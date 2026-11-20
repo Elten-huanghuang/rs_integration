@@ -1362,6 +1362,8 @@
   "rsi.farmers_spell.scroll_required": "§eSelect a reusable scroll of the %s school.",
   "rsi.farmers_spell.heat_warning": "§7A Fire scroll supplies heat. Other schools require a heat source below the pot.",
   "rsi.farmers_spell.recipe_conflict": "§cThe Arcane Cooking Pot does not select this recipe with the chosen ingredients and scroll.",
+  "rsi.goetydelight.recipe_conflict": "§cThe metal cooking pot does not select this recipe with the chosen ingredients.",
+  "rsi.goetydelight.soul_required": "§cThe necrotic-infused metal cooking pot needs at least 4 Soul Energy to cook this recipe.",
   "rsi.farmersdelight.heat_warning": "§7Requires a heat source placed beneath the machine (campfire, magma block, stove, etc.).",
   "rsi.farmersdelight.arcane_stove.fuel_missing": "§cArcane Stove has no fuel: player mana or Arcane/Cinder Essence in the storage network is required",
   "rsi.farmersdelight.arcane_stove.fuel_too_short": "§cThe Arcane Stove consumed fuel, but its burn time is too short: the recipe needs %s seconds and only %s seconds remain. Retry shortly to add fuel, or use Cinder Essence for permanent burning",

@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.mods.farmersdelight;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
+import com.huanghuang.rsintegration.mods.goetydelight.GoetyDelightCookingPotSupport;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.mods.IModIntegration;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
@@ -12,6 +13,7 @@ import net.minecraftforge.common.ForgeConfigSpec;
 import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.fml.ModList;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
 
@@ -34,19 +36,32 @@ public final class FarmersDelightRSModule implements IModIntegration {
     @Override
     public void registerModType() {
         boolean farmersSpell = ModList.get().isLoaded(ModIds.FARMERS_SPELL);
+        boolean goetyDelight = ModList.get().isLoaded(ModIds.GOETYDELIGHT);
         String cookingRecipe = "vectorwing.farmersdelight.common.crafting.CookingPotRecipe";
+        List<String> potRecipes = new ArrayList<>(List.of(cookingRecipe));
+        List<String[]> potCategories = new ArrayList<>();
+        potCategories.add(new String[]{"farmersdelight:cooking"});
+        if (farmersSpell) {
+            potRecipes.add(FarmersSpellPotSupport.RECIPE_CLASS);
+            potCategories.add(new String[]{FarmersSpellPotSupport.RECIPE_TYPE_ID});
+        }
+        if (goetyDelight) {
+            potRecipes.add(GoetyDelightCookingPotSupport.WORKSTATION_RECIPE_CLASS);
+            potCategories.addAll(List.of(
+                    new String[]{"goetydelight:cursed_cooking"},
+                    new String[]{"goetydelight:cursed_brazier"},
+                    new String[]{"goetydelight:apocalyptium_cooking"},
+                    new String[]{"goetydelight:apocalyptium_brazier"}));
+        }
         // Specific: Cooking Pot recipes
         ModType.register("farmersdelight_cooking_pot",
-                farmersSpell ? new String[]{cookingRecipe, FarmersSpellPotSupport.RECIPE_CLASS}
-                        : new String[]{cookingRecipe},
+                potRecipes.toArray(String[]::new),
                 new String[]{"cooking_pot"},
                 new String[]{"farmersdelight_cooking_pot"},
                 CookingPotBatchDelegate::new);
         ModType.configureJei("farmersdelight_cooking_pot",
-                farmersSpell ? new String[][]{{"farmersdelight:cooking"}, {FarmersSpellPotSupport.RECIPE_TYPE_ID}}
-                        : new String[][]{{"farmersdelight:cooking"}},
-                farmersSpell ? new String[][]{{cookingRecipe}, {FarmersSpellPotSupport.RECIPE_CLASS}}
-                        : new String[][]{{cookingRecipe}},
+                potCategories.toArray(String[][]::new),
+                potRecipes.stream().map(name -> new String[]{name}).toArray(String[][]::new),
                 "gui.rs_integration.jei.fd_cooking_pot_craft");
 
         if (ModList.get().isLoaded(ModIds.MINERS_DELIGHT)) {

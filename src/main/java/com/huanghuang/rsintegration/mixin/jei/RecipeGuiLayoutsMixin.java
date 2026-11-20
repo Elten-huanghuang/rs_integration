@@ -1908,8 +1908,9 @@ public class RecipeGuiLayoutsMixin {
         if (MachinePreferenceClient.isBlocked(entry)) return false;
         if (recipeType == null || recipeType == ModType.GENERIC
                 || !(recipe instanceof Recipe<?> nativeRecipe)) return true;
-        return AltarBindingRegistry.isRecipeBindingCompatible(
-                nativeRecipe, recipeType, entry.blockKey());
+        var level = Minecraft.getInstance().level;
+        return AltarBindingRegistry.isRecipeBindingCompatible(nativeRecipe, recipeType, entry.blockKey(),
+                level != null && level.dimension().location().equals(entry.dim()) ? level : null, entry.pos());
     }
 
     @Unique

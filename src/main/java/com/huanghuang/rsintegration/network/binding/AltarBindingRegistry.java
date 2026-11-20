@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.network.binding;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.mods.goetydelight.GoetyDelightCookingPotSupport;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.mods.tacz.TaczWorkbenchCompatibility;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
@@ -409,7 +410,7 @@ public final class AltarBindingRegistry {
                     player, type, recipe.getId()).isEmpty();
         }
 
-        if (ModIds.TACZ.equals(type.id())) {
+        if (ModIds.TACZ.equals(type.id()) || GoetyDelightCookingPotSupport.isNecroticRecipe(recipe)) {
             return !getBoundMachinesForRecipe(player, type, recipe.getId()).isEmpty();
         }
 
@@ -439,6 +440,20 @@ public final class AltarBindingRegistry {
             handler = ModRecipeHandlers.handlerFor(type);
         }
         return handler == null || handler.isCompatibleBinding(recipe, blockKey);
+    }
+
+    public static boolean isRecipeBindingCompatible(
+            Recipe<?> recipe, ModType type, @Nullable String blockKey,
+            @Nullable Level level, BlockPos pos) {
+        return isRecipeBindingCompatible(recipe, type, blockKey)
+                && matchesRecipeMachineState(recipe, level, pos);
+    }
+
+    private static boolean matchesRecipeMachineState(
+            Recipe<?> recipe, @Nullable Level level, BlockPos pos) {
+        return !GoetyDelightCookingPotSupport.isNecroticRecipe(recipe)
+                || level == null || !level.hasChunkAt(pos)
+                || GoetyDelightCookingPotSupport.acceptsRecipe(level.getBlockEntity(pos), recipe);
     }
 
     private static TickCache getTickCache(ServerPlayer player) {
@@ -847,6 +862,7 @@ public final class AltarBindingRegistry {
                     continue;
                 }
                 if (!isCraftModeUsable(entryLevel, entry.pos(), entry.blockKey())) continue;
+                if (recipe != null && !matchesRecipeMachineState(recipe, entryLevel, entry.pos())) continue;
                 if (!hasUsableStorageBinding(player, altarDim, entry.pos())) continue;
                 // Keep the concrete binding type. A recipe can deliberately use a
                 // compatible alias (notably vanilla_furnace -> ironfurnaces_furnace),
@@ -915,7 +931,8 @@ public final class AltarBindingRegistry {
                         counts[5]++;
                         continue;
                     }
-                    if (!isCraftModeUsable(level, entry.pos(), entry.blockKey())) {
+                    if (!isCraftModeUsable(level, entry.pos(), entry.blockKey())
+                            || recipe != null && !matchesRecipeMachineState(recipe, level, entry.pos())) {
                         counts[8]++;
                         continue;
                     }

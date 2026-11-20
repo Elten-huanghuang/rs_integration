@@ -1365,6 +1365,8 @@
   "rsi.farmers_spell.scroll_required": "§e请选择一张 %s 流派的卷轴，烹饪后可回收。",
   "rsi.farmers_spell.heat_warning": "§7火焰卷轴可以供热。使用其他流派卷轴时，请在锅下方放置热源。",
   "rsi.farmers_spell.recipe_conflict": "§c奥术烹饪锅使用所选食材和卷轴时，无法匹配这份配方。",
+  "rsi.goetydelight.recipe_conflict": "§c金属锅使用所选食材时，无法匹配这份配方。",
+  "rsi.goetydelight.soul_required": "§c亡灵注入的金属锅至少需要 4 点灵魂能量才能烹饪这份配方。",
   "rsi.farmersdelight.heat_warning": "§7需要机器下方有热源（营火、岩浆块、炉灶等）",
   "rsi.farmersdelight.arcane_stove.fuel_missing": "§c奥法炉灶缺少燃料：需要玩家法力值，或存储网络中的奥术源质/灰烬源质",
   "rsi.farmersdelight.arcane_stove.fuel_too_short": "§c奥法炉灶已消耗燃料，但燃烧时间不足：配方需要 %s 秒，目前只有 %s 秒。请稍后再次下单补充燃料，或使用灰烬源质设为永久燃烧",
