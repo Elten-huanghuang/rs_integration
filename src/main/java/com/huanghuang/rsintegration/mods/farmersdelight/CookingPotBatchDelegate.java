@@ -122,6 +122,17 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     }
 
     @Override
+    public PreparationResult prepare(ServerPlayer player, ResourceLocation recipeId,
+                                     @Nullable ResourceLocation dim, BlockPos pos) {
+        PreparationResult result = super.prepare(player, recipeId, dim, pos);
+        if (result.state() != PreparationState.READY || spellPot != null) return result;
+        // 奥术炉灶可以在启动时点火，魔法食事锅则要等选定卷轴后才能判断热源。
+        if (arcaneStoveBelow() != null || isHeated(myLevel.getBlockEntity(pos))) return result;
+        return PreparationResult.waiting("cooking pot has no heat at " + pos,
+                Component.translatable("rsi.farmersdelight.no_heat"));
+    }
+
+    @Override
     public MaterialPlan materialPlan() {
         return MaterialPlan.graphSlots(recipeSlots());
     }
@@ -439,6 +450,8 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             }
             if (!prepareScrollSlot(selectedScroll)) return false;
         }
+        BlockEntity heatSource = arcaneStoveBelow();
+        if (spellPot == null && heatSource == null && !checkHeatForStart(player, be)) return false;
         if (!drainExistingContentsToNetwork(itemHandler)) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] 无法清空机器原有内容 pos={}", myPos);
             return false;
@@ -451,8 +464,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
         // The bound machine is the pot, but Arcane Stove fuel state lives one
         // block below it. Invoke the stove's native interaction before checking heat.
-        BlockEntity heatSource = myLevel.getBlockEntity(myPos.below());
-        if (arcaneCookingPot && ArcaneStoveSupport.isArcaneStove(heatSource)
+        if (heatSource != null
                 && !ArcaneStoveSupport.ensureBurning(player, heatSource,
                 FarmersDelightRecipeHandler.getCookTime(recipe),
                 new ArcaneStoveSupport.FuelAccess() {
@@ -471,10 +483,8 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
-        // Ordinary cooking pots still use their original heat-source behavior.
-        if (spellPot == null && !isHeated(be)) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] No heat source under cooking pot at {}", myPos);
-            player.sendSystemMessage(Component.translatable("rsi.farmersdelight.no_heat"));
+        if (heatSource != null && spellPot == null && !checkHeatForStart(player, be)) {
+            forceChunkLoad(false);
             return false;
         }
 
@@ -928,6 +938,20 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         }
         return be.getCapability(ForgeCapabilities.ITEM_HANDLER)
                 .resolve().orElse(null);
+    }
+
+    @Nullable
+    private BlockEntity arcaneStoveBelow() {
+        if (!arcaneCookingPot) return null;
+        BlockEntity stove = myLevel.getBlockEntity(myPos.below());
+        return ArcaneStoveSupport.isArcaneStove(stove) ? stove : null;
+    }
+
+    private boolean checkHeatForStart(ServerPlayer player, BlockEntity pot) {
+        if (isHeated(pot)) return true;
+        RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] No heat source under cooking pot at {}", myPos);
+        player.sendSystemMessage(Component.translatable("rsi.farmersdelight.no_heat"));
+        return false;
     }
 
     protected boolean isHeated(BlockEntity be) {

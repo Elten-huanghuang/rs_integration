@@ -12,9 +12,11 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
+import com.huanghuang.rsintegration.crafting.loadbalancer.ParallelCraftGroup;
 import com.huanghuang.rsintegration.mods.dungeonsdelight.DungeonsDelightRecipeHandler;
 import com.huanghuang.rsintegration.mods.farmersdelight.FarmersDelightRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
+import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry.BoundMachine;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import com.huanghuang.rsintegration.util.ModIds;
@@ -185,6 +187,7 @@ class MonsterPotCompatibilityTest extends BootstrapTest {
         Fixture fixture = new Fixture(Ingredient.of(Items.CARROT), 1);
         assertTrue(fixture.prepare());
         when(fixture.machine.isHeated()).thenReturn(false);
+        fixture.inventory.setStackInSlot(3, new ItemStack(Items.POTATO));
         InputBufferPlan plan = fixture.delegate.inputBufferPlan(2);
         try (ExtractionLedger ledger = ExtractionLedger.external();
              MockedStatic<ForcedChunkTicketManager> tickets = mockStatic(ForcedChunkTicketManager.class)) {
@@ -192,7 +195,37 @@ class MonsterPotCompatibilityTest extends BootstrapTest {
         }
         assertTrue(fixture.inventory.getStackInSlot(0).isEmpty());
         assertTrue(fixture.inventory.getStackInSlot(7).isEmpty());
+        assertEquals(Items.POTATO, fixture.inventory.getStackInSlot(3).getItem());
         verify(fixture.machine).isHeated();
+    }
+
+    @Test
+    void parallelGroupSkipsColdPotAndUsesBothHeatedPots() {
+        Fixture cold = new Fixture(Ingredient.of(Items.CARROT), 1);
+        when(cold.machine.isHeated()).thenReturn(false);
+        Fixture first = new Fixture(Ingredient.of(Items.CARROT), 1, cold.pos.east());
+        Fixture second = new Fixture(Ingredient.of(Items.CARROT), 1, cold.pos.west());
+        ModType type = ModType.byId(ModIds.ID_DD_MONSTER_POT);
+        var dim = Level.OVERWORLD.location();
+        List<BoundMachine> machines = List.of(
+                new BoundMachine(dim, cold.pos, type, null),
+                new BoundMachine(dim, first.pos, type, null),
+                new BoundMachine(dim, second.pos, type, null));
+        when(cold.level.getBlockEntity(first.pos)).thenReturn(first.machine);
+        when(cold.level.getBlockEntity(second.pos)).thenReturn(second.machine);
+        try (MockedStatic<CraftPacketUtils> context = mockStatic(CraftPacketUtils.class)) {
+            context.when(() -> CraftPacketUtils.resolveLevel(cold.player.server, dim, cold.player))
+                    .thenReturn(cold.level);
+            ParallelCraftGroup group = new ParallelCraftGroup(machines, type, cold.recipe.getId(),
+                    cold.player, 4, false, cold.delegate.concurrencyCapabilities(),
+                    null, 2, machine -> new MonsterPotBatchDelegate(), null);
+            try {
+                assertEquals(2, group.getChildCount());
+                assertEquals(first.pos, group.getMachinePos());
+            } finally {
+                group.releasePreparationResources();
+            }
+        }
     }
 
     @Test
