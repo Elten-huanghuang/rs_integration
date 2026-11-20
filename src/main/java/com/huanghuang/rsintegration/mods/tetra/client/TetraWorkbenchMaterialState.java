@@ -33,6 +33,7 @@ import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /** Mirrors Tetra's current workbench material candidates into JEI as item stacks. */
 @Mod.EventBusSubscriber(value = Dist.CLIENT)
@@ -179,6 +180,15 @@ public final class TetraWorkbenchMaterialState {
                         TetraMaterialSortData.from(entry));
             }
         }
+        for (Object schematic : schematics) {
+            for (ItemStack material : schematicMaterials(schematic, target, slot, resolvedSortData.keySet())) {
+                ItemStack normalized = material.copyWithCount(1);
+                if (resolvedSortData.putIfAbsent(JeiNetworkInventoryPacket.key(normalized),
+                        TetraMaterialSortData.empty()) == null) {
+                    resolved.add(normalized);
+                }
+            }
+        }
         RSIntegrationMod.LOGGER.info(
                 "[RSI-Tetra] Workbench slot '{}' schematic '{}' resolved {} material stacks",
                 slot, selected == null ? "<slot candidates>" : invoke(selected, "getKey"),
@@ -232,6 +242,39 @@ public final class TetraWorkbenchMaterialState {
     private static boolean isHidden(Object materialData) throws ReflectiveOperationException {
         Field hidden = materialData.getClass().getField("hidden");
         return hidden.getBoolean(materialData);
+    }
+
+    static List<ItemStack> schematicMaterials(Object schematic, ItemStack target, String slot,
+                                              Set<String> knownMaterials)
+            throws ReflectiveOperationException {
+        Object definition = readField(schematic, "definition");
+        if (definition == null || !(readField(definition, "outcomes") instanceof Object[] outcomes)) {
+            return List.of();
+        }
+        int slotCount = ((Number) invoke(schematic, "getNumMaterialSlots")).intValue();
+        if (slotCount <= 0) return List.of();
+        Method accepts = findAcceptsMethod(schematic.getClass());
+        Map<String, ItemStack> materials = new LinkedHashMap<>();
+        // 直接从已加载的蓝图取材料，避免构造改装预览或重复解析数据包。
+        for (Object outcome : outcomes) {
+            if (outcome == null || Boolean.TRUE.equals(readField(outcome, "hidden"))
+                    || !(readField(outcome, "materialSlot") instanceof Number index)) continue;
+            int materialSlot = index.intValue();
+            if (materialSlot < 0 || materialSlot >= slotCount) continue;
+            Object material = readField(outcome, "material");
+            if (material == null || !(invoke(material, "getApplicableItemStacks") instanceof ItemStack[] stacks)) {
+                continue;
+            }
+            for (ItemStack stack : stacks) {
+                if (stack == null || stack.isEmpty()) continue;
+                String key = JeiNetworkInventoryPacket.key(stack);
+                if (knownMaterials.contains(key) || materials.containsKey(key)) continue;
+                if (Boolean.TRUE.equals(accepts.invoke(schematic, target, slot, materialSlot, stack))) {
+                    materials.put(key, stack);
+                }
+            }
+        }
+        return List.copyOf(materials.values());
     }
 
     private static boolean acceptedByAny(List<Object> schematics, ItemStack target,
