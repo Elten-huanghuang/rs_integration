@@ -23,7 +23,7 @@ public final class PreparationMessageScope {
         return DEPTH.get() > 0;
     }
 
-    static <T> T callSilently(Supplier<T> action) {
+    public static <T> T callSilently(Supplier<T> action) {
         int previous = DEPTH.get();
         DEPTH.set(previous + 1);
         try {

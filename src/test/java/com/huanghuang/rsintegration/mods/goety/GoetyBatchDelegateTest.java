@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.goety;
 
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.PreparationMessageScope;
 import com.huanghuang.rsintegration.crafting.plan.MachineCandidateView;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
@@ -10,10 +11,13 @@ import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.NonNullList;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -35,6 +39,7 @@ import java.util.ArrayList;
 import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.Mockito.mock;
@@ -44,6 +49,54 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 
 class GoetyBatchDelegateTest extends BootstrapTest {
+    private static final ResourceLocation PERSONAL_COURT = new ResourceLocation("goeticlegacy", "personal_court");
+
+    @Test
+    void structureCheckUsesPlayerAndBoundWorldAndRespectsRejections() {
+        ServerPlayer player = mock(ServerPlayer.class);
+        ServerLevel level = mock(ServerLevel.class);
+        ServerLevel overworld = mock(ServerLevel.class);
+        BlockEntity altar = mock(BlockEntity.class);
+        when(level.dimension()).thenReturn(ResourceKey.create(Registries.DIMENSION, PERSONAL_COURT));
+        when(overworld.dimension()).thenReturn(Level.OVERWORLD);
+        when(player.serverLevel()).thenReturn(overworld);
+        when(altar.getBlockPos()).thenReturn(BlockPos.ZERO);
+
+        assertTrue(GoetyBatchDelegate.checkNativeStructure(PlayerAwareStructure.class, BlockEntity.class,
+                "end", player, altar, level));
+        assertTrue(GoetyBatchDelegate.checkNativeStructure(PlayerAwareStructure.class, BlockEntity.class,
+                "expert_nether", player, altar, level));
+        assertFalse(GoetyBatchDelegate.checkNativeStructure(PlayerAwareStructure.class, BlockEntity.class,
+                "end", player, altar, player.serverLevel()));
+        when(altar.getBlockPos()).thenReturn(new BlockPos(1, 0, 0));
+        assertFalse(GoetyBatchDelegate.checkNativeStructure(PlayerAwareStructure.class, BlockEntity.class,
+                "end", player, altar, level));
+    }
+
+    @Test
+    void olderGoetyCanStillCheckStructuresWithoutPlayerOverload() {
+        ServerPlayer player = mock(ServerPlayer.class);
+        ServerLevel level = mock(ServerLevel.class);
+        BlockEntity altar = mock(BlockEntity.class);
+        when(altar.getBlockPos()).thenReturn(BlockPos.ZERO);
+
+        assertTrue(GoetyBatchDelegate.checkNativeStructure(LegacyStructure.class, BlockEntity.class,
+                "end", player, altar, level));
+    }
+
+    public static class LegacyStructure {
+        public static boolean getProperStructure(String type, BlockEntity altar, BlockPos pos, Level level) {
+            return pos.equals(altar.getBlockPos());
+        }
+    }
+
+    public static class PlayerAwareStructure extends LegacyStructure {
+        public static boolean getProperStructure(String type, Player player, BlockEntity altar, BlockPos pos, Level level) {
+            assertTrue(PreparationMessageScope.isSilent());
+            return player != null && level != null && level.dimension().location().equals(PERSONAL_COURT)
+                    && pos.equals(BlockPos.ZERO);
+        }
+    }
     @BeforeAll
     static void initializeModRuntime() throws Exception {
         FMLJavaModLoadingContext context = mock(FMLJavaModLoadingContext.class);

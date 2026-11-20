@@ -140,7 +140,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] validateAndInit [1/9] entry: recipe={} dim={} pos={}",
                 recipeId, dim, pos);
 
-        ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
+        ServerLevel level = resolveAltarLevel(player, dim);
         if (level == null) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-Goety] validateAndInit [FAIL-1] dim resolution failed for dim={}", dim);
             player.sendSystemMessage(Component.translatable("rsi.generic.error.dim_not_found"));
@@ -2117,10 +2117,10 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             Object craftTypeValue = recipe.getClass().getMethod("getCraftType").invoke(recipe);
             String craftType = craftTypeValue instanceof String string ? string : null;
             if (craftType == null || craftType.isEmpty()) return true;
-            ServerLevel level = resolveMachineLevel(player);
-            Method m = GoetyReflection.ritualRequirementsClass.getMethod("getProperStructure",
-                    String.class, GoetyReflection.ritualBlockEntityClass, BlockPos.class, Level.class);
-            boolean valid = (boolean) m.invoke(null, craftType, altar, myPos, level);
+            ServerLevel level = resolveAltarLevel(player, myDim.location());
+            boolean valid = level != null && level.isLoaded(myPos) && level.getBlockEntity(myPos) == altar
+                    && checkNativeStructure(GoetyReflection.ritualRequirementsClass,
+                            GoetyReflection.ritualBlockEntityClass, craftType, player, (BlockEntity) altar, level);
             if (!valid) {
                 player.sendSystemMessage(Component.translatable(
                         "rsi.goety.error.structure_mismatch", resolveCraftTypeName(craftType)));
@@ -2134,6 +2134,32 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                     "rsi.goety.error.prerequisite_check_failed"));
             return false;
         }
+    }
+
+    static @Nullable ServerLevel resolveAltarLevel(ServerPlayer player, @Nullable ResourceLocation dimension) {
+        return dimension == null ? player.serverLevel()
+                : player.server.getLevel(ResourceKey.create(Registries.DIMENSION, dimension));
+    }
+
+    static boolean checkNativeStructure(Class<?> requirements, Class<?> ritualBlock,
+                                        String craftType, Player player, BlockEntity altar, Level level) {
+        // 与手动激活使用同一入口，让附属模组按实际玩家和祭坛世界判断仪式要求。
+        return PreparationMessageScope.callSilently(() -> {
+            try {
+                Method method;
+                try {
+                    method = requirements.getMethod("getProperStructure", String.class, Player.class,
+                            ritualBlock, BlockPos.class, Level.class);
+                } catch (NoSuchMethodException missingPlayerOverload) {
+                    method = requirements.getMethod("getProperStructure", String.class,
+                            ritualBlock, BlockPos.class, Level.class);
+                    return Boolean.TRUE.equals(method.invoke(null, craftType, altar, altar.getBlockPos(), level));
+                }
+                return Boolean.TRUE.equals(method.invoke(null, craftType, player, altar, altar.getBlockPos(), level));
+            } catch (ReflectiveOperationException exception) {
+                throw new IllegalStateException("Goety ritual structure check failed", exception);
+            }
+        });
     }
 
     @SuppressWarnings("unchecked")
@@ -2360,7 +2386,7 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             String key = machine.dim() + "@" + machine.pos().asLong();
             if (!seen.add(key)) continue;
 
-            ServerLevel level = CraftPacketUtils.resolveLevel(player.server, machine.dim(), player);
+            ServerLevel level = resolveAltarLevel(player, machine.dim());
             // 未加载的远程祭坛无法完成可靠的灵魂/结构预检。保留绑定记录供执行阶段
             // 使用，但不要在规划阶段为每个未加载候选创建完整委托并生成临时诊断。
             if (level == null || !level.isLoaded(machine.pos())) {
@@ -2664,12 +2690,12 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             ServerPlayer player, ResourceLocation recipeId, String craftType,
             AltarBindingRegistry.BoundMachine candidate) {
         if (GoetyReflection.ritualRequirementsClass == null
+                || GoetyReflection.ritualBlockEntityClass == null
                 || GoetyReflection.darkAltarBEClass == null) {
             return PlanStructureProbe.CHECK_UNAVAILABLE;
         }
 
-        ServerLevel level = CraftPacketUtils.resolveLevel(
-                player.server, candidate.dim(), player);
+        ServerLevel level = resolveAltarLevel(player, candidate.dim());
         if (level == null) return PlanStructureProbe.INVALID_BINDING;
         if (!level.isLoaded(candidate.pos())) return PlanStructureProbe.UNLOADED;
 
@@ -2678,16 +2704,12 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             return PlanStructureProbe.INVALID_BINDING;
         }
 
-        Method structureCheck = findCompatibleStaticMethod(
-                GoetyReflection.ritualRequirementsClass,
-                "getProperStructure", craftType, be, candidate.pos(), level);
-        if (structureCheck == null) return PlanStructureProbe.CHECK_UNAVAILABLE;
         try {
-            return Boolean.TRUE.equals(structureCheck.invoke(
-                    null, craftType, be, candidate.pos(), level))
+            return checkNativeStructure(GoetyReflection.ritualRequirementsClass,
+                    GoetyReflection.ritualBlockEntityClass, craftType, player, be, level)
                     ? PlanStructureProbe.VERIFIED
                     : PlanStructureProbe.STRUCTURE_MISMATCH;
-        } catch (ReflectiveOperationException | RuntimeException exception) {
+        } catch (RuntimeException exception) {
             RSIntegrationMod.LOGGER.warn(
                     "[RSI-Batch-Goety] Plan structure probe failed: recipe={} dim={} pos={}",
                     recipeId, candidate.dim(), candidate.pos(), exception);
