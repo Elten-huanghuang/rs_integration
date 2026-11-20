@@ -17,6 +17,7 @@ public class ResonanceSyncPacket {
     public final long revision;
     public final List<ItemStack> taczAmmo;
     public final boolean experienceWand;
+    public final boolean normalArrow;
 
     public ResonanceSyncPacket(int diskGems) {
         this(diskGems, 0, 0, 0L);
@@ -35,12 +36,19 @@ public class ResonanceSyncPacket {
     public ResonanceSyncPacket(int diskGems, int lycheeCatalystMask,
                                int abilityMask, long revision, List<ItemStack> taczAmmo,
                                boolean experienceWand) {
+        this(diskGems, lycheeCatalystMask, abilityMask, revision, taczAmmo, experienceWand, false);
+    }
+
+    public ResonanceSyncPacket(int diskGems, int lycheeCatalystMask,
+                               int abilityMask, long revision, List<ItemStack> taczAmmo,
+                               boolean experienceWand, boolean normalArrow) {
         this.diskGems = diskGems;
         this.lycheeCatalystMask = lycheeCatalystMask;
         this.abilityMask = abilityMask;
         this.revision = revision;
         this.taczAmmo = taczAmmo.stream().map(ItemStack::copy).toList();
         this.experienceWand = experienceWand;
+        this.normalArrow = normalArrow;
     }
 
     public static void encode(ResonanceSyncPacket packet, FriendlyByteBuf buf) {
@@ -54,19 +62,21 @@ public class ResonanceSyncPacket {
             buffer.writeVarInt(stack.getCount());
         });
         buf.writeBoolean(packet.experienceWand);
+        buf.writeBoolean(packet.normalArrow);
     }
 
     public static ResonanceSyncPacket decode(FriendlyByteBuf buf) {
         return new ResonanceSyncPacket(
                 buf.readVarInt(), buf.readVarInt(), buf.readVarInt(), buf.readVarLong(),
                 buf.readList(buffer -> buffer.readItem().copyWithCount(buffer.readVarInt())),
-                buf.readBoolean());
+                buf.readBoolean(), buf.readBoolean());
     }
 
     public static void handle(ResonanceSyncPacket packet, Supplier<NetworkEvent.Context> ctx) {
         ctx.get().enqueueWork(() -> ClientDiskData.apply(
                 packet.diskGems, packet.lycheeCatalystMask,
-                packet.abilityMask, packet.revision, packet.taczAmmo, packet.experienceWand));
+                packet.abilityMask, packet.revision, packet.taczAmmo, packet.experienceWand,
+                packet.normalArrow));
         ctx.get().setPacketHandled(true);
     }
 }

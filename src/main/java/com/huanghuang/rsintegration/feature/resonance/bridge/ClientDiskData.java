@@ -14,6 +14,7 @@ public final class ClientDiskData {
     private static long revision = -1L;
     private static List<ItemStack> taczAmmo = List.of();
     private static boolean experienceWand;
+    private static boolean normalArrow;
 
     private ClientDiskData() {}
 
@@ -59,6 +60,10 @@ public final class ClientDiskData {
         return experienceWand;
     }
 
+    public static boolean hasNormalArrow() {
+        return normalArrow;
+    }
+
     public static void apply(int count, int catalystMask, int newAbilityMask,
                              long newRevision) {
         apply(count, catalystMask, newAbilityMask, newRevision, List.of());
@@ -75,6 +80,12 @@ public final class ClientDiskData {
 
     public static void apply(int count, int catalystMask, int newAbilityMask,
                              long newRevision, List<ItemStack> ammo, boolean hasExperienceWand) {
+        apply(count, catalystMask, newAbilityMask, newRevision, ammo, hasExperienceWand, false);
+    }
+
+    public static void apply(int count, int catalystMask, int newAbilityMask,
+                             long newRevision, List<ItemStack> ammo,
+                             boolean hasExperienceWand, boolean hasNormalArrow) {
         if (newRevision < revision) return;
         gemCount = count;
         lycheeCatalystMask = catalystMask;
@@ -82,6 +93,7 @@ public final class ClientDiskData {
         revision = newRevision;
         taczAmmo = ammo.stream().map(ItemStack::copy).toList();
         experienceWand = hasExperienceWand;
+        normalArrow = hasNormalArrow;
     }
 
     public static void clear() {
@@ -91,5 +103,6 @@ public final class ClientDiskData {
         revision = -1L;
         taczAmmo = List.of();
         experienceWand = false;
+        normalArrow = false;
     }
 }

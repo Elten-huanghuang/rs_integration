@@ -41,6 +41,7 @@ class ResonanceSyncPacketTest extends BootstrapTest {
         assertEquals(ResonanceDiskAbilities.MALUM_VOID_FAVOR, decoded.abilityMask);
         assertEquals(42L, decoded.revision);
         assertFalse(decoded.experienceWand);
+        assertFalse(decoded.normalArrow);
         assertEquals(0, buffer.readableBytes());
     }
 
@@ -72,6 +73,33 @@ class ResonanceSyncPacketTest extends BootstrapTest {
         ClientDiskData.apply(0, 0, 0, 3L, List.of(), true);
         ClientDiskData.clear();
         assertFalse(ClientDiskData.hasExperienceWand());
+    }
+
+    @Test
+    void roundTripsNormalArrowPresence() {
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+        try {
+            ResonanceSyncPacket.encode(new ResonanceSyncPacket(0, 0, 0, 1L, List.of(), false, true), buffer);
+            ResonanceSyncPacket decoded = ResonanceSyncPacket.decode(buffer);
+
+            assertTrue(decoded.normalArrow);
+            assertFalse(decoded.experienceWand);
+            assertEquals(0, buffer.readableBytes());
+        } finally {
+            buffer.release();
+        }
+    }
+
+    @Test
+    void stalePacketsCannotRestoreRemovedArrowsAndDisconnectClearsPresence() {
+        ClientDiskData.apply(0, 0, 0, 1L, List.of(), false, true);
+        assertTrue(ClientDiskData.hasNormalArrow());
+        ClientDiskData.apply(0, 0, 0, 2L, List.of(), false, false);
+        ClientDiskData.apply(0, 0, 0, 1L, List.of(), false, true);
+        assertFalse(ClientDiskData.hasNormalArrow());
+        ClientDiskData.apply(0, 0, 0, 3L, List.of(), false, true);
+        ClientDiskData.clear();
+        assertFalse(ClientDiskData.hasNormalArrow());
     }
 
     @Test
