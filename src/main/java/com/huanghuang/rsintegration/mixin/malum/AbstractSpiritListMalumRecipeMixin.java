@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mixin.malum;
 
+import com.huanghuang.rsintegration.util.Reflect;
 import com.sammy.malum.common.recipe.AbstractSpiritListMalumRecipe;
 import com.sammy.malum.common.recipe.SpiritInfusionRecipe;
 import net.minecraft.world.item.ItemStack;
@@ -25,7 +26,9 @@ public class AbstractSpiritListMalumRecipeMixin {
     @Unique
     private static boolean rsi$acceptsExtraAltarSpirits(AbstractSpiritListMalumRecipe recipe, List<ItemStack> offered) {
         // 只放宽祭坛的匹配；坩埚必须用精魂种类区分共用促符的配方。
-        return recipe instanceof SpiritInfusionRecipe && offered.size() > recipe.spirits.size()
-                && recipe.getSortedSpirits(offered).size() == recipe.spirits.size();
+        if (!SpiritInfusionRecipe.class.isInstance(recipe) || offered.size() <= recipe.spirits.size()) return false;
+        // 运行时调用 Malum 原生匹配，避免编译时解析其继承的 Lodestone 接口。
+        return Reflect.<List<?>>invokeExact(recipe, "getSortedSpirits", new Class<?>[]{List.class}, offered)
+                .map(sorted -> sorted.size() == recipe.spirits.size()).orElse(false);
     }
 }

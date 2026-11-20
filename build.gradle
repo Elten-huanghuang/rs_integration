@@ -78,6 +78,8 @@ def farmersDelightVersion = providers.gradleProperty('farmersDelightCompatibilit
         .getOrElse('1.20.1-1.3.3')
 def skipMissingTestDependencies = providers.gradleProperty('skipMissingTestDependencies')
         .getOrElse('false').toBoolean()
+def runMalumNativeTests = providers.gradleProperty('runMalumNativeTests')
+        .getOrElse('false').toBoolean()
 def aetherworksTestDirectory = layout.buildDirectory.dir('aetherworks-test-libs').get().asFile
 copy {
     from fileTree(dir: 'libs', include: ['*aetherworks-1.20.1-1.1.2.jar'])
@@ -322,9 +324,13 @@ dependencies {
     testImplementation fg.deobf("local:ironfurnaces:${ironFurnacesTestVersion}")
     // 原生沸腾配方会调用 Minecraft 方法，测试依赖必须实际完成名称映射。
     testImplementation fg.deobf('local:embersrekindled:1.20.1-1.3.9')
-    // 使用 Malum 的原生精魂匹配和配方数据验证祭坛与坩埚的隔离。
-    testImplementation fg.deobf('local.compile:malum-1.20.1-1.6.6:local')
-    testImplementation fg.deobf('local.compile:lodestone-1.20.1-1.6.4.1:local')
+    // 只有验证 Malum 原生精魂匹配时才需要它的 Lodestone 运行库。
+    if (runMalumNativeTests) {
+        testImplementation fg.deobf('local.compile:malum-1.20.1-1.6.6:local')
+        testImplementation fg.deobf('local.compile:lodestone-1.20.1-1.6.4.1:local')
+    } else {
+        sourceSets.test.java.exclude '**/mixin/malum/MalumSpiritMatchingTest.java'
+    }
     testImplementation fg.deobf('local:aetherworks:1.20.1-1.1.2')
     testImplementation fg.deobf('local:until_eternity:1.2.0-all')
     testImplementation fg.deobf('local:tacz:1.20.1-1.1.4-hotfix-all')
