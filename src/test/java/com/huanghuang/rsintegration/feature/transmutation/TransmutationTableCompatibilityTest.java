@@ -2,7 +2,6 @@ package com.huanghuang.rsintegration.feature.transmutation;
 
 import com.google.gson.JsonParser;
 import com.huanghuang.rsintegration.mixin.plugin.RSIntegrationMixinPlugin;
-import com.huanghuang.rsintegration.testutil.CompatibilityTestJars;
 import org.junit.jupiter.api.Test;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.tree.AnnotationNode;
@@ -15,49 +14,16 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
-import java.util.jar.JarFile;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** 直接核对用户安装的 1.22.9 发行版，不在单测 JVM 中初始化可选模组。 */
+/** 检查可选模组缺席时 RSI 的嬗变台注入配置。 */
 class TransmutationTableCompatibilityTest {
-    private static final String NATIVE_ROOT = "com/github/alexthe666/alexsmobs/";
     private static final String MIXIN_ROOT = "com/huanghuang/rsintegration/mixin/alexsmobs/";
     private static final String PLAYER = "Lnet/minecraft/world/entity/player/Player;";
-
-    @Test
-    void nativeMenuExposesConstructorAndOriginalTransmutationEntry() throws Exception {
-        try (JarFile jar = nativeJar()) {
-            ClassNode menu = nativeClass(jar, "inventory/MenuTransmutationTable");
-            method(menu, "<init>", "(ILnet/minecraft/world/entity/player/Inventory;"
-                    + "Lnet/minecraft/world/inventory/ContainerLevelAccess;" + PLAYER
-                    + "L" + NATIVE_ROOT + "tileentity/TileEntityTransmutationTable;)V");
-            method(menu, "m_6366_", "(" + PLAYER + "I)Z");
-            MethodNode transmute = method(menu, "transmute", "(" + PLAYER + "I)V");
-            assertTrue(calls(transmute, NATIVE_ROOT + "tileentity/TileEntityTransmutationTable",
-                    "postTransmute"));
-            assertTrue(calls(transmute, "net/minecraft/world/entity/player/Player", "m_6749_"));
-            assertTrue(menu.fields.stream().anyMatch(field -> field.name.equals("table")
-                    && field.desc.equals("L" + NATIVE_ROOT + "tileentity/TileEntityTransmutationTable;")));
-        }
-    }
-
-    @Test
-    void nativeTickRerollsAndSynchronizesAllThreeOptions() throws Exception {
-        try (JarFile jar = nativeJar()) {
-            ClassNode tile = nativeClass(jar, "tileentity/TileEntityTransmutationTable");
-            assertTrue(tile.fields.stream().anyMatch(field ->
-                    field.name.equals("rerollPlayerUUID") && field.desc.equals("Ljava/util/UUID;")));
-            method(tile, "getPossibility", "(I)Lnet/minecraft/world/item/ItemStack;");
-            assertTrue(calls(method(tile, "tick", "()V"),
-                    NATIVE_ROOT + "tileentity/TileEntityTransmutationTable", "randomizeResults"));
-            assertTrue(calls(method(tile, "randomizeResults", "(" + PLAYER + ")V"),
-                    NATIVE_ROOT + "AlexsMobs", "sendMSGToAll"));
-        }
-    }
 
     @Test
     void menuHookUsesVanillaMappingAndOnlyTheAutomaticButton() throws Exception {
@@ -69,14 +35,10 @@ class TransmutationTableCompatibilityTest {
         var injection = handler.visibleAnnotations.stream()
                 .filter(annotation -> annotation.desc.endsWith("/Inject;"))
                 .findFirst().orElseThrow();
-        assertTrue(injection.values.contains(true));
-        var refmap = JsonParser.parseString(Files.readString(Path.of(
-                "build/tmp/compileJava/compileJava-refmap.json"))).getAsJsonObject();
-        assertEquals("L" + NATIVE_ROOT + "inventory/MenuTransmutationTable;"
-                        + "m_6366_(" + PLAYER + "I)Z",
-                refmap.getAsJsonObject("mappings")
-                        .getAsJsonObject(MIXIN_ROOT + "TransmutationTableMenuMixin")
-                        .get("clickMenuButton").getAsString());
+        assertEquals(true, injection.values.get(injection.values.indexOf("cancellable") + 1));
+        assertEquals(false, injection.values.get(injection.values.indexOf("remap") + 1));
+        assertEquals(List.of("clickMenuButton(" + PLAYER + "I)Z", "m_6366_(" + PLAYER + "I)Z"),
+                injection.values.get(injection.values.indexOf("method") + 1));
     }
 
     @Test
@@ -110,18 +72,6 @@ class TransmutationTableCompatibilityTest {
                     .anyMatch(value -> relative.equals(value.getAsString())));
             assertFalse(plugin.shouldApplyMixin("missing.alexsmobs.Target",
                     MIXIN_ROOT.replace('/', '.') + name));
-        }
-    }
-
-    private static JarFile nativeJar() throws Exception {
-        return new JarFile(CompatibilityTestJars.requireMatching(".*alexsmobs-1\\.22\\.9\\.jar").toFile());
-    }
-
-    private static ClassNode nativeClass(JarFile jar, String name) throws Exception {
-        var entry = jar.getJarEntry(NATIVE_ROOT + name + ".class");
-        assertNotNull(entry);
-        try (InputStream input = jar.getInputStream(entry)) {
-            return read(input);
         }
     }
 

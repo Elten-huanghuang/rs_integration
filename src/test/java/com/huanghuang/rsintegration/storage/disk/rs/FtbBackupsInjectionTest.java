@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.storage.disk.rs;
 
 import com.huanghuang.rsintegration.mixin.ftbbackups2.UnifiedDiskBackupMixin;
+import com.huanghuang.rsintegration.testutil.CompatibilityTestJars;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import org.junit.jupiter.api.Test;
 import org.objectweb.asm.ClassReader;
@@ -12,14 +13,18 @@ import org.spongepowered.asm.mixin.injection.selectors.ElementNode;
 import org.spongepowered.asm.mixin.injection.selectors.TargetSelector;
 import org.spongepowered.asm.util.Annotations;
 
+import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.zip.ZipFile;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assumptions.abort;
 
 /** 对整合包实际使用的 FTB Backups 2 字节码校验两种备份的注入入口。 */
 class FtbBackupsInjectionTest {
@@ -42,7 +47,7 @@ class FtbBackupsInjectionTest {
                 .toList();
         assertEquals(2, operations.size());
 
-        try (ZipFile archive = new ZipFile(Path.of("libs/ftbbackups2-forge-1.20-1.0.23.jar").toFile())) {
+        try (ZipFile archive = openBackupJar()) {
             ClassNode handler = new ClassNode();
             try (var input = archive.getInputStream(archive.getEntry("net/creeperhost/ftbbackups/BackupHandler.class"))) {
                 new ClassReader(input).accept(handler, 0);
@@ -61,7 +66,7 @@ class FtbBackupsInjectionTest {
     }
 
     @Test void installedBackupJarEnumeratesFilesInsideBothProtectedOperations() throws Exception {
-        try (ZipFile archive = new ZipFile(Path.of("libs/ftbbackups2-forge-1.20-1.0.23.jar").toFile())) {
+        try (ZipFile archive = openBackupJar()) {
             ClassNode handler = new ClassNode();
             try (var input = archive.getInputStream(archive.getEntry("net/creeperhost/ftbbackups/BackupHandler.class"))) {
                 new ClassReader(input).accept(handler, 0);
@@ -96,5 +101,15 @@ class FtbBackupsInjectionTest {
         }
         assertTrue(Files.readString(Path.of("src/main/resources/rs_integration.mixins.json"))
                 .contains("\"ftbbackups2.UnifiedDiskBackupMixin\""));
+    }
+
+    private static ZipFile openBackupJar() throws IOException {
+        Path jar;
+        try {
+            jar = CompatibilityTestJars.requireMatching(Pattern.quote("ftbbackups2-forge-1.20-1.0.23.jar"));
+        } catch (FileNotFoundException missing) {
+            return abort(missing.getMessage());
+        }
+        return new ZipFile(jar.toFile());
     }
 }

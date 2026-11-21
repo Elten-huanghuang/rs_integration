@@ -470,14 +470,18 @@ class AsyncCraftChainMaterialRefreshTest extends BootstrapTest {
             broker = (MaterialBroker) field(chain, "graphMaterials");
             scheduler = spy((DagScheduler) field(chain, "graphScheduler"));
             set(chain, "graphScheduler", scheduler);
-            // 跳过首 tick 的发包；仍通过真正的图 tick 验证无 worker 时的材料唤醒。
-            executor = new ConcurrentNodeExecutor(scheduler, nodeId -> null, 1);
+            // 允许材料复查，由执行器阻止新派发，以便检查被唤醒节点的 READY 状态。
+            executor = new ConcurrentNodeExecutor(scheduler, nodeId -> {
+                throw new AssertionError("材料唤醒测试不应派发节点");
+            }, 1, nodeId -> false, (nodeId, worker) -> {},
+                    (nodeId, worker) -> ConcurrentNodeExecutor.CompletionStatus.SUCCEEDED,
+                    (nodeId, worker) -> {}, 1, 1, nodeId -> false);
             set(chain, "graphExecutor", executor);
             set(chain, "state", AsyncCraftChain.State.EXECUTING);
         }
 
         void tick() {
-            assertFalse(chain.tick(new VanillaCraftingTickBudget(1).allowance(0), () -> false));
+            assertFalse(chain.tick(new VanillaCraftingTickBudget(1).allowance(0)));
         }
 
         void refresh() throws Exception {
