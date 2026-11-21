@@ -1,78 +1,28 @@
 package com.huanghuang.rsintegration.mixin.yuusha;
 
-import java.lang.reflect.Method;
-
-import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.config.RSIntegrationConfig;
-import com.huanghuang.rsintegration.feature.resonance.bridge.ResonanceInventoryBridge;
+import com.huanghuang.rsintegration.mods.slashblade.NineSwordBladeSelection;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.entity.EquipmentSlot;
-import net.minecraft.world.entity.ai.attributes.AttributeModifier;
-import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.ItemStack;
+import org.heike233.chapterofyuusha3.comm.compat.curios.item.moonstone.NineSwordBooks;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-@Mixin(value = org.heike233.chapterofyuusha3.comm.compat.curios.item.moonstone.NineSwordBooks.class, remap = false)
+@Mixin(value = NineSwordBooks.class, remap = false)
 public abstract class YuushaNineSwordBooksMixin {
 
-    @Unique
-    private static int rsi$diagCount;
-
-    @Inject(method = "countValidSwords", at = @At("RETURN"), cancellable = true)
-    private void rsi$addDiskSwords(Player player, CallbackInfoReturnable<Integer> cir) {
-        int extra = rsi$countDiskSwords(player);
-        if (extra > 0) {
-            int hotbar = cir.getReturnValue();
-            int total = Math.min(hotbar + extra,
-                    RSIntegrationConfig.NINE_SWORD_MAX_COUNT.get());
-            cir.setReturnValue(total);
-            if (rsi$diagCount < 5) {
-                rsi$diagCount++;
-                RSIntegrationMod.LOGGER.info("[RSI-YuushaNineSwords] countValidSwords: hotbar={}, disk={}, final={}",
-                        hotbar, extra, total);
-            }
+    @Inject(method = "countValidSwords", at = @At("HEAD"), cancellable = true)
+    private void rsi$countSelectedBlades(Player player, CallbackInfoReturnable<Integer> cir) {
+        if (player instanceof ServerPlayer serverPlayer) {
+            cir.setReturnValue(NineSwordBladeSelection.count(serverPlayer));
         }
     }
 
-    @Inject(method = "calculateTotalSwordDamage", at = @At("RETURN"), cancellable = true)
-    private static void rsi$addDiskDamage(Player player, CallbackInfoReturnable<Float> cir) {
-        float extra = rsi$sumDiskSwordDamage(player);
-        if (extra > 0f) {
-            cir.setReturnValue(cir.getReturnValue() + extra);
+    @Inject(method = "calculateTotalSwordDamage", at = @At("HEAD"), cancellable = true)
+    private static void rsi$sumSelectedBladeDamage(Player player, CallbackInfoReturnable<Float> cir) {
+        if (player instanceof ServerPlayer serverPlayer) {
+            cir.setReturnValue(NineSwordBladeSelection.totalDamage(serverPlayer));
         }
-    }
-
-    @Unique
-    private static int rsi$countDiskSwords(Player player) {
-        if (!(player instanceof ServerPlayer sp)) return 0;
-        int count = 0;
-        for (ItemStack s : ResonanceInventoryBridge.getItems(sp)) {
-            if (!s.isEmpty() && s.getItem() instanceof mods.flammpfeil.slashblade.item.ItemSlashBlade) {
-                count++;
-            }
-        }
-        return count;
-    }
-
-    @Unique
-    private static float rsi$sumDiskSwordDamage(Player player) {
-        if (!(player instanceof ServerPlayer sp)) return 0f;
-        float total = 0f;
-        for (ItemStack s : ResonanceInventoryBridge.getItems(sp)) {
-            if (!s.isEmpty() && s.getItem() instanceof mods.flammpfeil.slashblade.item.ItemSlashBlade blade) {
-                var mods = blade.getAttributeModifiers(EquipmentSlot.MAINHAND, s);
-                for (var mod : mods.get(Attributes.ATTACK_DAMAGE)) {
-                    if (mod.getOperation() == AttributeModifier.Operation.ADDITION) {
-                        total += (float) mod.getAmount();
-                    }
-                }
-            }
-        }
-        return total;
     }
 }

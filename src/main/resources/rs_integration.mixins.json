@@ -118,6 +118,7 @@
     "enigmaticaddons.ArtificialFlowerMixin",
     "untileternity.ImFullInventoryHelperMixin",
     "untileternity.VibrantAmethystBlessingEventsMixin",
+    "tarotcards.TarotItemMixin",
     "moonstone.NineSwordBooksMixin",
     "enigmaticlegacy.SuperpositionHandlerMixin",
     "enigmaticlegacy.AddonEventHandlerMixin",

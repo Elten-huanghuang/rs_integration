@@ -831,7 +831,8 @@ public final class RSIntegrationConfig {
                         obj -> obj instanceof String && ((String) obj).contains(":"));
         NINE_SWORD_MAX_COUNT = c
                 .comment("九剑书生效数量上限",
-                        "统计玩家背包和共振盘中的九剑书；超出数量不生效，原版快捷栏上限为 9。")
+                        "快捷栏和共振盘共用此数量上限，优先统计快捷栏武器。",
+                        "勇者章节九剑九意的剑数和额外伤害均按此上限统计拔刀剑。")
                 .defineInRange("nineSwordMaxCount", 9, 1, 36);
         c.pop();
 

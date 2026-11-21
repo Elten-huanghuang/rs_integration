@@ -147,6 +147,15 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
             return isClassPresent(targetClassName) && hasMethod(targetClassName, "onPlayerTick")
                     && hasResonanceBackend();
         }
+        if (mixinClassName.endsWith(".tarotcards.TarotItemMixin")) {
+            return hasResonanceBackend()
+                    && hasMethod(targetClassName, "hasTarot",
+                    "(Lnet/minecraft/world/entity/player/Player;Lnet/minecraft/world/item/Item;)Z")
+                    && hasMethod(targetClassName, "isActivated", "(Lnet/minecraft/world/item/ItemStack;)Z")
+                    && isClassPresent("shiroroku.tarotcards.Item.TarotDeck.TarotDeckItem")
+                    && hasField("shiroroku.tarotcards.Configuration", "require_card_in_curio")
+                    && hasField("shiroroku.tarotcards.Configuration", "tarot_deck_applies_effects");
+        }
         if (mixinClassName.contains(".cthulhucreatures.")) {
             return isClassPresent(targetClassName)
                     && (hasMethod(targetClassName, "m_6875_") || hasMethod(targetClassName, "stillValid"));
