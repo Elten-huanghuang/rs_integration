@@ -5,9 +5,10 @@ import com.huanghuang.rsintegration.util.SharedText;
 import com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageAccess;
 import java.lang.reflect.Field;
 
+import com.huanghuang.rsintegration.client.recipe.FluidContainerClientCatalog;
 import com.huanghuang.rsintegration.client.recipe.RecipeBrowserBridge;
+import com.huanghuang.rsintegration.crafting.fluid.FluidContainerRecipe;
 import com.huanghuang.rsintegration.recipe.viewer.LongTravailCrownRecipes;
-import com.huanghuang.rsintegration.crafting.fluid.FluidContainerCatalog;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipe;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCatalog;
@@ -60,6 +61,8 @@ public final class RecipePreviewRenderer {
     private final Minecraft mc;
     @Nullable
     private IJeiRuntime cachedJeiRuntime;
+    @Nullable
+    private List<FluidContainerRecipe> cachedFluidCatalog;
 
     // Cached items for synthetic recipe icons
     private Item gemCuttingTableItem;
@@ -138,7 +141,18 @@ public final class RecipePreviewRenderer {
     @Nullable
     private Optional<IRecipeLayoutDrawable<?>> getDrawable(ResourceLocation recipeId) {
         if (currentJeiRuntime() == null || mc.level == null) return Optional.empty();
+        if (isFluidContainerRecipe(recipeId)) refreshFluidRecipeCache();
         return cache.computeIfAbsent(recipeId, this::createDrawable);
+    }
+
+    private void refreshFluidRecipeCache() {
+        var ready = FluidContainerClientCatalog.requestRecipes(mc.level);
+        if (ready == cachedFluidCatalog) return;
+        cachedFluidCatalog = ready;
+        cache.keySet().removeIf(RecipePreviewRenderer::isFluidContainerRecipe);
+        iconCache.keySet().removeIf(RecipePreviewRenderer::isFluidContainerRecipe);
+        titleCache.keySet().removeIf(RecipePreviewRenderer::isFluidContainerRecipe);
+        candidateCache.keySet().removeIf(RecipePreviewRenderer::isFluidContainerRecipe);
     }
 
     private Optional<IRecipeLayoutDrawable<?>> createDrawable(ResourceLocation recipeId) {
@@ -417,6 +431,7 @@ public final class RecipePreviewRenderer {
         }
         IDrawable icon = null;
         if (currentJeiRuntime() != null && mc.level != null) {
+            if (isFluidContainerRecipe(recipeId)) refreshFluidRecipeCache();
             icon = iconCache.computeIfAbsent(recipeId, this::lookupCategoryIcon).orElse(null);
         }
         if (icon == null) {
@@ -538,6 +553,7 @@ public final class RecipePreviewRenderer {
             return Optional.of(Component.translatable("block.farmingforblockheads.market"));
         }
         if (currentJeiRuntime() == null || mc.level == null) return Optional.empty();
+        if (isFluidContainerRecipe(recipeId)) refreshFluidRecipeCache();
         return titleCache.computeIfAbsent(recipeId, this::lookupCategoryTitle);
     }
 
@@ -567,7 +583,7 @@ public final class RecipePreviewRenderer {
             if (isIronSpellBooksRecipe(recipeId)) return IronSpellBooksRecipeCatalog.byId(mc.level, recipeId);
             if (isPmmoSalvageRecipe(recipeId)) return PmmoSalvageCatalog.byId(recipeId);
             if (isSyntheticBrewingRecipe(recipeId)) return VanillaBrewingCatalog.byId(recipeId);
-            if (isFluidContainerRecipe(recipeId)) return FluidContainerCatalog.resolve(mc.level, recipeId);
+            if (isFluidContainerRecipe(recipeId)) return FluidContainerClientCatalog.resolve(mc.level, recipeId);
         } catch (RuntimeException | LinkageError ignored) {
             // 可选模组或客户端目录尚未就绪时，仍保留候选和配方 ID。
         }
@@ -588,6 +604,7 @@ public final class RecipePreviewRenderer {
     public CandidateDetails candidateDetails(ResourceLocation id, ItemStack fallback) {
         long started = RecipeBrowserSlowCallDiagnostics.begin();
         try {
+            if (isFluidContainerRecipe(id)) refreshFluidRecipeCache();
             return candidateCache.computeIfAbsent(id, ignored -> {
                 Recipe<?> recipe = resolveRecipe(id);
                 if (recipe == null) return new CandidateDetails(id.getPath(), id.toString());

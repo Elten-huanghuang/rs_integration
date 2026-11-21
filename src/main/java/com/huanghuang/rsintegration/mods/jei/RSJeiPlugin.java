@@ -7,7 +7,6 @@ import com.huanghuang.rsintegration.feature.ftbquests.client.FtbQuestSubmissionC
 import com.huanghuang.rsintegration.feature.autoeat.client.AutoEatClientEvents;
 import com.huanghuang.rsintegration.client.recipe.RecipeAvailabilityClient;
 import com.huanghuang.rsintegration.client.recipe.FluidContainerRecipeCategory;
-import com.huanghuang.rsintegration.crafting.fluid.FluidContainerCatalog;
 import com.huanghuang.rsintegration.crafting.MachineManagementScreen;
 import com.huanghuang.rsintegration.crafting.planning.PlanningTasksScreen;
 import net.minecraft.client.Minecraft;
@@ -61,6 +60,7 @@ import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.renderer.Rect2i;
 import net.minecraft.world.inventory.MenuType;
 import net.minecraftforge.fml.ModList;
+import net.minecraftforge.common.MinecraftForge;
 import org.jetbrains.annotations.NotNull;
 
 import javax.annotation.Nullable;
@@ -74,6 +74,7 @@ public final class RSJeiPlugin implements IModPlugin {
     @Nullable
     private static IJeiRuntime cachedRuntime;
     private static boolean unifiedDiskRemoved;
+    private FluidContainerJeiRuntime fluidContainerRuntime;
 
     @Nullable
     public static IJeiRuntime getRuntime() {
@@ -100,6 +101,9 @@ public final class RSJeiPlugin implements IModPlugin {
     @Override
     public void onRuntimeAvailable(@NotNull IJeiRuntime jeiRuntime) {
         cachedRuntime = jeiRuntime;
+        stopFluidContainerRuntime();
+        fluidContainerRuntime = new FluidContainerJeiRuntime(jeiRuntime.getRecipeManager());
+        MinecraftForge.EVENT_BUS.register(fluidContainerRuntime);
         jeiRuntime.getIngredientManager().removeIngredientsAtRuntime(VanillaTypes.ITEM_STACK,
                 List.of(new ItemStack(ModItems.ALCHEMIST_INK_FLUID.get()),
                         new ItemStack(ModItems.INFINITY_WATER_DISK.get())));
@@ -131,6 +135,7 @@ public final class RSJeiPlugin implements IModPlugin {
 
     @Override
     public void onRuntimeUnavailable() {
+        stopFluidContainerRuntime();
         TetraJeiItemBridge.clear();
         TetraWorkbenchJeiFilterRefreshRegistry.clear();
         RecipeAvailabilityClient.clear();
@@ -152,6 +157,12 @@ public final class RSJeiPlugin implements IModPlugin {
         if (ModList.get().isLoaded(ModIds.PMMO)) {
             PmmoSalvageJeiBridge.clear();
         }
+    }
+
+    private void stopFluidContainerRuntime() {
+        if (fluidContainerRuntime == null) return;
+        MinecraftForge.EVENT_BUS.unregister(fluidContainerRuntime);
+        fluidContainerRuntime = null;
     }
 
     @Override
@@ -177,8 +188,6 @@ public final class RSJeiPlugin implements IModPlugin {
 
     @Override
     public void registerRecipes(IRecipeRegistration registration) {
-        registration.addRecipes(FluidContainerRecipeCategory.TYPE,
-                FluidContainerCatalog.allRecipes(Minecraft.getInstance().level));
         if (ironAlchemistEnabled()) registration.addRecipes(AlchemistCauldronRecipeCategory.TYPE,
                 IronSpellBooksRecipeCatalog.allRecipes(Minecraft.getInstance().level).stream()
                         .filter(IronSpellBooksRecipe::isBottling).toList());
