@@ -88,6 +88,7 @@ import mezz.jei.api.gui.IRecipeLayoutDrawable;
 import mezz.jei.api.gui.ingredient.IRecipeSlotView;
 import mezz.jei.api.gui.ingredient.IRecipeSlotsView;
 import mezz.jei.api.recipe.RecipeIngredientRole;
+import mezz.jei.api.recipe.vanilla.IJeiAnvilRecipe;
 import mezz.jei.gui.recipes.RecipeGuiLayouts;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -298,11 +299,6 @@ public class RecipeGuiLayoutsMixin {
                 skippedNoRecipe++;
                 continue;
             }
-            if (RecipeIdNormalizer.isEnchantmentInfoDisplayId(
-                    StandardRecipeIdResolver.resolve(recipe))) {
-                skippedNoFilter++;
-                continue;
-            }
             boolean isFa = recipeClassName.startsWith("com.stal111.forbidden_arcanus");
             boolean isFaOrTlm = isFa
                     || recipeClassName.startsWith("com.github.tartaricacid.touhoulittlemaid.");
@@ -342,11 +338,11 @@ public class RecipeGuiLayoutsMixin {
             } else {
                 recipeId = getRecipeId(recipe);
             }
-            if (recipeId == null) {
+            if (!RecipeIdNormalizer.canRequestJeiRecipe(recipeId)) {
                 if (isFa) faNoRecipeId++;
                 if (isFaOrTlm) {
-                    RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] FA/TLM recipe class={} getRecipeId returned null — skipped",
-                            recipeClassName);
+                    RSIntegrationMod.LOGGER.warn("[RSI-JEI-Mixin] FA/TLM recipe class={} unusable recipe ID={} — skipped",
+                            recipeClassName, recipeId);
                 }
                 skippedNoRecipeId++;
                 continue;
@@ -1118,7 +1114,7 @@ public class RecipeGuiLayoutsMixin {
         }
 
         // JEI AnvilRecipe (repair, enchantment combine, rename)
-        if (recipe instanceof mezz.jei.api.recipe.vanilla.IJeiAnvilRecipe anvilRecipe) {
+        if (recipe instanceof IJeiAnvilRecipe anvilRecipe) {
             // JEI may omit the UID for non-craftable anvil pages. Returning
             // null here is an intentional unsupported result, not a resolver
             // failure, and must not emit a warning.

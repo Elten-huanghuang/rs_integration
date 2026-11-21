@@ -6,6 +6,8 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class RecipeIdNormalizerTest {
 
@@ -35,15 +37,38 @@ class RecipeIdNormalizerTest {
     }
 
     @Test
-    void detectsSyntheticEnchantmentInfoDisplayId() {
+    void rejectsSyntheticAnvilEnchantmentDisplayId() {
         ResourceLocation displayId = new ResourceLocation(
-                "minecraft", "enchantment.tacz.modern_kinetic_gun.emxarms.emx_sf7b");
+                "minecraft", "enchantment.goetyawaken.claymore");
 
-        assertTrue(RecipeIdNormalizer.isEnchantmentInfoDisplayId(displayId));
+        assertFalse(RecipeIdNormalizer.canRequestJeiRecipe(displayId));
     }
 
     @Test
-    void preservesRealEnchantedBookRecipeIds() {
+    void rejectsAnvilDisplayIdFromDisconnectLog() {
+        ResourceLocation displayId = mock(ResourceLocation.class);
+        when(displayId.getNamespace()).thenReturn("minecraft");
+        when(displayId.getPath()).thenReturn("enchantment.goetyawaken:claymore");
+
+        assertFalse(RecipeIdNormalizer.canRequestJeiRecipe(displayId));
+    }
+
+    @Test
+    void rejectsMalformedIdsOutsideEnchantmentDisplay() {
+        ResourceLocation invalidPath = mock(ResourceLocation.class);
+        when(invalidPath.getNamespace()).thenReturn("minecraft");
+        when(invalidPath.getPath()).thenReturn("self_repair.goetyawaken:claymore");
+        ResourceLocation invalidNamespace = mock(ResourceLocation.class);
+        when(invalidNamespace.getNamespace()).thenReturn("invalid namespace");
+        when(invalidNamespace.getPath()).thenReturn("repair");
+
+        assertFalse(RecipeIdNormalizer.canRequestJeiRecipe(invalidPath));
+        assertFalse(RecipeIdNormalizer.canRequestJeiRecipe(invalidNamespace));
+        assertFalse(RecipeIdNormalizer.canRequestJeiRecipe(null));
+    }
+
+    @Test
+    void acceptsRealEnchantingAndRepairRecipeIds() {
         ResourceLocation craftTweakerRecipe = new ResourceLocation(
                 "crafttweaker", "apotheosis.enchanted_book.life_mending");
         ResourceLocation apotheosisRecipe = new ResourceLocation(
@@ -51,8 +76,11 @@ class RecipeIdNormalizerTest {
         ResourceLocation otherNamespace = new ResourceLocation(
                 "example", "enchantment.test");
 
-        assertFalse(RecipeIdNormalizer.isEnchantmentInfoDisplayId(craftTweakerRecipe));
-        assertFalse(RecipeIdNormalizer.isEnchantmentInfoDisplayId(apotheosisRecipe));
-        assertFalse(RecipeIdNormalizer.isEnchantmentInfoDisplayId(otherNamespace));
+        ResourceLocation repairDisplay = new ResourceLocation("minecraft", "self_repair.iron_sword");
+
+        assertTrue(RecipeIdNormalizer.canRequestJeiRecipe(craftTweakerRecipe));
+        assertTrue(RecipeIdNormalizer.canRequestJeiRecipe(apotheosisRecipe));
+        assertTrue(RecipeIdNormalizer.canRequestJeiRecipe(otherNamespace));
+        assertTrue(RecipeIdNormalizer.canRequestJeiRecipe(repairDisplay));
     }
 }
