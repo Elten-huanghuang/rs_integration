@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
+import com.huanghuang.rsintegration.util.SharedText;
 import com.huanghuang.rsintegration.feature.ftbquests.QuestSubmissionRequestPacket;
 import com.huanghuang.rsintegration.feature.ftbquests.QuestSubmissionTargetIds;
 import com.huanghuang.rsintegration.recipe.viewer.LongTravailCrownRecipes;
@@ -1326,7 +1327,7 @@ public final class CraftingPlanScreen extends Screen {
                     (width < 720 ? r.right() : workspace.confirm().x() - 6) - x)); outputSelectorH = 18;
             PlanWorkspaceChrome.panel(g, new Rect(x, y, outputSegmentW, 18), Color.SURFACE, Color.BORDER);
             Component destination = outputDestination == OutputDestination.PLAYER_INVENTORY
-                    ? Component.translatable("rsi.plan.output.player") : Component.translatable("rsi.plan.output.storage");
+                    ? Component.translatable("rsi.plan.output.player") : SharedText.STORAGE_NETWORK.text();
             if (outputDestination == OutputDestination.RS_NETWORK && storageReference != null) {
                 for (StorageNetworkDescriptor network : storageNetworks) if (storageReference.equals(network.reference())) destination = storageTargetLabel(network);
             }

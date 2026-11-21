@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.progress;
 
+import com.huanghuang.rsintegration.util.SharedText;
 import net.minecraft.world.item.ItemStack;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -113,6 +114,7 @@ public record CraftProgressSnapshot(
         }
 
         public String translationKey() {
+            if (this == NETWORK_UNAVAILABLE) return SharedText.STORAGE_NETWORK_UNAVAILABLE.key();
             return "rsi.progress.reason." + name().toLowerCase(Locale.ROOT);
         }
     }

@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarRecipeResolver;
 import com.huanghuang.rsintegration.mods.distantworlds.LithumAltarStatusSnapshot;
 import com.huanghuang.rsintegration.reflection.probes.DistantWorldsReflection;
+import com.huanghuang.rsintegration.util.SharedText;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
@@ -73,7 +74,7 @@ public final class LithumAltarHUDOverlay implements IGuiOverlay {
                 ? snapshot.recovery() : core.getPersistentData().getDouble("Recovery");
         var definition = LithumAltarRecipeResolver.resolveCurrentRecipe(current);
         String state = current.isEmpty()
-                ? Component.translatable("rsi.distant_worlds.hud.idle").getString()
+                ? SharedText.IDLE.text().getString()
                 : Component.translatable("rsi.distant_worlds.hud.working").getString();
         int stateColor = current.isEmpty() ? white : (energy >= maxEnergy && maxEnergy > 0 ? good : warn);
 
@@ -83,7 +84,7 @@ public final class LithumAltarHUDOverlay implements IGuiOverlay {
         y += line;
         if (!current.isEmpty()) {
             String label = definition == null ? current : definition.output().getHoverName().getString();
-            graphics.drawString(font, Component.translatable("rsi.distant_worlds.hud.recipe", label), x, y, white, false);
+            graphics.drawString(font, SharedText.RECIPE.text(label), x, y, white, false);
             y += line;
         }
         graphics.drawString(font, Component.translatable("rsi.distant_worlds.hud.energy",

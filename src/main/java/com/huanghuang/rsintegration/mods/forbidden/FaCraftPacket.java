@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mods.forbidden;
 
+import com.huanghuang.rsintegration.util.SharedText;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 
@@ -268,7 +269,7 @@ public final class FaCraftPacket {
         // Find pedestals
         List<Object> pedestals = FaRitualHelper.findPedestals(pos, level);
         if (pedestals == null) {
-            player.sendSystemMessage(Component.translatable("rsi.fa.error.pedestal_not_found"));
+            player.sendSystemMessage(SharedText.RITUAL_PEDESTALS_NOT_FOUND.text());
             return;
         }
 

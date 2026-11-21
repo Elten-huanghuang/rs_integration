@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mods.sophisticatedbackpacks;
 
+import com.huanghuang.rsintegration.util.SharedText;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.storage.StorageBackendId;
 import com.huanghuang.rsintegration.storage.StorageReference;
@@ -97,7 +98,7 @@ public class RSMagnetUpgradeItem extends MagnetUpgradeItem {
             if (reference != null) {
                 String dimKey = tag.getString("RSBlockDimension");
                 BlockPos pos = tag.contains("RSBlockPos") ? BlockPos.of(tag.getLong("RSBlockPos")) : null;
-                tooltip.add(TextBuilder.translate("item.sophisticatedbackpacks.rs_network.tooltip")
+                tooltip.add(TextBuilder.of(SharedText.STORAGE_NETWORK.text())
                         .colorFlow(1500L, 0.0F, RSIntegrationMod.RS_FLOW_COLORS).build());
                 String target = reference.backendId().value().equals("refinedstorage") && pos != null
                         ? dimDisplayName(dimKey) + " " + pos.toShortString()

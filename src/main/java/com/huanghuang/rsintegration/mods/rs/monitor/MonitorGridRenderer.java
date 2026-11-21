@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.mixin.refinedstorage.MonitorErrorAccessor;
 import com.huanghuang.rsintegration.mixin.refinedstorage.MonitorFluidAccessor;
 import com.huanghuang.rsintegration.mixin.refinedstorage.MonitorItemAccessor;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.client.InkFluidRenderer;
+import com.huanghuang.rsintegration.util.SharedText;
 import com.refinedmods.refinedstorage.api.autocrafting.craftingmonitor.ICraftingMonitorElement;
 import com.refinedmods.refinedstorage.api.render.IElementDrawers;
 import net.minecraft.client.Minecraft;
@@ -60,7 +61,9 @@ public final class MonitorGridRenderer {
             return;
         }
         var lines = new ArrayList<Component>();
-        if (amount.rsi$missing() > 0) lines.add(amount("missing", amount.rsi$missing()));
+        if (amount.rsi$missing() > 0) {
+            lines.add(SharedText.MISSING_MATERIAL.text(CompactQuantityFormat.format(amount.rsi$missing())));
+        }
         if (amount.rsi$stored() > 0) lines.add(amount("available", amount.rsi$stored()));
         if (amount.rsi$crafting() > 0) lines.add(amount("crafting", amount.rsi$crafting()));
         if (amount.rsi$scheduled() > 0) lines.add(amount("scheduled", amount.rsi$scheduled()));

@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.config.ConfigEditorModel;
 import com.huanghuang.rsintegration.config.ConfigEditorModel.ConfigFile;
 import com.huanghuang.rsintegration.config.ConfigEditorModel.Option;
 import com.huanghuang.rsintegration.config.CraftingUiTheme;
+import com.huanghuang.rsintegration.util.SharedText;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
@@ -268,7 +269,7 @@ public final class RSIntegrationConfigScreen extends Screen {
         private final String category;
 
         private CategoryRow(String category) { this.category = category; }
-        @Override public Component getNarration() { return category.isEmpty() ? tr("all") : categoryName(category); }
+        @Override public Component getNarration() { return category.isEmpty() ? SharedText.ALL.text() : categoryName(category); }
 
         @Override
         public void render(GuiGraphics graphics, int index, int y, int x, int rowWidth, int rowHeight,

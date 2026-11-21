@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.feature.foodorder;
 
+import com.huanghuang.rsintegration.util.SharedText;
 import com.huanghuang.rsintegration.ModItems;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.api.consumer.ConsumerCraftability;
@@ -460,7 +461,7 @@ public final class FoodOrderService {
         if (code == ConsumerDiagnosticCode.CATALOG_NOT_READY) {
             key = "rsi.food_order.error.indexing";
         } else if (code == ConsumerDiagnosticCode.STORAGE_UNAVAILABLE) {
-            key = "rsi.food_order.error.storage";
+            key = SharedText.STORAGE_NETWORK_UNAVAILABLE.key();
         } else if (code == ConsumerDiagnosticCode.PLAN_LIMIT_REACHED) {
             key = "rsi.food_order.error.plan_limit";
         } else if (code == ConsumerDiagnosticCode.OUTPUT_UNAVAILABLE) {

@@ -43,8 +43,7 @@ public final class YoukaisHomecomingRSModule implements IModIntegration {
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.youkaishomecoming.moka.MokaPotBatchDelegate"));
         ModType.configureJei("youkaishomecoming_moka",
                 new String[][]{{"youkaishomecoming:moka"}},
-                new String[][]{{"dev.xkmc.youkaishomecoming.content.pot.moka.MokaRecipe", "youkaishomecoming_moka"}},
-                "gui.rs_integration.jei.yhk_moka_craft");
+                new String[][]{{"dev.xkmc.youkaishomecoming.content.pot.moka.MokaRecipe", "youkaishomecoming_moka"}});
 
         // ── Fermentation Tank ──
         ModType.register("youkaishomecoming_ferment",
@@ -57,8 +56,7 @@ public final class YoukaisHomecomingRSModule implements IModIntegration {
                         {"youkaishomecoming:ferment", "youkaishomecoming_ferment"},
                         {"youkaisfeasts:ferment", "youkaishomecoming_ferment"}
                 },
-                new String[][]{{"dev.xkmc.youkaishomecoming.content.pot.ferment.SimpleFermentationRecipe", "youkaishomecoming_ferment"}},
-                "gui.rs_integration.jei.yhk_ferment_craft");
+                new String[][]{{"dev.xkmc.youkaishomecoming.content.pot.ferment.SimpleFermentationRecipe", "youkaishomecoming_ferment"}});
 
         // ── Steamer Pot ──
         ModType.register("youkaishomecoming_steamer",
@@ -71,8 +69,7 @@ public final class YoukaisHomecomingRSModule implements IModIntegration {
                         {"youkaishomecoming:steaming", "youkaishomecoming_steamer"},
                         {"youkaisfeasts:steaming", "youkaishomecoming_steamer"}
                 },
-                new String[][]{{"dev.xkmc.youkaishomecoming.content.pot.steamer.SteamingRecipe", "youkaishomecoming_steamer"}},
-                "gui.rs_integration.jei.yhk_steamer_craft");
+                new String[][]{{"dev.xkmc.youkaishomecoming.content.pot.steamer.SteamingRecipe", "youkaishomecoming_steamer"}});
 
         // ── Kettle ──
         ModType.register("youkaishomecoming_kettle",
@@ -85,8 +82,7 @@ public final class YoukaisHomecomingRSModule implements IModIntegration {
                         {"youkaishomecoming:kettle", "youkaishomecoming_kettle"},
                         {"youkaisfeasts:kettle", "youkaishomecoming_kettle"}
                 },
-                new String[][]{{"dev.xkmc.youkaishomecoming.content.pot.kettle.KettleRecipe", "youkaishomecoming_kettle"}},
-                "gui.rs_integration.jei.yhk_kettle_craft");
+                new String[][]{{"dev.xkmc.youkaishomecoming.content.pot.kettle.KettleRecipe", "youkaishomecoming_kettle"}});
 
         // ── Cooking Pots (3 sizes, each a separate ModType) ──
         // Recipe classification uses result.getCraftingRemainingItem() to
@@ -103,8 +99,7 @@ public final class YoukaisHomecomingRSModule implements IModIntegration {
                         {"youkaishomecoming:pot_cooking", "youkaishomecoming_cooking_small"},
                         {"youkaisfeasts:bowl_cooking", "youkaishomecoming_cooking_small"}
                 },
-                new String[][]{{"dev.xkmc.youkaishomecoming.content.pot.cooking.", "youkaishomecoming_cooking_small"}},
-                "gui.rs_integration.jei.yhk_cooking_pot_craft");
+                new String[][]{{"dev.xkmc.youkaishomecoming.content.pot.cooking.", "youkaishomecoming_cooking_small"}});
 
         ModType.register("youkaishomecoming_cooking_short",
                 new String[]{"dev.xkmc.youkaishomecoming.content.pot.cooking."},
@@ -116,8 +111,7 @@ public final class YoukaisHomecomingRSModule implements IModIntegration {
                         {"youkaishomecoming:pot_cooking", "youkaishomecoming_cooking_short"},
                         {"youkaisfeasts:pot_cooking", "youkaishomecoming_cooking_short"}
                 },
-                new String[][]{{"dev.xkmc.youkaishomecoming.content.pot.cooking.", "youkaishomecoming_cooking_short"}},
-                "gui.rs_integration.jei.yhk_cooking_pot_craft");
+                new String[][]{{"dev.xkmc.youkaishomecoming.content.pot.cooking.", "youkaishomecoming_cooking_short"}});
 
         ModType.register("youkaishomecoming_cooking_large",
                 new String[]{"dev.xkmc.youkaishomecoming.content.pot.cooking."},
@@ -129,8 +123,7 @@ public final class YoukaisHomecomingRSModule implements IModIntegration {
                         {"youkaishomecoming:pot_cooking", "youkaishomecoming_cooking_large"},
                         {"youkaisfeasts:stock_cooking", "youkaishomecoming_cooking_large"}
                 },
-                new String[][]{{"dev.xkmc.youkaishomecoming.content.pot.cooking.", "youkaishomecoming_cooking_large"}},
-                "gui.rs_integration.jei.yhk_cooking_pot_craft");
+                new String[][]{{"dev.xkmc.youkaishomecoming.content.pot.cooking.", "youkaishomecoming_cooking_large"}});
 
         // ── Cuisine Board ──
         ModType.register("youkaishomecoming_cuisine",
@@ -143,8 +136,7 @@ public final class YoukaisHomecomingRSModule implements IModIntegration {
                         {"youkaishomecoming:cuisine", "youkaishomecoming_cuisine"},
                         {"youkaisfeasts:cuisine", "youkaishomecoming_cuisine"}
                 },
-                new String[][]{{"dev.xkmc.youkaishomecoming.content.pot.table.recipe.CuisineRecipe", "youkaishomecoming_cuisine"}},
-                null);
+                new String[][]{{"dev.xkmc.youkaishomecoming.content.pot.table.recipe.CuisineRecipe", "youkaishomecoming_cuisine"}});
 
         // ── General fallback ──
         ModType.register("youkaishomecoming",
@@ -166,8 +158,7 @@ public final class YoukaisHomecomingRSModule implements IModIntegration {
                         {"youkaisfeasts:stock_cooking", "youkaishomecoming_cooking_large"},
                         {"youkaisfeasts:kettle", "youkaishomecoming_kettle"},
                         {"youkaisfeasts:cuisine", "youkaishomecoming_cuisine"}},
-                new String[][]{{"dev.xkmc.youkaishomecoming.content.", "youkaishomecoming"}},
-                null);
+                new String[][]{{"dev.xkmc.youkaishomecoming.content.", "youkaishomecoming"}});
     }
 
     @Override

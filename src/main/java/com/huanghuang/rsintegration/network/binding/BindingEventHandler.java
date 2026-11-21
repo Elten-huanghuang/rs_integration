@@ -11,6 +11,7 @@ import com.huanghuang.rsintegration.mods.wishingfountain.WishingFountainStructur
 import com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule;
 import com.huanghuang.rsintegration.mods.pmmo.PmmoSalvageStructure;
 import com.huanghuang.rsintegration.util.Reflect;
+import com.huanghuang.rsintegration.util.SharedText;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
@@ -786,7 +787,7 @@ public final class BindingEventHandler {
     }
 
     private static Component pmmoSalvageDisplayName() {
-        return Component.translatable("rsi.batch.mod.pmmo_salvage");
+        return Component.translatable(SharedText.machineTypeKey(PmmoRSModule.TYPE_ID));
     }
 
     public static final Map<String, MachineBindingTarget> CLASS_TARGET_MAP = new LinkedHashMap<>();

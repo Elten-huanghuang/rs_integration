@@ -39,8 +39,7 @@ public final class CasualnessDelightRSModule implements IModIntegration {
                 .confirmPureProjection("炸锅由共享账本预留整叠输入，结果通过锅位附近的世界掉落捕获结算");
         ModType.configureJei(ModIds.ID_CD_DEEP_FRYING_PAN,
                 new String[][]{{"casualness_delight:deep_frying", ModIds.ID_CD_DEEP_FRYING_PAN}},
-                new String[][]{{DeepFryingRecipeHandler.RECIPE_CLASS, ModIds.ID_CD_DEEP_FRYING_PAN}},
-                "gui.rs_integration.jei.cd_deep_frying_pan_craft");
+                new String[][]{{DeepFryingRecipeHandler.RECIPE_CLASS, ModIds.ID_CD_DEEP_FRYING_PAN}});
     }
 
     @Override

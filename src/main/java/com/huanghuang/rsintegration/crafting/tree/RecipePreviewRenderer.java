@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting.tree;
 
+import com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule;
+import com.huanghuang.rsintegration.util.SharedText;
 import com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageAccess;
 import java.lang.reflect.Field;
 
@@ -530,7 +532,7 @@ public final class RecipePreviewRenderer {
             return Optional.of(Component.translatable(key));
         }
         if (isPmmoSalvageRecipe(recipeId)) {
-            return Optional.of(Component.translatable("rsi.jei.pmmo_salvage"));
+            return Optional.of(Component.translatable(SharedText.machineTypeKey(PmmoRSModule.TYPE_ID)));
         }
         if (isVirtualMarketRecipe(recipeId)) {
             return Optional.of(Component.translatable("block.farmingforblockheads.market"));

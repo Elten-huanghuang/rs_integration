@@ -70,8 +70,7 @@ public final class ArsNouveauRSModule implements IModIntegration {
         ModType.configureJei(
                 ModIds.ID_ARS_IMBUEMENT,
                 new String[][]{{"ars_nouveau:imbuement", "imbuement"}},
-                new String[][]{{"com.hollingsworth.arsnouveau.common.crafting.recipes.ImbuementRecipe", "imbuement"}},
-                "gui.rs_integration.jei.ars_nouveau_imbuement_craft"
+                new String[][]{{"com.hollingsworth.arsnouveau.common.crafting.recipes.ImbuementRecipe", "imbuement"}}
         );
 
         // Enchanting Apparatus
@@ -98,8 +97,7 @@ public final class ArsNouveauRSModule implements IModIntegration {
                         {"com.hollingsworth.arsnouveau.api.enchanting_apparatus.EnchantingApparatusRecipe", "apparatus"},
                         {"com.hollingsworth.arsnouveau.api.enchanting_apparatus.EnchantmentRecipe", "apparatus"},
                         {"com.hollingsworth.arsnouveau.api.enchanting_apparatus.ArmorUpgradeRecipe", "apparatus"}
-                },
-                "gui.rs_integration.jei.ars_nouveau_apparatus_craft"
+                }
         );
 
         // Scribes' Table glyph crafting
@@ -122,8 +120,7 @@ public final class ArsNouveauRSModule implements IModIntegration {
                 },
                 new String[][]{{
                         "com.hollingsworth.arsnouveau.common.crafting.recipes.GlyphRecipe",
-                        ModIds.ID_ARS_SCRIBES_TABLE}},
-                "gui.rs_integration.jei.ars_nouveau_scribes_table_craft"
+                        ModIds.ID_ARS_SCRIBES_TABLE}}
         );
     }
 

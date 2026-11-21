@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mods.forbidden;
 
+import com.huanghuang.rsintegration.util.SharedText;
 import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
 import com.huanghuang.rsintegration.util.CuriosAccess;
@@ -520,12 +521,12 @@ public final class FaBatchDelegate extends AbstractBatchDelegate {
             foundPedestals = findPedestals(resolveMachineLevel(player));
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-FA] startPreparedOperation: pedestals not found", e);
-            player.sendSystemMessage(Component.translatable("rsi.fa.error.pedestal_not_found"));
+            player.sendSystemMessage(SharedText.RITUAL_PEDESTALS_NOT_FOUND.text());
             return false;
         }
         if (foundPedestals == null) {
             RSIntegrationMod.LOGGER.debug("[RSI-Batch-FA] startPreparedOperation: findPedestals returned null");
-            player.sendSystemMessage(Component.translatable("rsi.fa.error.pedestal_not_found"));
+            player.sendSystemMessage(SharedText.RITUAL_PEDESTALS_NOT_FOUND.text());
             return false;
         }
 

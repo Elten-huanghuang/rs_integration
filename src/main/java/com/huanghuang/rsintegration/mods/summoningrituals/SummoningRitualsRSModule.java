@@ -41,8 +41,7 @@ public final class SummoningRitualsRSModule implements IModIntegration {
         ModType.configureJei(ModIds.ID_SUMMONING_RITUALS,
                 new String[][]{{"summoningrituals:altar", ModIds.ID_SUMMONING_RITUALS}},
                 new String[][]{{SummoningRitualRecipeHandler.RECIPE_CLASS,
-                        ModIds.ID_SUMMONING_RITUALS}},
-                "gui.rs_integration.jei.summoning_rituals_prepare");
+                        ModIds.ID_SUMMONING_RITUALS}});
     }
 
     @Override

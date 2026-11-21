@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.feature.unifiedgrid.client;
 
+import com.huanghuang.rsintegration.util.SharedText;
 import com.huanghuang.rsintegration.mods.rs.RSGridSearchCache;
 import com.huanghuang.rsintegration.crafting.fluid.FluidContainerBucketSupport;
 import com.huanghuang.rsintegration.magic.MagicResourceKind;
@@ -232,9 +233,9 @@ public final class UnifiedGridView implements IGridView {
 
     public Component filterLabel() {
         return Component.translatable(switch (filter) {
-            case FILTER_ITEMS -> "rs_integration.unified_grid.filter.items";
+            case FILTER_ITEMS -> SharedText.ITEMS.key();
             case FILTER_FLUIDS_AND_MAGIC -> "rs_integration.unified_grid.filter.fluids";
-            default -> "rs_integration.unified_grid.filter.all";
+            default -> SharedText.ALL.key();
         });
     }
 

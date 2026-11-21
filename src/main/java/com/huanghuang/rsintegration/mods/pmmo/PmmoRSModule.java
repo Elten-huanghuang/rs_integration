@@ -28,8 +28,7 @@ public final class PmmoRSModule implements IModIntegration {
                 .rejectPureProjection("salvage output is probabilistic and each selected count is one attempt");
         ModType.configureJei(TYPE_ID,
                 new String[][]{{"rs_integration:pmmo_salvage", TYPE_ID}},
-                new String[][]{{"com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageRecipe", TYPE_ID}},
-                "gui.rs_integration.jei.pmmo_salvage_craft");
+                new String[][]{{"com.huanghuang.rsintegration.mods.pmmo.client.PmmoSalvageRecipe", TYPE_ID}});
     }
 
     @Override

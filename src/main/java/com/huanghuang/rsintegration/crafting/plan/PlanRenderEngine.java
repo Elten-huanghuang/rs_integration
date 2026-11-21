@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
+import com.huanghuang.rsintegration.util.SharedText;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.crafting.quantity.CompactQuantityFormat;
 import com.huanghuang.rsintegration.machine.client.MachineDisplayNameResolver;
@@ -252,7 +253,7 @@ public final class PlanRenderEngine {
                 var labels = new ArrayList<Component>();
                 labels.add(Component.translatable("rsi.plan.material.available", formatCompact(have)));
                 if (crafting > 0) labels.add(Component.translatable("rsi.plan.material.crafting", formatCompact(crafting)));
-                if (missing > 0) labels.add(Component.translatable("rsi.plan.material.missing", formatCompact(missing)));
+                if (missing > 0) labels.add(SharedText.MISSING_MATERIAL.text(formatCompact(missing)));
                 if (crafting == 0 && missing == 0) labels.add(Component.translatable("rsi.plan.material.needed", formatCompact(needed)));
                 gfx.pose().pushPose();
                 gfx.pose().translate(cx + 4, cy + 4, 0);
@@ -393,7 +394,7 @@ public final class PlanRenderEngine {
 
     public static String formatModTypeLabel(String modTypeId) {
         // 1. Explicit translation key (optional override)
-        String key = "rsi.batch.mod." + modTypeId;
+        String key = SharedText.machineTypeKey(modTypeId);
         if (I18n.exists(key)) {
             return I18n.get(key);
         }

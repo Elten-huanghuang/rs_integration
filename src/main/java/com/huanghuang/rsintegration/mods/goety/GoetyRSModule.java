@@ -53,7 +53,7 @@ public final class GoetyRSModule implements IModIntegration {
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.goety.CursedInfuserBatchDelegate"));
         ModType.configureJei("goety_cursed_infuser",
                 new String[][]{{"goety:cursed_infuser"}},
-                new String[][]{{"com.Polarice3.Goety.common.crafting.CursedInfuserRecipes", "goety_cursed_infuser"}}, null);
+                new String[][]{{"com.Polarice3.Goety.common.crafting.CursedInfuserRecipes", "goety_cursed_infuser"}});
         ModType.register("goety",
                 new String[]{"com.Polarice3.Goety.common.crafting.RitualRecipe"},
                 new String[]{"dark_altar"},
@@ -61,8 +61,7 @@ public final class GoetyRSModule implements IModIntegration {
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.goety.GoetyBatchDelegate"));
         ModType.configureJei("goety",
                 null,
-                new String[][]{{"com.Polarice3.Goety.common.crafting.RitualRecipe", "goety_altar"}},
-                null);
+                new String[][]{{"com.Polarice3.Goety.common.crafting.RitualRecipe", "goety_altar"}});
         ModType.register(BRAZIER_TYPE_ID,
                 new String[]{"com.Polarice3.Goety.common.crafting.BrazierRecipe"},
                 new String[]{"necro_brazier"},
@@ -70,8 +69,7 @@ public final class GoetyRSModule implements IModIntegration {
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.goety.GoetyBatchDelegate"));
         ModType.configureJei(BRAZIER_TYPE_ID,
                 new String[][]{{"goety:brazier", "goety"}},
-                new String[][]{{"com.Polarice3.Goety.common.crafting.BrazierRecipe", "goety"}},
-                "gui.rs_integration.jei.goety_brazier_craft");
+                new String[][]{{"com.Polarice3.Goety.common.crafting.BrazierRecipe", "goety"}});
         ModType.register(ARCA_TYPE_ID,
                 new String[0], new String[]{"arca"}, new String[]{"goety_arca"},
                 GenericBatchDelegate::new);

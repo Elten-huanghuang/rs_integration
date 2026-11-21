@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.network.binding.BindingInfo;
 import com.huanghuang.rsintegration.machine.client.data.MachineStatusCache;
 import com.huanghuang.rsintegration.client.ClientTooltipGuard;
+import com.huanghuang.rsintegration.util.SharedText;
 import com.huanghuang.rsintegration.machine.client.MachineFavoritesClient;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
@@ -268,7 +269,7 @@ public final class MachineHubRenderer {
                         case HAS_OUTPUT -> "§b" + Component.translatable("rsi.hub.state.has_output").getString();
                         case WORKING   -> "§6" + Component.translatable("rsi.hub.state.working",
                                 (int)(iStatus.progressFraction() * 100)).getString();
-                        case IDLE      -> "§a" + Component.translatable("rsi.hub.state.idle").getString();
+                        case IDLE      -> "§a" + SharedText.IDLE.text().getString();
                         case UNKNOWN   -> "§7" + Component.translatable("rsi.hub.state.unknown").getString();
                     };
                     tip.add(Component.literal(st));

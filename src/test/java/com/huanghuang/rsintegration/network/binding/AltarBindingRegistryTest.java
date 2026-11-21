@@ -198,7 +198,7 @@ class AltarBindingRegistryTest {
         ResourceLocation recipeId = new ResourceLocation(
                 "wizards_reborn", "crystal_infusion/apotheosis_ancient_material");
         ModType.configureJei(ModIds.WIZARDS_REBORN, null,
-                new String[][]{{CrystalInfusionRecipe.class.getName(), "crystal_ritual"}}, null);
+                new String[][]{{CrystalInfusionRecipe.class.getName(), "crystal_ritual"}});
 
         assertEquals("crystal_ritual", AltarBindingRegistry.normalizeSubType(
                 AltarBindingRegistry.recipeSubTypeHint(recipeId), wr));

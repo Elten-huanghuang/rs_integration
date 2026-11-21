@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.feature.foodorder.client;
 
+import com.huanghuang.rsintegration.util.SharedText;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.feature.foodorder.FoodOrderClient;
 import com.huanghuang.rsintegration.feature.foodorder.FoodOrderEntry;
@@ -129,7 +130,7 @@ public final class FoodOrderScreen extends Screen {
                 font, listX + listW - 68, panelY + 42, 68, 16, viewMode, this::selectViewMode));
         addRenderableWidget(new FoodOrderButton(
                 panelX + panelW - 54, panelY + 3, 46, 16,
-                Component.translatable("rsi.food_order.refresh"),
+                SharedText.REFRESH.text(),
                 button -> {
                     loading = true;
                     receivedAt = System.currentTimeMillis();
@@ -483,8 +484,7 @@ public final class FoodOrderScreen extends Screen {
             graphics.renderTooltip(font, entry.stack(), mouseX, mouseY);
         } else if (entry.recipeId() != null && mouseX >= detailX && mouseX < detailX + detailW
                 && mouseY >= detailY && mouseY < detailY + 18) {
-            graphics.renderTooltip(font, Component.translatable("rsi.food_order.recipe_id",
-                    entry.recipeId().toString()), mouseX, mouseY);
+            graphics.renderTooltip(font, SharedText.RECIPE.text(entry.recipeId().toString()), mouseX, mouseY);
         }
     }
 

@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mods.emi;
 
+import com.huanghuang.rsintegration.util.SharedText;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.client.recipe.CraftButtonTextures;
 import com.huanghuang.rsintegration.client.recipe.RecipeAvailabilityClient;
@@ -71,8 +72,8 @@ final class EmiCraftButtonWidget extends Widget {
     @Override
     public List<ClientTooltipComponent> getTooltip(int mouseX, int mouseY) {
         if (!machineButton && !isVisible()) return List.of();
-        String key = machineButton ? "rsi.jei.open_machine" : spec.tooltipKey();
-        var action = ClientTooltipComponent.create(Component.translatable(key).getVisualOrderText());
+        Component description = machineButton ? SharedText.OPEN_BOUND_MACHINE.text() : spec.tooltip();
+        var action = ClientTooltipComponent.create(description.getVisualOrderText());
         if (machineButton) return List.of(action);
         List<ClientTooltipComponent> tooltip = new ArrayList<>();
         tooltip.add(action);

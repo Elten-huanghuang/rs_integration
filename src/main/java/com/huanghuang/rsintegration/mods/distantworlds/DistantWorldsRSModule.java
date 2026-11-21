@@ -33,8 +33,7 @@ public final class DistantWorldsRSModule implements IModIntegration {
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.distantworlds.LithumAltarBatchDelegate"));
         ModType.configureJei(LithumAltarRecipeResolver.TYPE_ID,
                 new String[][]{{"rs_integration:lithum_altar_firon", LithumAltarRecipeResolver.TYPE_ID}},
-                new String[][]{{LithumAltarRecipeWrapper.class.getName(), LithumAltarRecipeResolver.TYPE_ID}},
-                "gui.rs_integration.jei.distant_worlds_lithum_altar");
+                new String[][]{{LithumAltarRecipeWrapper.class.getName(), LithumAltarRecipeResolver.TYPE_ID}});
     }
 
     @Override

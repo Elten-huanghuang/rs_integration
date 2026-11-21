@@ -44,14 +44,12 @@ public final class CrockPotRSModule implements IModIntegration {
                 BirdcageBatchDelegate::new);
         ModType.configureJei("crockpot",
                 new String[][]{{"crockpot:crock_pot_cooking"}},
-                new String[][]{{"com.sihenzhang.crockpot.", "crockpot"}},
-                "gui.rs_integration.jei.crockpot_cook");
+                new String[][]{{"com.sihenzhang.crockpot.", "crockpot"}});
         ModType.configureJei("crockpot_birdcage",
                 new String[][]{{"crockpot:parrot_feeding", "birdcage"},
                         {"crockpot:parrot_laying_eggs", "birdcage"}},
                 new String[][]{{"com.sihenzhang.crockpot.recipe.ParrotFeedingRecipe", "birdcage"},
-                        {"com.sihenzhang.crockpot.integration.jei.ParrotLayingEggsRecipeCategory", "birdcage"}},
-                "gui.rs_integration.jei.crockpot_birdcage_feed");
+                        {"com.sihenzhang.crockpot.integration.jei.ParrotLayingEggsRecipeCategory", "birdcage"}});
     }
 
     @Override

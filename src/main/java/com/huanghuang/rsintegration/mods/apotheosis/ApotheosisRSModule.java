@@ -74,16 +74,14 @@ public final class ApotheosisRSModule implements IModIntegration {
                 new String[][]{{
                         "dev.shadowsoffire.apotheosis.village.fletching.FletchingRecipe",
                         "apotheosis_fletching"
-                }},
-                "gui.rs_integration.jei.apotheosis_fletching");
+                }});
         ModType.configureJei(
                 GEM_CUTTING_TYPE,
                 new String[][]{{"apotheosis:gem_cutting", GEM_CUTTING_TYPE}},
                 new String[][]{{
                         "dev.shadowsoffire.apotheosis.adventure.compat.GemCuttingCategory$GemCuttingRecipe",
                         GEM_CUTTING_TYPE
-                }},
-                "gui.rs_integration.jei.apotheosis_gem_cutting");
+                }});
     }
 
     @Override

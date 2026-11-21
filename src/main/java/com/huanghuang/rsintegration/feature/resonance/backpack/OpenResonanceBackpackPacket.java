@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.feature.resonance.backpack;
 
+import com.huanghuang.rsintegration.util.SharedText;
 import com.huanghuang.rsintegration.network.gui.GuiOpenRateLimiter;
 import com.huanghuang.rsintegration.feature.resonance.api.ResonanceStorageResolvers;
 import com.huanghuang.rsintegration.feature.resonance.api.ResonanceStorageView;
@@ -68,7 +69,7 @@ public final class OpenResonanceBackpackPacket {
                 new SimpleMenuProvider(
                         (containerId, inv, p) -> new ResonanceBackpackContainer(
                                 containerId, inv, view),
-                        Component.translatable("rsi.resonance_backpack.title")),
+                        SharedText.RESONANCE_BACKPACK.text()),
                 buf -> {});
     }
 }

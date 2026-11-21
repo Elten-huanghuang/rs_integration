@@ -39,8 +39,7 @@ public final class FARSModule implements IModIntegration {
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.forbidden.FaBatchDelegate"));
         ModType.configureJei("forbidden_arcanus",
                 new String[][]{{"forbidden_arcanus:hephaestus_smithing", "hephaestus_forge"}, {"forbidden_arcanus:hephaestus_forge_upgrading", "hephaestus_forge"}, {"forbidden_arcanus:hephaestus_forge", "hephaestus_forge"}},
-                new String[][]{{"com.stal111.forbidden_arcanus.", "hephaestus_forge"}},
-                null);
+                new String[][]{{"com.stal111.forbidden_arcanus.", "hephaestus_forge"}});
 
         ModType.register(ModIds.ID_FA_CLIBANO,
                 new String[]{"com.stal111.forbidden_arcanus.common.recipe.ClibanoRecipe"},
@@ -49,8 +48,7 @@ public final class FARSModule implements IModIntegration {
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.forbidden.ClibanoBatchDelegate"));
         ModType.configureJei(ModIds.ID_FA_CLIBANO,
                 new String[][]{{"forbidden_arcanus:clibano_combustion", ModIds.ID_FA_CLIBANO}},
-                new String[][]{{"com.stal111.forbidden_arcanus.common.recipe.ClibanoRecipe", ModIds.ID_FA_CLIBANO}},
-                "gui.rs_integration.jei.clibano_craft");
+                new String[][]{{"com.stal111.forbidden_arcanus.common.recipe.ClibanoRecipe", ModIds.ID_FA_CLIBANO}});
     }
 
     @Override

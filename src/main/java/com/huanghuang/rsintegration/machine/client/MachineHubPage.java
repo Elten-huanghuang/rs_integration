@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.machine.client;
 
+import com.huanghuang.rsintegration.util.SharedText;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationHandler;
@@ -133,9 +134,9 @@ public final class MachineHubPage {
             }
             sizeType = Class.forName(MOD_PAGE_PACKAGE + "BdPageSize", true, loader);
             registerPage(MACHINE_PAGE_ID, menuType, "rsi.machine_hub.page", MACHINE_ICON);
-            registerPage(BACKPACK_PAGE_ID, menuType, "rsi.resonance_backpack.page", BACKPACK_ICON);
+            registerPage(BACKPACK_PAGE_ID, menuType, SharedText.RESONANCE_BACKPACK.key(), BACKPACK_ICON);
             // 最后注册，侧边栏里正好落在“设置”上面。
-            registerPage(AUTO_EAT_PAGE_ID, menuType, "rsi.auto_eat.page", AUTO_EAT_ICON);
+            registerPage(AUTO_EAT_PAGE_ID, menuType, SharedText.AUTO_EAT.key(), AUTO_EAT_ICON);
         } catch (Throwable error) {
             LOGGER.warn("无法注册超越维度页面", error);
         }
@@ -188,7 +189,7 @@ public final class MachineHubPage {
     /** 三个页签的标题翻译键，按注册顺序排列。 */
     public static List<String> actionKeys() {
         return List.of("rsi.machine_hub.page",
-                "rsi.resonance_backpack.page", "rsi.auto_eat.page");
+                SharedText.RESONANCE_BACKPACK.key(), SharedText.AUTO_EAT.key());
     }
 
     static String[] backpackIconArt() {

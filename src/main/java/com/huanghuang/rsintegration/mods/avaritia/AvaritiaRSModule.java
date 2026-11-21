@@ -55,12 +55,10 @@ public final class AvaritiaRSModule implements IModIntegration {
                 new String[0], new String[0], new String[0], null);
         ModType.configureJei(ModIds.ID_AVARITIA_CRAFTING,
                 null,
-                new String[][]{{"committee.nova.mods.avaritia.common.crafting.recipe.", ModIds.ID_AVARITIA_CRAFTING}},
-                null);
+                new String[][]{{"committee.nova.mods.avaritia.common.crafting.recipe.", ModIds.ID_AVARITIA_CRAFTING}});
         ModType.configureJei(ModIds.ID_AVARITIA_SMITHING,
                 null,
-                new String[][]{{"committee.nova.mods.avaritia.common.crafting.recipe.ExtremeSmithingRecipe", ModIds.ID_AVARITIA_SMITHING}},
-                null);
+                new String[][]{{"committee.nova.mods.avaritia.common.crafting.recipe.ExtremeSmithingRecipe", ModIds.ID_AVARITIA_SMITHING}});
     }
 
     @Override

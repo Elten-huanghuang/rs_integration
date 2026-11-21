@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.feature.autoeat.client;
 
+import com.huanghuang.rsintegration.util.SharedText;
 import com.huanghuang.rsintegration.util.PinyinUtil;
 import com.huanghuang.rsintegration.feature.autoeat.AutoEatMode;
 import com.huanghuang.rsintegration.feature.autoeat.network.UpdateBlacklistPacket;
@@ -128,7 +129,7 @@ public final class AutoEatScreen extends Screen {
         int searchW = PANEL_W - 24;
         searchBox = new EditBox(font, panelLeft + 12, panelTop + 52,
                 searchW, 16, Component.empty());
-        searchBox.setHint(Component.translatable("rsi.autoeat.search_hint"));
+        searchBox.setHint(SharedText.SEARCH_HINT.text());
         searchBox.setBordered(false);
         searchBox.setMaxLength(80);
         searchBox.setValue(lastFilterText);

@@ -1,11 +1,11 @@
 package com.huanghuang.rsintegration.feature.sidepanel;
 
+import com.huanghuang.rsintegration.util.SharedText;
 import com.huanghuang.rsintegration.feature.sidepanel.client.SidePanelInputHandler;
 import com.huanghuang.rsintegration.feature.sidepanel.client.SidePanelJeiBridge;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.network.chat.Component;
 import net.minecraftforge.client.event.InputEvent;
 import net.minecraftforge.client.event.ScreenEvent;
 import org.lwjgl.glfw.GLFW;
@@ -37,7 +37,7 @@ final class SearchController {
     static EditBox ensureWidget(Minecraft mc) {
         if (searchWidget == null) {
             searchWidget = new EditBox(mc.font, 0, 0, 82, 9,
-                    Component.translatable("rsi.side_panel.search_hint"));
+                    SharedText.SEARCH_HINT.text());
             searchWidget.setBordered(false);
             searchWidget.setTextColor(0xFFFFFFFF);
             searchWidget.setTextColorUneditable(0xFF777777);

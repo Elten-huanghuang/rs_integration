@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.mixin.refinedstorage.MonitorAmountsAccessor;
 import com.huanghuang.rsintegration.mixin.refinedstorage.MonitorErrorAccessor;
 import com.huanghuang.rsintegration.mixin.refinedstorage.MonitorFluidAccessor;
 import com.huanghuang.rsintegration.mixin.refinedstorage.MonitorItemAccessor;
+import com.huanghuang.rsintegration.util.SharedText;
 import com.refinedmods.refinedstorage.api.autocrafting.craftingmonitor.ICraftingMonitorElement;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
@@ -42,7 +43,7 @@ public record MonitorStepEntry(String key, int elementIndex, ItemStack item, Flu
             tooltip.add(state);
             tooltip.add(counts);
             tooltip.add(Component.translatable("rsi.monitor.pending_operations", pending));
-            Component type = Component.translatableWithFallback("rsi.batch.mod." + node.modTypeId(),
+            Component type = Component.translatableWithFallback(SharedText.machineTypeKey(node.modTypeId()),
                     node.modTypeId().replace('_', ' '));
             Component machine;
             if (node.machineLabel().isBlank()) {
@@ -52,7 +53,8 @@ public record MonitorStepEntry(String key, int elementIndex, ItemStack item, Flu
                 String position = node.machineLabel().substring(node.machineLabel().indexOf('@') + 1).strip();
                 boolean candidate = node.state() == CraftProgressSnapshot.NodeState.READY
                         || node.state() == CraftProgressSnapshot.NodeState.BLOCKED;
-                machine = Component.translatable(candidate ? "rsi.monitor.machine_candidate" : "rsi.monitor.step_machine", type, position);
+                machine = candidate ? Component.translatable("rsi.monitor.machine_candidate", type, position)
+                        : SharedText.DETAIL_PAIR.text(type, position);
             }
             tooltip.add(machine);
             if (!node.machineLabel().isBlank()) tooltip.add(Component.literal(node.machineLabel()));

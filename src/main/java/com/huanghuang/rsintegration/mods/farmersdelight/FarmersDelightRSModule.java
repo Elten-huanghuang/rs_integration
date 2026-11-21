@@ -61,8 +61,7 @@ public final class FarmersDelightRSModule implements IModIntegration {
                 CookingPotBatchDelegate::new);
         ModType.configureJei("farmersdelight_cooking_pot",
                 potCategories.toArray(String[][]::new),
-                potRecipes.stream().map(name -> new String[]{name}).toArray(String[][]::new),
-                "gui.rs_integration.jei.fd_cooking_pot_craft");
+                potRecipes.stream().map(name -> new String[]{name}).toArray(String[][]::new));
 
         if (ModList.get().isLoaded(ModIds.MINERS_DELIGHT)) {
             ModType.register(ModIds.ID_MD_COPPER_POT,
@@ -72,8 +71,7 @@ public final class FarmersDelightRSModule implements IModIntegration {
                     MinersDelightCopperPotBatchDelegate::new);
             ModType.configureJei(ModIds.ID_MD_COPPER_POT,
                     new String[][]{{"miners_delight:cooking", ModIds.ID_MD_COPPER_POT}},
-                    null,
-                    "gui.rs_integration.jei.md_copper_pot_craft");
+                    null);
         }
 
         // Twilight Delight 炽铁锅：与农夫乐事烹饪锅同构（同槽位、同配方、同容器），
@@ -88,8 +86,7 @@ public final class FarmersDelightRSModule implements IModIntegration {
                     .confirmPureProjection("炽铁锅食材与容器由共享账本预留，成品在独占机器槽内结算");
             ModType.configureJei(ModIds.ID_TD_FIERY_POT,
                     new String[][]{{"farmersdelight:cooking", ModIds.ID_TD_FIERY_POT}},
-                    null,
-                    "gui.rs_integration.jei.td_fiery_pot_craft");
+                    null);
         }
 
         // Specific: Skillet (campfire-like recipes)
@@ -106,8 +103,7 @@ public final class FarmersDelightRSModule implements IModIntegration {
                 SkilletBatchDelegate::new);
         ModType.configureJei("farmersdelight_skillet",
                 new String[][]{{"minecraft:campfire", "farmersdelight_skillet"}},
-                new String[][]{{"net.minecraft.world.item.crafting.CampfireCookingRecipe", "farmersdelight_skillet"}},
-                "gui.rs_integration.jei.fd_skillet_craft");
+                new String[][]{{"net.minecraft.world.item.crafting.CampfireCookingRecipe", "farmersdelight_skillet"}});
 
         // Specific: Cutting Board. Its outputs may be independently randomized and
         // its knife/shears tool loses durability, so keep execution serial and
@@ -123,8 +119,7 @@ public final class FarmersDelightRSModule implements IModIntegration {
         ModType.configureJei(ModIds.ID_FD_CUTTING_BOARD,
                 new String[][]{{"farmersdelight:cutting", ModIds.ID_FD_CUTTING_BOARD}},
                 new String[][]{{"vectorwing.farmersdelight.common.crafting.CuttingBoardRecipe",
-                        ModIds.ID_FD_CUTTING_BOARD}},
-                "gui.rs_integration.jei.fd_cutting_board_craft");
+                        ModIds.ID_FD_CUTTING_BOARD}});
 
         // General fallback for any future Farmer's Delight recipe types
         ModType.register("farmersdelight",

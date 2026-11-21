@@ -43,7 +43,6 @@ public final class ConfluenceRSModule implements IModIntegration {
                 ModType.delegateSupplier("com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate"));
         ModType.configureJei("confluence",
                 new String[][]{{"confluence:workshop"}, {"terra_curio:workshop"}},
-                null,
                 null);
     }
 

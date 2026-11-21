@@ -37,8 +37,7 @@ public final class FarmersRespiteRSModule implements IModIntegration {
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.farmersrespite.kettle.FRKettleBatchDelegate"));
         ModType.configureJei("farmersrespite_kettle",
                 new String[][]{{"farmersrespite:brewing"}},
-                new String[][]{{"umpaz.farmersrespite.common.crafting.KettleRecipe", "farmersrespite_kettle"}},
-                "gui.rs_integration.jei.fr_kettle_craft");
+                new String[][]{{"umpaz.farmersrespite.common.crafting.KettleRecipe", "farmersrespite_kettle"}});
 
         // General fallback
         ModType.register("farmersrespite",
@@ -48,8 +47,7 @@ public final class FarmersRespiteRSModule implements IModIntegration {
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.farmersrespite.kettle.FRKettleBatchDelegate"));
         ModType.configureJei("farmersrespite",
                 new String[][]{{"farmersrespite:brewing", "farmersrespite_kettle"}},
-                new String[][]{{"umpaz.farmersrespite.", "farmersrespite"}},
-                null);
+                new String[][]{{"umpaz.farmersrespite.", "farmersrespite"}});
     }
 
     @Override

@@ -44,8 +44,7 @@ public final class BossesDelightRSModule implements IModIntegration {
         ModType.configureJei(ModIds.ID_BD_SOUL_COOKING_POT,
                 new String[][]{{"bosses_delight:soul_cooking", ModIds.ID_BD_SOUL_COOKING_POT}},
                 new String[][]{{BossesDelightRecipeHandler.RECIPE_CLASS,
-                        ModIds.ID_BD_SOUL_COOKING_POT}},
-                "gui.rs_integration.jei.bd_soul_cooking_pot_craft");
+                        ModIds.ID_BD_SOUL_COOKING_POT}});
     }
 
     @Override

@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.crafting.progress;
 
+import com.huanghuang.rsintegration.util.SharedText;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.planning.PlanningHudLayout;
 import com.huanghuang.rsintegration.crafting.planning.PlanningProgressOverlay;
@@ -164,7 +165,7 @@ public final class CraftProgressOverlay {
 
     static Component hudProgress(CraftProgressSnapshot snapshot) {
         if (snapshot.totalNodes() > 1) {
-            return Component.translatable("rsi.progress.hud.steps",
+            return SharedText.CRAFT_STEPS.text(
                     snapshot.completedNodes(), snapshot.totalNodes());
         }
         if (!snapshot.outputProgress().known() && snapshot.nodes().size() == 1) {

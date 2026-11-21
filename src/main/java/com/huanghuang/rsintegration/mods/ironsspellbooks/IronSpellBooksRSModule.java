@@ -31,7 +31,7 @@ public final class IronSpellBooksRSModule implements IModIntegration {
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.ironsspellbooks.IronAlchemistBatchDelegate"));
         ModType.configureJei(ALCHEMIST_CAULDRON_TYPE,
                 new String[][]{{"rs_integration:alchemist_cauldron", ALCHEMIST_CAULDRON_TYPE}},
-                new String[][]{}, "gui.rs_integration.jei.irons_spellbooks_alchemist_cauldron");
+                new String[][]{});
         ModType.register(SCROLL_FORGE_TYPE,
                 new String[]{IronSpellBooksRecipe.class.getName()},
                 new String[]{"scroll_forge", "scrollforge"}, new String[]{SCROLL_FORGE_TYPE},
@@ -42,14 +42,12 @@ public final class IronSpellBooksRSModule implements IModIntegration {
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksBatchDelegate"));
         ModType.configureJei(SCROLL_FORGE_TYPE,
                 new String[][]{{"irons_spellbooks:scroll_forge", SCROLL_FORGE_TYPE}},
-                new String[][]{{"io.redspace.ironsspellbooks.jei.ScrollForgeRecipe", SCROLL_FORGE_TYPE}},
-                "gui.rs_integration.jei.irons_spellbooks_scroll_forge");
+                new String[][]{{"io.redspace.ironsspellbooks.jei.ScrollForgeRecipe", SCROLL_FORGE_TYPE}});
         ModType.configureJei(ARCANE_ANVIL_TYPE,
                 new String[][]{{"irons_spellbooks:arcane_anvil", ARCANE_ANVIL_TYPE}},
                 new String[][]{
                         {"io.redspace.ironsspellbooks.jei.ArcaneAnvilRecipe", ARCANE_ANVIL_TYPE},
-                        {"io.redspace.ironsspellbooks.jei.ArcaneAnvilJeiRecipe", ARCANE_ANVIL_TYPE}},
-                "gui.rs_integration.jei.irons_spellbooks_arcane_anvil");
+                        {"io.redspace.ironsspellbooks.jei.ArcaneAnvilJeiRecipe", ARCANE_ANVIL_TYPE}});
     }
 
     @Override

@@ -54,13 +54,11 @@ public final class MalumRSModule implements IModIntegration {
                 new String[][]{{"malum:spirit_infusion", "spirit_altar"},
                         {"malum:spirit_focusing", "spirit_crucible"},
                         {"malum:spirit_crucible", "spirit_crucible"}},
-                new String[][]{{"com.sammy.malum.common.recipe.SpiritFocusingRecipe", "spirit_crucible"}, {"com.sammy.malum.common.recipe.SpiritInfusionRecipe", "spirit_altar"}, {"com.sammy.malum.", "malum"}},
-                null);
+                new String[][]{{"com.sammy.malum.common.recipe.SpiritFocusingRecipe", "spirit_crucible"}, {"com.sammy.malum.common.recipe.SpiritInfusionRecipe", "spirit_altar"}, {"com.sammy.malum.", "malum"}});
         ModType.configureJei("malum_runic_workbench",
                 new String[][]{{"malum:runeworking", "runic_workbench"},
                         {"malum:runic_workbench", "runic_workbench"}},
-                new String[][]{{"com.sammy.malum.common.recipe.RunicWorkbenchRecipe", "malum_runic_workbench"}},
-                null);
+                new String[][]{{"com.sammy.malum.common.recipe.RunicWorkbenchRecipe", "malum_runic_workbench"}});
         ModType.configureJei(VOID_FAVOR_TYPE_ID,
                 new String[][]{{"malum:weeping_well", VOID_FAVOR_TYPE_ID}},
                 new String[][]{{"com.sammy.malum.common.recipe.FavorOfTheVoidRecipe", VOID_FAVOR_TYPE_ID}},

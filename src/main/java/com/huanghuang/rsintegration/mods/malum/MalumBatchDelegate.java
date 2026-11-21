@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mods.malum;
 
+import com.huanghuang.rsintegration.util.SharedText;
 import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import java.lang.reflect.Field;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -1403,9 +1404,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         }
 
         if (!spiritNames.isEmpty()) {
-            warnings.add(Component.translatable(
-                    "rsi.malum.warn.spirit_required",
-                    String.join(", ", spiritNames)));
+            warnings.add(SharedText.SPIRIT_REQUIRED.text(String.join(", ", spiritNames)));
         }
 
         // 计划阶段就提示底座空间不足，避免执行时才在聊天栏刷“位置过小”。

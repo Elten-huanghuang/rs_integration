@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.feature.autoeat.client;
 
+import com.huanghuang.rsintegration.util.SharedText;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.huanghuang.rsintegration.feature.autoeat.AutoEatMode;
 import com.huanghuang.rsintegration.feature.autoeat.network.AutoEatPacket;
@@ -350,7 +351,7 @@ public final class AutoEatClientEvents {
     }
 
     private static Component getMenuLabel() {
-        return Component.translatable("rsi.autoeat.btn.menu");
+        return SharedText.AUTO_EAT.text();
     }
 
     private static Tooltip getMenuTooltip(boolean expanded) {

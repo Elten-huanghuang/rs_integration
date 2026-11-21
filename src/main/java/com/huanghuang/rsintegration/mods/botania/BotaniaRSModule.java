@@ -23,19 +23,19 @@ public final class BotaniaRSModule implements IModIntegration {
                 new String[]{"conjuration_catalyst", "alchemy_catalyst", "mana_pool"},
                 ModType.delegateSupplier(
                         "com.huanghuang.rsintegration.mods.botania.ManaPoolBatchDelegate"));
-        configureJei("botania_mana_pool", "botania:mana_pool", "ManaInfusionRecipe", "mana_pool", "mana_pool");
+        configureJei("botania_mana_pool", "botania:mana_pool", "ManaInfusionRecipe", "mana_pool");
         register("botania_apothecary", "PetalsRecipe", "apothecary", "PetalApothecaryBatchDelegate");
-        configureJei("botania_apothecary", "botania:petals", "PetalsRecipe", "apothecary", "apothecary");
+        configureJei("botania_apothecary", "botania:petals", "PetalsRecipe", "apothecary");
         register("botania_runic_altar", "RunicAltarRecipe", "runic_altar", "RunicAltarBatchDelegate");
-        configureJei("botania_runic_altar", "botania:runic_altar", "RunicAltarRecipe", "runic_altar", "runic_altar");
+        configureJei("botania_runic_altar", "botania:runic_altar", "RunicAltarRecipe", "runic_altar");
         register("botania_brewery", "BotanicalBreweryRecipe", "brewery", "BotanicalBreweryBatchDelegate");
-        configureJei("botania_brewery", "botania:brewery", "BotanicalBreweryRecipe", "brewery", "brewery");
+        configureJei("botania_brewery", "botania:brewery", "BotanicalBreweryRecipe", "brewery");
         register("botania_elven_trade", "ElvenTradeRecipe", "alfheim_portal", "ElvenTradeBatchDelegate");
-        configureJei("botania_elven_trade", "botania:elven_trade", "ElvenTradeRecipe", "alfheim_portal", "elven_trade");
+        configureJei("botania_elven_trade", "botania:elven_trade", "ElvenTradeRecipe", "alfheim_portal");
         register("botania_terra_plate", "RecipeTerraPlate", "terra_plate", "TerraPlateBatchDelegate");
-        configureJei("botania_terra_plate", "botania:terra_plate", "RecipeTerraPlate", "terra_plate", "terra_plate");
+        configureJei("botania_terra_plate", "botania:terra_plate", "RecipeTerraPlate", "terra_plate");
         register("botania_pure_daisy", "PureDaisyRecipe", "pure_daisy", "PureDaisyBlockConversionDelegate");
-        configureJei("botania_pure_daisy", "botania:pure_daisy", "PureDaisyRecipe", "pure_daisy", "pure_daisy");
+        configureJei("botania_pure_daisy", "botania:pure_daisy", "PureDaisyRecipe", "pure_daisy");
 
         ModType.register("mythicbotany_mana_infuser",
                 new String[]{"mythicbotany.infuser.InfuserRecipe"},
@@ -44,16 +44,14 @@ public final class BotaniaRSModule implements IModIntegration {
                         "com.huanghuang.rsintegration.mods.botania.MythicBotanyManaInfuserBatchDelegate"));
         ModType.configureJei("mythicbotany_mana_infuser",
                 new String[][]{{"mythicbotany:infuser", "mana_infuser"}},
-                new String[][]{{"mythicbotany.infuser.InfuserRecipe", "mana_infuser"}},
-                "gui.rs_integration.jei.mythicbotany_mana_infuser_craft");
+                new String[][]{{"mythicbotany.infuser.InfuserRecipe", "mana_infuser"}});
     }
 
     private static void configureJei(String id, String uid, String recipeClass,
-                                     String bindingFilter, String tooltipSuffix) {
+                                     String bindingFilter) {
         ModType.configureJei(id,
                 new String[][]{{uid, bindingFilter}},
-                new String[][]{{"vazkii.botania.common.crafting." + recipeClass, bindingFilter}},
-                "gui.rs_integration.jei.botania_" + tooltipSuffix + "_craft");
+                new String[][]{{"vazkii.botania.common.crafting." + recipeClass, bindingFilter}});
     }
     private static void register(String id, String recipeClass, String blockKey, String delegate) {
         ModType.register(id,

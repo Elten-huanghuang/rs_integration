@@ -58,8 +58,7 @@ public final class FarmAndCharmRSModule implements IModIntegration {
                         "com.huanghuang.rsintegration.mods.farmandcharm.FarmAndCharmCookingPotBatchDelegate"));
         ModType.configureJei(ModIds.ID_FC_COOKING_POT,
                 new String[][]{{"farm_and_charm:cooking_pot", ModIds.ID_FC_COOKING_POT}},
-                new String[][]{{LetsDoCookingPotRecipeHandler.RECIPE_CLASS, ModIds.ID_FC_COOKING_POT}},
-                "gui.rs_integration.jei.farm_and_charm_cooking_pot_craft");
+                new String[][]{{LetsDoCookingPotRecipeHandler.RECIPE_CLASS, ModIds.ID_FC_COOKING_POT}});
 
         // ── 烘焙机 ──
         ModType.register(ModIds.ID_FC_ROASTER,
@@ -70,8 +69,7 @@ public final class FarmAndCharmRSModule implements IModIntegration {
                         "com.huanghuang.rsintegration.mods.farmandcharm.RoasterBlockBatchDelegate"));
         ModType.configureJei(ModIds.ID_FC_ROASTER,
                 new String[][]{{"farm_and_charm:roaster", ModIds.ID_FC_ROASTER}},
-                new String[][]{{LetsDoRoasterRecipeHandler.RECIPE_CLASS, ModIds.ID_FC_ROASTER}},
-                "gui.rs_integration.jei.farm_and_charm_roaster_craft");
+                new String[][]{{LetsDoRoasterRecipeHandler.RECIPE_CLASS, ModIds.ID_FC_ROASTER}});
 
         // ── 大汤锅（复用 pot_cooking 配方类型） ──
         ModType.register(ModIds.ID_CANDLELIGHT_COOKING_POT,
@@ -83,8 +81,7 @@ public final class FarmAndCharmRSModule implements IModIntegration {
         ModType.configureJei(ModIds.ID_CANDLELIGHT_COOKING_POT,
                 new String[][]{{"farm_and_charm:cooking_pot", ModIds.ID_CANDLELIGHT_COOKING_POT}},
                 new String[][]{{LetsDoCookingPotRecipeHandler.RECIPE_CLASS,
-                        ModIds.ID_CANDLELIGHT_COOKING_POT}},
-                "gui.rs_integration.jei.candlelight_cooking_pot_craft");
+                        ModIds.ID_CANDLELIGHT_COOKING_POT}});
 
         // ── 小烹饪锅（bakery，同样复用 pot_cooking 配方类型） ──
         ModType.register(ModIds.ID_BAKERY_COOKING_POT,
@@ -96,8 +93,7 @@ public final class FarmAndCharmRSModule implements IModIntegration {
         ModType.configureJei(ModIds.ID_BAKERY_COOKING_POT,
                 new String[][]{{"farm_and_charm:cooking_pot", ModIds.ID_BAKERY_COOKING_POT}},
                 new String[][]{{LetsDoCookingPotRecipeHandler.RECIPE_CLASS,
-                        ModIds.ID_BAKERY_COOKING_POT}},
-                "gui.rs_integration.jei.bakery_cooking_pot_craft");
+                        ModIds.ID_BAKERY_COOKING_POT}});
     }
 
     @Override

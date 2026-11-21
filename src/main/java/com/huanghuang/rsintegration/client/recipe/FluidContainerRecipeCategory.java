@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.client.recipe;
 
+import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.fluid.FluidContainerRecipe;
+import com.huanghuang.rsintegration.util.SharedText;
 import mezz.jei.api.forge.ForgeTypes;
 import mezz.jei.api.gui.builder.IRecipeLayoutBuilder;
 import mezz.jei.api.gui.drawable.IDrawable;
@@ -27,7 +29,9 @@ public final class FluidContainerRecipeCategory implements IRecipeCategory<Fluid
     }
 
     @Override public RecipeType<FluidContainerRecipe> getRecipeType() { return TYPE; }
-    @Override public Component getTitle() { return Component.translatable("gui.rs_integration.jei.fluid_container"); }
+    @Override public Component getTitle() {
+        return Component.translatable(SharedText.machineTypeKey(ModType.FLUID_CONTAINER.id()));
+    }
     @Override public int getWidth() { return 150; }
     @Override public int getHeight() { return 40; }
     @Override public IDrawable getIcon() { return icon; }

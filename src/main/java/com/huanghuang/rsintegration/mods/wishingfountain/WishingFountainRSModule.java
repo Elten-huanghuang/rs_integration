@@ -41,8 +41,7 @@ public final class WishingFountainRSModule implements IModIntegration {
                 new String[][]{
                         {WishingFountainRecipeHandler.RECIPE_CLASS, TYPE_ID},
                         {"io.github.poisonsheep.wishingfountain.compat.jei.WFRecipeWrapper", TYPE_ID}
-                },
-                "gui.rs_integration.jei.wishing_fountain_craft");
+                });
     }
 
     @Override

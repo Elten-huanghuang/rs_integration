@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mixin.jei;
 
+import com.huanghuang.rsintegration.util.SharedText;
 import com.huanghuang.rsintegration.machine.client.ClientBindingLookup;
 import java.lang.reflect.Field;
 
@@ -9,6 +10,7 @@ import com.huanghuang.rsintegration.feature.ftbquests.QuestSubmissionTargetIds;
 import com.huanghuang.rsintegration.recipe.viewer.StandardRecipeIdResolver;
 import com.huanghuang.rsintegration.recipe.viewer.WishingFountainRecipeIdResolver;
 import com.huanghuang.rsintegration.recipe.viewer.SophisticatedStorageRecipeIdResolver;
+import com.huanghuang.rsintegration.recipe.viewer.RecipeCraftTooltip;
 import com.huanghuang.rsintegration.recipe.viewer.RecipeMachineCategoryPolicy;
 import com.huanghuang.rsintegration.mods.jei.JeiRecipeButtonPlacement;
 import com.huanghuang.rsintegration.recipe.viewer.RecipeIdNormalizer;
@@ -235,7 +237,7 @@ public class RecipeGuiLayoutsMixin {
                 rsi$positions.add(new int[]{0, 0, 10, 10});
                 rsi$recipeIds.add(questRecipeId);
                 AltarCraftButtons.add(0, 0, 10, 10, handler,
-                        "gui.rs_integration.jei.ftb_quest_submit", questRecipeId,
+                        SharedText.CRAFT_AND_SUBMIT_QUEST.text(), questRecipeId,
                         player.level().dimension().location(), player.blockPosition(), null);
                 rsi$hasMachineGui.add(false);
                 buttonsAdded++;
@@ -378,8 +380,7 @@ public class RecipeGuiLayoutsMixin {
 
             ResourceLocation bindingDim;
             BlockPos machinePos;
-            String boundBlockKey = null;
-            String boundBlockRegKey = null;
+            BindingStorage.BindingEntry binding = null;
             if (isGeneric || isVirtual) {
                 bindingDim = player.level().dimension().location();
                 machinePos = player.blockPosition();
@@ -392,7 +393,7 @@ public class RecipeGuiLayoutsMixin {
                         recipeModType != null
                                 && recipeModType != ModType.GENERIC
                                 ? recipeModType : bindingType;
-                BindingStorage.BindingEntry binding = findBinding(
+                binding = findBinding(
                         filter, recipe, recipeMachineType,
                         externalProcessId);
                 if (binding == null) {
@@ -406,8 +407,6 @@ public class RecipeGuiLayoutsMixin {
                 }
                 bindingDim = binding.dim();
                 machinePos = binding.pos();
-                boundBlockKey = binding.blockKey();
-                boundBlockRegKey = binding.blockRegKey();
             }
 
             // FA smithing: ApplyModifierRecipe has no fixed base ingredient,
@@ -481,40 +480,7 @@ public class RecipeGuiLayoutsMixin {
                     ? recipeModType
                     : filteredType;
 
-            String tooltipKey;
-            if (recipe instanceof PmmoSalvageRecipe) {
-                tooltipKey = "gui.rs_integration.jei.pmmo_salvage_craft";
-            } else if (rsi$isGoetyRitual(recipe)) {
-                tooltipKey = "gui.rs_integration.jei.altar_craft";
-            } else if (rsi$isGoetyBrazierRecipe(recipe)) {
-                tooltipKey = "gui.rs_integration.jei.goety_brazier_craft";
-            } else if (modType != null && modType.jeiTooltipKey() != null) {
-                tooltipKey = modType.jeiTooltipKey();
-            } else if (filter.startsWith("block.minecraft.")) {
-                tooltipKey = "gui.rs_integration.jei.vanilla_machine_craft";
-            } else if (filter.equals("generic")) {
-                tooltipKey = "gui.rs_integration.jei.rs_auto_craft";
-            } else {
-                // Filter-based lookup for mods without jeiTooltipKey configured
-                tooltipKey = switch (filter) {
-                    case "spirit_altar" -> "gui.rs_integration.jei.malum_spirit_craft";
-                    case "spirit_crucible" -> "gui.rs_integration.jei.malum_crucible_craft";
-                    case "crystal_ritual" -> "gui.rs_integration.jei.wr_crystal_craft";
-                    case "hephaestus_forge" -> "gui.rs_integration.jei.fa_ritual_craft";
-                    case "crucible" -> "gui.rs_integration.jei.eidolon_crucible_craft";
-                    case "worktable" -> "gui.rs_integration.jei.eidolon_worktable_craft";
-                    case "ritual" -> "gui.rs_integration.jei.eidolon_ritual_craft";
-                    case ModIds.TOUHOU_LITTLE_MAID -> "gui.rs_integration.jei.tlm_maid_altar_craft";
-                    case ModIds.EMBERS -> "gui.rs_integration.jei.embers_alchemy_craft";
-                    case "aether_freezer" -> "gui.rs_integration.jei.aether_freezer_craft";
-                    case "aether_incubator" -> "gui.rs_integration.jei.aether_incubator_craft";
-                    case "aether_altar" -> "gui.rs_integration.jei.aether_altar_craft";
-                    case ModIds.ID_AVARITIA_CRAFTING -> "gui.rs_integration.jei.avaritia_crafting";
-                    case ModIds.ID_AVARITIA_SMITHING -> "gui.rs_integration.jei.avaritia_smithing";
-                    case "crabbersdelight" -> "gui.rs_integration.jei.crabbersdelight_trap";
-                    default -> "gui.rs_integration.jei.wr_remote_craft";
-                };
-            }
+            Component tooltip = RecipeCraftTooltip.resolve(filter, recipeModType, binding);
 
             rsi$layoutIndices.add(i);
             rsi$positions.add(new int[]{0, 0, 10, 10});
@@ -525,16 +491,16 @@ public class RecipeGuiLayoutsMixin {
                         RecipeAvailabilityKey.of(recipeId, bindingDim, machinePos,
                                 faSmithingBase, concreteTargetOutput));
             }
-            AltarCraftButtons.add(0, 0, 10, 10, handler, tooltipKey, recipeId,
+            AltarCraftButtons.add(0, 0, 10, 10, handler, tooltip, recipeId,
                     bindingDim, machinePos, modType);
 
             // Register machine GUI button for non-generic (bound) recipes
             // when the bound machine supports remote GUI.
-            if (!isGeneric && !isVirtual && bindingDim != null && machinePos != null
+            if (binding != null && bindingDim != null && machinePos != null
                     && modType != null
                     && (ModList.get().isLoaded(ModIds.REFINED_STORAGE)
                         || BindingBackendResolver.isBeyondDimensionsBinding(bindingDim, machinePos))
-                    && supportsGuiWithRegCheck(boundBlockKey, boundBlockRegKey)) {
+                    && supportsGuiWithRegCheck(binding.blockKey(), binding.blockRegKey())) {
                 ResourceLocation guiDim = bindingDim;
                 BlockPos guiPos = machinePos;
                 ResourceLocation jeiOpenRecipeId = recipeId;
@@ -743,8 +709,8 @@ public class RecipeGuiLayoutsMixin {
             if (hovered) {
                 var data = AltarCraftButtons.getButtonData(i);
                 tooltip = new ArrayList<>();
-                if (data != null) tooltip.add(Component.translatable(data.tooltip()));
                 if (data != null) {
+                    tooltip.add(data.tooltip());
                     for (String key : EmbersMachineHints.tooltipKeys(data.modType())) {
                         tooltip.add(Component.translatable(key));
                     }
@@ -764,7 +730,7 @@ public class RecipeGuiLayoutsMixin {
             boolean hovered = mouseX >= mx && mouseX < mx + mw && mouseY >= my && mouseY < my + mh;
 
             CraftButtonTextures.machine(guiGraphics, mx, my, mw, mh, hovered);
-            if (hovered) tooltip = List.of(Component.translatable("rsi.jei.open_machine"));
+            if (hovered) tooltip = List.of(SharedText.OPEN_BOUND_MACHINE.text());
         }
         if (tooltip != null) guiGraphics.renderComponentTooltip(Minecraft.getInstance().font, tooltip, mouseX, mouseY);
     }
@@ -2021,12 +1987,6 @@ public class RecipeGuiLayoutsMixin {
     private static boolean rsi$isGoetyRitual(Object recipe) {
         return ModList.get().isLoaded(ModIds.GOETY)
                 && recipe.getClass().getName().equals("com.Polarice3.Goety.common.crafting.RitualRecipe");
-    }
-
-    @Unique
-    private static boolean rsi$isGoetyBrazierRecipe(Object recipe) {
-        return ModList.get().isLoaded(ModIds.GOETY)
-                && recipe.getClass().getName().equals("com.Polarice3.Goety.common.crafting.BrazierRecipe");
     }
 
     @Unique

@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mods.rs.monitor;
 
+import com.huanghuang.rsintegration.util.SharedText;
 import com.huanghuang.rsintegration.client.gui.CraftingUiStyle;
 import com.huanghuang.rsintegration.config.CraftingUiColors;
 import com.huanghuang.rsintegration.client.gui.ListScrollState;
@@ -74,9 +75,12 @@ public final class MonitorTaskList extends AbstractWidget {
         if (task instanceof RsiMonitorTask rsi) {
             var snapshot = rsi.snapshot();
             var output = snapshot.outputProgress();
-            return Component.translatable(output.known() ? "rsi.monitor.task_output" : "rsi.monitor.task_nodes",
-                    CompactQuantityFormat.format(output.known() ? output.completed() : snapshot.completedNodes()),
-                    CompactQuantityFormat.format(output.known() ? output.total() : snapshot.totalNodes()));
+            if (output.known()) {
+                return Component.translatable("rsi.monitor.task_output",
+                        CompactQuantityFormat.format(output.completed()), CompactQuantityFormat.format(output.total()));
+            }
+            return SharedText.CRAFT_STEPS.text(
+                    CompactQuantityFormat.format(snapshot.completedNodes()), CompactQuantityFormat.format(snapshot.totalNodes()));
         }
         var nativeTask = (MonitorTaskAccessor) task;
         FluidStack fluid = nativeTask.rsi$requested().getFluid();

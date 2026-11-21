@@ -76,7 +76,7 @@ class MonitorStepEntryTest extends BootstrapTest {
     @Test void machineLineDistinguishesAssignedAndCandidateLocationsAndRetainsDimensionInDetails() {
         var running = MonitorStepEntry.forRsi(snapshot(List.of(node(1, NodeState.RUNNING, Reason.NONE, 0, 10, 1)))).get(0);
         var queued = MonitorStepEntry.forRsi(snapshot(List.of(node(2, NodeState.READY, Reason.MACHINE_BUSY, 0, 10, 0)))).get(0);
-        assertEquals("rsi.monitor.step_machine", ((TranslatableContents) running.machine().getContents()).getKey());
+        assertEquals("rsi.common.detail_pair", ((TranslatableContents) running.machine().getContents()).getKey());
         assertEquals("rsi.monitor.machine_candidate", ((TranslatableContents) queued.machine().getContents()).getKey());
         assertTrue(running.tooltip().stream().anyMatch(line -> line.getString().equals("furnace @ 1,2,3")));
         assertArrayEquals(new Object[]{Component.translatableWithFallback("rsi.batch.mod.vanilla_furnace", "vanilla furnace"), "1,2,3"},

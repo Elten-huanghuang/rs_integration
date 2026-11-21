@@ -33,16 +33,14 @@ public final class ApprenticeCodexRSModule implements IModIntegration {
                         "Essence Smoker consumes one catalyst per eight-material physical batch");
         ModType.configureJei(ESSENCE_SMOKER_TYPE,
                 new String[][]{{"apprenticecodex:essence_smoker", ESSENCE_SMOKER_TYPE}},
-                new String[][]{{ESSENCE_RECIPE, ESSENCE_SMOKER_TYPE}},
-                "gui.rs_integration.jei.apprenticecodex_essence_smoker");
+                new String[][]{{ESSENCE_RECIPE, ESSENCE_SMOKER_TYPE}});
 
         ModType.register(SPELLCASTER_WORKBENCH_TYPE, new String[]{WORKBENCH_RECIPE},
                 new String[]{"spellcaster_workbench"}, new String[]{SPELLCASTER_WORKBENCH_TYPE},
                 ModType.delegateSupplier(ApprenticeCodexWorkbenchBatchDelegate.class.getName()));
         ModType.configureJei(SPELLCASTER_WORKBENCH_TYPE,
                 new String[][]{{"apprenticecodex:spellcaster_workbench", SPELLCASTER_WORKBENCH_TYPE}},
-                new String[][]{{WORKBENCH_RECIPE, SPELLCASTER_WORKBENCH_TYPE}},
-                "gui.rs_integration.jei.apprenticecodex_spellcaster_workbench");
+                new String[][]{{WORKBENCH_RECIPE, SPELLCASTER_WORKBENCH_TYPE}});
     }
 
     @Override

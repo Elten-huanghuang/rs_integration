@@ -41,8 +41,7 @@ public final class WizardsRebornRSModule implements IModIntegration {
                 ModType.delegateSupplier("com.huanghuang.rsintegration.mods.wizardsreborn.WRBatchDelegate"));
         ModType.configureJei("wizards_reborn",
                 new String[][]{{"wizards_reborn:wissen_crystallizer", "wissen_crystallizer"}, {"wizards_reborn:arcane_iterator", "arcane_iterator"}, {"wizards_reborn:arcane_workbench", "arcane_workbench"}, {"wizards_reborn:crystal_ritual", "crystal_ritual"}, {"wizards_reborn:crystal_infusion", "crystal_ritual"}},
-                new String[][]{{"mod.maxbogomol.wizards_reborn.common.recipe.CrystalInfusion", "crystal_ritual"}, {"mod.maxbogomol.wizards_reborn.common.recipe.CrystalRitual", "arcane_iterator"}, {"mod.maxbogomol.wizards_reborn.common.recipe.ArcaneWorkbench", "arcane_workbench"}, {"mod.maxbogomol.wizards_reborn.common.recipe.ArcaneIterator", "arcane_iterator"}, {"mod.maxbogomol.wizards_reborn.common.recipe.WissenCrystallizer", "wissen_crystallizer"}, {"mod.maxbogomol.wizards_reborn.", "wizards_reborn"}},
-                null);
+                new String[][]{{"mod.maxbogomol.wizards_reborn.common.recipe.CrystalInfusion", "crystal_ritual"}, {"mod.maxbogomol.wizards_reborn.common.recipe.CrystalRitual", "arcane_iterator"}, {"mod.maxbogomol.wizards_reborn.common.recipe.ArcaneWorkbench", "arcane_workbench"}, {"mod.maxbogomol.wizards_reborn.common.recipe.ArcaneIterator", "arcane_iterator"}, {"mod.maxbogomol.wizards_reborn.common.recipe.WissenCrystallizer", "wissen_crystallizer"}, {"mod.maxbogomol.wizards_reborn.", "wizards_reborn"}});
         ModType.register(WRAlchemyRecipeHandler.TYPE,
                 new String[]{WRAlchemyRecipeHandler.RECIPE_CLASS},
                 new String[]{"alchemy_machine"}, new String[]{"alchemy_machine"},
@@ -50,7 +49,7 @@ public final class WizardsRebornRSModule implements IModIntegration {
                 .confirmPureProjection("炼金材料通过账本投入，产物从炼金机和上方锅炉回收");
         ModType.configureJei(WRAlchemyRecipeHandler.TYPE,
                 new String[][]{{"wizards_reborn:alchemy_machine", "alchemy_machine"}},
-                new String[][]{{WRAlchemyRecipeHandler.RECIPE_CLASS, "alchemy_machine"}}, null);
+                new String[][]{{WRAlchemyRecipeHandler.RECIPE_CLASS, "alchemy_machine"}});
     }
 
     @Override

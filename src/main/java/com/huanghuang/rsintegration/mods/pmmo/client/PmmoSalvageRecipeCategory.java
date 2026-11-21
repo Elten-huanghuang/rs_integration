@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.mods.pmmo.client;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule;
+import com.huanghuang.rsintegration.util.SharedText;
 import mezz.jei.api.gui.builder.IRecipeLayoutBuilder;
 import mezz.jei.api.gui.builder.ITooltipBuilder;
 import mezz.jei.api.gui.drawable.IDrawable;
@@ -45,7 +47,7 @@ public final class PmmoSalvageRecipeCategory implements IRecipeCategory<PmmoSalv
 
     @Override
     public Component getTitle() {
-        return Component.translatable("rsi.jei.pmmo_salvage");
+        return Component.translatable(SharedText.machineTypeKey(PmmoRSModule.TYPE_ID));
     }
 
     @Override public int getWidth() { return WIDTH; }

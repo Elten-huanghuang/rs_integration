@@ -35,6 +35,27 @@ public final class EquipmentTooltip {
         public DiskTooltipEffects.Theme theme() { return theme; }
         public int details() { return details; }
         public String prefix() { return "item.rs_integration." + path + ".guide."; }
+
+        private String titleKey() {
+            return switch (this) {
+                case PICKUP -> "gui.sophisticatedcore.upgrades.rs_pickup";
+                case FEEDING -> "upgrade.rs_integration.rs_feeding";
+                default -> prefix() + "title";
+            };
+        }
+
+        String detailKey(int line) {
+            return switch (this) {
+                case MANA_POOL, SOURCE_TANK -> switch (line) {
+                    case 1 -> SharedText.BLOCK_BIND_GUIDE.key();
+                    case 3 -> SharedText.BLOCK_UNBIND_GUIDE.key();
+                    default -> prefix() + "detail_" + line;
+                };
+                case PICKUP, MAGNET, REFILL, FEEDING -> line == 2
+                        ? SharedText.UPGRADE_BIND_GUIDE.key() : prefix() + "detail_" + line;
+                case VOID -> prefix() + "detail_" + line;
+            };
+        }
     }
 
     private EquipmentTooltip() {}
@@ -109,11 +130,11 @@ public final class EquipmentTooltip {
                     kind.theme(), DiskTooltipEffects.Tone.HINT, 0.3F));
             return;
         }
-        tooltip.add(DiskTooltipEffects.flow(kind.prefix() + "title", kind.theme(),
+        tooltip.add(DiskTooltipEffects.flow(kind.titleKey(), kind.theme(),
                 DiskTooltipEffects.Tone.HINT, 0).copy().withStyle(ChatFormatting.BOLD));
         for (int i = 1; i <= kind.details(); i++) {
             tooltip.add(DiskTooltipEffects.tint(Component.literal("• ").append(
-                    Component.translatable(kind.prefix() + "detail_" + i)),
+                    Component.translatable(kind.detailKey(i))),
                     kind.theme(), kind == Kind.VOID && i == 4
                             ? DiskTooltipEffects.Tone.WARNING : DiskTooltipEffects.Tone.MUTED));
         }

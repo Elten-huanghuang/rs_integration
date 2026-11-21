@@ -19,7 +19,6 @@ class AetherworksMetalFormerRegistrationTest {
         assertSame(type, ModType.findByRecipeClass("net.sirplop.aetherworks.recipe.MetalFormerRecipe"));
         assertEquals(type.id(), ModType.filterForJeiUid("aetherworks:metal_forming"));
         assertEquals(type.id(), ModType.filterForRecipeClass("net.sirplop.aetherworks.recipe.MetalFormerRecipe"));
-        assertEquals("gui.rs_integration.jei.aetherworks_metal_former_craft", type.jeiTooltipKey());
         assertEquals(ModType.PureProjectionAudit.UNSUPPORTED, type.pureProjectionAudit());
     }
 

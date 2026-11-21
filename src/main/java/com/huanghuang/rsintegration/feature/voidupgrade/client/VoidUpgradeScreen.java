@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.feature.voidupgrade.client;
 
+import com.huanghuang.rsintegration.ModItems;
 import com.huanghuang.rsintegration.util.PinyinUtil;
+import com.huanghuang.rsintegration.util.SharedText;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.huanghuang.rsintegration.feature.voidupgrade.VoidUpgradeConfig;
 import com.huanghuang.rsintegration.feature.voidupgrade.VoidUpgradeRule;
@@ -78,7 +80,7 @@ public final class VoidUpgradeScreen extends Screen {
 
     public VoidUpgradeScreen(SaveVoidUpgradeConfigPacket.Target target, int targetSlot,
                              VoidUpgradeConfig config, Screen parent) {
-        super(Component.translatable("screen.rs_integration.void_upgrade"));
+        super(ModItems.RS_VOID_UPGRADE.get().getDescription());
         this.target = target;
         this.targetSlot = targetSlot;
         this.parent = parent;
@@ -516,6 +518,7 @@ public final class VoidUpgradeScreen extends Screen {
     }
 
     private static Component typeLabel(VoidUpgradeRule.Type type) {
+        if (type == VoidUpgradeRule.Type.ITEM) return SharedText.ITEMS.text();
         return Component.translatable("screen.rs_integration.void_upgrade.type."
                 + type.name().toLowerCase(Locale.ROOT));
     }

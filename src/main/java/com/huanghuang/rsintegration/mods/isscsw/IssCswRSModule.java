@@ -26,8 +26,7 @@ public final class IssCswRSModule implements IModIntegration {
                 ModType.delegateSupplier(IssCswSpellForgeBatchDelegate.class.getName()));
         ModType.configureJei(SPELL_FORGE_TYPE,
                 new String[][]{{"iss_csw:spell_forge", SPELL_FORGE_TYPE}},
-                new String[][]{{RECIPE_CLASS, SPELL_FORGE_TYPE}},
-                "gui.rs_integration.jei.iss_csw_spell_forge");
+                new String[][]{{RECIPE_CLASS, SPELL_FORGE_TYPE}});
     }
 
     @Override public void registerBindingTargets() {

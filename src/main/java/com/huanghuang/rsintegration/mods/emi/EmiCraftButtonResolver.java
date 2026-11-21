@@ -1,11 +1,13 @@
 package com.huanghuang.rsintegration.mods.emi;
 
+import com.huanghuang.rsintegration.util.SharedText;
 import com.huanghuang.rsintegration.machine.client.ClientBindingLookup;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.feature.ftbquests.QuestSubmissionRequestPacket;
 import com.huanghuang.rsintegration.feature.ftbquests.QuestSubmissionSnapshot;
 import com.huanghuang.rsintegration.feature.ftbquests.QuestSubmissionTargetIds;
+import com.huanghuang.rsintegration.recipe.viewer.RecipeCraftTooltip;
 import com.huanghuang.rsintegration.recipe.viewer.RecipeMachineCategoryPolicy;
 import com.huanghuang.rsintegration.recipe.viewer.RecipeIdNormalizer;
 import com.huanghuang.rsintegration.recipe.viewer.SophisticatedStorageRecipeIdResolver;
@@ -94,7 +96,7 @@ final class EmiCraftButtonResolver {
             Runnable action = () -> BatchCraftNetworkHandler.CHANNEL.sendToServer(
                     new QuestSubmissionRequestPacket(quest.questId()));
             return Optional.of(new EmiCraftButtonSpec(recipeId, null,
-                    "gui.rs_integration.jei.ftb_quest_submit", action, null, null));
+                    SharedText.CRAFT_AND_SUBMIT_QUEST.text(), action, null, null));
         }
         if (sourceRecipe == null) return Optional.empty();
 
@@ -113,8 +115,7 @@ final class EmiCraftButtonResolver {
 
         ResourceLocation dimension;
         BlockPos machinePos;
-        String blockKey = null;
-        String blockRegistryKey = null;
+        BindingStorage.BindingEntry binding = null;
         if (generic || virtual) {
             dimension = minecraft.level.dimension().location();
             machinePos = minecraft.player.blockPosition();
@@ -123,13 +124,11 @@ final class EmiCraftButtonResolver {
             if (bindingType == null || bindingType == ModType.GENERIC) {
                 bindingType = recipeModType;
             }
-            BindingStorage.BindingEntry binding = findBinding(
+            binding = findBinding(
                     filter, sourceRecipe, backingRecipe, bindingType);
             if (binding == null) return Optional.empty();
             dimension = binding.dim();
             machinePos = binding.pos();
-            blockKey = binding.blockKey();
-            blockRegistryKey = binding.blockRegKey();
         }
 
         ModType filteredType = ModType.findById(filter);
@@ -140,10 +139,10 @@ final class EmiCraftButtonResolver {
                 baseItem, targetOutput);
 
         Runnable machineAction = null;
-        if (!generic && !virtual && modType != null
+        if (binding != null && modType != null
                 && (ModList.get().isLoaded(ModIds.REFINED_STORAGE)
                     || BindingBackendResolver.isBeyondDimensionsBinding(dimension, machinePos))
-                && supportsGui(blockKey, blockRegistryKey)) {
+                && supportsGui(binding.blockKey(), binding.blockRegKey())) {
             ResourceLocation actionDimension = dimension;
             BlockPos actionPos = machinePos;
             ItemStack actionBase = baseItem.isEmpty() ? null : baseItem.copy();
@@ -151,7 +150,7 @@ final class EmiCraftButtonResolver {
         }
 
         return Optional.of(new EmiCraftButtonSpec(recipeId, modType,
-                tooltipKey(sourceRecipe, filter, modType), craftAction, machineAction,
+                RecipeCraftTooltip.resolve(filter, recipeModType, binding), craftAction, machineAction,
                 RecipeAvailabilityKey.of(
                         recipeId, dimension, machinePos, baseItem, targetOutput)));
     }
@@ -477,35 +476,6 @@ final class EmiCraftButtonResolver {
         List<EmiStack> stacks = ingredients.get(index).getEmiStacks();
         if (stacks.isEmpty()) return ItemStack.EMPTY;
         return stacks.get(0).getItemStack().copy();
-    }
-
-    private static String tooltipKey(Object recipe, String filter, @Nullable ModType modType) {
-        if (recipe instanceof PmmoSalvageRecipe) {
-            return "gui.rs_integration.jei.pmmo_salvage_craft";
-        }
-        String className = recipe.getClass().getName();
-        if (isGoetyRitual(className)) return "gui.rs_integration.jei.altar_craft";
-        if ("com.Polarice3.Goety.common.crafting.BrazierRecipe".equals(className)) {
-            return "gui.rs_integration.jei.goety_brazier_craft";
-        }
-        if (modType != null && modType.jeiTooltipKey() != null) return modType.jeiTooltipKey();
-        if (filter.startsWith("block.minecraft.")) return "gui.rs_integration.jei.vanilla_machine_craft";
-        if ("generic".equals(filter)) return "gui.rs_integration.jei.rs_auto_craft";
-        return switch (filter) {
-            case "spirit_altar" -> "gui.rs_integration.jei.malum_spirit_craft";
-            case "spirit_crucible" -> "gui.rs_integration.jei.malum_crucible_craft";
-            case "crystal_ritual" -> "gui.rs_integration.jei.wr_crystal_craft";
-            case "hephaestus_forge" -> "gui.rs_integration.jei.fa_ritual_craft";
-            case "crucible" -> "gui.rs_integration.jei.eidolon_crucible_craft";
-            case "worktable" -> "gui.rs_integration.jei.eidolon_worktable_craft";
-            case "ritual" -> "gui.rs_integration.jei.eidolon_ritual_craft";
-            case ModIds.TOUHOU_LITTLE_MAID -> "gui.rs_integration.jei.tlm_maid_altar_craft";
-            case ModIds.EMBERS -> "gui.rs_integration.jei.embers_alchemy_craft";
-            case ModIds.ID_AVARITIA_CRAFTING -> "gui.rs_integration.jei.avaritia_crafting";
-            case ModIds.ID_AVARITIA_SMITHING -> "gui.rs_integration.jei.avaritia_smithing";
-            case "crabbersdelight" -> "gui.rs_integration.jei.crabbersdelight_trap";
-            default -> "gui.rs_integration.jei.wr_remote_craft";
-        };
     }
 
     private static boolean isUnsupportedGoetyRitual(Object recipe) {

@@ -65,7 +65,7 @@ public final class ModType {
     // recipePrefixes: [[classPrefix, filterString], ...] — single-element [prefix] defaults to id
     private String[][] jeiUidToFilter;
     private String[][] jeiRecipePrefixes;
-    private String jeiTooltipKey;
+    private String virtualJeiTooltipKey;
 
 
     public static final ModType GENERIC;
@@ -104,8 +104,7 @@ public final class ModType {
                 "market execution uses the standard material transaction and output capture");
         configureJei("farmingforblockheads",
                 new String[][]{{"farmingforblockheads:market", "market"}},
-                new String[][]{{"net.blay09.mods.farmingforblockheads.", "farmingforblockheads"}},
-                "gui.rs_integration.jei.market_craft");
+                new String[][]{{"net.blay09.mods.farmingforblockheads.", "farmingforblockheads"}});
 
         EXTERNAL_INTEGRATION = register(
                 "integration_api",
@@ -258,7 +257,7 @@ public final class ModType {
         return BY_ID.get(id);
     }
 
-    /** Call after {@link #register} to link JEI category UIDs and tooltip key.
+    /** Call after {@link #register} to link JEI category UIDs and recipe classes.
      *  @param jeiUidToFilter [jeiUid, filterString] pairs — filterString is what
      *                         {@code getBindingFilter} returns.  When the array is
      *                         a single-element {@code [uid]}, filter defaults to
@@ -268,18 +267,23 @@ public final class ModType {
      *                         is a single-element {@code [prefix]}, filter defaults
      *                         to the mod type's {@code id}. */
     public static void configureJei(String id, @Nullable String[][] jeiUidToFilter,
+                                    @Nullable String[][] jeiRecipePrefixes) {
+        configureJei(id, jeiUidToFilter, jeiRecipePrefixes, null);
+    }
+
+    public static void configureJei(String id, @Nullable String[][] jeiUidToFilter,
                                     @Nullable String[][] jeiRecipePrefixes,
-                                    @Nullable String jeiTooltipKey) {
+                                    @Nullable String virtualJeiTooltipKey) {
         ModType mt = byId(id);
         if (mt == GENERIC) return;
         mt.jeiUidToFilter = jeiUidToFilter;
         mt.jeiRecipePrefixes = jeiRecipePrefixes;
-        mt.jeiTooltipKey = jeiTooltipKey;
+        mt.virtualJeiTooltipKey = virtualJeiTooltipKey;
     }
 
-    /** Returns the tooltip key for this mod type's JEI button, or null. */
+    /** 没有绑定方块的虚拟配方可以提供操作提示。 */
     @Nullable
-    public String jeiTooltipKey() { return jeiTooltipKey; }
+    public String virtualJeiTooltipKey() { return virtualJeiTooltipKey; }
 
     /** Look up a JEI category UID and return the corresponding filter string
      *  for {@code getBindingFilter}, or null if no match. */

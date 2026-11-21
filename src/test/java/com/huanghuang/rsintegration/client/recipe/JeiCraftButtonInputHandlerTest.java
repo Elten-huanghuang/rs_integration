@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.client.recipe;
 import mezz.jei.gui.recipes.RecipesGui;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraftforge.client.event.ScreenEvent;
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -122,7 +123,7 @@ class JeiCraftButtonInputHandlerTest {
 
     private void addCraftButton() {
         AltarCraftButtons.add(10, 20, 10, 10, crafts::incrementAndGet,
-                "递归合成", null, null, BlockPos.ZERO, null);
+                Component.literal("递归合成"), null, null, BlockPos.ZERO, null);
     }
 
     private static ScreenEvent.MouseButtonPressed.Pre click(Screen screen, double x, double y, int button) {

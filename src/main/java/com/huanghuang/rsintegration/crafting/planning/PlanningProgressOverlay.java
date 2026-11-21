@@ -47,7 +47,9 @@ public final class PlanningProgressOverlay {
     }
 
     public static String titleKey(PlanningProgressSnapshot.State state) {
-        return "rsi.planning.state." + state.name().toLowerCase(Locale.ROOT);
+        return state == PlanningProgressSnapshot.State.ACCEPTED
+                ? "rsi.planning.state.running"
+                : "rsi.planning.state." + state.name().toLowerCase(Locale.ROOT);
     }
 
     public static String phaseKey(PlanningProgressSnapshot.Phase phase) {

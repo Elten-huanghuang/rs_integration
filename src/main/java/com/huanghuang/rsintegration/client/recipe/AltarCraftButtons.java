@@ -89,7 +89,7 @@ public final class AltarCraftButtons {
         }
     }
 
-    public static void add(int x, int y, int w, int h, Runnable handler, String tooltip,
+    public static void add(int x, int y, int w, int h, Runnable handler, Component tooltip,
                            ResourceLocation recipeId, @Nullable ResourceLocation dim,
                            BlockPos machinePos, ModType modType) {
         BUTTONS.add(new CraftButton(
@@ -217,7 +217,7 @@ public final class AltarCraftButtons {
             @Nullable ResourceLocation dim,
             BlockPos machinePos,
             ModType modType,
-            String tooltip
+            Component tooltip
     ) {}
 
     public record ButtonBounds(int x, int y, int width, int height) {
@@ -228,7 +228,7 @@ public final class AltarCraftButtons {
     }
 
     private record CraftButton(
-            ButtonBounds bounds, Runnable handler, String tooltip,
+            ButtonBounds bounds, Runnable handler, Component tooltip,
             ResourceLocation recipeId, @Nullable ResourceLocation dim,
             BlockPos machinePos, ModType modType) {
         CraftButton withRecipeId(ResourceLocation recipeId) {

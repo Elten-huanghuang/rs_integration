@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.feature.foodorder.client;
 
+import com.huanghuang.rsintegration.util.SharedText;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
@@ -20,8 +21,7 @@ final class FoodOrderBookmarkButton extends Button {
 
     void setFavorite(boolean favorite) {
         this.favorite = favorite;
-        setMessage(Component.translatable(favorite
-                ? "rsi.food_order.favorite.saved" : "rsi.food_order.favorite.label"));
+        setMessage(favorite ? Component.translatable("rsi.food_order.favorite.saved") : SharedText.FAVORITE.text());
         setTooltip(Tooltip.create(Component.translatable(favorite
                 ? "rsi.food_order.favorite.remove" : "rsi.food_order.favorite.add")));
     }

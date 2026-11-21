@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mods.malum;
 
+import com.huanghuang.rsintegration.util.SharedText;
 import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.NativeItemOutput;
 import com.huanghuang.rsintegration.crafting.TaskOutputReception;
@@ -1397,9 +1398,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
                 } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Crucible] spirit probe failed", e); }
             }
             if (!names.isEmpty()) {
-                warnings.add(Component.translatable(
-                        "rsi.malum_crucible.warn.spirit_required",
-                        String.join(", ", names)));
+                warnings.add(SharedText.SPIRIT_REQUIRED.text(String.join(", ", names)));
             }
         }
 

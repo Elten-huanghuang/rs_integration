@@ -325,9 +325,10 @@ dependencies {
     // 原生沸腾配方会调用 Minecraft 方法，测试依赖必须实际完成名称映射。
     testImplementation fg.deobf('local:embersrekindled:1.20.1-1.3.9')
     testImplementation fg.deobf('local.compile:eidolon_repraised-1.20.1-0.3.8.15:local')
+    // 输出钩子的兼容测试需要读取 Malum 字节码，即使未启用原生精魂匹配测试。
+    testImplementation fg.deobf('local.compile:malum-1.20.1-1.6.6:local')
     // 只有验证 Malum 原生精魂匹配时才需要它的 Lodestone 运行库。
     if (runMalumNativeTests) {
-        testImplementation fg.deobf('local.compile:malum-1.20.1-1.6.6:local')
         testImplementation fg.deobf('local.compile:lodestone-1.20.1-1.6.4.1:local')
     } else {
         sourceSets.test.java.exclude '**/mixin/malum/MalumSpiritMatchingTest.java'

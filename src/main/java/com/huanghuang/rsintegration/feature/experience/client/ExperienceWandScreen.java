@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.feature.experience.client;
 
+import com.huanghuang.rsintegration.ModItems;
 import com.huanghuang.rsintegration.feature.experience.ExperiencePoints;
 import com.huanghuang.rsintegration.feature.experience.ExperienceWandNetwork;
 import com.huanghuang.rsintegration.feature.experience.ExperienceWandNetwork.Action;
@@ -56,7 +57,7 @@ public final class ExperienceWandScreen extends Screen {
     private final List<Button> actionButtons = new ArrayList<>();
 
     public ExperienceWandScreen(StatePacket state) {
-        super(text("title"));
+        super(ModItems.RESONANT_EXPERIENCE_WAND.get().getDescription());
         this.state = state;
         mode = state.settings().mode();
         mending = state.settings().mending();

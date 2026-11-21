@@ -40,8 +40,7 @@ public final class EreAlchemyRSModule implements IModIntegration {
                         "alchemy inference and tablet locking require serial per-operation preparation");
         ModType.configureJei(ModIds.ID_EMBERS_ALCHEMY,
                 new String[][]{{"embers:alchemy", "embers"}},
-                new String[][]{{"com.rekindled.embers.", "embers"}},
-                null);
+                new String[][]{{"com.rekindled.embers.", "embers"}});
     }
 
     @Override

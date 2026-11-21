@@ -639,8 +639,7 @@ public final class RSIntegrationMod {
                     new String[][]{
                             {"net.minecraft.world.item.crafting.SmeltingRecipe", "vanilla_furnace"},
                             {"cech12.brickfurnace.crafting.BrickSmeltingRecipe", "vanilla_furnace"}
-                    },
-                    "gui.rs_integration.jei.vanilla_furnace_craft");
+                    });
             BindingEventHandler.registerTarget(
                     new BindingEventHandler.MachineBindingTarget(
                             "minecraft", ModType.byId("vanilla_furnace"),
@@ -665,8 +664,7 @@ public final class RSIntegrationMod {
                     new String[][]{
                             {"net.minecraft.world.item.crafting.BlastingRecipe", "vanilla_blast_furnace"},
                             {"cech12.brickfurnace.crafting.BrickBlastingRecipe", "vanilla_blast_furnace"}
-                    },
-                    "gui.rs_integration.jei.vanilla_blast_furnace_craft");
+                    });
             BindingEventHandler.registerTarget(
                     new BindingEventHandler.MachineBindingTarget(
                             "minecraft", ModType.byId("vanilla_blast_furnace"),
@@ -691,8 +689,7 @@ public final class RSIntegrationMod {
                     new String[][]{
                             {"net.minecraft.world.item.crafting.SmokingRecipe", "vanilla_smoker"},
                             {"cech12.brickfurnace.crafting.BrickSmokingRecipe", "vanilla_smoker"}
-                    },
-                    "gui.rs_integration.jei.vanilla_smoker_craft");
+                    });
             BindingEventHandler.registerTarget(
                     new BindingEventHandler.MachineBindingTarget(
                             "minecraft", ModType.byId("vanilla_smoker"),
@@ -724,8 +721,7 @@ public final class RSIntegrationMod {
                         ModType.delegateSupplier(delegateClass));
                 ModType.configureJei("vanilla_campfire",
                         new String[][]{{"minecraft:campfire_cooking", "vanilla_campfire"}},
-                        new String[][]{{"net.minecraft.world.item.crafting.CampfireCookingRecipe", "vanilla_campfire"}},
-                        "gui.rs_integration.jei.vanilla_campfire_craft");
+                        new String[][]{{"net.minecraft.world.item.crafting.CampfireCookingRecipe", "vanilla_campfire"}});
                 BindingEventHandler.registerTarget(
                         new BindingEventHandler.MachineBindingTarget(
                                 "minecraft", ModType.byId("vanilla_campfire"),
@@ -742,8 +738,7 @@ public final class RSIntegrationMod {
                     ModType.delegateSupplier(delegateClass));
             ModType.configureJei("vanilla_stonecutter",
                     new String[][]{{"minecraft:stonecutting", "vanilla_stonecutter"}},
-                    new String[][]{{"net.minecraft.world.item.crafting.StonecutterRecipe", "vanilla_stonecutter"}},
-                    "gui.rs_integration.jei.vanilla_stonecutter_craft");
+                    new String[][]{{"net.minecraft.world.item.crafting.StonecutterRecipe", "vanilla_stonecutter"}});
             BindingEventHandler.registerTarget(
                     new BindingEventHandler.MachineBindingTarget(
                             "minecraft", ModType.byId("vanilla_stonecutter"),
@@ -759,8 +754,7 @@ public final class RSIntegrationMod {
             ModType.configureJei("vanilla_brewing_stand",
                     new String[][]{{"minecraft:brewing", "vanilla_brewing_stand"}},
                     new String[][]{{"com.huanghuang.rsintegration.mods.vanilla.brewing.VanillaBrewingRecipeDefinition",
-                            "vanilla_brewing_stand"}},
-                    "gui.rs_integration.jei.vanilla_brewing_stand_craft");
+                            "vanilla_brewing_stand"}});
             BindingEventHandler.registerTarget(
                     new BindingEventHandler.MachineBindingTarget(
                             "minecraft", ModType.byId("vanilla_brewing_stand"),

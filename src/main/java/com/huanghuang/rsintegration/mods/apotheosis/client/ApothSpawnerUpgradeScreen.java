@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.mods.apotheosis.network.ApothSpawnerExecuteP
 import com.huanghuang.rsintegration.mods.apotheosis.network.ApothSpawnerRefreshPacket;
 import com.huanghuang.rsintegration.mods.apotheosis.network.ApothSpawnerStatePacket;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
+import com.huanghuang.rsintegration.util.SharedText;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.AbstractButton;
@@ -68,7 +69,7 @@ public final class ApothSpawnerUpgradeScreen extends Screen {
         addRenderableWidget(new FlatButton(left + 182, top + 27, 82, 18,
                 Component.translatable("rsi.apotheosis.spawner.select_all"), this::selectAll));
         addRenderableWidget(new FlatButton(left + PANEL_W - 82, top + 27, 72, 18,
-                Component.translatable("rsi.apotheosis.spawner.refresh"), () ->
+                SharedText.REFRESH.text(), () ->
                 NetworkHandler.CHANNEL.sendToServer(new ApothSpawnerRefreshPacket(dimension, pos))));
         addRenderableWidget(new FlatButton(left + PANEL_W - 70, top + PANEL_H - 27, 60, 20,
                 Component.translatable("gui.done"), this::execute));

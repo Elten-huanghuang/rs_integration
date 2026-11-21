@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mods.rs.monitor;
 
+import com.huanghuang.rsintegration.util.SharedText;
 import com.huanghuang.rsintegration.client.gui.CraftingUiStyle;
 import com.huanghuang.rsintegration.config.CraftingUiColors;
 import com.huanghuang.rsintegration.client.gui.ListScrollState;
@@ -129,7 +130,9 @@ public final class MonitorDetailsPanel {
     public boolean visible() { return visible; }
     public ViewState viewState() { return new ViewState(lastTaskId, selectedNodeId, List.copyOf(detailHistory), listOffset, offset); }
     public void restoreViewState(ViewState state) { pendingView = state; }
-    private Component filterLabel() { return Component.translatable(onlyActive ? "rsi.monitor.active_steps" : "rsi.monitor.all_steps"); }
+    private Component filterLabel() {
+        return onlyActive ? Component.translatable("rsi.monitor.active_steps") : SharedText.ALL.text();
+    }
 
     private int rowHeight() { return selectedNodeId >= 0 ? 32 : lastTask instanceof RsiMonitorTask ? RSI_ROW_HEIGHT : NATIVE_ROW_HEIGHT; }
     private int listTop() { return lastTask instanceof RsiMonitorTask ? 83 : 46; }

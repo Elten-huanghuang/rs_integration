@@ -45,8 +45,7 @@ public final class ImmortalersDelightRSModule implements IModIntegration {
                 new String[][]{
                         {"com.renyigesai.immortalers_delight.recipe.EnchantalCoolerRecipe", "immortalers_delight"},
                         {"com.renyigesai.immortalers_delight.recipe.PillagerKnifeAddPotionRecipe", "immortalers_delight"}
-                },
-                "gui.rs_integration.jei.immortalers_cooler_craft");
+                });
         ModType.registerVirtual(HOT_SPRING_TYPE_ID,
                 new String[]{ImmortalersDelightHotSpringRecipeHandler.RECIPE_CLASS},
                 HandlerVirtualExchangeBatchDelegate::new);

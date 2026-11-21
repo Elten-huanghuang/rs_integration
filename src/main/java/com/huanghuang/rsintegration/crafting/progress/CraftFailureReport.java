@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting.progress;
 
+import com.huanghuang.rsintegration.util.SharedText;
+
 import java.lang.reflect.Field;
 
 import net.minecraft.network.chat.Component;
@@ -201,7 +203,8 @@ public final class CraftFailureReport {
     }
 
     private static Component field(String name, String value) {
-        return Component.translatable("rsi.diagnostic." + name,
+        String key = name.equals("recipe") ? SharedText.RECIPE.key() : "rsi.diagnostic." + name;
+        return Component.translatable(key,
                 value == null || value.isBlank() ? unknown() : safeText(value))
                 .withStyle(name.equals("target") ? ChatFormatting.WHITE : ChatFormatting.GRAY);
     }

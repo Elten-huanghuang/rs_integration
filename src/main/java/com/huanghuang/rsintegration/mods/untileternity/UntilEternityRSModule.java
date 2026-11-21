@@ -31,8 +31,7 @@ public final class UntilEternityRSModule implements IModIntegration {
                 new String[]{TYPE_ID}, EndCraftingBatchDelegate::new);
         ModType.configureJei(TYPE_ID,
                 new String[][]{{"until_eternity:end_crafting", TYPE_ID}},
-                new String[][]{{RECIPE_CLASS, TYPE_ID}},
-                "gui.rs_integration.jei.until_eternity_end_crafting");
+                new String[][]{{RECIPE_CLASS, TYPE_ID}});
     }
 
     @Override

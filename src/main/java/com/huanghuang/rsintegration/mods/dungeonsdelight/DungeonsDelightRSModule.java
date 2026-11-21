@@ -35,8 +35,7 @@ public final class DungeonsDelightRSModule implements IModIntegration {
                 .confirmPureProjection("怪物锅食材及容器由共享账本预留，成品在独占机器槽内结算");
         ModType.configureJei(ModIds.ID_DD_MONSTER_POT,
                 new String[][]{{"dungeonsdelight:monster_cooking", ModIds.ID_DD_MONSTER_POT}},
-                new String[][]{{DungeonsDelightRecipeHandler.RECIPE_CLASS, ModIds.ID_DD_MONSTER_POT}},
-                "gui.rs_integration.jei.dd_monster_pot_craft");
+                new String[][]{{DungeonsDelightRecipeHandler.RECIPE_CLASS, ModIds.ID_DD_MONSTER_POT}});
     }
 
     @Override

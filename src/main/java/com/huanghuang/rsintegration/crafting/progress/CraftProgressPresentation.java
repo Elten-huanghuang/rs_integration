@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.progress;
 
 import com.huanghuang.rsintegration.crafting.plan.PlanRenderEngine;
+import com.huanghuang.rsintegration.util.SharedText;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.network.chat.Component;
@@ -55,7 +56,7 @@ final class CraftProgressPresentation {
         if (!output.isEmpty()) return output.getHoverName();
         return recipe == null
                 ? Component.translatable("rsi.progress.step.unknown")
-                : Component.translatable("rsi.progress.step.recipe",
+                : SharedText.RECIPE.text(
                 PlanRenderEngine.formatRecipeName(recipe, output));
     }
 
@@ -76,13 +77,13 @@ final class CraftProgressPresentation {
                 : Component.literal(PlanRenderEngine.formatModTypeLabel(node.modTypeId()));
         Component location = formatMachineLabel(node.machineLabel());
         if (location.getString().isEmpty()) return type;
-        return Component.translatable("rsi.progress.step.machine", type, location);
+        return SharedText.DETAIL_PAIR.text(type, location);
     }
 
     static Component machineWithReason(CraftProgressSnapshot.NodeProgress node) {
         Component machine = machine(node);
         if (node.reason() == CraftProgressSnapshot.Reason.NONE) return machine;
-        return Component.translatable("rsi.progress.step.machine_reason", machine,
+        return SharedText.DETAIL_PAIR.text(machine,
                 Component.translatable(node.reason().translationKey()));
     }
 
@@ -93,7 +94,7 @@ final class CraftProgressPresentation {
         String position = at >= 0 ? label.substring(at + 1) : "";
         Component translated = translateDimension(dimension);
         return position.isEmpty() ? translated
-                : Component.translatable("rsi.progress.step.location", translated, position);
+                : SharedText.DETAIL_PAIR.text(translated, position);
     }
 
     private static Component translateDimension(String dimension) {

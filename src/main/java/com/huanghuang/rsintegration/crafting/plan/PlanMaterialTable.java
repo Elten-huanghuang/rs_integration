@@ -69,7 +69,7 @@ public final class PlanMaterialTable {
                 value.available(), value.missingCount(), false, materialSourceKey(value, unresolved.contains(key)))));
         data.sort(Comparator.comparing((Row row) -> row.missing() == 0)
                 .thenComparing(row -> row.key().stack(1).getHoverName().getString()));
-        plan.leftovers().forEach((key, count) -> data.add(new Row(key, count, 0, 0, true, "leftover_source")));
+        plan.leftovers().forEach((key, count) -> data.add(new Row(key, count, 0, 0, true, "leftovers")));
         rows = List.copyOf(data);
         filterDirty = true;
     }

@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.network.binding;
 
+import com.huanghuang.rsintegration.mods.pmmo.PmmoRSModule;
+import com.huanghuang.rsintegration.util.SharedText;
 import com.huanghuang.rsintegration.network.binding.MachineBindingService.PlayerEndpoint;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.contents.TranslatableContents;
@@ -53,7 +55,7 @@ public final class MachineBindingInfoFactory {
             @Nullable String blockKey, @Nullable String blockRegKey,
             @Nullable ItemStack displayStack) {
         if (blockKey != null && blockKey.startsWith("pmmo_salvage||")) {
-            return "rsi.batch.mod.pmmo_salvage";
+            return SharedText.machineTypeKey(PmmoRSModule.TYPE_ID);
         }
         if (displayStack != null && !displayStack.isEmpty()) {
             Component hoverName = displayStack.getHoverName();

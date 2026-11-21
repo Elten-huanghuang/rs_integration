@@ -40,8 +40,7 @@ public final class AetherRSModule implements IModIntegration {
         ModType.configureJei("aether_freezer",
                 new String[][]{{"aether:freezing", "aether_freezer"}},
                 new String[][]{{"com.aetherteam.aether.recipe.recipes.item.FreezingRecipe", "aether_freezer"},
-                        {"com.aetherteam.aether.recipe.recipes.item.Freezable", "aether_freezer"}},
-                "gui.rs_integration.jei.aether_freezer_craft");
+                        {"com.aetherteam.aether.recipe.recipes.item.Freezable", "aether_freezer"}});
 
         // ── Incubator ──
         ModType.register("aether_incubator",
@@ -51,8 +50,7 @@ public final class AetherRSModule implements IModIntegration {
                 AetherFurnaceBatchDelegate::new);
         ModType.configureJei("aether_incubator",
                 new String[][]{{"aether:incubation", "aether_incubator"}},
-                new String[][]{{"com.aetherteam.aether.recipe.recipes.item.Incubation", "aether_incubator"}},
-                "gui.rs_integration.jei.aether_incubator_craft");
+                new String[][]{{"com.aetherteam.aether.recipe.recipes.item.Incubation", "aether_incubator"}});
 
         // ── Altar (enchanting + repairing) ──
         ModType.register("aether_altar",
@@ -65,8 +63,7 @@ public final class AetherRSModule implements IModIntegration {
                 new String[][]{{"aether:enchanting", "aether_altar"},
                         {"aether:repairing", "aether_altar"}},
                 new String[][]{{"com.aetherteam.aether.recipe.recipes.item.Enchanting", "aether_altar"},
-                        {"com.aetherteam.aether.recipe.recipes.item.Repairing", "aether_altar"}},
-                "gui.rs_integration.jei.aether_altar_craft");
+                        {"com.aetherteam.aether.recipe.recipes.item.Repairing", "aether_altar"}});
 
         // ── Generic fallback (other Aether recipe types) ──
         ModType.register("aether",
@@ -79,8 +76,7 @@ public final class AetherRSModule implements IModIntegration {
                         {"aether:incubation", "aether_incubator"},
                         {"aether:enchanting", "aether_altar"},
                         {"aether:repairing", "aether_altar"}},
-                new String[][]{{"com.aetherteam.aether.", "aether"}},
-                null);
+                new String[][]{{"com.aetherteam.aether.", "aether"}});
     }
 
     @Override

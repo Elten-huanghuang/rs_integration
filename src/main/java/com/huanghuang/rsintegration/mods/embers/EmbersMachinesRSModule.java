@@ -47,8 +47,7 @@ public final class EmbersMachinesRSModule implements IModIntegration {
                 .rejectPureProjection("余烬机器与外部流体罐、印模和物理产物共用状态");
         ModType.configureJei(id,
                 new String[][]{{"embers:" + jeiName, id}},
-                new String[][]{{implementation, id}},
-                "gui.rs_integration.jei." + id);
+                new String[][]{{implementation, id}});
     }
 
     @Override public void registerBindingTargets() {

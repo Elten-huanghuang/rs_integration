@@ -37,8 +37,7 @@ public final class TaczRSModule implements IModIntegration {
                 TaczBatchDelegate::new);
         ModType.configureJei("tacz",
                 null,
-                new String[][]{{"com.tacz.guns.crafting.GunSmithTableRecipe", "tacz"}},
-                "gui.rs_integration.jei.tacz_craft");
+                new String[][]{{"com.tacz.guns.crafting.GunSmithTableRecipe", "tacz"}});
     }
 
     @Override

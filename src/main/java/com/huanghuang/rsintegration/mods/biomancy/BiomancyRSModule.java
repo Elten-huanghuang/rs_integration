@@ -46,8 +46,7 @@ public final class BiomancyRSModule implements IModIntegration {
                 BiomancyBatchDelegate::new);
         ModType.configureJei(typeId,
                 new String[][]{{"biomancy:" + categoryId}},
-                List.of(recipePrefixes).stream().map(prefix -> new String[]{prefix}).toArray(String[][]::new),
-                "gui.rs_integration.jei.vanilla_machine_craft");
+                List.of(recipePrefixes).stream().map(prefix -> new String[]{prefix}).toArray(String[][]::new));
         ModType.byId(typeId).rejectPureProjection(
                 "Biomancy machine state and nutrient fuel are runtime-managed");
     }

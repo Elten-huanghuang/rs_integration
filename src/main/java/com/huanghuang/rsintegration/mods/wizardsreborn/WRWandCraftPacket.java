@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mods.wizardsreborn;
 
+import com.huanghuang.rsintegration.util.SharedText;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
@@ -502,7 +503,7 @@ public final class WRWandCraftPacket {
                     .invoke(null, beLevel, pos, area);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("Failed to find Arcane Pedestals for crystal ritual", e);
-            player.sendSystemMessage(Component.translatable("rsi.wr.error.cant_find_pedestals"));
+            player.sendSystemMessage(SharedText.RITUAL_PEDESTALS_NOT_FOUND.text());
             return false;
         }
 
