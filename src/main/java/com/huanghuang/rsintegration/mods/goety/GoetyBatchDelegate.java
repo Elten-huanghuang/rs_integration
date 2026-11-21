@@ -15,7 +15,6 @@ import com.huanghuang.rsintegration.crafting.plan.MachineCandidateView;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.magic.MagicResourceKind;
 import com.huanghuang.rsintegration.mods.goety.magic.GoetySoulCraftingTask;
-import com.huanghuang.rsintegration.util.CuriosAccess;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.AABB;
@@ -1151,14 +1150,6 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                     e -> matchesExpectedRitualResult(e.getItem(), expected));
             if (!entities.isEmpty()) return true;
         }
-        if (player == null) return false;
-        var inv = player.getInventory();
-        for (ItemStack stack : inv.items) {
-            if (matchesExpectedRitualResult(stack, expected)) return true;
-        }
-        for (ItemStack stack : inv.offhand) {
-            if (matchesExpectedRitualResult(stack, expected)) return true;
-        }
         return false;
     }
 
@@ -1297,21 +1288,6 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
             }
         }
 
-        // 3. Fallback: check player inventory
-        var inv = player.getInventory();
-        List<ItemStack> all = new ArrayList<>();
-        all.addAll(inv.items);
-        all.addAll(inv.offhand);
-        all.addAll(inv.armor);
-        all.addAll(CuriosAccess.stacks(player));
-
-        for (ItemStack stack : all) {
-            if (matchesExpectedRitualResult(stack, expected)) {
-                ItemStack collected = stack.split(expected.getCount());
-                return collected;
-            }
-        }
-
         return ItemStack.EMPTY;
     }
 
@@ -1341,19 +1317,6 @@ public final class GoetyBatchDelegate extends AbstractBatchDelegate {
                 RSIntegrationMod.LOGGER.debug("[RSI-Batch-Goety] Collected brazier result: {} x{}",
                         collected.getDisplayName().getString(), collected.getCount());
                 return collected;
-            }
-        }
-
-        // Fallback: check player inventory
-        var inv = player.getInventory();
-        for (ItemStack stack : inv.items) {
-            if (IBatchDelegate.matchesProducedItem(stack, expected)) {
-                return stack.split(expected.getCount());
-            }
-        }
-        for (ItemStack stack : inv.offhand) {
-            if (IBatchDelegate.matchesProducedItem(stack, expected)) {
-                return stack.split(expected.getCount());
             }
         }
 

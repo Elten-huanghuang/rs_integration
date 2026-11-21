@@ -1018,23 +1018,6 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             return result;
         }
 
-        // Fallback: a magnet or auto-pickup can move the result into any player
-        // inventory slot if an external collector won the race with the capture
-        // interceptor. Recover it from the complete inventory before declaring
-        // the world output missing.
-        if (!target.isEmpty()) {
-            List<ItemStack> slots = new ArrayList<>(player.getInventory().items);
-            slots.addAll(player.getInventory().offhand);
-            for (ItemStack slot : slots) {
-                if (ItemStack.isSameItemSameTags(slot, target)
-                        || ItemStack.isSameItem(slot, target)) {
-                    int amount = Math.min(slot.getCount(), target.getCount());
-                    ItemStack result = slot.split(amount);
-                    if (!result.isEmpty()) return result;
-                }
-            }
-        }
-
         return ItemStack.EMPTY;
     }
 

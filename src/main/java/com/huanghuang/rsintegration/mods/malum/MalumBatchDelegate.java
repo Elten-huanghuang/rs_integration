@@ -963,7 +963,7 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
         ItemStack expected = ModRecipeHandlers.tryGetUncachedResultItem(recipe, player.serverLevel().registryAccess());
         if (expected.isEmpty()) return ItemStack.EMPTY;
 
-        // 1. Scan for ItemEntity spawned by altar's craft() method
+        // 已捕获的产物由调度器交接；这里只收取尚在世界中的掉落物。
         if (myPos != null && resolveMachineLevel(player).isLoaded(myPos)) {
             var entities = resolveMachineLevel(player).getEntitiesOfClass(
                     ItemEntity.class,
@@ -981,21 +981,6 @@ public final class MalumBatchDelegate extends AbstractBatchDelegate {
                 RSIntegrationMod.LOGGER.debug("[RSI-Batch-Malum] Collected ItemEntity: {} x{}",
                         collected.getHoverName().getString(), collected.getCount());
                 return collected;
-            }
-        }
-
-        // 2. Fallback: check player inventory
-        var inv = player.getInventory();
-        for (ItemStack stack : inv.items) {
-            if (ItemStack.isSameItemSameTags(stack, expected)
-                    || ItemStack.isSameItem(stack, expected)) {
-                return stack.split(expected.getCount());
-            }
-        }
-        for (ItemStack stack : inv.offhand) {
-            if (ItemStack.isSameItemSameTags(stack, expected)
-                    || ItemStack.isSameItem(stack, expected)) {
-                return stack.split(expected.getCount());
             }
         }
 

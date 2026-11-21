@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.goety;
 
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.PreparationMessageScope;
 import com.huanghuang.rsintegration.crafting.plan.MachineCandidateView;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
@@ -11,6 +12,7 @@ import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.NonNullList;
+import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
@@ -28,6 +30,11 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.item.crafting.CraftingBookCategory;
+import net.minecraft.world.item.crafting.ShapelessRecipe;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.network.chat.Component;
 import net.minecraftforge.items.ItemStackHandler;
 import org.junit.jupiter.api.Test;
@@ -356,6 +363,33 @@ class GoetyBatchDelegateTest extends BootstrapTest {
         assertEquals(1, claimed.getCount());
         assertTrue(altar.getStackInSlot(0).isEmpty());
         assertTrue(GoetyBatchDelegate.claimMatchingOutput(altar, 0, expected).isEmpty());
+    }
+
+    @Test
+    void missingBrazierOutputDoesNotConsumeExistingPlayerItem() throws Exception {
+        ServerPlayer player = mock(ServerPlayer.class);
+        ServerLevel level = mock(ServerLevel.class);
+        Inventory inventory = new Inventory(player);
+        ItemStack expected = new ItemStack(Items.INK_SAC, 2);
+        inventory.items.set(0, expected.copyWithCount(5));
+        when(player.getInventory()).thenReturn(inventory);
+        when(player.serverLevel()).thenReturn(level);
+        when(level.registryAccess()).thenReturn(RegistryAccess.EMPTY);
+        when(level.getEntitiesOfClass(eq(ItemEntity.class), any(AABB.class), any())).thenReturn(List.of());
+
+        GoetyBatchDelegate delegate = new GoetyBatchDelegate();
+        set(delegate, "player", player);
+        set(delegate, "isBrazier", true);
+        set(delegate, "myPos", BlockPos.ZERO);
+        set(delegate, "brazierRecipeObj", new ShapelessRecipe(
+                new ResourceLocation("test", "brazier_output"), "",
+                CraftingBookCategory.MISC, expected, NonNullList.create()));
+        set(delegate, "brazier", new BrazierHolder(BlockPos.ZERO));
+
+        OperationOutputSource.Handoff handoff = delegate.outputSource().collectFinal(player);
+
+        assertTrue(handoff.stacks().isEmpty());
+        assertEquals(5, inventory.items.get(0).getCount());
     }
 
     @Test

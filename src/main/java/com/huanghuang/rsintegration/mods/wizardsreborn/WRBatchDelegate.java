@@ -5,7 +5,6 @@ import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
-import com.huanghuang.rsintegration.util.CuriosAccess;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -1940,26 +1939,6 @@ public final class WRBatchDelegate extends DrivenMachineDelegate {
         }
         if (!fromMachine.isEmpty()) return fromMachine;
 
-        // wissenWandFunction auto-delivers the result to the player's inventory
-        // (standard WR behavior). Search player inventory as fallback.
-        ItemStack expected = ModRecipeHandlers.tryGetUncachedResultItem(
-                recipe, player.serverLevel().registryAccess());
-        if (expected.isEmpty()) return ItemStack.EMPTY;
-
-        var inv = player.getInventory();
-        List<ItemStack> all = new ArrayList<>();
-        all.addAll(inv.items);
-        all.addAll(inv.offhand);
-        all.addAll(inv.armor);
-        all.addAll(CuriosAccess.stacks(player));
-
-        for (ItemStack stack : all) {
-            if (!stack.isEmpty() && ItemStack.isSameItemSameTags(stack, expected)) {
-                int take = Math.min(stack.getCount(), expected.getCount());
-                ItemStack taken = stack.split(take);
-                return taken;
-            }
-        }
         return ItemStack.EMPTY;
     }
 
