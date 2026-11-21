@@ -5,6 +5,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
 import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.ClassReader;
 import org.spongepowered.asm.mixin.extensibility.IMixinConfigPlugin;
 import org.spongepowered.asm.mixin.extensibility.IMixinInfo;
@@ -196,6 +197,27 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
                     && hasMethod(targetClassName, "capturePedestals",
                     "(Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;III)Ljava/util/List;");
         }
+        if (mixinClassName.endsWith(".malum.SpiritCrucibleOutputMixin")) {
+            return hasField(targetClassName, "recipe", "Lcom/sammy/malum/common/recipe/SpiritFocusingRecipe;")
+                    && countEntitySpawns(targetClassName, "craft", "()V", "net/minecraft/world/level/Level",
+                            "addFreshEntity", "m_7967_", 2);
+        }
+        if (mixinClassName.endsWith(".eidolon.BrazierOutputMixin")) {
+            return hasMethod(targetClassName, "startBurning");
+        }
+        if (mixinClassName.endsWith(".eidolon.CraftingRitualOutputMixin")) {
+            return countEntitySpawns(targetClassName, "start",
+                    "(Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;)"
+                            + "Lelucent/eidolon/api/ritual/Ritual$RitualResult;",
+                    "net/minecraft/world/level/Level", "addFreshEntity", "m_7967_", 1);
+        }
+        if (mixinClassName.endsWith(".botania.BreweryOutputMixin")) {
+            return countEntitySpawns(targetClassName, "commonTick",
+                    "(Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;"
+                            + "Lnet/minecraft/world/level/block/state/BlockState;"
+                            + "Lvazkii/botania/common/block/block_entity/BreweryBlockEntity;)V",
+                    "net/minecraft/world/level/Level", "addFreshEntity", "m_7967_", 1);
+        }
         if (mixinClassName.endsWith(".emi.RecipeDisplayMixin")) {
             return isClassPresent("dev.emi.emi.screen.RecipeDisplay")
                     && hasMethod(targetClassName, "getWidgets");
@@ -345,6 +367,20 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
             return hasField(targetClassName, "startRitual")
                     && hasField(targetClassName, "cooldown")
                     && hasMethod(targetClassName, "wissenWandFunction");
+        }
+        if (mixinClassName.endsWith(".wizardsreborn.CrystalBlockOutputMixin")) {
+            return hasMethod(targetClassName, "getCrystalRitual");
+        }
+        if (mixinClassName.endsWith(".wizardsreborn.CrystalInfusionOutputMixin")) {
+            return callsEntitySpawn(targetClassName, "end",
+                    "(Lmod/maxbogomol/wizards_reborn/common/block/crystal/CrystalBlockEntity;)V",
+                    "net/minecraft/world/level/Level", "addFreshEntity", "m_7967_");
+        }
+        if (mixinClassName.endsWith(".touhoulittlemaid.AltarRecipeOutputMixin")) {
+            return callsEntitySpawn(targetClassName, "spawnOutputEntity",
+                    "(Lnet/minecraft/server/level/ServerLevel;Lnet/minecraft/core/BlockPos;"
+                            + "Lcom/github/tartaricacid/touhoulittlemaid/inventory/AltarRecipeInventory;)V",
+                    "net/minecraft/server/level/ServerLevel", "tryAddFreshEntityWithPassengers", "m_8860_");
         }
         if (mixinClassName.contains("CraftingManagerMixin")
                 || mixinClassName.contains("CraftingTaskMixin")
@@ -730,12 +766,36 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
     }
 
     private static boolean readClass(String className, ClassPredicate predicate) {
+        return readClass(className, ClassReader.SKIP_CODE, predicate);
+    }
+
+    private static boolean callsEntitySpawn(String className, String method, String descriptor,
+                                            String owner, String name, String srgName) {
+        return countEntitySpawns(className, method, descriptor, owner, name, srgName, -1);
+    }
+
+    private static boolean countEntitySpawns(String className, String method, String descriptor,
+                                             String owner, String name, String srgName, int expected) {
+        return readClass(className, 0, node -> node.methods.stream()
+                .filter(candidate -> candidate.name.equals(method) && candidate.desc.equals(descriptor))
+                .anyMatch(candidate -> {
+                    int count = 0;
+                    for (var instruction : candidate.instructions) {
+                        if (instruction instanceof MethodInsnNode call && call.owner.equals(owner)
+                                && (call.name.equals(name) || call.name.equals(srgName))
+                                && call.desc.equals("(Lnet/minecraft/world/entity/Entity;)Z")) count++;
+                    }
+                    return expected < 0 ? count > 0 : count == expected;
+                }));
+    }
+
+    private static boolean readClass(String className, int flags, ClassPredicate predicate) {
         String resource = className.replace('.', '/') + ".class";
         try (InputStream input = RSIntegrationMixinPlugin.class.getClassLoader()
                 .getResourceAsStream(resource)) {
             if (input == null) return false;
             ClassNode node = new ClassNode();
-            new ClassReader(input).accept(node, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+            new ClassReader(input).accept(node, flags | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
             return predicate.test(node);
         } catch (Exception ignored) {
             return false;

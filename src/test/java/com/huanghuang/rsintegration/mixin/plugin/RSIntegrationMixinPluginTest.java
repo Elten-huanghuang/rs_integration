@@ -12,10 +12,26 @@ import java.util.jar.JarFile;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /** 校验 JEI 输入 API 探测能区分旧版和 15.74+。 */
 class RSIntegrationMixinPluginTest {
+
+    @Test
+    void nativeOutputHooksMatchTheSupportedModBytecode() {
+        var plugin = new RSIntegrationMixinPlugin();
+        String mixin = "com.huanghuang.rsintegration.mixin.";
+        assertTrue(plugin.shouldApplyMixin("elucent.eidolon.common.tile.BrazierTileEntity",
+                mixin + "eidolon.BrazierOutputMixin"));
+        assertTrue(plugin.shouldApplyMixin("elucent.eidolon.common.ritual.CraftingRitual",
+                mixin + "eidolon.CraftingRitualOutputMixin"));
+        assertTrue(plugin.shouldApplyMixin("vazkii.botania.common.block.block_entity.BreweryBlockEntity",
+                mixin + "botania.BreweryOutputMixin"));
+        assertTrue(plugin.shouldApplyMixin(
+                "com.sammy.malum.common.block.curiosities.spirit_crucible.SpiritCrucibleCoreBlockEntity",
+                mixin + "malum.SpiritCrucibleOutputMixin"));
+    }
 
     @Test
     void legacyJeiInputApiMatchesEachDistributionJar() throws Exception {

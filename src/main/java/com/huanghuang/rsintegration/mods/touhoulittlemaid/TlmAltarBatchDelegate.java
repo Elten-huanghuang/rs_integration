@@ -2,6 +2,10 @@ package com.huanghuang.rsintegration.mods.touhoulittlemaid;
 
 import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+import com.huanghuang.rsintegration.crafting.batch.OutputContract;
+import com.huanghuang.rsintegration.crafting.TaskOutputReception;
+import com.huanghuang.rsintegration.crafting.MaterialMatcher;
+import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import com.huanghuang.rsintegration.storage.StorageRestockSupport;
@@ -80,6 +84,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
     @Nullable
     private AABB outputCaptureRegion;
     private Recipe<?> recipe;
+    @Nullable private TaskOutputReception.Writer production;
     private boolean craftEverConfirmed;
     @Nullable
     private ExtractionLedger powerTopUpLedger;
@@ -540,7 +545,43 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         return OperationOutputSource.single(this::takeResult, outputContract());
     }
 
+    @Override
+    public void bindProduction(TaskOutputReception.Writer writer) {
+        production = writer;
+    }
+
+    @Override
+    public OutputContract outputContract() {
+        if (!(recipe instanceof TlmAltarOutputHook)) return OutputContract.none();
+        ItemStack expected = getExpectedOutput();
+        if (expected == null) return OutputContract.none();
+        ItemStack prototype = outputPrototype(expected);
+        return new OutputContract(List.of(new OutputContract.Port(
+                "touhou_little_maid:altar:output", null, prototype, expected.getCount(),
+                OutputContract.Kind.PRIMARY, OutputContract.Source.WORLD)));
+    }
+
+    private ItemStack outputPrototype(ItemStack expected) {
+        ItemStack prototype = expected.copy();
+        if (new TlmAltarRecipeHandler().hasRuntimeDependentPrimaryNbt(recipe)) prototype.setTag(null);
+        return prototype;
+    }
+
+    void armAltarOutput(TlmAltarOutputHook hook, ServerLevel level) {
+        if (production == null || recipe == null) return;
+        ItemStack expected = ModRecipeHandlers.tryGetUncachedResultItem(recipe, level.registryAccess());
+        if (expected.isEmpty()) return;
+        var declaration = MaterialKey.of(outputPrototype(expected));
+        TaskOutputReception.Writer receiver = production;
+        hook.rsi$setAltarOutputReceiver(entity -> {
+            if (!(entity instanceof ItemEntity item) || item.level() != level
+                    || !MaterialMatcher.matchesOutputDeclaration(declaration, item.getItem())) return false;
+            return receiver.tryHold(item.getItem());
+        });
+    }
+
     private ItemStack takeResult(ServerPlayer player) {
+        if (recipe instanceof TlmAltarOutputHook) return ItemStack.EMPTY;
         ServerLevel level = resolveMachineLevel(player);
 
         // Primary: capture the spawned ItemEntity for full NBT fidelity
@@ -613,6 +654,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public AABB getOutputCaptureRegion() {
+        if (recipe instanceof TlmAltarOutputHook) return null;
         if (outputCaptureRegion != null) return outputCaptureRegion;
         BlockPos base = centrePos != null ? centrePos : myPos;
         return base == null ? null : new AABB(base.above(2)).inflate(2.0);
@@ -825,6 +867,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
 
     /** Invoke altarCraft via reflection. Returns true if no exception thrown. */
     private boolean invokeAltarCraft(ServerLevel level) {
+        TlmAltarOutputHook hook = recipe instanceof TlmAltarOutputHook nativeRecipe ? nativeRecipe : null;
         try {
             Method altarCraftMethod = Reflect.findMethod(TLMReflection.blockAltarClass, "altarCraft",
                     new Class<?>[]{Level.class, TLMReflection.altarBEClass, Player.class});
@@ -832,6 +875,7 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
                 RSIntegrationMod.LOGGER.error("[RSI-Batch-TLM] altarCraft method not found");
                 return false;
             }
+            if (hook != null) armAltarOutput(hook, level);
             altarCraftMethod.invoke(blockAltar, level, altar, player);
             return true;
         } catch (InvocationTargetException e) {
@@ -841,47 +885,15 @@ public final class TlmAltarBatchDelegate extends AbstractBatchDelegate {
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.error("[RSI-Batch-TLM] altarCraft invocation failed:", e);
             return false;
+        } finally {
+            if (hook != null) hook.rsi$setAltarOutputReceiver(null);
         }
     }
 
-    /** Clear items from handlers we filled, return them to RS network. */
+    /** 回滚本次补充的灵力和放入祭坛的材料，不接管来源不明的掉落物。 */
     private void rollbackAll() {
         rollbackPowerTopUp();
         clearHandlers();
-        // Entity output cleanup: skip item recovery when using shared committed
-        // ledger -- refund is centralized via ledger.refundCommitted().
-        if (usingSharedLedger) return;
-        // Also clear any output entity near the altar (match expected output)
-        try {
-            ServerLevel level = player != null ? resolveMachineLevel(player) : null;
-            if (level != null && myPos != null) {
-                ItemStack expected = ItemStack.EMPTY;
-                if (recipe != null && level != null) {
-                    expected = ModRecipeHandlers.tryGetUncachedResultItem(recipe, level.registryAccess());
-                }
-                for (ItemEntity entity : level.getEntitiesOfClass(ItemEntity.class,
-                        new AABB(myPos).inflate(2.5))) {
-                    if (entity.isRemoved()) continue;
-                    ItemStack stack = entity.getItem();
-                    if (stack.isEmpty()) continue;
-                    // Only recover entities that match the expected recipe output
-                    if (!expected.isEmpty() && !ItemStack.isSameItemSameTags(stack, expected)) {
-                        continue;
-                    }
-                    if (storageEndpoint() != null || storageEndpoint() != null) {
-                        ItemStack leftover = insertIntoStorage(player, stack, false);
-                        if (!leftover.isEmpty()) {
-                            ItemHandlerHelper.giveItemToPlayer(player, leftover);
-                        }
-                    } else if (player != null) {
-                        ItemHandlerHelper.giveItemToPlayer(player, stack);
-                    }
-                    entity.discard();
-                }
-            }
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.debug("[RSI-Batch-TLM] Output cleanup failed", e);
-        }
     }
 
     /** Clear items from storage block handlers. When player is online,

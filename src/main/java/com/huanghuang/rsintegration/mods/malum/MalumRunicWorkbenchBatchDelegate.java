@@ -16,12 +16,10 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.phys.AABB;
 import net.minecraftforge.common.util.LazyOptional;
 import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemHandlerHelper;
@@ -259,22 +257,6 @@ public final class MalumRunicWorkbenchBatchDelegate extends InstantBatchDelegate
                 }
             }
         }
-        if (result.isEmpty()) {
-            // Fallback: scan for ItemEntity near workbench
-            if (!expectedOutput.isEmpty() && myLevel.isLoaded(myPos)) {
-                List<ItemEntity> entities = myLevel.getEntitiesOfClass(ItemEntity.class,
-                        new AABB(myPos).inflate(3),
-                        e -> ItemStack.isSameItemSameTags(e.getItem(), expectedOutput)
-                                || ItemStack.isSameItem(e.getItem(), expectedOutput));
-                if (!entities.isEmpty()) {
-                    ItemEntity entity = entities.get(0);
-                    result = entity.getItem().copy();
-                    entity.getItem().shrink(result.getCount());
-                    entity.setItem(entity.getItem().copy());
-                    if (entity.getItem().isEmpty()) entity.discard();
-                }
-            }
-        }
         craftDone = false;
         expectedOutput = ItemStack.EMPTY;
         resetInstantBatch();
@@ -324,13 +306,6 @@ public final class MalumRunicWorkbenchBatchDelegate extends InstantBatchDelegate
 
     @Override
     public BlockPos getMachinePos() { return myPos; }
-
-    @Override
-    public ItemStack getExpectedOutput() {
-        // Output normally lands in slot 0, but can pop into the world as an
-        // ItemEntity — expose it so the interceptor beats magnets in that case.
-        return (expectedOutput != null && !expectedOutput.isEmpty()) ? expectedOutput : null;
-    }
 
     // ── helpers ─────────────────────────────────────────────────────
 

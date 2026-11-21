@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.mods.malum;
 
 import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
+import com.huanghuang.rsintegration.crafting.batch.NativeItemOutput;
+import com.huanghuang.rsintegration.crafting.TaskOutputReception;
 import java.lang.reflect.Method;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
@@ -32,7 +34,6 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
@@ -54,7 +55,7 @@ import java.util.List;
  *   augmentInventory    — 4 slots (augments)
  *   coreAugmentInventory— 1 slot  (core augment)
  *
- * Output spawns as ItemEntity in the world — collected via AABB scan.
+ * 只从原生精魂坩埚的产出点收货。
  */
 public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegate {
 
@@ -87,7 +88,12 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     private Recipe<?> recipe;
     private ItemStack expectedOutput;
     private boolean craftStarted;
-    private boolean craftWasSeenActive;
+    private TaskOutputReception.Writer production;
+    private NativeItemOutput outputMachine;
+    private NativeItemOutput.Receiver outputReceiver;
+    private long primaryReceived;
+    private final List<InstalledInput> installedInputs = new ArrayList<>();
+    private final List<ItemStack> uninstalledInputs = new ArrayList<>();
     private int bufferedOperations = 1;
     private ItemStack catalystStock = ItemStack.EMPTY;
     private final List<ItemStack> additionalCatalystStock = new ArrayList<>();
@@ -127,6 +133,8 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
             return false;
         }
         this.myLevel = level;
+        this.machineDim = level.dimension().location();
+        this.machineServer = player.server;
 
         // Validate block entity — Spirit Crucible is a multi-block; the player
         // may have clicked on a component block rather than the core.  Scan a
@@ -145,7 +153,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
                 be = level.getBlockEntity(corePos);
             }
         }
-        if (be == null || !MalumReflection.crucibleBEClass.isInstance(be)) {
+        if (be == null || !MalumReflection.crucibleBEClass.isInstance(be) || !(be instanceof NativeItemOutput)) {
             player.sendSystemMessage(Component.translatable(
                     "rsi.malum_crucible.error.not_crucible"));
             return false;
@@ -248,7 +256,6 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         }
 
         this.craftStarted = false;
-        this.craftWasSeenActive = false;
         return true;
     }
 
@@ -387,7 +394,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         if (!expectedPlan.enabled() || expectedPlan.operations() != plan.operations()) return false;
 
         BlockEntity be = myLevel == null ? null : myLevel.getBlockEntity(myPos);
-        if (be == null || !MalumReflection.crucibleBEClass.isInstance(be)
+        if (!canReceiveOutput(be) || be != crucibleBE || hasUnownedSpirits()
                 || Reflect.getField(be, "recipe").orElse(null) != null) return false;
         this.sharedLedger = sharedLedger;
         this.usingSharedLedger = true;
@@ -396,21 +403,23 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
 
         ItemStack existing = invCatalyst.getStackInSlot(0);
         ItemStack catalystToPlace = existing.isEmpty() ? catalyst.stack().copy() : ItemStack.EMPTY;
-        placePreparedInputs(invSpirits, spirits, invCatalyst, catalystToPlace);
+        installInputs(spirits, catalystToPlace);
         if (!activateExpectedRecipe(be, player)) {
             clearUncommittedPlacements();
             return false;
         }
         be.setChanged();
+        armOutput((NativeItemOutput) be);
         this.craftStarted = true;
         return true;
     }
 
     @Override
     public OutputContract outputContract() {
-        if (!supportsInputBuffer() || expectedOutput.isEmpty()) return OutputContract.none();
+        ItemStack expected = getExpectedOutput();
+        if (expected == null || expected.isEmpty()) return OutputContract.none();
         return new OutputContract(List.of(new OutputContract.Port(
-                "malum:primary", null, expectedOutput, expectedOutput.getCount(),
+                "malum:primary", null, new ItemStack(expected.getItem()), expected.getCount(),
                 OutputContract.Kind.PRIMARY, OutputContract.Source.WORLD)));
     }
 
@@ -534,16 +543,11 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     public BatchConcurrencyCapabilities concurrencyCapabilities() {
         return new BatchConcurrencyCapabilities(
                 BatchConcurrencyCapabilities.MaterialOwnership.CHAIN_RESERVED,
-                BatchConcurrencyCapabilities.OutputOwnership.OWNED_WORLD_CAPTURE,
+                BatchConcurrencyCapabilities.OutputOwnership.DELEGATE_RESULT,
                 BatchConcurrencyCapabilities.CleanupContract.SEPARABLE_OFFLINE,
                 BatchConcurrencyCapabilities.SideEffects.LOCAL_WORLD_ITEMS,
                 BatchConcurrencyCapabilities.PreparationContract.RETRY_SAFE,
                 List.of());
-    }
-
-    @Override
-    public boolean allowsOverlappingOutputCaptureOrigins() {
-        return true;
     }
 
     // ── Internal: extraction + placement ─────────────────────────
@@ -554,7 +558,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
 
         // Re-validate BE still exists and is idle
         BlockEntity be = myLevel.getBlockEntity(myPos);
-        if (be == null || !MalumReflection.crucibleBEClass.isInstance(be)) {
+        if (be != crucibleBE || !canReceiveOutput(be) || hasUnownedSpirits()) {
             player.sendSystemMessage(Component.translatable(
                     "rsi.malum_crucible.error.not_crucible"));
             return false;
@@ -637,7 +641,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
                     "rsi.generic.error.missing_materials", recipe.getId().toString()));
             return false;
         }
-        placePreparedInputs(invSpirits, spiritStacks, invCatalyst, catalystToPlace);
+        installInputs(spiritStacks, catalystToPlace);
 
         if (!activateExpectedRecipe(be, player)) {
             clearUncommittedPlacements();
@@ -655,6 +659,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         }
 
         be.setChanged();
+        armOutput((NativeItemOutput) be);
         this.craftStarted = true;
         RSIntegrationMod.LOGGER.debug("[RSI-Crucible] Craft started for {} at {}", recipe.getId(), myPos);
         return true;
@@ -696,10 +701,11 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     }
 
     private boolean startPreparedOperationImpl(ServerPlayer player, List<ItemStack> materials) {
+        uninstalledInputs.addAll(materials.stream().map(ItemStack::copy).toList());
         if (myLevel == null || crucibleBE == null || recipe == null) return false;
 
         BlockEntity be = myLevel.getBlockEntity(myPos);
-        if (be == null || !MalumReflection.crucibleBEClass.isInstance(be)) return false;
+        if (be != crucibleBE || !canReceiveOutput(be) || hasUnownedSpirits()) return false;
         this.crucibleBE = be;
         this.invCatalyst = readHandler(be, "inventory");
         this.invSpirits = readHandler(be, "spiritInventory");
@@ -735,11 +741,16 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         while (matIdx < materials.size() && spiritStacks.size() < invSpirits.getSlots()) {
             spiritStacks.add(materials.get(matIdx++).copy());
         }
-        placePreparedInputs(invSpirits, spiritStacks, invCatalyst, catalystToPlace);
+        if (!materials.isEmpty()) uninstalledInputs.remove(0);
+        installInputs(spiritStacks, catalystToPlace);
+        for (InstalledInput input : installedInputs) {
+            if (input.handler() == invSpirits) uninstalledInputs.set(input.slot(), ItemStack.EMPTY);
+        }
 
         if (!activateExpectedRecipe(be, player)) return false;
 
         be.setChanged();
+        armOutput((NativeItemOutput) be);
         this.craftStarted = true;
         RSIntegrationMod.LOGGER.debug("[RSI-Crucible] Craft started with materials for {} at {}",
                 recipe.getId(), myPos);
@@ -749,7 +760,6 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     private boolean activateExpectedRecipe(BlockEntity be, ServerPlayer player) {
         if (refreshRecipeSelection(be, recipe)) {
             refreshAccelerators(be, myLevel, myPos);
-            craftWasSeenActive = true;
             return true;
         }
         RSIntegrationMod.LOGGER.warn(
@@ -938,87 +948,71 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         }
     }
 
-    // ── isMachineCraftFinished ───────────────────────────────────
+    @Override
+    public void bindProduction(TaskOutputReception.Writer writer) {
+        production = writer;
+    }
+
+    private boolean canReceiveOutput(@Nullable BlockEntity be) {
+        return production != null && be != null && !be.isRemoved()
+                && MalumReflection.crucibleBEClass.isInstance(be)
+                && be instanceof NativeItemOutput hook && hook.rsi$getOutputReceiver() == null
+                && getExpectedProduction() != null;
+    }
+
+    void armOutput(NativeItemOutput hook) {
+        var writer = production;
+        var expectedRecipe = recipe;
+        var expected = getExpectedProduction();
+        primaryReceived = 0;
+        outputMachine = hook;
+        outputReceiver = new NativeItemOutput.Receiver() {
+            private boolean takeBonus;
+
+            @Override
+            public boolean receive(Object activeRecipe, ItemStack stack, boolean primary) {
+                if (primary) takeBonus = false;
+                if (!sameRecipe(activeRecipe, expectedRecipe)
+                        || !ItemStack.isSameItem(stack, expected.item())
+                        || (primary ? primaryReceived >= expected.count() : !takeBonus)
+                        || !writer.tryHold(stack)) return false;
+                if (primary) {
+                    primaryReceived += stack.getCount();
+                    takeBonus = true;
+                }
+                return true;
+            }
+        };
+        hook.rsi$setOutputReceiver(outputReceiver);
+    }
 
     @Override
     protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
-        if (!craftStarted) return false;
-
-        // A missing/replaced core is not proof that the output was produced.
-        // Let the chain fail and refund unless a captured output was observed.
-        if (!MalumReflection.crucibleBEClass.isInstance(be)) return false;
-
-        Object currentRecipe = Reflect.getField(be, "recipe").orElse(null);
-        if (currentRecipe != null) {
-            craftWasSeenActive = true;
-            return false;
-        }
-
-        // Buffered Crucible operations publish their products through the world
-        // capture scope. A single visible entity must not complete a multi-item
-        // preload; the orchestration layer waits for getExpectedProduction().
-        if (bufferedOperations > 1) return false;
-
-        // Malum clears/selects the recipe again immediately after craft(). A
-        // null recipe therefore only means the current operation is no longer
-        // active; it is not a completion signal. Confirm the actual output.
-        ItemStack expected = expectedOutput;
-        if (expected == null || expected.isEmpty()) {
-            expected = ModRecipeHandlers.tryGetResultItem(recipe, level.registryAccess());
-        }
-        if (!expected.isEmpty()) {
-            final ItemStack scanTarget = expected;
-            BlockPos pos = be.getBlockPos();
-            List<ItemEntity> entities = level.getEntitiesOfClass(ItemEntity.class,
-                    new AABB(pos).inflate(4),
-                    e -> ItemStack.isSameItemSameTags(
-                            e.getItem(), scanTarget)
-                            || ItemStack.isSameItem(
-                                    e.getItem(), scanTarget));
-            if (!entities.isEmpty()) return true;
-        }
-
-        return false;
+        var expected = getExpectedProduction();
+        return craftStarted && be == crucibleBE && expected != null && primaryReceived >= expected.count();
     }
 
-    // ── collectResult ─────────────────────────────────────────────
+    @Override
+    protected CraftObservation observeMachineCraft(ServerLevel level, BlockEntity be) {
+        if (be != crucibleBE) return failObservation("spirit crucible was replaced");
+        if (isMachineCraftFinished(level, be)) return doneObservation();
+        if (!sameRecipe(Reflect.getField(be, "recipe").orElse(null), recipe)) {
+            return failObservation("spirit crucible stopped before producing the planned output");
+        }
+        return workingObservation(primaryReceived);
+    }
 
     @Override public OperationOutputSource outputSource() {
-        return OperationOutputSource.single(this::takeResult, outputContract());
+        return OperationOutputSource.single(player -> ItemStack.EMPTY, outputContract());
     }
 
-    private ItemStack takeResult(ServerPlayer player) {
-        if (myLevel == null || myPos == null) return ItemStack.EMPTY;
+    @Override public AABB getOutputCaptureRegion() { return null; }
 
-        ItemStack target = getExpectedOutput();
-        if (target == null || target.isEmpty()) {
-            target = ModRecipeHandlers.tryGetResultItem(recipe, myLevel.registryAccess());
-        }
-        final ItemStack scanTarget = target;
-
-        // Scan for ItemEntity matching the expected output
-        List<ItemEntity> entities = myLevel.getEntitiesOfClass(ItemEntity.class,
-                new AABB(myPos).inflate(4),
-                e -> {
-                    if (!e.isAlive()) return false;
-                    ItemStack ei = e.getItem();
-                    if (scanTarget.isEmpty()) return !ei.isEmpty();
-                    return ItemStack.isSameItemSameTags(ei, scanTarget)
-                            || ItemStack.isSameItem(ei, scanTarget);
-                });
-
-        if (!entities.isEmpty()) {
-            ItemEntity entity = entities.get(0);
-            ItemStack result = entity.getItem().copy();
-            entity.getItem().shrink(result.getCount());
-            entity.setItem(entity.getItem().copy());
-            if (entity.getItem().isEmpty()) entity.discard();
-            RSIntegrationMod.LOGGER.debug("[RSI-Crucible] Collected {}x{} from world",
-                    result.getHoverName().getString(), result.getCount());
-            return result;
-        }
-
-        return ItemStack.EMPTY;
+    @Override
+    public void releasePreparationResources() {
+        if (outputMachine != null) outputMachine.rsi$clearOutputReceiver(outputReceiver);
+        outputMachine = null;
+        outputReceiver = null;
     }
 
     // ── cleanup ───────────────────────────────────────────────────
@@ -1026,21 +1020,37 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         RSIntegrationMod.LOGGER.warn("[RSI-Crucible] Batch failed");
-        clearAllSlots();
+        recoverInputs(be == crucibleBE && !be.isRemoved(), player);
         resetState();
     }
 
     @Override
+    protected void clearMissingMachineState(@Nullable ServerPlayer player) {
+        recoverInputs(false, player);
+        resetState();
+    }
+
+    @Override
+    protected void clearUnavailableMachineState(@Nullable ServerPlayer player) {
+        clearMissingMachineState(player);
+    }
+
+    @Override
     protected void resetState() {
+        releasePreparationResources();
         super.resetState();
+        craftStarted = false;
+        primaryReceived = 0;
         bufferedOperations = 1;
+        installedInputs.clear();
+        uninstalledInputs.clear();
     }
 
     @Override
     public void cleanup(@NotNull ServerPlayer player) {
-        clearSpiritSlots(player);
-        if (!hasReusableCatalystInput()) {
-            releaseCatalystSlot(player);
+        if (myLevel == null || myLevel.hasChunkAt(myPos) && myLevel.getBlockEntity(myPos) == crucibleBE) {
+            clearSpiritSlots(player);
+            if (!hasReusableCatalystInput()) releaseCatalystSlot(player);
         }
         resetState();
     }
@@ -1175,8 +1185,7 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
 
     @Override
     public ItemStack getExpectedOutput() {
-        // Output drops as a world ItemEntity near the crucible — expose it so the
-        // interceptor can grab it before any magnet does.
+        // 配方声明用于数量校验，实物由坩埚直接交给任务。
         if (expectedOutput != null && !expectedOutput.isEmpty()) return expectedOutput.copy();
         if (targetOutput != null && !targetOutput.isEmpty()) return targetOutput.copy();
         return recipe == null || myLevel == null ? null : findRecipeOutput(recipe);
@@ -1231,7 +1240,8 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
                 ItemStack s = invSpirits.getStackInSlot(i);
                 // 增产可能使预载批次提前达标，共享账本下也要返还尚未消耗的精魂。
                 // 无法交付时保留槽位实物，避免离线清理直接丢失材料。
-                if (!s.isEmpty() && tryReturnCrucibleItem(s.copy(), returnPlayer)) {
+                if (!s.isEmpty() && (myLevel == null || ownsSpirit(i, s))
+                        && tryReturnCrucibleItem(s.copy(), returnPlayer)) {
                     setSlot(invSpirits, i, ItemStack.EMPTY);
                 }
             }
@@ -1239,27 +1249,46 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         if (crucibleBE instanceof BlockEntity be) be.setChanged();
     }
 
-    private void clearAllSlots() {
-        // A committed shared ledger may only refund what was physically recovered
-        // from the machine. Do not discard the stacks before the ledger sees them.
-        final List<ItemStack> recovered = new ArrayList<>();
-        if (invCatalyst != null) {
-            for (int i = 0; i < invCatalyst.getSlots(); i++) {
-                ItemStack s = invCatalyst.getStackInSlot(i);
-                if (!s.isEmpty()) {
-                    recovered.add(s.copy());
-                    setSlot(invCatalyst, i, ItemStack.EMPTY);
-                }
+    private record InstalledInput(IItemHandler handler, int slot, ItemStack stack) {}
+
+    private boolean hasUnownedSpirits() {
+        if (invSpirits == null) return true;
+        for (int slot = 0; slot < invSpirits.getSlots(); slot++) {
+            if (!invSpirits.getStackInSlot(slot).isEmpty()) return true;
+        }
+        return false;
+    }
+
+    private boolean ownsSpirit(int slot, ItemStack stack) {
+        return installedInputs.stream().anyMatch(input ->
+                input.handler() == invSpirits && input.slot() == slot && input.stack() == stack);
+    }
+
+    void installInputs(List<ItemStack> spirits, ItemStack catalyst) {
+        placePreparedInputs(invSpirits, spirits, invCatalyst, catalyst);
+        installedInputs.clear();
+        for (int slot = 0; slot < spirits.size() && slot < invSpirits.getSlots(); slot++) {
+            ItemStack actual = invSpirits.getStackInSlot(slot);
+            if (!actual.isEmpty() && ItemStack.matches(actual, spirits.get(slot))) {
+                installedInputs.add(new InstalledInput(invSpirits, slot, actual));
             }
         }
-        if (invSpirits != null) {
-            for (int i = 0; i < invSpirits.getSlots(); i++) {
-                ItemStack s = invSpirits.getStackInSlot(i);
-                if (!s.isEmpty()) {
-                    recovered.add(s.copy());
-                    setSlot(invSpirits, i, ItemStack.EMPTY);
-                }
+        ItemStack actualCatalyst = invCatalyst.getStackInSlot(0);
+        if (!catalyst.isEmpty() && ItemStack.matches(actualCatalyst, catalyst)) {
+            installedInputs.add(new InstalledInput(invCatalyst, 0, actualCatalyst));
+        }
+    }
+
+    private void recoverInputs(boolean machinePresent, @Nullable ServerPlayer returnPlayer) {
+        final List<ItemStack> recovered = new ArrayList<>(uninstalledInputs);
+        if (machinePresent) {
+            for (InstalledInput input : installedInputs) {
+                ItemStack actual = input.handler().getStackInSlot(input.slot());
+                if (actual.isEmpty() || actual != input.stack()) continue;
+                setSlot(input.handler(), input.slot(), ItemStack.EMPTY);
+                if (input.handler().getStackInSlot(input.slot()).isEmpty()) recovered.add(actual);
             }
+            ((BlockEntity) crucibleBE).setChanged();
         }
         if (!catalystStock.isEmpty()) {
             recovered.add(catalystStock.copy());
@@ -1270,10 +1299,8 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
         if (usingSharedLedger) {
             recordFailureRecoveredInputs(recovered);
         } else {
-            for (ItemStack stack : recovered) returnCrucibleItem(stack);
-        }
-        if (crucibleBE instanceof BlockEntity be) {
-            be.setChanged();
+            recordFailureRecoveredInputs(recovered);
+            for (ItemStack stack : recovered) tryReturnCrucibleItem(stack, returnPlayer != null ? returnPlayer : player);
         }
     }
 

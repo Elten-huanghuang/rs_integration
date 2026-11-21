@@ -2,6 +2,10 @@ package com.huanghuang.rsintegration.mods.wizardsreborn;
 
 import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
+import com.huanghuang.rsintegration.crafting.batch.OutputContract;
+import com.huanghuang.rsintegration.crafting.TaskOutputReception;
+import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
+import com.huanghuang.rsintegration.crafting.MaterialMatcher;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
@@ -54,6 +58,9 @@ public final class WRBatchDelegate extends DrivenMachineDelegate {
         CRYSTAL_RITUAL,
         UNKNOWN
     }
+
+    @Nullable private TaskOutputReception.Writer production;
+    private boolean nativeCrystalOutput;
 
 
     private ServerPlayer player;
@@ -207,6 +214,7 @@ public final class WRBatchDelegate extends DrivenMachineDelegate {
             return false;
         }
         this.be = blockEntity;
+        nativeCrystalOutput = false;
 
         // Determine machine type
         if (WRReflection.wissenCrystallizerBEClass != null && WRReflection.wissenCrystallizerBEClass.isInstance(be)) {
@@ -596,6 +604,8 @@ public final class WRBatchDelegate extends DrivenMachineDelegate {
                     return false;
                 }
                 RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] [step 6/6] ritual class={}", ritual.getClass().getName());
+                nativeCrystalOutput = be instanceof WRCrystalOutputHook
+                        && ritual instanceof WRCrystalOutputHook.NativeInfusion;
                 Method getId = Reflect.findMethod(
                         ritual.getClass(), "getId", new Class<?>[0]);
                 if (getId != null) {
@@ -1232,12 +1242,13 @@ public final class WRBatchDelegate extends DrivenMachineDelegate {
 
         craftStarted = true;
         try {
-            if (!WRContainerHelper.invokeWissenWandFunction(be)) {
+            if (!startCrystalOnMachine()) {
                 throw new IllegalStateException("wissenWandFunction is unavailable");
             }
             syncBlockEntity(be);
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] Failed to invoke wissenWandFunction on crystal block", e);
+            clearCrystalOutput();
             clearFilledPedestals(!usingSharedLedger);
 
             return false;
@@ -1528,11 +1539,12 @@ public final class WRBatchDelegate extends DrivenMachineDelegate {
 
         craftStarted = true;
         try {
-            if (!WRContainerHelper.invokeWissenWandFunction(be)) {
+            if (!startCrystalOnMachine()) {
                 throw new IllegalStateException("wissenWandFunction is unavailable");
             }
             syncBlockEntity(be);
         } catch (Exception e) {
+            clearCrystalOutput();
             clearFilledPedestals(!usingSharedLedger);
             return false;
         }
@@ -1724,6 +1736,52 @@ public final class WRBatchDelegate extends DrivenMachineDelegate {
         return OperationOutputSource.single(this::takeResult, outputContract());
     }
 
+    @Override
+    public void bindProduction(TaskOutputReception.Writer writer) {
+        production = writer;
+    }
+
+    @Override
+    public OutputContract outputContract() {
+        if (!nativeCrystalOutput) return OutputContract.none();
+        ItemStack expected = getExpectedOutput();
+        if (expected == null) return OutputContract.none();
+        return new OutputContract(List.of(new OutputContract.Port(
+                "wizards_reborn:crystal_infusion:output", null, expected, expected.getCount(),
+                OutputContract.Kind.PRIMARY, OutputContract.Source.WORLD)));
+    }
+
+    private boolean startCrystalOnMachine() {
+        armCrystalOutput();
+        return WRContainerHelper.invokeWissenWandFunction(be);
+    }
+
+    void armCrystalOutput() {
+        if (!nativeCrystalOutput || production == null || !(be instanceof WRCrystalOutputHook hook)) return;
+        ItemStack expected = getExpectedOutput();
+        if (expected == null) return;
+        var declaration = MaterialKey.of(expected);
+        TaskOutputReception.Writer receiver = production;
+        hook.rsi$setCrystalOutputReceiver(actual ->
+                MaterialMatcher.matchesOutputDeclaration(declaration, actual) && receiver.tryHold(actual));
+    }
+
+    private void clearCrystalOutput() {
+        if (nativeCrystalOutput && be instanceof WRCrystalOutputHook hook) {
+            hook.rsi$setCrystalOutputReceiver(null);
+        }
+    }
+
+    @Override
+    protected void clearMissingMachineState(@Nullable ServerPlayer player) {
+        clearCrystalOutput();
+    }
+
+    @Override
+    protected void clearUnavailableMachineState(@Nullable ServerPlayer player) {
+        clearCrystalOutput();
+    }
+
     private ItemStack takeResult(ServerPlayer player) {
         // First try to read output from machine slots
         ItemStack fromMachine = ItemStack.EMPTY;
@@ -1877,6 +1935,7 @@ public final class WRBatchDelegate extends DrivenMachineDelegate {
                 break;
             }
             case CRYSTAL_RITUAL: {
+                if (nativeCrystalOutput) break;
                 // 1) Try getItemsResult() — the ritual places output into the
                 //    crystal block's result slots (IItemResultBlockEntity).
                 try {
@@ -1948,6 +2007,7 @@ public final class WRBatchDelegate extends DrivenMachineDelegate {
 
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
+        clearCrystalOutput();
         // Abort path. WR commits the ledger BEFORE placement, so items are on
         // the machine. In the shared-ledger (chain) path the chain's abort()
         // already refunds them via ledger.refundCommitted() — so we must only
@@ -1964,6 +2024,7 @@ public final class WRBatchDelegate extends DrivenMachineDelegate {
 
     @Override
     public void cleanup(@NotNull ServerPlayer player) {
+        clearCrystalOutput();
         // Success path. The chain does ledger.reset() (no refund), so any item
         // still on the machine is real and uncounted → always return it. Normally
         // inputs were consumed and the output was already taken by collectResult,
@@ -1991,7 +2052,7 @@ public final class WRBatchDelegate extends DrivenMachineDelegate {
 
     @Override
     public AABB getOutputCaptureRegion() {
-        if (machineType != MachineType.CRYSTAL_RITUAL || myPos == null) return null;
+        if (machineType != MachineType.CRYSTAL_RITUAL || nativeCrystalOutput || myPos == null) return null;
         return new AABB(
                 myPos.offset(-2, -1, -2), myPos.offset(2, 3, 2));
     }

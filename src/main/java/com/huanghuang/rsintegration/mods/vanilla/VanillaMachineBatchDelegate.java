@@ -8,10 +8,7 @@ import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import java.lang.reflect.Field;
 import com.huanghuang.rsintegration.recipe.CampfireRecipeSupport;
 import java.util.Arrays;
-import net.minecraft.core.NonNullList;
-import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.level.block.entity.CampfireBlockEntity;
-import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
@@ -26,7 +23,6 @@ import com.huanghuang.rsintegration.crafting.batch.MachineSlotOwnershipPolicy;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
-import com.huanghuang.rsintegration.crafting.batch.PhysicalInputRecovery;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -40,7 +36,6 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraftforge.items.ItemHandlerHelper;
 import org.jetbrains.annotations.NotNull;
@@ -79,6 +74,7 @@ public final class VanillaMachineBatchDelegate extends ReceivingMachineDelegate 
 
     @Override
     public boolean acceptsFixedOutput() {
+        if (kind == MachineKind.CAMPFIRE) return campfireBE instanceof CampfireCookingOperation.Access;
         if (kind != MachineKind.FURNACE || !(furnaceBE instanceof AbstractFurnaceAccessor)
                 || recipe == null || myLevel == null
                 || BrickFurnaceCompat.isBrickFurnace(furnaceBE)) return false;
@@ -99,7 +95,7 @@ public final class VanillaMachineBatchDelegate extends ReceivingMachineDelegate 
     }
 
     @Override
-    protected boolean supportsNetworkOutputReception() { return acceptsFixedOutput(); }
+    protected boolean supportsNetworkOutputReception() { return kind == MachineKind.FURNACE && acceptsFixedOutput(); }
 
     private void transferAvailable(ServerLevel playerLevel) {
         if (outputBatch() == null || outputBatch().closed()) return;
@@ -133,57 +129,8 @@ public final class VanillaMachineBatchDelegate extends ReceivingMachineDelegate 
         VIRTUAL
     }
 
-    // CAMPFIRE path state
-    private int campfireSlot = -1;
-    private Object campfireBE;
-    private ItemStack suppliedCampfireInput = ItemStack.EMPTY;
-    private static final Field CAMPFIRE_ITEMS;
-    private static final Field CAMPFIRE_COOKING_PROGRESS;
-    private static final Field CAMPFIRE_COOKING_TIME;
-
-    static {
-        Field items = null;
-        Field cookingProgress = null;
-        Field cookingTime = null;
-        try {
-            Class<?> cfb = Class.forName(
-                    "net.minecraft.world.level.block.entity.CampfireBlockEntity");
-            items = resolveCampfireField(cfb, "items", "f_59042_");
-            cookingProgress = resolveCampfireField(cfb, "cookingProgress", "f_59043_");
-            cookingTime = resolveCampfireField(cfb, "cookingTime", "f_59044_");
-        } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-Vanilla] Campfire class probe failed", e); }
-        CAMPFIRE_ITEMS = items;
-        CAMPFIRE_COOKING_PROGRESS = cookingProgress;
-        CAMPFIRE_COOKING_TIME = cookingTime;
-    }
-
-    private static Field resolveCampfireField(Class<?> clazz, String official, String srg) {
-        Field field = findDeclaredField(clazz, official, srg);
-        if (field == null) {
-            RSIntegrationMod.LOGGER.warn(
-                    "[RSI-Vanilla] Campfire field unavailable: {} (tried {}, {})",
-                    official, official, srg);
-        }
-        return field;
-    }
-
-    @Nullable
-    static Field findDeclaredField(Class<?> clazz, String... candidateNames) {
-        for (String name : candidateNames) {
-            try {
-                Field f = clazz.getDeclaredField(name);
-                f.setAccessible(true);
-                return f;
-            } catch (NoSuchFieldException ignored) {}
-        }
-        return null;
-    }
-
-    private static boolean campfireFieldsAvailable() {
-        return CAMPFIRE_ITEMS != null
-                && CAMPFIRE_COOKING_PROGRESS != null
-                && CAMPFIRE_COOKING_TIME != null;
-    }
+    private CampfireBlockEntity campfireBE;
+    private CampfireCookingOperation campfireOperation;
 
     private static final Field LIT_TIME_FIELD = resolveLitTimeField();
 
@@ -309,37 +256,22 @@ public final class VanillaMachineBatchDelegate extends ReceivingMachineDelegate 
 
             this.furnaceBE = fbe;
             this.kind = MachineKind.FURNACE;
-        } else if (be instanceof CampfireBlockEntity) {
+        } else if (be instanceof CampfireBlockEntity campfire) {
             if (!(recipe instanceof CampfireCookingRecipe)) {
                 this.kind = MachineKind.VIRTUAL;
                 return true;
             }
-            if (!campfireFieldsAvailable()) {
+            if (!(campfire instanceof CampfireCookingOperation.Access)) {
                 player.sendSystemMessage(Component.translatable(
                         "rsi.vanilla.error.campfire_unavailable"));
                 return false;
             }
-            try {
-                @SuppressWarnings("unchecked")
-                NonNullList<ItemStack> items =
-                        (NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(be);
-                // Find an empty slot
-                int slot = -1;
-                for (int i = 0; i < items.size(); i++) {
-                    if (items.get(i).isEmpty()) { slot = i; break; }
-                }
-                if (slot < 0) {
-                    player.sendSystemMessage(Component.translatable(
-                            "rsi.vanilla.error.campfire_full"));
-                    return false;
-                }
-                this.campfireBE = be;
-                this.campfireSlot = slot;
-                this.kind = MachineKind.CAMPFIRE;
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.error("[RSI-Vanilla] Campfire reflection failed", e);
+            if (CampfireCookingOperation.freeSlot(campfire) < 0) {
+                player.sendSystemMessage(Component.translatable("rsi.vanilla.error.campfire_full"));
                 return false;
             }
+            this.campfireBE = campfire;
+            this.kind = MachineKind.CAMPFIRE;
         } else {
             // Other BE-backed machines: Stonecutter (has BE)
             this.kind = MachineKind.VIRTUAL;
@@ -1057,29 +989,19 @@ public final class VanillaMachineBatchDelegate extends ReceivingMachineDelegate 
 
     // ── CAMPFIRE path ──────────────────────────────────────────────
 
-    private void ensureCampfireLit() {
-        BlockState state = myLevel.getBlockState(myPos);
-        if (state.hasProperty(BlockStateProperties.LIT) && !state.getValue(BlockStateProperties.LIT)) {
-            myLevel.setBlock(myPos, state.setValue(BlockStateProperties.LIT, true), 3);
-        }
-    }
-
     private boolean tryStartCampfire(ServerPlayer player) {
         List<Ingredient> ingredients = recipe.getIngredients();
-        if (ingredients.isEmpty()) return false;
+        if (ingredients.isEmpty() || ingredients.get(0).isEmpty() || production == null
+                || myLevel.getBlockEntity(myPos) != campfireBE
+                || CampfireCookingOperation.freeSlot(campfireBE) < 0) return false;
 
         Ingredient input = ingredients.get(0);
-        ItemStack inputTemplate = ItemStack.EMPTY;
-        if (!input.isEmpty()) {
-            ExtractionLedger activeLedger = usingSharedLedger ? sharedLedger : ledger;
-            inputTemplate = CraftPacketUtils.ensureMaterialAvailable(
-                    player, myDim, myPos, input, 1, activeLedger);
-            if (inputTemplate.isEmpty()) {
-                player.sendSystemMessage(Component.translatable(
-                        "rsi.generic.error.missing_materials",
-                        CraftPacketUtils.describeIngredient(input)));
-                return false;
-            }
+        ExtractionLedger activeLedger = usingSharedLedger ? sharedLedger : ledger;
+        ItemStack material = CraftPacketUtils.ensureMaterialAvailable(player, myDim, myPos, input, 1, activeLedger);
+        if (material.isEmpty()) {
+            player.sendSystemMessage(Component.translatable("rsi.generic.error.missing_materials",
+                    CraftPacketUtils.describeIngredient(input)));
+            return false;
         }
 
         // Commit BEFORE placing — commit failure leaves campfire untouched
@@ -1091,127 +1013,21 @@ public final class VanillaMachineBatchDelegate extends ReceivingMachineDelegate 
             }
         }
 
-        // Place REAL item (post-commit) on campfire
-        if (!inputTemplate.isEmpty()) {
-            int cookTime = recipe instanceof CampfireCookingRecipe ccr ? ccr.getCookingTime() : 600;
-            try {
-                @SuppressWarnings("unchecked")
-                NonNullList<ItemStack> items =
-                        (NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(campfireBE);
-                items.set(campfireSlot, inputTemplate.copy());
-                suppliedCampfireInput = inputTemplate.copy();
-                int[] prog = (int[]) CAMPFIRE_COOKING_PROGRESS.get(campfireBE);
-                prog[campfireSlot] = 0;
-                int[] times = (int[]) CAMPFIRE_COOKING_TIME.get(campfireBE);
-                times[campfireSlot] = cookTime;
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.error("[RSI-Vanilla] Campfire placement failed", e);
-                return false;
-            }
+        if (tryStartCampfireWithMaterials(List.of(material))) return true;
+        if (!usingSharedLedger && ledger != null && ledger.isCommitted()) {
+            ledger.refundCommittedToEndpoint(storageEndpoint(), player);
         }
-
-        ensureCampfireLit();
-        if (campfireBE instanceof BlockEntity be) be.setChanged();
-        myLevel.sendBlockUpdated(myPos,
-                myLevel.getBlockState(myPos), myLevel.getBlockState(myPos), 3);
-        campfireForceLoad(true);
-        return true;
+        return false;
     }
 
     private boolean tryStartCampfireWithMaterials(List<ItemStack> materials) {
-        if (materials.isEmpty()) return false;
-
-        int cookTime = recipe instanceof CampfireCookingRecipe ccr ? ccr.getCookingTime() : 600;
-        try {
-            @SuppressWarnings("unchecked")
-            NonNullList<ItemStack> items =
-                    (NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(campfireBE);
-            items.set(campfireSlot, materials.get(0).copy());
-            suppliedCampfireInput = materials.get(0).copy();
-            int[] prog = (int[]) CAMPFIRE_COOKING_PROGRESS.get(campfireBE);
-            prog[campfireSlot] = 0;
-            int[] times = (int[]) CAMPFIRE_COOKING_TIME.get(campfireBE);
-            times[campfireSlot] = cookTime;
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Vanilla] Campfire placement failed", e);
-            return false;
-        }
-
-        ensureCampfireLit();
-        if (campfireBE instanceof BlockEntity be) be.setChanged();
-        myLevel.sendBlockUpdated(myPos,
-                myLevel.getBlockState(myPos), myLevel.getBlockState(myPos), 3);
-        campfireForceLoad(true);
+        if (materials.size() != 1 || !(recipe instanceof CampfireCookingRecipe cooking)
+                || myLevel.getBlockEntity(myPos) != campfireBE) return false;
+        campfireOperation = CampfireCookingOperation.start(campfireBE, materials.get(0), cooking.getCookingTime(), production);
+        if (campfireOperation == null) return false;
+        campfireOperation.updateCampfire(myLevel);
+        forceMachineChunk(myLevel, myPos, true);
         return true;
-    }
-
-    private boolean isCampfireComplete() {
-        // Vanilla CampfireBlockEntity.cookTick increments cookingProgress
-        // each tick; when it reaches cookingTime the result is spawned as an
-        // ItemEntity and the slot is cleared.  Detect completion by the slot
-        // being empty.
-        try {
-            @SuppressWarnings("unchecked")
-            NonNullList<ItemStack> items =
-                    (NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(campfireBE);
-            return items.get(campfireSlot).isEmpty();
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    private ItemStack collectCampfireResult() {
-        campfireForceLoad(false);
-
-        // Vanilla spawned the result as an ItemEntity above the campfire.
-        // Capture it for full NBT fidelity.
-        if (myLevel != null && myLevel.isLoaded(myPos)) {
-            List<ItemEntity> entities =
-                    myLevel.getEntitiesOfClass(ItemEntity.class,
-                            new AABB(myPos).inflate(2.0));
-            for (ItemEntity entity : entities) {
-                if (!entity.isRemoved()) {
-                    ItemStack stack = entity.getItem();
-                    if (!stack.isEmpty()) {
-                        entity.discard();
-                        return stack.copy();
-                    }
-                }
-            }
-        }
-
-        // Never fabricate a result when the real world entity is absent. The
-        // operation capture is authoritative and prevents refund + output
-        // duplication when another collector races this scan.
-        return ItemStack.EMPTY;
-    }
-
-    private ItemStack clearCampfireSlot(boolean refundToRS) {
-        try {
-            @SuppressWarnings("unchecked")
-            NonNullList<ItemStack> items =
-                    (NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(campfireBE);
-            ItemStack slotItem = items.get(campfireSlot);
-            if (!slotItem.isEmpty()
-                    && !PhysicalInputRecovery.recoveredExpected(
-                    slotItem, suppliedCampfireInput)) {
-                return ItemStack.EMPTY;
-            }
-            ItemStack recovered = slotItem.isEmpty() ? ItemStack.EMPTY
-                    : slotItem.copyWithCount(suppliedCampfireInput.getCount());
-            ItemStack retained = slotItem.copy();
-            retained.shrink(recovered.getCount());
-            items.set(campfireSlot, retained.isEmpty() ? ItemStack.EMPTY : retained);
-            if (!recovered.isEmpty() && refundToRS) refundToRSNetwork(recovered.copy());
-            int[] prog = (int[]) CAMPFIRE_COOKING_PROGRESS.get(campfireBE);
-            prog[campfireSlot] = 0;
-            int[] times = (int[]) CAMPFIRE_COOKING_TIME.get(campfireBE);
-            times[campfireSlot] = 0;
-            return recovered;
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Vanilla] Campfire clear failed", e);
-            return ItemStack.EMPTY;
-        }
     }
 
     // ── polling / collection ──────────────────────────────────────
@@ -1231,6 +1047,13 @@ public final class VanillaMachineBatchDelegate extends ReceivingMachineDelegate 
     @NotNull
     @Override
     protected CraftObservation observeMachineCraft(@NotNull ServerLevel level, @NotNull BlockEntity be) {
+        if (kind == MachineKind.CAMPFIRE) {
+            if (campfireOperation == null) return failObservation("campfire cooking not started");
+            if (campfireOperation.completed()) return doneObservation();
+            if (!campfireOperation.ownsInput(be)) return failObservation("campfire input removed or replaced");
+            observedCycle = campfireOperation.progress();
+            return workingObservation(observedCycle.completedTicks());
+        }
         if (outputBatch() != null && (be != furnaceBE || !(be instanceof AbstractFurnaceBlockEntity))) {
             return failObservation("furnace block entity replaced");
         }
@@ -1298,7 +1121,6 @@ public final class VanillaMachineBatchDelegate extends ReceivingMachineDelegate 
             return observeMachineCraft(level, be).phase() == CraftPhase.DONE;
         }
         if (kind == MachineKind.VIRTUAL) return craftDone;
-        if (kind == MachineKind.CAMPFIRE) return isCampfireComplete();
 
         if (furnaceBE == null) return true;
 
@@ -1331,9 +1153,7 @@ public final class VanillaMachineBatchDelegate extends ReceivingMachineDelegate 
             if (pendingVirtualResults.isEmpty()) craftDone = false;
             return result;
         }
-        if (kind == MachineKind.CAMPFIRE) {
-            return collectCampfireResult();
-        }
+        if (kind == MachineKind.CAMPFIRE) return ItemStack.EMPTY;
 
         ItemStack result = collectFurnaceOutput();
         if (production != null) production.finishBatch();
@@ -1399,11 +1219,13 @@ public final class VanillaMachineBatchDelegate extends ReceivingMachineDelegate 
             resetFurnaceOwnership();
             furnaceBE.setChanged();
         }
-        if (kind == MachineKind.CAMPFIRE && campfireBE != null) {
-            campfireForceLoad(false);
-            ItemStack recovered = clearCampfireSlot(!usingSharedLedger);
-            if (!recovered.isEmpty()) recoveredInputs.add(recovered);
-            suppliedCampfireInput = ItemStack.EMPTY;
+        if (campfireOperation != null) {
+            ItemStack recovered = campfireOperation.cancel(be);
+            campfireOperation = null;
+            if (!recovered.isEmpty()) {
+                recoveredInputs.add(recovered);
+                if (!usingSharedLedger) refundToRSNetwork(recovered.copy());
+            }
         }
 
         if (kind != MachineKind.VIRTUAL) recordFailureRecoveredInputs(recoveredInputs);
@@ -1438,6 +1260,7 @@ public final class VanillaMachineBatchDelegate extends ReceivingMachineDelegate 
 
     @Override
     protected void clearMissingMachineState(@Nullable ServerPlayer player) {
+        releaseCampfireOperation();
         resetFurnaceOwnership();
         pendingResult = ItemStack.EMPTY;
         pendingVirtualResults.clear();
@@ -1447,10 +1270,16 @@ public final class VanillaMachineBatchDelegate extends ReceivingMachineDelegate 
     }
 
     @Override
+    protected void clearUnavailableMachineState(@Nullable ServerPlayer player) {
+        releaseCampfireOperation();
+    }
+
+    @Override
     public void cleanup(@NotNull ServerPlayer player) {
         if (!markTerminalCleanup()) return;
         if (production != null) production.finishBatch();
-        campfireForceLoad(false);
+        releaseCampfireOperation();
+        releaseMachineChunk();
         if (kind == MachineKind.FURNACE) {
             refundLeftoverFuel();
             resetFurnaceOwnership();
@@ -1491,7 +1320,7 @@ public final class VanillaMachineBatchDelegate extends ReceivingMachineDelegate 
         if (result.isEmpty() || kind == null) return OutputContract.none();
         return switch (kind) {
             case FURNACE -> vanillaPrimaryOutputContract(result, OutputContract.Source.SLOT, 2);
-            case CAMPFIRE -> vanillaPrimaryOutputContract(result, OutputContract.Source.WORLD, null);
+            case CAMPFIRE -> CampfireCookingOperation.outputContract(result);
             case VIRTUAL -> vanillaPrimaryOutputContract(result, OutputContract.Source.VIRTUAL, null);
         };
     }
@@ -1507,21 +1336,16 @@ public final class VanillaMachineBatchDelegate extends ReceivingMachineDelegate 
 
     @Nullable
     @Override
-    public ItemStack getExpectedOutput() {
-        return kind == MachineKind.CAMPFIRE ? computeResult() : null;
-    }
-
-    @Nullable
-    @Override
     public AABB getOutputCaptureRegion() {
-        return kind == MachineKind.CAMPFIRE && myPos != null
-                ? new AABB(myPos).inflate(2.0) : null;
+        return null;
     }
 
     // ── helpers ───────────────────────────────────────────────────
 
-    private void campfireForceLoad(boolean load) {
-        forceMachineChunk(myLevel, myPos, load);
+    private void releaseCampfireOperation() {
+        if (campfireOperation == null) return;
+        campfireOperation.release();
+        campfireOperation = null;
     }
 
     private void refundToRSNetwork(ItemStack stack) {

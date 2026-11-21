@@ -173,6 +173,14 @@ public final class TaskOutputReception {
             if (current() == null) session.hold(key, actual.getCount());
             else current().collect(key, actual.getCount());
         }
+
+        /** 原生机器可能在任务取消后继续运行；已关闭的会话应让机器照常生成掉落物。 */
+        public boolean tryHold(ItemStack actual) {
+            session.checkThread();
+            if (session.closed || actual == null || actual.isEmpty()) return false;
+            hold(actual);
+            return true;
+        }
     }
 
     public static final class Session implements AutoCloseable {

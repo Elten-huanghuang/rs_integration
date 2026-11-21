@@ -1,11 +1,14 @@
 package com.huanghuang.rsintegration.mods.farmersdelight;
 
 import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
+import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
+import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.PhysicalInputRecovery;
+import com.huanghuang.rsintegration.crafting.TaskOutputReception;
+import com.huanghuang.rsintegration.mods.vanilla.CampfireCookingOperation;
 import java.util.HashSet;
-import net.minecraft.core.NonNullList;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.AABB;
@@ -22,18 +25,16 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.CampfireCookingRecipe;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.block.entity.CampfireBlockEntity;
 import net.minecraftforge.items.ItemHandlerHelper;
 import net.minecraftforge.items.ItemStackHandler;
 import org.jetbrains.annotations.NotNull;
 import javax.annotation.Nullable;
-import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
@@ -42,9 +43,6 @@ import java.util.UUID;
 
 /** Batch delegate for Farmer's Delight Skillet (also handles campfire). */
 public final class SkilletBatchDelegate extends AbstractBatchDelegate {
-
-    private static final String CAMPFIRE_BE =
-            "net.minecraft.world.level.block.entity.CampfireBlockEntity";
 
     private ServerPlayer player;
     private ServerLevel myLevel;
@@ -60,42 +58,16 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
     private int skilletPrevTime = -1;
     private ItemStack placedInput = ItemStack.EMPTY;
     // Campfire-specific
-    private int campfireSlot = -1;
-    private Object campfireBE;
+    private CampfireBlockEntity campfireBE;
+    private CampfireCookingOperation campfireOperation;
+    private TaskOutputReception.Writer production;
     private int arcaneSlot = -1;
     private final Set<UUID> arcaneEntitiesBefore = new HashSet<>();
     private long arcaneStartTick;
 
-    private static volatile Class<?> campfireClass;
-    private static final Field CAMPFIRE_ITEMS;
-    private static final Field CAMPFIRE_COOKING_PROGRESS;
-    private static final Field CAMPFIRE_COOKING_TIME;
-    private static volatile boolean reflectionProbed;
-
-    static {
-        Field items = null, cookingProgress = null, cookingTime = null;
-        try {
-            Class<?> cfb = Class.forName(CAMPFIRE_BE);
-            items = resolveField(cfb, "items", "f_59042_");
-            cookingProgress = resolveField(cfb, "cookingProgress", "f_59043_");
-            cookingTime = resolveField(cfb, "cookingTime", "f_59044_");
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Skillet] Reflection read failed", e);
-        }
-        CAMPFIRE_ITEMS = items;
-        CAMPFIRE_COOKING_PROGRESS = cookingProgress;
-        CAMPFIRE_COOKING_TIME = cookingTime;
-    }
-
-    private static Field resolveField(Class<?> clazz, String official, String srg) {
-        for (String name : new String[]{official, srg}) {
-            try {
-                Field f = clazz.getDeclaredField(name);
-                f.setAccessible(true);
-                return f;
-            } catch (NoSuchFieldException e) { RSIntegrationMod.LOGGER.debug("[RSI-Skillet] field not found", e); }
-        }
-        return null;
+    @Override
+    public void bindProduction(TaskOutputReception.Writer writer) {
+        if (campfireBE != null) production = writer;
     }
 
     @Override
@@ -126,6 +98,7 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
         this.placedInput = ItemStack.EMPTY;
         this.isSkillet = false;
         this.isArcaneStove = false;
+        this.campfireBE = null;
         this.arcaneSlot = -1;
         this.arcaneEntitiesBefore.clear();
 
@@ -136,6 +109,9 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
         }
         if (be != null && isSkilletBE(be)) {
             this.isSkillet = true;
+        } else if (be instanceof CampfireBlockEntity campfire) {
+            if (CampfireCookingOperation.freeSlot(campfire) < 0) return false;
+            this.campfireBE = campfire;
         }
         return true;
     }
@@ -151,6 +127,15 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
             return handler.getIngredients(recipe);
         }
         return CraftPacketUtils.extractIngredientSpecs(recipe);
+    }
+
+    @Override
+    protected boolean startOperationImpl(OperationStartContext context) {
+        if (campfireBE != null && !context.inputSlots().isEmpty()
+                && context.materialOwnership() == OperationStartContext.MaterialOwnership.CHAIN_RESERVED) {
+            useSharedLedger(context.ledger());
+        }
+        return super.startOperationImpl(context);
     }
 
     @Override
@@ -203,13 +188,17 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
         if (materials.isEmpty()) return false;
         ItemStack input = materials.get(0).copyWithCount(1);
 
-        if (isArcaneStove) {
-            return tryStartArcaneStove(be, input);
-        } else if (isSkilletBE(be)) {
-            return tryStartSkillet(be, input);
-        } else if (isCampfireBE(be)) {
-            return tryStartCampfire(be, input);
+        if (campfireBE != null) {
+            if (be != campfireBE || materials.size() != 1 || materials.get(0).getCount() != 1
+                    || !(recipe instanceof CampfireCookingRecipe cooking)) return false;
+            campfireOperation = CampfireCookingOperation.start(campfireBE, input, cooking.getCookingTime(), production);
+            if (campfireOperation == null) return false;
+            campfireOperation.updateCampfire(myLevel);
+            forceMachineChunk(myLevel, myPos, true);
+            return true;
         }
+        if (isArcaneStove) return tryStartArcaneStove(be, input);
+        if (isSkilletBE(be)) return tryStartSkillet(be, input);
 
         RSIntegrationMod.LOGGER.warn("[RSI-Batch-Skillet] Unknown BE type: {}", be.getClass().getName());
         return false;
@@ -295,7 +284,7 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
                 addItem.invoke(be, input, (CampfireCookingRecipe) recipe);
             }
             be.setChanged();
-            campfireForceLoad(true);
+            forceMachineChunk(myLevel, myPos, true);
             skilletPrevTime = -1;
             skilletStarted = true;
             placedInput = input.copy();
@@ -316,44 +305,14 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
         }
     }
 
-    @SuppressWarnings("unchecked")
-    private boolean tryStartCampfire(BlockEntity be, ItemStack input) {
-        if (CAMPFIRE_ITEMS == null || CAMPFIRE_COOKING_PROGRESS == null
-                || CAMPFIRE_COOKING_TIME == null) return false;
-
-        int cookTime = recipe instanceof CampfireCookingRecipe ccr
-                ? ccr.getCookingTime() : 600;
-
-        try {
-            var items = (NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(be);
-            for (int i = 0; i < items.size(); i++) {
-                if (items.get(i).isEmpty()) {
-                    items.set(i, input.copy());
-                    placedInput = input.copy();
-                    int[] prog = (int[]) CAMPFIRE_COOKING_PROGRESS.get(be);
-                    prog[i] = 0;
-                    int[] times = (int[]) CAMPFIRE_COOKING_TIME.get(be);
-                    times[i] = cookTime;
-                    campfireSlot = i;
-                    campfireBE = be;
-                    break;
-                }
-            }
-            if (campfireSlot < 0) return false;
-
-            var state = myLevel.getBlockState(myPos);
-            if (state.hasProperty(BlockStateProperties.LIT) && !state.getValue(BlockStateProperties.LIT)) {
-                myLevel.setBlock(myPos, state.setValue(BlockStateProperties.LIT, true), 3);
-            }
-            be.setChanged();
-            myLevel.sendBlockUpdated(myPos,
-                    myLevel.getBlockState(myPos), myLevel.getBlockState(myPos), 3);
-            campfireForceLoad(true);
-            return true;
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Batch-Skillet] Campfire placement failed", e);
-            return false;
-        }
+    @Override
+    protected CraftObservation observeMachineCraft(ServerLevel level, BlockEntity be) {
+        if (campfireBE == null) return super.observeMachineCraft(level, be);
+        if (campfireOperation == null) return failObservation("campfire cooking not started");
+        if (campfireOperation.completed()) return doneObservation();
+        if (!campfireOperation.ownsInput(be)) return failObservation("campfire input removed or replaced");
+        observedCycle = campfireOperation.progress();
+        return workingObservation(observedCycle.completedTicks());
     }
 
     @Override
@@ -369,10 +328,7 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
                     .findAny().isPresent();
         }
         if (isSkilletBE(be)) {
-            // Use CAMPFIRE_ITEMS (already resolved in static init) to peek at
-            // the stored item. hasStoredStack() returns true even for raw
-            // ingredients, so compare against the expected input to determine
-            // if cooking has transformed the item.
+            // 有些旧版本会把烤好的食物留在槽内。
             if (!skilletStarted) return false;
             try {
                 if ((Boolean) be.getClass().getMethod("isCooking").invoke(be)) return false;
@@ -388,45 +344,6 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
                 RSIntegrationMod.LOGGER.warn("[RSI-Batch-Skillet] Unable to inspect skillet state", e);
                 return false;
             }
-            /*if (CAMPFIRE_ITEMS != null) {
-                try {
-                    @SuppressWarnings("unchecked")
-                    var items = (net.minecraft.core.NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(be);
-                    if (!items.isEmpty()) {
-                        ItemStack stored = items.get(0);
-                        if (!stored.isEmpty()) {
-                            // If the stored item differs from the recipe input,
-                            // cooking has finished and transformed the ingredient.
-                            ItemStack rawInput = recipe.getIngredients().get(0).getItems().length > 0
-                                    ? recipe.getIngredients().get(0).getItems()[0]
-                                    : ItemStack.EMPTY;
-                            if (!rawInput.isEmpty() && !ItemStack.isSameItem(stored, rawInput)) {
-                                return true;
-                            }
-                            // If stored item matches input, still cooking.
-                            return false;
-                        }
-                    }
-                    // Item was consumed (popped off/smelted) → done cooking
-                    return campfireSlot >= 0 && campfireSlot < items.size()
-                            && items.get(campfireSlot).isEmpty();
-                } catch (Exception e) {
-                    RSIntegrationMod.LOGGER.debug("[RSI-Batch-Skillet] Item peek failed", e);
-                }
-            }
-            return false;*/
-        }
-
-        if (isCampfireBE(be) && CAMPFIRE_ITEMS != null) {
-            try {
-                @SuppressWarnings("unchecked")
-                var items = (NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(be);
-                return campfireSlot >= 0 && campfireSlot < items.size()
-                        && items.get(campfireSlot).isEmpty();
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Skillet] Reflection read failed", e);
-                return false;
-            }
         }
 
         return false;
@@ -440,7 +357,7 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
         BlockEntity be = myLevel.getBlockEntity(myPos);
         if (be == null) return ItemStack.EMPTY;
 
-        if (isArcaneStove) {
+        if (isArcaneStove || campfireBE != null) {
             return ItemStack.EMPTY;
         }
         if (isSkilletBE(be)) {
@@ -459,35 +376,20 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
             return ItemStack.EMPTY;
         }
 
-        if (isCampfireBE(be)) {
-            // Campfire spawns the result as an ItemEntity. The operation's
-            // exact-output capture is authoritative and is drained by the
-            // runtime before this method is called.
-            craftDone = true;
-            campfireForceLoad(false);
-            // Clear the slot
-            try {
-                @SuppressWarnings("unchecked")
-                var items = (NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(be);
-                items.set(campfireSlot, ItemStack.EMPTY);
-                int[] prog = (int[]) CAMPFIRE_COOKING_PROGRESS.get(be);
-                prog[campfireSlot] = 0;
-                int[] times = (int[]) CAMPFIRE_COOKING_TIME.get(be);
-                times[campfireSlot] = 0;
-                be.setChanged();
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Skillet] Reflection read failed", e);
-            }
-            return ItemStack.EMPTY;
-        }
-
         return ItemStack.EMPTY;
     }
 
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
         List<ItemStack> recoveredInputs = new ArrayList<>();
-        if (isArcaneStove) {
+        if (campfireBE != null) {
+            ItemStack recovered = campfireOperation == null ? ItemStack.EMPTY : campfireOperation.cancel(be);
+            campfireOperation = null;
+            if (!recovered.isEmpty()) {
+                recoveredInputs.add(recovered.copy());
+                if (!usingSharedLedger) refundToRSNetwork(recovered);
+            }
+        } else if (isArcaneStove) {
             ItemStack recovered = clearArcaneInput(be);
             if (!recovered.isEmpty()) {
                 recoveredInputs.add(recovered.copy());
@@ -508,10 +410,7 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
                 RSIntegrationMod.LOGGER.warn("[RSI-Skillet] Reflection read failed", e);
             }
         }
-        ItemStack campfireRecovered = clearCampfireSlot();
-        if (!campfireRecovered.isEmpty()) recoveredInputs.add(campfireRecovered);
         recordFailureRecoveredInputs(recoveredInputs);
-        campfireForceLoad(false);
         craftDone = false;
         skilletPrevTime = -1;
         placedInput = ItemStack.EMPTY;
@@ -534,8 +433,8 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
     @Override
     public void cleanup(@NotNull ServerPlayer player) {
         if (!markTerminalCleanup()) return;
-        campfireForceLoad(false);
-        forceMachineChunk(myLevel, myPos, false);
+        releaseCampfireOperation();
+        releaseMachineChunk();
         craftDone = false;
         skilletPrevTime = -1;
         setStorageEndpoint(null);
@@ -546,12 +445,17 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public ItemStack getExpectedOutput() {
+        if (campfireBE != null) return null;
         if (recipe == null || myLevel == null || myPos == null) return null;
-        // Both vanilla campfires and FD skillets eject CampfireCookingRecipe
-        // results into the world in current versions.
         ItemStack expected = CampfireRecipeSupport.resolveOutput(
                 recipe, myLevel.registryAccess());
         return expected.isEmpty() ? null : expected;
+    }
+
+    @Override
+    public OutputContract outputContract() {
+        return campfireBE == null ? super.outputContract() : CampfireCookingOperation.outputContract(
+                CampfireRecipeSupport.resolveOutput(recipe, myLevel.registryAccess()));
     }
 
     /**
@@ -580,7 +484,7 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     public AABB getOutputCaptureRegion() {
-        return myPos == null ? null : new AABB(myPos).inflate(1.5);
+        return campfireBE != null || myPos == null ? null : new AABB(myPos).inflate(1.5);
     }
 
     // ── plan helpers ──
@@ -606,30 +510,9 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
 
     // ── reflection ──
 
-    private static void ensureCampfireClass() {
-        if (reflectionProbed) return;
-        reflectionProbed = true;
-        try {
-            campfireClass = Class.forName(CAMPFIRE_BE);
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Skillet] Reflection probe failed", e);
-        }
-    }
-
     private static boolean isSkilletBE(BlockEntity be) {
         return FarmersDelightReflection.skilletBEClass != null
                 && FarmersDelightReflection.skilletBEClass.isAssignableFrom(be.getClass());
-    }
-
-    private static boolean isCampfireBE(BlockEntity be) {
-        ensureCampfireClass();
-        if (campfireClass != null && campfireClass.isAssignableFrom(be.getClass())) return true;
-        Class<?> clazz = be.getClass();
-        while (clazz != null) {
-            if (clazz.getName().equals(CAMPFIRE_BE)) return true;
-            clazz = clazz.getSuperclass();
-        }
-        return false;
     }
 
     private static boolean isHeated(BlockEntity be) {
@@ -642,36 +525,20 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
         }
     }
 
-    @SuppressWarnings("unchecked")
-    private ItemStack clearCampfireSlot() {
-        if (campfireSlot < 0 || campfireBE == null || CAMPFIRE_ITEMS == null) {
-            return ItemStack.EMPTY;
-        }
-        ItemStack recovered = ItemStack.EMPTY;
-        try {
-            var items = (NonNullList<ItemStack>) CAMPFIRE_ITEMS.get(campfireBE);
-            ItemStack leftover = items.get(campfireSlot);
-            if (!leftover.isEmpty()
-                    && !PhysicalInputRecovery.recoveredExpected(leftover, placedInput)) {
-                return ItemStack.EMPTY;
-            }
-            if (!leftover.isEmpty()) {
-                recovered = leftover.copyWithCount(placedInput.getCount());
-                ItemStack retained = leftover.copy();
-                retained.shrink(recovered.getCount());
-                items.set(campfireSlot, retained.isEmpty() ? ItemStack.EMPTY : retained);
-                if (!usingSharedLedger) refundToRSNetwork(recovered);
-            }
-            int[] prog = (int[]) CAMPFIRE_COOKING_PROGRESS.get(campfireBE);
-            prog[campfireSlot] = 0;
-            int[] times = (int[]) CAMPFIRE_COOKING_TIME.get(campfireBE);
-            times[campfireSlot] = 0;
-            if (campfireBE instanceof BlockEntity be) be.setChanged();
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Skillet] Reflection read failed", e);
-        }
-        campfireSlot = -1;
-        return recovered;
+    @Override
+    protected void clearMissingMachineState(@Nullable ServerPlayer player) {
+        releaseCampfireOperation();
+    }
+
+    @Override
+    protected void clearUnavailableMachineState(@Nullable ServerPlayer player) {
+        releaseCampfireOperation();
+    }
+
+    private void releaseCampfireOperation() {
+        if (campfireOperation == null) return;
+        campfireOperation.release();
+        campfireOperation = null;
     }
 
     private void refundToRSNetwork(ItemStack stack) {
@@ -681,7 +548,4 @@ public final class SkilletBatchDelegate extends AbstractBatchDelegate {
         }
     }
 
-    private void campfireForceLoad(boolean load) {
-        forceMachineChunk(myLevel, myPos, load);
-    }
 }
