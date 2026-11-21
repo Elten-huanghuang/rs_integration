@@ -77,7 +77,7 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
                 && GoetyDelightCookingPotSupport.isCompatibleBinding(recipe, blockKey);
     }
 
-    static boolean isCuttingBoardRecipe(@Nullable Recipe<?> recipe) {
+    public static boolean isCuttingBoardRecipe(@Nullable Recipe<?> recipe) {
         return recipe != null && recipe.getClass().getName().equals(CUTTING_BOARD_CLASS);
     }
 

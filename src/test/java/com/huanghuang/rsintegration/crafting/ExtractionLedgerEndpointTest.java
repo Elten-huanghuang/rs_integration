@@ -1,7 +1,10 @@
 package com.huanghuang.rsintegration.crafting;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 
+import com.huanghuang.rsintegration.crafting.graph.MaterialBroker;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
+import com.huanghuang.rsintegration.crafting.graph.MaterialSource;
+import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidTestFixtures;
 import com.huanghuang.rsintegration.storage.*;
@@ -134,6 +137,38 @@ class ExtractionLedgerEndpointTest extends BootstrapTest {
         assertEquals(1, variant.getCount());
         assertTrue(inventory.getItem(1).isEmpty());
         assertEquals(new CompoundTag(), ledger.committedFragments().get(0).getTag());
+    }
+
+    @Test
+    void logicalInitialPoolWithDefaultNbtStillExtractsTheExactTool() {
+        Inventory inventory = new Inventory(player);
+        ItemStack worn = new ItemStack(Items.IRON_PICKAXE);
+        worn.setDamageValue(100);
+        inventory.setItem(0, worn);
+        when(player.getInventory()).thenReturn(inventory);
+
+        MaterialKey planKey = new MaterialKey(Items.IRON_PICKAXE, null);
+        assertNotEquals(planKey, MaterialKey.of(planKey.toStack(1)));
+        var source = new MaterialSource.InitialPool(planKey);
+        var broker = new MaterialBroker();
+        broker.publish(source, planKey, 1);
+        broker.visitMonitorMaterials((key, held, planned) -> {
+            assertEquals(planKey, key);
+            assertEquals(0, held);
+            assertEquals(1, planned);
+        });
+        var token = broker.reserve(new NodeId(0), List.of(new MaterialBroker.Request(source, planKey, 1)));
+        ItemStack template = broker.checkout(token).initialStacks().get(0);
+        assertTrue(ledger.reserveExactAcrossNetworkAndInventory(template, 1, null, player).isEmpty());
+
+        inventory.setItem(1, new ItemStack(Items.IRON_PICKAXE));
+        assertFalse(ledger.reserveExactAcrossNetworkAndInventory(template, 1, null, player).isEmpty());
+        try (MockedStatic<PlayerUtils> ignored = mockStatic(PlayerUtils.class)) {
+            assertTrue(ledger.commitToEndpoint(null, player));
+        }
+        assertTrue(inventory.getItem(1).isEmpty());
+        assertSame(worn, inventory.getItem(0));
+        assertEquals(100, worn.getDamageValue());
     }
 
     @Test

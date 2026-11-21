@@ -108,7 +108,7 @@ public final class MaterialBroker {
         requireOwnerThread();
         for (AssetLot lot : lots.values()) {
             if (lot.source instanceof MaterialSource.InitialPool) {
-                consumer.accept(MaterialKey.of(lot.stack), 0L, saturatingAdd(lot.available, lot.reserved));
+                consumer.accept(lot.material, 0L, saturatingAdd(lot.available, lot.reserved));
             } else {
                 consumer.accept(MaterialKey.of(lot.stack), saturatingAdd(lot.available, lot.reserved), 0L);
             }
@@ -134,12 +134,23 @@ public final class MaterialBroker {
     }
 
     public long publish(MaterialSource source, MaterialKey material, long quantity) {
+        requireOwnerThread();
+        Objects.requireNonNull(source, "source");
+        Objects.requireNonNull(material, "material");
         if (quantity <= 0) throw new IllegalArgumentException("published quantity must be positive");
+        boolean initial = source instanceof MaterialSource.InitialPool pool && pool.key().equals(material);
+        if (source instanceof MaterialSource.InitialPool && !initial) {
+            throw new IllegalArgumentException("initial pool does not match material key");
+        }
         long firstLot = -1L;
         long remaining = quantity;
         while (remaining > 0L) {
             int chunk = (int) Math.min(Integer.MAX_VALUE, remaining);
-            long lotId = publishActual(source, material, material.toStack(chunk));
+            ItemStack template = material.toStack(chunk);
+            if (template.isEmpty()) throw new IllegalArgumentException("published stack must be non-empty");
+            // 初始库存只登记计划数量，重建的模板可能被物品补写默认 NBT。
+            long lotId = initial ? addLot(source, material, template)
+                    : publishActual(source, material, template);
             if (firstLot < 0L) firstLot = lotId;
             remaining -= chunk;
         }

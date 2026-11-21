@@ -11,6 +11,7 @@ import com.huanghuang.rsintegration.crafting.graph.AllocationId;
 import com.huanghuang.rsintegration.crafting.graph.CraftNode;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
+import com.huanghuang.rsintegration.crafting.consumption.DurabilityMath;
 import com.huanghuang.rsintegration.crafting.graph.InputPortId;
 import com.huanghuang.rsintegration.crafting.graph.MaterialAllocation;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
@@ -443,6 +444,11 @@ final class ResolutionContext {
     }
 
     @Nullable
+    ResourceLocation forcedRecipeForTool(ItemStack tool) {
+        return forcedRecipes == null ? null : recipeForStack(tool, forcedRecipes, forcedRecipesUseTags);
+    }
+
+    @Nullable
     private static ResourceLocation recipeForStack(ItemStack stack,
                                                     @Nullable Map<ResourceLocation, ResourceLocation> recipes,
                                                     boolean usesTags) {
@@ -858,6 +864,42 @@ final class ResolutionContext {
             itemCount = saturatingAdd(itemCount, ceilDiv(remainingUses, freshUses));
         }
         return Math.min(safeOperations, itemCount);
+    }
+
+    record DurabilitySupply(List<SupplySlice> slices, long remainingUses) {}
+
+    /** 按真正分配的工具剩余耐久扣减需求，多个工具可以接力完成这一槽。 */
+    DurabilitySupply takeDurabilityTools(Ingredient ingredient, long uses, long damagePerUse) {
+        if (forcedRecipeFor(ingredient) != null) return new DurabilitySupply(List.of(), uses);
+        record Tool(CraftingResolver.StackKey key, long capacity) {}
+        List<Tool> tools = new ArrayList<>();
+        for (var key : sortedMatchingKeys(ingredient)) {
+            if (!matches(ingredient, key)) continue;
+            long capacity = toolUses(stacksByKey.get(key).stack, damagePerUse);
+            if (capacity > 0) tools.add(new Tool(key, capacity));
+        }
+        tools.sort(Comparator.comparingLong(Tool::capacity).reversed());
+        long usable = Math.max(0L, countMatching(ingredient)
+                - RSIntegrationConfig.getProtectedReserve(ingredient));
+        List<SupplySlice> slices = new ArrayList<>();
+        for (Tool tool : tools) {
+            if (uses == 0 || usable == 0) break;
+            long count = Math.min(usable, Math.min(counts.getOrDefault(tool.key(), 0L),
+                    ceilDiv(uses, tool.capacity())));
+            long took = consumeSupplyLots(stacksByKey.get(tool.key()).material, count, slices, false);
+            if (took == 0) continue;
+            decrement(tool.key(), took);
+            usable -= took;
+            uses = Math.max(0L, uses - multiplySaturated(took, tool.capacity()));
+        }
+        return new DurabilitySupply(List.copyOf(slices), uses);
+    }
+
+    static long toolUses(ItemStack stack, long damagePerUse) {
+        if (stack.isEmpty()) return 0L;
+        if (!stack.isDamageableItem()) return Long.MAX_VALUE;
+        return DurabilityMath.usesForRemainingDurability(
+                (long) stack.getMaxDamage() - stack.getDamageValue(), damagePerUse);
     }
 
     private static long saturatingAdd(long left, long right) {

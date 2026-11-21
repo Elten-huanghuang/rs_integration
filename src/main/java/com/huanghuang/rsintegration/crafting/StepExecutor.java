@@ -25,6 +25,7 @@ import com.huanghuang.rsintegration.util.PerformanceMonitor;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotCategoryPlanning;
 import com.huanghuang.rsintegration.mods.goety.GoetyDynamicRitualRecipe;
 import com.huanghuang.rsintegration.mods.farmersdelight.MinersDelightCopperPotSupport;
+import com.huanghuang.rsintegration.mods.farmersdelight.FarmersDelightRecipeHandler;
 import com.huanghuang.rsintegration.mods.vanilla.SmithingRecipeHandler;
 import com.huanghuang.rsintegration.mods.slashblade.SlashBladeRecipeHandler;
 import com.huanghuang.rsintegration.mods.slashblade.SlashBladePlanning;
@@ -387,10 +388,26 @@ final class StepExecutor {
                 int originalIndex = resolutionOrder.get(next++);
                 IngredientSpec spec = physicalSpecs.get(originalIndex);
                 long pendingCount = pendingInputs.remove(0).count();
+                InputPortId port = new InputPortId(nodeId, originalIndex);
+                if (spec.role() == DemandRole.DURABILITY
+                        && FarmersDelightRecipeHandler.isCuttingBoardRecipe(recipe)) {
+                    resolveDurabilityTools(spec.ingredient(), batches, spec.consumption(), ctx, depth + 1,
+                            edges, port, stack, result -> {
+                                if (result == null) {
+                                    stack.leave();
+                                    stack.complete(done, null);
+                                    return;
+                                }
+                                for (var slice : result.slices()) ctx.addAllocation(port, slice);
+                                slotInputs[originalIndex] = new InputDemand(port, spec.ingredient(),
+                                        result.quantity(), spec.consumption(), firstDisplay(spec.ingredient()));
+                                stack.resume(this);
+                            });
+                    return;
+                }
                 int quantity = SaturatingLongMath.clampToInt(spec.consumption().kind()
                         == InputConsumption.Kind.DURABILITY
                         ? ctx.requiredDurabilityItems(spec, batches) : pendingCount);
-                InputPortId port = new InputPortId(nodeId, originalIndex);
                 // 刀的展示栈只代表条件下限，不能把工作台原料锁成整份 NBT 相等。
                 Consumer<Ingredient> resolvedSlot = plannedIngredient -> {
                     if (plannedIngredient == null) {
@@ -413,6 +430,97 @@ final class StepExecutor {
             }
         }
         stack.resume(new Slots());
+    }
+
+    record DurabilityAllocation(List<ResolutionContext.SupplySlice> slices, long quantity) {}
+
+    static void resolveDurabilityTools(
+            Ingredient ingredient, long uses, InputConsumption consumption, ResolutionContext ctx,
+            int depth, CraftingResolver.EdgeTracker edges, @Nullable InputPortId port,
+            PlanningStack stack, Consumer<DurabilityAllocation> done) {
+        long damage = consumption.unitsPerOperation();
+        var stock = ctx.takeDurabilityTools(ingredient, uses, damage);
+        long reserved = stock.slices().stream().mapToLong(ResolutionContext.SupplySlice::quantity).sum();
+        if (stock.remainingUses() == 0) {
+            stack.complete(done, new DurabilityAllocation(stock.slices(), reserved));
+            return;
+        }
+
+        // 先按每个候选自己的耐久计算补货量，再尝试其生产路线。
+        record Candidate(ItemStack tool, long count) {}
+        var preferences = MaterialVariantPreferences.snapshot();
+        ResourceLocation forcedRecipe = ctx.forcedRecipeFor(ingredient);
+        var candidates = Arrays.stream(ingredient.getItems())
+                .filter(tool -> !tool.isEmpty() && IngredientMatcher.test(ingredient, tool))
+                .filter(tool -> forcedRecipe == null || forcedRecipe.equals(ctx.forcedRecipeForTool(tool)))
+                .map(tool -> {
+                    long capacity = ResolutionContext.toolUses(tool, damage);
+                    long remaining = stock.remainingUses();
+                    return capacity == 0 ? null : new Candidate(tool, 1 + (remaining - 1) / capacity);
+                })
+                .filter(candidate -> candidate != null)
+                .distinct()
+                .sorted(Comparator.comparingLong(Candidate::count)
+                        .thenComparingInt(candidate -> preferences.rank(candidate.tool().getItem())))
+                .iterator();
+        boolean strictNbt = IngredientMatcher.requiresNbt(ingredient);
+        int missingCheckpoint = ctx.missingCount();
+        class TryTool implements Runnable {
+            long missingCount = 1;
+            List<String> failureDetails = List.of();
+
+            @Override
+            public void run() {
+                if (!candidates.hasNext() || ctx.timedOut()) {
+                    failureDetails.forEach(ctx::addMissing);
+                    if (CraftingResolver.recordBestEffortUnresolved(
+                            ctx, port, ingredient, missingCount, "tool-durability")) {
+                        stack.complete(done, new DurabilityAllocation(stock.slices(), reserved + missingCount));
+                    } else {
+                        CraftingResolver.recordFailureMissing(ctx, ingredient, missingCheckpoint);
+                        stack.complete(done, null);
+                    }
+                    return;
+                }
+                Candidate candidate = candidates.next();
+                Ingredient fresh = CraftingResolver.ingredientOf(candidate.tool(), strictNbt);
+                List<ResolutionContext.SupplySlice> picked = new ArrayList<>();
+                ctx.beginUndo();
+                edges.beginUndo();
+                boolean wasStrict = ctx.strictCandidatePass;
+                ctx.strictCandidatePass = true;
+                stack.enter(() -> ctx.strictCandidatePass = wasStrict);
+                CraftingResolver.ensureIngredient(fresh, candidate.count(), ctx, depth, edges,
+                        null, picked, stack, resolved -> {
+                            stack.leave();
+                            long remaining = stock.remainingUses();
+                            for (var slice : picked) {
+                                long capacity = ResolutionContext.toolUses(slice.material().toStack(1), damage);
+                                if (capacity == 0) continue;
+                                remaining = slice.quantity() > remaining / capacity
+                                        ? 0L : remaining - slice.quantity() * capacity;
+                            }
+                            if (resolved && remaining == 0) {
+                                ctx.commitUndo();
+                                edges.commitUndo();
+                                List<ResolutionContext.SupplySlice> all = new ArrayList<>(stock.slices());
+                                all.addAll(picked);
+                                stack.complete(done, new DurabilityAllocation(List.copyOf(all),
+                                        reserved + candidate.count()));
+                                return;
+                            }
+                            if (failureDetails.isEmpty()) {
+                                missingCount = candidate.count();
+                                failureDetails = ctx.missingSince(missingCheckpoint);
+                            }
+                            ctx.truncateMissing(missingCheckpoint);
+                            ctx.rollback();
+                            edges.rollback();
+                            stack.resume(this);
+                        });
+            }
+        }
+        stack.resume(new TryTool());
     }
 
     /**

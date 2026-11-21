@@ -68,7 +68,11 @@ import com.huanghuang.rsintegration.magic.MagicResourceCost;
 public final class CraftingResolver {
 
     /** The terminal recipe currently consuming the roots being resolved. */
-    public record ActiveRootRecipe(ResourceLocation recipeId, ItemStack output) {
+    public record ActiveRootRecipe(ResourceLocation recipeId, ItemStack output, int durabilityOperations) {
+        public ActiveRootRecipe(ResourceLocation recipeId, ItemStack output) {
+            this(recipeId, output, 0);
+        }
+
         public ActiveRootRecipe {
             Objects.requireNonNull(recipeId, "recipeId");
             output = Objects.requireNonNull(output, "output").copy();
@@ -703,6 +707,27 @@ public final class CraftingResolver {
                     Ingredient ingredient = pendingRoots.remove(0).ingredient();
                     if (root.isEmpty()) {
                         stack.resume(this);
+                        return;
+                    }
+                    if (activeRoot != null && activeRoot.durabilityOperations() > 0
+                            && root.role() == DemandRole.DURABILITY) {
+                        StepExecutor.resolveDurabilityTools(ingredient, activeRoot.durabilityOperations(),
+                                root.consumption(), ctx, 0, edges, null, stack, result -> {
+                                    if (result != null) {
+                                        var allocations = result.slices().stream()
+                                                .map(slice -> new RootAllocation(slice.source(),
+                                                        slice.material(), slice.quantity()))
+                                                .toList();
+                                        long supplied = allocations.stream().mapToLong(RootAllocation::quantity).sum();
+                                        RootDemand demand = new RootDemand(ingredient, result.quantity(),
+                                                result.quantity() - supplied, firstDisplayStack(ingredient),
+                                                allocations, root.role());
+                                        rootsByOrder.put(root.order(), demand);
+                                        if (checkpoint != null) checkpoint.completedRoot(ctx, root.order(), demand);
+                                    }
+                                    if (result == null && !bestEffort) finish();
+                                    else stack.resume(this);
+                                });
                         return;
                     }
                     RootSpec spec = new RootSpec(ingredient, root.count(), root.consumption(), root.order());

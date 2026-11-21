@@ -4,9 +4,11 @@ import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.crafting.graph.CraftNode;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.crafting.graph.MaterialSource;
 import com.huanghuang.rsintegration.mods.farmersdelight.CuttingBoardRecipeHandler;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
@@ -18,7 +20,9 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.crafting.CraftingBookCategory;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.item.crafting.ShapelessRecipe;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.common.ToolActions;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
@@ -91,11 +95,61 @@ class CuttingBoardIntermediateSelectionTest extends BootstrapTest {
 
     private static CraftNode resolveCutting(long existingShards, int requestedShards,
                                             ItemStack tool, long toolCount) {
+        return resolveCutting(existingShards, requestedShards, tool, toolCount,
+                new ToolActionIngredient(ToolActions.PICKAXE_DIG), false)
+                .nodes().stream().filter(node -> node.modTypeId().equals("farmersdelight_cutting_board"))
+                .findFirst().orElseThrow();
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false,0,0,1", "false,1,0,0", "false,1,249,1",
+            "true,0,0,1", "true,1,0,0", "true,1,249,1"})
+    void plansSixtyFourOperationsUsingOnlyTheNeededPickaxes(
+            boolean terminal, long stock, int damage, long crafted) {
+        ItemStack pickaxe = new ItemStack(Items.IRON_PICKAXE);
+        pickaxe.setDamageValue(damage);
+        ItemStack wornAlternative = new ItemStack(Items.WOODEN_PICKAXE);
+        wornAlternative.setDamageValue(wornAlternative.getMaxDamage() - 1);
+        Ingredient supportedTools = Ingredient.of(wornAlternative, new ItemStack(Items.IRON_PICKAXE));
+
+        CraftPlanGraph graph = resolveCutting(0, 256, pickaxe, stock, supportedTools, terminal);
+
+        assertEquals(crafted, graph.nodes().stream()
+                .filter(node -> node.recipeId().equals(new ResourceLocation("test", "iron_pickaxe")))
+                .mapToLong(CraftNode::executions).sum());
+        if (terminal) {
+            var root = graph.rootDemands().get(0);
+            assertEquals(DemandRole.DURABILITY, root.role());
+            assertEquals(stock + crafted, root.quantity());
+            assertEquals(0, root.unresolvedQuantity());
+            assertTrue(root.allocations().stream()
+                    .allMatch(allocation -> allocation.material().item() == Items.IRON_PICKAXE));
+            assertEquals(stock, root.allocations().stream()
+                    .filter(allocation -> allocation.source() instanceof MaterialSource.InitialPool)
+                    .mapToLong(allocation -> allocation.quantity()).sum());
+            return;
+        }
+        long plannedTools = graph.allocations().stream()
+                .filter(allocation -> allocation.material().item() == Items.IRON_PICKAXE)
+                .mapToLong(allocation -> allocation.quantity()).sum();
+        assertEquals(stock + crafted, plannedTools);
+        assertEquals(stock, graph.allocations().stream()
+                .filter(allocation -> allocation.material().item() == Items.IRON_PICKAXE
+                        && allocation.source() instanceof MaterialSource.InitialPool)
+                .mapToLong(allocation -> allocation.quantity()).sum());
+    }
+
+    private static CraftPlanGraph resolveCutting(long existingShards, int requestedShards,
+                                                 ItemStack tool, long toolCount,
+                                                 Ingredient tools, boolean terminal) {
         CuttingBoardRecipe cutting = new CuttingBoardRecipe(
                 new ResourceLocation("farmersdelight", "cutting/amethyst_block"), "",
-                Ingredient.of(Items.AMETHYST_BLOCK), new ToolActionIngredient(ToolActions.PICKAXE_DIG),
+                Ingredient.of(Items.AMETHYST_BLOCK), tools,
                 NonNullList.of(ChanceResult.EMPTY,
                         new ChanceResult(new ItemStack(Items.AMETHYST_SHARD, 4), 1.0F)), "");
+        var pickaxeRecipe = new ShapelessRecipe(new ResourceLocation("test", "iron_pickaxe"), "",
+                CraftingBookCategory.MISC, new ItemStack(Items.IRON_PICKAXE),
+                NonNullList.of(Ingredient.EMPTY, Ingredient.of(Items.IRON_INGOT)));
         ServerLevel level = mock(ServerLevel.class);
         when(level.registryAccess()).thenReturn(RegistryAccess.EMPTY);
         ServerPlayer player = mock(ServerPlayer.class);
@@ -116,24 +170,28 @@ class CuttingBoardIntermediateSelectionTest extends BootstrapTest {
             index.when(() -> RecipeIndex.get(level)).thenReturn(Map.of(
                     Items.AMETHYST_SHARD, List.of(new RecipeIndex.Entry(
                             cutting, cuttingType,
-                            new ResourceLocation("farmersdelight", "cutting")))));
-
-            CraftPlanGraph graph = CraftingResolver.resolveGraphForSpecsWithTypes(
+                            new ResourceLocation("farmersdelight", "cutting"))),
+                    Items.IRON_PICKAXE, List.of(new RecipeIndex.Entry(
+                            pickaxeRecipe, ModType.GENERIC, new ResourceLocation("minecraft", "crafting")))));
+            var available = Map.of(CraftingResolver.StackKey.of(tool, true), toolCount,
+                    new CraftingResolver.StackKey(Items.AMETHYST_BLOCK, null), 1000L,
+                    new CraftingResolver.StackKey(Items.AMETHYST_SHARD, null), existingShards,
+                    new CraftingResolver.StackKey(Items.IRON_INGOT, null), 1000L);
+            CraftPlanGraph graph = terminal ? CraftingResolver.resolveMachineGraphForScaledSpecsWithTypes(
+                    List.of(new ScaledIngredientSpec(tools, 64L, InputConsumption.durability(1))),
+                    available, level, player, null, missing, Map.of(), false, 10_000,
+                    new CraftingResolver.ActiveRootRecipe(cutting.getId(),
+                            new ItemStack(Items.AMETHYST_SHARD, 4), 64), Map.of())
+                    : CraftingResolver.resolveGraphForSpecsWithTypes(
                     List.of(new IngredientSpec(Ingredient.of(Items.AMETHYST_SHARD), requestedShards)),
-                    Map.of(CraftingResolver.StackKey.of(tool, true), toolCount,
-                            new CraftingResolver.StackKey(Items.AMETHYST_BLOCK, null), 1000L,
-                            new CraftingResolver.StackKey(Items.AMETHYST_SHARD, null), existingShards),
+                    available,
                     level, player, null, missing,
                     Map.of(new ResourceLocation("minecraft", "amethyst_shard"), cutting.getId()),
                     false, 10_000);
 
             assertTrue(missing.isEmpty(), missing.toString());
             assertTrue(graph.unresolvedDemands().isEmpty(), graph.toString());
-            CraftNode selected = graph.nodes().stream()
-                    .filter(node -> node.recipeId().equals(cutting.getId()))
-                    .findFirst().orElseThrow();
-            assertEquals("farmersdelight_cutting_board", selected.modTypeId());
-            return selected;
+            return graph;
         }
     }
 }

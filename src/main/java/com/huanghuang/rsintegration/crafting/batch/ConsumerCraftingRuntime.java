@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
+import com.huanghuang.rsintegration.mods.farmersdelight.FarmersDelightRecipeHandler;
+
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
@@ -1290,7 +1292,8 @@ public final class ConsumerCraftingRuntime {
         try {
             CraftingResolver.ActiveRootRecipe activeRoot =
                     new CraftingResolver.ActiveRootRecipe(
-                            key.recipeId(), target);
+                            key.recipeId(), target,
+                            FarmersDelightRecipeHandler.isCuttingBoardRecipe(recipe) ? executions : 0);
             int timeout = 30_000;
             try {
                 timeout = RSIntegrationConfig

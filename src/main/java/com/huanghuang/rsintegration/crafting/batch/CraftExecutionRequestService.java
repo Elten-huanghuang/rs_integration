@@ -30,6 +30,7 @@ import com.huanghuang.rsintegration.mods.crockpot.CrockPotCategoryPlanning;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotInventory;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotRecipeHandler;
 import com.huanghuang.rsintegration.mods.farmersdelight.MinersDelightCopperPotSupport;
+import com.huanghuang.rsintegration.mods.farmersdelight.FarmersDelightRecipeHandler;
 import com.huanghuang.rsintegration.mods.goety.GoetyBatchDelegate;
 import com.huanghuang.rsintegration.mods.goety.GoetyDynamicRitualRecipe;
 import com.huanghuang.rsintegration.mods.goety.GoetyRecipeHandler;
@@ -212,11 +213,10 @@ final class CraftExecutionRequestService {
             return true;
         } catch (IllegalArgumentException | ArithmeticException exception) {
             RSIntegrationMod.LOGGER.warn(
-                    "[RSI-Generic] Cached typed graph cannot be composed for {}",
+                    "[RSI-Generic] Cannot start cached crafting graph for {}",
                     recipeId, exception);
             player.sendSystemMessage(Component.translatable(
-                    "rsi.generic.error.unsupported_machine",
-                    recipe.getClass().getSimpleName()));
+                    "rsi.progress.reason.internal_error"));
             return true;
         }
     }
@@ -670,6 +670,8 @@ final class CraftExecutionRequestService {
                 }
                 Map<StackKey, Long> avail = listAvailable(player, storageEndpoint);
                 logExecutionAvailability(recipeId, avail);
+                var activeRoot = new CraftingResolver.ActiveRootRecipe(recipeId, recipeOutput,
+                        FarmersDelightRecipeHandler.isCuttingBoardRecipe(recipe) ? repeatCount : 0);
                 // Physical recipes are fully represented by immutable values.
                 // Queue dependency planning before the bounded typed resolver.
                 boolean physicalPureQueued = false;
@@ -692,13 +694,13 @@ final class CraftExecutionRequestService {
                                         graphSpecs, avail, player.serverLevel(), player,
                                         storageEndpoint, missing, forcedOverrides, false,
                                         typedResolverBudgetMs(),
-                                        new CraftingResolver.ActiveRootRecipe(recipeId, recipeOutput),
+                                        activeRoot,
                                         materialLocks, safePreferences)
                                 : CraftingResolver.resolveGraphForScaledSpecsWithTypes(
                                         graphSpecs, avail, player.serverLevel(), player,
                                         storageEndpoint, missing, forcedOverrides, false,
                                         typedResolverBudgetMs(),
-                                        new CraftingResolver.ActiveRootRecipe(recipeId, recipeOutput),
+                                        activeRoot,
                                         materialLocks, safePreferences);
                         if (missing.isEmpty()) break;
                         Map<StackKey, Long> refreshed = refreshMissingAvailability(

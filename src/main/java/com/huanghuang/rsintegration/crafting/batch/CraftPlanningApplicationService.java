@@ -70,6 +70,7 @@ import com.huanghuang.rsintegration.mods.crockpot.CrockPotInventory;
 import com.huanghuang.rsintegration.mods.crockpot.CrockPotRecipeHandler;
 import com.huanghuang.rsintegration.mods.embers.EmbersPlanInfo;
 import com.huanghuang.rsintegration.mods.farmersdelight.CookingPotBatchDelegate;
+import com.huanghuang.rsintegration.mods.farmersdelight.FarmersDelightRecipeHandler;
 import com.huanghuang.rsintegration.mods.farmersdelight.MinersDelightCopperPotSupport;
 import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketRecipeWrapper;
 import com.huanghuang.rsintegration.mods.forbidden.FaRitualWrapper;
@@ -1417,8 +1418,9 @@ final class CraftPlanningApplicationService {
                 && recipeSpecs.isEmpty();
         boolean executionMachineAvailable = !CraftExecutionPolicy.requiresBoundMachine(recipe, recipeModType)
                 || CraftMachineBindingSupport.hasBindingForExecutionType(player, recipe, recipeModType);
+        boolean cuttingBoard = FarmersDelightRecipeHandler.isCuttingBoardRecipe(recipe);
         DirectMaterialAllocator.Result directPreviewAllocation =
-                executionMachineAvailable && effectiveOverrides.isEmpty()
+                !cuttingBoard && executionMachineAvailable && effectiveOverrides.isEmpty()
                 && (hasFixedTerminalInputs || altarInputsPrepared)
                         ? (CraftExecutionPolicy.requiresBoundMachine(recipe, recipeModType)
                                 ? DirectMaterialAllocator.allocateScaledSingleVariant(
@@ -1646,13 +1648,11 @@ final class CraftPlanningApplicationService {
         List<ScaledIngredientSpec> recursiveRecipeSpecs = recursiveHandler == null
                 ? recipeSpecs
                 : recursiveHandler.getRecursiveScaledIngredients(recipe, recipeSpecs);
-        DirectMaterialAllocator.Result directRecursiveAllocation = effectiveOverrides.isEmpty()
+        DirectMaterialAllocator.Result directRecursiveAllocation = !cuttingBoard && effectiveOverrides.isEmpty()
                 ? DirectMaterialAllocator.allocateScaled(recursiveRecipeSpecs, available)
                 : new DirectMaterialAllocator.Result(false, List.of(), -1, 0);
-        boolean directRecursiveTerminalPlan = !effectiveOverrides.isEmpty()
-                ? false
-                : CraftIngredientPlanMath.useDirectTerminalPlan(
-                        directRecursiveAllocation, recursiveRecipeSpecs, planTargetOutput);
+        boolean directRecursiveTerminalPlan = CraftIngredientPlanMath.useDirectTerminalPlan(
+                directRecursiveAllocation, recursiveRecipeSpecs, planTargetOutput);
 
         List<ResolutionStep> resolutionSteps = null;
         CraftPlanGraph planGraph = null;
@@ -1702,7 +1702,8 @@ final class CraftPlanningApplicationService {
                 PlanningSnapshot typedSnapshot = planningSnapshot;
                 var level = player.serverLevel();
                 var bindingFingerprint = PlanningStateValidator.bindingFingerprint(player, planDimKey, pos);
-                var activeRoot = new CraftingResolver.ActiveRootRecipe(recipeId, targetOutput);
+                var activeRoot = new CraftingResolver.ActiveRootRecipe(recipeId, targetOutput,
+                        cuttingBoard ? repeatCount : 0);
                 List<TypedRootKey> rootKeys = typedRootKeys(recursiveRecipeSpecs);
                 var job = startCompatiblePreview(typedSnapshot, CraftPlanningRuntime.planRequests(),
                         player.getServer()::execute, player.getServer()::getTickCount,
