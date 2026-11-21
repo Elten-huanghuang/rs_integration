@@ -2110,6 +2110,8 @@
   "rsi.plan.workspace.recalculate_failed": "Recalculation failed; previous plan kept. Change the route or check again.",
   "rsi.transmutation.matched": "A bookmarked item is available. Auto-transmutation stopped.",
   "rsi.transmutation.unavailable": "Unable to transmute. Auto-transmutation stopped.",
+  "rsi.relics.full_quality": "Five-star quality reached. Auto-reroll stopped.",
+  "rsi.relics.reroll_unavailable": "Unable to continue rerolling.",
   "rsi.plan.sources.label": "Material sources",
   "rsi.plan.sources.inventory": "Inventory",
   "rsi.plan.sources.storage_network": "Storage network",

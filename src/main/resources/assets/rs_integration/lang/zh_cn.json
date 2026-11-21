@@ -2110,6 +2110,8 @@
   "rsi.plan.workspace.recalculate_failed": "重新运算失败，保留上次计划；可修改路线或重新检查",
   "rsi.transmutation.matched": "候选中出现收藏物品，已停止自动嬗变",
   "rsi.transmutation.unavailable": "无法继续嬗变，已停止",
+  "rsi.relics.full_quality": "技能已达五星，已停止自动重掷",
+  "rsi.relics.reroll_unavailable": "无法继续重掷，已停止",
   "rsi.plan.sources.label": "材料来源",
   "rsi.plan.sources.inventory": "物品栏",
   "rsi.plan.sources.storage_network": "存储网络",

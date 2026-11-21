@@ -24,6 +24,7 @@ import com.huanghuang.rsintegration.crafting.progress.CraftFailureClientCommands
 import com.huanghuang.rsintegration.crafting.tree.RecipeBrowserSlowCallDiagnostics;
 import com.huanghuang.rsintegration.machine.client.BeyondDimensionsMachineHubClient;
 import com.huanghuang.rsintegration.feature.resonance.bridge.ClientDiskData;
+import com.huanghuang.rsintegration.feature.relics.client.RelicsRerollClient;
 import com.huanghuang.rsintegration.feature.sidepanel.RSSidePanelClient;
 import com.huanghuang.rsintegration.feature.villager.tradelock.client.VillagerTradeLockClient;
 import com.huanghuang.rsintegration.feature.transmutation.client.TransmutationTableClient;
@@ -46,6 +47,9 @@ public final class ClientEventBootstrap {
                 VillagerTradeLockClient.class);
         if (ModList.get().isLoaded("alexsmobs")) {
             MinecraftForge.EVENT_BUS.register(TransmutationTableClient.class);
+        }
+        if (ModList.get().isLoaded("relics")) {
+            MinecraftForge.EVENT_BUS.register(RelicsRerollClient.class);
         }
         // The auto-eat UI supports both RS Grid and the BD terminal. The
         // listener uses class-name checks, so it remains safe in BD-only
