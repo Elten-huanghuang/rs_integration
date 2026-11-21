@@ -33,7 +33,7 @@ public final class ApotheosisGemCuttingBatchDelegate extends InstantBatchDelegat
     private ServerLevel level;
     private ResourceKey<Level> dimension;
     private BlockPos pos;
-    private ApotheosisGemCuttingRecipe recipe;
+    private ApotheosisGemCuttingInputs inputs;
     private GemCuttingMenu menu;
     private ItemStack expected = ItemStack.EMPTY;
     private final List<ItemStack> results = new ArrayList<>();
@@ -49,7 +49,8 @@ public final class ApotheosisGemCuttingBatchDelegate extends InstantBatchDelegat
         this.level = resolved;
         this.dimension = resolved.dimension();
         this.pos = pos.immutable();
-        this.recipe = found;
+        this.inputs = new ApotheosisGemCuttingInputs(
+                new ApotheosisGemCuttingRecipeHandler().getIngredients(found));
         this.expected = found.getResultItem(resolved.registryAccess());
         this.results.clear();
         this.done = false;
@@ -68,11 +69,7 @@ public final class ApotheosisGemCuttingBatchDelegate extends InstantBatchDelegat
 
     @Override
     public MaterialPlan materialPlan() {
-        return MaterialPlan.graphSlots(recipeSlots());
-    }
-
-    List<IngredientSpec> recipeSlots() {
-        return recipe == null ? null : new ApotheosisGemCuttingRecipeHandler().getIngredients(recipe);
+        return MaterialPlan.graphSlots(inputs == null ? null : inputs.reservationSlots());
     }
 
     @Override
@@ -82,8 +79,8 @@ public final class ApotheosisGemCuttingBatchDelegate extends InstantBatchDelegat
 
     @Override
     public boolean startSingleOperation(@Nonnull ServerPlayer player) {
-        List<IngredientSpec> specs = recipeSlots();
-        if (specs == null || specs.size() != 3) return false;
+        if (inputs == null) return false;
+        List<IngredientSpec> specs = inputs.reservationSlots();
         ExtractionLedger privateLedger = materialAccess().newLedger();
         this.ledger = privateLedger;
         this.usingSharedLedger = false;
@@ -91,7 +88,7 @@ public final class ApotheosisGemCuttingBatchDelegate extends InstantBatchDelegat
             setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, dimension, pos).orElse(null));
         }
         privateLedger.setStorageEndpoint(storageEndpoint());
-        List<ItemStack> materials = new ArrayList<>(3);
+        List<ItemStack> materials = new ArrayList<>(specs.size());
         for (IngredientSpec spec : specs) {
             ItemStack stack = CraftPacketUtils.ensureMaterialAvailable(
                     player, dimension, pos, spec.ingredient(), spec.count(), privateLedger);
@@ -118,30 +115,20 @@ public final class ApotheosisGemCuttingBatchDelegate extends InstantBatchDelegat
     }
 
     private boolean start(ServerPlayer player, List<ItemStack> materials) {
-        if (materials.size() != 3 || !isTable(level, pos)) return false;
+        if (inputs == null || !isTable(level, pos)) return false;
+        var menuInputs = inputs.forBatch(materials, preparedExecutions());
+        if (menuInputs == null) return false;
         AbstractContainerMenu created = createMenu(player);
         if (!(created instanceof GemCuttingMenu cutting)) return false;
         this.menu = cutting;
         for (int i = 0; i < 4; i++) if (cutting.getSlot(i).hasItem()) return failStart();
 
-        ItemStack gems = materials.get(0);
-        ItemStack dust = materials.get(1);
-        ItemStack rarityMaterial = materials.get(2);
-        int[] remaining = {
-                gems.getCount(), dust.getCount(), rarityMaterial.getCount()
-        };
         results.clear();
         for (int execution = 0; execution < preparedExecutions(); execution++) {
-            if (gems.isEmpty() || dust.isEmpty() || rarityMaterial.isEmpty()
-                    || remaining[0] < 2 || remaining[1] < recipe.dustCost()
-                    || remaining[2] < recipe.material().getCount()) {
-                return failStart();
-            }
-
-            cutting.getSlot(0).set(gems.copyWithCount(1));
-            cutting.getSlot(1).set(dust.copyWithCount(recipe.dustCost()));
-            cutting.getSlot(2).set(gems.copyWithCount(1));
-            cutting.getSlot(3).set(rarityMaterial.copyWithCount(recipe.material().getCount()));
+            cutting.getSlot(0).set(menuInputs.gem().copy());
+            cutting.getSlot(1).set(menuInputs.dust().copy());
+            cutting.getSlot(2).set(menuInputs.gem().copy());
+            cutting.getSlot(3).set(menuInputs.rarityMaterial().copy());
 
             if (!cutting.clickMenuButton(player, 0)) return failStart();
             ItemStack produced = cutting.getSlot(0).getItem().copy();
@@ -151,9 +138,6 @@ public final class ApotheosisGemCuttingBatchDelegate extends InstantBatchDelegat
                 return failStart();
             }
             results.add(cutting.getSlot(0).remove(produced.getCount()));
-            remaining[0] -= 2;
-            remaining[1] -= recipe.dustCost();
-            remaining[2] -= recipe.material().getCount();
             clearCraftingSlots();
         }
         clearMenu();
