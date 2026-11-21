@@ -554,6 +554,15 @@ public final class RSIntegrationMixinPlugin implements IMixinConfigPlugin {
         if (mixinClassName.contains("jei.RecipesGuiMixin")) {
             return hasMethod(targetClassName, "updateLayout");
         }
+        if (mixinClassName.contains("jei.FluidContainerRecipeGuiLogicMixin")) {
+            return hasField(targetClassName, "recipeManager", "Lmezz/jei/api/recipe/IRecipeManager;")
+                    && hasField(targetClassName, "recipeTransferManager",
+                            "Lmezz/jei/api/recipe/transfer/IRecipeTransferManager;")
+                    && hasField(targetClassName, "state", "Lmezz/jei/gui/recipes/lookups/ILookupState;")
+                    && hasMethod(targetClassName, "setState", "(Lmezz/jei/gui/recipes/lookups/ILookupState;Z)Z")
+                    && hasMethod(targetClassName, "showCategories", "(Ljava/util/List;)Z")
+                    && hasMethod(targetClassName, "tick");
+        }
         if (mixinClassName.contains("jei.IngredientFilterSolCarrotMixin")) {
             return hasField(targetClassName, "ingredientListCached")
                     && hasMethod(targetClassName, "notifyListenersOfChange");

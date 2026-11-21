@@ -330,6 +330,8 @@ dependencies {
         testImplementation fg.deobf('local.compile:malum-1.20.1-1.6.6:local')
         testImplementation fg.deobf('local.compile:lodestone-1.20.1-1.6.4.1:local')
     } else {
+        // 默认测试只读取 Malum 的字节码来检查 Mixin 是否适用。
+        testRuntimeOnly fg.deobf('local.compile:malum-1.20.1-1.6.6:local')
         sourceSets.test.java.exclude '**/mixin/malum/MalumSpiritMatchingTest.java'
     }
     testImplementation fg.deobf('local:aetherworks:1.20.1-1.1.2')

@@ -184,6 +184,7 @@
     "jei.RecipeGuiLayoutsMixin",
     "jei.AlchemistCauldronRecipeCategoryMixin",
     "jei.RecipesGuiMixin",
+    "jei.FluidContainerRecipeGuiLogicMixin",
     "jei.RecipeBookmarkMixin",
     "jei.RecipeBookmarkButtonMixin",
     "jei.BookmarkOverlayAccessor",

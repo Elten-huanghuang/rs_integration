@@ -12,6 +12,7 @@ import java.util.jar.JarFile;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -31,6 +32,14 @@ class RSIntegrationMixinPluginTest {
         assertTrue(plugin.shouldApplyMixin(
                 "com.sammy.malum.common.block.curiosities.spirit_crucible.SpiritCrucibleCoreBlockEntity",
                 mixin + "malum.SpiritCrucibleOutputMixin"));
+    }
+
+    @Test
+    void fluidLookupRefreshMatchesJeiRecipeLogic() {
+        var plugin = new RSIntegrationMixinPlugin();
+        var mixin = "com.huanghuang.rsintegration.mixin.jei.FluidContainerRecipeGuiLogicMixin";
+        assertTrue(plugin.shouldApplyMixin("mezz.jei.gui.recipes.RecipeGuiLogic", mixin));
+        assertFalse(plugin.shouldApplyMixin("mezz.jei.gui.recipes.RecipesGui", mixin));
     }
 
     @Test

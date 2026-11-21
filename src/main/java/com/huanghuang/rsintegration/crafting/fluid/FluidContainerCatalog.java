@@ -29,6 +29,7 @@ import net.minecraftforge.fluids.capability.IFluidHandler;
 import net.minecraftforge.fluids.capability.IFluidHandlerItem;
 import org.slf4j.Logger;
 
+import javax.annotation.Nullable;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -88,6 +89,11 @@ public final class FluidContainerCatalog {
         return build;
     }
 
+    public static IncrementalIndex incrementalClientIndex(Level level) {
+        if (!level.isClientSide()) throw new IllegalArgumentException("Expected a client level");
+        return incrementalIndex(level, Map.of(), Set.of(), Map.of(), () -> true);
+    }
+
     /** 同步完整定义列表的兼容入口；增量会话只调用 stage，完成前不走此入口。 */
     static synchronized void publish(List<FluidContainerRecipe> definitions, Map<Item, List<RecipeIndex.Entry>> index,
             Set<ResourceLocation> seen,
@@ -111,13 +117,18 @@ public final class FluidContainerCatalog {
         if (node != null) projected.computeIfAbsent(node.output(), ignored -> new ArrayList<>()).add(node);
     }
 
+    @Nullable
+    public static synchronized List<FluidContainerRecipe> publishedRecipes(@Nullable Level level) {
+        PublishedCatalog ready = level == null ? null : CATALOGS.get(level.getRecipeManager());
+        return ready == null ? null : ready.recipes();
+    }
+
     public static synchronized List<FluidContainerRecipe> allRecipes(Level level) {
-        if (level == null) return List.of();
-        PublishedCatalog ready = CATALOGS.get(level.getRecipeManager());
-        if (ready != null) return ready.recipes();
+        List<FluidContainerRecipe> ready = publishedRecipes(level);
+        if (ready != null) return ready;
+        if (level == null || level.isClientSide()) return List.of();
         // 服务端会话尚在其他 source 时也不能由执行器/预览触发第二次同步扫描。
-        if (PENDING.containsKey(level.getRecipeManager())
-                || !level.isClientSide && RecipeIndex.isBuildInFlight()) return List.of();
+        if (PENDING.containsKey(level.getRecipeManager()) || RecipeIndex.isBuildInFlight()) return List.of();
         IncrementalIndex build = incrementalIndex(level, new LinkedHashMap<>(), new HashSet<>(),
                 new LinkedHashMap<>(), () -> true);
         try {
@@ -145,6 +156,14 @@ public final class FluidContainerCatalog {
         COMPATIBILITY_BY_ID.clear();
         CATALOGS.clear();
         PENDING.clear();
+    }
+
+    public static synchronized void invalidateClientRecipes(Level level) {
+        if (!level.isClientSide()) throw new IllegalArgumentException("Expected a client level");
+        RecipeManager manager = level.getRecipeManager();
+        CATALOGS.remove(manager);
+        IncrementalIndex pending = PENDING.get(manager);
+        if (pending != null) pending.cancel();
     }
 
     public static synchronized FluidContainerRecipe resolve(Level level, ResourceLocation id) {
@@ -204,7 +223,7 @@ public final class FluidContainerCatalog {
             this.current = current;
         }
 
-        private boolean isCurrent() {
+        public boolean isCurrent() {
             synchronized (FluidContainerCatalog.class) {
                 return !cancelled && generation == epoch && revision == CraftPlanningRevision.current()
                         && manager == level.getRecipeManager() && current.getAsBoolean();
@@ -287,7 +306,7 @@ public final class FluidContainerCatalog {
                     if (!staged.hasNext()) { phase++; return; }
                     FluidContainerRecipe recipe = staged.next();
                     byId.put(recipe.getId(), recipe);
-                    stage(recipe, index, seen, projected);
+                    if (!level.isClientSide()) stage(recipe, index, seen, projected);
                 }
                 case 7 -> {
                     // 所有容器均由本会话独占；冻结视图不再整表复制，发布时只替换引用。
