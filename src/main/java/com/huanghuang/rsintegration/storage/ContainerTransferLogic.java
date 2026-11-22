@@ -43,6 +43,8 @@ public final class ContainerTransferLogic {
             "com.huanghuang.rsintegration.feature.resonance.backpack.ResonanceBackpackContainer";
     private static final String BD_STORAGE_MENU_PREFIX =
             "com.wintercogs.beyonddimensions.common.menu.Dimensions";
+    private static final String DELIGHT_O_FLIGHT_COOK_BOOK_MENU =
+            "com.cloudmeow.delightoflight.gui.CookBookMenu";
     /**
      * Better Beyond Dimensions injects these network-backed display slots into
      * otherwise ordinary menus (chests, backpacks, machines). They render a
@@ -66,10 +68,10 @@ public final class ContainerTransferLogic {
     public static void transferAll(
             ServerPlayer player, AbstractContainerMenu menu, byte mode) {
         if (isEnderChestMenu(menu)) return;
-        // BD handheld item configuration screens expose virtual slots (for
-        // example the feeder/magnet filter item). They are not inventories;
-        // treating their display stacks as source slots duplicates items.
-        if (isBeyondDimensionsVirtualMenu(menu.getClass().getName())) {
+        String menuClassName = menu.getClass().getName();
+        // BD 手持物品的配置槽和菜品配方书的材料槽只保存模板，不能作为库存转移。
+        if (isBeyondDimensionsVirtualMenu(menuClassName)
+                || DELIGHT_O_FLIGHT_COOK_BOOK_MENU.equals(menuClassName)) {
             player.sendSystemMessage(Component.translatable("rsi.transfer.nothing"), false);
             return;
         }
