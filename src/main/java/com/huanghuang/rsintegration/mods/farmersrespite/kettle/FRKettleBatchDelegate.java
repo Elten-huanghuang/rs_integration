@@ -10,6 +10,7 @@ import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
+import com.huanghuang.rsintegration.mods.farmersrespite.kettle.FRKettleRecipeSupport.Brewing;
 import com.huanghuang.rsintegration.reflection.probes.FRReflection;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -28,7 +29,6 @@ import net.minecraftforge.items.ItemHandlerHelper;
 import net.minecraftforge.items.ItemStackHandler;
 import org.jetbrains.annotations.NotNull;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
-import net.minecraft.world.level.material.Fluids;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
@@ -57,21 +57,9 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
     private ResourceKey<Level> myDim;
     private BlockPos myPos;
     private Recipe<?> recipe;
-    private FluidStack recipeFluidIn;
-    private FluidStack recipeFluidOut;
+    private Brewing brewing;
     private boolean craftDone;
 
-    // ── pouring descriptor (fluid → bottled item) ──
-    // The kettle brews to a FluidStack; RS can only carry ItemStacks, so the
-    // output fluid is converted to a bottled item via the matching
-    // KettlePouringRecipe (container item + `amount` mB fluid → output item).
-    private ItemStack pourContainer = ItemStack.EMPTY; // e.g. glass bottle
-    private ItemStack pourOutput = ItemStack.EMPTY;     // e.g. black tea bottle
-    private int pourAmount;                             // mB drained per bottle
-    private int bottlesPerCraft;                        // fluidOut.amount / pourAmount
-    private ItemStack inputPourContainer = ItemStack.EMPTY;
-    private ItemStack inputPourOutput = ItemStack.EMPTY;
-    private int inputBottlesPerCraft;
     // Solid input slots we actually wrote this craft (for precise rollback).
     private final List<Integer> filledInputSlots = new ArrayList<>();
     private boolean placedContainerSlot;
@@ -79,6 +67,7 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
     private NativeInputPhase nativeInputPhase = NativeInputPhase.NONE;
     private String nativeFailure;
     private ItemStack deferredOutputContainers = ItemStack.EMPTY;
+    private ItemStack returnedInputContainers = ItemStack.EMPTY;
     private final List<ItemStack> pendingNativeSolidMats = new ArrayList<>();
     /** Original private-ledger materials consumed by the native container path. */
     private ItemStack nativeInputRefund = ItemStack.EMPTY;
@@ -87,14 +76,6 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
     // ── reflection cache ──
     private static volatile Method getInventoryMethod;
     private static volatile Method isHeatedMethod;
-    private static volatile Method getFluidInMethod;
-    private static volatile Method getFluidOutMethod;
-    private static volatile Method getBrewTimeMethod;
-    // KettlePouringRecipe accessors
-    private static volatile Method pourGetFluidMethod;
-    private static volatile Method pourGetAmountMethod;
-    private static volatile Method pourGetContainerMethod;
-    private static volatile Method pourGetOutputMethod;
     private static volatile boolean reflectionProbed;
 
     @Override
@@ -117,10 +98,11 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
         }
         this.recipe = found;
         probeReflection();
-        this.recipeFluidIn = getFluidIn(found);
-        this.recipeFluidOut = getFluidOut(found);
-        if (recipeFluidIn == null) recipeFluidIn = FluidStack.EMPTY;
-        if (recipeFluidOut == null) recipeFluidOut = FluidStack.EMPTY;
+        this.brewing = FRKettleRecipeSupport.brewing(found, level.getRecipeManager());
+        if (brewing == null) {
+            RSIntegrationMod.LOGGER.warn("[RSI-FRKettle] Recipe {} has no usable bottling plan", recipeId);
+            return false;
+        }
         this.craftDone = false;
         this.filledInputSlots.clear();
         this.placedContainerSlot = false;
@@ -128,71 +110,12 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
         this.nativeInputPhase = NativeInputPhase.NONE;
         this.nativeFailure = null;
         this.deferredOutputContainers = ItemStack.EMPTY;
+        this.returnedInputContainers = ItemStack.EMPTY;
         this.pendingNativeSolidMats.clear();
         this.nativeInputRefund = ItemStack.EMPTY;
         this.nativeOutputContainerRefund = ItemStack.EMPTY;
 
-        // Resolve the pouring recipe that bottles this output fluid.
-        resolvePouring(level);
-        if (pourOutput.isEmpty() || pourContainer.isEmpty() || bottlesPerCraft <= 0) {
-            RSIntegrationMod.LOGGER.warn("[RSI-FRKettle] Recipe {} has no usable bottled output", recipeId);
-            return false;
-        }
         return true;
-    }
-
-    /** Find a KettlePouringRecipe whose fluid matches this recipe's output. */
-    private void resolvePouring(ServerLevel level) {
-        this.pourContainer = ItemStack.EMPTY;
-        this.pourOutput = ItemStack.EMPTY;
-        this.pourAmount = 0;
-        this.bottlesPerCraft = 0;
-        this.inputPourContainer = ItemStack.EMPTY;
-        this.inputPourOutput = ItemStack.EMPTY;
-        this.inputBottlesPerCraft = 0;
-        if (FRReflection.kettlePouringRecipeClass == null) return;
-        probeReflection();
-        if (pourGetFluidMethod == null) return;
-
-        PouringDescriptor output = findPouring(level, recipeFluidOut);
-        if (output != null) {
-            this.pourAmount = output.amount();
-            this.pourContainer = output.container();
-            this.pourOutput = output.output();
-            this.bottlesPerCraft = output.bottles();
-        } else if (!recipeFluidOut.isEmpty()) {
-            RSIntegrationMod.LOGGER.warn("[RSI-FRKettle] No KettlePouringRecipe found for output fluid {}",
-                    recipeFluidOut.getFluid().getFluidType().getDescriptionId());
-        }
-
-        PouringDescriptor input = findPouring(level, recipeFluidIn);
-        if (input != null) {
-            this.inputPourContainer = input.container();
-            this.inputPourOutput = input.output();
-            this.inputBottlesPerCraft = input.bottles();
-        }
-    }
-
-    @Nullable
-    private PouringDescriptor findPouring(ServerLevel level, FluidStack fluidStack) {
-        if (fluidStack == null || fluidStack.isEmpty()) return null;
-        for (Recipe<?> r : level.getRecipeManager().getRecipes()) {
-            if (!FRReflection.kettlePouringRecipeClass.isInstance(r)) continue;
-            try {
-                Object fluid = pourGetFluidMethod.invoke(r);
-                if (fluid != fluidStack.getFluid()) continue;
-                int amount = (int) pourGetAmountMethod.invoke(r);
-                ItemStack container = (ItemStack) pourGetContainerMethod.invoke(r);
-                ItemStack output = (ItemStack) pourGetOutputMethod.invoke(r);
-                if (amount <= 0 || output == null || output.isEmpty()) continue;
-                return new PouringDescriptor(
-                        container == null ? ItemStack.EMPTY : container.copy(),
-                        output.copy(), amount, Math.max(1, fluidStack.getAmount() / amount));
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.debug("[RSI-FRKettle] pouring recipe probe failed", e);
-            }
-        }
-        return null;
     }
 
     @Override
@@ -201,31 +124,7 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
     }
 
     List<IngredientSpec> recipeSlots() {
-        List<Ingredient> ingredients = recipe.getIngredients();
-
-        List<IngredientSpec> specs = new ArrayList<>();
-        for (Ingredient ing : ingredients) {
-            if (!ing.isEmpty()) specs.add(new IngredientSpec(ing, 1));
-        }
-
-        if (isWaterInput()) {
-            if (!pourContainer.isEmpty() && bottlesPerCraft > 0) {
-                specs.add(new IngredientSpec(Ingredient.of(pourContainer), bottlesPerCraft));
-            }
-        } else if (!recipeFluidIn.isEmpty()) {
-            // Non-water fluid is represented by the bottled item produced by the
-            // preceding Kettle recipe. Empty input bottles can be reused for output.
-            if (inputPourOutput.isEmpty() || inputBottlesPerCraft <= 0) return null;
-            specs.add(new IngredientSpec(Ingredient.of(inputPourOutput), inputBottlesPerCraft));
-            int reusable = sameItem(inputPourContainer, pourContainer)
-                    ? Math.min(inputBottlesPerCraft, bottlesPerCraft) : 0;
-            int extraContainers = Math.max(0, bottlesPerCraft - reusable);
-            if (extraContainers > 0 && !pourContainer.isEmpty()) {
-                specs.add(new IngredientSpec(Ingredient.of(pourContainer), extraContainers));
-            }
-        }
-
-        return specs.isEmpty() ? null : specs;
+        return brewing == null ? List.of() : brewing.ingredients(recipe);
     }
 
     @Override
@@ -236,7 +135,7 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
     @Override
     public boolean startSingleOperation(ServerPlayer player) {
         List<IngredientSpec> specs = recipeSlots();
-        if (specs == null || specs.isEmpty()) return false;
+        if (specs.isEmpty()) return false;
 
         List<ItemStack> materials = new ArrayList<>();
         try (ExtractionLedger ledger = materialAccess().newLedger()) {
@@ -279,6 +178,7 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
         this.nativeInputPhase = NativeInputPhase.NONE;
         this.nativeFailure = null;
         this.deferredOutputContainers = ItemStack.EMPTY;
+        this.returnedInputContainers = ItemStack.EMPTY;
         this.pendingNativeSolidMats.clear();
         this.nativeInputRefund = ItemStack.EMPTY;
         this.nativeOutputContainerRefund = ItemStack.EMPTY;
@@ -325,11 +225,11 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
         List<ItemStack> solidMats = new ArrayList<>();
         List<ItemStack> containerMats = new ArrayList<>();
         List<ItemStack> inputFluidMats = new ArrayList<>();
-        boolean waterInput = isWaterInput();
-        int requiredInputBottles = waterInput ? 0 : inputBottlesPerCraft;
-        int reusableInputContainers = !waterInput && sameItem(inputPourContainer, pourContainer)
-                ? Math.min(inputBottlesPerCraft, bottlesPerCraft) : 0;
-        int requiredContainers = Math.max(0, bottlesPerCraft - reusableInputContainers);
+        var input = brewing.input();
+        ItemStack pourContainer = brewing.output().container();
+        FluidStack recipeFluidIn = brewing.fluidIn();
+        int requiredInputBottles = input == null ? 0 : input.drink().getCount();
+        int requiredContainers = brewing.extraContainers();
 
         // Assign the real recipe ingredients first and only those stacks to slots
         // 0/1. Bottled fluid and pouring containers are separate material roles;
@@ -347,9 +247,9 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
             solidMats.add(matched.get(0));
         }
 
-        if (requiredInputBottles > 0 && !inputPourOutput.isEmpty()) {
+        if (input != null) {
             inputFluidMats.addAll(takeMatchingMaterials(remainingMaterials,
-                    Ingredient.of(inputPourOutput), requiredInputBottles));
+                    Ingredient.of(input.drink()), requiredInputBottles));
             requiredInputBottles -= countItems(inputFluidMats);
         }
         if (requiredContainers > 0 && !pourContainer.isEmpty()) {
@@ -412,7 +312,7 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
 
         FluidStack tankFluid = fluidHandler.getFluidInTank(0);
         FluidStack fluidToFill = FluidStack.EMPTY;
-        if (requiresNativeBottledInput(recipeFluidIn)) {
+        if (input != null) {
             // Non-water inputs must pass through Farmer's Respite's own container
             // slot. Starting from a non-empty tank would make ownership and the
             // number of consumed bottles ambiguous, so preserve it and fail closed.
@@ -461,14 +361,14 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
             machineMutated = true;
         }
 
-        if (!inputFluidMats.isEmpty()) {
+        if (input != null) {
             // Farmer's Respite only starts after the native bottled input has
             // emptied into the tank. Keep ingredients out of slots 0/1 until
             // that transition is observed; otherwise the kettle sees no fluid
             // on its first tick and does not start.
             pendingNativeSolidMats.addAll(solidMats.stream().map(ItemStack::copy).toList());
             ItemStack bottledInput = mergeStacks(inputFluidMats);
-            if (bottledInput.isEmpty() || bottledInput.getCount() != inputBottlesPerCraft) {
+            if (bottledInput.isEmpty() || bottledInput.getCount() != input.drink().getCount()) {
                 RSIntegrationMod.LOGGER.warn(
                         "[RSI-FRKettle] Bottled input variants cannot share the native container slot: {}",
                         inputFluidMats);
@@ -528,14 +428,16 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
 
     void advanceNativePhase(ItemStackHandler inventory, BlockEntity be, FluidStack tank) {
         if (nativeInputPhase == NativeInputPhase.EMPTYING_INPUT) {
+            FluidStack recipeFluidIn = brewing.fluidIn();
+            ItemStack inputContainers = brewing.input().container();
             ItemStack bottledInput = inventory.getStackInSlot(3);
             ItemStack returnedContainers = inventory.getStackInSlot(4);
             boolean filled = !tank.isEmpty()
-                    && tank.getFluid() == recipeFluidIn.getFluid()
+                    && tank.isFluidEqual(recipeFluidIn)
                     && tank.getAmount() >= recipeFluidIn.getAmount();
             boolean returned = bottledInput.isEmpty()
-                    && matchesPouringItem(inputPourContainer, returnedContainers)
-                    && returnedContainers.getCount() >= inputBottlesPerCraft;
+                    && matchesPouringItem(inputContainers, returnedContainers)
+                    && returnedContainers.getCount() >= inputContainers.getCount();
             if (filled && returned) {
                 if (!placePendingNativeSolids(inventory, be)) {
                     nativeFailure = "kettle ingredient slot became occupied during native input";
@@ -549,6 +451,7 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
             return;
         }
         if (nativeInputPhase != NativeInputPhase.BREWING) return;
+        FluidStack recipeFluidOut = brewing.fluidOut();
         boolean brewed = !tank.isEmpty()
                 && tank.getFluid() == recipeFluidOut.getFluid()
                 && tank.getAmount() >= recipeFluidOut.getAmount();
@@ -556,10 +459,12 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
 
         ItemStack returnedContainers = inventory.getStackInSlot(4).copy();
         ItemStack outputContainers = deferredOutputContainers.copy();
+        ItemStack pourContainer = brewing.output().container();
+        int bottlesPerCraft = pourContainer.getCount();
         int deferredCount = matchesPouringItem(pourContainer, outputContainers)
                 ? Math.min(bottlesPerCraft, outputContainers.getCount()) : 0;
         int required = bottlesPerCraft - deferredCount;
-        if (matchesPouringItem(pourContainer, returnedContainers)) {
+        if (sameItem(pourContainer, returnedContainers)) {
             int reused = Math.min(required, returnedContainers.getCount());
             ItemStack reusable = returnedContainers.copyWithCount(reused);
             returnedContainers.shrink(reused);
@@ -572,6 +477,7 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
             return;
         }
         takeOwnedSlot(inventory, 4);
+        returnedInputContainers = returnedContainers;
         deferredOutputContainers = ItemStack.EMPTY;
         inventory.setStackInSlot(3, outputContainers.copyWithCount(bottlesPerCraft));
         nativeInputPhase = NativeInputPhase.BOTTLING_OUTPUT;
@@ -588,22 +494,22 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
         ItemStackHandler inventory = getInventory(be);
         if (inventory == null || inventory.getSlots() < 5) return false;
         ItemStack output = inventory.getStackInSlot(4);
-        int expected = pourOutput.isEmpty() ? 1 : pourOutput.getCount() * bottlesPerCraft;
-        return !output.isEmpty() && matchesPouringItem(pourOutput, output)
-                && output.getCount() >= expected;
+        ItemStack expected = brewing.output().drink();
+        return matchesPouringItem(expected, output) && output.getCount() >= expected.getCount();
     }
 
     @Override public OperationOutputSource outputSource() {
-        return OperationOutputSource.single(this::takeResult, outputContract());
+        return player -> OperationOutputSource.Handoff.physical(takeResults(), outputContract());
     }
 
-    private ItemStack takeResult(ServerPlayer player) {
-        if (awaitingNativeTransition() || nativeFailure != null) return ItemStack.EMPTY;
+    List<ItemStack> takeResults() {
+        if (awaitingNativeTransition() || nativeFailure != null || craftDone) return List.of();
         BlockEntity be = myLevel.getBlockEntity(myPos);
-        if (be == null) return ItemStack.EMPTY;
+        if (be == null) return List.of();
 
         ItemStackHandler inventory = getInventory(be);
-        if (inventory == null || inventory.getSlots() < 5) return ItemStack.EMPTY;
+        if (inventory == null || inventory.getSlots() < 5
+                || !isMachineCraftFinished(myLevel, be)) return List.of();
 
         // KettleItemHandler rejects generic extraction from its result slot. The
         // slot was verified empty before this operation started, so every item
@@ -615,7 +521,9 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
             RSIntegrationMod.LOGGER.debug("[RSI-FRKettle] Collected {} x{} tag={}",
                     result.getItem(), result.getCount(), result.getTag());
         }
-        return result;
+        ItemStack returned = returnedInputContainers;
+        returnedInputContainers = ItemStack.EMPTY;
+        return returned.isEmpty() ? List.of(result) : List.of(result, returned);
     }
 
     @Override
@@ -642,6 +550,7 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
         machineMutated = false;
         nativeInputPhase = NativeInputPhase.NONE;
         deferredOutputContainers = ItemStack.EMPTY;
+        returnedInputContainers = ItemStack.EMPTY;
         pendingNativeSolidMats.clear();
         nativeInputRefund = ItemStack.EMPTY;
         nativeOutputContainerRefund = ItemStack.EMPTY;
@@ -670,17 +579,6 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
         try {
             getInventoryMethod = FRReflection.kettleBEClass.getMethod("getInventory");
             isHeatedMethod = FRReflection.kettleBEClass.getMethod("isHeated");
-
-            getFluidInMethod = FRReflection.kettleRecipeClass.getMethod("getFluidIn");
-            getFluidOutMethod = FRReflection.kettleRecipeClass.getMethod("getFluidOut");
-            getBrewTimeMethod = FRReflection.kettleRecipeClass.getMethod("getBrewTime");
-
-            if (FRReflection.kettlePouringRecipeClass != null) {
-                pourGetFluidMethod = FRReflection.kettlePouringRecipeClass.getMethod("getFluid");
-                pourGetAmountMethod = FRReflection.kettlePouringRecipeClass.getMethod("getAmount");
-                pourGetContainerMethod = FRReflection.kettlePouringRecipeClass.getMethod("getContainer");
-                pourGetOutputMethod = FRReflection.kettlePouringRecipeClass.getMethod("getOutput");
-            }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-FRKettle] Reflection probe failed", e);
         }
@@ -695,18 +593,6 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
         return be.getCapability(
                 ForgeCapabilities.FLUID_HANDLER)
                 .resolve().orElse(null);
-    }
-
-    private boolean isWaterInput() {
-        return recipeFluidIn != null && !recipeFluidIn.isEmpty()
-                && (recipeFluidIn.getFluid() == Fluids.WATER
-                || recipeFluidIn.getFluid() == Fluids.FLOWING_WATER);
-    }
-
-    static boolean requiresNativeBottledInput(FluidStack fluid) {
-        return fluid != null && !fluid.isEmpty()
-                && fluid.getFluid() != Fluids.WATER
-                && fluid.getFluid() != Fluids.FLOWING_WATER;
     }
 
     private static boolean sameItem(ItemStack first, ItemStack second) {
@@ -791,24 +677,6 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
         return true;
     }
 
-    private static FluidStack getFluidIn(Recipe<?> recipe) {
-        if (getFluidInMethod != null) {
-            try {
-                return (FluidStack) getFluidInMethod.invoke(recipe);
-            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-FRKettle] reflection invoke failed", e); }
-        }
-        return FluidStack.EMPTY;
-    }
-
-    private static FluidStack getFluidOut(Recipe<?> recipe) {
-        if (getFluidOutMethod != null) {
-            try {
-                return (FluidStack) getFluidOutMethod.invoke(recipe);
-            } catch (Exception e) { RSIntegrationMod.LOGGER.debug("[RSI-FRKettle] reflection invoke failed", e); }
-        }
-        return FluidStack.EMPTY;
-    }
-
     // ── cleanup ──
 
     /** Refund an entire material list (used on start failure). */
@@ -857,6 +725,7 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
         machineMutated = false;
         nativeInputPhase = NativeInputPhase.NONE;
         deferredOutputContainers = ItemStack.EMPTY;
+        returnedInputContainers = ItemStack.EMPTY;
         pendingNativeSolidMats.clear();
         nativeInputRefund = ItemStack.EMPTY;
         nativeOutputContainerRefund = ItemStack.EMPTY;
@@ -899,8 +768,6 @@ public final class FRKettleBatchDelegate extends AbstractBatchDelegate {
     private void forceChunkLoad(boolean load) {
         forceMachineChunk(myLevel, myPos, load);
     }
-
-    private record PouringDescriptor(ItemStack container, ItemStack output, int amount, int bottles) {}
 
     private enum NativeInputPhase {
         NONE,

@@ -8,11 +8,12 @@ import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
+import com.huanghuang.rsintegration.crafting.batch.OperationInputRecovery;
+import com.huanghuang.rsintegration.mods.youkaishomecoming.kettle.KettleRecipeSupport.Brewing;
 import com.huanghuang.rsintegration.util.Reflect;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.mods.common.IdleInventoryEvacuator;
 import com.huanghuang.rsintegration.reflection.probes.YHKReflection;
-import com.huanghuang.rsintegration.util.PlayerUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
@@ -20,20 +21,17 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.SimpleContainer;
-import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
-import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fluids.capability.IFluidHandler;
+import net.minecraftforge.fluids.capability.IFluidHandler.FluidAction;
 import net.minecraftforge.items.ItemHandlerHelper;
 import org.jetbrains.annotations.NotNull;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
-import net.minecraftforge.fluids.FluidUtil;
 import javax.annotation.Nullable;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -55,28 +53,18 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
     private ServerLevel myLevel;
     private ResourceKey<Level> myDim;
     private BlockPos myPos;
-    private Recipe<?> recipe;
-    private boolean craftDone;
+    private Brewing brewing;
+    private OperationInputRecovery inputRecovery;
 
     // -- reflection cache --
     /** KettleBlockEntity.fluids -- public final BaseTank */
     private static volatile Field fluidsField;
-    /** KettleRecipe.input -- public final List<Ingredient> */
-    private static volatile Field inputField;
-    /** KettleRecipe.result -- public FluidStack */
-    private static volatile Field resultField;
     /** HeatableBlockEntity.isHeated(Level, BlockPos) */
     private static volatile Method isHeatedMethod;
     /** FluidItemTile.getItemHandler() -> SimpleContainer */
     private static volatile Method getItemHandlerMethod;
     /** FluidItemTile.getFluidHandler() -> BaseTank */
     private static volatile Method getFluidHandlerMethod;
-    /** YHFluid.type -> IYHFluidHolder (public final) */
-    private static volatile Field yhFluidTypeField;
-    /** IYHFluidHolder.amount() -> int */
-    private static volatile Method holderAmountMethod;
-    /** IYHFluidHolder.asStack(int) -> ItemStack */
-    private static volatile Method holderAsStackMethod;
     private static volatile boolean reflectionProbed;
 
     @Override
@@ -97,9 +85,8 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
             player.sendSystemMessage(Component.translatable("rsi.generic.error.recipe_not_found", recipeId.toString()));
             return false;
         }
-        this.recipe = found;
-        this.craftDone = false;
-        return true;
+        this.brewing = KettleRecipeSupport.brewing(found);
+        return brewing != null;
     }
 
     @Override
@@ -108,13 +95,7 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
     }
 
     List<IngredientSpec> recipeSlots() {
-        List<Ingredient> ingredients = getRecipeInput();
-        if (ingredients.isEmpty()) return null;
-        List<IngredientSpec> specs = new ArrayList<>();
-        for (Ingredient ing : ingredients) {
-            if (!ing.isEmpty()) specs.add(new IngredientSpec(ing, 1));
-        }
-        return specs.isEmpty() ? null : specs;
+        return brewing == null ? List.of() : brewing.ingredients();
     }
 
     @Override
@@ -157,8 +138,7 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
                                          ExtractionLedger sharedLedger) {
         this.player = player;
         if (sharedLedger.storageEndpoint() != null) setStorageEndpoint(sharedLedger.storageEndpoint());
-        // usingSharedLedger already set by caller — don't overwrite
-        this.craftDone = false;
+        if (brewing == null || !matchesMaterials(brewing, materials)) return false;
 
         forceChunkLoad(true);
         if (!myLevel.hasChunkAt(myPos)) return false;
@@ -210,51 +190,36 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
-        // Insert ingredients into the 4 slots
-        int slot = 0;
-        for (ItemStack mat : materials) {
-            if (mat.isEmpty()) continue;
-            if (slot >= items.getContainerSize()) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Kettle] Too many ingredients for kettle slots");
-                clearSlots(items, be);
-                forceChunkLoad(false);
-                return false;
-            }
-            ItemStack single = mat.copyWithCount(1);
-            if (!items.getItem(slot).isEmpty()) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Kettle] Slot {} already occupied", slot);
-                clearSlots(items, be);
-                forceChunkLoad(false);
-                return false;
-            }
-            items.setItem(slot, single);
-            slot++;
+        inputRecovery = new OperationInputRecovery();
+        // 空容器由执行器保管，只在成功收取流体时消耗。
+        inputRecovery.hold(materials.get(brewing.solids().size()));
+        for (int slot = 0; slot < brewing.solids().size(); slot++) {
+            ItemStack solid = materials.get(slot);
+            inputRecovery.hold(solid).place(be, items, slot);
+            items.setItem(slot, solid.copy());
         }
 
         be.setChanged();
+        markCraftStarted();
+        return true;
+    }
+
+    static boolean matchesMaterials(Brewing brewing, List<ItemStack> materials) {
+        List<IngredientSpec> specs = brewing.ingredients();
+        if (materials.size() != specs.size()) return false;
+        for (int i = 0; i < specs.size(); i++) {
+            IngredientSpec spec = specs.get(i);
+            ItemStack material = materials.get(i);
+            if (material.getCount() != spec.count() || !spec.ingredient().test(material)) return false;
+        }
         return true;
     }
 
     @Override
     protected boolean isMachineCraftFinished(ServerLevel level, BlockEntity be) {
-        if (!isKettleBE(be)) return false;
-
-        // Check if result fluid is present in the tank.
-        // Input items may still be visible in the UI while the kettle
-        // processes them -- the fluid appearing is the true signal.
+        if (inputRecovery == null || !isKettleBE(be)) return false;
         IFluidHandler fluidHandler = getFluidHandler(be);
-        if (fluidHandler == null) return false;
-        FluidStack tankFluid = fluidHandler.getFluidInTank(0);
-        FluidStack recipeResult = getRecipeResult();
-        if (tankFluid.isEmpty() || recipeResult.isEmpty()) return false;
-        if (tankFluid.getFluid() != recipeResult.getFluid()) return false;
-
-        // For YHFluid, also verify there's enough for at least one container
-        if (YHKReflection.yhFluidClass != null && YHKReflection.yhFluidClass.isInstance(tankFluid.getFluid())) {
-            int minAmount = getYHFluidAmountPerContainer(tankFluid.getFluid());
-            if (minAmount > 0 && tankFluid.getAmount() < minAmount) return false;
-        }
-        return true;
+        return fluidHandler != null && canCollect(brewing, fluidHandler);
     }
 
     @Override public OperationOutputSource outputSource() {
@@ -262,153 +227,59 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
     }
 
     private ItemStack takeResult(ServerPlayer player) {
+        if (inputRecovery == null) return ItemStack.EMPTY;
         BlockEntity be = myLevel.getBlockEntity(myPos);
-        if (be == null) return ItemStack.EMPTY;
+        if (be == null || !isKettleBE(be)) return ItemStack.EMPTY;
 
         IFluidHandler fluidHandler = getFluidHandler(be);
         if (fluidHandler == null) return ItemStack.EMPTY;
-
-        FluidStack tankFluid = fluidHandler.getFluidInTank(0);
-        if (tankFluid.isEmpty()) return ItemStack.EMPTY;
-
-        // YHK custom fluid system (tea, sake, etc.):
-        // YHFluid.getBucket() always returns AIR.  Must use
-        // IYHFluidHolder.asStack(count) to obtain the filled container.
-        if (YHKReflection.yhFluidClass != null && YHKReflection.yhFluidClass.isInstance(tankFluid.getFluid())) {
-            return collectYHFluidResult(be, fluidHandler, tankFluid);
-        }
-
-        // Standard Forge fluid -- use bucket
-        FluidStack recipeResult = getRecipeResult();
-        FluidStack drained = fluidHandler.drain(recipeResult, IFluidHandler.FluidAction.EXECUTE);
+        ItemStack result = collectBrewed(brewing, fluidHandler);
+        if (result.isEmpty()) return result;
+        inputRecovery.release();
+        inputRecovery = null;
         be.setChanged();
-        craftDone = true;
-
-        if (drained.isEmpty()) return ItemStack.EMPTY;
-
-        Item bucketItem = drained.getFluid().getBucket();
-        if (bucketItem != null && bucketItem != Items.AIR) {
-            return new ItemStack(bucketItem);
-        }
-
-        ItemStack filled = FluidUtil.getFilledBucket(
-                new FluidStack(drained.getFluid(), 1000));
-        if (!filled.isEmpty()) return filled;
-
-        RSIntegrationMod.LOGGER.warn("[RSI-Kettle] Fluid {} has no bucket item, result lost",
-                drained.getFluid().getFluidType().getDescriptionId());
-        return ItemStack.EMPTY;
-    }
-
-    private ItemStack collectYHFluidResult(BlockEntity be, IFluidHandler fluidHandler,
-                                           FluidStack tankFluid) {
-        int perContainer = getYHFluidAmountPerContainer(tankFluid.getFluid());
-        int total = tankFluid.getAmount();
-        int count = total / perContainer;
-        if (count == 0) return ItemStack.EMPTY;
-
-        // Validate the fluid -> item conversion BEFORE draining.
-        // If asStack fails, the fluid stays in the tank so the player
-        // can still extract it manually.
-        ItemStack template = getYHFluidAsStack(tankFluid.getFluid(), 1);
-        if (template.isEmpty()) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Kettle] asStack(1) returned empty for {} (holder={}) -- fluid left in tank",
-                    tankFluid.getFluid().getFluidType().getDescriptionId(),
-                    getYHFluidHolderDesc(tankFluid.getFluid()));
-            return ItemStack.EMPTY;
-        }
-
-        int toDrain = count * perContainer;
-        FluidStack drained = fluidHandler.drain(
-                new FluidStack(tankFluid.getFluid(), toDrain),
-                IFluidHandler.FluidAction.EXECUTE);
-        if (drained.isEmpty()) return ItemStack.EMPTY;
-
-        be.setChanged();
-        craftDone = true;
-
-        if (count == 1) return template;
-
-        // For count > 1, prefer asStack(n) so the mod can set its own
-        // internal stack data; fall back to multiplying the template.
-        ItemStack stacked = getYHFluidAsStack(tankFluid.getFluid(), count);
-        if (!stacked.isEmpty()) return stacked;
-
-        ItemStack result = template.copy();
-        result.setCount(count);
         return result;
     }
 
-    private static int getYHFluidAmountPerContainer(Object fluid) {
-        if (yhFluidTypeField == null || holderAmountMethod == null) return 0;
-        try {
-            Object holder = yhFluidTypeField.get(fluid);
-            if (holder != null) {
-                return (int) holderAmountMethod.invoke(holder);
-            }
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Kettle] YHK fluid amount reflection failed", e);
-        }
-        return 0;
+    private static boolean canCollect(Brewing brewing, IFluidHandler tank) {
+        return tank.drain(brewing.fluid().copy(), FluidAction.SIMULATE).isFluidStackIdentical(brewing.fluid());
     }
 
-    private static ItemStack getYHFluidAsStack(Object fluid, int count) {
-        if (yhFluidTypeField == null || holderAsStackMethod == null) return ItemStack.EMPTY;
-        try {
-            Object holder = yhFluidTypeField.get(fluid);
-            if (holder != null) {
-                return (ItemStack) holderAsStackMethod.invoke(holder, count);
-            }
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Kettle] asStack({}) threw", count, e);
-        }
-        return ItemStack.EMPTY;
-    }
-
-    private static String getYHFluidHolderDesc(Object fluid) {
-        if (yhFluidTypeField == null) return "no-field";
-        try {
-            Object holder = yhFluidTypeField.get(fluid);
-            return holder != null ? holder.getClass().getSimpleName() : "null";
-        } catch (Exception e) {
-            return "err:" + e.toString();
-        }
+    static ItemStack collectBrewed(Brewing brewing, IFluidHandler tank) {
+        if (!canCollect(brewing, tank)) return ItemStack.EMPTY;
+        FluidStack drained = tank.drain(brewing.fluid().copy(), FluidAction.EXECUTE);
+        return drained.isFluidStackIdentical(brewing.fluid()) ? brewing.result().copy() : ItemStack.EMPTY;
     }
 
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
-        // If the recipe actually completed (fluid was produced) before we
-        // timed out, collect the result rather than throwing it away.
-        if (isKettleBE(be)) {
-            IFluidHandler fluidHandler = getFluidHandler(be);
-            if (fluidHandler != null) {
-                FluidStack tankFluid = fluidHandler.getFluidInTank(0);
-                FluidStack recipeResult = getRecipeResult();
-                if (!tankFluid.isEmpty() && !recipeResult.isEmpty()
-                        && tankFluid.getFluid() == recipeResult.getFluid()) {
-                    ItemStack result = takeResult(player);
-                    if (!result.isEmpty()) {
-                        if (storageEndpoint() == null)
-                            setStorageEndpoint(CraftPacketUtils.resolveEndpointForCraft(player, myDim, be.getBlockPos()).orElse(null));
-                        ItemStack remainder = insertIntoStorage(player, result, false);
-                        if (!remainder.isEmpty()) {
-                            PlayerUtils.safeGiveToStorage(player, remainder, storageEndpoint());
-                        }
-                    }
-                }
-            }
+        if (player != null) {
+            ItemStack result = takeResult(player);
+            if (!result.isEmpty()) refund(result);
         }
-        clearAndRefund();
-        forceChunkLoad(false);
-        craftDone = false;
-        setStorageEndpoint(null);
+        recoverInputs(myLevel);
+    }
+
+    @Override
+    protected void clearMissingMachineState(@Nullable ServerPlayer player) {
+        recoverInputs(null);
+    }
+
+    @Override
+    protected void clearUnavailableMachineState(@Nullable ServerPlayer player) {
+        recoverInputs(null);
+    }
+
+    private void recoverInputs(@Nullable ServerLevel level) {
+        List<ItemStack> recovered = inputRecovery == null ? List.of() : inputRecovery.recover(level);
+        inputRecovery = null;
+        if (usingSharedLedger) recordFailureRecoveredInputs(recovered);
+        else recovered.forEach(this::refund);
     }
 
     @Override
     public void cleanup(@NotNull ServerPlayer player) {
         forceChunkLoad(false);
-        clearAndRefund();
-        craftDone = false;
         setStorageEndpoint(null);
     }
 
@@ -423,7 +294,6 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
         List<Component> warnings = new ArrayList<>();
         warnings.add(Component.translatable("rsi.youkaishomecoming.kettle_water_warning"));
         warnings.add(Component.translatable("rsi.youkaishomecoming.heat_warning"));
-        warnings.add(Component.translatable("rsi.youkaishomecoming.kettle_fluid_output"));
         return warnings;
     }
 
@@ -472,16 +342,6 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
             // isHeated -- default method from HeatableBlockEntity
             isHeatedMethod = YHKReflection.kettleBEClass.getMethod("isHeated", Level.class, BlockPos.class);
 
-            // KettleRecipe public fields
-            inputField = YHKReflection.kettleRecipeClass.getField("input");
-            resultField = YHKReflection.kettleRecipeClass.getField("result");
-
-            // YHFluid custom container system (used for kettle fluid output)
-            if (YHKReflection.yhFluidClass != null && YHKReflection.yhFluidHolderClass != null) {
-                yhFluidTypeField = YHKReflection.yhFluidClass.getField("type");
-                holderAmountMethod = YHKReflection.yhFluidHolderClass.getMethod("amount");
-                holderAsStackMethod = YHKReflection.yhFluidHolderClass.getMethod("asStack", int.class);
-            }
         } catch (Exception e) {
             RSIntegrationMod.LOGGER.warn("[RSI-Kettle] Reflection probe failed", e);
         }
@@ -569,41 +429,6 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
         return false;
     }
 
-    @SuppressWarnings("unchecked")
-    private List<Ingredient> getRecipeInput() {
-        probeReflection();
-        if (inputField != null) {
-            try {
-                return (List<Ingredient>) inputField.get(recipe);
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Kettle] getRecipeInput reflection failed", e);
-            }
-        }
-        return List.of();
-    }
-
-    private FluidStack getRecipeResult() {
-        probeReflection();
-        if (resultField != null) {
-            try {
-                Object val = resultField.get(recipe);
-                if (val instanceof FluidStack fs) return fs;
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Kettle] getRecipeResult reflection failed", e);
-            }
-        }
-        return FluidStack.EMPTY;
-    }
-
-    // -- cleanup --
-
-    private void clearSlots(SimpleContainer items, BlockEntity be) {
-        for (int i = 0; i < items.getContainerSize(); i++) {
-            items.setItem(i, ItemStack.EMPTY);
-        }
-        be.setChanged();
-    }
-
     static int evacuateIdleItems(SimpleContainer items, float progress,
                                  Consumer<ItemStack> returnItem) {
         if (items == null || progress > 0.0F) return -1;
@@ -615,23 +440,6 @@ public final class KettleBatchDelegate extends AbstractBatchDelegate {
     private static float getProcessingProgress(BlockEntity be) {
         return Reflect.<Number>invoke(be, "inProgress")
                 .map(Number::floatValue).orElse(1.0F);
-    }
-
-    private void clearAndRefund() {
-        BlockEntity be = myLevel.getBlockEntity(myPos);
-        if (be == null || !isKettleBE(be)) return;
-
-        SimpleContainer items = getItemHandler(be);
-        if (items != null) {
-            for (int i = 0; i < items.getContainerSize(); i++) {
-                ItemStack s = items.getItem(i);
-                if (!s.isEmpty()) {
-                    items.setItem(i, ItemStack.EMPTY);
-                    if (!usingSharedLedger) refund(s);
-                }
-            }
-            be.setChanged();
-        }
     }
 
     private void refund(ItemStack stack) {

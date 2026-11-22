@@ -14,6 +14,7 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.mods.youkaishomecoming.ferment.FermentationRecipeOutputs;
+import com.huanghuang.rsintegration.mods.youkaishomecoming.kettle.KettleRecipeSupport;
 import dev.xkmc.youkaishomecoming.content.block.food.PotFoodBlock;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.ResourceLocation;
@@ -43,21 +44,21 @@ public final class YoukaisHomecomingRecipeHandler implements ModRecipeHandler {
     @Override
     public ModType modType() { return ModType.byId("youkaishomecoming"); }
 
-    private static final String KETTLE_RECIPE =
-            "dev.xkmc.youkaishomecoming.content.pot.kettle.KettleRecipe";
-
     @Override
     public boolean canHandle(Recipe<?> recipe) {
         String cn = recipe.getClass().getName();
-        // KettleRecipe produces FluidStack — no item result, RS can't handle it
-        if (cn.equals(KETTLE_RECIPE)) return false;
-        return cn.equals(MOKA_RECIPE) || cn.equals(STEAMING_RECIPE)
+        return KettleRecipeSupport.isKettleRecipe(recipe) || cn.equals(MOKA_RECIPE) || cn.equals(STEAMING_RECIPE)
                 || cn.equals(BASE_POT_RECIPE) || cn.equals(FERMENT_RECIPE)
                 || cn.startsWith("dev.xkmc.youkaishomecoming.content.pot");
     }
 
     @Override
     public ItemStack getResultItem(Recipe<?> recipe, RegistryAccess access) {
+        if (KettleRecipeSupport.isKettleRecipe(recipe)) {
+            var brewing = KettleRecipeSupport.brewing(recipe);
+            return brewing == null ? ItemStack.EMPTY : brewing.result();
+        }
+
         // Cooking-pot soup recipes produce a pot_of_X BlockItem (PotFoodBlock).
         // In-world it's served into bowls, so the true product is food*serve.
         // Report that here so RS indexing / plan preview match what the
@@ -109,6 +110,10 @@ public final class YoukaisHomecomingRecipeHandler implements ModRecipeHandler {
     @Nullable
     @Override
     public List<IngredientSpec> getIngredients(Recipe<?> recipe) {
+        if (KettleRecipeSupport.isKettleRecipe(recipe)) {
+            var brewing = KettleRecipeSupport.brewing(recipe);
+            return brewing == null ? List.of() : brewing.ingredients();
+        }
         String cn = recipe.getClass().getName();
         if (cn.equals(FERMENT_RECIPE)) {
             try {

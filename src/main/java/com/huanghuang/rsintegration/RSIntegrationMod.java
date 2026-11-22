@@ -155,6 +155,7 @@ import com.huanghuang.rsintegration.mods.rs.monitor.RsMonitorMenus;
 import com.huanghuang.rsintegration.mods.rs.monitor.RsMonitorNavigationClient;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.common.ForgeConfigSpec;
+import net.minecraftforge.common.ForgeMod;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.common.crafting.CraftingHelper;
 import net.minecraftforge.common.world.ForgeChunkManager;
@@ -338,6 +339,10 @@ public final class RSIntegrationMod {
     );
 
     public RSIntegrationMod() {
+        if (ModList.get().isLoaded(ModIds.FARMERSRESPITE)) {
+            // 原模组热可可配方引用 Forge 的可选牛奶流体，须在注册事件前启用。
+            ForgeMod.enableMilkFluid();
+        }
         RSIIntegrationServices.initialize();
         if (ModList.get().isLoaded(ModIds.GOETY)) {
             com.huanghuang.rsintegration.feature.goety.GoetyCauldronFeature.initialize(MOD_BUS);
