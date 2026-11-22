@@ -6,10 +6,16 @@ import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
+import com.huanghuang.rsintegration.crafting.OperationExecutionKernel;
+import com.huanghuang.rsintegration.crafting.OperationResourceCoordinator;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.OperationLifecycle;
 import com.huanghuang.rsintegration.crafting.batch.OperationStartContext;
+import com.huanghuang.rsintegration.crafting.graph.CaptureLeaseRegistry;
+import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
+import com.huanghuang.rsintegration.crafting.graph.NodeId;
+import com.huanghuang.rsintegration.crafting.graph.OperationBudget;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry.BoundMachine;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.BlockPos;
@@ -26,6 +32,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -45,6 +52,39 @@ class ParallelCraftGroupTickBudgetTest extends BootstrapTest {
             loading.when(FMLJavaModLoadingContext::get).thenReturn(context);
             Class.forName("com.huanghuang.rsintegration.RSIntegrationMod");
         }
+    }
+
+    @Test
+    void directOutputStartsWithAMachineLeaseAndWithoutWorldCapture() {
+        ServerLevel level = mock(ServerLevel.class);
+        ServerPlayer player = mock(ServerPlayer.class);
+        when(player.serverLevel()).thenReturn(level);
+        BlockPos pos = new BlockPos(-3, -60, 0);
+        var machine = new BoundMachine(Level.OVERWORLD.location(), pos, ModType.CUSTOM_GUI, "test");
+        SlotDelegate delegate = new SlotDelegate() {
+            @Override public ItemStack getExpectedOutput() { return new ItemStack(Items.DIAMOND); }
+            @Override public BatchConcurrencyCapabilities concurrencyCapabilities() {
+                return BatchConcurrencyCapabilities.delegateResult();
+            }
+        };
+        ParallelCraftGroup group = new ParallelCraftGroup(List.of(machine),
+                ModType.CUSTOM_GUI, new ResourceLocation("test", "direct_output"),
+                player, 1, false, BatchConcurrencyCapabilities.ownedWorldCapture(),
+                null, 1, ignored -> delegate);
+        MachineLeaseRegistry machines = new MachineLeaseRegistry();
+        CaptureLeaseRegistry captures = new CaptureLeaseRegistry();
+        group.setOperationKernel(new OperationExecutionKernel(new OperationResourceCoordinator(
+                        machines, captures, new OperationBudget(1, 1))),
+                UUID.randomUUID(), new NodeId(0), new OperationBudget(1, 1));
+
+        OperationLifecycle lifecycle = new OperationLifecycle(group);
+        assertTrue(lifecycle.start(OperationStartContext.delegateExtracted(player, ExtractionLedger.external())));
+        assertEquals(1, group.getRunningOperations());
+        assertEquals(1, machines.size());
+        assertEquals(0, captures.size());
+        assertEquals(MachineOperation.CraftPhase.DONE, lifecycle.poll(level).phase());
+        assertEquals(1, group.drainSettledResults().stream().mapToInt(ItemStack::getCount).sum());
+        assertEquals(0, machines.size());
     }
 
     @Test
@@ -116,7 +156,7 @@ class ParallelCraftGroupTickBudgetTest extends BootstrapTest {
         }
     }
 
-    private static final class SlotDelegate implements IBatchDelegate, MachineOperation {
+    private static class SlotDelegate implements IBatchDelegate, MachineOperation {
         @Override public MachineOperation machineOperation() { return this; }
 
         Runnable onTransfer = () -> {};

@@ -21,6 +21,7 @@ import com.huanghuang.rsintegration.crafting.OperationResourceCoordinator;
 import com.huanghuang.rsintegration.crafting.StackCopies;
 import com.huanghuang.rsintegration.crafting.batch.AbstractBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
+import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities.OutputOwnership;
 import com.huanghuang.rsintegration.crafting.graph.GraphConcurrencyPolicy;
 import com.huanghuang.rsintegration.crafting.graph.MachineLeaseRegistry;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
@@ -1804,13 +1805,14 @@ public final class ParallelCraftGroup implements IBatchDelegate, MachineOperatio
         }
         ItemStack expected = delegate.getExpectedOutput();
         var region = delegate.getOutputCaptureRegion();
-        boolean ownsWorldCapture = !concurrency.exclusive()
-                && concurrency.capabilities().outputOwnership()
-                == BatchConcurrencyCapabilities.OutputOwnership.OWNED_WORLD_CAPTURE;
-        if (!concurrency.exclusive() && expected != null && !expected.isEmpty()
-                && !ownsWorldCapture) return false;
-        OperationResourceCoordinator.CaptureRequest capture = expected != null
-                && !expected.isEmpty() && region != null
+        boolean hasExpectedOutput = expected != null && !expected.isEmpty();
+        if (!concurrency.exclusive() && hasExpectedOutput) {
+            OutputOwnership ownership = concurrency.capabilities().outputOwnership();
+            // 直接交付的产物也有预期数量，但不需要从世界捕获掉落物。
+            if (ownership != OutputOwnership.OWNED_WORLD_CAPTURE
+                    && (ownership != OutputOwnership.DELEGATE_RESULT || region != null)) return false;
+        }
+        OperationResourceCoordinator.CaptureRequest capture = hasExpectedOutput && region != null
                  ? new OperationResourceCoordinator.CaptureRequest(worker.machine.dim(), region, expected,
                          "malum".equals(modType.id())
                                  || delegate.allowsOverlappingOutputCaptureOrigins())
