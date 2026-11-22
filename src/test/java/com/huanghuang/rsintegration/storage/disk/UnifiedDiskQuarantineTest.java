@@ -234,6 +234,56 @@ class UnifiedDiskQuarantineTest extends BootstrapTest {
         assertArrayEquals(payload, FrozenKey.load(kind, payload).payload());
     }
 
+    @Test
+    void missingDamageTagRestoresWithExactLookupAndPreservesOriginalBytes() throws Exception {
+        DiskFileStore files = new DiskFileStore(directory);
+        UnifiedDiskCore original = UnifiedDiskCoreTest.core(2);
+        ItemStack sword = new ItemStack(Items.IRON_SWORD);
+        FrozenKey canonical = FrozenKey.item(sword);
+        FrozenKey placeholder = key(FrozenKey.Kind.ITEM, false);
+        original.insert(placeholder, 17, true);
+        original.insert(canonical, 7, true);
+        CompoundTag raw = decode(canonical.payload());
+        raw.remove("tag");
+        byte[] legacy = encode(raw);
+        var saved = files.save(replaceFirst(Snapshot.freeze(original), FrozenKey.Kind.ITEM, legacy), null);
+
+        UnifiedDiskCore loaded = files.load(original.worldId, original.diskId);
+        assertEquals(0, loaded.items.quarantinedSize());
+        assertEquals(1, loaded.items.size());
+        assertEquals(24, loaded.items.amount(FrozenKey.queryItem(sword)));
+        assertEquals(0, loaded.items.exactSlot(canonical));
+        assertEquals(0, loaded.items.key(0).itemStack(1).getDamageValue());
+        assertArrayEquals(legacy, loaded.items.key(0).payload());
+        assertEquals(legacy.length, loaded.payloadBytes());
+
+        files.save(Snapshot.freeze(loaded), saved.manifest());
+        UnifiedDiskCore reloaded = files.load(original.worldId, original.diskId);
+        assertEquals(24, reloaded.items.amount(canonical));
+        assertEquals(1, reloaded.extract(FrozenKey.Kind.ITEM, 0, 1, true));
+        assertEquals(23, reloaded.items.amount(canonical));
+        assertArrayEquals(legacy, reloaded.items.key(0).payload());
+    }
+
+    @Test
+    void damageNormalizationPreservesOtherTagsAndRejectsChangesToActualDamage() throws Exception {
+        ItemStack leggings = new ItemStack(Items.IRON_LEGGINGS);
+        leggings.getOrCreateTag().putString("custom", "keep");
+        FrozenKey canonical = FrozenKey.item(leggings);
+        CompoundTag raw = decode(canonical.payload());
+        CompoundTag tag = raw.getCompound("tag");
+        tag.remove("Damage");
+        byte[] legacy = encode(raw);
+        FrozenKey loaded = FrozenKey.load(FrozenKey.Kind.ITEM, legacy);
+        assertEquals(canonical, loaded);
+        assertEquals("keep", loaded.itemStack(1).getTag().getString("custom"));
+        assertArrayEquals(legacy, loaded.payload());
+
+        tag.putInt("Damage", -1);
+        byte[] changed = encode(raw);
+        assertThrows(FrozenKey.IdentityChangedException.class, () -> FrozenKey.load(FrozenKey.Kind.ITEM, changed));
+    }
+
     @ParameterizedTest @EnumSource(FrozenKey.Kind.class)
     void extensionFieldsArePreservedInQuarantineAcrossSavesWithoutDisablingHealthyInventory(FrozenKey.Kind kind)
             throws Exception {

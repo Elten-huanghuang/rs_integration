@@ -28,6 +28,7 @@ public final class ResourceTable {
     public record QuarantinedResource(FrozenKey.Kind kind, ResourceLocation resource, byte[] payload) {
         public QuarantinedResource { payload = payload.clone(); }
         @Override public byte[] payload() { return payload.clone(); }
+        public int payloadBytes() { return payload.length; }
     }
     public record DuplicateRepair(int keptSlot, int mergedSlot, FrozenKey.Kind kind, ResourceLocation resource) {}
     private static final class Page {

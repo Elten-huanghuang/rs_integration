@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.storage.disk.core;
 
 import com.huanghuang.rsintegration.storage.StorageIdentityBytes;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.IntTag;
 import net.minecraft.nbt.NbtAccounter;
 import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.Tag;
@@ -187,16 +188,49 @@ public final class FrozenKey {
                     : fluid(FluidStack.loadFluidStackFromNBT(restored));
             CompoundTag identity = key.identity();
             // 扩展字段可能由模组写入；无法原样纳入身份时隔离条目，不能将其直接判作整盘损坏。
-            if (!Arrays.equals(StorageIdentityBytes.exact(identity), expected)) {
+            if (!Arrays.equals(StorageIdentityBytes.exact(identity), expected)
+                    && !(key.template instanceof ItemStack stack
+                    && hasEquivalentDamage(tag, expected, identity, stack))) {
                 String changed = Stream.concat(tag.getAllKeys().stream(), identity.getAllKeys().stream())
                         .distinct().filter(field -> !Objects.equals(tag.get(field), identity.get(field)))
                         .sorted().collect(Collectors.joining(", "));
                 throw new IdentityChangedException(kind, id, changed);
             }
-            return new FrozenKey(kind, key.type, tag, key.template, bytes);
+            return new FrozenKey(kind, key.type, identity, key.template, bytes);
         } catch (RuntimeException e) {
             throw new IOException("资源身份无法恢复: " + name, e);
         }
+    }
+
+    private static boolean hasEquivalentDamage(CompoundTag saved, byte[] expected,
+                                               CompoundTag identity, ItemStack restored) {
+        CompoundTag currentTag = identity.getCompound("tag");
+        Tag oldDamage = saved.getCompound("tag").get("Damage");
+        if (!(currentTag.get("Damage") instanceof IntTag damage) || damage.getAsInt() < 0
+                || Objects.equals(oldDamage, damage)
+                || (oldDamage != null && !(oldDamage instanceof IntTag))) return false;
+
+        // 只允许 Damage 改变。Forge 读入物品时会补写耐久；部分模组用充能等字段推导耐久。
+        CompoundTag comparison = identity.copy();
+        CompoundTag oldTag = comparison.getCompound("tag");
+        if (oldDamage == null) {
+            oldTag.remove("Damage");
+            if (oldTag.isEmpty() && !saved.contains("tag")) comparison.remove("tag");
+        } else {
+            oldTag.put("Damage", oldDamage);
+        }
+        if (!Arrays.equals(StorageIdentityBytes.exact(comparison), expected)
+                || !restored.getItem().isDamageable(restored)
+                || restored.getDamageValue() != damage.getAsInt()) return false;
+
+        ItemStack previous = restored.copy();
+        // 直接修改测试副本的标签，避免 setTag 再次触发 Forge 的耐久归一化。
+        if (oldDamage == null) {
+            previous.getTag().remove("Damage");
+        } else {
+            previous.getTag().put("Damage", oldDamage);
+        }
+        return previous.getDamageValue() == damage.getAsInt();
     }
 
     private static IOException invalidPayload(Kind kind, CompoundTag payload, String reason) {

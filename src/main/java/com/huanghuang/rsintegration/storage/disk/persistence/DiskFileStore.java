@@ -380,19 +380,25 @@ public final class DiskFileStore {
         }
         records.sort(Comparator.comparingLong(Record::order));
         long previousOrder = 0;
+        int restoredBytes = 0;
         try {
             for (Record record : records) {
                 if (previousOrder == record.order) throw new IOException("资源插入顺序重复");
                 previousOrder = record.order;
                 if (record.missing != null) {
                     table.restoreQuarantined(record.slot, record.missing, record.generation, record.order, record.amount);
-                } else table.restore(record.slot, record.key, record.generation, record.order, record.amount);
+                    restoredBytes += record.missing.payloadBytes();
+                } else if (table.restore(record.slot, record.key, record.generation, record.order, record.amount)) {
+                    // 等价耐久标签可能使长度不同的载荷合并，只计入实际保留的条目。
+                    restoredBytes += record.key.payloadBytes();
+                }
+                if (restoredBytes > limits.payloadBytes()) throw new IOException("恢复后的资源载荷总量超过容量描述");
             }
             table.finishRestore(slots, generations);
         } catch (IllegalArgumentException e) {
             throw new IOException("磁盘资源记录非法: " + e.getMessage(), e);
         }
-        return totalBytes;
+        return restoredBytes;
     }
 
     public static long[] readAmounts(byte[] body) throws IOException {
