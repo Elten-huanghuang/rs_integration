@@ -2367,10 +2367,6 @@ final class CraftPlanningApplicationService {
         AetherFurnaceBatchDelegate.addFuelIfNeeded(
                 recipeModType != null ? recipeModType.id() : null, recipe,
                 itemAvailable, itemSource, neededCounts, repeatCount);
-        // EnchantalCooler: lapis lazuli or fuel tag items
-        EnchantalCoolerBatchDelegate.addFuelIfNeeded(
-                recipeModType != null ? recipeModType.id() : null,
-                itemAvailable, itemSource, neededCounts, repeatCount);
         CookingPotBatchDelegate.addFuelIfNeeded(
                 recipeModType != null ? recipeModType.id() : null,
                 itemAvailable, itemSource, neededCounts, repeatCount);
@@ -2461,6 +2457,18 @@ final class CraftPlanningApplicationService {
                 : new LinkedHashMap<>(materialBill.materials());
         Map<IngredientKey, Long> leftovers = materialBill.leftovers();
         boolean feasible = directTerminalPlan || materialBill.feasible();
+        boolean coolerFuelShortage = false;
+        if (recipeModType != null && ModIds.IMMORTERS_DELIGHT.equals(recipeModType.id())) {
+            long requiredFuel = repeatCount;
+            long availableFuel = EnchantalCoolerBatchDelegate.availableFuelUnits(
+                    player, recipeId, dim, pos, available);
+            if (availableFuel < requiredFuel) {
+                coolerFuelShortage = true;
+                feasible = false;
+                modWarnings.add(Component.translatable(
+                        "rsi.cooler.fuel_shortage", requiredFuel, availableFuel));
+            }
+        }
         CraftMachineBindingSupport.PlanAvailability machineAvailability =
                 CraftMachineBindingSupport.inspectPlanAvailability(
                         player, recipeId, recipeModType, steps, dim, pos);
@@ -2578,7 +2586,7 @@ final class CraftPlanningApplicationService {
                 prerequisiteResult.machineCandidates();
         boolean noReadyMachine = prerequisiteResult.noReadyMachine();
 
-        boolean materialShortage = !dedupedMissing.isEmpty()
+        boolean materialShortage = coolerFuelShortage || !dedupedMissing.isEmpty()
                 || materials.values().stream().anyMatch(a -> a.missingCount() > 0);
         List<IntegrationDiagnostic> diagnostics = new ArrayList<>();
         boolean cyclicPureFailure =

@@ -13,13 +13,16 @@ import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.common.IdleInventoryEvacuator;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
+import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
+import com.huanghuang.rsintegration.crafting.MaterialMatcher;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.crafting.consumption.FuelMath;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
-import com.huanghuang.rsintegration.mods.immortalersdelight.EnchantalCoolerRecipeHandler;
+import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.reflection.probes.ImmersalsDelightReflection;
 import net.minecraft.core.BlockPos;
@@ -28,11 +31,14 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.tags.ItemTags;
+import net.minecraft.tags.TagKey;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -64,6 +70,9 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
     private static final int FUEL_SLOT = 6;
     // 模组每消耗 1 个有效染料，只增加 1 点 residualDye；每次操作消耗 1 点。
     private static final int LAPIS_OPERATIONS_PER_ITEM = 1;
+    private static final TagKey<Item> FUEL_TAG = ItemTags.create(
+            ResourceLocation.fromNamespaceAndPath("immortalers_delight", "enchantal_cooler_fuel"));
+    private static final int LAPIS_PER_BLOCK = 9;
 
     private ServerPlayer player;
     private ServerLevel myLevel;
@@ -78,6 +87,7 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
     private final int[] suppliedSlotCounts = new int[7];
     private int plannedOperations = 1;
     private int activeOperations = 1;
+    private String startFailureDetail = "";
 
     // Cached reflection
     private static volatile Field inventoryField;
@@ -291,12 +301,18 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         return startPreparedOperationImpl(player, materials, true);
     }
 
+    @Override
+    public String lastStartFailureDetail() {
+        return startFailureDetail;
+    }
+
     private boolean startPreparedOperationImpl(ServerPlayer player, List<ItemStack> materials,
                                               boolean shared) {
         this.player = player;
         this.usingSharedLedger = shared;
         this.craftDone = false;
         this.craftObservedWorking = false;
+        this.startFailureDetail = "";
 
         if (!myLevel.hasChunkAt(myPos)) return false;
 
@@ -381,6 +397,11 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
+        if (!ensureFuel(be, itemHandler, operations)) {
+            player.sendSystemMessage(Component.translatable("rsi.cooler.no_fuel"));
+            return rollbackRejectedStart(itemHandler, be);
+        }
+
         forceChunkLoad(true);
 
         // Phase 1: Insert ingredients into input slots 0..3
@@ -389,34 +410,17 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
             if (mat.isEmpty()) continue;
             ItemStack batch = mat.copy();
             ItemStack remainder = itemHandler.insertItem(slot, batch, false);
+            recordSlotSupply(slot, batch, batch.getCount() - remainder.getCount());
             if (!remainder.isEmpty()) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Batch-Cooler] Failed to insert into slot {}: {}",
                         slot, remainder);
                 return rollbackRejectedStart(itemHandler, be);
             }
-            recordSlotSupply(slot, batch, batch.getCount());
             slot++;
         }
         be.setChanged();
 
-        // Phase 2: Ensure enough lapis lazuli for this logical batch.
-        ItemStack fuelSlot = itemHandler.getStackInSlot(FUEL_SLOT);
-        int existingFuel = fuelSlot.is(Items.LAPIS_LAZULI) ? fuelSlot.getCount() : 0;
-        int requiredFuel = requiredLapisForOperations(operations);
-        int needed = Math.max(0, requiredFuel - existingFuel);
-        if (needed > 0) {
-            int inserted = tryInsertFuelFromStorage(itemHandler, needed);
-            if (inserted > 0) {
-                recordSlotSupply(FUEL_SLOT, new ItemStack(Items.LAPIS_LAZULI), inserted);
-                be.setChanged();
-            }
-            if (!hasResidualDye(be) && !hasUsableFuel(be, itemHandler.getStackInSlot(FUEL_SLOT))) {
-                player.sendSystemMessage(Component.translatable("rsi.cooler.no_fuel"));
-                return rollbackRejectedStart(itemHandler, be);
-            }
-        }
-
-        // Phase 3: Insert container (e.g. bowl/cup) into CONTAINER_SLOT. Like FD's
+        // Insert container (e.g. bowl/cup) into CONTAINER_SLOT. Like FD's
         // cooking pot, the cooler only moves the finished meal to the output slot
         // when the meal's container is satisfied. Bowl/cup foods (maggot_9 etc.)
         // declare no explicit recipe container, so derive it from the result
@@ -432,17 +436,15 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
             }
             ItemStack remainder = itemHandler.insertItem(
                     CONTAINER_SLOT, containerMaterial.copy(), false);
+            recordSlotSupply(CONTAINER_SLOT, containerMaterial, containerMaterial.getCount() - remainder.getCount());
             if (!remainder.isEmpty()) {
                 return rollbackRejectedStart(itemHandler, be);
             }
-            recordSlotSupply(CONTAINER_SLOT, containerMaterial, containerMaterial.getCount());
             be.setChanged();
         }
 
         if (!matchesExpectedRecipe(itemHandler)) {
-            RSIntegrationMod.LOGGER.warn(
-                    "[RSI-Batch-Cooler] Inserted inputs resolved to a different or invalid recipe at {}",
-                    myPos);
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-Cooler] {} at {}", startFailureDetail, myPos);
             return rollbackRejectedStart(itemHandler, be);
         }
 
@@ -573,7 +575,7 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
         if (!container.isEmpty() && refundInputs) refundToStorage(container);
         // Fuel is out-of-band (not in shared ledger) — refund unconditionally
         ItemStack fuel = extractOwnedSlotDelta(handler, FUEL_SLOT);
-        if (!fuel.isEmpty()) refundToStorage(fuel);
+        if (!fuel.isEmpty()) refundFuel(fuel);
         resetInventoryLease();
         return recoveredInputs;
     }
@@ -650,29 +652,30 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
     }
 
     private boolean matchesExpectedRecipe(IItemHandler handler) {
-        if (recipe == null || myLevel == null) return false;
-        SimpleContainer inputs = createRecipeInput(handler);
         try {
-            @SuppressWarnings("rawtypes")
-            Recipe rawRecipe = recipe;
-            @SuppressWarnings("unchecked")
-            boolean matches = rawRecipe.matches(inputs, myLevel);
-            return matches;
+            ResourceLocation selected = findRecipeId(recipe, handler, myLevel);
+            if (recipe.getId().equals(selected)) return true;
+            startFailureDetail = "enchantal cooler recipe mismatch: expected " + recipe.getId()
+                    + ", selected " + (selected == null ? "none" : selected);
         } catch (RuntimeException e) {
-            RSIntegrationMod.LOGGER.warn(
-                    "[RSI-Batch-Cooler] Recipe {} rejected its prepared input inventory",
-                    recipe.getId(), e);
-            return false;
+            startFailureDetail = "enchantal cooler recipe lookup failed for " + recipe.getId();
+            RSIntegrationMod.LOGGER.debug("[RSI-Batch-Cooler] {}", startFailureDetail, e);
         }
+        return false;
     }
 
-    static SimpleContainer createRecipeInput(IItemHandler handler) {
-        SimpleContainer inputs = new SimpleContainer(CONTAINER_SLOT + 1);
+    @Nullable
+    @SuppressWarnings("unchecked")
+    static ResourceLocation findRecipeId(Recipe<?> recipe, IItemHandler handler, Level level) {
+        // 原模组只用四个原料槽查配方，单独检查成品容器。
+        SimpleContainer inputs = new SimpleContainer(INPUT_SLOTS);
+        int index = 0;
         for (int slot = 0; slot < INPUT_SLOTS; slot++) {
-            inputs.setItem(slot, handler.getStackInSlot(slot).copy());
+            ItemStack stack = handler.getStackInSlot(slot);
+            if (!stack.isEmpty()) inputs.setItem(index++, stack.copy());
         }
-        inputs.setItem(CONTAINER_SLOT, handler.getStackInSlot(CONTAINER_SLOT).copy());
-        return inputs;
+        RecipeType<Recipe<SimpleContainer>> type = (RecipeType<Recipe<SimpleContainer>>) recipe.getType();
+        return level.getRecipeManager().getRecipeFor(type, inputs, level).map(Recipe::getId).orElse(null);
     }
 
     private boolean isExpectedOutput(ItemStack stack) {
@@ -792,19 +795,44 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
 
     // ── plan helpers ──
 
-    public static void addFuelIfNeeded(@Nullable String recipeModTypeId,
-                                       Map<Item, Long> itemAvailable,
-                                       Map<Item, Ingredient> itemSource,
-                                       Map<Item, Long> neededCounts,
-                                       int repeatCount) {
-        if (!"immortalers_delight".equals(recipeModTypeId)) return;
-        int fuelNeeded = requiredLapisForOperations(repeatCount);
-        neededCounts.merge(Items.LAPIS_LAZULI, (long) fuelNeeded,
-                SaturatingLongMath::signedAdd);
-        // Include lapis blocks as an acceptable source — RS recursive
-        // resolution will show the decomposition in the plan tree
-        itemSource.putIfAbsent(Items.LAPIS_LAZULI,
-                Ingredient.of(Items.LAPIS_LAZULI, Items.LAPIS_BLOCK));
+    public static long availableFuelUnits(ServerPlayer player, ResourceLocation recipeId,
+                                          @Nullable ResourceLocation dim, @Nullable BlockPos pos,
+                                          Map<StackKey, Long> available) {
+        long units = storedFuelUnits(available);
+        if (ImmersalsDelightReflection.enchantalCoolerBEClass == null) return units;
+        if (pos != null) {
+            return SaturatingLongMath.add(units, machineFuelUnits(player, dim, pos));
+        }
+        var machines = AltarBindingRegistry.getBoundMachinesForRecipe(player,
+                ModType.byId("immortalers_delight"), recipeId);
+        for (var machine : machines) {
+            units = SaturatingLongMath.add(units, machineFuelUnits(player, machine.dim(), machine.pos()));
+        }
+        return units;
+    }
+
+    private static int machineFuelUnits(ServerPlayer player, @Nullable ResourceLocation dim, BlockPos pos) {
+        ServerLevel level = CraftPacketUtils.resolveLevel(player.server, dim, player);
+        if (level == null || !level.hasChunkAt(pos)) return 0;
+        BlockEntity be = level.getBlockEntity(pos);
+        if (!ImmersalsDelightReflection.enchantalCoolerBEClass.isInstance(be)) return 0;
+        IItemHandler handler = getInventory(be);
+        if (handler == null || handler.getSlots() <= FUEL_SLOT) return 0;
+        return fuelInMachine(be, handler);
+    }
+
+    static long storedFuelUnits(Map<StackKey, Long> available) {
+        long units = 0L;
+        for (var entry : available.entrySet()) {
+            ItemStack stack = entry.getKey().toStack();
+            if (isFuelItem(stack)) {
+                units = SaturatingLongMath.add(units, entry.getValue());
+            } else if (stack.is(Items.LAPIS_BLOCK) && !stack.hasTag()) {
+                units = SaturatingLongMath.add(units,
+                        SaturatingLongMath.multiply(entry.getValue(), LAPIS_PER_BLOCK));
+            }
+        }
+        return units;
     }
 
     static int requiredLapisForOperations(int operations) {
@@ -822,54 +850,87 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
 
     // ── fuel extraction ──
 
-    /**
-     * Try to insert up to {@code needed} lapis lazuli into the fuel slot,
-     * extracting from the selected storage backend. Tries lapis lazuli first, then lapis blocks
-     * (1 block = 9 lapis lazuli).  Returns the amount actually inserted.
-     */
-    private int tryInsertFuelFromStorage(IItemHandler handler, int needed) {
-        int inserted = 0;
+    boolean ensureFuel(BlockEntity be, IItemHandler handler, int operations) {
+        int required = requiredLapisForOperations(operations);
+        int supplied = fuelInMachine(be, handler);
+        if (supplied >= required) return true;
 
-        // 1) Try lapis lazuli directly
-        ItemStack lapis = extractExactFromStorage(player, new ItemStack(Items.LAPIS_LAZULI), needed, false);
-        if (!lapis.isEmpty()) {
-            ItemStack remainder = handler.insertItem(FUEL_SLOT, lapis, false);
-            if (!remainder.isEmpty()) {
-                insertIntoStorage(player, remainder, false);
-            }
-            inserted = lapis.getCount() - remainder.getCount();
-            if (inserted >= needed) return inserted;
-        }
-
-        // 2) Not enough — try lapis blocks
-        int stillNeeded = needed - inserted;
-        int blocksNeeded = (int) Math.ceil(stillNeeded / 9.0);
-        ItemStack blocks = extractExactFromStorage(player, new ItemStack(Items.LAPIS_BLOCK), blocksNeeded, false);
-        if (!blocks.isEmpty()) {
-            int totalLapis = blocks.getCount() * 9;
-            int toInsert = Math.min(totalLapis, stillNeeded);
-            if (inserted > 0) {
-                // Fuel slot already has some lapis from step 1 — check what fits
-                ItemStack existing = handler.getStackInSlot(FUEL_SLOT);
-                int space = 64 - (existing.is(Items.LAPIS_LAZULI) ? existing.getCount() : 0);
-                toInsert = Math.min(toInsert, space);
-            }
-            if (toInsert > 0) {
-                ItemStack lapisStack = new ItemStack(Items.LAPIS_LAZULI, toInsert);
-                ItemStack remainder = handler.insertItem(FUEL_SLOT, lapisStack, false);
-                if (!remainder.isEmpty()) {
-                    insertIntoStorage(player, remainder, false);
+        ItemStack fuelSlot = handler.getStackInSlot(FUEL_SLOT);
+        int needed = required - supplied;
+        var available = materialAccess().available(player, storageEndpoint());
+        FuelSupply supply = selectFuel(fuelSlot, available, needed);
+        if (supply != null && hasUsableFuel(be, supply.fuel())
+                && handler.insertItem(FUEL_SLOT, supply.fuel().copyWithCount(needed), true).isEmpty()) {
+            ItemStack fuel = extractExactFromStorage(player, supply.fuel(), supply.loose(), false);
+            if (fuel.getCount() == supply.loose()) {
+                ItemStack blocks = extractExactFromStorage(
+                        player, new ItemStack(Items.LAPIS_BLOCK), supply.blocks(), false);
+                if (blocks.getCount() == supply.blocks()) {
+                    ItemStack input = supply.fuel().copyWithCount(needed);
+                    ItemStack remainder = handler.insertItem(FUEL_SLOT, input, false);
+                    int inserted = needed - remainder.getCount();
+                    recordSlotSupply(FUEL_SLOT, input, inserted);
+                    if (blocks.getCount() > 0) {
+                        int change = fuel.getCount() + blocks.getCount() * LAPIS_PER_BLOCK - needed;
+                        if (change > 0) refundToStorage(new ItemStack(Items.LAPIS_LAZULI, change));
+                        refundToStorage(remainder);
+                    } else {
+                        refundFuel(remainder);
+                    }
+                    if (inserted > 0) be.setChanged();
+                    if (inserted == needed) return true;
+                } else {
+                    refundFuel(blocks);
+                    refundFuel(fuel);
                 }
-                inserted += toInsert - remainder.getCount();
-            }
-            // Return excess lapis lazuli (from overshoot on block conversion)
-            int excess = totalLapis - toInsert;
-            if (excess > 0) {
-                insertIntoStorage(player, new ItemStack(Items.LAPIS_LAZULI, excess), false);
+            } else {
+                refundFuel(fuel);
             }
         }
+        startFailureDetail = "enchantal cooler fuel unavailable: required " + required
+                + ", available in machine " + fuelInMachine(be, handler)
+                + ", available in selected sources " + storedFuelUnits(available);
+        return false;
+    }
 
-        return inserted;
+    @Nullable
+    static FuelSupply selectFuel(ItemStack slot, Map<StackKey, Long> available, int needed) {
+        StackKey lapis = StackKey.of(new ItemStack(Items.LAPIS_LAZULI), true);
+        StackKey block = StackKey.of(new ItemStack(Items.LAPIS_BLOCK), true);
+        if (slot.isEmpty() || MaterialMatcher.sameRuntimeFragment(slot, lapis.toStack())) {
+            int loose = (int) Math.min(needed, available.getOrDefault(lapis, 0L));
+            int blocks = (int) SaturatingLongMath.ceilDiv(needed - loose, LAPIS_PER_BLOCK);
+            if (available.getOrDefault(block, 0L) >= blocks) {
+                return new FuelSupply(lapis.toStack(), loose, blocks);
+            }
+        }
+        if (!slot.isEmpty()) {
+            return isFuelItem(slot) && available.getOrDefault(StackKey.of(slot, true), 0L) >= needed
+                    ? new FuelSupply(slot.copyWithCount(1), needed, 0) : null;
+        }
+        return available.entrySet().stream()
+                .filter(entry -> entry.getValue() >= needed)
+                .map(entry -> entry.getKey().toStack())
+                .filter(EnchantalCoolerBatchDelegate::isFuelItem)
+                .findFirst().map(fuel -> new FuelSupply(fuel, needed, 0)).orElse(null);
+    }
+
+    record FuelSupply(ItemStack fuel, int loose, int blocks) {}
+
+    private static boolean isFuelItem(ItemStack stack) {
+        return stack.is(Items.LAPIS_LAZULI) || stack.is(FUEL_TAG);
+    }
+
+    private static int fuelInMachine(BlockEntity be, IItemHandler handler) {
+        int residual = residualDye(be);
+        ItemStack fuel = handler.getStackInSlot(FUEL_SLOT);
+        return residual + (hasUsableFuel(be, fuel) ? fuel.getCount() : 0);
+    }
+
+    private void refundFuel(ItemStack stack) {
+        if (stack.isEmpty()) return;
+        ItemStack leftover = refundMaterial(player, stack);
+        if (!leftover.isEmpty() && player != null) ItemHandlerHelper.giveItemToPlayer(player, leftover);
     }
 
     // ── reflection ──
@@ -922,13 +983,13 @@ public final class EnchantalCoolerBatchDelegate extends AbstractBatchDelegate {
                 .resolve().orElse(null);
     }
 
-    private static boolean hasResidualDye(BlockEntity be) {
+    private static int residualDye(BlockEntity be) {
         probeReflection();
-        if (residualDyeField == null) return false;
+        if (residualDyeField == null) return 0;
         try {
-            return residualDyeField.getInt(be) > 0;
+            return Math.max(0, residualDyeField.getInt(be));
         } catch (Exception e) {
-            return false;
+            return 0;
         }
     }
 

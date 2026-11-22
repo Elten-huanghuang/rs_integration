@@ -4,22 +4,32 @@ import com.huanghuang.rsintegration.crafting.batch.MachineOperation;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.OutputAccounting;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
+import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.reflection.probes.ImmersalsDelightReflection;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.BlockPos;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.item.crafting.RecipeManager;
+import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.items.ItemStackHandler;
 import org.junit.jupiter.api.Test;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
@@ -28,10 +38,62 @@ import static org.mockito.Mockito.when;
 class EnchantalCoolerBatchDelegateTest extends BootstrapTest {
 
     @Test
+    @SuppressWarnings("unchecked")
+    void recipeLookupUsesOnlyPackedIngredientsAndReturnsTheNativeSelection() {
+        ServerLevel level = mock(ServerLevel.class);
+        RecipeManager manager = new RecipeManager();
+        when(level.getRecipeManager()).thenReturn(manager);
+        RecipeType<Recipe<SimpleContainer>> type = new RecipeType<>() {};
+        Recipe<SimpleContainer> requested = mock(Recipe.class);
+        Recipe<SimpleContainer> cocktail = mock(Recipe.class);
+        ResourceLocation cocktailId = new ResourceLocation("immortalers_delight", "enchantal_cooler/vulcan_coktail");
+        doReturn(type).when(requested).getType();
+        doReturn(type).when(cocktail).getType();
+        when(cocktail.getId()).thenReturn(cocktailId);
+        when(cocktail.matches(any(SimpleContainer.class), same(level))).thenAnswer(call -> {
+            SimpleContainer inputs = call.getArgument(0);
+            return inputs.getContainerSize() == 4
+                    && inputs.getItem(0).is(Items.NETHER_WART)
+                    && inputs.getItem(1).is(Items.TORCHFLOWER)
+                    && inputs.getItem(2).isEmpty() && inputs.getItem(3).isEmpty();
+        });
+        manager.replaceRecipes(List.of(cocktail));
+
+        ItemStackHandler inventory = new ItemStackHandler(7);
+        inventory.setStackInSlot(0, new ItemStack(Items.NETHER_WART));
+        inventory.setStackInSlot(2, new ItemStack(Items.TORCHFLOWER));
+        inventory.setStackInSlot(4, new ItemStack(Items.GLASS_BOTTLE));
+        inventory.setStackInSlot(6, new ItemStack(Items.LAPIS_LAZULI));
+        assertEquals(cocktailId, EnchantalCoolerBatchDelegate.findRecipeId(cocktail, inventory, level));
+        assertEquals(cocktailId, EnchantalCoolerBatchDelegate.findRecipeId(requested, inventory, level));
+        assertTrue(inventory.getStackInSlot(4).is(Items.GLASS_BOTTLE));
+        inventory.setStackInSlot(2, new ItemStack(Items.APPLE));
+        assertNull(EnchantalCoolerBatchDelegate.findRecipeId(cocktail, inventory, level));
+    }
+
+    @Test
     void everyCoolerOperationConsumesOneLapisLazuli() {
         assertEquals(1, EnchantalCoolerBatchDelegate.requiredLapisForOperations(1));
         assertEquals(4, EnchantalCoolerBatchDelegate.requiredLapisForOperations(4));
         assertEquals(16, EnchantalCoolerBatchDelegate.requiredLapisForOperations(16));
+    }
+
+    @Test
+    void fuelSelectionCombinesLooseLapisWithBlocksWithoutTreatingBlocksAsNativeFuel() {
+        ItemStack lapis = new ItemStack(Items.LAPIS_LAZULI);
+        ItemStack block = new ItemStack(Items.LAPIS_BLOCK);
+        Map<StackKey, Long> stock = Map.of(StackKey.of(lapis, true), 2L, StackKey.of(block, true), 1L);
+
+        assertEquals(11, EnchantalCoolerBatchDelegate.storedFuelUnits(stock));
+        var direct = EnchantalCoolerBatchDelegate.selectFuel(ItemStack.EMPTY, stock, 1);
+        assertEquals(1, direct.loose());
+        assertEquals(0, direct.blocks());
+        var converted = EnchantalCoolerBatchDelegate.selectFuel(lapis, stock, 10);
+        assertTrue(converted.fuel().is(Items.LAPIS_LAZULI));
+        assertEquals(2, converted.loose());
+        assertEquals(1, converted.blocks());
+        assertNull(EnchantalCoolerBatchDelegate.selectFuel(ItemStack.EMPTY, stock, 12));
+        assertNull(EnchantalCoolerBatchDelegate.selectFuel(block, stock, 1));
     }
 
     @Test
