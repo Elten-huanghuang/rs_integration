@@ -6,6 +6,8 @@ import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
+import com.huanghuang.rsintegration.mods.aether.AetherRecipeHandler;
+import com.huanghuang.rsintegration.mods.aether.AetherRSModule;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
@@ -175,6 +177,33 @@ class CraftMachineBindingSupportTest extends BootstrapTest {
                     CraftMachineBindingSupport.resolveExecutionModType(
                             player, recipe, null, null)
             );
+        }
+    }
+
+    @Test
+    void aetherFreezerBindingKeepsTheSpecificTypeInPreviewAndCachedExecution() {
+        AetherRSModule.INSTANCE.registerModType();
+        ModType freezer = ModType.byId("aether_freezer");
+        ModType aether = ModType.byId("aether");
+        ServerPlayer player = mock(ServerPlayer.class);
+        Recipe<?> recipe = mock(Recipe.class);
+        AetherRecipeHandler handler = new AetherRecipeHandler();
+        try (MockedStatic<AetherRecipeHandler> aetherTypes = mockStatic(AetherRecipeHandler.class);
+             MockedStatic<ModRecipeHandlers> claims = mockStatic(ModRecipeHandlers.class);
+             MockedStatic<AltarBindingRegistry> bindings = mockStatic(AltarBindingRegistry.class)) {
+            aetherTypes.when(() -> AetherRecipeHandler.machineTypeFor(recipe)).thenReturn(freezer);
+            claims.when(() -> ModRecipeHandlers.claimFor(recipe))
+                    .thenReturn(new ModRecipeHandlers.Claim(handler, List.of(handler)));
+            bindings.when(() -> AltarBindingRegistry.hasBindingForRecipe(player, recipe, aether))
+                    .thenReturn(true);
+            bindings.when(() -> AltarBindingRegistry.hasAnyBindingForType(player, freezer))
+                    .thenReturn(true);
+
+            ModType previewType = CraftMachineBindingSupport.resolveExecutionModType(player, recipe, null, null);
+
+            assertSame(freezer, previewType);
+            assertTrue(AltarBindingRegistry.hasAnyBindingForType(player, previewType));
+            assertSame(freezer, CraftPlanningApplicationService.modTypeForCachedExecution(recipe));
         }
     }
 

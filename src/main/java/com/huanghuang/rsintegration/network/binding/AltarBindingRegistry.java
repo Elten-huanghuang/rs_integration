@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.network.binding;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.mods.aether.AetherRecipeHandler;
 import com.huanghuang.rsintegration.mods.goetydelight.GoetyDelightCookingPotSupport;
 import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.mods.tacz.TaczWorkbenchCompatibility;
@@ -46,7 +47,6 @@ import net.minecraft.world.item.crafting.SmithingTrimRecipe;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.event.level.BlockEvent;
 import net.minecraftforge.fml.ModList;
-import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
 import java.util.*;
@@ -390,20 +390,8 @@ public final class AltarBindingRegistry {
             return !(recipe instanceof SmithingTransformRecipe)
                     && !(recipe instanceof SmithingTrimRecipe);
         }
-        // Prefer the recipe registry type for Aether machines. This remains
-        // stable when Aether renames Java recipe classes and prevents the broad
-        // parent `aether` fallback from hiding freezer/incubator/altar recipes.
-        ResourceLocation recipeType = recipe.getType() != null
-                ? ForgeRegistries.RECIPE_TYPES.getKey(recipe.getType()) : null;
-        if (recipeType != null && "aether".equals(recipeType.getNamespace())) {
-            String mapped = switch (recipeType.getPath()) {
-                case "freezing" -> "aether_freezer";
-                case "incubation" -> "aether_incubator";
-                case "enchanting", "repairing" -> "aether_altar";
-                default -> null;
-            };
-            if (mapped != null && ModType.byId(mapped) != null) type = ModType.byId(mapped);
-        }
+        ModType aetherMachine = AetherRecipeHandler.machineTypeFor(recipe);
+        if (aetherMachine != null) type = aetherMachine;
 
         if (type == ModType.EXTERNAL_INTEGRATION) {
             return !getBoundMachinesForRecipe(
