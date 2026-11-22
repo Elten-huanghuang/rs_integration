@@ -1883,6 +1883,7 @@
   "rsi.plan.details.steps": "步骤列表",
   "rsi.plan.details.search": "搜索名称或物品 ID…",
   "rsi.plan.details.shortages": "缺料 %s",
+  "rsi.plan.details.shortage_detected": "缺少材料",
   "rsi.plan.details.conditions": "条件与提示 %s",
   "rsi.plan.details.bookmark_all": "收藏全部缺料到 JEI",
   "rsi.plan.details.quantity": "需求 %s · 补做 %s",

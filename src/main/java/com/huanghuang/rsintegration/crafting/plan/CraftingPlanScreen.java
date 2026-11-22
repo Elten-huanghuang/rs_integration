@@ -105,7 +105,7 @@ public final class CraftingPlanScreen extends Screen {
             }
         }
         JeiCraftingPlanContext.INSTANCE.updateMaterials(plan, inventoryState.changed());
-        if (detailsPanel != null) detailsPanel.updateInventory(plan, displayWarnings(plan));
+        if (detailsPanel != null) detailsPanel.updateInventory(plan);
         if (materialTable != null) materialTable.update(plan);
         if (externalRequest == null && !publishPlanExtensions && !responseRequests.waitingForPreview()
                 && !inventoryState.changed().isEmpty()) {
@@ -514,7 +514,7 @@ public final class CraftingPlanScreen extends Screen {
                         @Override public void openTarget() { onOpenMachine(); }
                     });
         }
-        detailsPanel.update(plan, treeModel.root, displayWarnings(plan));
+        detailsPanel.update(plan, executionPreview, treeModel.root, displayWarnings(plan));
         detailsPanel.setShowAllMaterials(() -> { materialView = true; embersDetailsOpen = false; });
         dropdownNode = detailsPanel.isOpen() ? detailsPanel.selectedNode() : null;
         addWidget(recipeCandidatePanel.searchBox());
@@ -1080,7 +1080,9 @@ public final class CraftingPlanScreen extends Screen {
         g.pose().scale(iconSize / 16f, iconSize / 16f, 1);
         InkFluidRenderer.render(g, plan.targetResult(), 0, 0);
         g.pose().popPose();
-        String shortages = workspaceText("shortage_status", detailsPanel.shortageCount()).getString();
+        String shortages = (detailsPanel.hasUnitemizedShortages()
+                ? Component.translatable("rsi.plan.details.shortage_detected")
+                : workspaceText("shortage_status", detailsPanel.shortageCount())).getString();
         String conditions = workspaceText("condition_status", detailsPanel.conditionCount()).getString();
         int maxBadgeWidth = Math.max(40, (r.width() - (compact ? 90 : 190) - (compact ? 0 : 26) - 5) / 2);
         int firstWidth = Math.min(maxBadgeWidth, font.width(shortages) + 12);
@@ -1914,7 +1916,7 @@ public final class CraftingPlanScreen extends Screen {
         pendingCandidateSwitch = null;
         pendingMaterialChoice = null;
         if (detailsPanel != null) {
-            detailsPanel.update(plan, treeModel.root, displayWarnings(plan));
+            detailsPanel.update(plan, executionPreview, treeModel.root, displayWarnings(plan));
             detailsPanel.showPreviewFailure(failure);
             dropdownNode = detailsPanel.isOpen() ? detailsPanel.selectedNode() : null;
         }

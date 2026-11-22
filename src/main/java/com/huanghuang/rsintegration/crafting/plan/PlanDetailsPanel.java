@@ -91,6 +91,8 @@ public final class PlanDetailsPanel {
     private int nodeHeaderScroll, nodeHeaderMaxScroll;
     private List<Row> materialRows = List.of();
     private List<Row> missingRows = List.of();
+    private List<Component> unitemizedShortages = List.of();
+    private boolean hasBookmarkableShortage;
     private List<Row> conditionRows = List.of();
     private List<Component> previewFailure = List.of();
     private List<Row> stepRows = List.of();
@@ -138,6 +140,7 @@ public final class PlanDetailsPanel {
     }
 
     public int shortageCount() { return missingRows.size(); }
+    public boolean hasUnitemizedShortages() { return !unitemizedShortages.isEmpty(); }
     public int conditionCount() { return conditionRows.size(); }
     public void setShowAllMaterials(Runnable action) { showAllMaterials = action; }
     public void layout(PlanWorkspaceLayout.Rect rect) { bounds = new Bounds(rect.x(), rect.y(), rect.width(), rect.height()); }
@@ -152,12 +155,13 @@ public final class PlanDetailsPanel {
     public int contentRight(int fallback) { return isOpen() && bounds != null ? bounds.x() - 8 : fallback; }
 
     /** 只在计划/库存更新时重建数据，平移和缩放不遍历材料账单。 */
-    public void update(PlanResponse plan, PlanTreeNode root, List<Component> warnings) {
+    public void update(PlanResponse plan, PlanResponse preview, PlanTreeNode root, List<Component> warnings) {
         IngredientKey previousKey = node == null ? null : node.key;
         String recipeQuery = recipes.searchBox().getValue();
         this.plan = plan;
         this.root = root;
         previewFailure = List.of();
+        unitemizedShortages = MissingMaterialBookmarkList.unitemizedShortages(preview);
         node = selection == null ? root : selection.resolve(root);
         selection = PlanNodeSelection.capture(root, node);
         bindRecipes();
@@ -173,7 +177,7 @@ public final class PlanDetailsPanel {
         conditionRows = List.copyOf(rows);
     }
 
-    public void updateInventory(PlanResponse plan, List<Component> warnings) {
+    public void updateInventory(PlanResponse plan) {
         this.plan = plan;
         rebuildMaterialRows();
     }
@@ -287,8 +291,10 @@ public final class PlanDetailsPanel {
             PlanWorkspaceChrome.panel(graphics, new PlanWorkspaceLayout.Rect(x, y, w, h), Color.PANEL, Color.BORDER);
             graphics.enableScissor(x + 1, y + 1, x + w - 1, y + h - 1);
             try {
-                String heading = tab == Tab.ISSUES ? text(conditions ? "conditions" : "shortages",
-                        conditions ? conditionRows.size() : missingRows.size()).getString()
+                String shortages = hasUnitemizedShortages() ? text("shortage_detected").getString()
+                        : text("shortages", shortageCount()).getString();
+                String conditionTitle = text("conditions", conditionCount()).getString();
+                String heading = tab == Tab.ISSUES ? (conditions ? conditionTitle : shortages)
                         : tab == Tab.STEPS ? text("tab_steps").getString() : tab == Tab.MACHINES ? text("machines").getString()
                         : variants ? text("material_choices").getString() : recipePage ? text("recipes").getString() : text("tab_node").getString();
                 boolean roomy = h >= 230;
@@ -301,9 +307,9 @@ public final class PlanDetailsPanel {
                 int tw = (w - 12) / 3;
                 button(graphics, text("tab_node").getString(), x + 5, tabY, tw - 2, 20,
                         tab == Tab.NODE || tab == Tab.STEPS, true, mouseX, mouseY, () -> { tab = Tab.NODE; variants = recipePage = false; resetSearch(); bindRecipes(); });
-                button(graphics, text("shortages", missingRows.size()).getString(), x + 5 + tw, tabY, tw - 2, 20,
+                button(graphics, shortages, x + 5 + tw, tabY, tw - 2, 20,
                         tab == Tab.ISSUES && !conditions, true, mouseX, mouseY, this::showIssues);
-                button(graphics, text("conditions", conditionRows.size()).getString(), x + 5 + tw * 2, tabY, tw - 2, 20,
+                button(graphics, conditionTitle, x + 5 + tw * 2, tabY, tw - 2, 20,
                         tab == Tab.ISSUES && conditions, true, mouseX, mouseY, this::showConditions);
                 int top = tabY + 26;
                 if (tab == Tab.NODE) renderNode(graphics, top, mouseX, mouseY);
@@ -323,7 +329,7 @@ public final class PlanDetailsPanel {
                     if (tab == Tab.ISSUES && !conditions) {
                         int half = (w - 18) / 2;
                         button(graphics, Component.translatable("rsi.plan.workspace.bookmark_all_short").getString(), x + 7, y + h - 22, half, 17,
-                                true, !missingRows.isEmpty(), mouseX, mouseY, bookmarkAll);
+                                true, hasBookmarkableShortage, mouseX, mouseY, bookmarkAll);
                         button(graphics, text("all_materials").getString(), x + 10 + half, y + h - 22, half, 17,
                                 false, true, mouseX, mouseY, showAllMaterials);
                     } else if (tab == Tab.ISSUES) button(graphics, text("recheck").getString(), x + 7, y + h - 22,
@@ -672,14 +678,22 @@ public final class PlanDetailsPanel {
                 key.stack(1).getHoverName().getString(), text("leftover", value).getString(),
                 Color.REFERENCE, firstNodeByKey.get(key), 0, false)));
         materialRows = List.copyOf(materials);
-        missingRows = MissingMaterialBookmarkList.textEntries(plan).stream().map(entry -> {
-                PlanResponse.Availability value = entry.bookmarkable() ? plan.availability(entry.bookmark()) : null;
-                return new Row(entry.bookmark(), entry.label(), value != null
-                        ? text("availability", value.needed(), value.available(), value.missingCount()).getString()
-                        : entry.missingCount() > 0 ? text("missing", entry.missingCount()).getString() : text("unresolved").getString(),
-                        Color.WARNING, entry.bookmarkable() ? firstNodeByKey.get(IngredientKey.of(entry.bookmark())) : null,
-                        entry.missingCount(), !entry.bookmarkable());
-        }).toList();
+        List<MissingMaterialBookmarkList.TextEntry> entries = MissingMaterialBookmarkList.textEntries(plan);
+        hasBookmarkableShortage = entries.stream().anyMatch(MissingMaterialBookmarkList.TextEntry::bookmarkable);
+        List<Row> shortages = new ArrayList<>();
+        for (var entry : entries) {
+            PlanResponse.Availability value = entry.bookmarkable() ? plan.availability(entry.bookmark()) : null;
+            shortages.add(new Row(entry.bookmark(), entry.label(), value != null
+                    ? text("availability", value.needed(), value.available(), value.missingCount()).getString()
+                    : entry.missingCount() > 0 ? text("missing", entry.missingCount()).getString() : text("unresolved").getString(),
+                    Color.WARNING, entry.bookmarkable() ? firstNodeByKey.get(IngredientKey.of(entry.bookmark())) : null,
+                    entry.missingCount(), !entry.bookmarkable()));
+        }
+        for (Component shortage : unitemizedShortages) {
+            shortages.add(new Row(ItemStack.EMPTY, text("unresolved").getString(),
+                    ChatFormatting.stripFormatting(shortage.getString()), Color.WARNING, null, 0, true));
+        }
+        missingRows = List.copyOf(shortages);
     }
 
     private static void collect(PlanTreeNode node, List<PlanTreeNode> nodes) {

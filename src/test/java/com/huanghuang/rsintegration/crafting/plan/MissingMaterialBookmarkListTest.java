@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.plan;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -244,6 +245,50 @@ class MissingMaterialBookmarkListTest extends BootstrapTest {
                 entries.stream().map(entry -> entry.bookmark().getItem()).toList());
         assertEquals(List.of(2L, 3L),
                 entries.stream().map(MissingMaterialBookmarkList.TextEntry::missingCount).toList());
+        assertTrue(MissingMaterialBookmarkList.unitemizedShortages(plan).isEmpty());
+    }
+
+    @Test
+    void missingInputsWithoutMaterialRowsStillHaveAShortageMessage() {
+        var diagnostic = IntegrationDiagnostic.error(IntegrationDiagnosticCode.NBT_MISMATCH);
+        PlanResponse plan = new PlanResponse(false, "", new ItemStack(Items.DIAMOND),
+                List.of(), Map.of(), List.of(), "test:recipe", List.of(), 1,
+                PlanOutcome.MISSING_INPUTS, List.of(diagnostic));
+
+        assertTrue(MissingMaterialBookmarkList.textEntries(plan).isEmpty());
+        assertEquals(List.of(diagnostic.clientMessage()), MissingMaterialBookmarkList.unitemizedShortages(plan));
+        assertTrue(MissingMaterialBookmarkList.bookmarkableItems(plan).isEmpty());
+    }
+
+    @Test
+    void coolerFuelShortageSurvivesThePacketEvenWithAHigherPriorityMachineFailure() {
+        Component fuelShortage = Component.translatable("rsi.cooler.fuel_shortage", "8", "2");
+        var machineFailure = IntegrationDiagnostic.error(IntegrationDiagnosticCode.MACHINES_LEASED);
+        PlanResponse plan = new PlanResponse(false, "", new ItemStack(Items.DIAMOND),
+                List.of(), Map.of(), List.of(), "test:recipe",
+                List.of(fuelShortage, machineFailure.clientMessage()), 8,
+                PlanOutcome.RUNTIME_UNAVAILABLE, List.of(machineFailure));
+
+        PlanResponse decoded = PlanResponsePacket.decodePayload(PlanResponsePacket.encodePayload(plan, 1L)).plan();
+
+        assertEquals(List.of(fuelShortage), MissingMaterialBookmarkList.unitemizedShortages(decoded));
+        assertTrue(MissingMaterialBookmarkList.bookmarkableItems(decoded).isEmpty());
+    }
+
+    @Test
+    void unfinishedPlansAndMachineFailuresAloneAreNotShortages() {
+        var diagnostic = IntegrationDiagnostic.error(IntegrationDiagnosticCode.NO_BOUND_MACHINE);
+        PlanResponse machineFailure = new PlanResponse(false, "", new ItemStack(Items.DIAMOND),
+                List.of(), Map.of(), List.of(), "test:recipe", List.of(), 1,
+                PlanOutcome.RUNTIME_UNAVAILABLE, List.of(diagnostic));
+        PlanResponse incomplete = new PlanResponse(false, "", new ItemStack(Items.DIAMOND),
+                List.of(), Map.of(), List.of(), "test:recipe",
+                List.of(Component.translatable("rsi.cooler.fuel_shortage", 8, 2)), 8,
+                PlanOutcome.BUDGET_EXHAUSTED,
+                List.of(IntegrationDiagnostic.error(IntegrationDiagnosticCode.COMPLEXITY_LIMIT)));
+
+        assertTrue(MissingMaterialBookmarkList.unitemizedShortages(machineFailure).isEmpty());
+        assertTrue(MissingMaterialBookmarkList.unitemizedShortages(incomplete).isEmpty());
     }
 
     private static PlanResponse planWithMissing(

@@ -94,6 +94,37 @@ class PlanInventoryClientStateTest extends BootstrapTest {
     }
 
     @Test
+    void sameStockCannotClearTheConfirmedShortageShownForACraftingIngredient() {
+        var wheat = new ItemStack(Items.WHEAT);
+        var key = IngredientKey.of(wheat);
+        var preview = plan(List.of(), List.of(new PlanGraphView.UnresolvedView(0, 0, wheat, 3)),
+                Map.of(key, 4L));
+        var inventory = new PreviewInventoryModel(preview);
+        var client = new PlanInventoryClientState(10, 11, preview);
+
+        inventory.update(key, 4);
+        assertEquals(PreviewInventoryModel.Status.MISSING, inventory.status());
+        assertTrue(client.accept(new PlanInventoryUpdatePacket(10, 11, 1, true,
+                inventory.status(), 0, 1, inventory.drain(true))));
+        var shortages = MissingMaterialBookmarkList.textEntries(client.view());
+        assertEquals(1, shortages.size());
+        assertEquals(Items.WHEAT, shortages.get(0).bookmark().getItem());
+        assertEquals(3, shortages.get(0).missingCount());
+
+        inventory.update(key, 5);
+        assertTrue(client.accept(new PlanInventoryUpdatePacket(10, 11, 2, false,
+                inventory.status(), 0, 1, inventory.drain(false))));
+        assertEquals(2, MissingMaterialBookmarkList.textEntries(client.view()).get(0).missingCount());
+
+        inventory.update(key, 7);
+        assertEquals(PreviewInventoryModel.Status.REPLAN, inventory.status());
+        assertTrue(client.accept(new PlanInventoryUpdatePacket(10, 11, 3, false,
+                inventory.status(), 0, 1, inventory.drain(false))));
+        assertTrue(MissingMaterialBookmarkList.textEntries(client.view()).isEmpty());
+        assertTrue(MissingMaterialBookmarkList.unitemizedShortages(preview).isEmpty());
+    }
+
+    @Test
     void jeiDemandContextAppliesOnlyChangedMaterials() {
         var source = source();
         var state = new PlanInventoryClientState(10, 11, source);

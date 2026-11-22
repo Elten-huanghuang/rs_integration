@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
 import net.minecraft.ChatFormatting;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -35,6 +37,24 @@ public final class MissingMaterialBookmarkList {
             if (!duplicate) result.add(entry.bookmark().copyWithCount(1));
         }
         return List.copyOf(result);
+    }
+
+    /** 从原始预览读取独立的缺料诊断，避免把补足后的库存缺口重新显示出来。 */
+    static List<Component> unitemizedShortages(PlanResponse preview) {
+        if (preview.outcome().incomplete()) return List.of();
+        List<Component> warnings = preview.modWarnings() == null ? List.of() : preview.modWarnings().stream()
+                .filter(warning -> warning.getContents() instanceof TranslatableContents translated
+                        && "rsi.cooler.fuel_shortage".equals(translated.getKey()))
+                .distinct()
+                .toList();
+        if (!warnings.isEmpty() || preview.outcome() != PlanOutcome.MISSING_INPUTS
+                || !textEntries(preview).isEmpty()) return warnings;
+        return List.of(preview.diagnostics().stream()
+                .filter(diagnostic -> diagnostic.code() == IntegrationDiagnosticCode.NBT_MISMATCH
+                        || diagnostic.code() == IntegrationDiagnosticCode.MISSING_MATERIALS)
+                .findFirst()
+                .map(IntegrationDiagnostic::clientMessage)
+                .orElseGet(() -> Component.translatable(IntegrationDiagnosticCode.MISSING_MATERIALS.translationKey())));
     }
 
     /** Resolve plain missing diagnostics into localized, individually bookmarkable labels. */

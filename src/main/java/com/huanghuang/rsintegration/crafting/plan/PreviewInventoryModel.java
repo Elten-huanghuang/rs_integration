@@ -20,6 +20,7 @@ public final class PreviewInventoryModel {
     private final List<IngredientKey> keys;
     private final Map<IngredientKey, Integer> indices = new HashMap<>();
     private final Map<IngredientKey, Long> required = new HashMap<>();
+    private final Map<IngredientKey, PlanResponse.Availability> unresolvedAtPreview = new HashMap<>();
     private final Map<IngredientKey, Long> current = new HashMap<>();
     private final Set<IngredientKey> dirty = new LinkedHashSet<>();
     private final Set<Item> types = new LinkedHashSet<>();
@@ -37,6 +38,12 @@ public final class PreviewInventoryModel {
         }
         PlanGraphView graph = plan.graph();
         graph.visitExternalDemand(this::require);
+        graph.visitUnresolvedDemand((stack, count) -> {
+            if (stack.isEmpty() || count <= 0) return;
+            IngredientKey key = IngredientKey.of(stack);
+            PlanResponse.Availability previewStock = plan.materials().get(key);
+            if (previewStock.missingCount() > 0) unresolvedAtPreview.put(key, previewStock);
+        });
         // 缺料图的展示模板不携带完整 Ingredient 谓词；补入展示物品也必须重新规划，
         // 不能据此宣布标签、动态 NBT 或未展开分支已经可以执行。
         complete = plan.canConfirmExecution();
@@ -64,9 +71,10 @@ public final class PreviewInventoryModel {
         amount = Math.max(0L, amount);
         long before = current.getOrDefault(key, 0L);
         if (before == amount) return;
-        long need = required.getOrDefault(key, 0L);
-        if (before < need && amount >= need) shortages--;
-        else if (before >= need && amount < need) shortages++;
+        boolean wasMissing = missingAmount(key, before) > 0;
+        boolean isMissing = missingAmount(key, amount) > 0;
+        if (wasMissing && !isMissing) shortages--;
+        else if (!wasMissing && isMissing) shortages++;
         current.put(key, amount);
         dirty.add(key);
     }
@@ -80,10 +88,19 @@ public final class PreviewInventoryModel {
         List<PlanInventoryUpdatePacket.Entry> result = new ArrayList<>();
         for (IngredientKey key : changed) {
             long have = current.getOrDefault(key, 0L);
-            result.add(new PlanInventoryUpdatePacket.Entry(indices.get(key), have,
-                    Math.max(0L, required.getOrDefault(key, 0L) - have)));
+            result.add(new PlanInventoryUpdatePacket.Entry(indices.get(key), have, missingAmount(key, have)));
         }
         dirty.clear();
         return List.copyOf(result);
+    }
+
+    private long missingAmount(IngredientKey key, long have) {
+        long inventoryGap = Math.max(0L, requiredAmount(key) - have);
+        PlanResponse.Availability previewStock = unresolvedAtPreview.get(key);
+        if (previewStock == null) return inventoryGap;
+
+        // 预览时已有的同名物品未能满足这项需求，只有新增库存才能缩小这个缺口。
+        long added = Math.max(0L, have - previewStock.available());
+        return Math.max(inventoryGap, previewStock.missingCount() - added);
     }
 }

@@ -1883,6 +1883,7 @@
   "rsi.plan.details.steps": "Steps",
   "rsi.plan.details.search": "Search names or item IDs…",
   "rsi.plan.details.shortages": "Missing %s",
+  "rsi.plan.details.shortage_detected": "Materials missing",
   "rsi.plan.details.conditions": "Conditions %s",
   "rsi.plan.details.bookmark_all": "Bookmark all missing items in JEI",
   "rsi.plan.details.quantity": "Required %s · Produce %s",
