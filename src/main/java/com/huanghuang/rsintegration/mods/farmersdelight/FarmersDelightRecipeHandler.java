@@ -153,9 +153,7 @@ public final class FarmersDelightRecipeHandler extends AbstractRecipeHandler {
             }
             ResourceLocation school = FarmersSpellPotSupport.requiredSchool(recipe);
             if (school != null) {
-                IngredientSpec scroll = FarmersSpellPotSupport.scrollSpec(school);
-                if (scroll.isEmpty()) return null;
-                specs.add(scroll);
+                specs.add(FarmersSpellPotSupport.scrollSpec(school));
             }
             if (specs.isEmpty()) return null;
             ItemStack container = FarmersSpellPotSupport.isRecipe(recipe)

@@ -3,7 +3,6 @@ package com.huanghuang.rsintegration.mods.farmersdelight;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import io.redspace.ironsspellbooks.api.item.IScroll;
-import io.redspace.ironsspellbooks.api.registry.SchoolRegistry;
 import io.redspace.ironsspellbooks.api.registry.SpellRegistry;
 import io.redspace.ironsspellbooks.api.spells.ISpellContainer;
 import net.minecraft.resources.ResourceLocation;
@@ -56,11 +55,12 @@ final class FarmersSpellPotSupport {
     }
 
     static IngredientSpec scrollSpec(ResourceLocation schoolId) {
-        var school = SchoolRegistry.getSchool(schoolId);
         var scrollItem = ForgeRegistries.ITEMS.getValue(SCROLL);
         List<ItemStack> displays = new ArrayList<>();
-        if (school != null && scrollItem != null) {
-            for (var spell : SpellRegistry.getSpellsForSchool(school)) {
+        if (scrollItem instanceof IScroll) {
+            // 按当前配置的流派 ID 枚举，避免复用模组按流派对象缓存的旧结果。
+            for (var spell : SpellRegistry.REGISTRY.get().getValues()) {
+                if (spell == SpellRegistry.none() || !schoolId.equals(spell.getSchoolType().getId())) continue;
                 for (int level = spell.getMinLevel(), max = spell.getMaxLevel(); level <= max; level++) {
                     ItemStack stack = new ItemStack(scrollItem);
                     ISpellContainer.createScrollContainer(spell, level, stack);
@@ -128,6 +128,12 @@ final class FarmersSpellPotSupport {
         @Override
         public boolean test(@Nullable ItemStack stack) {
             return stack != null && !stack.isEmpty() && matchesSchool.test(stack);
+        }
+
+        @Override
+        public boolean isEmpty() {
+            // 展示候选为空时，库存中已有的正确卷轴仍可满足这项需求。
+            return false;
         }
 
         @Override

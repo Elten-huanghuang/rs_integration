@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.mods.farmersdelight;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
+import com.huanghuang.rsintegration.crafting.DirectMaterialAllocator;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.IngredientMatcher;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
@@ -33,6 +35,7 @@ import vectorwing.farmersdelight.common.crafting.CookingPotRecipe;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -84,6 +87,36 @@ class FarmersSpellPotCompatibilityTest extends BootstrapTest {
             assertTrue(specs.get(2).ingredient().test(new ItemStack(Items.BOWL)));
             assertTrue(handler.isCompatibleBinding(fixture.recipe, "farmersdelight_cooking_pot||block.farmers_spell.alchemist_pot"));
             assertFalse(handler.isCompatibleBinding(fixture.recipe, "farmersdelight_cooking_pot||block.farmersdelight.cooking_pot"));
+        }
+    }
+
+    @Test
+    void cottonCandyNeedsTheServingContainerAndSchoolScrollEvenWithoutDisplayCandidates() {
+        ResourceLocation lightning = ResourceLocation.parse("irons_spellbooks:lightning");
+        Ingredient caramel = Ingredient.of(Items.SUGAR);
+        var recipe = new CookingPotRecipe(ResourceLocation.parse("farmers_spell:alchemist_cooking/thunder_cotton_candy"),
+                "", null, NonNullList.of(Ingredient.EMPTY, caramel, caramel, caramel),
+                new ItemStack(Items.APPLE), new ItemStack(Items.LIGHTNING_ROD), 0, 200);
+        ItemStack lightningScroll = new ItemStack(Items.PAPER);
+        lightningScroll.getOrCreateTag().putString("school", lightning.toString());
+        var scroll = new IngredientSpec(new FarmersSpellPotSupport.ScrollIngredient(List.of(),
+                stack -> stack.getTag() != null && lightning.toString().equals(stack.getTag().getString("school"))),
+                1, DemandRole.CATALYST);
+        try (var support = mockStatic(FarmersSpellPotSupport.class, CALLS_REAL_METHODS)) {
+            support.when(() -> FarmersSpellPotSupport.isRecipe(recipe)).thenReturn(true);
+            support.when(() -> FarmersSpellPotSupport.requiredSchool(recipe)).thenReturn(lightning);
+            support.when(() -> FarmersSpellPotSupport.scrollSpec(lightning)).thenReturn(scroll);
+
+            var specs = new FarmersDelightRecipeHandler().getIngredients(recipe);
+            assertEquals(5, specs.size());
+            assertEquals(DemandRole.CATALYST, specs.get(3).role());
+            var sugar = StackKey.of(new ItemStack(Items.SUGAR), true);
+            var rod = StackKey.of(new ItemStack(Items.LIGHTNING_ROD), true);
+            var correctScroll = StackKey.of(lightningScroll, true);
+            var blankScroll = StackKey.of(new ItemStack(Items.PAPER), true);
+            assertFalse(DirectMaterialAllocator.allocate(specs, Map.of(sugar, 3, rod, 1, blankScroll, 1)).feasible());
+            assertFalse(DirectMaterialAllocator.allocate(specs, Map.of(sugar, 3, correctScroll, 1)).feasible());
+            assertTrue(DirectMaterialAllocator.allocate(specs, Map.of(sugar, 3, rod, 1, correctScroll, 1)).feasible());
         }
     }
 
