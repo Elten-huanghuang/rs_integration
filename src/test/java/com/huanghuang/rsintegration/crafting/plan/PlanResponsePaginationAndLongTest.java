@@ -1,14 +1,22 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
+import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.graph.OutputKind;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import io.netty.buffer.Unpooled;
+import net.minecraft.core.MappedRegistry;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraftforge.registries.ForgeRegistry;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -77,6 +85,64 @@ class PlanResponsePaginationAndLongTest extends BootstrapTest {
         assertEquals(2_000_000_009L,
                 decodedGraph.roots().get(0).allocations().get(0).quantity());
         assertEquals(7_000_000_010L, decodedGraph.unresolved().get(0).quantity());
+    }
+
+    @Test
+    void encodingShareTagsDoesNotChangeCachedSupplyIdentity() {
+        ItemStack material = new ItemStack(registerMutatingShareTagItem());
+        StackKey stocked = StackKey.of(material, true);
+        var initial = PlanGraphView.SourceView.fromInitial();
+        var edge = new PlanGraphView.EdgeView(0, 0, initial, material, 1);
+        var allocation = new PlanGraphView.RootEdgeView(initial, material, 1);
+        var node = new PlanGraphView.NodeView(0, ResourceLocation.parse("test:intermediate"),
+                "generic", 1, new ItemStack(Items.GOLD_INGOT),
+                List.of(new PlanGraphView.InputView(0, material, 1, DemandRole.CONSUMED.ordinal())),
+                List.of(new PlanGraphView.OutputView(0, new ItemStack(Items.GOLD_INGOT), 1,
+                        OutputKind.PRIMARY.ordinal())));
+        var graph = new PlanGraphView(1, List.of(node), List.of(edge),
+                List.of(new PlanGraphView.RootView(material, 1, 0, List.of(allocation))),
+                List.of(), List.of(0));
+        var plan = new PlanResponse(true, "Target", new ItemStack(Items.DIAMOND),
+                List.of(), Map.of(), List.of(), "test:share_tag", null, null,
+                0, 0, 0, List.of(), 1, null, null, null, 0L,
+                false, false, false, null, Set.of(), Map.of(), null, graph);
+
+        var decodedGraph = PlanResponsePacket.decodePayload(
+                PlanResponsePacket.encodePayload(plan, REQUEST_ID)).plan().graph();
+
+        assertEquals(stocked, StackKey.of(edge.material(), true));
+        assertEquals(stocked, StackKey.of(allocation.material(), true));
+        assertTrue(decodedGraph.edges().get(0).material().getTag().contains("Inventory"));
+        assertTrue(decodedGraph.roots().get(0).allocations().get(0)
+                .material().getTag().contains("Inventory"));
+    }
+
+    private static Item registerMutatingShareTagItem() {
+        var forgeItems = (ForgeRegistry<Item>) ForgeRegistries.ITEMS;
+        var items = (MappedRegistry<Item>) BuiltInRegistries.ITEM;
+        var id = ResourceLocation.parse("test:mutating_share_tag");
+        boolean locked = forgeItems.isLocked();
+        forgeItems.unfreeze();
+        items.unfreeze();
+        try {
+            // 模拟人偶的同步行为：直接把容器内容写入传入的物品堆。
+            Item item = new Item(new Item.Properties().stacksTo(1)) {
+                @Override
+                public CompoundTag getShareTag(ItemStack stack) {
+                    CompoundTag inventory = new CompoundTag();
+                    inventory.putInt("Size", 1);
+                    inventory.put("Items", new ListTag());
+                    CompoundTag tag = stack.getOrCreateTag();
+                    tag.put("Inventory", inventory);
+                    return tag;
+                }
+            };
+            forgeItems.register(id, item);
+            return item;
+        } finally {
+            items.freeze();
+            if (locked) forgeItems.freeze();
+        }
     }
 
     @Test

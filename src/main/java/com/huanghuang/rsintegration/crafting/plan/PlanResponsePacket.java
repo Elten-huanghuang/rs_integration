@@ -618,7 +618,7 @@ public final class PlanResponsePacket {
             buf.writeVarInt(edge.consumerNodeId());
             buf.writeVarInt(edge.consumerPortIndex());
             writeSource(buf, edge.source());
-            InkFluidSupport.writePacket(buf, edge.material());
+            writeAllocatedMaterial(buf, edge.material());
             buf.writeVarLong(edge.quantity());
         }
         buf.writeVarInt(graph.roots().size());
@@ -630,7 +630,7 @@ public final class PlanResponsePacket {
             buf.writeVarInt(root.allocations().size());
             for (PlanGraphView.RootEdgeView allocation : root.allocations()) {
                 writeSource(buf, allocation.source());
-                InkFluidSupport.writePacket(buf, allocation.material());
+                writeAllocatedMaterial(buf, allocation.material());
                 buf.writeVarLong(allocation.quantity());
             }
         }
@@ -657,6 +657,11 @@ public final class PlanResponsePacket {
                 buf.writeUtf(option.modTypeId(), MAX_MOD_TYPE_LENGTH);
             }
         }
+    }
+
+    private static void writeAllocatedMaterial(FriendlyByteBuf buf, ItemStack material) {
+        // 模组的 getShareTag 可能修改物品堆，而确认合成仍需用原始 NBT 核对供料。
+        InkFluidSupport.writePacket(buf, material.copy());
     }
 
     static PlanGraphView readGraph(FriendlyByteBuf buf) {
