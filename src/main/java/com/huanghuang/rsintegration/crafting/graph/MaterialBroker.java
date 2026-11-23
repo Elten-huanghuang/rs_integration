@@ -536,6 +536,17 @@ public final class MaterialBroker {
         return total;
     }
 
+    public Map<MaterialKey, Long> outstandingInitialMaterials() {
+        requireOwnerThread();
+        Map<MaterialKey, Long> amounts = new HashMap<>();
+        for (AssetLot lot : lots.values()) {
+            if (!(lot.source instanceof MaterialSource.InitialPool)) continue;
+            long held = saturatingAdd(lot.available, saturatingAdd(lot.reserved, lot.committed));
+            amounts.merge(lot.material, held, MaterialBroker::saturatingAdd);
+        }
+        return amounts;
+    }
+
     public long heldBy(NodeId owner) {
         requireOwnerThread();
         long total = 0L;

@@ -33,15 +33,26 @@ public final class RSIPlanExtensions {
      * complete 为 false 时，仅包含能确认的外部材料。 */
     public record Context(UUID planId, long inventoryRevision, ResourceLocation recipeId, int craftCount,
                           Optional<Network> network, Set<Source> enabledSources,
-                          List<Material> initialMaterials, boolean complete) {
+                          List<Material> initialMaterials, boolean complete, List<SourceAllocation> sourceAllocations) {
+        public Context(UUID planId, long inventoryRevision, ResourceLocation recipeId, int craftCount,
+                       Optional<Network> network, Set<Source> enabledSources,
+                       List<Material> initialMaterials, boolean complete) {
+            this(planId, inventoryRevision, recipeId, craftCount, network, enabledSources, initialMaterials,
+                    complete, List.of());
+        }
+
         public Context {
             enabledSources = Set.copyOf(enabledSources);
             initialMaterials = List.copyOf(initialMaterials);
+            sourceAllocations = List.copyOf(sourceAllocations);
         }
     }
 
-    /** 任务外部需求（包括缺料），不含中间产物。现有规划没有逐来源分配数据。 */
+    /** 任务外部需求，包括缺料。 */
     public record Material(IntegrationResourceKey key, long needed, long available, long missing) {}
+
+    /** 已分配给注册材料源的外部需求，按物品身份和来源 ID 汇总。 */
+    public record SourceAllocation(IntegrationResourceKey key, ResourceLocation sourceId, long count) {}
 
     public record MaterialNote(String note, List<String> tooltipLines) {
         public MaterialNote {

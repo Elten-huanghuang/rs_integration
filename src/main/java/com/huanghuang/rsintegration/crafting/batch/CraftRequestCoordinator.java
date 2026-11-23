@@ -185,7 +185,9 @@ public final class CraftRequestCoordinator {
                     request.repeatCount, request.inferMode, request.baseItem, request.targetOutput,
                     request.outputDestination, request.machineSelectionMode,
                     request.storageReference, request.materialLocks,
-                    false, preparationRequest, request.planningPreferences, request.confirmedPreviewRequestId);
+                    false, preparationRequest, request.planningPreferences, request.confirmedPreviewRequestId,
+                    request.confirmedPreviewRequestId > 0L && request.requestId > 0L
+                            ? () -> refreshConfirmedQuote(player, request) : null);
         } catch (CraftingPlanningTimeoutException timeout) {
             PerformanceMonitor.recordResolveTimeout();
             RSIntegrationMod.LOGGER.warn(
@@ -202,6 +204,17 @@ public final class CraftRequestCoordinator {
                         "[RSI-Generic] Failed to send queued execution error", ex);
             }
         }
+    }
+
+    private static void refreshConfirmedQuote(ServerPlayer player, Request request) {
+        long generation = beginPreview(player, request.requestId, request.recipeId);
+        if (generation == 0L) {
+            player.sendSystemMessage(Component.translatable("rsi.plan.failure.planner_busy"));
+            return;
+        }
+        CraftPlanningApplicationService.tryBuildPlan(player, request.recipeId, request.forcedRecipes,
+                request.dim, request.pos, request.repeatCount, request.baseItem, request.targetOutput,
+                request.requestId, generation, request.storageReference, request.materialLocks, request.planningPreferences);
     }
 
     private static void tickExecutionRequests(MinecraftServer server) {

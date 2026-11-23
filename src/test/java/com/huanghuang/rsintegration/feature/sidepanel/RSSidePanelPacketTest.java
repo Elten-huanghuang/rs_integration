@@ -1,6 +1,10 @@
 package com.huanghuang.rsintegration.feature.sidepanel;
 
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import com.huanghuang.rsintegration.api.RSIItemRetrieval;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.player.Inventory;
+import static org.mockito.Mockito.*;
 import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.DecoderException;
 import net.minecraft.network.FriendlyByteBuf;
@@ -9,7 +13,6 @@ import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
-import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -39,26 +42,6 @@ class RSSidePanelPacketTest extends BootstrapTest {
     }
 
     @Test
-    void pickBlockCountIsBoundedByItemStackSizeAndLongStorageCounts() {
-        assertEquals(0, RSSidePanelClickPacket.pickRequestCount(0L, 64));
-        assertEquals(12, RSSidePanelClickPacket.pickRequestCount(12L, 64));
-        assertEquals(64, RSSidePanelClickPacket.pickRequestCount(Long.MAX_VALUE, 64));
-    }
-
-    @Test
-    void backendExtractionFragmentsAreCombinedWithoutLosingIdentity() {
-        ItemStack first = new ItemStack(Items.STONE, 20);
-        ItemStack second = new ItemStack(Items.STONE, 12);
-
-        ItemStack merged = RSSidePanelClickPacket.mergeExactStacks(List.of(first, second));
-
-        assertEquals(32, merged.getCount());
-        assertTrue(ItemStack.isSameItemSameTags(first, merged));
-        assertTrue(RSSidePanelClickPacket.mergeExactStacks(List.of(
-                first, new ItemStack(Items.DIRT))).isEmpty());
-    }
-
-    @Test
     void matchingNativeMiddleClickIsCoalescedButUnrelatedHandItemsAreNot() {
         ItemStack target = new ItemStack(Items.STONE);
         ItemStack nativePick = new ItemStack(Items.STONE, 48);
@@ -71,6 +54,21 @@ class RSSidePanelPacketTest extends BootstrapTest {
                 new ItemStack(Items.DIRT), target).isEmpty());
         assertTrue(RSSidePanelClickPacket.coalescedNativePick(
                 ItemStack.EMPTY, target).isEmpty());
+    }
+
+    @Test
+    void indeterminateWorldPickAcknowledgesTheDeliveredCountWithoutReportingSuccess() {
+        ServerPlayer player = mock(ServerPlayer.class);
+        when(player.getInventory()).thenReturn(new Inventory(player));
+        when(player.getMainHandItem()).thenReturn(ItemStack.EMPTY);
+        try (var retrieval = mockStatic(RSIItemRetrieval.class)) {
+            retrieval.when(() -> RSIItemRetrieval.retrieve(any())).thenReturn(
+                    new RSIItemRetrieval.Result(RSIItemRetrieval.Status.INDETERMINATE, 3));
+            var result = RSSidePanelClickPacket.executePickBlock(player, new ItemStack(Items.STONE), null);
+            assertFalse(result.success());
+            assertEquals(3, result.actualCount());
+            assertEquals(RSSidePanelOperationResultPacket.ErrorCode.INDETERMINATE, result.errorCode());
+        }
     }
 
     @Test

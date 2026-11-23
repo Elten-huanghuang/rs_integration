@@ -1,5 +1,8 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
+import com.huanghuang.rsintegration.api.RSICraftingMaterialSources;
+import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
+import com.huanghuang.rsintegration.crafting.RegisteredMaterialSources;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
@@ -9,6 +12,8 @@ import com.huanghuang.rsintegration.crafting.MaterialSourceSelection;
 import com.huanghuang.rsintegration.crafting.batch.CraftPlanningRuntime;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
+import com.huanghuang.rsintegration.crafting.planning.PlanCache.PublishedPlan;
+import com.huanghuang.rsintegration.crafting.planning.PlanningStateValidator;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
@@ -33,6 +38,7 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.network.PacketDistributor;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -60,23 +66,23 @@ public final class PreviewInventorySyncManager {
     }
 
     /** 按玩家和请求保留已发送的结果；仅当前打开的窗口挂原生监听器。 */
-    public static void offer(ServerPlayer player, PlanResponse plan, long requestId) {
+    public static void offer(ServerPlayer player, PlanResponse plan, long requestId, long generation,
+                             MaterialSourceSelection materialSources) {
         if (!enabled() || plan.graph() == null || plan.recipeId().isEmpty()
                 || plan.outcome().incomplete()) return;
-        offer(player.getUUID(), plan, requestId, player.getServer().getTickCount());
+        offer(player.getUUID(), new PublishedPlan(plan, generation, materialSources), requestId, player.getServer().getTickCount());
         prune(player.getServer().getTickCount(),
                 RSIntegrationConfig.serverInt(RSIntegrationConfig.CRAFTING_PREVIEW_INVENTORY_PENDING_TICKS),
                 RSIntegrationConfig.serverInt(RSIntegrationConfig.CRAFTING_PLAN_CACHE_MAX_ENTRIES),
                 RSIntegrationConfig.serverInt(RSIntegrationConfig.CRAFTING_PLAN_CACHE_MAX_NODES));
     }
 
-    static Session offer(UUID playerId, PlanResponse plan, long requestId, int tick) {
+    static Session offer(UUID playerId, PublishedPlan published, long requestId, int tick) {
         SessionKey key = new SessionKey(playerId, requestId);
         Session existing = SESSIONS.get(key);
         if (existing != null) return existing;
         try {
-            Session next = new Session(plan, requestId, tick,
-                    CraftPlanningRuntime.publishedMaterialSources(playerId, requestId));
+            Session next = new Session(published.plan(), requestId, tick, published.generation(), published.materialSources());
             SESSIONS.put(key, next);
             return next;
         } catch (IllegalArgumentException unsupported) {
@@ -99,7 +105,7 @@ public final class PreviewInventorySyncManager {
     }
 
     static void watch(UUID playerId, PlanInventoryWatchPacket packet, int tick,
-                      Consumer<PlanInventoryUpdatePacket> sender, Supplier<PlanResponse> retainedPlan) {
+                      Consumer<PlanInventoryUpdatePacket> sender, Supplier<PublishedPlan> retainedPlan) {
         Session state = SESSIONS.get(new SessionKey(playerId, packet.requestId()));
         if (packet.open()) {
             if (packet.watchId() <= LAST_WATCH_IDS.getOrDefault(playerId, 0L)) return;
@@ -113,8 +119,8 @@ public final class PreviewInventorySyncManager {
             }
             if (state == null) {
                 // 闲置订阅清理不等于计划失效；从服务端保留的结果恢复并重新对账，不调用求解器。
-                PlanResponse plan = retainedPlan.get();
-                if (plan != null && plan.graph() != null) state = offer(playerId, plan, packet.requestId(), tick);
+                PublishedPlan plan = retainedPlan.get();
+                if (plan != null && plan.plan().graph() != null) state = offer(playerId, plan, packet.requestId(), tick);
             }
             if (state == null) {
                 sender.accept(new PlanInventoryUpdatePacket(packet.requestId(), packet.watchId(), 1L, true,
@@ -198,6 +204,7 @@ public final class PreviewInventorySyncManager {
     static final class Session {
         final PlanResponse plan;
         final long requestId;
+        final long previewGeneration;
         final long revision = CraftPlanningRevision.current();
         final PreviewInventoryModel model;
         final MaterialSourceSelection materialSources;
@@ -205,6 +212,11 @@ public final class PreviewInventorySyncManager {
         final Map<IngredientKey, Long> stored = new HashMap<>();
         final Map<IngredientKey, Long> local = new HashMap<>();
         final Map<IngredientKey, Long> derived = new HashMap<>();
+        final Map<IngredientKey, Long> external = new HashMap<>();
+        final List<RegisteredMaterialSources.Share> plannedExternal = new ArrayList<>();
+        final Map<StackKey, Long> allocatedInputs;
+        RegisteredMaterialSources.StockSnapshot extensionStock = RegisteredMaterialSources.StockSnapshot.EMPTY;
+        boolean extensionPlanChanged;
         final Map<IngredientKey, Long> pending = new LinkedHashMap<>();
         final Map<StorageFluidKey, IngredientKey> fluidKeys = new HashMap<>();
         final Set<IngredientKey> dirty = new LinkedHashSet<>();
@@ -224,14 +236,18 @@ public final class PreviewInventorySyncManager {
         PreviewInventoryModel.Status lastStatus;
 
         Session(PlanResponse plan, long requestId, int tick) {
-            this(plan, requestId, tick, MaterialSourceSelection.ALL);
+            this(plan, requestId, tick, 0L, MaterialSourceSelection.ALL);
         }
 
-        Session(PlanResponse plan, long requestId, int tick, MaterialSourceSelection materialSources) {
+        Session(PlanResponse plan, long requestId, int tick, long previewGeneration, MaterialSourceSelection materialSources) {
+            this.previewGeneration = previewGeneration;
             this.materialSources = materialSources;
             this.plan = plan;
             this.requestId = requestId;
             this.model = new PreviewInventoryModel(plan);
+            this.allocatedInputs = PlanningStateValidator.requiredInitialSupply(plan.graph());
+            plan.graph().visitExtensionAllocations((id, stack, count) ->
+                    plannedExternal.add(new RegisteredMaterialSources.Share(id, StackKey.of(stack, true), count)));
             this.watchesContainers = model.itemTypes().contains(Items.WATER_BUCKET)
                     || model.itemTypes().contains(Items.LAVA_BUCKET);
             this.lastUsedTick = tick;
@@ -303,12 +319,19 @@ public final class PreviewInventorySyncManager {
             }
             pending.clear();
             if (poll || full || derivedDirty) updateDerived(player);
+            if (poll || full) {
+                ResourceLocation recipe = ResourceLocation.tryParse(plan.recipeId());
+                extensionStock = RegisteredMaterialSources.capture(player, endpoint, materialSources,
+                        model.itemTypes(), RSICraftingMaterialSources.Phase.PLAN,
+                        recipe == null ? null : new RSICraftingMaterialSources.Plan(recipe, previewGeneration), null);
+            }
+            if (poll || full || !dirty.isEmpty()) updateExternal();
             for (IngredientKey key : dirty) {
-                model.update(key, SaturatingLongMath.add(local.getOrDefault(key, 0L),
-                        SaturatingLongMath.add(stored.getOrDefault(key, 0L), derived.getOrDefault(key, 0L))));
+                model.update(key, SaturatingLongMath.add(physicalAmount(key), external.getOrDefault(key, 0L)));
             }
             dirty.clear();
             PreviewInventoryModel.Status status = model.status();
+            if (extensionPlanChanged) status = PreviewInventoryModel.Status.QUOTE_CHANGED;
             if (status == PreviewInventoryModel.Status.READY && derived.entrySet().stream().anyMatch(entry ->
                     entry.getValue() > 0 && SaturatingLongMath.add(local.getOrDefault(entry.getKey(), 0L),
                             stored.getOrDefault(entry.getKey(), 0L)) < model.requiredAmount(entry.getKey()))) {
@@ -317,6 +340,57 @@ public final class PreviewInventorySyncManager {
             }
             send(status, sender);
         }
+
+        private long physicalAmount(IngredientKey key) {
+            return SaturatingLongMath.add(local.getOrDefault(key, 0L),
+                    SaturatingLongMath.add(stored.getOrDefault(key, 0L), derived.getOrDefault(key, 0L)));
+        }
+
+        private void updateExternal() {
+            if (extensionStock.isEmpty() && external.isEmpty()) {
+                extensionPlanChanged = !plannedExternal.isEmpty();
+                return;
+            }
+            Map<StackKey, Long> physical = new HashMap<>();
+            allocatedInputs.keySet().forEach(key -> physical.put(key, physicalAmount(IngredientKey.of(key.toStack()))));
+            var budget = extensionStock.budget();
+            List<RegisteredMaterialSources.Share> shares = plannedExternal;
+            if (!extensionStock.matchesAllocation(allocatedInputs, physical, plannedExternal)) {
+                shares = new ArrayList<>();
+                for (var input : allocatedInputs.entrySet()) {
+                    long shortfall = input.getValue() - physical.get(input.getKey());
+                    if (shortfall > 0) shares.addAll(budget.take(input.getKey(), shortfall));
+                }
+            }
+            extensionPlanChanged = shares != plannedExternal
+                    && !summedShares(shares).equals(summedShares(plannedExternal));
+            Map<IngredientKey, Long> fresh = new HashMap<>();
+            for (var share : shares) {
+                fresh.merge(IngredientKey.of(share.key().toStack()), share.count(), SaturatingLongMath::add);
+            }
+            if (plan.graph().hasUnresolvedDemands()) {
+                // Display-only shortages may share a budget with confirmed inputs.
+                if (shares == plannedExternal) plannedExternal.forEach(budget::retain);
+                for (IngredientKey key : model.keys()) {
+                    long have = SaturatingLongMath.add(physicalAmount(key), fresh.getOrDefault(key, 0L));
+                    long gap = model.requiredAmount(key) - have;
+                    if (gap <= 0L) continue;
+                    var exact = StackKey.of(key.stack(1), true);
+                    for (var offer : budget.take(exact, gap)) {
+                        fresh.merge(key, offer.count(), SaturatingLongMath::add);
+                    }
+                }
+            }
+            replace(external, fresh);
+        }
+
+        private static Map<ShareKey, Long> summedShares(List<RegisteredMaterialSources.Share> shares) {
+            Map<ShareKey, Long> sums = new HashMap<>();
+            for (var share : shares) sums.merge(new ShareKey(share.source(), share.key()), share.count(), SaturatingLongMath::add);
+            return sums;
+        }
+
+        private record ShareKey(ResourceLocation source, StackKey material) {}
 
         private CraftStorageEndpoint resolve(ServerPlayer player) {
             if (!materialSources.storageNetwork()) return null;

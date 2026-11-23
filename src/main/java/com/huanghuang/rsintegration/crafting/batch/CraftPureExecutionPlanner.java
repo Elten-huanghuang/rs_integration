@@ -1,5 +1,8 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
+import com.huanghuang.rsintegration.api.RSICraftingMaterialSources;
+import com.huanghuang.rsintegration.crafting.MaterialSourceSelection;
+import com.huanghuang.rsintegration.crafting.RegisteredMaterialSources;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
@@ -245,7 +248,10 @@ final class CraftPureExecutionPlanner {
                 PlanningStateValidator.bindingFingerprint(player,
                         ResourceKey.create(Registries.DIMENSION, effectiveDimension),
                         effectivePosition),
-                blockedOutputIds, false);
+                blockedOutputIds, false).withExtensionStock(RegisteredMaterialSources.capture(
+                        player, storageEndpoint, MaterialSourceSelection.current(), Set.of(),
+                        RSICraftingMaterialSources.Phase.REVALIDATE,
+                        new RSICraftingMaterialSources.Plan(recipeId, 0L), null));
 
         CraftPlanningRuntime.planRequests().submitRouted(
                 snapshot, routeInputs, plannedExecutions,
@@ -255,7 +261,8 @@ final class CraftPureExecutionPlanner {
                             !materialLocks.isEmpty(), completed.forcedRecipesProjected(), completed.inspection(),
                             completed.plan(), completed.coverage(), completed.routing().catalystOutputs(),
                             completed.routing().catalystRecipes().contains(recipeId));
-                    if (decision.action() == PlannerAction.RUN_TYPED) {
+                    if (decision.action() == PlannerAction.RUN_TYPED
+                            || snapshot.canSupplement(completed.plan())) {
                         RSIntegrationMod.LOGGER.info(
                                 "[RSI-exec] typed {} route recipe={} reason={} coverage={}",
                                 planKind, recipeId, decision.reason(), completed.coverage().status());

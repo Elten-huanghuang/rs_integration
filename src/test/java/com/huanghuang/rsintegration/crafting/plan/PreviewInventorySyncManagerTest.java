@@ -2,6 +2,9 @@ package com.huanghuang.rsintegration.crafting.plan;
 
 import com.huanghuang.rsintegration.crafting.CraftPlanningRevision;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
+import com.huanghuang.rsintegration.crafting.MaterialSourceSelection;
+import com.huanghuang.rsintegration.crafting.RegisteredMaterialSources;
+import com.huanghuang.rsintegration.api.RSICraftingMaterialSources;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
@@ -44,6 +47,11 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class PreviewInventorySyncManagerTest extends BootstrapTest {
+    private static PreviewInventorySyncManager.Session offer(UUID player, PlanResponse plan, long requestId, int tick) {
+        return PreviewInventorySyncManager.offer(player, new PlanCache.PublishedPlan(plan, 77L,
+                MaterialSourceSelection.ALL), requestId, tick);
+    }
+
     @Test
     void idleSubscriptionRestoresFromRetainedPlanWithoutConsumingOrReplanning() {
         UUID playerId = UUID.randomUUID();
@@ -54,16 +62,17 @@ class PreviewInventorySyncManagerTest extends BootstrapTest {
                 Map.of(), Map.of(), new ImmutableRecipeGraph(Map.of()), "", "", false);
         PlanCache cache = new PlanCache(10);
         cache.put(key, plan, snapshot, 0);
-        cache.retainForRequest(playerId, 10, snapshot);
+        cache.retainForRequest(playerId, 10, snapshot, 77L);
         var entry = cache.peekForRequest(key, 10);
         try {
-            var expired = PreviewInventorySyncManager.offer(playerId, plan, 10, 0);
+            var expired = offer(playerId, plan, 10, 0);
             PreviewInventorySyncManager.prune(1200, 1200, 64, 131072);
             assertNull(cache.get(key, 20), "去重缓存到期不能使确认计划失效");
             PreviewInventorySyncManager.watch(playerId, new PlanInventoryWatchPacket(10, 11, true),
                     1201, sent::add, () -> cache.publishedPlan(playerId, 10));
-            var restored = PreviewInventorySyncManager.offer(playerId, plan, 10, 1201);
+            var restored = offer(playerId, plan, 10, 1201);
             assertNotSame(expired, restored);
+            assertEquals(77L, restored.previewGeneration);
             assertEquals(11, restored.watchId);
             assertTrue(restored.full);
             assertTrue(restored.invalidated, "恢复后必须重新读取现货，不能把旧库存当作当前库存");
@@ -81,8 +90,8 @@ class PreviewInventorySyncManagerTest extends BootstrapTest {
         List<PlanInventoryUpdatePacket> sent = new ArrayList<>();
         var plan = plan(List.of(initial(new ItemStack(Items.IRON_INGOT), 100)), List.of(), Map.of());
         try {
-            var newer = PreviewInventorySyncManager.offer(playerId, plan, 20, 0);
-            var older = PreviewInventorySyncManager.offer(playerId, plan, 10, 1);
+            var newer = offer(playerId, plan, 20, 0);
+            var older = offer(playerId, plan, 10, 1);
             PreviewInventorySyncManager.watch(playerId, new PlanInventoryWatchPacket(20, 21, true), 2, sent::add);
             StorageItemSubscription subscription = mock(StorageItemSubscription.class);
             newer.subscription = subscription;
@@ -108,10 +117,10 @@ class PreviewInventorySyncManagerTest extends BootstrapTest {
         List<PlanInventoryUpdatePacket> sent = new ArrayList<>();
         var plan = plan(List.of(initial(new ItemStack(Items.IRON_INGOT), 100)), List.of(), Map.of());
         try {
-            var visible = PreviewInventorySyncManager.offer(playerId, plan, 10, 0);
+            var visible = offer(playerId, plan, 10, 0);
             PreviewInventorySyncManager.watch(playerId, new PlanInventoryWatchPacket(10, 11, true), 0, sent::add);
-            PreviewInventorySyncManager.offer(playerId, plan, 20, 1);
-            var recent = PreviewInventorySyncManager.offer(playerId, plan, 30, 2);
+            offer(playerId, plan, 20, 1);
+            var recent = offer(playerId, plan, 30, 2);
             PreviewInventorySyncManager.prune(3, 100, 2, 100);
             assertEquals(11, visible.watchId);
             PreviewInventorySyncManager.watch(playerId, new PlanInventoryWatchPacket(20, 31, true), 4, sent::add);
@@ -132,9 +141,9 @@ class PreviewInventorySyncManagerTest extends BootstrapTest {
         List<PlanInventoryUpdatePacket> sent = new ArrayList<>();
         var plan = plan(List.of(initial(new ItemStack(Items.IRON_INGOT), 100)), List.of(), Map.of());
         try {
-            var visible = PreviewInventorySyncManager.offer(first, plan, 10, 0);
+            var visible = offer(first, plan, 10, 0);
             PreviewInventorySyncManager.watch(first, new PlanInventoryWatchPacket(10, 11, true), 0, sent::add);
-            PreviewInventorySyncManager.offer(second, plan, 10, 1);
+            offer(second, plan, 10, 1);
             PreviewInventorySyncManager.prune(2, 100, 10, 1);
             assertEquals(11, visible.watchId);
             PreviewInventorySyncManager.watch(second, new PlanInventoryWatchPacket(10, 12, true), 2, sent::add);
@@ -175,6 +184,40 @@ class PreviewInventorySyncManagerTest extends BootstrapTest {
             fixture.start();
             assertEquals(0, fixture.sent.get(0).entries().get(0).missing());
             assertEquals(PreviewInventoryModel.Status.REPLAN, fixture.sent.get(0).status());
+        }
+    }
+
+    @Test
+    void sameAvailableTotalInvalidatesTheQuoteAndPollsWithThePublishedGeneration() {
+        var iron = new ItemStack(Items.IRON_INGOT);
+        var source = ResourceLocation.parse("test:emc");
+        var exact = StackKey.of(iron, true);
+        var fixture = new Fixture(true, iron, 8, 0);
+        var plan = plan(List.of(new PlanGraphView.EdgeView(0, 0,
+                new PlanGraphView.SourceView(true, -1, -1, source), iron, 8)), List.of(), Map.of());
+        var state = new PreviewInventorySyncManager.Session(plan, 10, 0, 77, MaterialSourceSelection.ALL);
+        var quoted = new RegisteredMaterialSources.Share(source, exact, 8);
+        var offers = mock(RegisteredMaterialSources.StockSnapshot.class);
+        when(offers.matchesAllocation(Map.of(exact, 8L), Map.of(exact, 0L), List.of(quoted))).thenReturn(true);
+        var budget = mock(RegisteredMaterialSources.Budget.class);
+        when(offers.budget()).thenReturn(budget);
+        when(budget.take(exact, 5L)).thenReturn(List.of(new RegisteredMaterialSources.Share(source, exact, 5)));
+        try (var local = mockStatic(MaterialSources.class); var sources = mockStatic(RegisteredMaterialSources.class)) {
+            sources.when(() -> RegisteredMaterialSources.capture(eq(fixture.player), eq(fixture.endpoint),
+                    eq(MaterialSourceSelection.ALL), anySet(), eq(RSICraftingMaterialSources.Phase.PLAN),
+                    eq(new RSICraftingMaterialSources.Plan(ResourceLocation.parse(plan.recipeId()), 77)), isNull()))
+                    .thenReturn(offers);
+            state.watchId = 11;
+            state.bind(fixture.player, fixture.endpoint);
+            state.tick(fixture.player, 1, 20, fixture.sent::add);
+            assertEquals(8L, fixture.sent.get(0).entries().get(0).available());
+            assertEquals(PreviewInventoryModel.Status.READY, fixture.sent.get(0).status());
+            fixture.listener().onChanged(iron, 3);
+            state.tick(fixture.player, 2, 20, fixture.sent::add);
+            var update = fixture.sent.get(1);
+            assertTrue(update.entries().isEmpty());
+            assertEquals(PreviewInventoryModel.Status.QUOTE_CHANGED, update.status());
+            assertEquals(5L, state.external.get(IngredientKey.of(iron)));
         }
     }
 
@@ -339,8 +382,10 @@ class PreviewInventorySyncManagerTest extends BootstrapTest {
             when(storage.hasPermission(player, StoragePermission.VIEW)).thenReturn(true);
             when(subscription.isValid()).thenReturn(true);
             when(storage.subscribeItemChanges(any())).thenReturn(subscribed ? Optional.of(subscription) : Optional.empty());
-            when(endpoint.snapshot(player, Set.of(input.getItem()))).thenReturn(StorageSnapshotResult.success(
-                    new StorageSnapshot(REFERENCE.backendId(), List.of(new StoredItem(StorageItemKey.fromItemStack(REFERENCE.backendId(), input), available)))));
+            List<StoredItem> items = available == 0 ? List.of() : List.of(
+                    new StoredItem(StorageItemKey.fromItemStack(REFERENCE.backendId(), input), available));
+            when(endpoint.snapshot(player, Set.of(input.getItem()))).thenReturn(
+                    StorageSnapshotResult.success(new StorageSnapshot(REFERENCE.backendId(), items)));
             state = new PreviewInventorySyncManager.Session(plan(List.of(initial(input, required)), List.of(), Map.of()), 10, 0);
             state.watchId = 11;
         }

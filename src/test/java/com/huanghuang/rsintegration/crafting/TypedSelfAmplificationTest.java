@@ -2,12 +2,14 @@ package com.huanghuang.rsintegration.crafting;
 
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.api.RSICraftingMaterialSources;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.EdgeTracker;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanValidator;
+import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.crafting.planning.PlanningPreferences;
 import com.huanghuang.rsintegration.mods.embers.EreAlchemyRSModule;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
@@ -35,15 +37,18 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.MockedStatic;
 
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.when;
@@ -77,6 +82,49 @@ class TypedSelfAmplificationTest extends BootstrapTest {
 
         assertFalse(edges.containsReverse(seed, seed));
         assertTrue(edges.containsReverse(seed, fuel));
+    }
+
+    @Test
+    void strictGridSearchCanBuyTheRolledBackIngredientWithoutAMachineOrNetwork() {
+        CraftingRecipe gear = craftingRecipe("gear", Items.COMPASS, 1, Items.IRON_INGOT);
+        Level level = mock(Level.class);
+        when(level.registryAccess()).thenReturn(RegistryAccess.EMPTY);
+        ServerPlayer player = mock(ServerPlayer.class);
+        var iron = new StackKey(Items.IRON_INGOT, null);
+        var id = ResourceLocation.parse("test:iron");
+        var pool = new RegisteredMaterialSources.Pool(id, id);
+        var stock = new RegisteredMaterialSources.StockSnapshot(Map.of(), Map.of(iron, List.of(
+                new RegisteredMaterialSources.Stock(id, iron, pool, BigInteger.ZERO, 1))));
+        var selection = new MaterialSourceSelection(false, false, true);
+        try (var scope = selection.enter(); var index = mockStatic(RecipeIndex.class);
+             var sources = mockStatic(RegisteredMaterialSources.class);
+             var config = mockStatic(RSIntegrationConfig.class, CALLS_REAL_METHODS)) {
+            config.when(() -> RSIntegrationConfig.enabled(RSIntegrationConfig.COMMON_SPEC,
+                    RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING)).thenReturn(false);
+            index.when(() -> RecipeIndex.get(level)).thenReturn(Map.of(Items.COMPASS, List.of(craftingEntry(gear))));
+            sources.when(() -> RegisteredMaterialSources.hasEnabled(selection)).thenReturn(true);
+            sources.when(() -> RegisteredMaterialSources.capture(player, null, selection, Set.of(),
+                    RSICraftingMaterialSources.Phase.REVALIDATE, null, null)).thenReturn(stock);
+            var missing = new ArrayList<String>();
+            var inputs = List.of(new IngredientSpec(Ingredient.of(Items.COMPASS), 1));
+            var graph = CraftingResolver.resolveGraphForSpecsWithTypes(inputs, Map.of(), level, player, null,
+                    missing, null, false, 10_000, null, Map.of(), PlanningPreferences.empty());
+            assertTrue(missing.isEmpty(), missing.toString());
+            assertEquals(List.of(gear.getId()), graph.nodes().stream().map(node -> node.recipeId()).toList());
+            assertEquals(Map.of(MaterialKey.of(iron.toStack()), Map.of(id, 1L)), InitialMaterialPlan.from(graph).sourceShares());
+
+            var physical = CraftingResolver.resolveGraphForSpecsWithTypes(inputs, Map.of(iron, 1L), level,
+                    player, null, missing, null, false, 10_000, null, Map.of(), PlanningPreferences.empty());
+            assertTrue(missing.isEmpty());
+            assertTrue(InitialMaterialPlan.from(physical).sourceShares().isEmpty());
+
+            var disabled = new PlanningPreferences(Map.of(), Map.of(), Set.of(), MaterialSourceSelection.fromMask(0));
+            CraftingResolver.resolveGraphForSpecsWithTypes(inputs, Map.of(), level, player, null,
+                    missing, null, false, 10_000, null, Map.of(), disabled);
+            assertFalse(missing.isEmpty());
+            sources.verify(() -> RegisteredMaterialSources.capture(player, null, selection, Set.of(),
+                    RSICraftingMaterialSources.Phase.REVALIDATE, null, null));
+        }
     }
 
     @Test

@@ -6,6 +6,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 
 import java.util.Objects;
+import java.util.Set;
 
 /** 原生 JEI 取物或世界选块明确缺货后的服务端后备处理器。 */
 public final class RSIItemRetrievalFallback {
@@ -16,6 +17,12 @@ public final class RSIItemRetrievalFallback {
         return ItemRetrievalFallbacks.register(id, handler);
     }
 
+    /** Explicitly opt in to delivery destinations and, if supported, an occupied matching hotbar slot. */
+    public static boolean register(ResourceLocation id, Set<Destination> destinations, boolean supportsTopUp,
+                                   Handler handler) {
+        return ItemRetrievalFallbacks.register(id, destinations, supportsTopUp, handler);
+    }
+
     @FunctionalInterface
     public interface Handler {
         /** 仅在服务端主线程调用。必须自行校验来源和实际交付条件；PASS 不得产生副作用。 */
@@ -23,18 +30,30 @@ public final class RSIItemRetrievalFallback {
     }
 
     public enum Scene { JEI, WORLD_PICK }
-    public enum Destination { PLAYER_INVENTORY, SELECTED_HOTBAR_SLOT }
+    public enum Destination { PLAYER_INVENTORY, SELECTED_HOTBAR_SLOT, CURSOR }
     public enum Reason { OUT_OF_STOCK }
 
-    /** 原生已通过权限及交付目标检查，且实际交付为零；目标仍须在实际交付时重验。 */
+    /**
+     * 原生已通过权限及交付目标检查，且实际交付为零。实际交付时重验目标。
+     * destinationIndex 为光标对应的菜单 ID 或选中的快捷栏索引。背包使用 -1。
+     */
     public record Request(ServerPlayer player, ItemStack target, int requestedCount, Scene scene,
-                          Destination destination, String backendId, String networkId) {
+                          Destination destination, String backendId, String networkId,
+                          RSIItemRetrieval.Intent intent, int destinationIndex) {
+        public Request(ServerPlayer player, ItemStack target, int requestedCount, Scene scene,
+                       Destination destination, String backendId, String networkId) {
+            this(player, target, requestedCount, scene, destination, backendId, networkId,
+                    RSIItemRetrieval.Intent.STACK, destination == Destination.SELECTED_HOTBAR_SLOT
+                            ? player.getInventory().selected : -1);
+        }
+
         public Request {
             Objects.requireNonNull(player);
             Objects.requireNonNull(scene);
             Objects.requireNonNull(destination);
             Objects.requireNonNull(backendId);
             Objects.requireNonNull(networkId);
+            Objects.requireNonNull(intent);
             target = Objects.requireNonNull(target).copyWithCount(1);
             if (target.isEmpty() || requestedCount <= 0) throw new IllegalArgumentException("invalid target or count");
         }

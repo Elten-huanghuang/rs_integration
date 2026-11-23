@@ -12,6 +12,7 @@ import net.minecraft.world.item.crafting.Ingredient;
 
 import javax.annotation.Nullable;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -28,9 +29,11 @@ public final class PlanMaterialBill {
         if (graph == null) return Map.of();
         Map<IngredientKey, Long> needed = new LinkedHashMap<>();
         graph.visitInitialAllocations((stack, count) -> mergeDemand(needed, stack, count));
+        Map<IngredientKey, Long> extensionAmounts = extensionAmounts(graph);
         Map<IngredientKey, PlanResponse.Availability> materials = new LinkedHashMap<>();
         needed.forEach((key, count) -> {
-            long available = snapshotStock.getOrDefault(StackKey.of(key.stack(1), true), 0L);
+            long available = SaturatingLongMath.add(snapshotStock.getOrDefault(StackKey.of(key.stack(1), true), 0L),
+                    extensionAmounts.getOrDefault(key, 0L));
             materials.put(key, new PlanResponse.Availability(count, available, 0L));
         });
         return Collections.unmodifiableMap(materials);
@@ -222,10 +225,12 @@ public final class PlanMaterialBill {
         Map<IngredientKey, Long> unresolved = new LinkedHashMap<>();
         graph.visitInitialAllocations((stack, count) -> mergeDemand(initial, stack, count));
         graph.visitUnresolvedDemand((stack, count) -> mergeDemand(unresolved, stack, count));
+        Map<IngredientKey, Long> extensionAmounts = extensionAmounts(graph);
 
         Map<IngredientKey, PlanResponse.Availability> result = new LinkedHashMap<>();
         initial.forEach((key, count) -> {
-            long available = countOf(stackAvailable, StackKey.of(key.stack(1), true));
+            long available = SaturatingLongMath.add(countOf(stackAvailable, StackKey.of(key.stack(1), true)),
+                    extensionAmounts.getOrDefault(key, 0L));
             result.put(key, new PlanResponse.Availability(count, available));
         });
         for (Map.Entry<IngredientKey, Long> entry : unresolved.entrySet()) {
@@ -240,6 +245,12 @@ public final class PlanMaterialBill {
                             allocated.available(), SaturatingLongMath.add(allocated.missingCount(), quantity)));
         }
         return result;
+    }
+
+    private static Map<IngredientKey, Long> extensionAmounts(PlanGraphView graph) {
+        Map<IngredientKey, Long> counts = new HashMap<>();
+        graph.visitExtensionAllocations((source, stack, count) -> mergeDemand(counts, stack, count));
+        return counts;
     }
 
     private static void mergeDemand(Map<IngredientKey, Long> demand,

@@ -147,7 +147,7 @@ public record PlanGraphView(
             return SourceView.fromProducer(producer.outputPort().nodeId().value(),
                     producer.outputPort().index());
         }
-        return SourceView.fromInitial();
+        return new SourceView(true, -1, -1, ((MaterialSource.InitialPool) source).extensionId());
     }
 
     @Nullable
@@ -164,6 +164,22 @@ public record PlanGraphView(
         for (RootView root : roots) {
             for (RootEdgeView edge : root.allocations()) {
                 if (edge.source().initial()) accept.accept(edge.material(), edge.quantity());
+            }
+        }
+    }
+
+    @FunctionalInterface
+    public interface ExtensionAllocationConsumer {
+        void accept(ResourceLocation sourceId, ItemStack material, long quantity);
+    }
+
+    public void visitExtensionAllocations(ExtensionAllocationConsumer accept) {
+        for (EdgeView edge : edges) {
+            if (edge.source().extensionId() != null) accept.accept(edge.source().extensionId(), edge.material(), edge.quantity());
+        }
+        for (RootView root : roots) {
+            for (RootEdgeView edge : root.allocations()) {
+                if (edge.source().extensionId() != null) accept.accept(edge.source().extensionId(), edge.material(), edge.quantity());
             }
         }
     }
@@ -356,7 +372,12 @@ public record PlanGraphView(
         }
     }
 
-    public record SourceView(boolean initial, int producerNodeId, int producerPortIndex) {
+    public record SourceView(boolean initial, int producerNodeId, int producerPortIndex,
+                             @Nullable ResourceLocation extensionId) {
+        public SourceView(boolean initial, int producerNodeId, int producerPortIndex) {
+            this(initial, producerNodeId, producerPortIndex, null);
+        }
+
         static SourceView fromInitial() { return new SourceView(true, -1, -1); }
         static SourceView fromProducer(int nodeId, int portIndex) {
             return new SourceView(false, nodeId, portIndex);

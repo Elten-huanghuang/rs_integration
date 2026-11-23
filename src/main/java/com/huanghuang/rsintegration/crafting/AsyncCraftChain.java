@@ -181,6 +181,7 @@ public final class AsyncCraftChain {
     private final MaterialSourceSelection materialSources = MaterialSourceSelection.current();
     @Nullable private GlobalMaterialCoordinator materialCoordinator;
     private boolean initialMaterialsReady;
+    @Nullable private Runnable initialQuoteChanged;
     private int nextMaterialAdmissionTick;
     private int lastMaterialAdmissionTick = Integer.MIN_VALUE;
     private int nextMaterialSubscriptionTick;
@@ -465,6 +466,10 @@ public final class AsyncCraftChain {
         fluidWakeKeys = Set.copyOf(fluidKeys);
     }
 
+    public void onInitialQuoteChanged(@Nullable Runnable refresh) {
+        initialQuoteChanged = refresh;
+    }
+
     private boolean acquireInitialMaterials() {
         if (materialAccount == null) return true;
         if (materialAccount.uncertain()) {
@@ -493,7 +498,7 @@ public final class AsyncCraftChain {
         materialAdmissionInProgress = true;
         try {
             admitted = materialAccount.ensure(
-                    initialMaterialPlan.materials(), initialMaterialPlan.reusable(), player);
+                    initialMaterialPlan.materials(), initialMaterialPlan.reusable(), initialMaterialPlan.sourceShares(), player);
         } finally {
             materialAdmissionInProgress = false;
             // 本次提取和回滚产生的库存通知不能唤醒自己的下一次准入。
@@ -502,6 +507,7 @@ public final class AsyncCraftChain {
             logSlowExecutionPhase("initial_materials", start);
         }
         if (admitted) {
+            initialQuoteChanged = null;
             initialMaterialsReady = true;
             waitingForInitialMaterials = false;
             materialWakeKeys = Set.of();
@@ -521,6 +527,13 @@ public final class AsyncCraftChain {
         waitingForInitialMaterials = true;
         if (materialAccount.uncertain()) {
             abort("材料转移结果不明：" + craftId, Component.translatable("rsi.async.abort.material_transfer_unknown"));
+        } else if (materialAccount.admissionFailure() != null) {
+            Component failure = materialAccount.admissionFailure();
+            abort(failure.getString(), failure);
+            if (failure == ExtractionLedger.QUOTE_CHANGED && initialQuoteChanged != null) {
+                initialQuoteChanged.run();
+                initialQuoteChanged = null;
+            }
         } else if ((long) tick - materialAdmissionStartedTick >= GRAPH_RETRY_ABORT_TICKS) {
             abort("初始材料等待超时", Component.translatable("rsi.async.abort.initial_material_timeout"));
         } else maybeSendProgress(player, false);
@@ -1265,10 +1278,11 @@ public final class AsyncCraftChain {
             if (a.source() instanceof MaterialSource.InitialPool) protectedRoots.merge(a.material(), a.quantity(), Math::addExact);
         }
         Map<MaterialKey, Long> protectedHeld = new HashMap<>();
+        var outstanding = graphMaterials.outstandingInitialMaterials();
         heldMaterials.forEach((key, amount) -> {
             MaterialKey material = MaterialKey.of(key.toStack());
             long held = Math.min(amount, SaturatingLongMath.add(protectedRoots.getOrDefault(material, 0L),
-                    graphMaterials.outstanding(new MaterialSource.InitialPool(material), material)));
+                    outstanding.getOrDefault(material, 0L)));
             protectedHeld.put(material, held);
         });
         return protectedHeld;
@@ -1300,7 +1314,7 @@ public final class AsyncCraftChain {
                 MaterialLocks.narrowSpecs(node.recipeId(), round.missing(), supplementalMaterialLocks),
                 usable, player.serverLevel(), player, storageEndpoint, missing, unfinishedRecipes(),
                 supplementalForcedRecipes, supplementalMaterialLocks, new CraftingResolver.ActiveRootRecipe(
-                        node.recipeId(), graphNodeTargetOutput(node)));
+                        node.recipeId(), graphNodeTargetOutput(node)), craftId);
         return new SupplementalSearch(round, job, missing);
     }
 
@@ -1320,7 +1334,13 @@ public final class AsyncCraftChain {
                 protectedHeld.getOrDefault(key, 0L)));
         // 从准入到发布不可切分；本 tick 已用尽则保留求解结果，下次重新核算准入。
         if (!dispatchAllowed.getAsBoolean()) return RetryPreparation.PLANNING;
-        if (!materialAccount.ensure(required, extension.reusable(), player)) return RetryPreparation.WAITING_MATERIALS;
+        if (!materialAccount.ensure(required, extension.reusable(), extension.sourceShares(), player)) {
+            var failure = materialAccount.admissionFailure();
+            if (failure == null) return RetryPreparation.WAITING_MATERIALS;
+            graphFailureDetails.put(nodeId, failure.getString());
+            graphFailureCodes.put(nodeId, CraftFailureCode.MATERIAL_EXTRACTION_FAILED);
+            return RetryPreparation.FAILED;
+        }
         // 只交接这次真正获配的余料。账户准入未成功时原物仍由终止恢复负责。
         var toTransfer = new HashMap<>(extension.materials());
         for (ItemStack stack : virtualInventory) {

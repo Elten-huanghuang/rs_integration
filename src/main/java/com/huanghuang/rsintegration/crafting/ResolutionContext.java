@@ -85,6 +85,10 @@ final class ResolutionContext {
     int stepGuardLimit;
     final Deque<UndoEntry> undoStack = new ArrayDeque<>();
     final Deque<Integer> undoCheckpoints = new ArrayDeque<>();
+    private final Deque<Integer> extensionCheckpoints = new ArrayDeque<>();
+    private RegisteredMaterialSources.StockSnapshot extensionStock = RegisteredMaterialSources.StockSnapshot.EMPTY;
+    private RegisteredMaterialSources.Budget extensionBudget;
+    private final Map<Item, List<CraftingResolver.StackKey>> extensionVariants = new HashMap<>();
     final Deque<SupplyUndoEntry> supplyUndoStack = new ArrayDeque<>();
     final Deque<Integer> supplyUndoCheckpoints = new ArrayDeque<>();
     final Deque<Integer> stepCheckpoints = new ArrayDeque<>();
@@ -111,7 +115,10 @@ final class ResolutionContext {
     @Nullable final ServerPlayer player;
     @Nullable final CraftStorageEndpoint storageEndpoint;
     final boolean bestEffort;
-    boolean genericCandidatesOnly;
+    boolean genericCandidatesOnly = !RSIntegrationConfig.enabled(
+            RSIntegrationConfig.COMMON_SPEC, RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING);
+    // Strict search rolls back graph edges for failed producers. Keep their actual predicates for the retry.
+    @Nullable Set<Ingredient> failedIngredients;
     boolean strictCandidatePass;
     boolean bestEffortFallbackPass;
     @Nullable final List<String> missingOut;
@@ -623,6 +630,7 @@ final class ResolutionContext {
 
     void beginUndo() {
         undoCheckpoints.push(undoStack.size());
+        if (extensionBudget != null) extensionCheckpoints.push(extensionBudget.mark());
         supplyUndoCheckpoints.push(supplyUndoStack.size());
         stepCheckpoints.push(steps.size());
         graphNodeCheckpoints.push(graphNodes.size());
@@ -635,6 +643,7 @@ final class ResolutionContext {
 
     void commitUndo() {
         undoCheckpoints.pop();
+        if (extensionBudget != null) extensionCheckpoints.pop();
         supplyUndoCheckpoints.pop();
         stepCheckpoints.pop();
         graphNodeCheckpoints.pop();
@@ -651,6 +660,7 @@ final class ResolutionContext {
 
     void rollback() {
         int ucp = undoCheckpoints.pop();
+        if (extensionBudget != null) extensionBudget.rollback(extensionCheckpoints.pop());
         int supplyUndoCp = supplyUndoCheckpoints.pop();
         int scp = stepCheckpoints.pop();
         int ncp = graphNodeCheckpoints.pop();
@@ -798,7 +808,53 @@ final class ResolutionContext {
                 total = MaterialSources.saturatedAdd(total, count);
             }
         }
+        if (extensionBudget != null && total < Long.MAX_VALUE) {
+            int mark = extensionBudget.mark();
+            try {
+                total += takeExtension(ingredient, Long.MAX_VALUE - total, null);
+            } finally {
+                extensionBudget.rollback(mark);
+            }
+        }
         return total;
+    }
+
+    void setExtensionStock(RegisteredMaterialSources.StockSnapshot stock) {
+        if (stock.isEmpty()) return;
+        extensionStock = stock;
+        extensionBudget = stock.budget();
+        for (var key : stock.variants()) {
+            extensionVariants.computeIfAbsent(key.item(), ignored -> new ArrayList<>()).add(key);
+        }
+    }
+
+    private Iterable<CraftingResolver.StackKey> extensionKeys(Ingredient ingredient) {
+        var types = IngredientMatcher.itemTypesForMatching(ingredient);
+        if (types == null) return extensionStock.variants();
+        return () -> types.stream().flatMap(item -> extensionVariants.getOrDefault(item, List.of()).stream())
+                .iterator();
+    }
+
+    private long takeExtension(Ingredient ingredient, long needed, @Nullable List<SupplySlice> slices) {
+        long remaining = needed;
+        for (CraftingResolver.StackKey key : extensionKeys(ingredient)) {
+            if (remaining == 0) break;
+            if (!matches(ingredient, key)) continue;
+            remaining -= takeExtension(key, remaining, slices);
+        }
+        return needed - remaining;
+    }
+
+    private long takeExtension(CraftingResolver.StackKey key, long needed, @Nullable List<SupplySlice> slices) {
+        long taken = 0;
+        for (var share : extensionBudget.take(key, needed)) {
+            taken += share.count();
+            if (slices != null) {
+                var material = new MaterialKey(key.item(), key.tag());
+                slices.add(new SupplySlice(new MaterialSource.InitialPool(material, share.source()), material, share.count()));
+            }
+        }
+        return taken;
     }
 
     /** 计数与消费共用候选范围；只索引物品身份，数量和真实谓词每次重验。 */
@@ -892,6 +948,21 @@ final class ResolutionContext {
             usable -= took;
             uses = Math.max(0L, uses - multiplySaturated(took, tool.capacity()));
         }
+        if (extensionBudget != null && uses > 0 && usable > 0) {
+            List<Tool> external = new ArrayList<>();
+            for (var key : extensionKeys(ingredient)) {
+                if (!matches(ingredient, key)) continue;
+                long capacity = toolUses(key.toStack(), damagePerUse);
+                if (capacity > 0) external.add(new Tool(key, capacity));
+            }
+            external.sort(Comparator.comparingLong(Tool::capacity).reversed());
+            for (Tool tool : external) {
+                if (uses == 0 || usable == 0) break;
+                long took = takeExtension(tool.key(), Math.min(usable, ceilDiv(uses, tool.capacity())), slices);
+                usable -= took;
+                uses = Math.max(0L, uses - multiplySaturated(took, tool.capacity()));
+            }
+        }
         return new DurabilitySupply(List.copyOf(slices), uses);
     }
 
@@ -945,6 +1016,14 @@ final class ResolutionContext {
             remaining -= supplied;
             addRemainder(key, supplied);
             if (!producedOnly && supplied != requested) break;
+        }
+        if (!producedOnly && extensionBudget != null && remaining > 0) {
+            int first = slices.size();
+            remaining -= takeExtension(ingredient, remaining, slices);
+            for (int index = first; index < slices.size(); index++) {
+                var slice = slices.get(index);
+                addRemainder(CraftingResolver.StackKey.of(slice.material().toStack(1), true), slice.quantity());
+            }
         }
         var result = new SupplyConsumption(List.copyOf(slices), needed, needed - remaining);
         profileEnd(Phase.TAKE, start);

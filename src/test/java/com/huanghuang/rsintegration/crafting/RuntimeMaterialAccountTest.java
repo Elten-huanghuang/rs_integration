@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting;
 
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.api.RSICraftingMaterialSources;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
@@ -15,6 +16,7 @@ import com.huanghuang.rsintegration.storage.StorageOperationResult;
 import com.huanghuang.rsintegration.storage.StorageReference;
 import com.huanghuang.rsintegration.storage.StorageSession;
 import com.huanghuang.rsintegration.storage.StorageSnapshot;
+import com.huanghuang.rsintegration.storage.StorageSnapshotStatus;
 import com.huanghuang.rsintegration.storage.StorageSnapshotResult;
 import com.huanghuang.rsintegration.storage.StoredItem;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
@@ -24,6 +26,8 @@ import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidTestFixtures;
 import com.huanghuang.rsintegration.util.PlayerUtils;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.chat.contents.TranslatableContents;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.level.ServerLevel;
@@ -44,9 +48,11 @@ import net.minecraftforge.fml.ModList;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigInteger;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -178,6 +184,88 @@ class RuntimeMaterialAccountTest extends BootstrapTest {
 
     private boolean acquire(RuntimeMaterialAccount account, MaterialKey material, long count) {
         return account.ensure(Map.of(material, count), List.of(), player);
+    }
+
+    @Test
+    void admissionReservesOnlyTheConfirmedSourceEvenWhenAnEarlierOfferCanCoverEverything() {
+        var earlier = ResourceLocation.parse("test:a_emc");
+        var quoted = ResourceLocation.parse("test:z_free");
+        var iron = CraftingResolver.StackKey.of(IRON.toStack(1), true);
+        var free = new RegisteredMaterialSources.Pool(quoted, quoted);
+        var paid = new RegisteredMaterialSources.Pool(earlier, earlier);
+        var offers = new RegisteredMaterialSources.StockSnapshot(Map.of(paid, BigInteger.TEN), Map.of(iron, List.of(
+                new RegisteredMaterialSources.Stock(earlier, iron, paid, BigInteger.ONE, 8),
+                new RegisteredMaterialSources.Stock(quoted, iron, free, BigInteger.ZERO, 8))));
+        var hold = mock(RSICraftingMaterialSources.Reservation.class);
+        when(hold.validate()).thenReturn(true);
+        when(hold.commit()).thenReturn(new RSICraftingMaterialSources.Extraction(List.of(IRON.toStack(5)), false));
+        stock.put(IRON, 3L);
+        var context = mock(RSICraftingMaterialSources.Context.class);
+        try (var sources = mockStatic(RegisteredMaterialSources.class)) {
+            sources.when(() -> RegisteredMaterialSources.hasEnabled(any())).thenReturn(true);
+            sources.when(() -> RegisteredMaterialSources.context(eq(player), eq(endpoint), any(), anySet(),
+                    eq(RSICraftingMaterialSources.Phase.TASK), isNull(), any())).thenReturn(context);
+            sources.when(() -> RegisteredMaterialSources.capture(any(RSICraftingMaterialSources.Context.class)))
+                    .thenReturn(offers);
+            sources.when(() -> RegisteredMaterialSources.reserve(eq(quoted), any(), any(), eq(List.of())))
+                    .thenReturn(Optional.of(hold));
+            var account = account();
+            assertTrue(account.ensure(Map.of(IRON, 8L), List.of(), Map.of(IRON, Map.of(quoted, 5L)), player));
+            assertEquals(8L, account.count(IRON));
+            sources.verify(() -> RegisteredMaterialSources.reserve(eq(earlier), any(), any(), any()), never());
+            verify(hold).commit();
+            verify(hold).release();
+        }
+    }
+
+    @Test
+    void deniedSelectedNetworkDoesNotAuthorizeAnExternalReservation() {
+        when(session.snapshotItems(player, Set.of(Items.IRON_INGOT))).thenReturn(
+                StorageSnapshotResult.failure(StorageSnapshotStatus.DENIED));
+        var source = ResourceLocation.parse("test:emc");
+        var account = account();
+        var context = mock(RSICraftingMaterialSources.Context.class);
+        try (var sources = mockStatic(RegisteredMaterialSources.class)) {
+            sources.when(() -> RegisteredMaterialSources.hasEnabled(any())).thenReturn(true);
+            sources.when(() -> RegisteredMaterialSources.context(eq(player), eq(endpoint), any(), anySet(),
+                    eq(RSICraftingMaterialSources.Phase.TASK), isNull(), any())).thenReturn(context);
+            assertFalse(account.ensure(Map.of(IRON, 8L), List.of(), Map.of(IRON, Map.of(source, 8L)), player));
+            assertNotNull(account.admissionFailure());
+            var message = (TranslatableContents) account.admissionFailure().getContents();
+            assertEquals("DENIED/NONE", message.getArgs()[0]);
+            sources.verify(() -> RegisteredMaterialSources.reserve(any(), any(), any(), any()), never());
+            assertEquals(0L, account.count(IRON));
+        }
+    }
+
+    @Test
+    void failingNetworkRecheckReleasesTheHoldBeforeAnyCharge() {
+        var source = ResourceLocation.parse("test:emc");
+        var context = mock(RSICraftingMaterialSources.Context.class);
+        var offers = mock(RegisteredMaterialSources.StockSnapshot.class);
+        var budget = mock(RegisteredMaterialSources.Budget.class);
+        var hold = mock(RSICraftingMaterialSources.Reservation.class);
+        when(offers.budget()).thenReturn(budget);
+        when(budget.retain(any())).thenReturn(true);
+        when(hold.validate()).thenReturn(true);
+        when(session.snapshotItems(player, Set.of(Items.IRON_INGOT))).thenReturn(
+                StorageSnapshotResult.success(new StorageSnapshot(BACKEND, List.of())),
+                StorageSnapshotResult.failure(StorageSnapshotStatus.FAILED, StorageDiagnosticCode.BACKEND_EXCEPTION));
+        try (var sources = mockStatic(RegisteredMaterialSources.class)) {
+            sources.when(() -> RegisteredMaterialSources.hasEnabled(any())).thenReturn(true);
+            sources.when(() -> RegisteredMaterialSources.context(eq(player), eq(endpoint), any(), anySet(),
+                    eq(RSICraftingMaterialSources.Phase.TASK), isNull(), any())).thenReturn(context);
+            sources.when(() -> RegisteredMaterialSources.capture(context)).thenReturn(offers);
+            sources.when(() -> RegisteredMaterialSources.reserve(eq(source), eq(context), any(), eq(List.of())))
+                    .thenReturn(Optional.of(hold));
+            var account = account();
+            assertFalse(account.ensure(Map.of(IRON, 8L), List.of(), Map.of(IRON, Map.of(source, 8L)), player));
+            var message = (TranslatableContents) account.admissionFailure().getContents();
+            assertEquals("FAILED/BACKEND_EXCEPTION", message.getArgs()[0]);
+            verify(hold).release();
+            verify(hold, never()).commit();
+            assertEquals(0L, account.count(IRON));
+        }
     }
 
     @Test

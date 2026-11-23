@@ -27,7 +27,7 @@ enum PlanConfirmationAction {
         return switch (status) {
             case READY -> CONFIRM;
             case MISSING -> FIND_ALTERNATIVE;
-            case REPLAN -> COMPLETE_ROUTE;
+            case REPLAN, QUOTE_CHANGED -> COMPLETE_ROUTE;
             case UNAVAILABLE -> CHECK_STOCK;
             case EXPIRED -> REBUILD_EXPIRED;
         };

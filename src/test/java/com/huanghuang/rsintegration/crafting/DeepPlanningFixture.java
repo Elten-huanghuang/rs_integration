@@ -375,7 +375,7 @@ public final class DeepPlanningFixture implements AutoCloseable {
         var slots = demands.stream().map(s -> new IngredientSpec(s.ingredient(), Math.toIntExact(s.count()),
                 s.consumption())).toList();
         return CraftingResolver.startSupplementalGraph(slots, available(true), level, null, null, missing,
-                excluded, Map.of(), Map.of(), null);
+                excluded, Map.of(), Map.of(), null, new java.util.UUID(0L, 1L));
     }
 
     public CraftPlanGraph legacyTyped(int timeoutMs, List<String> missing) {

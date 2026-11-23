@@ -37,6 +37,7 @@ class PlanResponsePaginationAndLongTest extends BootstrapTest {
     @Test
     void payloadRoundTripPreservesLongPlanAndGraphQuantities() {
         ResourceLocation recipeId = ResourceLocation.parse("test:long_plan");
+        ResourceLocation materialSource = ResourceLocation.parse("test:material_source");
         ItemStack raw = new ItemStack(Items.COBBLESTONE, 9);
         ItemStack output = new ItemStack(Items.DIAMOND, 2);
         long batches = (long) Integer.MAX_VALUE + 123L;
@@ -53,7 +54,7 @@ class PlanResponsePaginationAndLongTest extends BootstrapTest {
                         List.of(new PlanGraphView.OutputView(0, output, 4_000_000_005L,
                                 OutputKind.PRIMARY.ordinal())))),
                 List.of(new PlanGraphView.EdgeView(0, 0,
-                        new PlanGraphView.SourceView(true, -1, -1), raw, 3_000_000_006L)),
+                        new PlanGraphView.SourceView(true, -1, -1, materialSource), raw, 3_000_000_006L)),
                 List.of(new PlanGraphView.RootView(output, 7_000_000_007L, 6_000_000_008L,
                         List.of(new PlanGraphView.RootEdgeView(
                                 new PlanGraphView.SourceView(true, -1, -1),
@@ -80,10 +81,12 @@ class PlanResponsePaginationAndLongTest extends BootstrapTest {
         assertEquals(3_000_000_004L, decodedGraph.nodes().get(0).inputs().get(0).quantity());
         assertEquals(4_000_000_005L, decodedGraph.nodes().get(0).outputs().get(0).quantity());
         assertEquals(3_000_000_006L, decodedGraph.edges().get(0).quantity());
+        assertEquals(materialSource, decodedGraph.edges().get(0).source().extensionId());
         assertEquals(7_000_000_007L, decodedGraph.roots().get(0).quantity());
         assertEquals(6_000_000_008L, decodedGraph.roots().get(0).unresolvedQuantity());
         assertEquals(2_000_000_009L,
                 decodedGraph.roots().get(0).allocations().get(0).quantity());
+        assertNull(decodedGraph.roots().get(0).allocations().get(0).source().extensionId());
         assertEquals(7_000_000_010L, decodedGraph.unresolved().get(0).quantity());
     }
 

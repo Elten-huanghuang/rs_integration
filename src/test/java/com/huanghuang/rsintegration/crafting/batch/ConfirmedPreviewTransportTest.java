@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.planning.PlanCache;
 import com.huanghuang.rsintegration.crafting.planning.PlanningSnapshot;
 import com.huanghuang.rsintegration.crafting.planning.PlanningStateValidator;
+import com.huanghuang.rsintegration.crafting.planning.PlanningStateValidator.ExecutionState;
 import com.huanghuang.rsintegration.crafting.planning.PureRecipePlanner;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import io.netty.buffer.Unpooled;
@@ -230,13 +231,13 @@ class ConfirmedPreviewTransportTest extends BootstrapTest {
 
         void assertAccepted(GenericCraftPacketCodec.WireData confirmation) {
             try (var validator = mockStatic(PlanningStateValidator.class)) {
-                validator.when(() -> PlanningStateValidator.revalidateForExecution(player,
-                        snapshot, plan, Level.OVERWORLD, BlockPos.ZERO, null)).thenReturn(true);
+                validator.when(() -> PlanningStateValidator.executionState(player,
+                        snapshot, plan.graph(), Level.OVERWORLD, BlockPos.ZERO, null)).thenReturn(ExecutionState.CURRENT);
                 var result = confirm(confirmation);
                 assertFalse(result.rejected(), "未经修改的预览往返网络包后必须能确认");
                 assertSame(plan, result.entry().plan());
-                validator.verify(() -> PlanningStateValidator.revalidateForExecution(player,
-                        snapshot, plan, Level.OVERWORLD, BlockPos.ZERO, null));
+                validator.verify(() -> PlanningStateValidator.executionState(player,
+                        snapshot, plan.graph(), Level.OVERWORLD, BlockPos.ZERO, null));
             }
         }
 

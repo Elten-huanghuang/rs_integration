@@ -26,7 +26,7 @@ final class RSSidePanelClientPacketHandler {
 
     static void onOperationResult(RSSidePanelOperationResultPacket packet) {
         WorldPickClient.onOperationResult(
-                packet.operationId(), packet.success(), packet.actualCount());
+                packet.operationId(), packet.errorCode() == RSSidePanelOperationResultPacket.ErrorCode.ITEM_NOT_FOUND);
         if (RSSidePanelModule.isEnabled()) RSSidePanelClient.onOperationResult(packet);
     }
 }

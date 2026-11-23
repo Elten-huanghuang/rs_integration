@@ -1,7 +1,7 @@
 package com.huanghuang.rsintegration.storage;
 
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
-import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
+import com.huanghuang.rsintegration.crafting.endpoint.SessionCraftStorageEndpoint;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import com.huanghuang.rsintegration.RSIntegrationMod;
@@ -24,6 +24,13 @@ public final class StorageRestockSupport {
     private StorageRestockSupport() {}
 
     public static Optional<CraftStorageEndpoint> resolve(ServerPlayer player) {
+        return resolveForRetrieval(player).session().map(SessionCraftStorageEndpoint::new);
+    }
+
+    /** Preserves native selection order while retaining the reason when no endpoint can be selected. */
+    static StorageResolutionResult resolveForRetrieval(ServerPlayer player) {
+        var registry = RSIntegrationMod.STORAGE_BACKENDS.registry();
+        StorageResolutionStatus failure = StorageResolutionStatus.NOT_FOUND;
         // A held BD terminal is an explicit user choice for these one-shot
         // GUI actions. This prevents the RS-first backend order from stealing
         // a refill when both networks are installed.
@@ -41,22 +48,51 @@ public final class StorageRestockSupport {
             }
         }
         if (heldNetwork.isPresent()) {
-            Optional<CraftStorageEndpoint> held = CraftStorageEndpoints.resolve(
+            StorageResolutionResult held = registry.resolve(
                     new StorageReference(BEYOND_DIMENSIONS,
                             Integer.toString(heldNetwork.getAsInt())), player);
-            if (held.isPresent()) return held;
+            if (held.resolved()) return held;
+            failure = preferFailure(failure, held.status());
         }
         if (isBeyondDimensionsTerminalMenu(player)) {
-            for (StorageNetworkDescriptor descriptor :
-                    RSIntegrationMod.STORAGE_BACKENDS.registry()
-                            .discoverNetworksForPlayer(player)) {
+            for (StorageNetworkDescriptor descriptor : registry.discoverNetworksForPlayer(player)) {
                 if (!BEYOND_DIMENSIONS.equals(descriptor.reference().backendId())) continue;
-                Optional<CraftStorageEndpoint> endpoint = CraftStorageEndpoints.resolve(
-                        descriptor.reference(), player);
-                if (endpoint.isPresent()) return endpoint;
+                StorageResolutionResult result = registry.resolve(descriptor.reference(), player);
+                if (result.resolved()) return result;
+                failure = preferFailure(failure, result.status());
             }
         }
-        return CraftStorageEndpoints.resolveDefault(player);
+        for (var candidate : registry.resolveDefaultResultsForPlayer(player)) {
+            StorageResolutionResult result = candidate.result();
+            if (result.resolved()) return result;
+            failure = preferFailure(failure, result.status());
+        }
+        for (var candidate : registry.discoverAllNetworksForPlayer(player)) {
+            StorageDiscoveryResult discovery = candidate.result();
+            if (discovery.status() == StorageDiscoveryStatus.FAILED) failure = StorageResolutionStatus.FAILED;
+            if (discovery.status() == StorageDiscoveryStatus.DENIED) {
+                failure = preferFailure(failure, StorageResolutionStatus.DENIED);
+            }
+            for (StorageNetworkDescriptor descriptor : discovery.networks()) {
+                // A discovered coordinate is not an RS access credential.
+                if ("refinedstorage".equals(descriptor.reference().backendId().value())
+                        && !com.huanghuang.rsintegration.network.RSIntegrationNetwork
+                                .hasCurrentNetworkAccess(player, descriptor.reference())) continue;
+                StorageResolutionResult result = registry.resolve(descriptor.reference(), player);
+                if (result.resolved()) return result;
+                failure = preferFailure(failure, result.status());
+            }
+        }
+        return StorageResolutionResult.failure(failure);
+    }
+
+    private static StorageResolutionStatus preferFailure(StorageResolutionStatus current,
+                                                          StorageResolutionStatus candidate) {
+        if (candidate == StorageResolutionStatus.FAILED || current == StorageResolutionStatus.FAILED) {
+            return StorageResolutionStatus.FAILED;
+        }
+        if (candidate == StorageResolutionStatus.DENIED) return candidate;
+        return current;
     }
 
     private static boolean isBeyondDimensionsTerminalMenu(ServerPlayer player) {
@@ -137,16 +173,25 @@ public final class StorageRestockSupport {
         return merged;
     }
 
-    private static void refund(CraftStorageEndpoint endpoint, ServerPlayer player,
-                               List<ItemStack> stacks, String reason) {
+    static boolean refund(CraftStorageEndpoint endpoint, ServerPlayer player,
+                          List<ItemStack> stacks, String reason) {
+        boolean known = true;
         for (ItemStack stack : stacks) {
             if (stack == null || stack.isEmpty()) continue;
-            StorageOperationResult result = endpoint.insert(player, stack, false);
+            StorageOperationResult result;
+            try {
+                result = endpoint.insert(player, stack, false);
+            } catch (RuntimeException | LinkageError failure) {
+                RSIntegrationMod.LOGGER.error("[RSI-Restock] {} refund failed for {}", reason, stack, failure);
+                known = false;
+                continue;
+            }
             Optional<ItemStack> knownRemainder = result.remainder();
             if (knownRemainder.isEmpty()) {
                 RSIntegrationMod.LOGGER.error(
                         "[RSI-Restock] {} refund became indeterminate for {} x{}",
                         reason, ItemStackUtils.registryId(stack), stack.getCount());
+                known = false;
                 continue;
             }
             ItemStack remainder = knownRemainder.orElse(ItemStack.EMPTY);
@@ -157,5 +202,6 @@ public final class StorageRestockSupport {
                 player.drop(remainder, false);
             }
         }
+        return known;
     }
 }

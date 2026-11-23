@@ -1,9 +1,8 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
-
-
-import com.huanghuang.rsintegration.network.packet.NetworkHandler;import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.crafting.MaterialSourceSelection;
 import com.huanghuang.rsintegration.crafting.batch.BatchCraftNetworkHandler;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
@@ -20,6 +19,11 @@ public final class PlanResponsePublisher {
     private PlanResponsePublisher() {}
 
     public static void send(ServerPlayer player, PlanResponse plan, long requestId) {
+        send(player, plan, requestId, 0L, MaterialSourceSelection.ALL);
+    }
+
+    public static void send(ServerPlayer player, PlanResponse plan, long requestId, long generation,
+                            MaterialSourceSelection materialSources) {
         if (player == null || player.hasDisconnected() || player.isRemoved()) return;
         int graphNodes = plan.graph() == null ? 0 : plan.graph().nodes().size();
         int maxGraphNodes = configuredMaxGraphNodes();
@@ -65,7 +69,7 @@ public final class PlanResponsePublisher {
         for (PlanResponsePagePacket page : pages) {
             BatchCraftNetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), page);
         }
-        PreviewInventorySyncManager.offer(player, plan, requestId);
+        PreviewInventorySyncManager.offer(player, plan, requestId, generation, materialSources);
     }
 
     public static void sendError(ServerPlayer player, PlanOutcome outcome,

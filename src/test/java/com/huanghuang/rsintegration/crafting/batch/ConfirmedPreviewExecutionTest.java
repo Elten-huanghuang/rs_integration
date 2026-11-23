@@ -11,6 +11,7 @@ import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.planning.PlanCache;
 import com.huanghuang.rsintegration.crafting.planning.PlanningSnapshot;
 import com.huanghuang.rsintegration.crafting.planning.PlanningStateValidator;
+import com.huanghuang.rsintegration.crafting.planning.PlanningStateValidator.ExecutionState;
 import com.huanghuang.rsintegration.mods.goety.GoetyBatchDelegate;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.storage.StorageRestockSupport;
@@ -77,15 +78,15 @@ class ConfirmedPreviewExecutionTest extends BootstrapTest {
             PlanCache.Entry older = fixture.cache.peekForRequest(fixture.key, 10);
             fixture.retain(20, 2);
             PlanCache.Entry newer = fixture.cache.peekForRequest(fixture.key, 20);
-            validator.when(() -> PlanningStateValidator.revalidateForExecution(fixture.player,
-                    older.snapshot(), older.plan(), Level.OVERWORLD, BlockPos.ZERO, null)).thenReturn(true);
+            validator.when(() -> PlanningStateValidator.executionState(fixture.player,
+                    older.snapshot(), older.plan().graph(), Level.OVERWORLD, BlockPos.ZERO, null)).thenReturn(ExecutionState.CURRENT);
             var selected = fixture.confirm(10);
             assertFalse(selected.rejected());
             assertSame(older, selected.entry());
             assertSame(newer, fixture.cache.peekForRequest(fixture.key, 20));
             assertTrue(fixture.confirm(10).rejected(), "重复确认已消费任务不能回退到另一份计划或重新搜索");
-            validator.verify(() -> PlanningStateValidator.revalidateForExecution(fixture.player,
-                    older.snapshot(), older.plan(), Level.OVERWORLD, BlockPos.ZERO, null), times(1));
+            validator.verify(() -> PlanningStateValidator.executionState(fixture.player,
+                    older.snapshot(), older.plan().graph(), Level.OVERWORLD, BlockPos.ZERO, null), times(1));
             validator.verifyNoMoreInteractions();
         } finally { fixture.cache.removePlayer(fixture.player.getUUID()); }
     }
@@ -99,9 +100,27 @@ class ConfirmedPreviewExecutionTest extends BootstrapTest {
             assertTrue(fixture.confirm(999).rejected());
             assertTrue(fixture.confirm(10).rejected(), "材料复验失败必须拒绝，并保留原计划等待恢复");
             assertSame(entry, fixture.cache.peekForRequest(fixture.key, 10));
-            validator.when(() -> PlanningStateValidator.revalidateForExecution(fixture.player,
-                    entry.snapshot(), entry.plan(), Level.OVERWORLD, BlockPos.ZERO, null)).thenReturn(true);
+            validator.when(() -> PlanningStateValidator.executionState(fixture.player,
+                    entry.snapshot(), entry.plan().graph(), Level.OVERWORLD, BlockPos.ZERO, null)).thenReturn(ExecutionState.CURRENT);
             assertSame(entry, fixture.confirm(10).entry());
+        } finally { fixture.cache.removePlayer(fixture.player.getUUID()); }
+    }
+
+    @Test
+    void changedAllocationInvalidatesOnlyTheConfirmedQuote() {
+        Fixture fixture = new Fixture();
+        try (var validator = mockStatic(PlanningStateValidator.class)) {
+            fixture.retain(10, 1);
+            PlanCache.Entry entry = fixture.cache.peekForRequest(fixture.key, 10);
+            fixture.retain(20, 2);
+            validator.when(() -> PlanningStateValidator.executionState(fixture.player,
+                    entry.snapshot(), entry.plan().graph(), Level.OVERWORLD, BlockPos.ZERO, null))
+                    .thenReturn(ExecutionState.QUOTE_CHANGED);
+            var result = fixture.confirm(10);
+            assertEquals("rsi.plan.failure.material_quote_changed", result.rejectionKey());
+            assertNull(result.entry());
+            assertNull(fixture.cache.peekForRequest(fixture.key, 10));
+            assertNotNull(fixture.cache.peekForRequest(fixture.key, 20));
         } finally { fixture.cache.removePlayer(fixture.player.getUUID()); }
     }
 
@@ -119,8 +138,8 @@ class ConfirmedPreviewExecutionTest extends BootstrapTest {
 
             fixture.retain(20, 2);
             var ready = fixture.cache.peekForRequest(fixture.key, 20);
-            validator.when(() -> PlanningStateValidator.revalidateForExecution(fixture.player,
-                    ready.snapshot(), ready.plan(), Level.OVERWORLD, BlockPos.ZERO, null)).thenReturn(true);
+            validator.when(() -> PlanningStateValidator.executionState(fixture.player,
+                    ready.snapshot(), ready.plan().graph(), Level.OVERWORLD, BlockPos.ZERO, null)).thenReturn(ExecutionState.CURRENT);
             assertTrue(fixture.confirm(10).rejected());
             assertSame(ready, fixture.confirm(20).entry());
         } finally { fixture.cache.removePlayer(fixture.player.getUUID()); }
@@ -173,8 +192,8 @@ class ConfirmedPreviewExecutionTest extends BootstrapTest {
             bindings.verify(() -> AltarBindingRegistry.getBoundMachinesForRecipe(
                     fixture.player, type, fixture.recipe));
             // 材料复验仍可拒绝执行，但不能把自动选中的异维度祭坛当成预览位置。
-            validator.verify(() -> PlanningStateValidator.revalidateForExecution(fixture.player,
-                    snapshot, plan, Level.OVERWORLD, BlockPos.ZERO, null));
+            validator.verify(() -> PlanningStateValidator.executionState(fixture.player,
+                    snapshot, plan.graph(), Level.OVERWORLD, BlockPos.ZERO, null));
             validator.verifyNoMoreInteractions();
             assertNotNull(fixture.cache.peekForExecution(key), "复验失败仍保留原计划");
         } finally { fixture.cache.removePlayer(fixture.player.getUUID()); }

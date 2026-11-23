@@ -278,7 +278,7 @@ class AsyncProbabilitySettlementTest extends BootstrapTest {
         accountField.setAccessible(true);
         accountField.set(chain, account);
         when(account.heldMaterials()).thenReturn(Map.of(CraftingResolver.StackKey.of(paper.toStack(1), true), 1L));
-        when(account.ensure(anyMap(), anyList(), eq(player))).thenReturn(true);
+        when(account.ensure(anyMap(), anyList(), anyMap(), eq(player))).thenReturn(true);
         scheduler.claim(id);
         assertEquals(ConcurrentNodeExecutor.CompletionStatus.RETRY, attempt(chain, player, admissions, id,
                 List.of(new MaterialBroker.Request(initial, paper, 1)), List.of()));
@@ -303,7 +303,7 @@ class AsyncProbabilitySettlementTest extends BootstrapTest {
                 return supplement;
             });
             resolver.when(() -> CraftingResolver.startSupplementalGraph(anyList(), anyMap(), any(), eq(player),
-                    isNull(), anyList(), anySet(), anyMap(), anyMap(), any())).thenAnswer(call -> {
+                    isNull(), anyList(), anySet(), anyMap(), anyMap(), any(), eq(chain.getCraftId()))).thenAnswer(call -> {
                 assertTrue(call.getArgument(1, Map.class).isEmpty(), "根需求的纸不能用于补产");
                 assertTrue(call.getArgument(6, Set.class).contains(node.recipeId()));
                 return job;
@@ -313,11 +313,11 @@ class AsyncProbabilitySettlementTest extends BootstrapTest {
                 scheduler.releaseClaim(id);
                 assertEquals(List.of(id), scheduler.nodeOrder());
                 assertEquals(DagScheduler.NodeState.READY, scheduler.state(id));
-                verify(account, never()).ensure(anyMap(), anyList(), any());
+                verify(account, never()).ensure(anyMap(), anyList(), anyMap(), any());
                 scheduler.claim(id);
             }
             assertEquals(RetryPreparation.PLANNING, chain.prepareRetryRound(id, player));
-            verify(account, never()).ensure(anyMap(), anyList(), any());
+            verify(account, never()).ensure(anyMap(), anyList(), anyMap(), any());
             assertEquals(List.of(id), scheduler.nodeOrder());
             scheduler.releaseClaim(id);
             allowed.set(true);
@@ -333,7 +333,7 @@ class AsyncProbabilitySettlementTest extends BootstrapTest {
             scheduler.claim(id);
             assertEquals(RetryPreparation.READY, chain.prepareRetryRound(id, player));
             verify(job, times(1)).graph();
-            verify(account, times(1)).ensure(anyMap(), anyList(), eq(player));
+            verify(account, times(1)).ensure(anyMap(), anyList(), anyMap(), eq(player));
             @SuppressWarnings("unchecked")
             var requests = (Map<NodeId, List<MaterialBroker.Request>>) field(chain, "graphRequests");
             assertEquals(List.of(new MaterialBroker.Request(produced, paper, 1)), requests.get(id));
@@ -446,21 +446,21 @@ class AsyncProbabilitySettlementTest extends BootstrapTest {
                 : Map.of(CraftingResolver.StackKey.of(f.paper.toStack(1), true), (long) held.get()));
         doAnswer(call -> { held.addAndGet(call.getArgument(0, ItemStack.class).getCount()); return null; })
                 .when(f.account).add(any(ItemStack.class));
-        when(f.account.ensure(anyMap(), anyList(), eq(f.player))).thenAnswer(call ->
+        when(f.account.ensure(anyMap(), anyList(), anyMap(), eq(f.player))).thenAnswer(call ->
                 call.<Map<MaterialKey, Long>>getArgument(0).getOrDefault(f.paper, 0L) <= held.get());
         try (var index = mockStatic(RecipeIndex.class); var sources = mockStatic(MaterialSources.class)) {
             for (int tick = 0; tick < 2; tick++) {
                 for (var id : List.of(f.first, f.second)) assertEquals(RetryPreparation.PLANNING, f.slice(id, 2));
             }
             assertEquals(1, f.chain.virtualInventory().get(0).getCount());
-            verify(f.account, never()).ensure(anyMap(), anyList(), any());
+            verify(f.account, never()).ensure(anyMap(), anyList(), anyMap(), any());
             assertEquals(RetryPreparation.READY, f.finishSearch(f.first));
             assertEquals(RetryPreparation.READY, f.slice(f.first, 10000));
             assertEquals(1, held.get());
             assertTrue(f.chain.virtualInventory().isEmpty());
             assertEquals(RetryPreparation.WAITING_MATERIALS, f.finishSearch(f.second));
-            verify(f.account).ensure(eq(Map.of(f.paper, 0L)), anyList(), eq(f.player));
-            verify(f.account).ensure(eq(Map.of(f.paper, 2L)), anyList(), eq(f.player));
+            verify(f.account).ensure(eq(Map.of(f.paper, 0L)), anyList(), anyMap(), eq(f.player));
+            verify(f.account).ensure(eq(Map.of(f.paper, 2L)), anyList(), anyMap(), eq(f.player));
             verify(f.account, times(1)).add(any(ItemStack.class));
             assertEquals(1, f.broker.outstanding(f.pool, f.paper));
             assertEquals(List.of(f.first, f.second), f.scheduler.nodeOrder());
@@ -476,7 +476,7 @@ class AsyncProbabilitySettlementTest extends BootstrapTest {
             assertTrue(f.chain.isDone());
             assertEquals(RetryPreparation.FAILED, f.chain.prepareRetryRound(f.first, f.player));
             assertTrue(((Map<?, ?>) field(f.chain, "supplementalSearches")).isEmpty());
-            verify(f.account, never()).ensure(anyMap(), anyList(), any());
+            verify(f.account, never()).ensure(anyMap(), anyList(), anyMap(), any());
             verify(f.account, never()).add(any(ItemStack.class));
             assertEquals(0, f.broker.outstanding(f.pool, f.paper));
             assertEquals(List.of(f.first, f.second), f.scheduler.nodeOrder());

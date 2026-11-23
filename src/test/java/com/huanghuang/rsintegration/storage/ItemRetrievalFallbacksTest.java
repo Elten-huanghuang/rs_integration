@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.storage;
 
+import com.huanghuang.rsintegration.api.RSIItemRetrieval;
 import com.huanghuang.rsintegration.api.RSIItemRetrievalFallback.Delivered;
 import com.huanghuang.rsintegration.api.RSIItemRetrievalFallback.Destination;
 import com.huanghuang.rsintegration.api.RSIItemRetrievalFallback.Handler;
@@ -40,7 +41,7 @@ class ItemRetrievalFallbacksTest extends BootstrapTest {
 
     @Test
     void invalidDeliveryCannotFallThroughToAnotherSource() {
-        assertEquals(0, ItemRetrievalFallbacks.dispatch(request(), List.of(
+        assertEquals(-1, ItemRetrievalFallbacks.dispatchOutcome(request(), List.of(
                 handler("invalid", received -> new Delivered(5)),
                 handler("never", received -> fail("结果异常后不应尝试第二个来源")))));
     }
@@ -53,6 +54,14 @@ class ItemRetrievalFallbacksTest extends BootstrapTest {
                 mode, 4, List.of(new ItemStack(Items.IRON_INGOT)))));
         assertFalse(StorageRestockSupport.confirmedMissing(StorageOperationResult.failedExtraction(
                 mode, 4, StorageOperationStatus.DENIED, List.of(), List.of())));
+    }
+
+    @Test
+    void uncertainDeliveryIsDifferentFromConfirmedZero() {
+        var unknown = new RSIItemRetrieval.Result(RSIItemRetrieval.Status.INDETERMINATE, 0);
+        var noNetwork = new RSIItemRetrieval.Result(RSIItemRetrieval.Status.NO_NETWORK, 0);
+        assertFalse(unknown.confirmedZeroDelivery());
+        assertTrue(noNetwork.confirmedZeroDelivery());
     }
 
     private static Request request() {
