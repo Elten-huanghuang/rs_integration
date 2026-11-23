@@ -51,6 +51,7 @@ import com.huanghuang.rsintegration.mods.embers.EreAlchemyRSModule;
 import com.huanghuang.rsintegration.mods.farmingforblockheads.MarketRecipeWrapper;
 import com.huanghuang.rsintegration.network.binding.AltarBindingRegistry;
 import com.huanghuang.rsintegration.network.binding.MachineFavoritesSavedData;
+import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.storage.StorageBackendId;
 import com.huanghuang.rsintegration.storage.StorageItemKey;
 import com.huanghuang.rsintegration.storage.StorageSession;
@@ -993,6 +994,96 @@ class GenericCraftPacketTest extends BootstrapTest {
                 false, true, inspection, result, coverage, Set.of(), false).action());
         assertEquals(PlannerAction.RUN_TYPED, CraftPlanDecisionRules.completedRoute(snapshot,
                 false, true, inspection, null, coverage, Set.of(), false).action());
+    }
+
+    @Test
+    void virtualRecipePreviewRequiresItsCatalystButNoMachineBinding() throws Exception {
+        var recipeId = new ResourceLocation("test", "virtual_soaking");
+        ModType virtualType = ModType.registerVirtual("testutil_virtual_soaking",
+                new String[0], HandlerVirtualExchangeBatchDelegate::new);
+        Recipe<?> recipe = mock(Recipe.class);
+        when(recipe.getId()).thenReturn(recipeId);
+        RecipeManager manager = mock(RecipeManager.class);
+        doReturn(Optional.of(recipe)).when(manager).byKey(recipeId);
+        ModRecipeHandler handler = mock(ModRecipeHandler.class, CALLS_REAL_METHODS);
+        when(handler.modType()).thenReturn(virtualType);
+        when(handler.preferHandlerIngredients()).thenReturn(true);
+        when(handler.getIngredients(recipe)).thenReturn(List.of(new IngredientSpec(Ingredient.of(Items.RAW_IRON), 1)));
+        doReturn(false).when(handler).supportsBackgroundPlanning(recipe);
+
+        ServerPlayer player = mock(ServerPlayer.class);
+        UUID playerId = UUID.randomUUID();
+        Inventory inventory = new Inventory(player);
+        inventory.setItem(0, new ItemStack(Items.RAW_IRON));
+        ServerLevel level = mock(ServerLevel.class);
+        MinecraftServer server = mock(MinecraftServer.class);
+        var serverField = ServerPlayer.class.getField("server");
+        serverField.setAccessible(true);
+        serverField.set(player, server);
+        when(player.getUUID()).thenReturn(playerId);
+        when(player.getGameProfile()).thenReturn(new GameProfile(playerId, "virtual_test"));
+        when(player.getInventory()).thenReturn(inventory);
+        when(player.getServer()).thenReturn(server);
+        when(player.level()).thenReturn(level);
+        when(player.serverLevel()).thenReturn(level);
+        when(player.blockPosition()).thenReturn(BlockPos.ZERO);
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        when(level.getServer()).thenReturn(server);
+        when(level.getRecipeManager()).thenReturn(manager);
+        when(level.registryAccess()).thenReturn(RegistryAccess.EMPTY);
+        when(server.isSameThread()).thenReturn(true);
+        var serverTasks = new LinkedBlockingQueue<Runnable>();
+        doAnswer(call -> {
+            serverTasks.add(call.getArgument(0));
+            return null;
+        }).when(server).execute(any(Runnable.class));
+
+        boolean previous = RSIntegrationConfig.REQUIRE_RS_NETWORK_FOR_RECIPE_TREE.get();
+        try (var lifecycle = mockStatic(ServerLifecycleHooks.class);
+             var mods = mockStatic(ModList.class);
+             var bindings = mockStatic(AltarBindingRegistry.class);
+             var favorites = mockStatic(MachineFavoritesSavedData.class);
+             var claims = mockStatic(ModRecipeHandlers.class, CALLS_REAL_METHODS)) {
+            lifecycle.when(ServerLifecycleHooks::getCurrentServer).thenReturn(server);
+            mods.when(ModList::get).thenReturn(mock(ModList.class));
+            favorites.when(() -> MachineFavoritesSavedData.get(server))
+                    .thenReturn(mock(MachineFavoritesSavedData.class));
+            claims.when(() -> ModRecipeHandlers.claimFor(recipe))
+                    .thenReturn(new ModRecipeHandlers.Claim(handler, List.of(handler)));
+            doReturn(new ItemStack(Items.IRON_INGOT)).when(handler).getResultItem(recipe, RegistryAccess.EMPTY);
+            RSIntegrationConfig.REQUIRE_RS_NETWORK_FOR_RECIPE_TREE.set(false);
+            RecipeIndex.warmUpBlocking(level);
+
+            var readySink = mock(CraftPlanResultDispatcher.Sink.class);
+            doReturn(true).when(handler).isAvailableForPlanning(recipe, player);
+            CraftPlanningApplicationService.tryBuildPlan(player, recipeId, Map.of(), null, null, 1,
+                    null, null, 1, CraftPlanningRuntime.planRequests().begin(playerId), null, null,
+                    true, false, readySink, null, Map.of(), null, PlanningPreferences.empty());
+            verify(readySink, never()).error(any(PlanOutcome.class), any(IntegrationDiagnostic.class));
+            Runnable callback = serverTasks.poll(5, TimeUnit.SECONDS);
+            assertNotNull(callback, "virtual preview should reach response finalization");
+            callback.run();
+
+            var response = ArgumentCaptor.forClass(PlanResponse.class);
+            verify(readySink).success(response.capture(), any(PlanningSnapshot.class));
+            assertEquals(PlanOutcome.READY, response.getValue().outcome());
+            assertTrue(response.getValue().canConfirmExecution());
+
+            var missingCatalystSink = mock(CraftPlanResultDispatcher.Sink.class);
+            doReturn(false).when(handler).isAvailableForPlanning(recipe, player);
+            CraftPlanningApplicationService.tryBuildPlan(player, recipeId, Map.of(), null, null, 1,
+                    null, null, 2, CraftPlanningRuntime.planRequests().begin(playerId), null, null,
+                    true, false, missingCatalystSink, null, Map.of(), null, PlanningPreferences.empty());
+            verify(missingCatalystSink).error(PlanOutcome.RUNTIME_UNAVAILABLE,
+                    IntegrationDiagnostic.error(IntegrationDiagnosticCode.PREREQUISITE_UNAVAILABLE));
+        } finally {
+            RSIntegrationConfig.REQUIRE_RS_NETWORK_FOR_RECIPE_TREE.set(previous);
+            CraftPlanningRuntime.removePlayer(playerId);
+            try (var mods = mockStatic(ModList.class)) {
+                mods.when(ModList::get).thenReturn(mock(ModList.class));
+                RecipeIndex.invalidate();
+            }
+        }
     }
 
     @Test

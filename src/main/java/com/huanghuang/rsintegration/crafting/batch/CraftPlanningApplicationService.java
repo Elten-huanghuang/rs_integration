@@ -974,6 +974,12 @@ final class CraftPlanningApplicationService {
                     IntegrationDiagnostic.error(IntegrationDiagnosticCode.AUTO_CRAFT_DISABLED));
             return;
         }
+        if (previewModType != null && previewModType.isVirtual()
+                && !CraftMachineBindingSupport.isRecipeAvailableForPlanning(player, recipe)) {
+            sink.error(PlanOutcome.RUNTIME_UNAVAILABLE,
+                    IntegrationDiagnostic.error(IntegrationDiagnosticCode.PREREQUISITE_UNAVAILABLE));
+            return;
+        }
 
         // Determine ingredients, output, and mod type for both vanilla and mod recipes
         List<ScaledIngredientSpec> recipeSpecs;
@@ -1416,13 +1422,14 @@ final class CraftPlanningApplicationService {
         boolean altarInputsPrepared = recipeModType != null
                 && ModIds.ID_SUMMONING_RITUALS.equals(recipeModType.id())
                 && recipeSpecs.isEmpty();
-        boolean executionMachineAvailable = !CraftExecutionPolicy.requiresBoundMachine(recipe, recipeModType)
+        boolean requiresExecutionBinding = CraftExecutionPolicy.requiresBoundMachine(recipe, recipeModType);
+        boolean executionMachineAvailable = !requiresExecutionBinding
                 || CraftMachineBindingSupport.hasBindingForExecutionType(player, recipe, recipeModType);
         boolean cuttingBoard = FarmersDelightRecipeHandler.isCuttingBoardRecipe(recipe);
         DirectMaterialAllocator.Result directPreviewAllocation =
                 !cuttingBoard && executionMachineAvailable && effectiveOverrides.isEmpty()
                 && (hasFixedTerminalInputs || altarInputsPrepared)
-                        ? (CraftExecutionPolicy.requiresBoundMachine(recipe, recipeModType)
+                        ? (requiresExecutionBinding
                                 ? DirectMaterialAllocator.allocateScaledSingleVariant(
                                         recipeSpecs, available)
                                 : DirectMaterialAllocator.allocateScaled(recipeSpecs, available))
@@ -2474,6 +2481,9 @@ final class CraftPlanningApplicationService {
                         player, recipeId, recipeModType, steps, dim, pos);
         boolean missingExecutionBinding =
                 machineAvailability.missingExecutionBinding();
+        Set<String> boundMachineTypes = machineAvailability.boundMachineTypes();
+        boolean missingExecutionMachineType = requiresExecutionBinding && recipeModType != null
+                && !boundMachineTypes.contains(recipeModType.id());
         // A plan may still be displayed without a bound physical machine, but
         // it must never be advertised as executable in that state.
         if (missingExecutionBinding) feasible = false;
@@ -2535,8 +2545,6 @@ final class CraftPlanningApplicationService {
 
         boolean executionMachineSupportsGui =
                 machineAvailability.executionMachineSupportsGui();
-        Set<String> boundMachineTypes =
-                machineAvailability.boundMachineTypes();
         boolean allExecutionMachinesLeased =
                 machineAvailability.allExecutionMachinesLeased();
         if (allExecutionMachinesLeased) feasible = false;
@@ -2566,8 +2574,7 @@ final class CraftPlanningApplicationService {
                     .anyMatch(a -> a.missingCount() > 0)) {
                 modWarnings.add(Component.translatable(
                         "rsi.plan.failure.missing_materials"));
-            } else if (missingExecutionBinding || (recipeModType != null
-                    && !boundMachineTypes.contains(recipeModType.id()))) {
+            } else if (missingExecutionBinding || missingExecutionMachineType) {
                 modWarnings.add(Component.translatable(
                         "rsi.plan.failure.no_bound_machine"));
             }
@@ -2595,8 +2602,7 @@ final class CraftPlanningApplicationService {
                 CraftPlanOutcomeResolver.resolve(
                         feasible, timedOutMissingRoute, allExecutionMachinesLeased,
                         missingExecutionBinding,
-                        recipeModType != null
-                                && !boundMachineTypes.contains(recipeModType.id()),
+                        missingExecutionMachineType,
                         noReadyMachine, cyclicPureFailure, nbtMismatch,
                         materialShortage, blockingPrerequisiteFailure);
         PlanOutcome outcome = outcomeResolution.outcome();
