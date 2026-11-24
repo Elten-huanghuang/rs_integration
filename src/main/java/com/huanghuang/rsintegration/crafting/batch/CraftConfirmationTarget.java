@@ -3,9 +3,11 @@ package com.huanghuang.rsintegration.crafting.batch;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import io.netty.buffer.Unpooled;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.world.item.ItemStack;
 
+import javax.annotation.Nullable;
 import java.util.Objects;
 
 /** 确认参数使用客户端实际收到的物品身份，执行仍使用服务端保存的原始目标。 */
@@ -26,9 +28,16 @@ final class CraftConfirmationTarget {
             // 完整物品比较还会检查未传给客户端的 ForgeCaps，不能用于确认网络包。
             InkFluidSupport.writePacket(buffer, planned);
             ItemStack displayed = InkFluidSupport.readPacket(buffer);
-            return Objects.equals(displayed.getTag(), confirmed.getTag());
+            return Objects.equals(nonEmptyTag(displayed), nonEmptyTag(confirmed));
         } finally {
             buffer.release();
         }
+    }
+
+    @Nullable
+    private static CompoundTag nonEmptyTag(ItemStack stack) {
+        // 宝石等物品的提示会调用 getOrCreateTag，只有空标签时不改变确认目标。
+        CompoundTag tag = stack.getTag();
+        return tag == null || tag.isEmpty() ? null : tag;
     }
 }

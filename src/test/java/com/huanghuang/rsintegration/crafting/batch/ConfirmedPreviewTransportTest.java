@@ -79,6 +79,34 @@ class ConfirmedPreviewTransportTest extends BootstrapTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
+    void emptyTagCreatedByInflictorGemTooltipDoesNotInvalidateConfirmation(boolean clicked) {
+        // 单测未注册模组物品；用普通物品复现宝石提示调用 getOrCreateTag 的行为。
+        ItemStack target = new ItemStack(Items.DIAMOND);
+        ResourceLocation recipe = new ResourceLocation("embers", "alchemy/inflictor_gem");
+        try (Fixture fixture = new Fixture(target, clicked, recipe)) {
+            var confirmation = fixture.roundTrip(displayed -> {
+                assertNull(displayed.getTag());
+                displayed.getOrCreateTag();
+            });
+            assertEquals(new CompoundTag(), confirmation.targetOutput().getTag());
+            fixture.assertAccepted(confirmation);
+            assertNull(target.getTag(), "客户端补出的空标签不能替换服务端目标");
+        }
+    }
+
+    @Test
+    void addingAnAttunementToAnUntaggedTargetStillRejectsConfirmation() {
+        ItemStack target = new ItemStack(Items.DIAMOND);
+        try (Fixture fixture = new Fixture(target, true)) {
+            var confirmation = fixture.roundTrip(displayed ->
+                    displayed.getOrCreateTag().putString("type", "inFire"));
+            assertTrue(fixture.confirm(confirmation).rejected());
+            assertNotNull(fixture.cache.peekForRequest(fixture.key, 10));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
     void serverOnlyCapabilitiesDoNotInvalidateTheDisplayedTarget(boolean clicked) throws Exception {
         ItemStack target = new ItemStack(Items.DIAMOND_SWORD);
         attachServerCapability(target);
