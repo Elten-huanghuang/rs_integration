@@ -6,6 +6,10 @@ import com.huanghuang.rsintegration.api.RSIPlanExtensions;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
+import com.huanghuang.rsintegration.crafting.graph.InputPortId;
+import com.huanghuang.rsintegration.crafting.graph.MaterialAllocation;
+import com.huanghuang.rsintegration.crafting.graph.MaterialSource.ProducerOutput;
+import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
@@ -16,6 +20,7 @@ import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -142,8 +147,35 @@ public final class RegisteredMaterialSources {
         public Budget budget() { return new Budget(this); }
 
         public boolean canSupplement(CraftPlanGraph plan) {
-            return !isEmpty() && (plan.unresolvedDemands().stream().anyMatch(demand -> matches(demand.ingredient()))
-                    || plan.rootDemands().stream().anyMatch(root -> root.unresolvedQuantity() > 0 && matches(root.ingredient())));
+            if (isEmpty()) return false;
+            if (plan.unresolvedDemands().stream().anyMatch(demand -> matches(demand.ingredient()))
+                    || plan.rootDemands().stream().anyMatch(root -> root.unresolvedQuantity() > 0 && matches(root.ingredient()))) {
+                return true;
+            }
+            if (plan.unresolvedDemands().isEmpty()) return false;
+
+            // 最佳努力计划会把缺料挂在最深的工序，扩展来源也可能直接供给上游所需的中间产物。
+            Set<NodeId> blocked = new HashSet<>();
+            plan.unresolvedDemands().forEach(demand -> blocked.add(demand.consumer().nodeId()));
+            Map<InputPortId, Ingredient> inputs = new HashMap<>();
+            plan.nodes().forEach(node -> node.inputs().forEach(input -> inputs.put(input.id(), input.ingredient())));
+            Map<NodeId, List<MaterialAllocation>> outputs = new HashMap<>();
+            for (MaterialAllocation allocation : plan.allocations()) {
+                if (allocation.source() instanceof ProducerOutput producer) {
+                    outputs.computeIfAbsent(producer.outputPort().nodeId(), ignored -> new ArrayList<>()).add(allocation);
+                }
+            }
+            for (NodeId node : plan.topologicalOrder()) {
+                if (!blocked.contains(node)) continue;
+                for (MaterialAllocation output : outputs.getOrDefault(node, List.of())) {
+                    Ingredient input = inputs.get(output.consumer());
+                    if (input != null && matches(input)) return true;
+                    blocked.add(output.consumer().nodeId());
+                }
+            }
+            return plan.rootDemands().stream().anyMatch(root -> root.allocations().stream().anyMatch(allocation ->
+                    allocation.source() instanceof ProducerOutput producer && blocked.contains(producer.outputPort().nodeId()))
+                    && matches(root.ingredient()));
         }
 
         boolean matches(Ingredient ingredient) {
