@@ -29,6 +29,10 @@ RS Integration 不通过单一项目许可证重新授权第三方组件。第�
 
 ## 仅编译或测试使用的模组
 
+`libs/` 中的 `FarmersDelight-1.20.1-1.3.3.jar` 和
+`FarmersDelight-1.20.1-1.2.8.jar` 由 vectorwing 发布，采用 MIT 许可证，许可文本位于
+`libs/LICENSE-FarmersDelight.txt`。两版用于砧板兼容测试，不进入发布 jar。
+
 `libs/` 中的 `until_eternity-1.2.0-all.jar` 用于构建，作者为
 carrot123。JAR 内的 `META-INF/mods.toml` 声明 MIT；其附带的 MixinExtras 和 MixinSquared
 保留原有许可文件。Until Eternity 的许可文本位于 `libs/LICENSE-Until-Eternity.txt`。
