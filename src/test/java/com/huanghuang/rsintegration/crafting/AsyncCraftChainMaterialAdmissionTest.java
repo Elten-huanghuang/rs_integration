@@ -86,17 +86,17 @@ class AsyncCraftChainMaterialAdmissionTest extends BootstrapTest {
         tick.set(1);
         listener.get().onChanged(new ItemStack(Items.GOLD_INGOT), 10L);
         assertFalse(acquire());
-        verify(account, times(1)).ensure(anyMap(), anyList(), eq(player));
+        verify(account, times(1)).ensure(anyMap(), anyList(), anyMap(), eq(player));
 
         listener.get().onChanged(new ItemStack(Items.IRON_INGOT), 2L);
         assertFalse(acquire());
-        verify(account, times(2)).ensure(anyMap(), anyList(), eq(player));
+        verify(account, times(2)).ensure(anyMap(), anyList(), anyMap(), eq(player));
         verify(subscription, never()).close();
     }
 
     @Test
     void rollbackNotificationsDoNotCauseATightRetryLoop() throws Exception {
-        when(account.ensure(anyMap(), anyList(), eq(player))).thenAnswer(ignored -> {
+        when(account.ensure(anyMap(), anyList(), anyMap(), eq(player))).thenAnswer(ignored -> {
             listener.get().onChanged(new ItemStack(Items.IRON_INGOT), 2L);
             inventoryRevision.incrementAndGet();
             return false;
@@ -104,10 +104,10 @@ class AsyncCraftChainMaterialAdmissionTest extends BootstrapTest {
         assertFalse(acquire());
         tick.set(1);
         assertFalse(acquire());
-        verify(account, times(1)).ensure(anyMap(), anyList(), eq(player));
+        verify(account, times(1)).ensure(anyMap(), anyList(), anyMap(), eq(player));
         tick.set(100);
         assertFalse(acquire());
-        verify(account, times(2)).ensure(anyMap(), anyList(), eq(player));
+        verify(account, times(2)).ensure(anyMap(), anyList(), anyMap(), eq(player));
     }
 
     @Test
@@ -116,7 +116,7 @@ class AsyncCraftChainMaterialAdmissionTest extends BootstrapTest {
         inventoryRevision.incrementAndGet();
         tick.set(1);
         assertFalse(acquire());
-        verify(account, times(2)).ensure(anyMap(), anyList(), eq(player));
+        verify(account, times(2)).ensure(anyMap(), anyList(), anyMap(), eq(player));
     }
 
     @Test
@@ -129,10 +129,10 @@ class AsyncCraftChainMaterialAdmissionTest extends BootstrapTest {
         tick.set(1);
         listener.get().onFluidChanged(new FluidStack(Fluids.WATER, 1), 1000L);
         assertFalse(acquire());
-        verify(account, times(1)).ensure(anyMap(), anyList(), eq(player));
+        verify(account, times(1)).ensure(anyMap(), anyList(), anyMap(), eq(player));
         listener.get().onFluidChanged(required, 1000L);
         assertFalse(acquire());
-        verify(account, times(2)).ensure(anyMap(), anyList(), eq(player));
+        verify(account, times(2)).ensure(anyMap(), anyList(), anyMap(), eq(player));
     }
 
     private boolean acquire() throws Exception {

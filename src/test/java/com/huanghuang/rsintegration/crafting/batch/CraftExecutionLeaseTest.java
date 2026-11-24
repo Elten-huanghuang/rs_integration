@@ -12,6 +12,7 @@ import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph;
 import com.huanghuang.rsintegration.crafting.planning.PlanCache;
 import com.huanghuang.rsintegration.crafting.planning.PlanningSnapshot;
 import com.huanghuang.rsintegration.crafting.planning.PlanningStateValidator;
+import com.huanghuang.rsintegration.crafting.planning.PlanningStateValidator.ExecutionState;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
@@ -161,9 +162,9 @@ class CraftExecutionLeaseTest extends BootstrapTest {
         try (MockedStatic<CraftPlanningRuntime> runtime = mockStatic(CraftPlanningRuntime.class);
              MockedStatic<PlanningStateValidator> validator = mockStatic(PlanningStateValidator.class)) {
             runtime.when(CraftPlanningRuntime::planCache).thenReturn(cache);
-            validator.when(() -> PlanningStateValidator.revalidateForExecution(
-                    player, snapshot, plan, Level.OVERWORLD, BlockPos.ZERO, null))
-                    .thenReturn(stateValid);
+            validator.when(() -> PlanningStateValidator.executionState(
+                    player, snapshot, plan.graph(), Level.OVERWORLD, BlockPos.ZERO, null))
+                    .thenReturn(stateValid ? ExecutionState.CURRENT : ExecutionState.STALE);
 
             var result = CraftPlanningApplicationService.findValidatedExecutionPlan(
                     player, recipeId, Map.of(), 1, output, type,
@@ -171,8 +172,8 @@ class CraftExecutionLeaseTest extends BootstrapTest {
             assertEquals(!stateValid, result.rejected());
             assertSame(stateValid ? displayed : null, result.entry());
 
-            validator.verify(() -> PlanningStateValidator.revalidateForExecution(
-                    player, snapshot, plan, Level.OVERWORLD, BlockPos.ZERO, null));
+            validator.verify(() -> PlanningStateValidator.executionState(
+                    player, snapshot, plan.graph(), Level.OVERWORLD, BlockPos.ZERO, null));
             if (stateValid) {
                 assertNull(cache.peekLatestForExecution(playerId));
             } else {

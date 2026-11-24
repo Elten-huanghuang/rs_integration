@@ -89,6 +89,12 @@ public final class CraftingPlanScreen extends Screen {
     /** 材料包不进入 updatePlan：不重建树、控件或滚动位置。 */
     public void updateInventory(PlanInventoryUpdatePacket packet) {
         if (inventoryState == null || !inventoryState.accept(packet)) return;
+        if (inventoryState.status() == PreviewInventoryModel.Status.QUOTE_CHANGED
+                && externalRequest == null && !responseRequests.waitingForPreview()) {
+            stopInventoryWatch();
+            refreshPlan();
+            return;
+        }
         this.plan = inventoryState.view();
         for (IngredientKey key : inventoryState.changed()) {
             PlanResponse.Availability value = plan.materials().get(key);
@@ -852,9 +858,11 @@ public final class CraftingPlanScreen extends Screen {
                 .withPlanningPreferences(requestPreferences())
                 .withStorageReference(storageReference);
         if (!preview && !partialPreparation && !selectedPath.isDirty()) {
-            packet.withConfirmedPreview(responseRequests.activeRequestId());
+            long previewId = responseRequests.activeRequestId();
+            packet.withConfirmedPreview(previewId);
+            PlanBackgroundClient.expectRequote(requestId, previewId);
             if (minecraft.screen instanceof PlanScreenHost host) {
-                host.rsi$planSubmitted(responseRequests.activeRequestId());
+                host.rsi$planSubmitted(previewId);
             }
         }
         if (preview) {

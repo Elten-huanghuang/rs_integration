@@ -38,23 +38,23 @@ final class PlanResponseClientPacketHandler {
     private PlanResponseClientPacketHandler() {}
 
     static void handle(PlanResponse plan, long requestId) {
-        if (!PlanningProgressTracker.acceptsResponse(requestId)) return;
-        if (requestId > 0L && !PlanningProgressTracker.isSelected(requestId)) {
-            PlanBackgroundClient.detach(requestId);
+        long replacedPreview = PlanBackgroundClient.takeRequote(requestId);
+        if (replacedPreview == 0L) {
+            if (!PlanningProgressTracker.acceptsResponse(requestId)) return;
+            if (requestId > 0L && !PlanningProgressTracker.isSelected(requestId)) {
+                PlanBackgroundClient.detach(requestId);
+            }
         }
         RSIntegrationMod.LOGGER.debug(
                 "[RSI-PlanPkt] enqueueWork running on client thread: recipeId={}",
                 plan.recipeId());
         // 成功、失败和取消都必须结束本地 loading，不能只处理成功响应。
         PlanningProgressTracker.responseReceived(requestId);
-        // Error responses intentionally carry an empty target stack. Do not
-        // open a normal plan screen for those packets: ItemStack.EMPTY's
-        // hover name is "Air", which makes a failed request look like an
-        // actual recipe targeting air. Valid infeasible plans still have a
-        // recipe id/target and continue to open with their missing materials.
+        // 空目标的错误包不打开计划页；有明确目标的缺料计划仍可展示。
         if (!plan.success()
                 && (plan.recipeId() == null || plan.recipeId().isEmpty())
                 && plan.targetResult().isEmpty()) {
+            if (replacedPreview > 0L) PlanBackgroundClient.dismiss(replacedPreview);
             var mc = Minecraft.getInstance();
             // 页面内的候选切换必须把错误交回页面状态机，才能回滚这次草稿选择并
             // 重开原节点。旧实现只发聊天栏消息，pending 选择会永久残留。
@@ -88,6 +88,12 @@ final class PlanResponseClientPacketHandler {
                 plan.executionBlocked(), plan.machineCandidates(), plan.stepIssues(),
                 plan.storageReference(), plan.storageNetworks(),
                 plan.outcome(), plan.diagnostics());
+        if (replacedPreview > 0L) {
+            PlanBackgroundClient.replaceRevision(replacedPreview, requestId);
+            PlanBackgroundClient.detach(requestId);
+            cacheBackgroundPlan(Minecraft.getInstance(), localized, requestId);
+            return;
+        }
         PlanBackgroundClient.remember(requestId, localized);
         openScreen(localized, requestId);
     }
@@ -207,8 +213,9 @@ final class PlanResponseClientPacketHandler {
         Component targetName = plan.targetResult().isEmpty()
                 ? Component.literal(plan.targetName())
                 : plan.targetResult().getHoverName();
-        mc.player.displayClientMessage(
-                PlanBackgroundClient.readyMessage(targetName, requestId), false);
+        if (mc.player != null) {
+            mc.player.displayClientMessage(PlanBackgroundClient.readyMessage(targetName, requestId), false);
+        }
         RSIntegrationMod.LOGGER.debug(
                 "[RSI-PlanPkt] cached background plan: request={} recipe={}",
                 requestId, plan.recipeId());

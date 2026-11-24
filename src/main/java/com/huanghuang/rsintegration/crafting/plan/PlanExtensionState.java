@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting.plan;
 
+import com.huanghuang.rsintegration.api.RSIPlanExtensions.SourceAllocation;
+import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.api.IntegrationResourceKey;
 import com.huanghuang.rsintegration.api.RSIPlanExtensions.Context;
@@ -76,10 +78,19 @@ public final class PlanExtensionState {
                 .map(entry -> new Material(key(entry.getKey().stack(1)), entry.getValue().needed(),
                         entry.getValue().available(), entry.getValue().missingCount()))
                 .toList();
+        record AllocationKey(IntegrationResourceKey key, ResourceLocation source) {}
+        var bySource = new LinkedHashMap<AllocationKey, Long>();
+        if (plan.graph() != null) {
+            plan.graph().visitExtensionAllocations((source, stack, count) ->
+                    bySource.merge(new AllocationKey(key(stack), source), count, SaturatingLongMath::add));
+        }
+        List<SourceAllocation> allocations = bySource.entrySet().stream()
+                .map(entry -> new SourceAllocation(entry.getKey().key(), entry.getKey().source(), entry.getValue()))
+                .toList();
         Context context = new Context(planId, revision, recipe, plan.repeatCount(),
                 Optional.ofNullable(plan.storageReference())
                         .map(reference -> new Network(reference.backendId().value(), reference.networkId())),
-                sources, materials, plan.graph() != null && !plan.outcome().incomplete());
+                sources, materials, plan.graph() != null && !plan.outcome().incomplete(), allocations);
         registered.forEach((id, provider) -> {
             responses.put(id, new Response(0, null));
             AtomicLong sequence = new AtomicLong();

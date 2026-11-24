@@ -1,16 +1,11 @@
 package com.huanghuang.rsintegration.feature.sidepanel;
 
-import com.huanghuang.rsintegration.api.RSIItemRetrievalFallback.Destination;
-import com.huanghuang.rsintegration.api.RSIItemRetrievalFallback.Scene;
-import com.huanghuang.rsintegration.storage.ItemRetrievalFallbacks;
 import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.api.RSIItemRetrieval;
+import com.huanghuang.rsintegration.api.RSIItemRetrieval.*;
+import com.huanghuang.rsintegration.feature.sidepanel.RSSidePanelOperationResultPacket.ErrorCode;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
-import com.huanghuang.rsintegration.storage.StorageOperationResult;
-import com.huanghuang.rsintegration.storage.StoragePermission;
-import com.huanghuang.rsintegration.storage.StorageRestockSupport;
-import com.huanghuang.rsintegration.storage.rs.RefinedStorageBackend;
 import com.huanghuang.rsintegration.util.TrackedNetworkInsertion;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.network.security.Permission;
@@ -25,7 +20,6 @@ import net.minecraftforge.network.NetworkEvent;
 import net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket;
 import net.minecraftforge.common.util.FakePlayer;
 import net.minecraftforge.items.IItemHandler;
-import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -185,21 +179,49 @@ public final class RSSidePanelClickPacket {
 
     private static OperationResult executeSingleClick(ServerPlayer player, ItemStack targetItem,
                                                        byte action, boolean isShift, UUID panelId) {
+        if (action == ACTION_PICK_BLOCK) return executePickBlock(player, targetItem, panelId);
         ItemStack extracted = handleSingleClick(player, targetItem, action, isShift, panelId);
-        // Do not infer the result from the storage cache here.  RS updates its
-        // cache/listener asynchronously, so a successful extraction can still
-        // report the old count in this tick and look like a failed operation.
-        int actual = extracted.isEmpty() ? 0 : extracted.getCount();
-        if (action == ACTION_PICK_BLOCK && actual > 0) {
-            player.displayClientMessage(Component.translatable(
-                    "rsi.world_pick.extracted", Component.translatable(targetItem.getDescriptionId()), actual), true);
-        } else if (action == ACTION_PICK_BLOCK) {
-            player.displayClientMessage(Component.translatable(
-                    "rsi.world_pick.failed", Component.translatable(targetItem.getDescriptionId())), true);
+        return !extracted.isEmpty()
+                ? OperationResult.success(panelId, extracted.getCount())
+                : OperationResult.failure(panelId, ErrorCode.NOTHING_TRANSFERRED);
+    }
+
+    static OperationResult executePickBlock(ServerPlayer player, ItemStack target, UUID panelId) {
+        if (target.isEmpty() || player.isCreative() || player.isSpectator()) {
+            return OperationResult.failure(panelId, ErrorCode.INVALID_REQUEST);
         }
-        return actual > 0
-                ? OperationResult.success(panelId, actual)
-                : OperationResult.failure(panelId, RSSidePanelOperationResultPacket.ErrorCode.NOTHING_TRANSFERRED);
+        // 此数据包到达时，超越维度可能已通过自己的选块按键完成取物。
+        ItemStack coalesced = coalescedNativePick(player.getMainHandItem(), target);
+        Result result = coalesced.isEmpty()
+                ? RSIItemRetrieval.retrieve(new Request(player, target, target.getMaxStackSize(), Scene.WORLD_PICK,
+                        Intent.STACK, new SelectedHotbar(player.getInventory().selected), Fallback.REGISTERED))
+                : new Result(Status.SUCCESS, coalesced.getCount());
+        if (result.status() == Status.INDETERMINATE) {
+            player.displayClientMessage(Component.translatable("rsi.world_pick.indeterminate", result.deliveredCount()), true);
+            return new OperationResult(false, panelId, result.deliveredCount(), ErrorCode.INDETERMINATE);
+        }
+        if (result.deliveredCount() > 0) {
+            player.displayClientMessage(Component.translatable(
+                    "rsi.world_pick.extracted", target.getHoverName(), result.deliveredCount()), true);
+            return OperationResult.success(panelId, result.deliveredCount());
+        }
+        ErrorCode error = switch (result.status()) {
+            case OUT_OF_STOCK -> ErrorCode.ITEM_NOT_FOUND;
+            case NO_NETWORK -> ErrorCode.NO_NETWORK;
+            case NO_PERMISSION -> ErrorCode.NO_PERMISSION;
+            case NO_SPACE -> ErrorCode.NOTHING_TRANSFERRED;
+            case INVALID_REQUEST -> ErrorCode.INVALID_REQUEST;
+            default -> ErrorCode.INTERNAL_ERROR;
+        };
+        String message = switch (result.status()) {
+            case NO_NETWORK -> "rsi.jei.pull.no_network";
+            case NO_PERMISSION -> "rsi.jei.pull.no_permission";
+            case NO_SPACE -> "rsi.jei.pull.inventory_full";
+            case BACKEND_FAILURE -> "rsi.jei.pull.failed";
+            default -> "rsi.world_pick.failed";
+        };
+        player.displayClientMessage(Component.translatable(message, target.getHoverName()), true);
+        return OperationResult.failure(panelId, error);
     }
 
     private static OperationResult executeInsert(ServerPlayer player, boolean rightClick, ItemStack carried) {
@@ -265,10 +287,6 @@ public final class RSSidePanelClickPacket {
     private static ItemStack handleSingleClickImpl(ServerPlayer player, ItemStack targetItem,
                                                     byte action, boolean isShift, UUID panelId) {
         if (targetItem.isEmpty()) return ItemStack.EMPTY;
-        if (action == ACTION_PICK_BLOCK) {
-            return handlePickBlock(player, targetItem);
-        }
-
         INetwork network = RSIntegrationNetwork.resolveNetworkFromPlayer(player);
         if (network == null) return ItemStack.EMPTY;
 
@@ -401,116 +419,12 @@ public final class RSSidePanelClickPacket {
         return extracted;
     }
 
-    private static ItemStack handlePickBlock(ServerPlayer player, ItemStack targetItem) {
-        if (player.isCreative()) return ItemStack.EMPTY;
-
-        // BD 0.7.x binds its own shortcut to the same middle mouse button and
-        // sends a PickBlockFromNetPacket from the client tick handler. That
-        // packet is independent of Forge's interaction event cancellation.
-        // If it reaches the server first, coalesce its newly filled hand into
-        // this operation instead of reporting a false failure and bookmarking
-        // an item that BD already extracted.
-        ItemStack nativePick = coalescedNativePick(player.getMainHandItem(), targetItem);
-        if (!player.getMainHandItem().isEmpty()) return nativePick;
-
-        CraftStorageEndpoint endpoint = StorageRestockSupport.resolve(player).orElse(null);
-        if (endpoint == null
-                || !endpoint.session().hasPermission(player, StoragePermission.EXTRACT)) {
-            return ItemStack.EMPTY;
-        }
-        var snapshot = endpoint.snapshot(player).snapshot().orElse(null);
-        if (snapshot == null) return ItemStack.EMPTY;
-        int count = pickRequestCount(snapshot.countExact(endpoint.session().itemKey(targetItem)),
-                targetItem.getMaxStackSize());
-        if (count <= 0) return tryPickFallback(player, targetItem, endpoint);
-
-        StorageOperationResult simulated = endpoint.extractExact(player, targetItem, count, true);
-        long simulatedCount = simulated.transferredAmount().orElse(0L);
-        if (simulatedCount <= 0L) return StorageRestockSupport.confirmedMissing(simulated)
-                ? tryPickFallback(player, targetItem, endpoint) : ItemStack.EMPTY;
-        count = (int) Math.min(count, simulatedCount);
-
-        StorageOperationResult performed = endpoint.extractExact(player, targetItem, count, false);
-        refundStacks(endpoint, player, performed.recoveryStacks(), "recovery");
-        List<ItemStack> extractedStacks = performed.extractedStacks();
-        ItemStack extracted = mergeExactStacks(extractedStacks);
-        if (extracted.isEmpty()) {
-            refundStacks(endpoint, player, extractedStacks, "invalid exact extraction");
-            return StorageRestockSupport.confirmedMissing(performed)
-                    ? tryPickFallback(player, targetItem, endpoint) : ItemStack.EMPTY;
-        }
-
-        int selectedSlot = player.getInventory().selected;
-        // The selected slot may have changed after the client sent the request.
-        // Never overwrite it; return confirmed assets to their original backend.
-        if (!player.getInventory().getItem(selectedSlot).isEmpty()) {
-            refundExtracted(endpoint, player, extracted);
-            return ItemStack.EMPTY;
-        }
-        player.getInventory().setItem(selectedSlot, extracted);
-        player.getInventory().setChanged();
-        player.inventoryMenu.broadcastChanges();
-        player.containerMenu.broadcastChanges();
-        syncPlayerInventorySlot(player, selectedSlot);
-        drainExtractEnergy(
-                RefinedStorageBackend.resolveNativeNetwork(endpoint.session().reference(), player),
-                player);
-        return extracted;
-    }
-
-    private static ItemStack tryPickFallback(ServerPlayer player, ItemStack target, CraftStorageEndpoint endpoint) {
-        int slot = player.getInventory().selected;
-        if (!player.getInventory().getItem(slot).isEmpty()) return ItemStack.EMPTY;
-        int delivered = ItemRetrievalFallbacks.onMissing(player, target, target.getMaxStackSize(),
-                Scene.WORLD_PICK, Destination.SELECTED_HOTBAR_SLOT, endpoint.session().reference());
-        if (delivered <= 0) return ItemStack.EMPTY;
-        player.getInventory().setChanged();
-        player.inventoryMenu.broadcastChanges();
-        player.containerMenu.broadcastChanges();
-        syncPlayerInventorySlot(player, slot);
-        return target.copyWithCount(delivered);
-    }
-
     static ItemStack coalescedNativePick(ItemStack mainHand, ItemStack targetItem) {
         if (mainHand == null || mainHand.isEmpty() || targetItem == null || targetItem.isEmpty()) {
             return ItemStack.EMPTY;
         }
-        return ItemStack.isSameItemSameTags(mainHand, targetItem)
+        return ItemStack.isSameItemSameTags(mainHand, targetItem) && mainHand.areCapsCompatible(targetItem)
                 ? mainHand.copy() : ItemStack.EMPTY;
-    }
-
-    static int pickRequestCount(long available, int maxStackSize) {
-        if (available <= 0L || maxStackSize <= 0) return 0;
-        return (int) Math.min(available, (long) maxStackSize);
-    }
-
-    static ItemStack mergeExactStacks(List<ItemStack> stacks) {
-        ItemStack merged = ItemStack.EMPTY;
-        for (ItemStack stack : stacks) {
-            if (stack == null || stack.isEmpty()) continue;
-            if (merged.isEmpty()) {
-                merged = stack.copy();
-            } else if (ItemStack.isSameItemSameTags(merged, stack)) {
-                merged.grow(stack.getCount());
-            } else {
-                return ItemStack.EMPTY;
-            }
-        }
-        return merged;
-    }
-
-    private static void drainExtractEnergy(INetwork network, ServerPlayer player) {
-        if (network == null) return;
-        try {
-            var nim = network.getNetworkItemManager();
-            if (nim != null) {
-                int extractCost = com.refinedmods.refinedstorage.RS.SERVER_CONFIG
-                        .getWirelessGrid().getExtractUsage();
-                nim.drainEnergy(player, extractCost);
-            }
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI] Energy drain failed after extraction", e);
-        }
     }
 
     private static ItemStack extractExact(INetwork network, ServerPlayer player,
@@ -640,47 +554,6 @@ public final class RSSidePanelClickPacket {
         RSSidePanelNetworkHandler.sendDeltaImmediate(player,
                 panelId != null ? panelId : UUID.randomUUID(),
                 zeroStack, System.currentTimeMillis(), false);
-    }
-
-    /** Explicitly update a player-inventory slot even while another menu is open. */
-    private static void syncPlayerInventorySlot(ServerPlayer player, int slot) {
-        player.connection.send(new ClientboundContainerSetSlotPacket(
-                ClientboundContainerSetSlotPacket.PLAYER_INVENTORY,
-                0, slot, player.getInventory().getItem(slot)));
-    }
-
-    /** Return an extracted stack to its selected backend if the destination became invalid. */
-    private static void refundExtracted(CraftStorageEndpoint endpoint, ServerPlayer player,
-                                        ItemStack extracted) {
-        refundStacks(endpoint, player, List.of(extracted), "destination conflict");
-    }
-
-    private static void refundStacks(CraftStorageEndpoint endpoint, ServerPlayer player,
-                                     List<ItemStack> stacks, String reason) {
-        for (ItemStack stack : stacks) {
-            if (stack == null || stack.isEmpty()) continue;
-            StorageOperationResult result = endpoint.insert(player, stack, false);
-            var knownRemainder = result.remainder();
-            if (knownRemainder.isEmpty()) {
-                RSIntegrationMod.LOGGER.error(
-                        "[RSI] Pick-block {} refund became indeterminate for {} x{}",
-                        reason, itemId(stack), stack.getCount());
-                continue;
-            }
-            ItemStack remainder = knownRemainder.orElse(ItemStack.EMPTY);
-            if (!remainder.isEmpty()) {
-                RSIntegrationMod.LOGGER.error(
-                        "[RSI] Pick-block {} refund left {} x{}; dropping remainder",
-                        reason, itemId(remainder), remainder.getCount());
-                player.drop(remainder, false);
-            }
-        }
-    }
-
-    private static String itemId(ItemStack stack) {
-        if (stack == null || stack.isEmpty()) return "empty";
-        var id = ForgeRegistries.ITEMS.getKey(stack.getItem());
-        return id != null ? id.toString() : "unknown";
     }
 
     /** Sync the cursor slot to the client.  The client optimistically clears

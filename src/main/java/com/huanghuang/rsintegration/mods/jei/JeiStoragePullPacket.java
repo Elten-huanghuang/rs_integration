@@ -1,18 +1,12 @@
 package com.huanghuang.rsintegration.mods.jei;
 
-import com.huanghuang.rsintegration.RSIntegrationMod;
-import com.huanghuang.rsintegration.api.RSIItemRetrievalFallback.Destination;
-import com.huanghuang.rsintegration.api.RSIItemRetrievalFallback.Scene;
-import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.api.RSIItemRetrieval;
+import com.huanghuang.rsintegration.api.RSIItemRetrieval.*;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.huanghuang.rsintegration.network.packet.NetworkPacketIds;
-import com.huanghuang.rsintegration.storage.StorageOperationResult;
-import com.huanghuang.rsintegration.storage.ItemRetrievalFallbacks;
-import com.huanghuang.rsintegration.storage.StorageRestockSupport;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.network.NetworkDirection;
 import net.minecraftforge.network.NetworkEvent;
@@ -45,69 +39,16 @@ public record JeiStoragePullPacket(ItemStack stack) {
     private static void handleOnServer(JeiStoragePullPacket packet, ServerPlayer player) {
         if (player == null || packet.stack.isEmpty()) return;
 
-        ItemStack template = packet.stack.copyWithCount(1);
-        Optional<CraftStorageEndpoint> resolved = StorageRestockSupport.resolve(player);
-        if (resolved.isEmpty()) {
-            notify(player, "rsi.jei.pull.no_network");
-            return;
+        Result result = RSIItemRetrieval.retrieve(new Request(player, packet.stack, packet.stack.getMaxStackSize(),
+                Scene.JEI, Intent.STACK, new Inventory(), Fallback.REGISTERED));
+        switch (result.status()) {
+            case NO_NETWORK -> notify(player, "rsi.jei.pull.no_network");
+            case NO_PERMISSION -> notify(player, "rsi.jei.pull.no_permission");
+            case NO_SPACE -> notify(player, "rsi.jei.pull.inventory_full");
+            case OUT_OF_STOCK -> notify(player, "rsi.jei.pull.not_found", packet.stack.getHoverName());
+            case BACKEND_FAILURE, INDETERMINATE -> notify(player, "rsi.jei.pull.failed");
+            default -> {}
         }
-
-        CraftStorageEndpoint endpoint = resolved.get();
-        if (!StorageRestockSupport.canExtract(endpoint, player)) {
-            notify(player, "rsi.jei.pull.no_permission");
-            return;
-        }
-
-        int capacity = inventoryCapacity(player.getInventory(), template);
-        if (capacity <= 0) {
-            notify(player, "rsi.jei.pull.inventory_full");
-            return;
-        }
-
-        int amount = Math.min(template.getMaxStackSize(), capacity);
-        StorageRestockSupport.Extraction extraction;
-        try {
-            extraction = StorageRestockSupport.extractOutcome(endpoint, player, template, amount);
-        } catch (RuntimeException exception) {
-            RSIntegrationMod.LOGGER.warn("[RSI-JEI] Storage pull failed for {}", template, exception);
-            notify(player, "rsi.jei.pull.failed");
-            return;
-        }
-
-        ItemStack extracted = extraction.stack();
-        if (extracted.isEmpty()) {
-            if (extraction.confirmedMissing() && inventoryCapacity(player.getInventory(), template) >= amount
-                    && ItemRetrievalFallbacks.onMissing(player, template, amount, Scene.JEI,
-                            Destination.PLAYER_INVENTORY, endpoint.session().reference()) > 0) {
-                player.getInventory().setChanged();
-                player.containerMenu.broadcastChanges();
-                return;
-            }
-            notify(player, "rsi.jei.pull.not_found", template.getHoverName());
-            return;
-        }
-
-        ItemStack remainder = extracted.copy();
-        player.getInventory().add(remainder);
-        if (!remainder.isEmpty()) {
-            StorageOperationResult refund = endpoint.insert(player, remainder, false);
-            ItemStack unreturned = refund.remainder().orElse(remainder);
-            if (!unreturned.isEmpty()) player.drop(unreturned, false);
-        }
-        player.containerMenu.broadcastChanges();
-    }
-
-    private static int inventoryCapacity(Inventory inventory, ItemStack template) {
-        int capacity = 0;
-        for (ItemStack existing : inventory.items) {
-            if (existing.isEmpty()) {
-                capacity += template.getMaxStackSize();
-            } else if (ItemStack.isSameItemSameTags(existing, template)) {
-                capacity += Math.max(0, existing.getMaxStackSize() - existing.getCount());
-            }
-            if (capacity >= template.getMaxStackSize()) return template.getMaxStackSize();
-        }
-        return capacity;
     }
 
     private static void notify(ServerPlayer player, String key, Object... args) {

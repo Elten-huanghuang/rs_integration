@@ -60,10 +60,7 @@ public final class PlanCache {
         this.maxNodes = maxNodes;
     }
 
-    public MaterialSourceSelection publishedMaterialSources(UUID playerId, long requestId) {
-        ExecutionLease lease = requestLeases.get(new PreviewKey(playerId, requestId));
-        return lease == null ? MaterialSourceSelection.ALL : lease.entry().snapshot().preferences().materialSources();
-    }
+    public record PublishedPlan(PlanResponse plan, long generation, MaterialSourceSelection materialSources) {}
 
     public Entry get(Key key, long now) {
         Entry entry = entries.get(key);
@@ -145,6 +142,10 @@ public final class PlanCache {
 
     /** 在发布响应时关联客户端请求；保留完整服务端图，不接受客户端上传的计划。 */
     public void retainForRequest(UUID playerId, long requestId, PlanningSnapshot snapshot) {
+        retainForRequest(playerId, requestId, snapshot, snapshot.requestGeneration());
+    }
+
+    public void retainForRequest(UUID playerId, long requestId, PlanningSnapshot snapshot, long generation) {
         if (requestId <= 0L || !playerId.equals(snapshot.playerId())) return;
         ExecutionLease lease = executionLeases.get(playerId);
         if (lease == null || !lease.entry().snapshot().equals(snapshot)) {
@@ -156,7 +157,7 @@ public final class PlanCache {
         }
         if (lease == null) return;
         PreviewKey key = new PreviewKey(playerId, requestId);
-        if (requestLeases.putIfAbsent(key, lease) != null) return;
+        if (requestLeases.putIfAbsent(key, new ExecutionLease(lease.key(), lease.entry(), generation)) != null) return;
         latestPublished.put(playerId, key);
         prunePublishedHistory();
     }
@@ -182,10 +183,11 @@ public final class PlanCache {
 
     /** 仅用于恢复库存提示；不授予执行权限，也不消费任务凭据。 */
     @Nullable
-    public PlanResponse publishedPlan(UUID playerId, long requestId) {
+    public PublishedPlan publishedPlan(UUID playerId, long requestId) {
         ExecutionLease lease = requestLeases.get(new PreviewKey(playerId, requestId));
         return lease != null && CraftPlanningRevision.isCurrent(lease.key().recipeRevision())
-                ? lease.entry().plan() : null;
+                ? new PublishedPlan(lease.entry().plan(), lease.generation(),
+                        lease.entry().snapshot().preferences().materialSources()) : null;
     }
 
     /** 仍需由调用方校验产物、路线、网络、机器及当前材料；此处仅检查请求与锁定选材身份。 */
@@ -375,7 +377,11 @@ public final class PlanCache {
     /**
      * 租约直接持有完整 PlanningSnapshot，不能由调用方用部分 key 重新构造。
      */
-    private record ExecutionLease(Key key, Entry entry) {
+    private record ExecutionLease(Key key, Entry entry, long generation) {
+        private ExecutionLease(Key key, Entry entry) {
+            this(key, entry, entry.snapshot().requestGeneration());
+        }
+
         private ExecutionLease {
             if (entry == null || entry.snapshot() == null) {
                 throw new IllegalArgumentException("execution lease requires a full snapshot");

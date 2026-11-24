@@ -29,8 +29,12 @@ public final class PlanningProgressTracker {
         TASKS.put(requestId, new Task(new PlanningProgressSnapshot(requestId, 0L, recipeId,
                 PlanningProgressSnapshot.State.ACCEPTED,
                 PlanningProgressSnapshot.Phase.ACCEPTING, 0L, Component.empty())));
-        newestRequestId = Math.max(newestRequestId, requestId);
+        markIssued(requestId);
         select(requestId);
+    }
+
+    public static void markIssued(long requestId) {
+        newestRequestId = Math.max(newestRequestId, requestId);
     }
 
     public static void select(long requestId) {

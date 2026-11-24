@@ -49,8 +49,8 @@ final class CraftPlanResultDispatcher {
                 RESULT_GATES.remove(key, gate);
                 logIncomplete(plan, requestId, previewGeneration);
                 PlanningProgressServer.succeed(player, previewGeneration);
-                CraftPlanningRuntime.planCache().retainForRequest(player.getUUID(), requestId, snapshot);
-                PlanResponsePublisher.send(player, plan, requestId);
+                CraftPlanningRuntime.planCache().retainForRequest(player.getUUID(), requestId, snapshot, previewGeneration);
+                PlanResponsePublisher.send(player, plan, requestId, previewGeneration, snapshot.preferences().materialSources());
             }
 
             @Override

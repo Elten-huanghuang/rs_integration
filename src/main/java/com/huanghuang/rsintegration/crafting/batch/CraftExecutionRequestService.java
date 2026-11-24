@@ -18,6 +18,7 @@ import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.huanghuang.rsintegration.crafting.MachineSelectionMode;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.crafting.MaterialSourceSelection;
+import com.huanghuang.rsintegration.crafting.RegisteredMaterialSources;
 import com.huanghuang.rsintegration.crafting.OutputDestination;
 import com.huanghuang.rsintegration.crafting.plan.MachineCandidateView;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraphProjector;
@@ -173,7 +174,8 @@ final class CraftExecutionRequestService {
             @Nullable ItemStack baseItem, @Nullable ItemStack targetOutput,
             OutputDestination outputDestination, MachineSelectionMode machineSelectionMode,
             @Nullable CraftStorageEndpoint storageEndpoint,
-            PlanCache.Entry cached, Map<String, ItemStack> materialLocks, long confirmedPreviewRequestId) {
+            PlanCache.Entry cached, Map<String, ItemStack> materialLocks, long confirmedPreviewRequestId,
+            @Nullable Runnable refreshQuote) {
         ModType terminalType = CraftPlanningApplicationService.modTypeForCachedExecution(recipe);
         if (cached.resolvedGraph() == null) {
             // 已展示的成功计划不能在确认后改走另一条未展示的递归路线。
@@ -209,7 +211,7 @@ final class CraftExecutionRequestService {
             CraftExecutionService.launchGraph(player, storageEndpoint, completeGraph,
                     recipeId, null, targetOutput, outputDestination,
                     machineSelectionMode, dim, pos, forcedRecipes, materialLocks,
-                    confirmedPreviewRequestId, chain -> {});
+                    confirmedPreviewRequestId, chain -> chain.onInitialQuoteChanged(refreshQuote));
             return true;
         } catch (IllegalArgumentException | ArithmeticException exception) {
             RSIntegrationMod.LOGGER.warn(
@@ -326,7 +328,7 @@ final class CraftExecutionRequestService {
                                    Map<String, ItemStack> materialLocks) {
         tryResolve(player, recipeId, forcedRecipes, dim, pos, repeatCount, inferMode,
                 baseItem, targetOutput, outputDestination, machineSelectionMode,
-                storageReference, materialLocks, true, false, PlanningPreferences.empty(), 0L);
+                storageReference, materialLocks, true, false, PlanningPreferences.empty(), 0L, null);
     }
 
     static void tryResolve(ServerPlayer player, ResourceLocation recipeId,
@@ -342,12 +344,13 @@ final class CraftExecutionRequestService {
                                    Map<String, ItemStack> materialLocks,
                                    boolean typedGraphOnly,
                                    boolean partialPreparation,
-                                   PlanningPreferences preferences, long confirmedPreviewRequestId) {
+                                   PlanningPreferences preferences, long confirmedPreviewRequestId,
+                                   @Nullable Runnable refreshQuote) {
         PlanningPreferences selected = preferences == null ? PlanningPreferences.empty() : preferences;
         try (MaterialSourceSelection.Scope ignored = selected.materialSources().enter()) {
             tryResolveWithSources(player, recipeId, forcedRecipes, dim, pos, repeatCount, inferMode,
                     baseItem, targetOutput, outputDestination, machineSelectionMode, storageReference,
-                    materialLocks, typedGraphOnly, partialPreparation, selected, confirmedPreviewRequestId);
+                    materialLocks, typedGraphOnly, partialPreparation, selected, confirmedPreviewRequestId, refreshQuote);
         }
     }
 
@@ -361,7 +364,7 @@ final class CraftExecutionRequestService {
                                    @Nullable StorageReference storageReference,
                                    Map<String, ItemStack> materialLocks, boolean typedGraphOnly,
                                    boolean partialPreparation, PlanningPreferences preferences,
-                                   long confirmedPreviewRequestId) {
+                                   long confirmedPreviewRequestId, @Nullable Runnable refreshQuote) {
         PlanningPreferences safePreferences = preferences == null
                 ? PlanningPreferences.empty() : preferences;
         CraftForcedRecipeOverrides.Resolution forcedResolution =
@@ -616,13 +619,16 @@ final class CraftExecutionRequestService {
                 dim, pos, executionStorageReference, materialLocks, confirmedPreviewRequestId);
         if (cachedPreview.rejected()) {
             player.sendSystemMessage(Component.translatable(cachedPreview.rejectionKey()));
+            if (refreshQuote != null && RegisteredMaterialSources.QUOTE_CHANGED.equals(cachedPreview.rejectionKey())) {
+                refreshQuote.run();
+            }
             return;
         }
         if (cachedPreview.entry() != null
                 && tryExecuteCachedCraftingPlan(player, recipe, recipeId, forcedRecipes,
                 dim, pos, repeatCount, inferMode, baseItem, targetOutput,
                 outputDestination, machineSelectionMode, storageEndpoint,
-                cachedPreview.entry(), materialLocks, confirmedPreviewRequestId)) {
+                cachedPreview.entry(), materialLocks, confirmedPreviewRequestId, refreshQuote)) {
             return;
         }
 
@@ -942,8 +948,7 @@ final class CraftExecutionRequestService {
         // (e.g. diamond from diamond block) would not be crafted otherwise.
         // 没有存储端点时也必须继续：绑定锻造台后直接从背包锻造是合法路径，
         // 只有递归出现实体机器步骤时才需要网络（下方按需报 network_unavailable）。
-        if (modType == ModType.byId("smithing")
-                && RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING.get()) {
+        if (modType == ModType.byId("smithing")) {
             ItemStack smithingOutput = ModRecipeHandlers.tryGetResultItem(
                     recipe, player.serverLevel().registryAccess());
             List<ScaledIngredientSpec> smithingSpecs =

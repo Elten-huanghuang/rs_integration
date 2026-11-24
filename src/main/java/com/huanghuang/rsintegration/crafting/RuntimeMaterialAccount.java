@@ -11,6 +11,7 @@ import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.storage.StorageOperationMode;
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
 import com.huanghuang.rsintegration.storage.StorageFluidOperationResult;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.nbt.CompoundTag;
@@ -46,6 +47,9 @@ final class RuntimeMaterialAccount {
     private boolean uncertain;
     private boolean closed;
     private boolean acquiring;
+    @Nullable private Component admissionFailure;
+
+    @Nullable Component admissionFailure() { return admissionFailure; }
 
     RuntimeMaterialAccount(UUID craftId, UUID playerId, MinecraftServer server,
                            @Nullable CraftStorageEndpoint endpoint) {
@@ -162,6 +166,12 @@ final class RuntimeMaterialAccount {
 
     /** 补足本次需求；确认缺料时整批回滚，不跨 tick 持有半份准入材料。 */
     boolean ensure(Map<MaterialKey, Long> required, List<Ingredient> reusable, ServerPlayer player) {
+        return ensure(required, reusable, Map.of(), player);
+    }
+
+    boolean ensure(Map<MaterialKey, Long> required, List<Ingredient> reusable,
+                   Map<MaterialKey, Map<ResourceLocation, Long>> sourceShares, ServerPlayer player) {
+        admissionFailure = null;
         if (!usable() || !belongsTo(player)) return false;
         Map<MaterialKey, Long> missing = new LinkedHashMap<>();
         required.forEach((key, amount) -> {
@@ -178,21 +188,18 @@ final class RuntimeMaterialAccount {
         }
         acquisition.setStorageEndpoint(endpoint);
         try {
+            acquisition.useRegisteredSources(player, endpoint, missingTypes, craftId);
             for (Ingredient ingredient : reusable) acquisition.preferResonanceFor(ingredient);
             for (Map.Entry<MaterialKey, Long> entry : missing.entrySet()) {
-                long remaining = entry.getValue();
-                while (remaining > 0) {
-                    int quantity = (int) Math.min(Integer.MAX_VALUE, remaining);
-                    ItemStack reserved = acquisition.reserveExactAcrossNetworkAndInventory(
-                            entry.getKey().toStack(1), quantity, endpoint, player);
-                    if (reserved.getCount() != quantity) {
-                        acquisition.close();
-                        return false;
-                    }
-                    remaining -= quantity;
+                if (!acquisition.reservePlannedMaterial(entry.getKey().toStack(1), entry.getValue(),
+                        sourceShares.getOrDefault(entry.getKey(), Map.of()), player)) {
+                    admissionFailure = acquisition.reservationFailure();
+                    acquisition.close();
+                    return false;
                 }
             }
             if (!acquisition.commitToEndpoint(endpoint, player)) {
+                admissionFailure = acquisition.reservationFailure();
                 if (acquisition.hasUncertainTransfers()) {
                     freeze(acquisition, "材料准入提取结果不明");
                 }

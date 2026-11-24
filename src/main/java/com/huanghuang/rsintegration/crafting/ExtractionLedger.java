@@ -1,4 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
+
+import com.huanghuang.rsintegration.api.RSICraftingMaterialSources;
+import com.huanghuang.rsintegration.storage.StorageDiagnosticCode;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.graph.MaterialKey;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
@@ -30,6 +33,7 @@ import com.huanghuang.rsintegration.storage.StorageOperationMode;
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
 import com.huanghuang.rsintegration.storage.StorageSnapshot;
 import com.huanghuang.rsintegration.storage.StorageSnapshotResult;
+import net.minecraft.network.chat.Component;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
@@ -61,6 +65,12 @@ public final class ExtractionLedger implements AutoCloseable {
 
     private final List<Entry> entries = new ArrayList<>();
     private final MaterialSourceSelection materialSources = MaterialSourceSelection.current();
+    @Nullable private RSICraftingMaterialSources.Context extensionContext;
+    @Nullable private RegisteredMaterialSources.Budget extensionBudget;
+    static final Component QUOTE_CHANGED = Component.translatable(RegisteredMaterialSources.QUOTE_CHANGED);
+    @Nullable private Component reservationFailure;
+
+    @Nullable Component reservationFailure() { return reservationFailure; }
 
     private List<ItemStack> selectedMainInventory(ServerPlayer player) {
         return materialSources.inventory() ? player.getInventory().items : List.of();
@@ -104,6 +114,13 @@ public final class ExtractionLedger implements AutoCloseable {
     /** 准入账必须取得指定身份，不允许按机器原料回退。 */
     static ExtractionLedger forAcquisition(Set<Item> itemTypes) {
         return new ExtractionLedger(null, Set.copyOf(itemTypes));
+    }
+
+    void useRegisteredSources(ServerPlayer player, @Nullable CraftStorageEndpoint endpoint,
+                              Set<Item> itemTypes, UUID taskId) {
+        if (!RegisteredMaterialSources.hasEnabled(materialSources)) return;
+        extensionContext = RegisteredMaterialSources.context(player, endpoint, materialSources, itemTypes,
+                RSICraftingMaterialSources.Phase.TASK, null, taskId);
     }
     boolean hasUncertainTransfers() { return uncertainTransfers; }
     List<UncertainMaterialTransfer> uncertainMaterialTransfers() {
@@ -230,8 +247,6 @@ public final class ExtractionLedger implements AutoCloseable {
     private CraftStorageEndpoint reservationSnapshotEndpoint;
     @Nullable
     private StorageSnapshotResult reservationSnapshotResult;
-    @Nullable
-    private StorageSnapshot reservationSnapshot;
     private long reservationSnapshotTick = Long.MIN_VALUE;
 
     public void setStorageEndpoint(@Nullable CraftStorageEndpoint endpoint) {
@@ -260,7 +275,6 @@ public final class ExtractionLedger implements AutoCloseable {
         StorageSnapshotResult loaded = endpoint.snapshot(player, acquisitionItemTypes);
         reservationSnapshotEndpoint = endpoint;
         reservationSnapshotResult = loaded;
-        reservationSnapshot = loaded.snapshot().orElse(null);
         reservationSnapshotTick = currentTick;
         return loaded;
     }
@@ -268,7 +282,6 @@ public final class ExtractionLedger implements AutoCloseable {
     private void clearReservationSnapshot() {
         reservationSnapshotEndpoint = null;
         reservationSnapshotResult = null;
-        reservationSnapshot = null;
         reservationSnapshotTick = Long.MIN_VALUE;
     }
 
@@ -610,7 +623,6 @@ public final class ExtractionLedger implements AutoCloseable {
      * inventory. A graph requirement represents one logical stack, but its
      * physical items may be split between both sources.
      */
-    /** Endpoint-aware exact reservation used by graph and async execution. */
     @Nonnull
     public ItemStack reserveExactAcrossNetworkAndInventory(
             @Nonnull ItemStack template, int count,
@@ -621,29 +633,121 @@ public final class ExtractionLedger implements AutoCloseable {
         if (state == State.IDLE) transition(State.RESERVING);
         CraftStorageEndpoint selected = endpoint != null ? endpoint : storageEndpoint;
         if (selected != null) setStorageEndpoint(selected);
-        int endpointAvailable = countExactAvailableInEndpoint(selected, template, player);
-        int inventoryAvailable = countExactAvailableInInventory(player, template);
+        var network = countExactAvailableInEndpoint(selected, template, player);
+        int endpointAvailable = (int) Math.min(Integer.MAX_VALUE, network.available());
+        int inventoryAvailable = (int) Math.min(Integer.MAX_VALUE, countExactAvailableInInventory(player, template));
+        if (!network.snapshotReadable() && inventoryAvailable < count) {
+            recordNetworkReadFailure(network.detail());
+            return ItemStack.EMPTY;
+        }
         int[] allocation = allocateExactAcrossSources(count, endpointAvailable, inventoryAvailable);
         if (allocation.length == 0) return ItemStack.EMPTY;
+        int networkCount = allocation[0];
+        int inventoryCount = allocation[1];
 
         int mark = reservationMark();
-        Ingredient ingredient = Ingredient.of(template.copyWithCount(1));
-        if (allocation[0] > 0
+        if (networkCount > 0
                 && (selected == null
-                || reserveExactFromEndpoint(template, allocation[0], selected, player).isEmpty())) {
+                || reserveExactFromEndpoint(template, networkCount, selected, player).isEmpty())) {
             cancelReservationsSince(mark);
             return ItemStack.EMPTY;
         }
-        if (allocation[1] > 0) {
-            if (!reserveExactInventoryAvailability(player, template, allocation[1])) {
-                cancelReservationsSince(mark);
-                return ItemStack.EMPTY;
-            }
-            ItemStack reserved = template.copyWithCount(allocation[1]);
-            recordEntry(new Entry(Source.PLAYER_INVENTORY, ingredient, reserved,
-                    null, null, null, null, true));
+        if (inventoryCount > 0 && !reserveExactInventory(template, inventoryCount, player)) {
+            cancelReservationsSince(mark);
+            return ItemStack.EMPTY;
         }
         return template.copyWithCount(count);
+    }
+
+    private boolean reserveExactInventory(ItemStack template, int count, ServerPlayer player) {
+        if (!reserveExactInventoryAvailability(player, template, count)) return false;
+        if (state == State.IDLE) transition(State.RESERVING);
+        recordEntry(new Entry(Source.PLAYER_INVENTORY, Ingredient.of(template.copyWithCount(1)),
+                template.copyWithCount(count), null, null, null, null, true));
+        return true;
+    }
+
+    /** 按已确认计划中的材料源和份额补足实物缺口。 */
+    boolean reservePlannedMaterial(ItemStack template, long total, Map<ResourceLocation, Long> sources,
+                                   ServerPlayer player) {
+        var network = countExactAvailableInEndpoint(storageEndpoint, template, player);
+        long inventory = countExactAvailableInInventory(player, template);
+        // 网络状态未知时，只允许完全由随身库存供料且未报价的需求。
+        if (!network.snapshotReadable() && (!sources.isEmpty() || inventory < total)) {
+            recordNetworkReadFailure(network.detail());
+            return false;
+        }
+        long nativeCount = Math.min(total, saturatedAdd(network.available(), inventory));
+        long quoted = sources.values().stream().reduce(0L, Math::addExact);
+        if (total - nativeCount != quoted) {
+            if (!sources.isEmpty()) return quoteChanged();
+            if (extensionContext != null && !RegisteredMaterialSources.capture(extensionContext).budget()
+                    .take(CraftingResolver.StackKey.of(template, true), total - nativeCount).isEmpty()) {
+                return quoteChanged();
+            }
+            return false;
+        }
+        while (nativeCount > 0) {
+            int part = (int) Math.min(Integer.MAX_VALUE, nativeCount);
+            boolean reserved = network.snapshotReadable()
+                    ? !reserveExactAcrossNetworkAndInventory(template, part, storageEndpoint, player).isEmpty()
+                    : reserveExactInventory(template, part, player);
+            if (!reserved) return false;
+            nativeCount -= part;
+        }
+        if (sources.isEmpty()) return true;
+        if (extensionContext == null) return quoteChanged();
+        if (extensionBudget == null) extensionBudget = RegisteredMaterialSources.capture(extensionContext).budget();
+        if (state == State.IDLE) transition(State.RESERVING);
+        var key = CraftingResolver.StackKey.of(template, true);
+        Ingredient ingredient = Ingredient.of(template);
+        for (var source : sources.entrySet()) {
+            if (!extensionBudget.retain(new RegisteredMaterialSources.Share(source.getKey(), key, source.getValue()))) {
+                return quoteChanged();
+            }
+            long remaining = source.getValue();
+            while (remaining > 0) {
+                int part = (int) Math.min(remaining, Integer.MAX_VALUE);
+                var share = new RegisteredMaterialSources.Share(source.getKey(), key, part);
+                var previous = entries.stream().filter(entry -> entry.extensionShare != null
+                                && entry.extensionShare.source().equals(share.source()))
+                        .map(entry -> new RSICraftingMaterialSources.Allocation(entry.template, entry.count)).toList();
+                var requested = new RSICraftingMaterialSources.Allocation(template, part);
+                var reservation = RegisteredMaterialSources.reserve(share.source(), extensionContext, requested, previous);
+                if (reservation.isEmpty()) return quoteChanged();
+                var entry = new Entry(Source.REGISTERED, ingredient, template.copyWithCount(part),
+                        null, null, null, null, true);
+                entry.extensionShare = share;
+                entry.extensionReservation = reservation.get();
+                recordEntry(entry);
+                remaining -= part;
+            }
+        }
+        return true;
+    }
+
+    private boolean quoteChanged() {
+        reservationFailure = QUOTE_CHANGED;
+        return false;
+    }
+
+    private void recordNetworkReadFailure(String detail) {
+        reservationFailure = Component.translatable("rsi.async.abort.material_network_read", detail);
+    }
+
+    private void releaseRegisteredReservations() {
+        for (Entry entry : entries) releaseRegisteredReservation(entry);
+    }
+
+    private void releaseRegisteredReservation(Entry entry) {
+        if (entry.extensionReservation == null) return;
+        var reservation = entry.extensionReservation;
+        entry.extensionReservation = null;
+        try {
+            reservation.release();
+        } catch (RuntimeException | LinkageError failure) {
+            LOGGER.warn("[RSI-Ledger] Could not release reservation for {}", entry.extensionShare.source(), failure);
+        }
     }
 
     private ItemStack reserveExactFromEndpoint(@Nonnull ItemStack template, int count,
@@ -927,10 +1031,18 @@ public final class ExtractionLedger implements AutoCloseable {
         transition(State.COMMITTING);
 
         // ── Phase 1: Pre-check ──────────────────────────────────
-        if (!preCheck(endpoint, player)) {
+        boolean ready;
+        try {
+            ready = preCheck(endpoint, player);
+        } catch (RuntimeException | LinkageError failure) {
+            LOGGER.warn("[RSI-Ledger] Material pre-check failed before extraction", failure);
+            ready = false;
+        }
+        if (!ready) {
             commitFailureDetail = "材料提取前检查失败";
             LOGGER.warn(fmt("Ledger commit pre-check failed, rolling back"));
             releaseUncommittedAccountReservations();
+            releaseRegisteredReservations();
             transition(State.ROLLED_BACK);
             return false;
         }
@@ -960,6 +1072,7 @@ public final class ExtractionLedger implements AutoCloseable {
                         || !result.complete() || result.mode() != StorageOperationMode.PERFORM
                         || result.transferredAmount().orElse(-1L) != entry.count) {
                     commitFailureStatus = result.status();
+                    if (entry.source == Source.REGISTERED && !transferUnknown) reservationFailure = QUOTE_CHANGED;
                     ResourceLocation itemId = BuiltInRegistries.ITEM.getKey(entry.template.getItem());
                     commitFailureDetail = "材料提取失败：" + itemId + "，需要 " + entry.count
                             + "，状态 " + result.status() + "，来源 " + entry.source
@@ -980,6 +1093,8 @@ public final class ExtractionLedger implements AutoCloseable {
             commitFailureDetail = "材料提取异常：" + e.getClass().getSimpleName();
             LOGGER.warn("[RSI-Ledger] Commit exception during extraction", e);
             extractionFailed = true;
+        } finally {
+            releaseRegisteredReservations();
         }
         if (extractionFailed) {
             releaseUncommittedAccountReservations();
@@ -1023,7 +1138,32 @@ public final class ExtractionLedger implements AutoCloseable {
      */
     private boolean preCheck(@Nullable CraftStorageEndpoint endpoint, ServerPlayer player) {
         if (materialAccount != null) return canUseAccount(player, endpoint);
+        for (Entry entry : entries) {
+            if (entry.extensionReservation == null) continue;
+            try {
+                if (!entry.extensionReservation.validate()) return quoteChanged();
+            } catch (RuntimeException | LinkageError failure) {
+                LOGGER.warn("[RSI-Ledger] Could not validate reservation for {}", entry.extensionShare.source(), failure);
+                return quoteChanged();
+            }
+        }
         CraftStorageEndpoint selected = endpoint != null ? endpoint : storageEndpoint;
+        if (extensionBudget != null) {
+            // 材料源回调可能在预留后改变实物库存，按精确物品变体重新检查一次。
+            clearReservationSnapshot();
+            Set<CraftingResolver.StackKey> checked = new HashSet<>();
+            for (Entry entry : entries) {
+                if (entry.extensionShare == null || !checked.add(entry.extensionShare.key())) continue;
+                var network = countExactAvailableInEndpoint(selected, entry.template, player);
+                if (!network.snapshotReadable()) {
+                    recordNetworkReadFailure(network.detail());
+                    return false;
+                }
+                if (network.available() > 0L || countExactAvailableInInventory(player, entry.template) > 0L) {
+                    return quoteChanged();
+                }
+            }
+        }
         if (selected != null) {
             // Group reservations by ingredient for accurate per-type checking.
             Map<Ingredient, Long> neededByIngredient = new HashMap<>();
@@ -1034,10 +1174,14 @@ public final class ExtractionLedger implements AutoCloseable {
                 }
             }
             if (!neededByIngredient.isEmpty()) {
-                var snapshot = selected.snapshot(player,
-                        IngredientMatcher.itemTypesForAll(neededByIngredient.keySet()))
-                        .snapshot().orElse(null);
-                if (snapshot == null) return false;
+                var result = extensionBudget == null
+                        ? selected.snapshot(player, IngredientMatcher.itemTypesForAll(neededByIngredient.keySet()))
+                        : reservationSnapshotResult(selected, player);
+                if (!result.successful()) {
+                    recordNetworkReadFailure(result.status() + "/" + result.diagnosticCode());
+                    return false;
+                }
+                var snapshot = result.snapshot().orElseThrow();
                 for (var ingEntry : neededByIngredient.entrySet()) {
                     StorageSnapshot.MatchResult match = snapshot.match(ingEntry.getKey());
                     if (!match.successful()) return false;
@@ -1104,6 +1248,10 @@ public final class ExtractionLedger implements AutoCloseable {
         }
         CraftStorageEndpoint destination = rec.sourceEndpoint != null
                 ? rec.sourceEndpoint : storageEndpoint;
+        if (rec.source == Source.REGISTERED) {
+            refundLeftoverToPlayerOrStorage(s, player, destination);
+            return;
+        }
         if (InkFluidSupport.isToken(s)) {
             ItemStack leftover = destination == null ? s : refundRemainder(
                     CraftStorageEndpoint.insertInternal(destination, player, s, false), rec.entryId, s);
@@ -1135,7 +1283,7 @@ public final class ExtractionLedger implements AutoCloseable {
                 }
             }
             case PLAYER_INVENTORY -> PlayerUtils.safeGiveToStorage(player, s, destination);
-            case TASK_ACCOUNT -> throw new IllegalStateException("账户退款不应到达外部来源");
+            case TASK_ACCOUNT, REGISTERED -> throw new IllegalStateException("退款已由来源专用路径处理");
         }
     }
 
@@ -1211,6 +1359,7 @@ public final class ExtractionLedger implements AutoCloseable {
 
     private void releaseReservations(@Nullable ServerPlayer player) {
         releaseUncommittedAccountReservations();
+        releaseRegisteredReservations();
         // Pending reservations were never physically extracted — just clear the
         // tracking maps so future reservations see accurate counts.
         pendingNet.clear();
@@ -1350,6 +1499,9 @@ public final class ExtractionLedger implements AutoCloseable {
 
     public void reset() {
         releaseUncommittedAccountReservations();
+        releaseRegisteredReservations();
+        extensionBudget = null;
+        reservationFailure = null;
         entries.clear();
         entriesById.clear();
         pendingNet.clear();
@@ -1383,6 +1535,7 @@ public final class ExtractionLedger implements AutoCloseable {
             LOGGER.warn(fmt("Ledger auto-rollback via close() — {} entries abandoned"), entries.size());
         }
         releaseUncommittedAccountReservations();
+        releaseRegisteredReservations();
         entries.clear();
         entriesById.clear();
         pendingNet.clear();
@@ -1394,7 +1547,7 @@ public final class ExtractionLedger implements AutoCloseable {
         state = State.ROLLED_BACK;
     }
 
-    private enum Source { NETWORK, PLAYER_INVENTORY, ALTAR_BINDING, RESONANCE_DISK, TASK_ACCOUNT }
+    private enum Source { NETWORK, PLAYER_INVENTORY, ALTAR_BINDING, RESONANCE_DISK, TASK_ACCOUNT, REGISTERED }
 
     public record BatchAvailability(long available, boolean snapshotReadable,
                                     String detail) {
@@ -1441,6 +1594,8 @@ public final class ExtractionLedger implements AutoCloseable {
         final Map<CraftingResolver.StackKey, Long> pendingNetworkAllocation = new HashMap<>();
         List<ItemStack> extracted = List.of();
         boolean accountHeld;
+        @Nullable RegisteredMaterialSources.Share extensionShare;
+        @Nullable RSICraftingMaterialSources.Reservation extensionReservation;
 
         Entry(Source source, Ingredient originalIngredient, ItemStack template, @Nullable ItemStack preExtracted,
               @Nullable ResourceKey<Level> altarDim, @Nullable BlockPos altarPos,
@@ -1496,6 +1651,7 @@ public final class ExtractionLedger implements AutoCloseable {
             return StorageOperationResult.extracted(StorageOperationMode.PERFORM, entry.count,
                     List.of(entry.preExtracted));
         }
+        if (entry.source == Source.REGISTERED) return extractRegistered(entry);
         CraftStorageEndpoint sourceEndpoint = entry.sourceEndpoint != null
                 ? entry.sourceEndpoint : endpoint != null ? endpoint : storageEndpoint;
         if (entry.source == Source.NETWORK && sourceEndpoint != null) {
@@ -1551,7 +1707,7 @@ public final class ExtractionLedger implements AutoCloseable {
                         entry.altarDim, entry.altarPos,
                         entry.originalIngredient, entry.count);
             }
-            case NETWORK, TASK_ACCOUNT -> ItemStack.EMPTY;
+            case NETWORK, TASK_ACCOUNT, REGISTERED -> ItemStack.EMPTY;
             case RESONANCE_DISK -> {
                 if (entry.resonanceView == null) yield ItemStack.EMPTY;
                 ItemStack extracted = entry.resonanceView.extractExactView(
@@ -1572,6 +1728,32 @@ public final class ExtractionLedger implements AutoCloseable {
                 yield extracted;
             }
         };
+    }
+
+    private static StorageOperationResult extractRegistered(Entry entry) {
+        var extraction = Objects.requireNonNull(entry.extensionReservation.commit());
+        List<ItemStack> confirmed = new ArrayList<>();
+        List<ItemStack> recovery = new ArrayList<>();
+        int remaining = entry.count;
+        for (ItemStack stack : extraction.items()) {
+            if (stack.isEmpty()) continue;
+            if (!entry.extensionShare.key().equals(CraftingResolver.StackKey.of(stack, true))
+                    || stack.getCount() > remaining) {
+                recovery.add(stack);
+                continue;
+            }
+            confirmed.add(stack);
+            remaining -= stack.getCount();
+        }
+        if (extraction.uncertain()) {
+            return StorageOperationResult.indeterminateExtraction(entry.count, confirmed, recovery,
+                    StorageDiagnosticCode.NATIVE_OPERATION_FAILED_AFTER_MUTATION);
+        }
+        if (!recovery.isEmpty()) {
+            return StorageOperationResult.failedExtraction(StorageOperationMode.PERFORM, entry.count,
+                    StorageOperationStatus.INVALID_RESPONSE, confirmed, recovery, StorageDiagnosticCode.INVALID_NATIVE_RESPONSE);
+        }
+        return StorageOperationResult.extracted(StorageOperationMode.PERFORM, entry.count, confirmed);
     }
 
     private static ItemStack extractFromSlots(Entry entry, List<ItemStack> slots) {
@@ -1616,27 +1798,25 @@ public final class ExtractionLedger implements AutoCloseable {
         return extracted;
     }
 
-    private int countExactAvailableInEndpoint(@Nullable CraftStorageEndpoint endpoint,
-                                              ItemStack template,
-                                              @Nullable ServerPlayer player) {
+    private BatchAvailability countExactAvailableInEndpoint(@Nullable CraftStorageEndpoint selected,
+                                                             ItemStack template, ServerPlayer player) {
+        if (selected == null || !materialSources.storageNetwork()) return new BatchAvailability(0, true, "");
+        String detail;
         try {
-            CraftStorageEndpoint selected = endpoint != null ? endpoint : storageEndpoint;
-            if (selected != null && player != null) {
-                StorageSnapshot snapshot = reservationSnapshot(selected, player);
-                long endpointAvailable = snapshot == null ? 0L
-                        : snapshot.countExact(selected.session().itemKey(template));
-                endpointAvailable = Math.max(0L, endpointAvailable
-                        - pendingNet.getOrDefault(CraftingResolver.StackKey.of(template, true), 0L));
-                long resonanceAvailable = countExactAvailableInPreferredResonance(
-                        template, selected, player);
-                return (int) Math.min(Integer.MAX_VALUE,
-                        Math.max(0L, endpointAvailable + resonanceAvailable));
+            StorageSnapshotResult result = reservationSnapshotResult(selected, player);
+            if (result.successful()) {
+                long stored = result.snapshot().orElseThrow().countExact(selected.session().itemKey(template));
+                long pending = pendingNet.getOrDefault(CraftingResolver.StackKey.of(template, true), 0L);
+                long available = saturatedAdd(Math.max(0L, stored - pending),
+                        countExactAvailableInPreferredResonance(template, selected, player));
+                return new BatchAvailability(available, true, "");
             }
-            return 0;
-        } catch (Exception e) {
-            LOGGER.warn("[RSI-Ledger] Error counting exact network stack", e);
-            return 0;
+            detail = result.status() + "/" + result.diagnosticCode();
+        } catch (RuntimeException | LinkageError failure) {
+            LOGGER.warn("[RSI-Ledger] Error counting exact network stack", failure);
+            detail = failure.getClass().getSimpleName();
         }
+        return new BatchAvailability(0, false, detail);
     }
 
     private int countExactAvailableInPreferredResonance(
@@ -1658,17 +1838,16 @@ public final class ExtractionLedger implements AutoCloseable {
         return (int) available;
     }
 
-    private int countExactAvailableInInventory(ServerPlayer player, ItemStack template) {
+    private long countExactAvailableInInventory(ServerPlayer player, ItemStack template) {
         CraftingResolver.StackKey key = CraftingResolver.StackKey.of(template, true);
-        int available = countExact(selectedMainInventory(player), template);
+        long available = countExact(selectedMainInventory(player), template);
         for (IItemHandler backpack : selectedBackpackInventories(player)) {
             for (int slot = 0; slot < backpack.getSlots(); slot++) {
                 ItemStack stored = readBackpackSlot(backpack, slot);
                 if (MaterialMatcher.sameRuntimeFragment(template, stored)) available += stored.getCount();
             }
         }
-        return (int) Math.min(Integer.MAX_VALUE,
-                Math.max(0L, available - pendingInv.getOrDefault(key, 0L)));
+        return Math.max(0L, available - pendingInv.getOrDefault(key, 0L));
     }
 
     private long countExactAvailableInInventoryLong(ServerPlayer player, ItemStack template) {
@@ -1697,7 +1876,7 @@ public final class ExtractionLedger implements AutoCloseable {
 
     private boolean reserveExactInventoryAvailability(ServerPlayer player, ItemStack template, int needed) {
         CraftingResolver.StackKey key = CraftingResolver.StackKey.of(template, true);
-        int available = countExactAvailableInInventory(player, template);
+        long available = countExactAvailableInInventory(player, template);
         if (available < needed) return false;
         pendingInv.merge(key, (long) needed, ExtractionLedger::saturatedAdd);
         return true;
@@ -1707,10 +1886,11 @@ public final class ExtractionLedger implements AutoCloseable {
     String describeExactAvailability(ItemStack template, ServerPlayer player) {
         if (template == null || template.isEmpty() || player == null) return "unreadable";
         try {
-            int network = countExactAvailableInEndpoint(storageEndpoint, template, player);
-            int inventory = countExactAvailableInInventory(player, template);
+            var network = countExactAvailableInEndpoint(storageEndpoint, template, player);
+            if (!network.snapshotReadable()) return network.detail();
+            long inventory = countExactAvailableInInventory(player, template);
             CraftingResolver.StackKey key = CraftingResolver.StackKey.of(template, true);
-            return "network=" + network + ", inventory=" + inventory
+            return "network=" + network.available() + ", inventory=" + inventory
                     + ", pendingNetwork=" + pendingNet.getOrDefault(key, 0L)
                     + ", pendingInventory=" + pendingInv.getOrDefault(key, 0L);
         } catch (RuntimeException e) {
@@ -1718,8 +1898,8 @@ public final class ExtractionLedger implements AutoCloseable {
         }
     }
 
-    private static int countExact(List<ItemStack> stacks, ItemStack template) {
-        int total = 0;
+    private static long countExact(List<ItemStack> stacks, ItemStack template) {
+        long total = 0;
         for (ItemStack stack : stacks) {
             if (MaterialMatcher.sameRuntimeFragment(template, stack)) total += stack.getCount();
         }
@@ -2101,6 +2281,7 @@ public final class ExtractionLedger implements AutoCloseable {
                         case PLAYER_INVENTORY -> "inventory";
                         case ALTAR_BINDING -> "altar_binding";
                         case RESONANCE_DISK -> "resonance_disk";
+                        case REGISTERED -> e.extensionShare.source().toString();
                     }));
         }
         return out;
@@ -2153,6 +2334,10 @@ public final class ExtractionLedger implements AutoCloseable {
         }
         CraftStorageEndpoint destination = e.sourceEndpoint != null
                 ? e.sourceEndpoint : endpoint != null ? endpoint : storageEndpoint;
+        if (e.source == Source.REGISTERED) {
+            refundLeftoverToPlayerOrStorage(refund, player, destination);
+            return;
+        }
         if (InkFluidSupport.isToken(refund)) {
             ItemStack leftover = refund;
             if (destination != null) {
@@ -2193,7 +2378,7 @@ public final class ExtractionLedger implements AutoCloseable {
             }
             case PLAYER_INVENTORY -> refundLeftoverToPlayerOrStorage(
                     refund, player, destination);
-            case TASK_ACCOUNT -> throw new IllegalStateException("账户退款不应到达外部来源");
+            case TASK_ACCOUNT, REGISTERED -> throw new IllegalStateException("退款已由来源专用路径处理");
         }
     }
 
@@ -2440,6 +2625,7 @@ public final class ExtractionLedger implements AutoCloseable {
     }
 
     private void decrementPending(Entry entry) {
+        if (entry.source == Source.REGISTERED) { releaseRegisteredReservation(entry); return; }
         if (entry.source == Source.TASK_ACCOUNT) { releaseAccountReservation(entry); return; }
         if (entry.source == Source.RESONANCE_DISK && entry.resonanceKey != null) {
             pendingResonance.computeIfPresent(entry.resonanceKey, (ignored, reserved) -> {

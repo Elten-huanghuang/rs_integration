@@ -54,17 +54,17 @@ public final class GoetyInitialMaterials {
         Map<MaterialKey, Long> required = new LinkedHashMap<>();
         Set<MaterialKey> fixed = new HashSet<>();
         for (MaterialAllocation allocation : graph.allocations()) {
-            if (allocation.source() instanceof InitialPool) {
+            if (allocation.source() instanceof InitialPool pool) {
                 required.merge(allocation.material(), allocation.quantity(), Math::addExact);
-                if (!flexiblePorts.contains(allocation.consumer())) fixed.add(allocation.material());
+                if (pool.extensionId() != null || !flexiblePorts.contains(allocation.consumer())) fixed.add(allocation.material());
             }
         }
         for (RootDemand root : graph.rootDemands()) {
             boolean flexible = goetyTerminal && root.role() == DemandRole.CONSUMED && ordinary(root.ingredient());
             for (RootAllocation allocation : root.allocations()) {
-                if (allocation.source() instanceof InitialPool) {
+                if (allocation.source() instanceof InitialPool pool) {
                     required.merge(allocation.material(), allocation.quantity(), Math::addExact);
-                    if (!flexible) fixed.add(allocation.material());
+                    if (pool.extensionId() != null || !flexible) fixed.add(allocation.material());
                 }
             }
         }

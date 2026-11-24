@@ -52,7 +52,8 @@ final class CraftPreviewInventoryRefresh implements CraftPlanResultDispatcher.Si
             cancelled(Component.translatable("rsi.plan.failure.planning_cancelled"));
             return;
         }
-        if (plan.graph() != null && PreviewInventorySyncManager.enabled()) {
+        if (plan.graph() != null && PreviewInventorySyncManager.enabled()
+                && snapshot.capturedExtensionStock() == null) {
             // 图中的初始供料在打开窗口后持续投影。数量变化不再重新启动整次搜索。
             finished = true;
             destination.success(plan, snapshot);

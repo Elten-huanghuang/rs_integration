@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.jei.client;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.api.RSIItemRetrievalInput;
 import com.huanghuang.rsintegration.config.ClientSyncedConfig;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.jei.JeiCheatDropPacket;
@@ -67,7 +68,7 @@ public final class JeiCheatShortcuts {
         boolean giveStack = matches(RSIKeyBindings.KEY_JEI_GIVE_STACK, input);
         boolean drop = matches(RSIKeyBindings.KEY_JEI_DROP, input);
         boolean pullStorage = matches(RSIKeyBindings.KEY_JEI_PULL_STORAGE, input);
-        if (pullStorage) return pullFromStorage(screen);
+        if (pullStorage) return pullFromStorage(screen, input);
         if (!giveOne && !giveStack && !drop) return false;
         IJeiRuntime runtime = activeRuntime(screen);
         if (runtime == null) return false;
@@ -105,7 +106,7 @@ public final class JeiCheatShortcuts {
         return true;
     }
 
-    private static boolean pullFromStorage(Screen screen) {
+    private static boolean pullFromStorage(Screen screen, InputConstants.Key input) {
         IJeiRuntime runtime = activeStorageRuntime(screen);
         if (runtime == null) return false;
         Optional<ItemStack> ingredient = itemUnderMouse(runtime);
@@ -115,6 +116,9 @@ public final class JeiCheatShortcuts {
             return false;
         }
         ItemStack request = ingredient.get().copyWithCount(ingredient.get().getMaxStackSize());
+        if (RSIItemRetrievalInput.dispatch(new RSIItemRetrievalInput.Context(
+                new RSIItemRetrievalInput.Jei(screen), request, input,
+                RSIItemRetrievalInput.Modifiers.current()))) return true;
         NetworkHandler.CHANNEL.sendToServer(new JeiStoragePullPacket(request));
         return true;
     }

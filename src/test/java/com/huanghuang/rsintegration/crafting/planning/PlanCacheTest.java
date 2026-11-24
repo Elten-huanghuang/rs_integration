@@ -140,7 +140,7 @@ class PlanCacheTest extends BootstrapTest {
         cache.put(first, wide, snapshot, 1);
         cache.retainForRequest(first.playerId(), 10, snapshot);
         assertNull(cache.get(first, 2));
-        assertSame(wide, cache.publishedPlan(first.playerId(), 10));
+        assertSame(wide, cache.publishedPlan(first.playerId(), 10).plan());
 
         PlanCache.Key other = key("other_player");
         cache.put(other, planWithGraph(1023), snapshot(other), 2);

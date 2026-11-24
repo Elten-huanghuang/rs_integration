@@ -5,7 +5,7 @@
 | Minecraft | 1.20.1 |
 | Java | 17 |
 | Forge | 47.x |
-| Integration API | 1.1.x |
+| Integration API | 1.3.x |
 | Resonance Inventory API | 1.0.x |
 | Consumer API | 1.0.x |
 
@@ -1510,7 +1510,7 @@ RS 与 BD 的魔法资源余额不会因调用这些入口自动共享或合并�
 
 ## 18. 原生交互扩展
 
-以下入口从 Integration API 1.2 提供。
+计划展示、结算事件和缺货兜底从 Integration API 1.2 提供。材料源、客户端输入和服务端取物从 1.3 提供。
 
 ### 18.1 原生合成计划展示
 
@@ -1518,7 +1518,9 @@ RS 与 BD 的魔法资源余额不会因调用这些入口自动共享或合并�
 配方、次数、存储网络、来源开关和外部材料需求，不把任务内的中间产物再算作外部材料。
 库存更新保留计划 ID 并增加 `inventoryRevision`；`complete=false` 表示只能看到已确认的材料。
 没有计划图时不会从展示用材料表猜测外部需求。
-现有规划不记录每种来源分别承担的数量，请勿把总可用量当作来源分摊。
+`Context.sourceAllocations()` 按精确物品身份和注册材料源 ID 汇总已确认分配的数量，
+可以直接用来报价。总可用量仍包含原生来源。开启实时库存同步时，来源或份额变化会撤下旧报价并自动请求新计划，
+即使材料总可用量相同也会刷新。新图发布后，扩展按新计划 ID 报价。
 
 `Provider.onPlan` 在客户端线程调用；耗时计算应在其他线程进行，可通过 `publish` 异步提交
 整份 `Decoration`，或用它更新同一计划的内容。换计划或更新库存后，旧回调的结果会被忽略。
@@ -1538,5 +1540,60 @@ RS 与 BD 的魔法资源余额不会因调用这些入口自动共享或合并�
 后端异常或部分交付时保持原流程。不同取物场景的交付目标不同，处理器应重验来源权限和空间。
 
 `Result.PASS` 不得扣料或修改库存；`new Delivered(actualCount)` 仅用于已经实际交付的物品，
-数量不得超过请求数。首次交付后停止调用并跳过原失败通知和收藏。该 API 不处理跨模组按键冲突，
-也不会注册递归合成材料来源。
+数量不得超过请求数。首次交付后停止调用并跳过原失败通知和收藏。原有注册方法接受 JEI
+背包和世界选块的空快捷栏交付。需要支持光标或快捷栏补齐时，调用接受目标集合和
+`supportsTopUp` 的重载，并在交付时检查 `Request.destinationIndex()`。
+
+### 18.4 注册递归合成材料源
+
+在 common setup 调用 `RSICraftingMaterialSources.register(id, toggle, source)`。
+`toggle` 指定该材料源跟随哪个原生来源开关。例如选择 `RSIPlanExtensions.Source.BACKPACKS`
+会让该来源跟随背包开关。RS 和超越维度共用同一调用契约。RSI 优先使用启用的原生库存，
+再按来源 ID 顺序补足差额。
+
+- `Source.snapshot(context)` 在服务端主线程读取玩家、所选网络和实时库存。上下文包含来源
+  开关、待查询的物品类型、阶段及可用的计划或任务标识。同一预览的库存轮询沿用服务端分配的
+  `Plan.generation()`。空物品类型集合表示允许枚举全部。
+- 每个 `Offer` 提供精确物品变体、数量上限、额度池 ID 和单位价格。多个物品可以共用池余额，
+  价格用 `BigInteger` 表示。不同材料源的额度池独立。规划使用这份快照，候选回退时恢复试分配
+  的额度。预览优先使用原生规划，发现可由扩展来源补料的缺口后才尝试共享额度。这个过程
+  遵守原有配方和机器启用条件。关闭多方块中间合成后，普通工作台仍可使用已启用的材料源。
+  实物或来源份额变化时，预览会撤下旧报价并自动重新规划。确认时发现需要改用其他来源或增加
+  扩展份额，RSI 会返回新计划，供玩家按更新后的 `sourceAllocations()` 重新确认。
+- `Source.reserve(context, requested, earlier)` 为当前任务尝试预留指定变体和数量。
+  RSI 按计划中的来源 ID 和份额预留。所选网络读取失败时，不会把它视为缺货或启用扩展补料；
+  只有未分配扩展份额且随身实物足量的需求可以继续。
+  `earlier` 是同一来源在本次预留批次中已获配的份额。预留只占额度，返回空值表示不足。
+  `Reservation.validate()` 校验预留是否仍然有效。RSI 在提交前重验，并调用
+  `Reservation.commit()` 实际取料。提交应检查预留仍成立，并报告实际取得的物品片段。
+- 已取得的片段由 RSI 账本结算，部分提取时也按实物处理。RSI 在提交、放弃或取消后调用
+  `release()` 释放剩余额度。任务失败或取消时，RSI 返还账本中可退的实物，来源的
+  `release()` 只释放预留额度。结果不明时返回 `Extraction(items, true)`，
+  由任务停止自动重试并记录已确认片段。
+
+### 18.5 协调客户端取物输入
+
+在客户端初始化时调用 `RSIItemRetrievalInput.register(id, priority, handler)`。
+RSI 在识别 JEI 拉取或世界选块后、发送自身请求前调用处理器。上下文包含目标物品、输入键、
+Shift、Ctrl 和 Alt 状态，以及 JEI 屏幕或世界方块命中信息。世界选块回调在 RSI 检查空手和
+已有匹配物品之前调用，因此处理器可选择接管补齐手持物品的操作。
+
+优先级高的处理器先调用，同优先级按 ID 排序。`PASS` 继续后续处理器和原生流程。
+`HANDLED` 消费输入，由当前处理器发送唯一的请求。
+
+### 18.6 服务端取物
+
+在服务端主线程调用 `RSIItemRetrieval.retrieve(request)`。选择 `Scene.JEI` 或
+`Scene.WORLD_PICK`。JEI 支持 `Inventory`、`Cursor(containerId)` 和
+`SelectedHotbar(slot)`。世界选块用 `SelectedHotbar(slot)`，可用 `SINGLE` 单取、
+`STACK` 整组或 `TOP_UP` 补齐同一物品。需要指定数量时使用 `COUNT`。
+RSI 解析当前网络，并检查权限、物品身份、交付目标和容量。
+`Cursor(containerId)` 适用于服务端可验证的菜单光标。创造模式物品栏的光标由调用方
+沿用已有的客户端校验和回执流程。后端精确物品键用于确认取出的身份，堆叠兼容性和容量
+按实际物品片段重新校验。
+
+`Result` 包含实际确认的 `deliveredCount()` 和 `status()`。除完全成功和部分交付，
+状态还区分缺货、无网络、无权限、无空间、无效请求和后端失败。`INDETERMINATE`
+表示转移结果不明，其数量只代表已确认交付的部分。调用方依据状态和交付数量统一发消息或收藏。
+`Fallback.REGISTERED` 允许 RSI 在确认缺货时使用已注册兜底。`Fallback.DISABLED`
+让调用方自行决定后续行为。调用方可以用 `confirmedZeroDelivery()` 判断零交付是否已确定。

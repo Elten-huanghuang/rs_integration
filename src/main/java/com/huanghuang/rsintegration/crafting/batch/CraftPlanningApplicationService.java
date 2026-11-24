@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
+import com.huanghuang.rsintegration.api.RSICraftingMaterialSources;
+import com.huanghuang.rsintegration.crafting.RegisteredMaterialSources;
 import com.huanghuang.rsintegration.crafting.MaterialAccess;
 
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
@@ -174,7 +176,7 @@ final class CraftPlanningApplicationService {
                 ImmutableRecipeGraphProjector.restrictToDependencies(graph, targetRecipeId);
         if (scoped.recipesById().values().stream().noneMatch(
                 CraftPlanningApplicationService::hasContextualInputs)) {
-            return bindingAwareGraph(player, scoped);
+            return bindingAwareGraph(player, scoped, targetRecipeId);
         }
         Set<ResourceLocation> unsupported = new HashSet<>();
         ImmutableRecipeGraph contextual =
@@ -204,7 +206,7 @@ final class CraftPlanningApplicationService {
                             }
                             return List.copyOf(inputs);
                         });
-        BindingAwareGraph filtered = bindingAwareGraph(player, contextual);
+        BindingAwareGraph filtered = bindingAwareGraph(player, contextual, targetRecipeId);
         boolean requiresTyped = unsupported.stream()
                 .anyMatch(filtered.graph().recipesById()::containsKey);
         return new BindingAwareGraph(
@@ -324,14 +326,17 @@ final class CraftPlanningApplicationService {
                             ? CraftPacketUtils.resolveEndpointForCraft(player, levelKey, lookupPos).orElse(null)
                             : CraftStorageEndpoints.resolve(storageReference, player).orElse(null));
         }
-        boolean current = refreshed != graph
-                ? PlanningStateValidator.revalidateGraphForExecution(
-                        player, entry.snapshot(), PlanGraphView.from(refreshed), levelKey, lookupPos, storageReference)
-                : PlanningStateValidator.revalidateForExecution(
-                        player, entry.snapshot(), entry.plan(), levelKey, lookupPos, storageReference);
-        if (!current) {
-            return ExecutionPlanLookup.invalid();
+        var state = PlanningStateValidator.executionState(player, entry.snapshot(),
+                refreshed != graph ? PlanGraphView.from(refreshed) : entry.plan().graph(),
+                levelKey, lookupPos, storageReference);
+        if (state == PlanningStateValidator.ExecutionState.STOCK_UNAVAILABLE) {
+            return new ExecutionPlanLookup(null, "rsi.plan.failure.material_stock_unavailable");
         }
+        if (explicitPreview && state == PlanningStateValidator.ExecutionState.QUOTE_CHANGED
+                && cache.consumeForRequest(player.getUUID(), confirmedPreviewRequestId, entry)) {
+            return new ExecutionPlanLookup(null, RegisteredMaterialSources.QUOTE_CHANGED);
+        }
+        if (state != PlanningStateValidator.ExecutionState.CURRENT) return ExecutionPlanLookup.invalid();
         boolean consumed = explicitPreview
                 ? cache.consumeForRequest(player.getUUID(), confirmedPreviewRequestId, entry)
                 : semanticLease
@@ -411,19 +416,16 @@ final class CraftPlanningApplicationService {
     }
 
     static BindingAwareGraph bindingAwareGraph(
-            ServerPlayer player, ImmutableRecipeGraph graph) {
-        return bindingAwareGraph(player, graph, false);
-    }
-
-    private static BindingAwareGraph bindingAwareGraph(
-            ServerPlayer player, ImmutableRecipeGraph graph, boolean requireIdleMachine) {
-        PreviewBindingCapture capture = bindingCapture(player, graph, requireIdleMachine);
+            ServerPlayer player, ImmutableRecipeGraph graph, ResourceLocation rootId) {
+        PreviewBindingCapture capture = bindingCapture(player, graph, false, rootId);
         capture.advance(() -> true);
         return capture.result();
     }
 
     private static PreviewBindingCapture bindingCapture(
-            ServerPlayer player, ImmutableRecipeGraph graph, boolean requireIdleMachine) {
+            ServerPlayer player, ImmutableRecipeGraph graph, boolean requireIdleMachine, @Nullable ResourceLocation rootId) {
+        boolean restrictIntermediates = rootId != null && !RSIntegrationConfig.enabled(
+                RSIntegrationConfig.COMMON_SPEC, RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING);
         Map<ResourceLocation, Optional<Recipe<?>>> recipes = new HashMap<>();
         Function<ResourceLocation, Recipe<?>> resolve = recipeId ->
                 recipes.computeIfAbsent(recipeId,
@@ -431,6 +433,8 @@ final class CraftPlanningApplicationService {
                                 CraftRecipeResolver.resolve(player.serverLevel(), id)))
                         .orElse(null);
         return new PreviewBindingCapture(graph, node -> {
+            if (restrictIntermediates && !node.recipeId().equals(rootId)
+                    && !ModType.GENERIC.id().equals(node.modTypeId())) return false;
             Recipe<?> recipe = resolve.apply(node.recipeId());
             return recipe == null
                     || CraftMachineBindingSupport.isRecipeAvailableForPlanning(player, recipe);
@@ -453,7 +457,9 @@ final class CraftPlanningApplicationService {
 
     static BindingAwareGraph consumerBindingAwareGraph(
             ServerPlayer player, ImmutableRecipeGraph graph) {
-        return bindingAwareGraph(player, graph, true);
+        var capture = bindingCapture(player, graph, true, null);
+        capture.advance(() -> true);
+        return capture.result();
     }
 
     static BindingAwareGraph filterRecipeGraph(
@@ -541,7 +547,8 @@ final class CraftPlanningApplicationService {
 
     private record CompletedTypedPreview(CraftPlanGraph graph, List<String> missing,
                                          ItemStack output, List<TypedRootKey> roots,
-                                         Map<Integer, ParallelPlan> parallelPlans, @Nullable PlanGraphView view) {}
+                                         Map<Integer, ParallelPlan> parallelPlans, @Nullable PlanGraphView view,
+                                         boolean extensionAttempt) {}
 
     private record TypedRootKey(Class<?> predicateType, Object predicate, long count,
                                 InputConsumption consumption) {}
@@ -628,7 +635,8 @@ final class CraftPlanningApplicationService {
                                              CraftingResolver.TypedPreview job, BooleanSupplier sameWorldContext,
                                              Consumer<CompletedTypedPreview> completed,
                                              Consumer<IntegrationDiagnostic> incomplete,
-                                             List<String> missing, ItemStack output, List<TypedRootKey> roots) {
+                                             List<String> missing, ItemStack output, List<TypedRootKey> roots,
+                                             boolean extensionAttempt) {
         var queue = CraftPlanningRuntime.typedPreviewRequests();
         class PreviewTask implements Runnable {
             private boolean solved;
@@ -725,7 +733,7 @@ final class CraftPlanningApplicationService {
                             return;
                         }
                         completed.accept(new CompletedTypedPreview(graph, missing, output, roots,
-                                parallelPlans, view));
+                                parallelPlans, view, extensionAttempt));
                     } finally {
                         PerformanceMonitor.recordPlanningLatency(
                                 PerformanceMonitor.PlanningLatencyPhase.TYPED_ASSEMBLY, System.nanoTime() - start);
@@ -773,6 +781,16 @@ final class CraftPlanningApplicationService {
             Function<Set<Item>, Map<StackKey, Long>> readStock, List<ScaledIngredientSpec> roots, Level level,
             ServerPlayer player, CraftStorageEndpoint endpoint, List<String> missing, boolean physical,
             int timeout, CraftingResolver.ActiveRootRecipe activeRoot, Map<String, ItemStack> locks) {
+        return startCompatiblePreview(snapshot, requests, server, tick, readStock, roots, level, player,
+                endpoint, missing, physical, timeout, activeRoot, locks, false);
+    }
+
+    private static CraftingResolver.TypedPreview startCompatiblePreview(
+            PlanningSnapshot snapshot, PlanRequestService requests, Executor server, IntSupplier tick,
+            Function<Set<Item>, Map<StackKey, Long>> readStock, List<ScaledIngredientSpec> roots, Level level,
+            ServerPlayer player, CraftStorageEndpoint endpoint, List<String> missing, boolean physical,
+            int timeout, CraftingResolver.ActiveRootRecipe activeRoot, Map<String, ItemStack> locks,
+            boolean extensionAttempt) {
         // 同一 tick 内共享精确物品的只读库存探针。账本中的中间产物没有对应的实物扣款。
         var validate = new CraftingResolver.BranchStockValidator() {
             int lastTick = Integer.MIN_VALUE;
@@ -806,7 +824,8 @@ final class CraftPlanningApplicationService {
         };
         return CraftingResolver.startHybridPreview(roots, snapshot.availableItems(), level, player, endpoint,
                 missing, snapshot.forcedRecipes(), physical, timeout, activeRoot, locks, snapshot.preferences(),
-                requests.branchDispatcher(snapshot, server), validate);
+                requests.branchDispatcher(snapshot, server), validate, extensionAttempt
+                        ? snapshot.extensionStock() : RegisteredMaterialSources.StockSnapshot.EMPTY);
     }
 
     static void tryBuildPlan(ServerPlayer player, ResourceLocation recipeId,
@@ -1305,9 +1324,8 @@ final class CraftPlanningApplicationService {
         } else {
             long snapshotStarted = System.nanoTime();
             try {
-                available = freshPreview
-                        ? MaterialSources.listAllAvailableFresh(player, planningEndpoint)
-                        : MaterialSources.listAllAvailable(player, planningEndpoint);
+                var physical = MaterialSources.readAllAvailable(player, planningEndpoint, freshPreview);
+                available = physical.counts();
                 boolean backgroundProjectable = RecipeIndex.isBackgroundProjectable(recipe);
                 boolean projectable = recipe instanceof CraftingRecipe || backgroundProjectable;
                 var level = player.serverLevel();
@@ -1323,9 +1341,10 @@ final class CraftPlanningApplicationService {
                         && scoped.recipesById().size() > IMMEDIATE_BINDING_SCAN_RECIPES) {
                     var captured = PlanningSnapshotFactory.capture(player.getUUID(), previewGeneration, recipeId,
                             available, effectiveOverrides, scoped, network, binding, Set.of(), false,
-                            safePreferences).withBindingAnchor(planDimKey, pos);
+                            safePreferences).withBindingAnchor(planDimKey, pos)
+                            .withNetworkStockReadable(physical.snapshotSuccessful());
                     scheduleBindingCapture(player, recipeId, previewGeneration,
-                            bindingCapture(player, scoped, false), captured,
+                            bindingCapture(player, scoped, false, recipeId), captured,
                             () -> player.serverLevel() == level && binding.equals(
                                     PlanningStateValidator.bindingFingerprint(player, planDimKey, pos)),
                             current -> tryBuildPlan(player, recipeId, forcedRecipes, dim, pos, repeatCount,
@@ -1336,7 +1355,7 @@ final class CraftPlanningApplicationService {
                 }
                 BindingAwareGraph bindingGraph = contextual
                         ? scopedBindingAwareGraph(player, graph, recipeId)
-                        : bindingAwareGraph(player, scoped);
+                        : bindingAwareGraph(player, scoped, recipeId);
                 planningSnapshot = PlanningSnapshotFactory.capture(
                         player.getUUID(), previewGeneration, recipeId, available,
                         effectiveOverrides,
@@ -1345,7 +1364,8 @@ final class CraftPlanningApplicationService {
                         bindingGraph.blockedOutputIds(),
                         bindingGraph.requiresTypedPlanning()
                                 || !(recipe instanceof CraftingRecipe) && !backgroundProjectable,
-                        safePreferences).withBindingAnchor(planDimKey, pos);
+                        safePreferences).withBindingAnchor(planDimKey, pos)
+                        .withNetworkStockReadable(physical.snapshotSuccessful());
             } finally {
                 long elapsed = System.nanoTime() - snapshotStarted;
                 PerformanceMonitor.recordPlanningSnapshot(elapsed);
@@ -1398,7 +1418,9 @@ final class CraftPlanningApplicationService {
                 || cached.plan().graph() != null && PlanningStateValidator.sameRelevantState(
                 cached.snapshot(), planningSnapshot, cached.plan()))) {
             RSIntegrationMod.debug("[RSI-tryBuildPlan] Validated cache hit: recipeId={}", recipeId);
-            sink.success(cached.plan(), cached.snapshot());
+            CraftPlanningRuntime.planCache().put(cacheKey, cached.plan(), planningSnapshot, cached.purePlan(),
+                    cached.resolvedGraph(), cached.terminalEmbedded(), System.nanoTime());
+            sink.success(cached.plan(), planningSnapshot);
             return;
         }
         if (cached != null) {
@@ -1436,6 +1458,9 @@ final class CraftPlanningApplicationService {
                 : new DirectMaterialAllocator.Result(false, List.of(), -1, 0);
         boolean directTerminalPlan = CraftIngredientPlanMath.useDirectTerminalPlan(
                 directPreviewAllocation, recipeSpecs, planTargetOutput);
+        // 后台路线只依赖实物库存；扩展报价不会让已完成的路线失效。
+        boolean matchesRoutedSnapshot = routedPlan != null
+                && routedPlan.snapshot().equals(planningSnapshot.withExtensionStock(null));
         if (directTerminalPlan) {
             RSIntegrationMod.LOGGER.info(
                     "[RSI-plan] direct terminal preview recipe={} specs={} fragments={} recursivePlannerBypassed=true",
@@ -1507,7 +1532,7 @@ final class CraftPlanningApplicationService {
                     PureDemandTreeInspector.Status.TARGET_NOT_PROJECTED, 0,
                     null, false);
             demandTreeElapsed = 0L;
-        } else if (routedPlan != null && routedPlan.snapshot().equals(planningSnapshot)
+        } else if (matchesRoutedSnapshot
                 && routedPlan.routing().matchesPolicy(demandMaxNodes, reusableCatalystOutputIds,
                         reusableCatalystRecipeIds, pureIncompatibleOutputIds)) {
             demandTree = routedPlan.inspection();
@@ -1538,9 +1563,7 @@ final class CraftPlanningApplicationService {
                     demandTree.visitedNodes(), demandTree.unresolved());
         }
         boolean projectedOverrides = effectiveOverrides.isEmpty()
-                || routedPlan != null
-                && routedPlan.snapshot().equals(planningSnapshot)
-                && routedPlan.forcedRecipesProjected();
+                || matchesRoutedSnapshot && routedPlan.forcedRecipesProjected();
         RouteDecision routeDecision = directTerminalPlan
                 ? new RouteDecision(PlannerAction.USE_PURE_RESULT, RouteReason.PURE_SUCCESS)
                 : CraftPlanDecisionRules.completedRoute(planningSnapshot, !materialLocks.isEmpty(),
@@ -1570,18 +1593,24 @@ final class CraftPlanningApplicationService {
                     CraftFailureMessages.purePreviewDiagnostic(precomputedPlan)));
             return;
         }
-        boolean selectedPureResolver = routeDecision.action() == PlannerAction.USE_PURE_RESULT
-                || timedOutMissingRoute;
-        boolean needsTypedResolver = routeDecision.action() == PlannerAction.RUN_TYPED;
-        if (needsTypedResolver && !RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING.get()) {
-            sink.error(PlanOutcome.RUNTIME_UNAVAILABLE,
-                    IntegrationDiagnostic.error(IntegrationDiagnosticCode.MULTIBLOCK_DISABLED));
-            return;
+        boolean typedStorageAllowed = planningEndpoint != null || (recipe instanceof CraftingRecipe
+                && (recipeModType == null || recipeModType == ModType.GENERIC));
+        boolean pureShortage = routeDecision.action() == PlannerAction.USE_PURE_RESULT
+                && PlanningSnapshot.hasPureShortage(precomputedPlan);
+        boolean typedShortage = routeDecision.action() == PlannerAction.RUN_TYPED && completedTyped != null
+                && !completedTyped.extensionAttempt()
+                && (!completedTyped.graph().unresolvedDemands().isEmpty()
+                    || completedTyped.graph().rootDemands().stream().anyMatch(root -> root.unresolvedQuantity() > 0));
+        if (typedStorageAllowed && (pureShortage || typedShortage)) {
+            planningSnapshot = capturePreviewExtensionStock(player, planningEndpoint, planningSnapshot);
         }
+        boolean supplementPure = routeDecision.action() == PlannerAction.USE_PURE_RESULT
+                && typedStorageAllowed && planningSnapshot.canSupplement(precomputedPlan);
+        boolean selectedPureResolver = !supplementPure
+                && (routeDecision.action() == PlannerAction.USE_PURE_RESULT || timedOutMissingRoute);
+        boolean needsTypedResolver = routeDecision.action() == PlannerAction.RUN_TYPED || supplementPure;
         // 兼容规划也处理可复用催化剂等普通工作台配方，不一定涉及机器。
-        if (needsTypedResolver && planningEndpoint == null
-                && (!(recipe instanceof CraftingRecipe)
-                || recipeModType != null && recipeModType != ModType.GENERIC)) {
+        if (needsTypedResolver && !typedStorageAllowed) {
             sink.error(PlanOutcome.RUNTIME_UNAVAILABLE,
                     IntegrationDiagnostic.error(IntegrationDiagnosticCode.NETWORK_UNAVAILABLE));
             return;
@@ -1705,7 +1734,10 @@ final class CraftPlanningApplicationService {
             usedPurePlan = true;
         } else {
             selectedTypedResolver = true;
-            if (completedTyped == null) {
+            boolean retryWithExtension = completedTyped != null && !completedTyped.extensionAttempt()
+                    && planningSnapshot.extensionStock().canSupplement(completedTyped.graph());
+            if (completedTyped == null || retryWithExtension) {
+                boolean extensionAttempt = supplementPure || retryWithExtension;
                 PlanningSnapshot typedSnapshot = planningSnapshot;
                 var level = player.serverLevel();
                 var bindingFingerprint = PlanningStateValidator.bindingFingerprint(player, planDimKey, pos);
@@ -1718,7 +1750,8 @@ final class CraftPlanningApplicationService {
                                 typedSnapshot.preferences().materialSources()),
                         recursiveRecipeSpecs, level, player, planningEndpoint, missing,
                         CraftExecutionPolicy.usesPhysicalMachineInputSlots(recipe),
-                        RSIntegrationConfig.CRAFTING_TYPED_PREVIEW_TIMEOUT_MS.get(), activeRoot, materialLocks);
+                        RSIntegrationConfig.CRAFTING_TYPED_PREVIEW_TIMEOUT_MS.get(), activeRoot, materialLocks,
+                        extensionAttempt);
                 scheduleTypedPreview(player, recipeId, previewGeneration, typedSnapshot, sink, job,
                         () -> player.serverLevel() == level && Objects.equals(bindingFingerprint,
                                 PlanningStateValidator.bindingFingerprint(player, planDimKey, pos)),
@@ -1729,7 +1762,7 @@ final class CraftPlanningApplicationService {
                         diagnostic -> sink.incomplete(PlanResponse.incomplete(recipeId, activeRoot.output(),
                                 repeatCount, dim, pos, baseItem, clickedOutput, planStorageReference,
                                 PlanGraphView.from(job.completedRootsGraph()), available, diagnostic)),
-                        missing, activeRoot.output(), rootKeys);
+                        missing, activeRoot.output(), rootKeys, extensionAttempt);
                 return;
             }
             if (!ItemStack.matches(completedTyped.output(), targetOutput)
@@ -1786,7 +1819,7 @@ final class CraftPlanningApplicationService {
                                 baseItem, clickedOutput, requestId, previewGeneration, precomputedPlan, currentSnapshot,
                                 true, reuseValidatedSnapshot, sink, planStorageReference, materialLocks, routedPlan,
                                 safePreferences, new CompletedTypedPreview(graph, List.of(), planTargetOutput,
-                                        roots, work.result(), null)), sink);
+                                        roots, work.result(), null, false)), sink);
                 return;
             }
             resolutionSteps = ExecutionEquivalence.projectFlatSteps(planGraph);
@@ -2687,6 +2720,15 @@ final class CraftPlanningApplicationService {
 
     static boolean requiresFreshPreview(@Nullable ModType terminalType, @Nullable PlanResponse plan) {
         return plan != null && !plan.canConfirmExecution() || requiresContextualPreview(terminalType, plan);
+    }
+
+    static PlanningSnapshot capturePreviewExtensionStock(ServerPlayer player, @Nullable CraftStorageEndpoint endpoint,
+                                                          PlanningSnapshot snapshot) {
+        if (!snapshot.networkStockReadable() || snapshot.capturedExtensionStock() != null
+                || !RegisteredMaterialSources.hasEnabled(snapshot.preferences().materialSources())) return snapshot;
+        return snapshot.withExtensionStock(RegisteredMaterialSources.capture(player, endpoint,
+                snapshot.preferences().materialSources(), Set.of(), RSICraftingMaterialSources.Phase.PLAN,
+                new RSICraftingMaterialSources.Plan(snapshot.recipeId(), snapshot.requestGeneration()), null));
     }
 
     private static boolean requiresContextualPreview(@Nullable ModType terminalType, @Nullable PlanResponse plan) {

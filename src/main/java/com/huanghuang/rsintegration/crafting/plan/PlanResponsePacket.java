@@ -770,19 +770,26 @@ public final class PlanResponsePacket {
     }
 
     private static void writeSource(FriendlyByteBuf buf, PlanGraphView.SourceView source) {
-        buf.writeBoolean(source.initial());
-        if (!source.initial()) {
+        if (source.extensionId() != null) {
+            buf.writeByte(2);
+            buf.writeResourceLocation(source.extensionId());
+        } else if (source.initial()) {
+            buf.writeByte(1);
+        } else {
+            buf.writeByte(0);
             buf.writeVarInt(source.producerNodeId());
             buf.writeVarInt(source.producerPortIndex());
         }
     }
 
     private static PlanGraphView.SourceView readSource(FriendlyByteBuf buf) {
-        return buf.readBoolean()
-                ? new PlanGraphView.SourceView(true, -1, -1)
-                : new PlanGraphView.SourceView(false,
-                readNonNegativeVarInt(buf, "source producer node"),
-                readNonNegativeVarInt(buf, "source producer port"));
+        return switch (buf.readUnsignedByte()) {
+            case 0 -> PlanGraphView.SourceView.fromProducer(readNonNegativeVarInt(buf, "source producer node"),
+                    readNonNegativeVarInt(buf, "source producer port"));
+            case 1 -> PlanGraphView.SourceView.fromInitial();
+            case 2 -> new PlanGraphView.SourceView(true, -1, -1, buf.readResourceLocation());
+            default -> throw new IllegalArgumentException("unknown plan material source");
+        };
     }
 
     public PlanResponse plan() {

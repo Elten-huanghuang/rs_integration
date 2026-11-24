@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting;
 
+import com.huanghuang.rsintegration.api.RSICraftingMaterialSources;
+import com.huanghuang.rsintegration.crafting.RegisteredMaterialSources.StockSnapshot;
 import com.huanghuang.rsintegration.crafting.planning.FrozenRecipeBranch;
 import com.huanghuang.rsintegration.crafting.batch.VirtualExchangeRecipe;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
@@ -453,9 +455,19 @@ public final class CraftingResolver {
             @Nullable List<String> missingOut, @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
             boolean singleVariantRoots, int timeoutMs, @Nullable ActiveRootRecipe activeRoot,
             Map<String, ItemStack> materialLocks, PlanningPreferences preferences) {
+        return startTypedPreview(needed, availableKeyed, level, player, storageEndpoint, missingOut,
+                forcedOverrides, singleVariantRoots, timeoutMs, activeRoot, materialLocks, preferences, null);
+    }
+
+    private static TypedPreview startTypedPreview(
+            List<ScaledIngredientSpec> needed, Map<StackKey, ? extends Number> availableKeyed, Level level,
+            @Nullable ServerPlayer player, @Nullable CraftStorageEndpoint storageEndpoint,
+            @Nullable List<String> missingOut, @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides,
+            boolean singleVariantRoots, int timeoutMs, @Nullable ActiveRootRecipe activeRoot,
+            Map<String, ItemStack> materialLocks, PlanningPreferences preferences, @Nullable StockSnapshot extensionStock) {
         return startRootResolution(rootSpecs(needed), availableKeyed, level, player, storageEndpoint,
                 missingOut, forcedOverrides, true, singleVariantRoots, timeoutMs, activeRoot,
-                materialLocks, preferences.excludedRecipes(), preferences, true);
+                materialLocks, preferences.excludedRecipes(), preferences, true, extensionStock, null);
     }
 
     @FunctionalInterface
@@ -475,9 +487,19 @@ public final class CraftingResolver {
             @Nullable Map<ResourceLocation, ResourceLocation> forced, boolean machineSlots, int timeoutMs,
             @Nullable ActiveRootRecipe root, Map<String, ItemStack> locks, PlanningPreferences preferences,
             FrozenRecipeBranch.Dispatcher dispatcher, BranchStockValidator validateStock) {
+        return startHybridPreview(needed, available, level, player, endpoint, missing, forced,
+                machineSlots, timeoutMs, root, locks, preferences, dispatcher, validateStock, StockSnapshot.EMPTY);
+    }
+
+    public static TypedPreview startHybridPreview(
+            List<ScaledIngredientSpec> needed, Map<StackKey, ? extends Number> available, Level level,
+            ServerPlayer player, @Nullable CraftStorageEndpoint endpoint, List<String> missing,
+            @Nullable Map<ResourceLocation, ResourceLocation> forced, boolean machineSlots, int timeoutMs,
+            @Nullable ActiveRootRecipe root, Map<String, ItemStack> locks, PlanningPreferences preferences,
+            FrozenRecipeBranch.Dispatcher dispatcher, BranchStockValidator validateStock, StockSnapshot extensionStock) {
         var preview = startTypedPreview(needed, available, level, player, endpoint, missing, forced,
-                machineSlots, timeoutMs, root, locks, preferences);
-        preview.context.hybrid = new HybridBranchPlanning(dispatcher, validateStock);
+                machineSlots, timeoutMs, root, locks, preferences, extensionStock);
+        if (extensionStock.isEmpty()) preview.context.hybrid = new HybridBranchPlanning(dispatcher, validateStock);
         return preview;
     }
 
@@ -576,10 +598,10 @@ public final class CraftingResolver {
             Map<StackKey, ? extends Number> available, Level level, ServerPlayer player, CraftStorageEndpoint storageEndpoint,
             List<String> missing, Set<ResourceLocation> excludedRecipes,
             Map<ResourceLocation, ResourceLocation> forcedRecipes, Map<String, ItemStack> materialLocks,
-            ActiveRootRecipe activeRoot) {
+            ActiveRootRecipe activeRoot, UUID taskId) {
         return startRootResolution(ingredientRootSpecs(needed), available, level, player, storageEndpoint,
                 missing, forcedRecipes, false, true, null, activeRoot, materialLocks, excludedRecipes,
-                PlanningPreferences.empty(), false);
+                PlanningPreferences.empty(), false, null, taskId);
     }
 
     private static CraftPlanGraph resolveGraphForSpecsWithTypes(
@@ -639,9 +661,35 @@ public final class CraftingResolver {
             boolean singleVariantRoots, int timeoutMs, @Nullable ActiveRootRecipe activeRoot,
             Map<String, ItemStack> materialLocks, Set<ResourceLocation> excludedRecipes,
             PlanningPreferences preferences) {
-        return startRootResolution(needed, availableKeyed, level, player, storageEndpoint, missingOut,
+        var selected = MaterialSourceSelection.fromMask(
+                MaterialSourceSelection.current().mask() & preferences.materialSources().mask());
+        boolean checkSources = player != null && RegisteredMaterialSources.hasEnabled(selected);
+        List<String> physicalMissing = checkSources && missingOut == null ? new ArrayList<>() : missingOut;
+        int previousMissing = physicalMissing == null ? 0 : physicalMissing.size();
+        var nativeSearch = startRootResolution(needed, availableKeyed, level, player, storageEndpoint, physicalMissing,
                 forcedOverrides, bestEffort, singleVariantRoots, timeoutMs, activeRoot,
-                materialLocks, excludedRecipes, preferences, false).finishSynchronously();
+                materialLocks, excludedRecipes, preferences, false, StockSnapshot.EMPTY, null);
+        if (checkSources) nativeSearch.context.failedIngredients = new LinkedHashSet<>();
+        var nativePlan = nativeSearch.finishSynchronously();
+        if (!checkSources
+                || nativeSearch.context.timeoutReached()
+                || (nativePlan.unresolvedDemands().isEmpty()
+                    && nativeSearch.context.missingCount() == previousMissing
+                    && nativePlan.rootDemands().stream().noneMatch(root -> root.unresolvedQuantity() > 0))) {
+            return nativePlan;
+        }
+        var plan = activeRoot == null ? null : new RSICraftingMaterialSources.Plan(activeRoot.recipeId(), 0L);
+        var extensionStock = RegisteredMaterialSources.capture(player, storageEndpoint,
+                selected, Set.of(), RSICraftingMaterialSources.Phase.REVALIDATE, plan, null);
+        if (!extensionStock.canSupplement(nativePlan)
+                && nativeSearch.context.failedIngredients.stream().noneMatch(extensionStock::matches)) return nativePlan;
+        var retry = startRootResolution(needed, availableKeyed, level, player, storageEndpoint, missingOut,
+                forcedOverrides, bestEffort, singleVariantRoots, timeoutMs, activeRoot,
+                materialLocks, excludedRecipes, preferences, false, extensionStock, null);
+        retry.context.deadlineNanos = nativeSearch.context.deadlineNanos;
+        retry.context.ensureCalls = nativeSearch.context.ensureCalls;
+        if (missingOut != null) missingOut.subList(previousMissing, missingOut.size()).clear();
+        return retry.finishSynchronously();
     }
 
     private static TypedPreview startRootResolution(
@@ -651,7 +699,8 @@ public final class CraftingResolver {
             @Nullable Map<ResourceLocation, ResourceLocation> forcedOverrides, boolean bestEffort,
             boolean singleVariantRoots, @Nullable Integer timeoutMs, @Nullable ActiveRootRecipe activeRoot,
             Map<String, ItemStack> materialLocks, Set<ResourceLocation> excludedRecipes,
-            PlanningPreferences preferences, boolean checkPreviewBudget) {
+            PlanningPreferences preferences, boolean checkPreviewBudget, @Nullable StockSnapshot extensionStock,
+            @Nullable UUID taskId) {
         Map<ResourceLocation, ResourceLocation> prefs = mergeForcedOverrides(level, forcedOverrides);
         Map<Item, List<RecipeIndex.Entry>> index = RecipeIndex.get(level);
         // 补料由当前 tick 的共享预算逐帧推进；保留步数、深度和循环约束，没有跨轮的墙钟截止时间。
@@ -662,6 +711,14 @@ public final class CraftingResolver {
                 timeoutMs != null && timeoutMs > 0 && shouldAbortOnTimeout(bestEffort));
         ctx.withMaterialLocks(materialLocks);
         ctx.withPreferences(preferences);
+        if (extensionStock == null && player != null) {
+            var phase = taskId != null ? RSICraftingMaterialSources.Phase.TASK
+                    : checkPreviewBudget ? RSICraftingMaterialSources.Phase.PLAN : RSICraftingMaterialSources.Phase.REVALIDATE;
+            var plan = activeRoot == null ? null : new RSICraftingMaterialSources.Plan(activeRoot.recipeId(), 0L);
+            extensionStock = RegisteredMaterialSources.capture(player, storageEndpoint,
+                    MaterialSourceSelection.current(), Set.of(), phase, plan, taskId);
+        }
+        if (extensionStock != null) ctx.setExtensionStock(extensionStock);
         // 补料还要排除任务中未结束的配方，不能被空的持久偏好覆盖。
         ctx.excludedRecipes = Set.copyOf(excludedRecipes);
         EdgeTracker edges = new EdgeTracker();
@@ -1707,6 +1764,7 @@ public final class CraftingResolver {
      */
     static void recordFailureMissing(ResolutionContext ctx, Ingredient ingredient,
                                      int missingCheckpoint) {
+        if (ctx.failedIngredients != null) ctx.failedIngredients.add(ingredient);
         if (ctx.missingOut == null || ctx.missingCount() > missingCheckpoint) return;
         ctx.addMissing(describeFirstItem(ingredient));
     }

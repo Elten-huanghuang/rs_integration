@@ -1,5 +1,7 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
+import com.huanghuang.rsintegration.api.RSICraftingMaterialSources;
+import com.huanghuang.rsintegration.crafting.RegisteredMaterialSources;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.CraftPlanningRevision;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
@@ -30,15 +32,19 @@ import net.minecraft.world.item.ItemStack;
 import org.slf4j.Logger;
 
 import javax.annotation.Nullable;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 /** Server-thread validation for cached and background planning results. */
 public final class PlanningStateValidator {
     private static final Logger LOGGER = LogUtils.getLogger();
+
+    public enum ExecutionState { CURRENT, STALE, STOCK_UNAVAILABLE, QUOTE_CHANGED }
 
     private PlanningStateValidator() {}
 
@@ -110,21 +116,21 @@ public final class PlanningStateValidator {
                                                  @Nullable PlanResponse plan,
                                                  ResourceKey<Level> dimension, BlockPos lookupPos,
                                                  @Nullable StorageReference selectedReference) {
-        if (!executionSnapshotCurrent(player, snapshot)) return false;
-        return revalidateRelevantGraph(player, snapshot,
-                plan == null ? null : plan.graph(), dimension, lookupPos, selectedReference, true);
+        return revalidateGraphForExecution(player, snapshot, plan == null ? null : plan.graph(),
+                dimension, lookupPos, selectedReference);
     }
 
     /** 后台纯规划与缓存执行共用同一份实际初始供料核验。 */
     public static boolean revalidateGraphForExecution(
-            ServerPlayer player, PlanningSnapshot snapshot, PlanGraphView graph,
+            ServerPlayer player, PlanningSnapshot snapshot, @Nullable PlanGraphView graph,
             ResourceKey<Level> dimension, BlockPos lookupPos,
             @Nullable StorageReference selectedReference) {
-        if (!executionSnapshotCurrent(player, snapshot)) return false;
-        return revalidateRelevantGraph(player, snapshot, graph, dimension, lookupPos, selectedReference, true);
+        return executionState(player, snapshot, graph, dimension, lookupPos, selectedReference) == ExecutionState.CURRENT;
     }
 
-    private static boolean executionSnapshotCurrent(ServerPlayer player, PlanningSnapshot snapshot) {
+    public static ExecutionState executionState(ServerPlayer player, PlanningSnapshot snapshot,
+            @Nullable PlanGraphView graph, ResourceKey<Level> dimension, BlockPos lookupPos,
+            @Nullable StorageReference selectedReference) {
         if (player.hasDisconnected() || player.isRemoved()) {
             return rejectState(snapshot, true, "player-unavailable", "connected", "unavailable");
         }
@@ -132,10 +138,10 @@ public final class PlanningStateValidator {
             return rejectState(snapshot, true, "recipe-revision-changed",
                     snapshot.recipeRevision(), CraftPlanningRevision.current());
         }
-        return true;
+        return revalidateRelevantGraph(player, snapshot, graph, dimension, lookupPos, selectedReference, true);
     }
 
-    private static boolean revalidateRelevantGraph(ServerPlayer player, PlanningSnapshot snapshot,
+    private static ExecutionState revalidateRelevantGraph(ServerPlayer player, PlanningSnapshot snapshot,
                                                    @Nullable PlanGraphView graph,
                                                    ResourceKey<Level> dimension, BlockPos lookupPos,
                                                    @Nullable StorageReference selectedReference,
@@ -162,13 +168,25 @@ public final class PlanningStateValidator {
         if (!snapshot.bindingFingerprint().equals(currentBinding)) {
             return rejectState(snapshot, execution, "binding-changed", snapshot.bindingFingerprint(), currentBinding);
         }
-        if (graph == null) return true;
+        if (graph == null) return ExecutionState.CURRENT;
         if (!graph.unresolved().isEmpty()) {
             return rejectState(snapshot, execution, "unresolved-plan", 0, graph.unresolved().size());
         }
         Map<StackKey, Long> required = requiredInitialSupply(graph);
-        Map<StackKey, Long> currentAvailable = MaterialSources.listAvailableForTypes(
-                player, endpoint, itemTypes(required), snapshot.preferences().materialSources());
+        Set<Item> types = itemTypes(required);
+        var physical = MaterialSources.readAvailableForTypes(
+                player, endpoint, types, snapshot.preferences().materialSources());
+        var currentAvailable = physical.counts();
+        var shares = extensionShares(graph);
+        if (shares.isEmpty() && hasRequiredInitialSupply(required, currentAvailable)) return ExecutionState.CURRENT;
+        if (!physical.snapshotSuccessful()) return ExecutionState.STOCK_UNAVAILABLE;
+        var extension = captureExtensionStock(player, snapshot, endpoint, types,
+                RSICraftingMaterialSources.Phase.REVALIDATE);
+        if (extension.matchesAllocation(required, currentAvailable, shares)) return ExecutionState.CURRENT;
+        if (extension.covers(required, currentAvailable)) {
+            LOGGER.debug("[RSI-PlanValidation] Material allocation changed for {} ({})", snapshot.recipeId(), snapshot.playerId());
+            return ExecutionState.QUOTE_CHANGED;
+        }
         for (Map.Entry<StackKey, Long> entry : required.entrySet()) {
             long available = currentAvailable.getOrDefault(entry.getKey(), 0L);
             if (available < entry.getValue()) {
@@ -178,17 +196,17 @@ public final class PlanningStateValidator {
                                 + " count=" + entry.getValue(), available);
             }
         }
-        return true;
+        return ExecutionState.CURRENT;
     }
 
-    private static boolean rejectState(PlanningSnapshot snapshot, boolean execution,
+    private static ExecutionState rejectState(PlanningSnapshot snapshot, boolean execution,
                                         String reason, Object expected, Object actual) {
         // 确认失败必须在普通日志中留下原因；预览轮询仍保持安静。
         if (execution) {
             LOGGER.warn("[RSI-PlanValidation] execution rejected recipe={} player={} reason={} expected={} actual={}",
                     snapshot.recipeId(), snapshot.playerId(), reason, expected, actual);
         }
-        return false;
+        return ExecutionState.STALE;
     }
 
     /**
@@ -206,7 +224,7 @@ public final class PlanningStateValidator {
             return false;
         }
         return revalidateRelevantGraph(player, snapshot, null, dimension, lookupPos,
-                selectedReference, false);
+                selectedReference, false) == ExecutionState.CURRENT;
     }
 
     /** 只读本次计划相关物品的新鲜库存，不复用同 tick 的完整库存缓存。 */
@@ -219,8 +237,29 @@ public final class PlanningStateValidator {
         CraftStorageEndpoint endpoint = selectedReference == null
                 ? CraftPacketUtils.resolveEndpointForCraft(player, dimension, lookupPos).orElse(null)
                 : CraftStorageEndpoints.resolve(selectedReference, player).orElse(null);
-        return previewNeedsRefresh(snapshot, plan,
-                MaterialSources.listAvailableForTypes(player, endpoint, types, snapshot.preferences().materialSources()));
+        if (selectedReference != null && endpoint == null) return false;
+        var stock = MaterialSources.readAvailableForTypes(player, endpoint, types, snapshot.preferences().materialSources());
+        if (!stock.snapshotSuccessful()) return false;
+        var physical = stock.counts();
+        if (plan.success() && plan.graph() != null) {
+            var required = requiredInitialSupply(plan.graph());
+            var shares = extensionShares(plan.graph());
+            if (shares.isEmpty()) return !hasRequiredInitialSupply(required, physical);
+            var extension = captureExtensionStock(player, snapshot, endpoint, types, RSICraftingMaterialSources.Phase.PLAN);
+            return !extension.matchesAllocation(required, physical, shares);
+        }
+        if (snapshot.capturedExtensionStock() != null) {
+            var extension = captureExtensionStock(player, snapshot, endpoint, Set.of(), RSICraftingMaterialSources.Phase.PLAN);
+            if (!snapshot.extensionStock().equals(extension)) return true;
+        }
+        return previewNeedsRefresh(snapshot, plan, physical);
+    }
+
+    private static RegisteredMaterialSources.StockSnapshot captureExtensionStock(ServerPlayer player,
+            PlanningSnapshot snapshot, @Nullable CraftStorageEndpoint endpoint, Set<Item> types,
+            RSICraftingMaterialSources.Phase phase) {
+        return RegisteredMaterialSources.capture(player, endpoint, snapshot.preferences().materialSources(),
+                types, phase, new RSICraftingMaterialSources.Plan(snapshot.recipeId(), snapshot.requestGeneration()), null);
     }
 
     private static Set<Item> previewItemTypes(PlanningSnapshot snapshot, PlanResponse plan) {
@@ -252,6 +291,8 @@ public final class PlanningStateValidator {
         return left.recipeRevision() == right.recipeRevision()
                 && left.recipeId().equals(right.recipeId())
                 && left.availableItems().equals(right.availableItems())
+                && left.networkStockReadable() == right.networkStockReadable()
+                && left.extensionStock().equals(right.extensionStock())
                 && left.forcedRecipes().equals(right.forcedRecipes())
                 && left.preferences().equals(right.preferences())
                 && left.networkFingerprint().equals(right.networkFingerprint())
@@ -274,9 +315,20 @@ public final class PlanningStateValidator {
                 .equals(networkIdentity(current.networkFingerprint()))) {
             return false;
         }
-        if (cached.availableItems().equals(current.availableItems())) return true;
-        return plan != null && plan.success() && hasRequiredInitialSupply(plan,
-                current.availableItems());
+        if (cached.availableItems().equals(current.availableItems())
+                && cached.extensionStock().equals(current.extensionStock())) return true;
+        if (plan == null || !plan.success()) return false;
+        if (plan.graph() == null) return true;
+        return !plan.graph().hasUnresolvedDemands()
+                && current.extensionStock().matchesAllocation(
+                        requiredInitialSupply(plan.graph()), current.availableItems(), extensionShares(plan.graph()));
+    }
+
+    private static List<RegisteredMaterialSources.Share> extensionShares(PlanGraphView graph) {
+        var shares = new ArrayList<RegisteredMaterialSources.Share>();
+        graph.visitExtensionAllocations((source, stack, count) ->
+                shares.add(new RegisteredMaterialSources.Share(source, StackKey.of(stack, true), count)));
+        return shares;
     }
 
     static boolean hasRequiredInitialSupply(PlanResponse plan,
@@ -290,20 +342,11 @@ public final class PlanningStateValidator {
                 && hasRequiredInitialSupply(requiredInitialSupply(graph), available);
     }
 
-    private static Map<StackKey, Long> requiredInitialSupply(PlanGraphView graph) {
+    public static Map<StackKey, Long> requiredInitialSupply(PlanGraphView graph) {
         if (graph == null) return Map.of();
-        Map<StackKey, Long> required = new HashMap<>();
-        for (PlanGraphView.EdgeView edge : graph.edges()) {
-            if (edge.source().initial()) mergeRequirement(required, edge.material(), edge.quantity());
-        }
-        for (PlanGraphView.RootView root : graph.roots()) {
-            for (PlanGraphView.RootEdgeView allocation : root.allocations()) {
-                if (allocation.source().initial()) {
-                    mergeRequirement(required, allocation.material(), allocation.quantity());
-                }
-            }
-        }
-        return Map.copyOf(required);
+        Map<StackKey, Long> required = new java.util.LinkedHashMap<>();
+        graph.visitInitialAllocations((stack, count) -> mergeRequirement(required, stack, count));
+        return java.util.Collections.unmodifiableMap(required);
     }
 
     private static boolean hasRequiredInitialSupply(Map<StackKey, Long> required,
@@ -361,10 +404,7 @@ public final class PlanningStateValidator {
     private static void mergeRequirement(Map<StackKey, Long> required,
                                          ItemStack stack, long quantity) {
         if (stack == null || stack.isEmpty() || quantity <= 0L) return;
-        String tag = stack.getTag() == null || stack.getTag().isEmpty()
-                ? null : stack.getTag().toString();
-        required.merge(new StackKey(stack.getItem(), tag), quantity,
-                SaturatingLongMath::add);
+        required.merge(StackKey.of(stack, true), quantity, SaturatingLongMath::add);
     }
 
     static String networkIdentity(String fingerprint) {
