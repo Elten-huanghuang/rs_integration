@@ -87,12 +87,14 @@ Use the in-game editor from JEI's config button, or edit the client, common, sto
 
 ## Building
 
-Requires JDK 17:
+Requires JDK 17. The repository includes the mod JARs in `libs/` needed to compile and package the main mod:
 
 ```powershell
-.\gradlew.bat test --no-daemon
+.\gradlew.bat compileJava --console=plain
 .\gradlew.bat jarJar verifyReleaseJar --no-daemon
 ```
+
+`compileJava` does not run tests. `.\gradlew.bat test` requires additional local test mods; `-PskipMissingTestDependencies=true` skips only the Dungeons Delight compatibility test when its JAR is absent.
 
 Verified release JARs are written to `build/libs/`.
 

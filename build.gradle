@@ -41,48 +41,53 @@ minecraft {
     }
 }
 
-// 将带中文前缀的本地文件归一为模块名，供 ForgeGradle 映射原生工厂测试依赖。
-def ironFurnacesTestSource = providers.gradleProperty('ironFurnacesCompatibilityJar')
-        .map { file(it) }.getOrElse(fileTree(dir: 'libs', include: ['*ironfurnaces-*.jar']).singleFile)
-def ironFurnacesTestVersion = (ironFurnacesTestSource.name =~ /ironfurnaces-(.+)\.jar$/)[0][1]
-def ironFurnacesTestDirectory = layout.buildDirectory.dir('ironfurnaces-test-libs').get().asFile
-copy {
-    from ironFurnacesTestSource
-    into ironFurnacesTestDirectory
-    rename { "ironfurnaces-${ironFurnacesTestVersion}.jar" }
+def localModJarsDir = file(providers.gradleProperty('localModJarsDir').getOrElse('libs'))
+def localModJars = { String pattern -> fileTree(dir: localModJarsDir, include: [pattern]).files }
+def localModJar = { Collection<File> candidates -> candidates.size() == 1 ? candidates.first() : null }
+def ironFurnacesOverride = providers.gradleProperty('ironFurnacesCompatibilityJar').map { file(it) }.orNull
+def ironFurnacesCandidates = localModJars('*ironfurnaces-*.jar')
+def ironFurnacesSource = ironFurnacesOverride ?: localModJar(ironFurnacesCandidates)
+def profoundCurseCandidates = localModJars('*profound_curse-*.jar')
+def profoundCurseSource = localModJar(profoundCurseCandidates)
+def localModVersion = { File source, String modId ->
+    if (!source?.isFile()) return null
+    def matcher = source.name =~ /${modId}-(.+)\.jar$/
+    matcher.find() ? matcher.group(1) : null
 }
-def botaniaTestSource = fileTree(dir: 'libs', include: ['*Botania-1.20.1-448-FORGE.jar']).singleFile
-def botaniaTestDirectory = layout.buildDirectory.dir('botania-test-libs').get().asFile
-copy {
-    from botaniaTestSource
-    into botaniaTestDirectory
-    rename { 'botania-1.20.1-448-FORGE.jar' }
+def ironFurnacesVersion = localModVersion(ironFurnacesSource, 'ironfurnaces')
+def profoundCurseVersion = localModVersion(profoundCurseSource, 'profound_curse')
+
+// ForgeGradle 解析本地 Maven 坐标前先处理已有 JAR；缺文件只在相关任务检查。
+def normalizeModJar = { String directory, File source, String destination ->
+    File targetDirectory = layout.buildDirectory.dir(directory).get().asFile
+    if (source?.isFile()) {
+        copy {
+            from source
+            into targetDirectory
+            rename { destination }
+        }
+    }
+    targetDirectory
 }
-def arsNouveauTestSource = fileTree(dir: 'libs', include: ['*ars_nouveau-1.20.1-4.12.6-all.jar']).singleFile
-def arsNouveauTestDirectory = layout.buildDirectory.dir('ars-nouveau-test-libs').get().asFile
-copy {
-    from arsNouveauTestSource
-    into arsNouveauTestDirectory
-    rename { 'ars_nouveau-1.20.1-4.12.6-all.jar' }
-}
-def profoundCurseSource = fileTree(dir: 'libs', include: ['*profound_curse-*.jar']).singleFile
-def profoundCurseVersion = (profoundCurseSource.name =~ /profound_curse-(.+)\.jar$/)[0][1]
-def profoundCurseDirectory = layout.buildDirectory.dir('profound-curse-test-libs').get().asFile
-copy {
-    from profoundCurseSource
-    into profoundCurseDirectory
-    rename { "profound_curse-${profoundCurseVersion}.jar" }
-}
+def ironFurnacesTestDirectory = normalizeModJar('ironfurnaces-test-libs', ironFurnacesSource,
+        "ironfurnaces-${ironFurnacesVersion}.jar")
+def botaniaTestDirectory = normalizeModJar('botania-test-libs',
+        localModJar(localModJars('*Botania-1.20.1-448-FORGE.jar')), 'botania-1.20.1-448-FORGE.jar')
+def arsNouveauTestDirectory = normalizeModJar('ars-nouveau-test-libs',
+        localModJar(localModJars('*ars_nouveau-1.20.1-4.12.6-all.jar')), 'ars_nouveau-1.20.1-4.12.6-all.jar')
+def profoundCurseDirectory = normalizeModJar('profound-curse-test-libs', profoundCurseSource,
+        "profound_curse-${profoundCurseVersion}.jar")
 // 切换真实依赖，分别验证农夫乐事两个版本的砧板语义与执行接口。
 def farmersDelightVersion = providers.gradleProperty('farmersDelightCompatibilityVersion')
         .getOrElse('1.20.1-1.3.3')
+def farmersDelightJar = "FarmersDelight-${farmersDelightVersion}.jar"
 def skipMissingTestDependencies = providers.gradleProperty('skipMissingTestDependencies')
         .getOrElse('false').toBoolean()
 def runMalumNativeTests = providers.gradleProperty('runMalumNativeTests')
         .getOrElse('false').toBoolean()
 def aetherworksTestDirectory = layout.buildDirectory.dir('aetherworks-test-libs').get().asFile
 copy {
-    from fileTree(dir: 'libs', include: ['*aetherworks-1.20.1-1.1.2.jar'])
+    from fileTree(dir: localModJarsDir, include: ['*aetherworks-1.20.1-1.1.2.jar'])
     into aetherworksTestDirectory
     rename { 'aetherworks-1.20.1-1.1.2.jar' }
 }
@@ -92,18 +97,14 @@ def goetyVersionOf = { jar ->
     def matcher = jar.name.toLowerCase(Locale.ROOT) =~ /goety-(\d+(?:\.\d+)+)/
     matcher.find() ? matcher.group(1) : null
 }
-def goetyVersionFiles = fileTree(dir: 'libs', include: ['*.jar']).files.findAll {
+def goetyVersionFiles = localModJars('*.jar').findAll {
     goetyVersionOf(it) != null
 }
 def requestedGoetyCompileVersion = findProperty('goetyCompileVersion')?.toString()
 def goetyCompileSource
 if (requestedGoetyCompileVersion != null) {
     def matches = goetyVersionFiles.findAll { goetyVersionOf(it) == requestedGoetyCompileVersion }
-    if (matches.size() != 1) {
-        throw new GradleException(
-                "goetyCompileVersion=${requestedGoetyCompileVersion} must match exactly one jar: ${matches}")
-    }
-    goetyCompileSource = matches[0]
+    goetyCompileSource = localModJar(matches)
 } else {
     goetyCompileSource = goetyVersionFiles.max { left, right ->
         def leftParts = goetyVersionOf(left).tokenize('.').collect { it.toInteger() }
@@ -115,14 +116,12 @@ if (requestedGoetyCompileVersion != null) {
         }
         0
     }
-    if (goetyCompileSource == null) {
-        throw new GradleException('libs must contain a versioned Goety jar')
-    }
 }
-def goetyCompileVersion = goetyVersionOf(goetyCompileSource)
-def modCompileJars = fileTree(dir: 'libs', include: ['*.jar'],
+def goetyCompileVersion = goetyCompileSource == null ? null : goetyVersionOf(goetyCompileSource)
+def modCompileJars = fileTree(dir: localModJarsDir, include: ['*.jar'],
         exclude: ['emi-*.jar', '*irons_spellbooks-1.20.1-3.16.3.jar', 'apothic_staff_rarities-*.jar',
                   'fantasy_ending-1.20.1-2.7.20g-all.jar', 'improve_the_expectations-1.0.2-forge-1.20.1.jar',
+                  '*FarmersDelight-1.20.1-*.jar', '*ironfurnaces-*.jar',
                   '*profound_curse-*.jar', '*rs_integration-*.jar']).matching {
     exclude { details ->
         def version = goetyVersionOf(details.file)
@@ -166,7 +165,7 @@ modCompileArtifacts.each { artifact, sources ->
 
 repositories {
     flatDir { dirs modCompileDirectory }
-    flatDir { dirs 'libs' }
+    flatDir { dirs localModJarsDir }
     flatDir { dirs ironFurnacesTestDirectory }
     flatDir { dirs botaniaTestDirectory }
     flatDir { dirs arsNouveauTestDirectory }
@@ -251,6 +250,16 @@ minecraft {
     }
 }
 
+// ForgeGradle 在主源码和测试之间共享待映射依赖；未安装的测试 JAR 只在运行测试时检查。
+def missingTestJars = []
+def localTestMod = { String configuration, String coordinate, String pattern ->
+    if (localModJars(pattern).isEmpty()) {
+        missingTestJars.add(pattern)
+    } else {
+        dependencies.add(configuration, fg.deobf(coordinate))
+    }
+}
+
 dependencies {
     minecraft "net.minecraftforge:forge:1.20.1-47.4.13"
 
@@ -259,26 +268,36 @@ dependencies {
     modCompileArtifacts.keySet().each { artifact ->
         compileOnly fg.deobf("local.compile:${artifact}:local")
     }
-    compileOnly fg.deobf("local:profound_curse:${profoundCurseVersion}")
+    if (profoundCurseVersion != null) {
+        compileOnly fg.deobf("local:profound_curse:${profoundCurseVersion}")
+    }
+    if (ironFurnacesVersion != null) {
+        def ironFurnaces = "local:ironfurnaces:${ironFurnacesVersion}"
+        compileOnly fg.deobf(ironFurnaces)
+        runtimeOnly fg.deobf(ironFurnaces)
+        testImplementation fg.deobf(ironFurnaces)
+    }
 
     // A production RS jar in run/mods is not remapped for the userdev namespace.
     // Keep the release artifact compile-only, but provide a deobfuscated runtime copy for dev runs.
     runtimeOnly fg.deobf("local:refinedstorage:1.12.4")
     // runClient smoke-test dependencies must be present in the dev runtime.
-    if (file("libs/jei-${minecraft_version}-forge-${jei_version}.jar").exists()) {
+    if (new File(localModJarsDir, "jei-${minecraft_version}-forge-${jei_version}.jar").isFile()) {
         runtimeOnly fg.deobf("local:jei-${minecraft_version}-forge:${jei_version}")
     } else {
         runtimeOnly fg.deobf("mezz.jei:jei-${minecraft_version}-forge:${jei_version}")
     }
-    runtimeOnly fg.deobf("local:FarmersDelight:${farmersDelightVersion}")
-    runtimeOnly fg.deobf("local:ironfurnaces:${ironFurnacesTestVersion}")
+    if (new File(localModJarsDir, farmersDelightJar).isFile()) {
+        runtimeOnly fg.deobf("local:FarmersDelight:${farmersDelightVersion}")
+        apismokeCompileOnly fg.deobf("local:FarmersDelight:${farmersDelightVersion}")
+    }
 
     // JEI
     compileOnly "mezz.jei:jei-${minecraft_version}-forge-api:${jei_version}"
     compileOnly "mezz.jei:jei-${minecraft_version}-common-api:${jei_version}"
 
     // EMI (optional client integration)
-    if (file("libs/emi-${emi_version}+forge.jar").exists()) {
+    if (new File(localModJarsDir, "emi-${emi_version}+forge.jar").isFile()) {
         compileOnly fg.deobf("local:emi:${emi_version}+forge")
     } else {
         compileOnly fg.deobf("dev.emi:emi-forge:${emi_version}")
@@ -314,40 +333,46 @@ dependencies {
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
     testImplementation 'org.mockito:mockito-core:5.11.0'
     testImplementation 'io.github.llamalad7:mixinextras-common:0.4.1'
-    testImplementation fg.deobf('local.compile:SlashBladeResharped-1.20.1-1.8.62:local')
+    localTestMod('testImplementation', 'local.compile:SlashBladeResharped-1.20.1-1.8.62:local',
+            'SlashBladeResharped-1.20.1-1.8.62.jar')
     testImplementation fg.deobf('local.compile:tarotcards-1.20-1.7.0:local')
     testImplementation fg.deobf("local:refinedstorage:1.12.4")
     // 验证 BD 原生 Key、流体库存以及终端交互，不启动完整游戏。
     testImplementation fg.deobf("local:beyonddimensions:1.20.1-forge-0.7.30")
-    testImplementation fg.deobf("local:sophisticatedcore:1.20.1-1.2.55.975")
+    localTestMod('testImplementation', 'local:sophisticatedcore:1.20.1-1.2.55.975',
+            'sophisticatedcore-1.20.1-1.2.55.975.jar')
     // 使用 Jade 11 的真实接口验证可选的坩埚状态显示。
     testImplementation fg.deobf("local:Jade:1.20.1-forge-11.11.1")
-    // 原生工厂分配逻辑会调用 Minecraft 字段，必须通过模块依赖完成名称映射。
-    testImplementation fg.deobf("local:ironfurnaces:${ironFurnacesTestVersion}")
     // 原生沸腾配方会调用 Minecraft 方法，测试依赖必须实际完成名称映射。
     testImplementation fg.deobf('local:embersrekindled:1.20.1-1.3.9')
-    testImplementation fg.deobf('local.compile:eidolon_repraised-1.20.1-0.3.8.15:local')
+    localTestMod('testImplementation', 'local.compile:eidolon_repraised-1.20.1-0.3.8.15:local',
+            'eidolon_repraised-1.20.1-0.3.8.15.jar')
     // 只有验证 Malum 原生精魂匹配时才需要它的 Lodestone 运行库。
     if (runMalumNativeTests) {
-        testImplementation fg.deobf('local.compile:malum-1.20.1-1.6.6:local')
-        testImplementation fg.deobf('local.compile:lodestone-1.20.1-1.6.4.1:local')
+        localTestMod('testImplementation', 'local.compile:malum-1.20.1-1.6.6:local',
+                'malum-1.20.1-1.6.6.jar')
+        localTestMod('testImplementation', 'local.compile:lodestone-1.20.1-1.6.4.1:local',
+                'lodestone-1.20.1-1.6.4.1.jar')
     } else {
         // 默认测试只读取 Malum 的字节码来检查 Mixin 是否适用。
-        testRuntimeOnly fg.deobf('local.compile:malum-1.20.1-1.6.6:local')
+        localTestMod('testRuntimeOnly', 'local.compile:malum-1.20.1-1.6.6:local',
+                'malum-1.20.1-1.6.6.jar')
         sourceSets.test.java.exclude '**/mixin/malum/MalumSpiritMatchingTest.java'
     }
-    testImplementation fg.deobf('local:aetherworks:1.20.1-1.1.2')
+    localTestMod('testImplementation', 'local:aetherworks:1.20.1-1.1.2', '*aetherworks-1.20.1-1.1.2.jar')
     testImplementation fg.deobf('local:until_eternity:1.2.0-all')
     testImplementation fg.deobf('local:tacz:1.20.1-1.1.4-hotfix-all')
     // 用实际怪物锅配方和库存接口验证批量适配。
-    testImplementation fg.deobf("local:FarmersDelight:${farmersDelightVersion}")
+    localTestMod('testImplementation', "local:FarmersDelight:${farmersDelightVersion}", farmersDelightJar)
     // 用原生酿造和装瓶配方验证跨命名空间的水壶材料。
-    testImplementation fg.deobf('local.compile:farmersrespite-1.20.1-2.1.2:local')
+    localTestMod('testImplementation', 'local.compile:farmersrespite-1.20.1-2.1.2:local',
+            'farmersrespite-1.20.1-2.1.2.jar')
     // 用烹饪锅原生配方条件验证动态食材、默认填充物与四槽补齐。
-    testImplementation fg.deobf('local:CrockPot:1.20.1-1.0.4-release')
+    localTestMod('testImplementation', 'local:CrockPot:1.20.1-1.0.4-release', 'CrockPot-1.20.1-1.0.4-release.jar')
     if (!skipMissingTestDependencies
-            || file('libs/forge-dungeonsdelight-1.20.1-1.3.0.jar').exists()) {
-        testImplementation fg.deobf('local:forge-dungeonsdelight:1.20.1-1.3.0')
+            || new File(localModJarsDir, 'forge-dungeonsdelight-1.20.1-1.3.0.jar').isFile()) {
+        localTestMod('testImplementation', 'local:forge-dungeonsdelight:1.20.1-1.3.0',
+                'forge-dungeonsdelight-1.20.1-1.3.0.jar')
     } else {
         sourceSets.test.java.exclude '**/mods/dungeonsdelight/MonsterPotCompatibilityTest.java'
         logger.lifecycle('本次打包跳过缺失的 Dungeons Delight 测试依赖，未删除正式联动代码。')
@@ -355,13 +380,15 @@ dependencies {
     // 验证魔力石板这类「能力挂在物品堆上」的容器识别与读写；用模块依赖确保 Minecraft 方法完成映射。
     testImplementation fg.deobf('local:botania:1.20.1-448-FORGE')
     testImplementation fg.deobf('local:ars_nouveau:1.20.1-4.12.6-all')
-    testImplementation fg.deobf("local:profound_curse:${profoundCurseVersion}")
+    if (profoundCurseVersion != null) {
+        testImplementation fg.deobf("local:profound_curse:${profoundCurseVersion}")
+    }
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     // 混合终端与配方预览测试需要编译、加载 JEI 接口。
     testImplementation "mezz.jei:jei-${minecraft_version}-forge-api:${jei_version}"
     testImplementation "mezz.jei:jei-${minecraft_version}-common-api:${jei_version}"
     // 书签回归测试需要真实的 JEI 实现类型，仅 API 不包含 IBookmark。
-    if (file("libs/jei-${minecraft_version}-forge-${jei_version}.jar").exists()) {
+    if (new File(localModJarsDir, "jei-${minecraft_version}-forge-${jei_version}.jar").isFile()) {
         testImplementation fg.deobf("local:jei-${minecraft_version}-forge:${jei_version}")
     } else {
         testImplementation fg.deobf("mezz.jei:jei-${minecraft_version}-forge:${jei_version}")
@@ -376,6 +403,66 @@ dependencies {
 // 避免代理/证书问题导致整个构建在配置阶段失败。
 configurations.configureEach {
     resolutionStrategy.force 'cpw.mods:modlauncher:10.0.9'
+}
+
+def verifyLocalModJarsTask = tasks.register('verifyLocalModJars') {
+    group = 'verification'
+    description = '检查正式联动编译所需的本地模组 JAR。'
+    doLast {
+        def problems = []
+        if (ironFurnacesVersion == null) {
+            def candidates = ironFurnacesOverride == null ? ironFurnacesCandidates : [ironFurnacesOverride]
+            problems.add("Iron Furnaces：需要一个 ironfurnaces-<版本>.jar，例如 ironfurnaces-1.20.1-4.1.8.jar；找到 ${candidates}")
+        }
+        if (profoundCurseVersion == null) {
+            problems.add("Profound Curse：需要一个 profound_curse-<版本>.jar，例如 profound_curse-1.1.9.jar；找到 ${profoundCurseCandidates}")
+        }
+        if (goetyCompileSource == null) {
+            def expected = requestedGoetyCompileVersion ?: '<版本>'
+            problems.add("Goety：需要 goety-${expected}.jar；找到 ${goetyVersionFiles}")
+        }
+        [
+                'Botania-1.20.1-448-FORGE.jar',
+                'ars_nouveau-1.20.1-4.12.6-all.jar',
+                'until_eternity-1.2.0-all.jar',
+                'beyonddimensions-1.20.1-forge-0.7.30.jar',
+                'embersrekindled-1.20.1-1.3.9.jar',
+                'Jade-1.20.1-forge-11.11.1.jar',
+                'tacz-1.20.1-1.1.4-hotfix-all.jar',
+                'tarotcards-1.20-1.7.0.jar',
+                'refinedstorage-1.12.4.jar',
+                'curios-forge-5.14.1+1.20.1.jar'
+        ].each { name ->
+            def candidates = localModJars("*${name}")
+            if (candidates.size() != 1) {
+                problems.add("${name}：需要一个匹配文件；找到 ${candidates}")
+            }
+        }
+        if (!problems.isEmpty()) {
+            throw new GradleException("本地模组目录 ${localModJarsDir} 中有缺失或重复的编译依赖：\n - "
+                    + problems.join('\n - ')
+                    + '\n请检查 Git 检出是否完整，以及是否指定了正确的依赖目录。')
+        }
+    }
+}
+
+def verifyTestModJarsTask = tasks.register('verifyTestModJars') {
+    group = 'verification'
+    description = '检查单元测试所需的本地模组 JAR。'
+    doLast {
+        if (!missingTestJars.isEmpty()) {
+            throw new GradleException("本地模组目录 ${localModJarsDir} 缺少测试依赖：\n - "
+                    + missingTestJars.join('\n - '))
+        }
+    }
+}
+
+def verifyApiSmokeModJarsTask = tasks.register('verifyApiSmokeModJars') {
+    doLast {
+        if (!new File(localModJarsDir, farmersDelightJar).isFile()) {
+            throw new GradleException("联动冒烟测试需要 ${new File(localModJarsDir, farmersDelightJar)}")
+        }
+    }
 }
 
 compileBenchmarkJava {
@@ -532,6 +619,7 @@ test {
 }
 
 compileJava {
+    dependsOn verifyLocalModJarsTask
     options.encoding = 'UTF-8'
     // Mixin AP 会为全部 Mixin 汇总生成 refmap；仅编译局部源文件会丢失或覆盖映射。
     // 保留整任务的 UP-TO-DATE 检查，只关闭 Java 源文件级别的增量编译。
@@ -544,10 +632,12 @@ compileJava {
 }
 
 compileTestJava {
+    dependsOn verifyTestModJarsTask
     options.encoding = 'UTF-8'
 }
 
 compileApismokeJava {
+    dependsOn verifyApiSmokeModJarsTask
     options.encoding = 'UTF-8'
 }
 

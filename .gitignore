@@ -29,8 +29,8 @@ __pycache__/
 run/
 logs/
 
-# Dependencies (keep only gradle wrapper)
-libs/
+# 本地依赖默认忽略，只显式跟踪构建所需的 JAR 和许可文件。
+/libs/
 
 # Claude Code local tooling state
 .claude/

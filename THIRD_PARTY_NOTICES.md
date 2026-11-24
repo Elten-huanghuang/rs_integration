@@ -29,6 +29,10 @@ RS Integration 不通过单一项目许可证重新授权第三方组件。第�
 
 ## 仅编译或测试使用的模组
 
+`libs/` 中的 `until_eternity-1.2.0-all.jar` 用于构建，作者为
+carrot123。JAR 内的 `META-INF/mods.toml` 声明 MIT；其附带的 MixinExtras 和 MixinSquared
+保留原有许可文件。Until Eternity 的许可文本位于 `libs/LICENSE-Until-Eternity.txt`。
+
 `libs/` 中的其它模组 jar 和 Maven 依赖用于编译、测试或开发运行，不会仅因出现在
 `libs/` 中而自动进入发布 jar。它们仍是各自作者的版权作品，适用各自许可证。
 

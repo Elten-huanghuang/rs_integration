@@ -87,12 +87,14 @@ RS 与 BD 始终是独立网络，库存不会自动合并。功能边界与详�
 
 ## 构建
 
-需要 JDK 17：
+需要 JDK 17。主代码编译和打包所需的模组 JAR 随仓库放在 `libs/`，无需单独下载这些 JAR：
 
 ```powershell
-.\gradlew.bat test --no-daemon
+.\gradlew.bat compileJava --console=plain
 .\gradlew.bat jarJar verifyReleaseJar --no-daemon
 ```
+
+`compileJava` 不运行测试。运行 `.\gradlew.bat test` 还需要本地测试模组；`-PskipMissingTestDependencies=true` 仅在缺少 Dungeons Delight 的 JAR 时跳过对应的兼容测试。
 
 经校验的发布 JAR 位于 `build/libs/`。
 
