@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.feature.craftingstation;
 
 import com.refinedmods.refinedstorage.api.network.INetwork;
+import com.refinedmods.refinedstorage.api.network.grid.IGrid;
 import com.refinedmods.refinedstorage.api.network.grid.INetworkAwareGrid;
 import com.refinedmods.refinedstorage.api.util.Action;
 import com.refinedmods.refinedstorage.api.util.IComparer;
@@ -10,6 +11,8 @@ import net.minecraft.world.inventory.CraftingContainer;
 import net.minecraft.world.item.ItemStack;
 
 import javax.annotation.Nullable;
+import java.util.ArrayList;
+import java.util.List;
 
 /** 内嵌工作站共享的网络/背包物品转移和九格矩阵清理。 */
 final class CraftingStationInventorySupport {
@@ -59,14 +62,23 @@ final class CraftingStationInventorySupport {
 
     static void returnCraftingMatrix(
             GridContainerMenu menu, Player player) {
-        if (player.level().isClientSide || menu.getGrid() == null
-                || menu.getGrid().getCraftingMatrix() == null) return;
-        CraftingContainer matrix = menu.getGrid().getCraftingMatrix();
+        if (player.level().isClientSide) return;
+        IGrid grid = menu.getGrid();
+        if (grid == null) return;
+        CraftingContainer matrix = grid.getCraftingMatrix();
+        if (matrix == null) return;
+
+        List<ItemStack> removed = new ArrayList<>();
         for (int index = 0; index < matrix.getContainerSize(); index++) {
             ItemStack stack = matrix.removeItemNoUpdate(index);
-            if (!stack.isEmpty()) {
-                returnToNetworkOrPlayer(menu, player, stack);
-            }
+            if (!stack.isEmpty()) removed.add(stack);
+        }
+        if (removed.isEmpty()) return;
+
+        // 无线终端在矩阵变更时写入物品 NBT，归还前必须先保存空九格。
+        grid.onCraftingMatrixChanged();
+        for (ItemStack stack : removed) {
+            returnToNetworkOrPlayer(menu, player, stack);
         }
     }
 
