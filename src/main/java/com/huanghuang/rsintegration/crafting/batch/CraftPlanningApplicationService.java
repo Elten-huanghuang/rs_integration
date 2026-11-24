@@ -329,6 +329,9 @@ final class CraftPlanningApplicationService {
         var state = PlanningStateValidator.executionState(player, entry.snapshot(),
                 refreshed != graph ? PlanGraphView.from(refreshed) : entry.plan().graph(),
                 levelKey, lookupPos, storageReference);
+        if (state == PlanningStateValidator.ExecutionState.STOCK_UNAVAILABLE) {
+            return new ExecutionPlanLookup(null, "rsi.plan.failure.material_stock_unavailable");
+        }
         if (explicitPreview && state == PlanningStateValidator.ExecutionState.QUOTE_CHANGED
                 && cache.consumeForRequest(player.getUUID(), confirmedPreviewRequestId, entry)) {
             return new ExecutionPlanLookup(null, RegisteredMaterialSources.QUOTE_CHANGED);
@@ -1293,7 +1296,6 @@ final class CraftPlanningApplicationService {
             cached = null;
         }
         if (cached != null && cached.snapshot().preferences().equals(safePreferences)
-                && !RegisteredMaterialSources.hasEnabled(safePreferences.materialSources())
                 && cached.plan().success() && cached.plan().graph() != null
                 && PlanningStateValidator.revalidateForExecution(player, cached.snapshot(),
                 cached.plan(), planDimKey, planLookupPos, planStorageReference)) {
@@ -1322,12 +1324,8 @@ final class CraftPlanningApplicationService {
         } else {
             long snapshotStarted = System.nanoTime();
             try {
-                available = freshPreview || RegisteredMaterialSources.hasEnabled(safePreferences.materialSources())
-                        ? MaterialSources.listAllAvailableFresh(player, planningEndpoint)
-                        : MaterialSources.listAllAvailable(player, planningEndpoint);
-                var extensionStock = RegisteredMaterialSources.capture(player, planningEndpoint,
-                        safePreferences.materialSources(), Set.of(), RSICraftingMaterialSources.Phase.PLAN,
-                        new RSICraftingMaterialSources.Plan(recipeId, previewGeneration), null);
+                var physical = MaterialSources.readAllAvailable(player, planningEndpoint, freshPreview);
+                available = physical.counts();
                 boolean backgroundProjectable = RecipeIndex.isBackgroundProjectable(recipe);
                 boolean projectable = recipe instanceof CraftingRecipe || backgroundProjectable;
                 var level = player.serverLevel();
@@ -1343,7 +1341,8 @@ final class CraftPlanningApplicationService {
                         && scoped.recipesById().size() > IMMEDIATE_BINDING_SCAN_RECIPES) {
                     var captured = PlanningSnapshotFactory.capture(player.getUUID(), previewGeneration, recipeId,
                             available, effectiveOverrides, scoped, network, binding, Set.of(), false,
-                            safePreferences).withBindingAnchor(planDimKey, pos).withExtensionStock(extensionStock);
+                            safePreferences).withBindingAnchor(planDimKey, pos)
+                            .withNetworkStockReadable(physical.snapshotSuccessful());
                     scheduleBindingCapture(player, recipeId, previewGeneration,
                             bindingCapture(player, scoped, false, recipeId), captured,
                             () -> player.serverLevel() == level && binding.equals(
@@ -1365,7 +1364,8 @@ final class CraftPlanningApplicationService {
                         bindingGraph.blockedOutputIds(),
                         bindingGraph.requiresTypedPlanning()
                                 || !(recipe instanceof CraftingRecipe) && !backgroundProjectable,
-                        safePreferences).withBindingAnchor(planDimKey, pos).withExtensionStock(extensionStock);
+                        safePreferences).withBindingAnchor(planDimKey, pos)
+                        .withNetworkStockReadable(physical.snapshotSuccessful());
             } finally {
                 long elapsed = System.nanoTime() - snapshotStarted;
                 PerformanceMonitor.recordPlanningSnapshot(elapsed);
@@ -1458,6 +1458,9 @@ final class CraftPlanningApplicationService {
                 : new DirectMaterialAllocator.Result(false, List.of(), -1, 0);
         boolean directTerminalPlan = CraftIngredientPlanMath.useDirectTerminalPlan(
                 directPreviewAllocation, recipeSpecs, planTargetOutput);
+        // 后台路线只依赖实物库存；扩展报价不会让已完成的路线失效。
+        boolean matchesRoutedSnapshot = routedPlan != null
+                && routedPlan.snapshot().equals(planningSnapshot.withExtensionStock(null));
         if (directTerminalPlan) {
             RSIntegrationMod.LOGGER.info(
                     "[RSI-plan] direct terminal preview recipe={} specs={} fragments={} recursivePlannerBypassed=true",
@@ -1529,7 +1532,7 @@ final class CraftPlanningApplicationService {
                     PureDemandTreeInspector.Status.TARGET_NOT_PROJECTED, 0,
                     null, false);
             demandTreeElapsed = 0L;
-        } else if (routedPlan != null && routedPlan.snapshot().equals(planningSnapshot)
+        } else if (matchesRoutedSnapshot
                 && routedPlan.routing().matchesPolicy(demandMaxNodes, reusableCatalystOutputIds,
                         reusableCatalystRecipeIds, pureIncompatibleOutputIds)) {
             demandTree = routedPlan.inspection();
@@ -1560,9 +1563,7 @@ final class CraftPlanningApplicationService {
                     demandTree.visitedNodes(), demandTree.unresolved());
         }
         boolean projectedOverrides = effectiveOverrides.isEmpty()
-                || routedPlan != null
-                && routedPlan.snapshot().equals(planningSnapshot)
-                && routedPlan.forcedRecipesProjected();
+                || matchesRoutedSnapshot && routedPlan.forcedRecipesProjected();
         RouteDecision routeDecision = directTerminalPlan
                 ? new RouteDecision(PlannerAction.USE_PURE_RESULT, RouteReason.PURE_SUCCESS)
                 : CraftPlanDecisionRules.completedRoute(planningSnapshot, !materialLocks.isEmpty(),
@@ -1594,6 +1595,15 @@ final class CraftPlanningApplicationService {
         }
         boolean typedStorageAllowed = planningEndpoint != null || (recipe instanceof CraftingRecipe
                 && (recipeModType == null || recipeModType == ModType.GENERIC));
+        boolean pureShortage = routeDecision.action() == PlannerAction.USE_PURE_RESULT
+                && PlanningSnapshot.hasPureShortage(precomputedPlan);
+        boolean typedShortage = routeDecision.action() == PlannerAction.RUN_TYPED && completedTyped != null
+                && !completedTyped.extensionAttempt()
+                && (!completedTyped.graph().unresolvedDemands().isEmpty()
+                    || completedTyped.graph().rootDemands().stream().anyMatch(root -> root.unresolvedQuantity() > 0));
+        if (typedStorageAllowed && (pureShortage || typedShortage)) {
+            planningSnapshot = capturePreviewExtensionStock(player, planningEndpoint, planningSnapshot);
+        }
         boolean supplementPure = routeDecision.action() == PlannerAction.USE_PURE_RESULT
                 && typedStorageAllowed && planningSnapshot.canSupplement(precomputedPlan);
         boolean selectedPureResolver = !supplementPure
@@ -2710,6 +2720,15 @@ final class CraftPlanningApplicationService {
 
     static boolean requiresFreshPreview(@Nullable ModType terminalType, @Nullable PlanResponse plan) {
         return plan != null && !plan.canConfirmExecution() || requiresContextualPreview(terminalType, plan);
+    }
+
+    static PlanningSnapshot capturePreviewExtensionStock(ServerPlayer player, @Nullable CraftStorageEndpoint endpoint,
+                                                          PlanningSnapshot snapshot) {
+        if (!snapshot.networkStockReadable() || snapshot.capturedExtensionStock() != null
+                || !RegisteredMaterialSources.hasEnabled(snapshot.preferences().materialSources())) return snapshot;
+        return snapshot.withExtensionStock(RegisteredMaterialSources.capture(player, endpoint,
+                snapshot.preferences().materialSources(), Set.of(), RSICraftingMaterialSources.Phase.PLAN,
+                new RSICraftingMaterialSources.Plan(snapshot.recipeId(), snapshot.requestGeneration()), null));
     }
 
     private static boolean requiresContextualPreview(@Nullable ModType terminalType, @Nullable PlanResponse plan) {

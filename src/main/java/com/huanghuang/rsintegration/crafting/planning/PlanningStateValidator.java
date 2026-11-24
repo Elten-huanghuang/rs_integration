@@ -44,7 +44,7 @@ import java.util.Set;
 public final class PlanningStateValidator {
     private static final Logger LOGGER = LogUtils.getLogger();
 
-    public enum ExecutionState { CURRENT, STALE, QUOTE_CHANGED }
+    public enum ExecutionState { CURRENT, STALE, STOCK_UNAVAILABLE, QUOTE_CHANGED }
 
     private PlanningStateValidator() {}
 
@@ -173,11 +173,14 @@ public final class PlanningStateValidator {
             return rejectState(snapshot, execution, "unresolved-plan", 0, graph.unresolved().size());
         }
         Map<StackKey, Long> required = requiredInitialSupply(graph);
-        Map<StackKey, Long> currentAvailable = MaterialSources.listAvailableForTypes(
-                player, endpoint, itemTypes(required), snapshot.preferences().materialSources());
+        Set<Item> types = itemTypes(required);
+        var physical = MaterialSources.readAvailableForTypes(
+                player, endpoint, types, snapshot.preferences().materialSources());
+        var currentAvailable = physical.counts();
         var shares = extensionShares(graph);
         if (shares.isEmpty() && hasRequiredInitialSupply(required, currentAvailable)) return ExecutionState.CURRENT;
-        var extension = captureExtensionStock(player, snapshot, endpoint, itemTypes(required),
+        if (!physical.snapshotSuccessful()) return ExecutionState.STOCK_UNAVAILABLE;
+        var extension = captureExtensionStock(player, snapshot, endpoint, types,
                 RSICraftingMaterialSources.Phase.REVALIDATE);
         if (extension.matchesAllocation(required, currentAvailable, shares)) return ExecutionState.CURRENT;
         if (extension.covers(required, currentAvailable)) {
@@ -234,7 +237,10 @@ public final class PlanningStateValidator {
         CraftStorageEndpoint endpoint = selectedReference == null
                 ? CraftPacketUtils.resolveEndpointForCraft(player, dimension, lookupPos).orElse(null)
                 : CraftStorageEndpoints.resolve(selectedReference, player).orElse(null);
-        var physical = MaterialSources.listAvailableForTypes(player, endpoint, types, snapshot.preferences().materialSources());
+        if (selectedReference != null && endpoint == null) return false;
+        var stock = MaterialSources.readAvailableForTypes(player, endpoint, types, snapshot.preferences().materialSources());
+        if (!stock.snapshotSuccessful()) return false;
+        var physical = stock.counts();
         if (plan.success() && plan.graph() != null) {
             var required = requiredInitialSupply(plan.graph());
             var shares = extensionShares(plan.graph());
@@ -242,8 +248,10 @@ public final class PlanningStateValidator {
             var extension = captureExtensionStock(player, snapshot, endpoint, types, RSICraftingMaterialSources.Phase.PLAN);
             return !extension.matchesAllocation(required, physical, shares);
         }
-        var extension = captureExtensionStock(player, snapshot, endpoint, Set.of(), RSICraftingMaterialSources.Phase.PLAN);
-        if (!snapshot.extensionStock().equals(extension)) return true;
+        if (snapshot.capturedExtensionStock() != null) {
+            var extension = captureExtensionStock(player, snapshot, endpoint, Set.of(), RSICraftingMaterialSources.Phase.PLAN);
+            if (!snapshot.extensionStock().equals(extension)) return true;
+        }
         return previewNeedsRefresh(snapshot, plan, physical);
     }
 
@@ -283,6 +291,7 @@ public final class PlanningStateValidator {
         return left.recipeRevision() == right.recipeRevision()
                 && left.recipeId().equals(right.recipeId())
                 && left.availableItems().equals(right.availableItems())
+                && left.networkStockReadable() == right.networkStockReadable()
                 && left.extensionStock().equals(right.extensionStock())
                 && left.forcedRecipes().equals(right.forcedRecipes())
                 && left.preferences().equals(right.preferences())

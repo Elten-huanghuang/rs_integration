@@ -113,10 +113,11 @@ class MalumConfirmedPreviewTest extends BootstrapTest {
                     .thenReturn("altar-binding");
             Map<StackKey, Long> insufficient = new HashMap<>(available);
             insufficient.put(new StackKey(Items.AMETHYST_SHARD, null), 64L * operations - 1L);
-            materials.when(() -> MaterialSources.listAvailableForTypes(player, endpoint,
+            materials.when(() -> MaterialSources.readAvailableForTypes(player, endpoint,
                     Set.of(Items.SLIME_BALL, Items.GHAST_TEAR, Items.AMETHYST_SHARD),
                     snapshot.preferences().materialSources()))
-                    .thenReturn(insufficient, available);
+                    .thenReturn(new MaterialSources.AvailabilityLoad(insufficient, true),
+                            new MaterialSources.AvailabilityLoad(available, true));
             var confirmation = roundTrip(plan);
             assertTrue(confirm(player, malum, confirmation).rejected());
             assertSame(original, cache.peekForRequest(key, 10L), "缺料不能消费已展示计划");

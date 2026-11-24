@@ -27,7 +27,7 @@ public final class StorageRestockSupport {
         return resolveForRetrieval(player).session().map(SessionCraftStorageEndpoint::new);
     }
 
-    /** Preserves native selection order while retaining the reason when no endpoint can be selected. */
+    /** 保留原生网络选择顺序；无法选定存储端点时保留失败原因。 */
     static StorageResolutionResult resolveForRetrieval(ServerPlayer player) {
         var registry = RSIntegrationMod.STORAGE_BACKENDS.registry();
         StorageResolutionStatus failure = StorageResolutionStatus.NOT_FOUND;
@@ -74,7 +74,7 @@ public final class StorageRestockSupport {
                 failure = preferFailure(failure, StorageResolutionStatus.DENIED);
             }
             for (StorageNetworkDescriptor descriptor : discovery.networks()) {
-                // A discovered coordinate is not an RS access credential.
+                // 发现 RS 网络坐标不等于玩家具备该网络的访问凭据。
                 if ("refinedstorage".equals(descriptor.reference().backendId().value())
                         && !com.huanghuang.rsintegration.network.RSIntegrationNetwork
                                 .hasCurrentNetworkAccess(player, descriptor.reference())) continue;

@@ -14,22 +14,22 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
-/** External material sources for native recursive crafting, shared by both storage backends. */
+/** 原生递归合成的外部材料源，由两种存储后端共用。 */
 public final class RSICraftingMaterialSources {
     private RSICraftingMaterialSources() {}
 
-    /** Register during common setup. Native stock is used first, then extensions by source ID. */
+    /** 在通用初始化阶段注册。优先使用原生库存，再按来源 ID 顺序使用扩展材料源。 */
     public static boolean register(ResourceLocation id, RSIPlanExtensions.Source toggle, Source source) {
         return RegisteredMaterialSources.register(id, toggle, source);
     }
 
     public interface Source {
-        /** Read player state on the server thread and return detached stock and spending limits. */
+        /** 在服务端主线程读取玩家状态，返回不依赖实时库存的供料和额度快照。 */
         Snapshot snapshot(Context context);
 
         /**
-         * Claim the exact quantity on the server thread. An empty result means insufficient stock.
-         * Only hold capacity here. Earlier allocations are from this same source and reservation batch.
+         * 在服务端主线程预留指定数量。返回空值表示供料不足。
+         * 此处只占用供料额度，不取出物品。{@code earlier} 是同一材料源在本批次已预留的份额。
          */
         Optional<Reservation> reserve(Context context, Allocation requested, List<Allocation> earlier);
     }
@@ -37,7 +37,7 @@ public final class RSICraftingMaterialSources {
     public enum Phase { PLAN, REVALIDATE, TASK }
     public record Plan(ResourceLocation recipeId, long generation) {}
 
-    /** An empty itemTypes set requests all variants. Network is present if one was selected. */
+    /** {@code itemTypes} 为空时查询所有变体。选定存储网络时，{@code network} 包含该网络。 */
     public record Context(ServerPlayer player, Optional<RSIPlanExtensions.Network> network,
                           Set<RSIPlanExtensions.Source> enabledSources, Set<Item> itemTypes,
                           Phase phase, Optional<Plan> plan, Optional<UUID> taskId) {
@@ -52,7 +52,7 @@ public final class RSICraftingMaterialSources {
         }
     }
 
-    /** Pool IDs are local to a source. Multiple variants can spend the same pool. */
+    /** 额度池 ID 仅在各自的材料源内有效，多个物品变体可共用同一额度池。 */
     public record Snapshot(Map<ResourceLocation, BigInteger> balances, List<Offer> offers) {
         public static final Snapshot EMPTY = new Snapshot(Map.of(), List.of());
 
@@ -70,7 +70,7 @@ public final class RSICraftingMaterialSources {
         }
     }
 
-    /** A free offer uses just its per-variant limit. Paid offers also spend their pool balance. */
+    /** 免费供料只受变体数量上限限制；付费供料还会消耗相应额度池的余额。 */
     public record Offer(ItemStack target, long limit, ResourceLocation pool, BigInteger unitCost) {
         public Offer {
             target = Objects.requireNonNull(target).copyWithCount(1);
@@ -96,17 +96,17 @@ public final class RSICraftingMaterialSources {
     }
 
     public interface Reservation {
-        /** Revalidate the remaining claim on the server thread without taking any materials. */
+        /** 在服务端主线程重新校验剩余预留额度，不取出材料。 */
         boolean validate();
 
-        /** Revalidate and take materials. Return the actual fragments, even on partial extraction. */
+        /** 重新校验预留后实际取料；即使只取出一部分，也要返回已取得的物品堆。 */
         Extraction commit();
 
-        /** Release the unused claim. Called once even after commit. Any returned items remain paid. */
+        /** 释放未用的预留额度。提交后仍会调用一次；已取出的物品仍按已付费处理。 */
         void release();
     }
 
-    /** Uncertain extraction stops automatic retries. Include any fragments whose extraction is confirmed. */
+    /** 取料结果不明时停止自动重试；仍须返回所有已确认取出的物品堆。 */
     public record Extraction(List<ItemStack> items, boolean uncertain) {
         public Extraction {
             items = items.stream().map(ItemStack::copy).toList();

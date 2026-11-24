@@ -117,7 +117,7 @@ final class ResolutionContext {
     final boolean bestEffort;
     boolean genericCandidatesOnly = !RSIntegrationConfig.enabled(
             RSIntegrationConfig.COMMON_SPEC, RSIntegrationConfig.ENABLE_MULTIBLOCK_AUTO_CRAFTING);
-    // Strict search rolls back graph edges for failed producers. Keep their actual predicates for the retry.
+    // 严格搜索会回滚失败路线上的供料边，保留实际的材料匹配条件供重试使用。
     @Nullable Set<Ingredient> failedIngredients;
     boolean strictCandidatePass;
     boolean bestEffortFallbackPass;

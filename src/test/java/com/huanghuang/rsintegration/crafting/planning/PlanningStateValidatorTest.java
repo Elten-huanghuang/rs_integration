@@ -3,6 +3,8 @@ package com.huanghuang.rsintegration.crafting.planning;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.CraftPlanningRevision;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
+import com.huanghuang.rsintegration.crafting.RegisteredMaterialSources;
+import com.huanghuang.rsintegration.api.RSICraftingMaterialSources;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.crafting.plan.PlanOutcome;
@@ -32,6 +34,7 @@ import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.*;
 
@@ -203,8 +206,9 @@ class PlanningStateValidatorTest extends BootstrapTest {
             endpoints.when(() -> CraftStorageEndpoints.resolve(reference, player)).thenReturn(Optional.of(endpoint));
             validator.when(() -> PlanningStateValidator.bindingFingerprint(player, Level.OVERWORLD, BlockPos.ZERO))
                     .thenReturn("binding");
-            materials.when(() -> MaterialSources.listAvailableForTypes(player, endpoint, Set.of(Items.COAL)))
-                    .thenReturn(Map.of());
+            materials.when(() -> MaterialSources.readAvailableForTypes(player, endpoint, Set.of(Items.COAL),
+                    original.preferences().materialSources()))
+                    .thenReturn(new MaterialSources.AvailabilityLoad(Map.of(), true));
 
             assertTrue(PlanningStateValidator.revalidatePreview(player, original, draft,
                     Level.OVERWORLD, BlockPos.ZERO, requests, reference));
@@ -225,6 +229,57 @@ class PlanningStateValidatorTest extends BootstrapTest {
                     .thenReturn("new_binding");
             assertFalse(PlanningStateValidator.revalidatePreview(player, original, draft,
                     Level.OVERWORLD, BlockPos.ZERO, requests, reference));
+        }
+    }
+
+    @Test
+    void unreadableNetworkCannotTriggerARequoteOrBlockSufficientCarriedStock() {
+        var player = mock(ServerPlayer.class);
+        var endpoint = mock(CraftStorageEndpoint.class);
+        var reference = new StorageReference(new StorageBackendId("test"), "dimension:network:1");
+        var original = new PlanningSnapshot(UUID.randomUUID(), 1, CraftPlanningRevision.current(),
+                new ResourceLocation("test", "target"), Map.of(), Map.of(),
+                new ImmutableRecipeGraph(Map.of()), PlanningStateValidator.networkFingerprint(reference, Map.of()),
+                "binding", false);
+        var sources = original.preferences().materialSources();
+        var coal = new ItemStack(Items.COAL);
+        var carried = Map.of(StackKey.of(coal, true), 8L);
+        var nativePlan = planRequiring(coal, 8);
+        var quotedPlan = planWithGraph(new PlanGraphView(1, List.of(), List.of(
+                new PlanGraphView.EdgeView(0, 0,
+                        new PlanGraphView.SourceView(true, -1, -1, ResourceLocation.parse("test:emc")),
+                        coal, 8)), List.of(), List.of(), List.of()));
+
+        try (var endpoints = mockStatic(CraftStorageEndpoints.class);
+             var materials = mockStatic(MaterialSources.class);
+             var extensions = mockStatic(RegisteredMaterialSources.class);
+             var validator = mockStatic(PlanningStateValidator.class, CALLS_REAL_METHODS)) {
+            endpoints.when(() -> CraftStorageEndpoints.resolve(reference, player)).thenReturn(Optional.of(endpoint));
+            validator.when(() -> PlanningStateValidator.bindingFingerprint(player, Level.OVERWORLD, BlockPos.ZERO))
+                    .thenReturn("binding");
+            materials.when(() -> MaterialSources.readAvailableForTypes(player, endpoint, Set.of(Items.COAL), sources))
+                    .thenReturn(new MaterialSources.AvailabilityLoad(Map.of(), false),
+                            new MaterialSources.AvailabilityLoad(carried, false),
+                            new MaterialSources.AvailabilityLoad(carried, false),
+                            new MaterialSources.AvailabilityLoad(carried, true));
+
+            assertEquals(PlanningStateValidator.ExecutionState.STOCK_UNAVAILABLE,
+                    PlanningStateValidator.executionState(player, original, nativePlan.graph(),
+                            Level.OVERWORLD, BlockPos.ZERO, reference));
+            assertTrue(PlanningStateValidator.revalidateForExecution(player, original, nativePlan,
+                    Level.OVERWORLD, BlockPos.ZERO, reference));
+            assertEquals(PlanningStateValidator.ExecutionState.STOCK_UNAVAILABLE,
+                    PlanningStateValidator.executionState(player, original, quotedPlan.graph(),
+                            Level.OVERWORLD, BlockPos.ZERO, reference));
+            extensions.verifyNoInteractions();
+
+            extensions.when(() -> RegisteredMaterialSources.capture(player, endpoint, sources, Set.of(Items.COAL),
+                    RSICraftingMaterialSources.Phase.REVALIDATE,
+                    new RSICraftingMaterialSources.Plan(original.recipeId(), original.requestGeneration()), null))
+                    .thenReturn(RegisteredMaterialSources.StockSnapshot.EMPTY);
+            assertEquals(PlanningStateValidator.ExecutionState.QUOTE_CHANGED,
+                    PlanningStateValidator.executionState(player, original, quotedPlan.graph(),
+                            Level.OVERWORLD, BlockPos.ZERO, reference));
         }
     }
 

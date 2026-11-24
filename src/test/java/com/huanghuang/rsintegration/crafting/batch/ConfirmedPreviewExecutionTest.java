@@ -101,7 +101,10 @@ class ConfirmedPreviewExecutionTest extends BootstrapTest {
             assertTrue(fixture.confirm(10).rejected(), "材料复验失败必须拒绝，并保留原计划等待恢复");
             assertSame(entry, fixture.cache.peekForRequest(fixture.key, 10));
             validator.when(() -> PlanningStateValidator.executionState(fixture.player,
-                    entry.snapshot(), entry.plan().graph(), Level.OVERWORLD, BlockPos.ZERO, null)).thenReturn(ExecutionState.CURRENT);
+                    entry.snapshot(), entry.plan().graph(), Level.OVERWORLD, BlockPos.ZERO, null))
+                    .thenReturn(ExecutionState.STOCK_UNAVAILABLE, ExecutionState.CURRENT);
+            assertEquals("rsi.plan.failure.material_stock_unavailable", fixture.confirm(10).rejectionKey());
+            assertSame(entry, fixture.cache.peekForRequest(fixture.key, 10));
             assertSame(entry, fixture.confirm(10).entry());
         } finally { fixture.cache.removePlayer(fixture.player.getUUID()); }
     }

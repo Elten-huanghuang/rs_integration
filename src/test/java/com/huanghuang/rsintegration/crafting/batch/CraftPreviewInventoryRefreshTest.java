@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
 import com.huanghuang.rsintegration.ModType;
+import com.huanghuang.rsintegration.api.RSICraftingMaterialSources;
+import com.huanghuang.rsintegration.crafting.RegisteredMaterialSources;
 import com.huanghuang.rsintegration.crafting.plan.PlanStep;
 import com.huanghuang.rsintegration.crafting.plan.IntegrationDiagnostic;
 import com.huanghuang.rsintegration.crafting.plan.IntegrationDiagnosticCode;
@@ -15,6 +17,7 @@ import com.huanghuang.rsintegration.testutil.BootstrapTest;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.Test;
@@ -72,6 +75,28 @@ class CraftPreviewInventoryRefreshTest extends BootstrapTest {
         PlanningSnapshot snapshot = snapshot();
         refresh.success(graphPlan, snapshot);
         verify(destination).success(graphPlan, snapshot);
+    }
+
+    @Test
+    void shortageCapturesExtensionStockOnceAndNeverWithAnUnreadableNetwork() {
+        var player = mock(ServerPlayer.class);
+        var snapshot = snapshot();
+        var unreadable = snapshot.withNetworkStockReadable(false);
+        var sources = snapshot.preferences().materialSources();
+        var quote = new RSICraftingMaterialSources.Plan(snapshot.recipeId(), snapshot.requestGeneration());
+        try (var extensions = mockStatic(RegisteredMaterialSources.class)) {
+            assertSame(unreadable, CraftPlanningApplicationService.capturePreviewExtensionStock(player, null, unreadable));
+            extensions.verifyNoInteractions();
+            extensions.when(() -> RegisteredMaterialSources.hasEnabled(sources)).thenReturn(true);
+            extensions.when(() -> RegisteredMaterialSources.capture(player, null, sources, Set.of(),
+                    RSICraftingMaterialSources.Phase.PLAN, quote, null))
+                    .thenReturn(RegisteredMaterialSources.StockSnapshot.EMPTY);
+            var captured = CraftPlanningApplicationService.capturePreviewExtensionStock(player, null, snapshot);
+            assertSame(RegisteredMaterialSources.StockSnapshot.EMPTY, captured.capturedExtensionStock());
+            assertSame(captured, CraftPlanningApplicationService.capturePreviewExtensionStock(player, null, captured));
+            extensions.verify(() -> RegisteredMaterialSources.capture(player, null, sources, Set.of(),
+                    RSICraftingMaterialSources.Phase.PLAN, quote, null));
+        }
     }
 
     @Test

@@ -187,6 +187,42 @@ class RuntimeMaterialAccountTest extends BootstrapTest {
     }
 
     @Test
+    void nativeInventoryFulfillsPlanWhenSelectedNetworkIsUnavailable() {
+        player.getInventory().items.set(0, IRON.toStack(3));
+        when(session.snapshotItems(player, Set.of(Items.IRON_INGOT))).thenReturn(
+                StorageSnapshotResult.failure(StorageSnapshotStatus.UNAVAILABLE));
+        var account = account();
+        try (var inventoryUpdates = mockStatic(PlayerUtils.class)) {
+            assertTrue(acquire(account, IRON, 3));
+            assertEquals(3L, account.count(IRON));
+            assertTrue(player.getInventory().items.get(0).isEmpty());
+            assertNull(account.admissionFailure());
+        }
+        verify(session, never()).extractExact(any(), any(), anyLong(), anyBoolean());
+    }
+
+    @Test
+    void unreadableNetworkIsNotTreatedAsShortageForUnquotedMaterial() {
+        player.getInventory().items.set(0, IRON.toStack(2));
+        when(session.snapshotItems(player, Set.of(Items.IRON_INGOT))).thenReturn(
+                StorageSnapshotResult.failure(StorageSnapshotStatus.UNAVAILABLE));
+        var account = account();
+        var context = mock(RSICraftingMaterialSources.Context.class);
+        try (var sources = mockStatic(RegisteredMaterialSources.class)) {
+            sources.when(() -> RegisteredMaterialSources.hasEnabled(any())).thenReturn(true);
+            sources.when(() -> RegisteredMaterialSources.context(eq(player), eq(endpoint), any(), anySet(),
+                    eq(RSICraftingMaterialSources.Phase.TASK), isNull(), any())).thenReturn(context);
+            assertFalse(acquire(account, IRON, 3));
+            var message = (TranslatableContents) account.admissionFailure().getContents();
+            assertEquals("UNAVAILABLE/NONE", message.getArgs()[0]);
+            assertEquals(2, player.getInventory().items.get(0).getCount());
+            sources.verify(() -> RegisteredMaterialSources.capture(context), never());
+            sources.verify(() -> RegisteredMaterialSources.reserve(any(), any(), any(), any()), never());
+        }
+        verify(session, never()).extractExact(any(), any(), anyLong(), anyBoolean());
+    }
+
+    @Test
     void admissionReservesOnlyTheConfirmedSourceEvenWhenAnEarlierOfferCanCoverEverything() {
         var earlier = ResourceLocation.parse("test:a_emc");
         var quoted = ResourceLocation.parse("test:z_free");

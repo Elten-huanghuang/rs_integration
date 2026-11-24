@@ -634,40 +634,50 @@ public final class ExtractionLedger implements AutoCloseable {
         CraftStorageEndpoint selected = endpoint != null ? endpoint : storageEndpoint;
         if (selected != null) setStorageEndpoint(selected);
         var network = countExactAvailableInEndpoint(selected, template, player);
-        if (!network.snapshotReadable()) return ItemStack.EMPTY;
         int endpointAvailable = (int) Math.min(Integer.MAX_VALUE, network.available());
         int inventoryAvailable = (int) Math.min(Integer.MAX_VALUE, countExactAvailableInInventory(player, template));
+        if (!network.snapshotReadable() && inventoryAvailable < count) {
+            recordNetworkReadFailure(network.detail());
+            return ItemStack.EMPTY;
+        }
         int[] allocation = allocateExactAcrossSources(count, endpointAvailable, inventoryAvailable);
         if (allocation.length == 0) return ItemStack.EMPTY;
         int networkCount = allocation[0];
         int inventoryCount = allocation[1];
 
         int mark = reservationMark();
-        Ingredient ingredient = Ingredient.of(template.copyWithCount(1));
         if (networkCount > 0
                 && (selected == null
                 || reserveExactFromEndpoint(template, networkCount, selected, player).isEmpty())) {
             cancelReservationsSince(mark);
             return ItemStack.EMPTY;
         }
-        if (inventoryCount > 0) {
-            if (!reserveExactInventoryAvailability(player, template, inventoryCount)) {
-                cancelReservationsSince(mark);
-                return ItemStack.EMPTY;
-            }
-            ItemStack reserved = template.copyWithCount(inventoryCount);
-            recordEntry(new Entry(Source.PLAYER_INVENTORY, ingredient, reserved,
-                    null, null, null, null, true));
+        if (inventoryCount > 0 && !reserveExactInventory(template, inventoryCount, player)) {
+            cancelReservationsSince(mark);
+            return ItemStack.EMPTY;
         }
         return template.copyWithCount(count);
     }
 
-    /** Reserve the exact physical shortfall against the source IDs in the confirmed graph. */
+    private boolean reserveExactInventory(ItemStack template, int count, ServerPlayer player) {
+        if (!reserveExactInventoryAvailability(player, template, count)) return false;
+        if (state == State.IDLE) transition(State.RESERVING);
+        recordEntry(new Entry(Source.PLAYER_INVENTORY, Ingredient.of(template.copyWithCount(1)),
+                template.copyWithCount(count), null, null, null, null, true));
+        return true;
+    }
+
+    /** 按已确认计划中的材料源和份额补足实物缺口。 */
     boolean reservePlannedMaterial(ItemStack template, long total, Map<ResourceLocation, Long> sources,
                                    ServerPlayer player) {
         var network = countExactAvailableInEndpoint(storageEndpoint, template, player);
-        if (!network.snapshotReadable()) return false;
-        long nativeCount = Math.min(total, saturatedAdd(network.available(), countExactAvailableInInventory(player, template)));
+        long inventory = countExactAvailableInInventory(player, template);
+        // 网络状态未知时，只允许完全由随身库存供料且未报价的需求。
+        if (!network.snapshotReadable() && (!sources.isEmpty() || inventory < total)) {
+            recordNetworkReadFailure(network.detail());
+            return false;
+        }
+        long nativeCount = Math.min(total, saturatedAdd(network.available(), inventory));
         long quoted = sources.values().stream().reduce(0L, Math::addExact);
         if (total - nativeCount != quoted) {
             if (!sources.isEmpty()) return quoteChanged();
@@ -679,7 +689,10 @@ public final class ExtractionLedger implements AutoCloseable {
         }
         while (nativeCount > 0) {
             int part = (int) Math.min(Integer.MAX_VALUE, nativeCount);
-            if (reserveExactAcrossNetworkAndInventory(template, part, storageEndpoint, player).isEmpty()) return false;
+            boolean reserved = network.snapshotReadable()
+                    ? !reserveExactAcrossNetworkAndInventory(template, part, storageEndpoint, player).isEmpty()
+                    : reserveExactInventory(template, part, player);
+            if (!reserved) return false;
             nativeCount -= part;
         }
         if (sources.isEmpty()) return true;
@@ -716,6 +729,10 @@ public final class ExtractionLedger implements AutoCloseable {
     private boolean quoteChanged() {
         reservationFailure = QUOTE_CHANGED;
         return false;
+    }
+
+    private void recordNetworkReadFailure(String detail) {
+        reservationFailure = Component.translatable("rsi.async.abort.material_network_read", detail);
     }
 
     private void releaseRegisteredReservations() {
@@ -1132,13 +1149,16 @@ public final class ExtractionLedger implements AutoCloseable {
         }
         CraftStorageEndpoint selected = endpoint != null ? endpoint : storageEndpoint;
         if (extensionBudget != null) {
-            // A provider callback can change physical stock after reservation. Recheck once per exact variant.
+            // 材料源回调可能在预留后改变实物库存，按精确物品变体重新检查一次。
             clearReservationSnapshot();
             Set<CraftingResolver.StackKey> checked = new HashSet<>();
             for (Entry entry : entries) {
                 if (entry.extensionShare == null || !checked.add(entry.extensionShare.key())) continue;
                 var network = countExactAvailableInEndpoint(selected, entry.template, player);
-                if (!network.snapshotReadable()) return false;
+                if (!network.snapshotReadable()) {
+                    recordNetworkReadFailure(network.detail());
+                    return false;
+                }
                 if (network.available() > 0L || countExactAvailableInInventory(player, entry.template) > 0L) {
                     return quoteChanged();
                 }
@@ -1158,8 +1178,7 @@ public final class ExtractionLedger implements AutoCloseable {
                         ? selected.snapshot(player, IngredientMatcher.itemTypesForAll(neededByIngredient.keySet()))
                         : reservationSnapshotResult(selected, player);
                 if (!result.successful()) {
-                    reservationFailure = Component.translatable("rsi.async.abort.material_network_read",
-                            result.status() + "/" + result.diagnosticCode());
+                    recordNetworkReadFailure(result.status() + "/" + result.diagnosticCode());
                     return false;
                 }
                 var snapshot = result.snapshot().orElseThrow();
@@ -1797,7 +1816,6 @@ public final class ExtractionLedger implements AutoCloseable {
             LOGGER.warn("[RSI-Ledger] Error counting exact network stack", failure);
             detail = failure.getClass().getSimpleName();
         }
-        reservationFailure = Component.translatable("rsi.async.abort.material_network_read", detail);
         return new BatchAvailability(0, false, detail);
     }
 

@@ -32,7 +32,8 @@ public record PlanningSnapshot(
         boolean mainThreadOnly,
         PlanningPreferences preferences,
         @Nullable BindingAnchor bindingAnchor,
-        StockSnapshot extensionStock) {
+        @Nullable StockSnapshot capturedExtensionStock,
+        boolean networkStockReadable) {
 
     public PlanningSnapshot(UUID playerId, long requestGeneration, long recipeRevision,
                             ResourceLocation recipeId, Map<StackKey, Long> availableItems,
@@ -42,7 +43,7 @@ public record PlanningSnapshot(
                             boolean mainThreadOnly, PlanningPreferences preferences, @Nullable BindingAnchor bindingAnchor) {
         this(playerId, requestGeneration, recipeRevision, recipeId, availableItems, forcedRecipes, recipeGraph,
                 networkFingerprint, bindingFingerprint, bindingBlockedOutputIds, mainThreadOnly, preferences,
-                bindingAnchor, StockSnapshot.EMPTY);
+                bindingAnchor, null, true);
     }
 
     public PlanningSnapshot(UUID playerId, long requestGeneration, long recipeRevision,
@@ -89,40 +90,55 @@ public record PlanningSnapshot(
         bindingBlockedOutputIds = bindingBlockedOutputIds == null
                 ? Set.of() : Set.copyOf(bindingBlockedOutputIds);
         preferences = preferences == null ? PlanningPreferences.empty() : preferences;
-        extensionStock = Objects.requireNonNull(extensionStock, "extensionStock");
     }
 
     public PlanningSnapshot withRecipeGraph(ImmutableRecipeGraph graph, Set<ResourceLocation> blockedOutputs) {
         return new PlanningSnapshot(playerId, requestGeneration, recipeRevision, recipeId,
                 availableItems, forcedRecipes, graph, networkFingerprint, bindingFingerprint,
-                blockedOutputs, mainThreadOnly, preferences, bindingAnchor, extensionStock);
+                blockedOutputs, mainThreadOnly, preferences, bindingAnchor, capturedExtensionStock, networkStockReadable);
     }
 
     public PlanningSnapshot withBindingAnchor(ResourceKey<Level> dimension, @Nullable BlockPos position) {
         return new PlanningSnapshot(playerId, requestGeneration, recipeRevision, recipeId, availableItems,
                 forcedRecipes, recipeGraph, networkFingerprint, bindingFingerprint, bindingBlockedOutputIds,
                 mainThreadOnly, preferences,
-                new BindingAnchor(dimension, position == null ? null : position.immutable()), extensionStock);
+                new BindingAnchor(dimension, position == null ? null : position.immutable()),
+                capturedExtensionStock, networkStockReadable);
     }
 
-    public PlanningSnapshot withExtensionStock(StockSnapshot stock) {
+    public PlanningSnapshot withNetworkStockReadable(boolean readable) {
+        if (networkStockReadable == readable) return this;
         return new PlanningSnapshot(playerId, requestGeneration, recipeRevision, recipeId, availableItems,
                 forcedRecipes, recipeGraph, networkFingerprint, bindingFingerprint, bindingBlockedOutputIds,
-                mainThreadOnly, preferences, bindingAnchor, stock);
+                mainThreadOnly, preferences, bindingAnchor, capturedExtensionStock, readable);
+    }
+
+    public PlanningSnapshot withExtensionStock(@Nullable StockSnapshot stock) {
+        if (capturedExtensionStock == stock) return this;
+        return new PlanningSnapshot(playerId, requestGeneration, recipeRevision, recipeId, availableItems,
+                forcedRecipes, recipeGraph, networkFingerprint, bindingFingerprint, bindingBlockedOutputIds,
+                mainThreadOnly, preferences, bindingAnchor, stock, networkStockReadable);
+    }
+
+    public StockSnapshot extensionStock() {
+        return capturedExtensionStock == null ? StockSnapshot.EMPTY : capturedExtensionStock;
+    }
+
+    public static boolean hasPureShortage(@Nullable PureRecipePlanner.Result result) {
+        return result != null && result.feasibility() == PureRecipePlanner.Feasibility.INFEASIBLE
+                && result.failureReason() == PureRecipePlanner.FailureReason.MISSING_INPUTS;
     }
 
     public boolean canSupplement(@Nullable PureRecipePlanner.Result result) {
-        if (extensionStock.isEmpty() || result == null
-                || result.feasibility() != PureRecipePlanner.Feasibility.INFEASIBLE
-                || result.failureReason() != PureRecipePlanner.FailureReason.MISSING_INPUTS) return false;
-        var offered = extensionStock.variants().stream()
+        if (!hasPureShortage(result) || extensionStock().isEmpty()) return false;
+        var offered = extensionStock().variants().stream()
                 .map(key -> new ImmutableRecipeGraph.MaterialRef(BuiltInRegistries.ITEM.getKey(key.item()), key.tag()))
                 .toList();
         Predicate<ImmutableRecipeGraph.IngredientRef> offeredFor = demand -> offered.stream()
                 .anyMatch(material -> ImmutableRecipeGraphProjector.matchesIngredient(material, demand));
         if (result.missing().stream().anyMatch(offeredFor)) return true;
 
-        // An offer for an unmet input can bypass the failed producer of that input.
+        // 若扩展能直接供应缺少的输入，就可以绕过未能规划成功的生产路线。
         return Stream.concat(Stream.of(recipeId), result.steps().stream().map(PureRecipePlanner.PlannedStep::recipeId))
                 .distinct().map(recipeGraph.recipesById()::get).filter(Objects::nonNull)
                 .flatMap(recipe -> recipe.inputs().stream()).filter(offeredFor)

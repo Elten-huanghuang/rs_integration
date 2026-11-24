@@ -1,6 +1,5 @@
 package com.huanghuang.rsintegration.crafting.batch;
 
-import com.huanghuang.rsintegration.crafting.RegisteredMaterialSources;
 import com.huanghuang.rsintegration.crafting.plan.IntegrationDiagnostic;
 import com.huanghuang.rsintegration.crafting.plan.IntegrationDiagnosticCode;
 import com.huanghuang.rsintegration.crafting.plan.PlanOutcome;
@@ -54,7 +53,7 @@ final class CraftPreviewInventoryRefresh implements CraftPlanResultDispatcher.Si
             return;
         }
         if (plan.graph() != null && PreviewInventorySyncManager.enabled()
-                && !RegisteredMaterialSources.hasEnabled(snapshot.preferences().materialSources())) {
+                && snapshot.capturedExtensionStock() == null) {
             // 图中的初始供料在打开窗口后持续投影。数量变化不再重新启动整次搜索。
             finished = true;
             destination.success(plan, snapshot);

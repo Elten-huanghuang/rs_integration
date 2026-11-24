@@ -13,7 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-/** Client-only interception of recognized native retrieval gestures. */
+/** 在客户端拦截已识别的原生取物操作。 */
 public final class RSIItemRetrievalInput {
     private record Registration(ResourceLocation id, int priority, Handler handler) {}
 
@@ -22,7 +22,7 @@ public final class RSIItemRetrievalInput {
 
     private RSIItemRetrievalInput() {}
 
-    /** Register during client setup. Higher priorities run first, with ID order breaking ties. */
+    /** 在客户端初始化阶段注册。优先调用优先级更高的处理器，同优先级按 ID 排序。 */
     public static synchronized boolean register(ResourceLocation id, int priority, Handler handler) {
         var entry = new Registration(Objects.requireNonNull(id), priority, Objects.requireNonNull(handler));
         if (HANDLERS.putIfAbsent(id, entry) != null) return false;
@@ -36,7 +36,7 @@ public final class RSIItemRetrievalInput {
 
     @FunctionalInterface
     public interface Handler {
-        /** PASS leaves the gesture untouched. HANDLED consumes the gesture and owns request dispatch. */
+        /** {@code PASS} 不接管输入；{@code HANDLED} 消费输入并负责发送请求。 */
         Decision onInput(Context context);
     }
 
@@ -62,13 +62,13 @@ public final class RSIItemRetrievalInput {
         public ItemStack target() { return target.copy(); }
     }
 
-    /** Invoked by RSI on the client thread before its native request. */
+    /** RSI 在客户端线程发送原生请求之前调用。 */
     public static boolean dispatch(Context context) {
         for (Registration entry : orderedHandlers) {
             try {
                 if (Objects.requireNonNull(entry.handler().onInput(context)) == Decision.HANDLED) return true;
             } catch (RuntimeException | LinkageError failure) {
-                // A handler may have sent its request before failing.
+                // 处理器可能在抛出异常前已经发出请求，不能再发一次。
                 RSIntegrationMod.LOGGER.warn("[RSI-Retrieval] Client handler {} failed", entry.id(), failure);
                 return true;
             }

@@ -158,6 +158,37 @@ class PlanBackgroundReuseTest extends BootstrapTest {
     }
 
     @Test
+    void requoteReplacesOnlyItsOriginalPreviewAfterAnotherRequestStarts() {
+        PlanBackgroundClient.startPreview(100L, RECIPE, null, null);
+        PlanningProgressTracker.responseReceived(100L);
+        PlanBackgroundClient.remember(100L, plan(new ItemStack(Items.IRON_SWORD), null, NETWORK));
+        PlanBackgroundClient.expectRequote(101L, 100L);
+        assertNull(PlanningProgressTracker.get(101L));
+        ResourceLocation other = new ResourceLocation("test", "other");
+        PlanBackgroundClient.startPreview(102L, other, null, null);
+
+        var refreshed = plan(null, null, NETWORK);
+        when(refreshed.success()).thenReturn(true);
+        when(refreshed.targetName()).thenReturn("target");
+        when(refreshed.targetResult()).thenReturn(ItemStack.EMPTY);
+        try (var game = mockStatic(Minecraft.class)) {
+            var client = mock(Minecraft.class);
+            game.when(Minecraft::getInstance).thenReturn(client);
+            PlanResponseClientPacketHandler.handle(refreshed, 101L);
+
+            assertFalse(PlanBackgroundClient.contains(100L));
+            assertEquals(101L, PlanBackgroundClient.findExisting(RECIPE, null, null, NETWORK));
+            assertEquals(102L, PlanBackgroundClient.findPending(other, null, null, null));
+            assertTrue(PlanningProgressTracker.isSelected(102L));
+            var retained = PlanBackgroundClient.completedPlans().get(101L);
+            assertNotNull(retained);
+            PlanResponseClientPacketHandler.handle(refreshed, 101L);
+            assertSame(retained, PlanBackgroundClient.completedPlans().get(101L));
+            verifyNoInteractions(client);
+        }
+    }
+
+    @Test
     void repeatedPlusFindsTheRunningRequestWithoutMergingOtherOutputVariants() {
         ItemStack output = new ItemStack(Items.ENCHANTED_BOOK);
         output.getOrCreateTag().putInt("level", 2);

@@ -50,11 +50,30 @@ public final class PlanBackgroundClient {
     private static final Map<Long, Long> DETACHED_REQUESTS = new LinkedHashMap<>();
     private static final Map<Long, CachedPlan> CACHED_PLANS = new LinkedHashMap<>();
     private static final Map<Long, PreviewTarget> PREVIEW_TARGETS = new LinkedHashMap<>();
+    private static final Map<Long, PendingRequote> REQUOTES = new LinkedHashMap<>();
 
     private PlanBackgroundClient() {}
 
     public static synchronized void attach(long requestId) {
         DETACHED_REQUESTS.remove(requestId);
+    }
+
+    /** 确认通常不会返回计划；仅登记可能到达的重报价，不启动规划进度。 */
+    static synchronized void expectRequote(long requestId, long previewId) {
+        if (previewId <= 0L || requestId <= previewId) return;
+        long now = System.currentTimeMillis();
+        prune(now);
+        PlanningProgressTracker.markIssued(requestId);
+        REQUOTES.put(requestId, new PendingRequote(previewId, now));
+        while (REQUOTES.size() > MAX_PENDING_REQUESTS) {
+            REQUOTES.remove(REQUOTES.keySet().iterator().next());
+        }
+    }
+
+    static synchronized long takeRequote(long requestId) {
+        prune(System.currentTimeMillis());
+        PendingRequote pending = REQUOTES.remove(requestId);
+        return pending == null ? 0L : pending.previewId();
     }
 
     public static synchronized void remember(long requestId, PlanResponse plan) {
@@ -196,6 +215,7 @@ public final class PlanBackgroundClient {
         DETACHED_REQUESTS.clear();
         CACHED_PLANS.clear();
         PREVIEW_TARGETS.clear();
+        REQUOTES.clear();
     }
 
     static Component readyMessage(Component targetName, long requestId) {
@@ -307,8 +327,10 @@ public final class PlanBackgroundClient {
                 now - entry.getValue() >= CACHE_TTL_MS);
         CACHED_PLANS.entrySet().removeIf(entry ->
                 now - entry.getValue().cachedAt() >= CACHE_TTL_MS);
+        REQUOTES.values().removeIf(pending -> now - pending.sentAt() >= CACHE_TTL_MS);
     }
 
+    private record PendingRequote(long previewId, long sentAt) {}
     private record CachedPlan(PlanResponse plan, long cachedAt, @Nullable PreviewTarget previewTarget) {}
     private record PreviewTarget(ResourceLocation recipeId, ItemStack baseItem,
                                  ItemStack clickedOutput, @Nullable StorageReference network) {}

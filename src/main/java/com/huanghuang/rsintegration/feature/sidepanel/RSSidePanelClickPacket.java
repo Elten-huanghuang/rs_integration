@@ -190,7 +190,7 @@ public final class RSSidePanelClickPacket {
         if (target.isEmpty() || player.isCreative() || player.isSpectator()) {
             return OperationResult.failure(panelId, ErrorCode.INVALID_REQUEST);
         }
-        // BD may already have handled its independent pick binding by the time this packet arrives.
+        // 此数据包到达时，超越维度可能已通过自己的选块按键完成取物。
         ItemStack coalesced = coalescedNativePick(player.getMainHandItem(), target);
         Result result = coalesced.isEmpty()
                 ? RSIItemRetrieval.retrieve(new Request(player, target, target.getMaxStackSize(), Scene.WORLD_PICK,

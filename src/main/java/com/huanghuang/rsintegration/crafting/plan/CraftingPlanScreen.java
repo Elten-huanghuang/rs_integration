@@ -858,9 +858,11 @@ public final class CraftingPlanScreen extends Screen {
                 .withPlanningPreferences(requestPreferences())
                 .withStorageReference(storageReference);
         if (!preview && !partialPreparation && !selectedPath.isDirty()) {
-            packet.withConfirmedPreview(responseRequests.activeRequestId());
+            long previewId = responseRequests.activeRequestId();
+            packet.withConfirmedPreview(previewId);
+            PlanBackgroundClient.expectRequote(requestId, previewId);
             if (minecraft.screen instanceof PlanScreenHost host) {
-                host.rsi$planSubmitted(responseRequests.activeRequestId());
+                host.rsi$planSubmitted(previewId);
             }
         }
         if (preview) {

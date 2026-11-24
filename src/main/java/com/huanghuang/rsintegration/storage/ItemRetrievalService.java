@@ -18,7 +18,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Predicate;
 
-/** Common delivery and recovery path for both native retrieval gestures. */
+/** 原生 JEI 取物和世界选块共用的交付与返还流程。 */
 public final class ItemRetrievalService {
     private ItemRetrievalService() {}
 
@@ -109,7 +109,7 @@ public final class ItemRetrievalService {
                     RSIntegrationMod.LOGGER.warn("[RSI-Retrieval] Fragment delivery failed", failure);
                     deliveryFailed = true;
                     known = false;
-                    // Once insertion starts, only the unattempted portion is safe to return.
+                    // 插入一旦开始，只能安全返还尚未尝试插入的部分。
                     inserted = toDeliver;
                 }
                 if (inserted < fragment.getCount()) remainder.add(fragment.copyWithCount(fragment.getCount() - inserted));
@@ -304,7 +304,7 @@ public final class ItemRetrievalService {
         }
     }
 
-    /** Kept behind the RS backend check so BD-only servers can use the shared operation. */
+    /** 只在确认使用 RS 后端时调用，避免仅安装超越维度的服务端加载 RS 类型。 */
     private static final class RefinedStorageEnergy {
         static void drain(StorageReference reference, ServerPlayer player) {
             try {

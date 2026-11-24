@@ -12,6 +12,8 @@ import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.ResolutionStep;
 import com.huanghuang.rsintegration.crafting.DirectMaterialAllocator;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
+import com.huanghuang.rsintegration.crafting.MaterialSources;
+import com.huanghuang.rsintegration.crafting.RegisteredMaterialSources;
 import com.huanghuang.rsintegration.crafting.ScaledIngredientSpec;
 import com.huanghuang.rsintegration.crafting.OutputDestination;
 import com.huanghuang.rsintegration.crafting.RecipeIndex;
@@ -112,6 +114,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anySet;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
@@ -1131,9 +1134,13 @@ class GenericCraftPacketTest extends BootstrapTest {
              var mods = mockStatic(ModList.class);
              var bindings = mockStatic(AltarBindingRegistry.class);
              var favorites = mockStatic(MachineFavoritesSavedData.class);
+             var sources = mockStatic(RegisteredMaterialSources.class, CALLS_REAL_METHODS);
+             var materials = mockStatic(MaterialSources.class, CALLS_REAL_METHODS);
              var ingredientSpecs = mockStatic(CraftPacketUtils.class, CALLS_REAL_METHODS)) {
             lifecycle.when(ServerLifecycleHooks::getCurrentServer).thenReturn(server);
             mods.when(ModList::get).thenReturn(mock(ModList.class));
+            sources.when(() -> RegisteredMaterialSources.hasEnabled(PlanningPreferences.empty().materialSources()))
+                    .thenReturn(true);
             favorites.when(() -> MachineFavoritesSavedData.get(player.server))
                     .thenReturn(mock(MachineFavoritesSavedData.class));
             for (var recipe : recipes) {
@@ -1175,6 +1182,14 @@ class GenericCraftPacketTest extends BootstrapTest {
             assertEquals(1L, plan.materials().entrySet().stream()
                     .filter(entry -> entry.getKey().item() == Items.NETHER_STAR)
                     .mapToLong(entry -> entry.getValue().needed()).sum());
+            var repeated = mock(CraftPlanResultDispatcher.Sink.class);
+            CraftPlanningApplicationService.tryBuildPlan(player, aeternalis.getId(), Map.of(),
+                    null, null, 1, null, null, 2, CraftPlanningRuntime.planRequests().begin(playerId),
+                    null, null, true, false, repeated, null, Map.of(), null, PlanningPreferences.empty());
+            verify(repeated).success(same(plan), any(PlanningSnapshot.class));
+            materials.verify(() -> MaterialSources.readAllAvailable(player, null, false));
+            sources.verify(() -> RegisteredMaterialSources.capture(any(), any(), any(), anySet(),
+                    any(), any(), any()), never());
             CraftPlanningRuntime.planCache().retainForRequest(playerId, 1, snapshot.getValue());
             var confirmation = CraftPlanningApplicationService.findValidatedExecutionPlan(player,
                     aeternalis.getId(), Map.of(), 1, plan.targetResult(), ModType.GENERIC,

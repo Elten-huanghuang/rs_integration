@@ -129,6 +129,12 @@ public final class MaterialSources {
     /** Backend-neutral exact availability view shared by every planning caller. */
     public static Map<StackKey, Long> listAllAvailable(
             ServerPlayer player, @Nullable CraftStorageEndpoint endpoint) {
+        return readAllAvailable(player, endpoint, false).counts();
+    }
+
+    public static AvailabilityLoad readAllAvailable(
+            ServerPlayer player, @Nullable CraftStorageEndpoint endpoint, boolean fresh) {
+        if (fresh) return loadAllAvailable(player, endpoint);
         int currentTick = currentTick(player);
         String cacheKey = cacheKey(player, endpoint) + ":sources=" + MaterialSourceSelection.current().mask();
         rotateCache(currentTick);
@@ -136,13 +142,11 @@ public final class MaterialSources {
         if (cached != null) {
             Map<StackKey, Long> normalized = toLongCounts(cached);
             if (!normalized.equals(cached)) cache.put(cacheKey, normalized);
-            return normalized;
+            return new AvailabilityLoad(normalized, true);
         }
         AvailabilityLoad loaded = loadAllAvailable(player, endpoint);
-        if (!loaded.snapshotSuccessful()) return loaded.counts();
-        Map<StackKey, Long> snapshot = Map.copyOf(loaded.counts());
-        cache.putIfAbsent(cacheKey, snapshot);
-        return snapshot;
+        if (loaded.snapshotSuccessful()) cache.putIfAbsent(cacheKey, loaded.counts());
+        return loaded;
     }
 
     /**
@@ -151,7 +155,7 @@ public final class MaterialSources {
      */
     public static Map<StackKey, Long> listAllAvailableFresh(
             ServerPlayer player, @Nullable CraftStorageEndpoint endpoint) {
-        return Map.copyOf(loadAllAvailable(player, endpoint).counts());
+        return readAllAvailable(player, endpoint, true).counts();
     }
 
     private static AvailabilityLoad loadAllAvailable(
@@ -161,6 +165,7 @@ public final class MaterialSources {
             return new AvailabilityLoad(available, true);
         }
         var snapshotResult = endpoint.snapshot(player);
+        if (!snapshotResult.successful()) return new AvailabilityLoad(available, false);
         snapshotResult.snapshot().ifPresent(snapshot -> snapshot.items().forEach(item ->
                 mergeAvailable(available, StackKey.of(item.stack(), true), item.amount(),
                         "storage_snapshot")));
@@ -190,11 +195,15 @@ public final class MaterialSources {
                     snapshotResult.snapshot().map(s -> s.items().size()).orElse(0),
                     available.size(), exact);
         }
-        return new AvailabilityLoad(available, snapshotResult.successful());
+        return new AvailabilityLoad(available, true);
     }
 
-    private record AvailabilityLoad(Map<StackKey, Long> counts,
-                                    boolean snapshotSuccessful) {}
+    /** 网络读取失败时仅保留随身库存；未知库存不能用于计算付费缺口。 */
+    public record AvailabilityLoad(Map<StackKey, Long> counts, boolean snapshotSuccessful) {
+        public AvailabilityLoad {
+            counts = Map.copyOf(counts);
+        }
+    }
 
     /**
      * Fresh narrow snapshot used when a completed plan only needs its concrete
@@ -204,12 +213,20 @@ public final class MaterialSources {
     public static Map<StackKey, Long> listAvailableForTypes(
             ServerPlayer player, @Nullable CraftStorageEndpoint endpoint,
             Set<Item> itemTypes) {
-        if (itemTypes == null || itemTypes.isEmpty()) return Map.of();
+        return readAvailableForTypes(player, endpoint, itemTypes).counts();
+    }
+
+    private static AvailabilityLoad readAvailableForTypes(
+            ServerPlayer player, @Nullable CraftStorageEndpoint endpoint, Set<Item> itemTypes) {
+        if (itemTypes == null || itemTypes.isEmpty()) return new AvailabilityLoad(Map.of(), true);
         Map<StackKey, Long> available = new HashMap<>(toLongCounts(countInventory(player)));
         available.entrySet().removeIf(entry -> !itemTypes.contains(entry.getKey().item()));
-        if (endpoint == null || !MaterialSourceSelection.current().storageNetwork()) return Map.copyOf(available);
+        if (endpoint == null || !MaterialSourceSelection.current().storageNetwork()) {
+            return new AvailabilityLoad(available, true);
+        }
 
         StorageSnapshotResult snapshotResult = endpoint.snapshot(player, Set.copyOf(itemTypes));
+        if (!snapshotResult.successful()) return new AvailabilityLoad(available, false);
         snapshotResult.snapshot().ifPresent(snapshot -> snapshot.items().forEach(item -> {
             ItemStack stack = item.stack();
             if (!stack.isEmpty() && itemTypes.contains(stack.getItem())) {
@@ -226,7 +243,7 @@ public final class MaterialSources {
                         "revalidation_derived_container");
             }
         }
-        return Map.copyOf(available);
+        return new AvailabilityLoad(available, true);
     }
 
     /** Invalidate cached counts for a player after items are consumed mid-tick. */
@@ -249,6 +266,13 @@ public final class MaterialSources {
             @Nullable CraftStorageEndpoint endpoint, Set<Item> itemTypes, MaterialSourceSelection sources) {
         try (MaterialSourceSelection.Scope ignored = sources.enter()) {
             return listAvailableForTypes(player, endpoint, itemTypes);
+        }
+    }
+
+    public static AvailabilityLoad readAvailableForTypes(ServerPlayer player,
+            @Nullable CraftStorageEndpoint endpoint, Set<Item> itemTypes, MaterialSourceSelection sources) {
+        try (MaterialSourceSelection.Scope ignored = sources.enter()) {
+            return readAvailableForTypes(player, endpoint, itemTypes);
         }
     }
 

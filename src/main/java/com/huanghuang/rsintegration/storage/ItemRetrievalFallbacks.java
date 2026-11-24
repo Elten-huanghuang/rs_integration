@@ -55,7 +55,7 @@ public final class ItemRetrievalFallbacks {
                 storage.backendId().value(), storage.networkId())));
     }
 
-    /** Returns -1 if a handler ran without confirming its result. */
+    /** 处理器已运行但无法确认交付结果时返回 -1。 */
     static int tryOnMissing(Request request) {
         ServerPlayer player = request.player();
         var registered = handlers(request);

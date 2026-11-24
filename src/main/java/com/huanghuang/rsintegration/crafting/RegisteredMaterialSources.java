@@ -25,7 +25,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
 
-/** Converts live extension snapshots into planner values and manages their shared budgets. */
+/** 将扩展材料源快照转换为规划数据，并管理其共享额度。 */
 public final class RegisteredMaterialSources {
     public static final String QUOTE_CHANGED = "rsi.plan.failure.material_quote_changed";
     private static final Map<ResourceLocation, Registration> SOURCES = new TreeMap<>();
@@ -126,7 +126,7 @@ public final class RegisteredMaterialSources {
         }
     }
 
-    /** Contains IDs, item identities and numeric limits only. Safe to pass to planning workers. */
+    /** 仅包含 ID、物品身份和数值额度，可传给后台规划线程。 */
     public record StockSnapshot(Map<Pool, BigInteger> balances, Map<StackKey, List<Stock>> offers) {
         public static final StockSnapshot EMPTY = new StockSnapshot(Map.of(), Map.of());
 
@@ -150,7 +150,7 @@ public final class RegisteredMaterialSources {
             return variants().stream().anyMatch(key -> IngredientMatcher.test(ingredient, key));
         }
 
-        /** Revalidation uses a single budget for the complete external demand. */
+        /** 用同一份额度核验全部外部材料需求。 */
         public boolean covers(Map<StackKey, Long> required, Map<StackKey, Long> physical) {
             Budget budget = budget();
             for (var entry : required.entrySet()) {
@@ -162,7 +162,7 @@ public final class RegisteredMaterialSources {
             return true;
         }
 
-        /** A preview can retain its quoted shares while its exact shortfalls and claims still agree. */
+        /** 实物缺口仍与原份额一致，且来源仍能供料时，可以保留预览中已报价的份额。 */
         public boolean matchesAllocation(Map<StackKey, Long> required, Map<StackKey, Long> physical,
                                          List<Share> planned) {
             Budget budget = budget();

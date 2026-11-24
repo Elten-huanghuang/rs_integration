@@ -17,7 +17,7 @@ public final class RSIItemRetrievalFallback {
         return ItemRetrievalFallbacks.register(id, handler);
     }
 
-    /** Explicitly opt in to delivery destinations and, if supported, an occupied matching hotbar slot. */
+    /** 显式声明支持的交付目标，以及是否能补齐已有匹配物品的快捷栏槽位。 */
     public static boolean register(ResourceLocation id, Set<Destination> destinations, boolean supportsTopUp,
                                    Handler handler) {
         return ItemRetrievalFallbacks.register(id, destinations, supportsTopUp, handler);

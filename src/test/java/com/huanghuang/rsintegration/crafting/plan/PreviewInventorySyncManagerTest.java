@@ -222,6 +222,46 @@ class PreviewInventorySyncManagerTest extends BootstrapTest {
     }
 
     @Test
+    void nativePreviewStartsQuotingOnlyWhenAnInventoryEventShowsAShortage() {
+        var iron = new ItemStack(Items.IRON_INGOT);
+        var exact = StackKey.of(iron, true);
+        var fixture = new Fixture(true, iron, 8, 8);
+        var recipe = new RSICraftingMaterialSources.Plan(ResourceLocation.parse(fixture.state.plan.recipeId()), 0);
+        var offer = new RegisteredMaterialSources.Share(ResourceLocation.parse("test:emc"), exact, 3);
+        var stock = mock(RegisteredMaterialSources.StockSnapshot.class);
+        var budget = mock(RegisteredMaterialSources.Budget.class);
+        when(stock.budget()).thenReturn(budget);
+        when(budget.take(exact, 3)).thenReturn(List.of(offer));
+        try (var local = mockStatic(MaterialSources.class);
+             var sources = mockStatic(RegisteredMaterialSources.class);
+             var endpoints = mockStatic(CraftStorageEndpoints.class)) {
+            endpoints.when(() -> CraftStorageEndpoints.resolve(REFERENCE, fixture.player))
+                    .thenReturn(Optional.of(fixture.endpoint));
+            sources.when(() -> RegisteredMaterialSources.capture(fixture.player, fixture.endpoint,
+                    MaterialSourceSelection.ALL, Set.of(Items.IRON_INGOT), RSICraftingMaterialSources.Phase.PLAN,
+                    recipe, null)).thenReturn(stock);
+            fixture.start();
+            fixture.state.tick(fixture.player, 20, 20, fixture.sent::add);
+            sources.verifyNoInteractions();
+            assertEquals(PreviewInventoryModel.Status.READY, fixture.state.lastStatus);
+
+            var listener = fixture.listener();
+            listener.onChanged(iron, 5);
+            fixture.state.tick(fixture.player, 21, 20, fixture.sent::add);
+            assertEquals(PreviewInventoryModel.Status.QUOTE_CHANGED, fixture.state.lastStatus);
+            assertEquals(3L, fixture.state.external.get(IngredientKey.of(iron)));
+
+            listener.onChanged(iron, 8);
+            fixture.state.tick(fixture.player, 22, 20, fixture.sent::add);
+            assertEquals(PreviewInventoryModel.Status.READY, fixture.state.lastStatus);
+            assertTrue(fixture.state.external.isEmpty());
+            sources.verify(() -> RegisteredMaterialSources.capture(fixture.player, fixture.endpoint,
+                    MaterialSourceSelection.ALL, Set.of(Items.IRON_INGOT), RSICraftingMaterialSources.Phase.PLAN,
+                    recipe, null));
+        }
+    }
+
+    @Test
     void nativeChurnCoalescesAndDoesNotScanNetworkAgain() {
         var fixture = new Fixture(true);
         try (var local = mockStatic(MaterialSources.class)) {

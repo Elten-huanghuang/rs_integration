@@ -209,6 +209,7 @@ public final class PreviewInventorySyncManager {
         final PreviewInventoryModel model;
         final MaterialSourceSelection materialSources;
         final boolean watchesContainers;
+        final boolean unresolvedDemands;
         final Map<IngredientKey, Long> stored = new HashMap<>();
         final Map<IngredientKey, Long> local = new HashMap<>();
         final Map<IngredientKey, Long> derived = new HashMap<>();
@@ -216,6 +217,7 @@ public final class PreviewInventorySyncManager {
         final List<RegisteredMaterialSources.Share> plannedExternal = new ArrayList<>();
         final Map<StackKey, Long> allocatedInputs;
         RegisteredMaterialSources.StockSnapshot extensionStock = RegisteredMaterialSources.StockSnapshot.EMPTY;
+        boolean extensionStockCaptured;
         boolean extensionPlanChanged;
         final Map<IngredientKey, Long> pending = new LinkedHashMap<>();
         final Map<StorageFluidKey, IngredientKey> fluidKeys = new HashMap<>();
@@ -246,6 +248,7 @@ public final class PreviewInventorySyncManager {
             this.requestId = requestId;
             this.model = new PreviewInventoryModel(plan);
             this.allocatedInputs = PlanningStateValidator.requiredInitialSupply(plan.graph());
+            this.unresolvedDemands = plan.graph().hasUnresolvedDemands();
             plan.graph().visitExtensionAllocations((id, stack, count) ->
                     plannedExternal.add(new RegisteredMaterialSources.Share(id, StackKey.of(stack, true), count)));
             this.watchesContainers = model.itemTypes().contains(Items.WATER_BUCKET)
@@ -319,13 +322,10 @@ public final class PreviewInventorySyncManager {
             }
             pending.clear();
             if (poll || full || derivedDirty) updateDerived(player);
-            if (poll || full) {
-                ResourceLocation recipe = ResourceLocation.tryParse(plan.recipeId());
-                extensionStock = RegisteredMaterialSources.capture(player, endpoint, materialSources,
-                        model.itemTypes(), RSICraftingMaterialSources.Phase.PLAN,
-                        recipe == null ? null : new RSICraftingMaterialSources.Plan(recipe, previewGeneration), null);
+            if (poll || full || !dirty.isEmpty()) {
+                refreshExtensionStock(player, poll || full);
+                updateExternal();
             }
-            if (poll || full || !dirty.isEmpty()) updateExternal();
             for (IngredientKey key : dirty) {
                 model.update(key, SaturatingLongMath.add(physicalAmount(key), external.getOrDefault(key, 0L)));
             }
@@ -344,6 +344,22 @@ public final class PreviewInventorySyncManager {
         private long physicalAmount(IngredientKey key) {
             return SaturatingLongMath.add(local.getOrDefault(key, 0L),
                     SaturatingLongMath.add(stored.getOrDefault(key, 0L), derived.getOrDefault(key, 0L)));
+        }
+
+        private void refreshExtensionStock(ServerPlayer player, boolean periodic) {
+            boolean needed = !plannedExternal.isEmpty() || unresolvedDemands || model.keys().stream()
+                    .anyMatch(key -> physicalAmount(key) < model.requiredAmount(key));
+            if (!needed) {
+                extensionStock = RegisteredMaterialSources.StockSnapshot.EMPTY;
+                extensionStockCaptured = false;
+            } else if (periodic || !extensionStockCaptured) {
+                // 原生库存事件可能早于下次轮询发现缺口，此时就应开始询价。
+                ResourceLocation recipe = ResourceLocation.tryParse(plan.recipeId());
+                extensionStock = RegisteredMaterialSources.capture(player, endpoint, materialSources,
+                        model.itemTypes(), RSICraftingMaterialSources.Phase.PLAN,
+                        recipe == null ? null : new RSICraftingMaterialSources.Plan(recipe, previewGeneration), null);
+                extensionStockCaptured = true;
+            }
         }
 
         private void updateExternal() {
@@ -368,8 +384,8 @@ public final class PreviewInventorySyncManager {
             for (var share : shares) {
                 fresh.merge(IngredientKey.of(share.key().toStack()), share.count(), SaturatingLongMath::add);
             }
-            if (plan.graph().hasUnresolvedDemands()) {
-                // Display-only shortages may share a budget with confirmed inputs.
+            if (unresolvedDemands) {
+                // 仅用于展示的缺料也可能与已确认的输入共用额度。
                 if (shares == plannedExternal) plannedExternal.forEach(budget::retain);
                 for (IngredientKey key : model.keys()) {
                     long have = SaturatingLongMath.add(physicalAmount(key), fresh.getOrDefault(key, 0L));
