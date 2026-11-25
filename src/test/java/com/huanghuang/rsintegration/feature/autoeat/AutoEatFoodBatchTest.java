@@ -15,12 +15,14 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraftforge.fml.ModList;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -160,6 +162,58 @@ class AutoEatFoodBatchTest extends BootstrapTest {
         verify(storage).returnStack(player, nativeFood);
         verify(storage, never()).extract(player, fee, 2);
         verify(supplier, never()).takeOne(any(), any());
+    }
+
+    @Test
+    void withdrawnOfferStillRequiresExactNativeVariantOnLaterPasses() {
+        ItemStack quoted = foodWithCapability(1);
+        ItemStack other = foodWithCapability(2);
+        Source supplier = source("withdrawn_variant", quoted);
+        when(supplier.takeOne(eq(context), any())).thenReturn(new TakeResult.Unavailable());
+        when(storage.extract(eq(player), any(), eq(1))).thenReturn(
+                new Extraction(ItemStack.EMPTY, true), new Extraction(other, false), new Extraction(quoted, false));
+
+        var batch = new AutoEatFoodBatch(storage, context, fee);
+        var candidate = batch.candidates().iterator().next();
+        assertTrue(batch.take(candidate, stack -> true).isEmpty());
+        verify(storage).returnStack(player, fee);
+        assertTrue(batch.take(candidate, stack -> fail("不同变体不得进入食用检查")).isEmpty());
+        verify(storage).returnStack(player, other);
+        verify(storage).extract(player, fee, 2);
+
+        assertSame(quoted, batch.take(candidate, stack -> true));
+        verify(storage, times(2)).extract(player, fee, 2);
+        verify(supplier).takeOne(eq(context), any());
+        assertNull(batch.failure());
+    }
+
+    @Test
+    void diversityRecordFailureCountsFinishedServingAndStopsBeforeNextCharge() {
+        ItemStack second = food.copy();
+        second.getOrCreateTag().putInt("flavour", 2);
+        Source supplier = source("diversity_record_failure", food, second);
+        when(supplier.takeOne(eq(context), any())).thenAnswer(call ->
+                new TakeResult.Taken(call.getArgument(1, ItemStack.class).copy()));
+        var batch = new AutoEatFoodBatch(storage, context, fee);
+        assertEquals(2, batch.candidates().size());
+        when(player.getUUID()).thenReturn(UUID.randomUUID());
+        try (var mods = mockStatic(ModList.class)) {
+            mods.when(ModList::get).thenReturn(mock(ModList.class));
+            AutoEatEngine.execute(player, AutoEatMode.DIVERSITY, List.of());
+            try {
+                int eaten = AutoEatEngine.eatDiversityBatch(player, batch,
+                        candidate -> batch.take(candidate, stack -> true),
+                        item -> AutoEatEngine.runNutritionHook("SolCarrot addFood", () -> {
+                            throw new IllegalStateException("记录失败");
+                        }));
+                assertEquals(1, eaten);
+                verify(supplier).takeOne(eq(context), any());
+                verify(storage).extract(player, fee, 2);
+                verify(storage, never()).returnStack(player, fee);
+            } finally {
+                AutoEatEngine.stop(player);
+            }
+        }
     }
 
     private ItemStack foodWithCapability(int variant) {

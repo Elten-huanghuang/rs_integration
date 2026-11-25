@@ -40,6 +40,7 @@ public final class AutoEatFoodBatch {
     static final class Candidate {
         final ItemStack template;
         private final CompoundTag identity;
+        private boolean externallyQuoted;
         private final Map<ResourceLocation, Offer> offers = new LinkedHashMap<>();
 
         private Candidate(CompoundTag identity, ItemStack template) {
@@ -65,6 +66,7 @@ public final class AutoEatFoodBatch {
                     if (stack == null || stack.getCount() != 1 || !wanted(stack)) continue;
                     ItemStack template = stack.copy();
                     Candidate candidate = addCandidate(template);
+                    candidate.externallyQuoted = true;
                     candidate.offers.putIfAbsent(entry.getKey(), new Offer(entry.getValue(), template));
                 }
             } catch (RuntimeException | LinkageError e) {
@@ -115,7 +117,7 @@ public final class AutoEatFoodBatch {
                 if (food.isEmpty() || !checkAccess() || !canEat.test(food)) return ItemStack.EMPTY;
             } else {
                 // 网络的匹配规则可能比外部报价宽松；取到不同变体并不等于确认缺货。
-                if (!candidate.offers.isEmpty() && !candidate.identity.equals(exactIdentity(food))) {
+                if (candidate.externallyQuoted && !candidate.identity.equals(exactIdentity(food))) {
                     return ItemStack.EMPTY;
                 }
                 if (!canEat.test(food)) return ItemStack.EMPTY;

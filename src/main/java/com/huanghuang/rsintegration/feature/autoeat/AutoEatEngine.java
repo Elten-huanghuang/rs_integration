@@ -33,6 +33,8 @@ import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
+import java.util.function.Predicate;
 
 public final class AutoEatEngine {
     private static final Logger LOGGER = LogUtils.getLogger();
@@ -362,36 +364,10 @@ public final class AutoEatEngine {
         if (foodList == null) return false;
 
         Set<ResourceLocation> effectBlacklist = getEffectBlacklist(player);
-        int maxPerBatch = 16;
-        int eaten = 0;
-
         var batch = new AutoEatFoodBatch(storage, new Context(player, Set.of()), configuredCost());
-        for (Candidate candidate : batch.candidates()) {
-            ItemStack stack = candidate.template;
-            if (!runningTasks.contains(player.getUUID())) break;
-            if (eaten >= maxPerBatch) break;
-            if (stack.isEmpty()) continue;
-
-            Item item = stack.getItem();
-            if (!item.isEdible()) continue;
-
-            try {
-                if (!(boolean) solConfig_shouldCount.invoke(item)) continue;
-                if ((boolean) foodList_hasEaten.invoke(foodList, item)) continue;
-            } catch (Throwable e) { continue; }
-
-            if (isFoodBlacklisted(stack, getBlacklist(player))) continue;
-            if (hasBlacklistedEffect(stack, player, effectBlacklist)) continue;
-
-            ItemStack taken = batch.take(candidate, food -> !isFoodBlacklisted(food, getBlacklist(player))
-                    && !hasBlacklistedEffect(food, player, getEffectBlacklist(player)));
-            if (batch.failure() != null) break;
-            if (taken.isEmpty()) continue;
-
-            finishServing(storage, player, taken);
-            eaten++;
-            runNutritionHook("SolCarrot addFood", () -> foodList_addFood.invoke(foodList, item));
-        }
+        int eaten = eatDiversityBatch(player, batch,
+                candidate -> eatNewFood(player, storage, batch, candidate, foodList, effectBlacklist),
+                item -> runNutritionHook("SolCarrot addFood", () -> foodList_addFood.invoke(foodList, item)));
 
         if (eaten > 0) {
             runNutritionHook("SolCarrot update health", () -> maxHealth_update.invoke(player));
@@ -407,6 +383,38 @@ public final class AutoEatEngine {
         if (batch.failure() != null) sendFailure(player, AutoEatMode.DIVERSITY, batch.failure());
         // 每次点击只处理一批，网络仍有符合条件的食物也不续跑。
         return false;
+    }
+
+    static int eatDiversityBatch(ServerPlayer player, AutoEatFoodBatch batch,
+                                 Function<Candidate, ItemStack> eatIfEligible, Predicate<Item> recordFood) {
+        int eaten = 0;
+        for (Candidate candidate : batch.candidates()) {
+            if (!runningTasks.contains(player.getUUID()) || eaten >= SAFE_MAX_PER_REQUEST) break;
+            ItemStack eatenFood = eatIfEligible.apply(candidate);
+            if (batch.failure() != null) break;
+            if (eatenFood.isEmpty()) continue;
+            eaten++;
+            // 食物已经结算；记录失败时保留本份计数，停止选择后续食物。
+            if (!recordFood.test(eatenFood.getItem())) break;
+        }
+        return eaten;
+    }
+
+    private static ItemStack eatNewFood(ServerPlayer player, AutoEatStorage storage, AutoEatFoodBatch batch,
+                                        Candidate candidate, Object foodList, Set<ResourceLocation> effectBlacklist) {
+        ItemStack stack = candidate.template;
+        Item item = stack.getItem();
+        if (stack.isEmpty() || !item.isEdible()) return ItemStack.EMPTY;
+        try {
+            if (!(boolean) solConfig_shouldCount.invoke(item)
+                    || (boolean) foodList_hasEaten.invoke(foodList, item)) return ItemStack.EMPTY;
+        } catch (Throwable e) { return ItemStack.EMPTY; }
+
+        if (isFoodBlacklisted(stack, getBlacklist(player))
+                || hasBlacklistedEffect(stack, player, effectBlacklist)) return ItemStack.EMPTY;
+        ItemStack taken = batch.take(candidate, food -> !isFoodBlacklisted(food, getBlacklist(player))
+                && !hasBlacklistedEffect(food, player, getEffectBlacklist(player)));
+        return taken.isEmpty() ? ItemStack.EMPTY : finishServing(storage, player, taken);
     }
 
     // 进食费用
