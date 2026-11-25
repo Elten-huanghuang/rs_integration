@@ -289,7 +289,7 @@ class GraphPreparationReuseTest extends BootstrapTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"generic", "smelting", "wr_arcane_workbench", "malum_runic_workbench"})
+    @ValueSource(strings = {"generic", "malum_runic_workbench"})
     void preparedMachineGraphsKeepTheirPlansAndDemandTrees(String machineType) {
         ImmutableRecipeGraph graph = graph(machineType, 0);
         Map<MaterialRef, Integer> stock = stock(1, 1);

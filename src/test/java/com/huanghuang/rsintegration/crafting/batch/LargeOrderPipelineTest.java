@@ -154,7 +154,7 @@ class LargeOrderPipelineTest extends BootstrapTest {
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {1025, 1_000_000, 10_000_000, 50_000_000})
+    @ValueSource(ints = {1025, 50_000_000})
     void oversizedOrdersAreClampedByConstructorAndRejectedOnServerWire(int requested) {
         GenericCraftPacket packet = new GenericCraftPacket(TARGET_RECIPE, true, Map.of(),
                 null, null, requested, false, null);

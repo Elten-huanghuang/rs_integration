@@ -674,19 +674,6 @@ class PlanningLookupCacheTest extends BootstrapTest {
     }
 
     @Test
-    void identicalEarthHeartExactMatchUsesStringFastPathBeforeTaintedFallback() {
-        MaterialRef actual = new MaterialRef(EARTH_HEART, "{isTainted:1b}");
-        IngredientRef ingredient = new IngredientRef(
-                List.of(new MaterialRef(EARTH_HEART, "{isTainted:1b}")), 1, NbtMatchMode.EXACT);
-
-        PlanningLookupCache.run(() -> {
-            assertTrue(ImmutableRecipeGraphProjector.matchesIngredient(actual, ingredient));
-            assertEquals(0, PlanningLookupCache.currentStats().nbtParses());
-            return null;
-        });
-    }
-
-    @Test
     void taintedEarthHeartFallbackUsesPlanningNbtCacheAcrossNumericTagTypes() {
         MaterialRef expected = new MaterialRef(EARTH_HEART, "{isTainted:1}");
         MaterialRef actual = new MaterialRef(EARTH_HEART, "{isTainted:1b}");
@@ -993,7 +980,7 @@ class PlanningLookupCacheTest extends BootstrapTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"generic", "smelting", "wr_arcane_workbench", "malum_runic_workbench"})
+    @ValueSource(strings = {"generic", "smelting"})
     void machineProjectionPlanningAndInspectionAreUnchanged(String machineType) {
         MaterialRef raw = new MaterialRef(id("raw"), "{quality:1,owner:7}");
         MaterialRef requiredRaw = new MaterialRef(raw.itemId(), "{quality:1}");

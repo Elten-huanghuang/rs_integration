@@ -67,16 +67,6 @@ class ReverseTargetFallbackTest extends BootstrapTest {
     }
 
     @Test
-    void decompressionTargetFallsBackToDirectRecipe() {
-        PureRecipePlanner.Result result = plan(DECOMPRESS, Map.of(DUST, 64L), 1);
-
-        assertEquals(PureRecipePlanner.Feasibility.FEASIBLE, result.feasibility());
-        assertEquals(List.of(new PureRecipePlanner.PlannedStep(FOUR_TO_ONE, 9)), result.steps());
-        assertEquals(28L, result.remaining().get(DUST));
-        assertTrue(result.missing().isEmpty());
-    }
-
-    @Test
     void decompressionTargetReportsMissingDustInsteadOfCycle() {
         PureRecipePlanner.Result result = plan(DECOMPRESS, Map.of(), 1);
 
@@ -100,12 +90,13 @@ class ReverseTargetFallbackTest extends BootstrapTest {
     }
 
     @Test
-    void decompressionTargetWithRepeatsScalesDirectRecipe() {
+    void decompressionTargetFallsBackToDirectRecipeScaledForRepeats() {
         PureRecipePlanner.Result result = plan(DECOMPRESS, Map.of(DUST, 128L), 2);
 
         assertEquals(PureRecipePlanner.Feasibility.FEASIBLE, result.feasibility());
         assertEquals(List.of(new PureRecipePlanner.PlannedStep(FOUR_TO_ONE, 18)), result.steps());
         assertEquals(56L, result.remaining().get(DUST));
+        assertTrue(result.missing().isEmpty());
     }
 
     @Test

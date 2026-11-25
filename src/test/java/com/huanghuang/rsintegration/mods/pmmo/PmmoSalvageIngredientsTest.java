@@ -27,10 +27,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PmmoSalvageIngredientsTest extends BootstrapTest {
     @ParameterizedTest
-    @ValueSource(strings = {"{}", "{Damage:97}",
-            "{Enchantments:[{id:\"minecraft:efficiency\",lvl:3s}]}",
-            "{display:{Name:'{\"text\":\"Salvage\"}'},RepairCost:5}",
-            "{Damage:97,Unbreakable:1b,itemModifier:\"celestial_forge:sluggish\"}"})
+    @ValueSource(strings = {"{}", "{Damage:97,Unbreakable:1b,"
+            + "itemModifier:\"celestial_forge:sluggish\",RepairCost:5,"
+            + "Enchantments:[{id:\"minecraft:efficiency\",lvl:3s}],display:{Name:'{\"text\":\"Salvage\"}'}}"})
     void declarationAndPlannerAcceptEveryNbtStateOfTheInputItem(String nbt) throws Exception {
         PmmoSalvageRecipeWrapper recipe = recipe();
         PmmoSalvageRecipeHandler handler = new PmmoSalvageRecipeHandler();

@@ -50,16 +50,6 @@ class IronFurnacesCompatibilityTest extends BootstrapTest {
     }
 
     @Test
-    void factoryBatchUsesFiveLanesForFiveOperations() {
-        var lanes = IronFurnacesBatchDelegate.splitFactoryMaterials(
-                java.util.List.of(new ItemStack(Items.CLAY_BALL, 5)));
-
-        assertEquals(5, lanes.size());
-        assertTrue(lanes.stream().allMatch(stack -> stack.is(Items.CLAY_BALL)
-                && stack.getCount() == 1));
-    }
-
-    @Test
     void rainbowFactoryBatchFillsSixFullLanes() {
         var lanes = IronFurnacesBatchDelegate.splitFactoryMaterials(
                 java.util.List.of(

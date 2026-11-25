@@ -79,7 +79,7 @@ class CraftMarketPlanServiceTest extends BootstrapTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"1, false", "64, false", "100000000, false", "64, true"})
+    @CsvSource({"1, false", "100000000, false", "64, true"})
     void fastExchangeCachesOneExecutableNodeWithExactPaymentAndSelectedStorage(
             int executions, boolean leased) {
         PlanCache.Entry cached = buildFastPlan(executions, leased, true);

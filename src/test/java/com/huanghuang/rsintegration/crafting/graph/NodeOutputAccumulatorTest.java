@@ -306,28 +306,7 @@ class NodeOutputAccumulatorTest extends BootstrapTest {
     }
 
     @Test
-    void probabilisticOutputIsObservedWithoutBeingRequired() {
-        OutputDeclaration declaration = OutputDeclaration.item(
-                new OutputPortId(new NodeId(8), 0),
-                MaterialKey.of(new ItemStack(Items.DIAMOND)),
-                0, OutputKind.SECONDARY, 0, 2,
-                OutputProbability.probabilistic(0.25D, 4, "diamond_bonus"),
-                false, null);
-        NodeOutputAccumulator accumulator = new NodeOutputAccumulator(List.of(declaration));
-
-        assertTrue(accumulator.isComplete());
-        List<NodeOutputAccumulator.Publication> publications =
-                accumulator.add(List.of(new ItemStack(Items.DIAMOND, 2)));
-
-        assertEquals(1, publications.size());
-        assertEquals(2, publications.get(0).stack().getCount());
-        assertEquals(2, accumulator.publishedQuantity(declaration.id()));
-        assertTrue(accumulator.isComplete());
-        assertTrue(accumulator.drainSurplus().isEmpty());
-    }
-
-    @Test
-    void probabilisticOutputPublishesNoMoreThanItsMaximumQuantity() {
+    void probabilisticOutputIsOptionalAndPublishesOnlyUpToItsMaximumQuantity() {
         OutputDeclaration declaration = OutputDeclaration.item(
                 new OutputPortId(new NodeId(9), 0),
                 MaterialKey.of(new ItemStack(Items.DIAMOND)),
@@ -336,6 +315,7 @@ class NodeOutputAccumulatorTest extends BootstrapTest {
                 false, null);
         NodeOutputAccumulator accumulator = new NodeOutputAccumulator(List.of(declaration));
 
+        assertTrue(accumulator.isComplete());
         List<NodeOutputAccumulator.Publication> publications =
                 accumulator.add(List.of(new ItemStack(Items.DIAMOND, 5)));
 
@@ -343,6 +323,7 @@ class NodeOutputAccumulatorTest extends BootstrapTest {
         assertEquals(2, publications.get(0).stack().getCount());
         assertEquals(3, accumulator.drainSurplus().get(0).getCount());
         assertEquals(2, accumulator.publishedQuantity(declaration.id()));
+        assertTrue(accumulator.isComplete());
     }
 
     private static ItemStack tagged(String variant, int count) {

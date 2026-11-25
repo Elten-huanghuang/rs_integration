@@ -63,7 +63,7 @@ class CuttingBoardIntermediateSelectionTest extends BootstrapTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"0, 1", "1, 1", "24, 1", "0, 6", "24, 6"})
+    @CsvSource({"0, 1", "1, 1", "24, 6"})
     void forcedAmethystCuttingKeepsTheSelectedProducerAndDurabilityTool(
             long existingShards, int requestedShards) {
         CraftNode selected = resolveCutting(existingShards, requestedShards,

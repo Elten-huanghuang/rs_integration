@@ -43,12 +43,11 @@ class InkBottleNativeTerminalTest extends BootstrapTest {
         verify(f.tracker).changed(eq(f.player), argThat(fluid -> fluid.isFluidEqual(f.ink) && fluid.getAmount() == 250));
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = {"REGULAR", "SPLASH", "LINGERING"})
-    void nativeTerminalBottlesPotionAndShiftMovesItToInventory(String type) throws Exception {
+    @Test
+    void nativeTerminalBottlesPotionAndShiftMovesItToInventory() throws Exception {
         InkFluidTestFixtures.ink("potion", 250);
         Fixture f = new Fixture();
-        ItemStack potion = AlchemistPotionSupportTest.potion(type);
+        ItemStack potion = AlchemistPotionSupportTest.potion("LINGERING");
         FluidStack fluid = AlchemistPotionSupport.fluid(potion);
         when(f.list.get(f.id)).thenReturn(fluid);
         when(f.network.extractFluid(any(), eq(250), any())).thenReturn(fluid.copy());

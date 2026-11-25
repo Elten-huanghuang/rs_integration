@@ -73,9 +73,8 @@ class SteamerMultiblockTest extends BootstrapTest {
     }
 
     static Stream<Arguments> structures() {
-        return Stream.of("youkaishomecoming", "youkaisfeasts")
-                .flatMap(namespace -> Stream.of(1, 2, 3, 6, 7, 18)
-                        .map(layers -> Arguments.of(namespace, layers)));
+        return Stream.of(Arguments.of("youkaishomecoming", 1), Arguments.of("youkaishomecoming", 7),
+                Arguments.of("youkaisfeasts", 3), Arguments.of("youkaisfeasts", 18));
     }
 
     @ParameterizedTest

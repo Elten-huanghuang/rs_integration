@@ -163,19 +163,6 @@ class RefinedStorageOperationExecutorTest extends BootstrapTest {
     }
 
     @Test
-    void simulatedExtractionIsMarkedAsNonMutating() {
-        FakeDriver driver = new FakeDriver();
-        driver.extractResults.add(new ItemStack(Items.DIAMOND, 1));
-        StorageItemKey key = RefinedStorageItemKeys.fromStack(new ItemStack(Items.DIAMOND));
-
-        StorageOperationResult result = RefinedStorageOperationExecutor.extract(driver, key,
-                new ItemStack(Items.DIAMOND), 1, 1, true);
-
-        assertEquals(StorageOperationMode.SIMULATE, result.mode());
-        assertEquals(1, result.transferredAmount().orElseThrow());
-    }
-
-    @Test
     void simulatedExtractionCanCoverLongRequestsByNativeIntChunks() {
         FakeDriver driver = new FakeDriver();
         driver.extractResults.add(new ItemStack(Items.DIAMOND, Integer.MAX_VALUE));

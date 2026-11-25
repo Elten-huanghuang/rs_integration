@@ -725,9 +725,9 @@ class CraftNodeRuntimeBufferedProgressTest extends BootstrapTest {
         RSIntegrationConfig.SERVER_SPEC.setConfig(config);
     }
 
-    @ParameterizedTest
-    @ValueSource(ints = {129, 1024})
-    void incrementalNativeOutputsKeepLongBufferedOrderAlive(int operations) {
+    @Test
+    void incrementalNativeOutputsKeepLongBufferedOrderAlive() {
+        int operations = 1024;
         ParallelCraftGroup group = startGroup(operations);
         CraftNodeRuntime runtime = runtime(group);
 

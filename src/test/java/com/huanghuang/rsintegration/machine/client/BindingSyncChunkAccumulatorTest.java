@@ -18,18 +18,7 @@ class BindingSyncChunkAccumulatorTest {
     }
 
     @Test
-    void appliesOnlyAfterAllChunksArrive() {
-        BindingInfo first = info(1);
-        BindingInfo second = info(2);
-
-        assertNull(BindingSyncChunkAccumulator.accept(
-                7L, 0, 2, List.of(first)));
-        assertEquals(List.of(first, second), BindingSyncChunkAccumulator.accept(
-                7L, 1, 2, List.of(second)));
-    }
-
-    @Test
-    void ignoresDuplicateAndStaleChunks() {
+    void appliesOnlyAfterAllUniqueChunksOfTheCurrentGenerationArrive() {
         BindingInfo first = info(1);
         BindingInfo second = info(2);
 

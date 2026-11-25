@@ -11,23 +11,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class SidePanelRequestRateLimiterTest {
 
     @Test
-    void firstRequestAllowed() {
-        assertFalse(SidePanelRequestRateLimiter.isRateLimited(UUID.randomUUID()));
-    }
-
-    @Test
     void immediateSecondDropped() {
         UUID p = UUID.randomUUID();
-        SidePanelRequestRateLimiter.isRateLimited(p);
-        assertTrue(SidePanelRequestRateLimiter.isRateLimited(p));
-    }
-
-    @Test
-    void allowedAfterInterval() throws InterruptedException {
-        UUID p = UUID.randomUUID();
-        SidePanelRequestRateLimiter.isRateLimited(p);
-        Thread.sleep(70); // MIN_INTERVAL_MS is 50
         assertFalse(SidePanelRequestRateLimiter.isRateLimited(p));
+        assertTrue(SidePanelRequestRateLimiter.isRateLimited(p));
     }
 
     @Test

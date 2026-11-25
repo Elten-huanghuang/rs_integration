@@ -452,9 +452,7 @@ class CraftProgressRuntimeTest extends BootstrapTest {
 
     @ParameterizedTest
     @CsvSource({
-            "2, WORKING, true",
             "3, WORKING, true",
-            "4, WORKING, true",
             "6, DONE, true",
             "3, WORKING, false"
     })

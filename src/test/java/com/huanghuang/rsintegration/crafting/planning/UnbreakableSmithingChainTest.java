@@ -74,23 +74,6 @@ class UnbreakableSmithingChainTest extends BootstrapTest {
                 PureDemandTreeInspector.inspect(graph, stock, FINAL_RECIPE, 1).status());
     }
 
-    @ParameterizedTest
-    @ValueSource(ints = {0, 1})
-    void lookupOptimizationKeepsTheFullModifiedSwordPlanAndTree(int start) {
-        ImmutableRecipeGraph graph = graph(NbtMatchMode.PARTIAL);
-        Map<MaterialRef, Long> stock = stock(start, MODIFIED);
-        var uncachedLimits = new PlanningLookupCache.Limits(0, 0, 0, 0);
-        PureRecipePlanner.Result expected = PlanningLookupCache.run(uncachedLimits, () -> plan(graph, stock));
-        PureRecipePlanner.Result actual = plan(graph, stock);
-        assertTrue(actual.feasible(), actual.toString());
-        assertEquals(expected, actual);
-        PureDemandTreeInspector.Result expectedTree = PlanningLookupCache.run(uncachedLimits,
-                () -> PureDemandTreeInspector.inspect(graph, stock, FINAL_RECIPE, 1));
-        assertEquals(PureDemandTreeInspector.Status.COMPLETE, expectedTree.status());
-        assertEquals(expectedTree, PureDemandTreeInspector.inspect(graph, stock, FINAL_RECIPE, 1));
-        assertEquals(7 - start, actual.steps().size());
-    }
-
     @Test
     void exactChainAlsoAcceptsEquivalentDefaultDamageWithoutInventingOrdinaryStock() {
         ImmutableRecipeGraph graph = graph(NbtMatchMode.EXACT);
@@ -206,16 +189,18 @@ class UnbreakableSmithingChainTest extends BootstrapTest {
     void preparationReusePreservesModifiedSwordPlanningAndInspection(int start) {
         ImmutableRecipeGraph graph = graph(NbtMatchMode.PARTIAL);
         Map<MaterialRef, Long> stock = stock(start, MODIFIED);
-        var expectedPlan = PlanningLookupCache.run(new PlanningLookupCache.Limits(0, 0, 0, 0),
-                () -> plan(graph, stock));
-        var expectedTree = PureDemandTreeInspector.inspect(graph, stock, FINAL_RECIPE, 1);
+        var uncachedLimits = new PlanningLookupCache.Limits(0, 0, 0, 0);
+        var expectedPlan = PlanningLookupCache.run(uncachedLimits, () -> plan(graph, stock));
+        var expectedTree = PlanningLookupCache.run(uncachedLimits,
+                () -> PureDemandTreeInspector.inspect(graph, stock, FINAL_RECIPE, 1));
+        assertTrue(expectedPlan.feasible());
+        assertEquals(7 - start, expectedPlan.steps().size());
+        assertEquals(PureDemandTreeInspector.Status.COMPLETE, expectedTree.status());
         PlanningLookupCache.run(() -> {
             for (int repetition = 0; repetition < 3; repetition++) {
                 assertEquals(expectedPlan, plan(graph, stock));
                 assertEquals(expectedTree, PureDemandTreeInspector.inspect(graph, stock, FINAL_RECIPE, 1));
             }
-            assertTrue(expectedPlan.feasible());
-            assertEquals(PureDemandTreeInspector.Status.COMPLETE, expectedTree.status());
             var stats = PlanningLookupCache.preparationStats(PlanningLookupCache.PreparationStage.SMITHING);
             assertEquals(1, stats.builds());
             assertEquals(5, stats.hits());

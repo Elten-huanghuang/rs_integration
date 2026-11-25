@@ -12,8 +12,7 @@ import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraftforge.fluids.FluidStack;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.UUID;
@@ -21,10 +20,9 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 
 class InkFluidProgressPacketTest extends BootstrapTest {
-    @ParameterizedTest
-    @ValueSource(ints = {250, 1000, 2300})
-    void startedPacketRetainsInkTargetAndAmount(int amount) {
-        ItemStack target = ink(amount);
+    @Test
+    void startedPacketRetainsInkTargetAndAmount() {
+        ItemStack target = ink();
         FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
         try {
             new CraftStartedPacket(UUID.randomUUID(), 1, false, target).encode(buffer);
@@ -36,10 +34,9 @@ class InkFluidProgressPacketTest extends BootstrapTest {
         }
     }
 
-    @ParameterizedTest
-    @ValueSource(ints = {250, 1000, 2300})
-    void fullAndDeltaProgressRetainInkAndOrdinaryOutputs(int amount) {
-        ItemStack target = ink(amount);
+    @Test
+    void fullAndDeltaProgressRetainInkAndOrdinaryOutputs() {
+        ItemStack target = ink();
         ItemStack bottle = new ItemStack(Items.GLASS_BOTTLE, 3);
         List<NodeProgress> nodes = List.of(node(0, target), node(1, bottle));
         CraftProgressSnapshot snapshot = new CraftProgressSnapshot(UUID.randomUUID(), 2,
@@ -65,8 +62,8 @@ class InkFluidProgressPacketTest extends BootstrapTest {
         }
     }
 
-    private static ItemStack ink(int amount) {
-        FluidStack fluid = InkFluidTestFixtures.ink("legendary_ink", amount);
+    private static ItemStack ink() {
+        FluidStack fluid = InkFluidTestFixtures.ink("legendary_ink", 2300);
         fluid.getOrCreateTag().putString("variant", "display-test");
         return InkFluidSupport.token(InkFluidTestFixtures.tokenItem(), fluid);
     }

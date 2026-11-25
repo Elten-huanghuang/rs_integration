@@ -14,42 +14,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class GuiOpenRateLimiterTest {
 
     @Test
-    void firstOpenIsAllowed() {
-        UUID player = UUID.randomUUID();
-        assertFalse(GuiOpenRateLimiter.isRateLimited(player));
-    }
-
-    @Test
     void immediateReopenIsDropped() {
         UUID player = UUID.randomUUID();
-        GuiOpenRateLimiter.isRateLimited(player);
+        assertFalse(GuiOpenRateLimiter.isRateLimited(player));
         assertTrue(GuiOpenRateLimiter.isRateLimited(player),
                 "a reopen within the 500ms window must be rate-limited");
     }
 
     @Test
-    void openIsAllowedAtTheIntervalBoundary() {
+    void droppedAttemptDoesNotSlideTheIntervalBoundary() {
         UUID player = UUID.randomUUID();
         long startedAt = 1_000;
         assertFalse(GuiOpenRateLimiter.isRateLimited(player, startedAt, 500));
         assertTrue(GuiOpenRateLimiter.isRateLimited(player, startedAt + 499, 500));
-        assertFalse(GuiOpenRateLimiter.isRateLimited(player, startedAt + 500, 500));
-    }
-
-    /**
-     * Contract nuance vs {@link com.huanghuang.rsintegration.crafting.PreviewRateLimiter}:
-     * GuiOpenRateLimiter only refreshes the timestamp when a request is ALLOWED.
-     * A dropped request does NOT slide the window, so the gate opens exactly
-     * the configured interval after the last accepted open — not after the last attempt.
-     */
-    @Test
-    void droppedAttemptsDoNotSlideTheWindow() {
-        UUID player = UUID.randomUUID();
-        long startedAt = 2_000;
-        assertFalse(GuiOpenRateLimiter.isRateLimited(player, startedAt, 500));
-        assertTrue(GuiOpenRateLimiter.isRateLimited(player, startedAt + 300, 500));
         assertFalse(GuiOpenRateLimiter.isRateLimited(player, startedAt + 500, 500),
-                "window is measured from the last ACCEPTED open, not the last attempt");
+                "窗口从上次放行时开始，不因拒绝请求而延长");
     }
 
     @Test

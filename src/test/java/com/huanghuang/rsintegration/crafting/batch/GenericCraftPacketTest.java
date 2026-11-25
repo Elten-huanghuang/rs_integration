@@ -1600,12 +1600,7 @@ class GenericCraftPacketTest extends BootstrapTest {
     }
 
     @Test
-    void outputDestinationRoundTripsAndInvalidOrdinalsDefaultToRs() {
-        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
-        OutputDestination.PLAYER_INVENTORY.write(buffer);
-
-        assertEquals(OutputDestination.PLAYER_INVENTORY,
-                OutputDestination.read(buffer));
+    void invalidOutputDestinationOrdinalsDefaultToRs() {
         assertEquals(OutputDestination.RS_NETWORK, OutputDestination.byOrdinal(-1));
         assertEquals(OutputDestination.RS_NETWORK, OutputDestination.byOrdinal(99));
     }

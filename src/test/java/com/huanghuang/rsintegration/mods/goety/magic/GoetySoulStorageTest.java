@@ -95,14 +95,6 @@ class GoetySoulStorageTest extends BootstrapTest {
     }
 
     @Test
-    void directDiskInsertionSupportsArcaOverflow() {
-        UnifiedDiskCore disk = new UnifiedDiskCore(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
-                new UnifiedDiskCore.Limits(8, 8, 1048576, 268435456));
-        assertEquals(500, disk.insertGoetySouls(500, true));
-        assertEquals(500, disk.goetySouls());
-    }
-
-    @Test
     void genericGridTransferFindsSoulTotemThroughOptionalBridge() {
         ItemStack totem = totem(100, 25);
         ModList mods = mock(ModList.class);

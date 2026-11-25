@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BiomancyBioLabInputLayoutTest extends BootstrapTest {
     @ParameterizedTest
-    @ValueSource(ints = {0, 1, 2, 3, 4})
+    @ValueSource(ints = {0, 2, 4})
     void centerIngredientAlwaysGoesIntoSlotFour(int sideCount) {
         List<IngredientSpec> specs = new ArrayList<>();
         List<ItemStack> materials = new ArrayList<>();

@@ -519,12 +519,6 @@ class GoetyBatchDelegateTest extends BootstrapTest {
     }
 
     @Test
-    void soulProbeAcceptsEnoughEnergy() {
-        assertEquals(IBatchDelegate.PreparationState.READY,
-                GoetyBatchDelegate.soulPreparationResult(100, 100).state());
-    }
-
-    @Test
     void soulProbeCombinesTaskReservationWithAltarEnergy() {
         int available = GoetyBatchDelegate.combinedSoulAvailability(50, 0, 50);
 

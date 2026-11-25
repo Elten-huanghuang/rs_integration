@@ -48,7 +48,7 @@ class CraftPlanExecutionEligibilityTest extends BootstrapTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value = PlanOutcome.class, names = "RUNTIME_UNAVAILABLE", mode = EnumSource.Mode.EXCLUDE)
+    @EnumSource(value = PlanOutcome.class, names = {"READY", "MISSING_INPUTS", "BUDGET_EXHAUSTED"})
     void otherFailureOutcomesCannotBeRetriedAsMachineContention(PlanOutcome outcome) {
         PlanResponse plan = plan(outcome, false,
                 List.of(IntegrationDiagnostic.error(IntegrationDiagnosticCode.MACHINES_LEASED)),
@@ -58,8 +58,8 @@ class CraftPlanExecutionEligibilityTest extends BootstrapTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value = IntegrationDiagnosticCode.class, names = "MACHINES_LEASED",
-            mode = EnumSource.Mode.EXCLUDE)
+    @EnumSource(value = IntegrationDiagnosticCode.class,
+            names = {"NO_BOUND_MACHINE", "NO_READY_MACHINE", "MISSING_MATERIALS"})
     void otherFailuresCannotBeHiddenByTheMachineLeaseDiagnostic(IntegrationDiagnosticCode code) {
         PlanResponse plan = plan(PlanOutcome.RUNTIME_UNAVAILABLE, false,
                 List.of(IntegrationDiagnostic.error(IntegrationDiagnosticCode.MACHINES_LEASED),

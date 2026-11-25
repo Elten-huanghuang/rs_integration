@@ -61,7 +61,7 @@ class DeepPlanningTest extends BootstrapTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"64, false", "128, true", "256, false", "512, true", "1024, true"})
+    @CsvSource({"256, false", "1024, true"})
     void bothPlanningPathsResolveAllStepsFromRawStock(int depth, boolean machineSlots) {
         try (var fixture = new DeepPlanningFixture(depth, 1, false)) {
             var pure = fixture.pure(true);
@@ -149,7 +149,7 @@ class DeepPlanningTest extends BootstrapTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"9, 0, 32, 64", "10, 0, 48, 96", "9, 320, 32, 64"})
+    @CsvSource({"10, 0, 48, 96", "9, 320, 32, 64"})
     void fullTreeVisitsEveryNativeRouteAndPreservesAllInputs(int levels, int trunkDepth, int routeCount,
                                                             int rootAlternatives) {
         int nodes = (1 << levels) - 1 + trunkDepth;

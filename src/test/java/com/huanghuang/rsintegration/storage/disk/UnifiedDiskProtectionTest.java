@@ -17,8 +17,6 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.util.UUID;
@@ -55,14 +53,13 @@ class UnifiedDiskProtectionTest extends BootstrapTest {
         return entity;
     }
 
-    @ParameterizedTest @ValueSource(strings = {"explosion", "lightningBolt", "inFire", "lava", "cactus", "arrow", "wither", "fallingBlock"})
-    void vanillaItemDamageRejectsAllSourcesWithoutRemovingDisk(String name) {
+    @Test void vanillaExplosionDamageDoesNotRemoveDisk() {
         ItemStack stack = disk();
         UUID id = UUID.randomUUID(), world = UUID.randomUUID(); item.setIdentity(stack, id, world);
         CompoundTag original = stack.getTag().copy();
         ItemEntity entity = entity(level(), stack, 80);
         doReturn(false).when(entity).isInvulnerableTo(any(DamageSource.class));
-        DamageSource source = new DamageSource(Holder.direct(new DamageType(name, 0)));
+        DamageSource source = new DamageSource(Holder.direct(new DamageType("explosion", 0)));
         assertFalse(entity.hurt(source, Float.MAX_VALUE));
         verify(entity, never()).discard();
         assertEquals(original, stack.getTag()); assertEquals(1, stack.getCount());

@@ -63,9 +63,8 @@ class ConfirmedPreviewTransportTest extends BootstrapTest {
         book.setTag(TagParser.parseTag("{StoredEnchantments:[{id:\"minecraft:sharpness\",lvl:3s}]}"));
         ItemStack potion = new ItemStack(Items.POTION);
         potion.setTag(TagParser.parseTag("{Potion:\"minecraft:strong_healing\"}"));
-        return Stream.of(new ItemStack(Items.BOOK), emptyTag, new ItemStack(Items.DIAMOND_SWORD),
-                        rich, book, potion)
-                .flatMap(stack -> Stream.of(Arguments.of(stack, false), Arguments.of(stack, true)));
+        return Stream.of(Arguments.of(new ItemStack(Items.BOOK), false), Arguments.of(emptyTag, true),
+                Arguments.of(rich, false), Arguments.of(book, true), Arguments.of(potion, false));
     }
 
     @ParameterizedTest

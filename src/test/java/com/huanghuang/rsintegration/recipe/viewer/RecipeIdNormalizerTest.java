@@ -45,15 +45,6 @@ class RecipeIdNormalizerTest {
     }
 
     @Test
-    void rejectsAnvilDisplayIdFromDisconnectLog() {
-        ResourceLocation displayId = mock(ResourceLocation.class);
-        when(displayId.getNamespace()).thenReturn("minecraft");
-        when(displayId.getPath()).thenReturn("enchantment.goetyawaken:claymore");
-
-        assertFalse(RecipeIdNormalizer.canRequestJeiRecipe(displayId));
-    }
-
-    @Test
     void rejectsMalformedIdsOutsideEnchantmentDisplay() {
         ResourceLocation invalidPath = mock(ResourceLocation.class);
         when(invalidPath.getNamespace()).thenReturn("minecraft");

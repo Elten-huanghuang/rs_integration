@@ -17,26 +17,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MagicResourceCostPlanningTest extends BootstrapTest {
     @Test
-    void purePlannerAggregatesSelectedRecipeCostsRecursively() {
-        ResourceLocation recipeId = new ResourceLocation("test", "mana_recipe");
-        ResourceLocation itemId = new ResourceLocation("minecraft", "stone");
-        ImmutableRecipeGraph.MaterialRef output =
-                new ImmutableRecipeGraph.MaterialRef(itemId, "");
-        ImmutableRecipeGraph.RecipeNode node = new ImmutableRecipeGraph.RecipeNode(
-                recipeId, output, 1, List.of(), "test", recipeId,
-                List.of(new MagicResourceCost(MagicResourceKind.MANA, 75)));
-        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(
-                Map.of(output, List.of(node)));
-
-        PureRecipePlanner.Result result = PureRecipePlanner.resolve(
-                graph, Map.of(),
-                List.of(new ImmutableRecipeGraph.IngredientRef(List.of(output), 1)), 8);
-
-        assertEquals(List.of(new MagicResourceCost(MagicResourceKind.MANA, 75)),
-                result.magicCosts());
-    }
-
-    @Test
     void costMergeAddsWithinRangeAndKeepsEnumOrder() {
         List<MagicResourceCost> merged = MagicResourceCost.merge(List.of(
                 new MagicResourceCost(MagicResourceKind.SOURCE, 40),

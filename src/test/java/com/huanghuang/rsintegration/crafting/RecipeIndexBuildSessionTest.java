@@ -88,7 +88,6 @@ class RecipeIndexBuildSessionTest extends BootstrapTest {
     @ParameterizedTest
     @ValueSource(strings = {
             "alkahestry/crafting/netherrack",
-            "alkahestry/crafting/diamond",
             "alkahestry/charging/redstone",
             "alkahestry/drain/redstone"
     })

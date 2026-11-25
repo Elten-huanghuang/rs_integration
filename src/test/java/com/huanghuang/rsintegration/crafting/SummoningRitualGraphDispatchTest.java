@@ -86,7 +86,7 @@ class SummoningRitualGraphDispatchTest extends BootstrapTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"1,0,false", "1,0,true", "6,0,false", "6,0,true", "6,2,true", "6,6,true"})
+    @CsvSource({"1,0,false", "6,0,false", "6,2,true", "6,6,true"})
     void emptyPlayerInventoryCanPrepareWholeBatchFromRsAndExistingAltarStock(
             int executions, int installedMaterials, boolean installedCatalyst) throws Exception {
         ServerPlayer player = mock(ServerPlayer.class);

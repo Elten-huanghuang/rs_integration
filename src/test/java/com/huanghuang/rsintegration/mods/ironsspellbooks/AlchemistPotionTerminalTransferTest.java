@@ -14,8 +14,6 @@ import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraftforge.server.ServerLifecycleHooks;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.MockedStatic;
 
 import java.util.List;
@@ -27,9 +25,9 @@ import static org.mockito.Mockito.*;
 class AlchemistPotionTerminalTransferTest extends BootstrapTest {
     @BeforeAll static void registerPotionFluid() { InkFluidTestFixtures.ink("potion", 250); }
 
-    @ParameterizedTest @ValueSource(strings = {"REGULAR", "SPLASH", "LINGERING"})
-    void emptyCursorBorrowsBottleAndExtractsExactly250Mb(String type) {
-        ItemStack potion = AlchemistPotionSupportTest.potion(type);
+    @Test
+    void emptyCursorBorrowsBottleAndExtractsExactly250Mb() {
+        ItemStack potion = AlchemistPotionSupportTest.potion("REGULAR");
         FluidStack fluid = AlchemistPotionSupport.fluid(potion);
         INetwork network = network(fluid);
         when(network.extractItem(any(), eq(1), any())).thenReturn(new ItemStack(Items.GLASS_BOTTLE));

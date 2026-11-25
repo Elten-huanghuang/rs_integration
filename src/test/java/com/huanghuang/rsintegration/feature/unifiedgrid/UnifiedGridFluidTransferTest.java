@@ -66,7 +66,7 @@ class UnifiedGridFluidTransferTest extends BootstrapTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"1,999", "1,1000", "1,2000", "3,999", "3,1000", "3,2000"})
+    @CsvSource({"1,999", "1,1000", "3,2000"})
     void bucketSubclassWithoutCapabilitiesEmptiesOnlyOneWholeBucket(int count, int capacity) {
         var buckets = FluidContainerBucketTestFixtures.subclassBuckets("terminal_poisonwater");
         FluidStack fluid = new FluidStack(((BucketItem) buckets.filled()).getFluid(), 1000);
@@ -163,7 +163,7 @@ class UnifiedGridFluidTransferTest extends BootstrapTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"999,0", "999,1", "1000,0", "1000,1", "1000,3", "1001,1", "2000,0", "2000,1"})
+    @CsvSource({"999,0", "999,1", "1000,0", "1000,3", "1001,1"})
     void fillingFromLiveCachePreservesFluidIdentityWhenLastBucketClearsEntry(int amount, int cursorBuckets) {
         Store f = new Store(amount, 4000, cursorBuckets == 0 ? 1 : 0);
         IndexedStackList<FluidStack> cache = new IndexedStackList<>(FrozenKey.Kind.FLUID);

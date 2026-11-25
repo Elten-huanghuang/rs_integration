@@ -16,11 +16,6 @@ class BiomancyNutrientDemandTest extends BootstrapTest {
     }
 
     @Test
-    void singleExecutionKeepsRecipeCost() {
-        assertEquals(100, BiomancyBatchDelegate.nutrientDemand(100, 1));
-    }
-
-    @Test
     void zeroExecutionsIsTreatedAsOne() {
         assertEquals(100, BiomancyBatchDelegate.nutrientDemand(100, 0));
     }

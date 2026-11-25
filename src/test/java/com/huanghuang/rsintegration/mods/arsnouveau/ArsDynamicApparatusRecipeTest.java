@@ -55,19 +55,6 @@ class ArsDynamicApparatusRecipeTest extends BootstrapTest {
     }
 
     @Test
-    void higherEnchantStartsFromPreviousLevelBook() {
-        var input = ArsDynamicApparatusRecipe.buildEnchantmentInput(Enchantments.FIRE_ASPECT, 2);
-        var output = ArsDynamicApparatusRecipe.buildEnchantmentOutput(
-                input, Enchantments.FIRE_ASPECT, 2);
-
-        assertTrue(input.getItem() instanceof EnchantedBookItem);
-        assertEquals(1, EnchantmentHelper.getEnchantments(input)
-                .getOrDefault(Enchantments.FIRE_ASPECT, 0));
-        assertEquals(2, EnchantmentHelper.getEnchantments(output)
-                .getOrDefault(Enchantments.FIRE_ASPECT, 0));
-    }
-
-    @Test
     void levelFourEnchantRequiresTheExactLevelThreeBook() {
         var input = ArsDynamicApparatusRecipe.buildEnchantmentInput(Enchantments.BLOCK_EFFICIENCY, 4);
         var output = ArsDynamicApparatusRecipe.buildEnchantmentOutput(

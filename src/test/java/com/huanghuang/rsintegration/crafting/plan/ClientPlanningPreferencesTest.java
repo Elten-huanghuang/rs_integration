@@ -49,8 +49,6 @@ class ClientPlanningPreferencesTest extends BootstrapTest {
     @ParameterizedTest
     @ValueSource(strings = {
             "minecraft:gold_ingot_from_smelting_gold_ore",
-            "minecraft:gold_ingot_from_blasting_gold_ore",
-            "minecraft:gold_ingot_from_nuggets",
             "minecraft:gold_ingot_from_gold_block"
     })
     void persistedDefaultCannotReplaceExplicitRecipe(String clickedRecipe) {

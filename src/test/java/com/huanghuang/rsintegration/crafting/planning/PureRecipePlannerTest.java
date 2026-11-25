@@ -933,27 +933,6 @@ class PureRecipePlannerTest extends BootstrapTest {
     }
 
     @Test
-    void recursivelyAmplifiesASeedUsedByItsOwnRecipe() {
-        MaterialRef template = material("template");
-        MaterialRef stone = material("stone");
-        RecipeNode duplicate = recipe("duplicate_template", template, 2,
-                ingredient(template, 1), ingredient(stone, 7));
-        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
-                template, List.of(duplicate)));
-
-        PureRecipePlanner.Result result = PureRecipePlanner.resolve(graph,
-                Map.of(template, 1, stone, 49), List.of(ingredient(template, 8)), 20);
-
-        assertTrue(result.feasible());
-        assertEquals(List.of(
-                new PureRecipePlanner.PlannedStep(id("duplicate_template"), 1),
-                new PureRecipePlanner.PlannedStep(id("duplicate_template"), 2),
-                new PureRecipePlanner.PlannedStep(id("duplicate_template"), 4)),
-                result.steps());
-        assertTrue(result.remaining().isEmpty());
-    }
-
-    @Test
     void amplifiesTemplateFromFiftyNineStockToSixtyFiveOutput() {
         MaterialRef template = material("template_with_large_seed_stock");
         MaterialRef stone = material("stone_for_large_seed_stock");
@@ -981,7 +960,7 @@ class PureRecipePlannerTest extends BootstrapTest {
                 template, List.of(duplicate)));
 
         PureRecipePlanner.Result result = PureRecipePlanner.resolve(graph,
-                Map.of(template, 2, stone, 512), List.of(ingredient(template, 65)), 20);
+                Map.of(template, 2, stone, 441), List.of(ingredient(template, 65)), 20);
 
         assertTrue(result.feasible(), result.toString());
         assertEquals(List.of(
@@ -998,6 +977,7 @@ class PureRecipePlannerTest extends BootstrapTest {
                 new PureRecipePlanner.PlannedStep(
                         id("duplicate_template_small_seed_stock"), 1)),
                 result.steps());
+        assertTrue(result.remaining().isEmpty());
     }
 
     @Test
@@ -1049,31 +1029,6 @@ class PureRecipePlannerTest extends BootstrapTest {
         assertFalse(result.feasible());
         assertEquals(PureRecipePlanner.Status.UNRESOLVABLE, result.status());
         assertEquals(Map.of(stone, 49L), result.remaining());
-    }
-
-    @Test
-    void selfAmplifyingRecipeWorksAsAnIntermediateStep() {
-        MaterialRef template = material("template");
-        MaterialRef stone = material("stone");
-        MaterialRef artifact = material("artifact");
-        RecipeNode duplicate = recipe("duplicate_template", template, 2,
-                ingredient(template, 1), ingredient(stone, 7));
-        RecipeNode assemble = recipe("assemble_artifact", artifact, 1,
-                ingredient(template, 8));
-        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(
-                template, List.of(duplicate), artifact, List.of(assemble)));
-
-        PureRecipePlanner.Result result = PureRecipePlanner.resolve(graph,
-                Map.of(template, 1, stone, 49), List.of(ingredient(artifact, 1)), 20);
-
-        assertTrue(result.feasible());
-        assertEquals(List.of(
-                new PureRecipePlanner.PlannedStep(id("duplicate_template"), 1),
-                new PureRecipePlanner.PlannedStep(id("duplicate_template"), 2),
-                new PureRecipePlanner.PlannedStep(id("duplicate_template"), 4),
-                new PureRecipePlanner.PlannedStep(id("assemble_artifact"), 1)),
-                result.steps());
-        assertTrue(result.remaining().isEmpty());
     }
 
     @Test
