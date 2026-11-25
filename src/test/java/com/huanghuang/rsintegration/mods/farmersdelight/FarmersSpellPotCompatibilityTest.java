@@ -222,6 +222,7 @@ class FarmersSpellPotCompatibilityTest extends BootstrapTest {
 
         Fixture() {
             scroll.setStackInSlot(0, previousScroll);
+            when(machine.getBlockPos()).thenReturn(POS);
             when(access.rsi$foodInventory()).thenReturn(food);
             when(access.rsi$scrollInventory()).thenReturn(scroll);
             when(player.level()).thenReturn(level);

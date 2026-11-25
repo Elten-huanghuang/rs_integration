@@ -15,6 +15,8 @@ import com.huanghuang.rsintegration.crafting.batch.BatchConcurrencyCapabilities;
 import com.huanghuang.rsintegration.crafting.batch.IBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferContract;
 import com.huanghuang.rsintegration.crafting.batch.InputBufferPlan;
+import com.huanghuang.rsintegration.crafting.batch.OperationInputRecovery;
+import com.huanghuang.rsintegration.crafting.batch.OperationInputRecovery.Input;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.crafting.batch.ParallelBatchSizing;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
@@ -68,9 +70,10 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     private FarmersSpellPotAccess spellPot;
     private ItemStack placedScroll = ItemStack.EMPTY;
     private int plannedOperations = 1;
-    private final List<ItemStack> placedInputs = new ArrayList<>();
-    private final List<ItemStack> detachedRecoveredInputs = new ArrayList<>();
-    private ItemStack placedContainer = ItemStack.EMPTY;
+    @Nullable
+    private OperationInputRecovery inputRecovery;
+    @Nullable
+    private String startFailureDetail;
 
     private static volatile Field inventoryField;
     private static volatile boolean reflectionProbed;
@@ -102,9 +105,8 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         this.craftDone = false;
         this.arcaneCookingPot = false;
         this.plannedOperations = 1;
-        this.placedInputs.clear();
-        this.detachedRecoveredInputs.clear();
-        this.placedContainer = ItemStack.EMPTY;
+        this.inputRecovery = null;
+        this.startFailureDetail = null;
         BlockEntity existing = level.getBlockEntity(pos);
         this.spellPotEntity = existing instanceof FarmersSpellPotAccess ? existing : null;
         this.spellPot = existing instanceof FarmersSpellPotAccess pot ? pot : null;
@@ -291,6 +293,9 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
     public boolean startBufferedOperation(@NotNull ServerPlayer player,
                                            @NotNull InputBufferPlan plan,
                                            @NotNull ExtractionLedger sharedLedger) {
+        if (plan != null && plan.enabled()) {
+            holdInputs(player, plan.inputs().stream().map(InputBufferPlan.InputSlot::stack).toList());
+        }
         if (!supportsInputBuffer() || plan == null || !plan.enabled()) {
             RSIntegrationMod.LOGGER.warn(
                     "[RSI-Batch-CookingPot] 输入缓冲不可用 recipe={} pos={}",
@@ -369,24 +374,57 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
             if (!ledger.commitToEndpoint(storageEndpoint(), player)) return false;
 
-            this.usingSharedLedger = false;
-            if (!startPreparedOperation(player, materials, ledger)) {
-                for (ItemStack mat : materials) {
-                    if (!mat.isEmpty())
-                        insertIntoStorage(player, mat, false);
+            boolean started = false;
+            try {
+                started = startPreparedOperation(player, materials, ledger);
+                return started;
+            } finally {
+                if (started) {
+                    usingSharedLedger = false;
+                } else {
+                    recover(player, "cooking pot start failed");
+                    List<ItemStack> recovered = failureRecoveredInputs();
+                    if (recovered != null) {
+                        ledger.retainCommittedRefunds(recovered);
+                        ledger.refundCommittedToEndpoint(endpoint, player);
+                    }
                 }
-                return false;
             }
-            return true;
         }
+    }
+
+    private List<Input> holdInputs(ServerPlayer player, List<ItemStack> materials) {
+        this.player = player;
+        this.usingSharedLedger = true;
+        this.craftDone = false;
+        this.startFailureDetail = null;
+        this.inputRecovery = new OperationInputRecovery();
+        return new ArrayList<>(materials.stream().map(inputRecovery::hold).toList());
     }
 
     @Override
     public boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials,
                                          ExtractionLedger sharedLedger) {
-        this.player = player;
-        this.usingSharedLedger = true;
-        this.craftDone = false;
+        // 即使机器在校验阶段拒绝启动，已交接但未投放的实物也必须可退。
+        List<Input> inputs = holdInputs(player, materials);
+        boolean started = false;
+        try {
+            started = startPreparedOperation(player, materials, inputs);
+            return started;
+        } finally {
+            // 失败 worker 可能还要等其他机器结束；现在就撤回本次投料，稍后由账本结算。
+            if (!started) inputRecovery.recover(myLevel);
+        }
+    }
+
+    private boolean startPreparedOperation(ServerPlayer player, List<ItemStack> materials, List<Input> inputs) {
+        int scrollIndex = spellPot == null ? -1 : (int) recipe.getIngredients().stream()
+                .filter(ingredient -> !ingredient.isEmpty()).count();
+        if (!placedScroll.isEmpty() && scrollIndex >= 0 && scrollIndex < materials.size()
+                && ItemStack.matches(placedScroll, materials.get(scrollIndex))) {
+            // 沿用上批卷轴时，仍由独立的卷轴回收流程认领，不能按未投放材料再退一次。
+            inputs.get(scrollIndex).release();
+        }
 
         if (!myLevel.hasChunkAt(myPos)) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] 机器区块未加载 pos={}", myPos);
@@ -428,12 +466,11 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
         ItemStack selectedScroll = ItemStack.EMPTY;
+        Input scrollInput = null;
         if (spellPot != null) {
             ResourceLocation school = FarmersSpellPotSupport.requiredSchool(recipe);
             if (school != null) {
                 if (requiredSpecs == null || materials.size() != requiredSpecs.size()) return false;
-                int scrollIndex = (int) recipe.getIngredients().stream()
-                        .filter(ingredient -> !ingredient.isEmpty()).count();
                 if (scrollIndex >= materials.size() || requiredSpecs.get(scrollIndex).role() != DemandRole.CATALYST) {
                     return false;
                 }
@@ -445,6 +482,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
                 }
                 materials = new ArrayList<>(materials);
                 materials.remove(scrollIndex);
+                scrollInput = inputs.remove(scrollIndex);
                 requiredSpecs = new ArrayList<>(requiredSpecs);
                 requiredSpecs.remove(scrollIndex);
             }
@@ -465,9 +503,6 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] 无法清空机器原有内容 pos={}", myPos);
             return false;
         }
-        placedInputs.clear();
-        detachedRecoveredInputs.clear();
-        placedContainer = ItemStack.EMPTY;
 
         forceChunkLoad(true);
 
@@ -497,21 +532,20 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             return false;
         }
 
-        List<ItemStack> inputMaterials = new ArrayList<>();
         ItemStack containerMaterial = ItemStack.EMPTY;
         int inputEnd = materials.size();
         if (!requiredContainer.isEmpty()) {
-            if (materials.isEmpty()) return false;
-            ItemStack suppliedContainer = materials.get(materials.size() - 1);
-            if (suppliedContainer.isEmpty()
-                    || !ItemStack.isSameItemSameTags(suppliedContainer, requiredContainer)
-                    || suppliedContainer.getCount() < requiredContainer.getCount()) {
+            ItemStack suppliedContainer = inputEnd == 0 ? ItemStack.EMPTY : materials.get(inputEnd - 1);
+            // 原生烹饪锅按物品类型认容器；投放和回收仍使用带原始 NBT 的实物。
+            if (suppliedContainer.isEmpty() || !ItemStack.isSameItem(suppliedContainer, requiredContainer)) {
+                startFailureDetail = "invalid serving container for recipe " + recipe.getId();
                 RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] Planned container missing for recipe {}: {}",
                         recipe.getId(), requiredContainer);
                 return false;
             }
             long requiredCount = (long) requiredContainer.getCount() * plannedOperations;
             if (requiredCount > Integer.MAX_VALUE || suppliedContainer.getCount() != (int) requiredCount) {
+                startFailureDetail = "wrong serving container count for recipe " + recipe.getId();
                 RSIntegrationMod.LOGGER.warn(
                         "[RSI-Batch-CookingPot] 容器数量不匹配 recipe={} required={} supplied={} operations={}",
                         recipe.getId(), requiredCount, suppliedContainer.getCount(), plannedOperations);
@@ -520,12 +554,12 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             containerMaterial = suppliedContainer.copy();
             inputEnd--;
         }
+        List<Integer> ingredientIndices = new ArrayList<>(inputEnd);
         for (int i = 0; i < inputEnd; i++) {
-            ItemStack material = materials.get(i);
-            if (!material.isEmpty()) inputMaterials.add(material);
+            if (!materials.get(i).isEmpty()) ingredientIndices.add(i);
         }
 
-        long materialCount = inputMaterials.stream().filter(s -> !s.isEmpty()).count();
+        int materialCount = ingredientIndices.size();
         if (materialCount > inputSlots()) {
             RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] Recipe {} has {} ingredients but only {} input slots",
                     recipe.getId(), materialCount, inputSlots());
@@ -535,18 +569,18 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
         int requiredInputCount = requiredSpecs == null ? 0
                 : requiredSpecs.size() - (requiredContainer.isEmpty() ? 0 : 1);
-        if (requiredInputCount != inputMaterials.size()) {
+        if (requiredInputCount != materialCount) {
             RSIntegrationMod.LOGGER.warn(
                     "[RSI-Batch-CookingPot] 食材条目数量不匹配 recipe={} required={} supplied={}",
-                    recipe.getId(), requiredInputCount, inputMaterials.size());
+                    recipe.getId(), requiredInputCount, materialCount);
             return false;
         }
 
         // Insert one stack per recipe ingredient. The native pot consumes one
         // item from every occupied input slot after each completed cycle.
-        int slot = 0;
-        for (ItemStack mat : inputMaterials) {
-            if (mat.isEmpty()) continue;
+        for (int slot = 0; slot < materialCount; slot++) {
+            int materialIndex = ingredientIndices.get(slot);
+            ItemStack mat = materials.get(materialIndex);
             IngredientSpec spec = requiredSpecs.get(slot);
             long requiredCount = (long) spec.count() * plannedOperations;
             if (requiredCount > Integer.MAX_VALUE || mat.getCount() != (int) requiredCount
@@ -558,23 +592,12 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
                 forceChunkLoad(false);
                 return false;
             }
-            ItemStack placed = mat.copy();
-            ItemStack remainder = itemHandler.insertItem(slot, placed, false);
+            ItemStack remainder = placeInput(inputs.get(materialIndex), be, itemHandler, slot, mat);
             if (!remainder.isEmpty()) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] Failed to insert into slot {}: {}",
                         slot, remainder.getHoverName().getString());
-                for (int back = 0; back < slot; back++) {
-                    ItemStack refund = itemHandler.extractItem(back, 64, false);
-                    if (!refund.isEmpty()) {
-                        detachedRecoveredInputs.add(refund.copy());
-                        if (!usingSharedLedger) insertIntoStorage(player, refund, false);
-                    }
-                }
-                be.setChanged();
                 return false;
             }
-            placedInputs.add(placed.copy());
-            slot++;
         }
         be.setChanged();
 
@@ -584,8 +607,6 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             ItemStack existingContainer = itemHandler.getStackInSlot(containerSlot());
             if (!existingContainer.isEmpty()) {
                 RSIntegrationMod.LOGGER.warn("[RSI-Batch-CookingPot] Container slot occupied at {}", myPos);
-                rollbackInputs(itemHandler, slot);
-                be.setChanged();
                 return false;
             }
             ItemStack simulated = itemHandler.insertItem(containerSlot(), containerMaterial, true);
@@ -593,30 +614,39 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
                 RSIntegrationMod.LOGGER.warn(
                         "[RSI-Batch-CookingPot] 容器槽模拟插入失败 pos={} remainder={}",
                         myPos, simulated.getCount());
-                rollbackInputs(itemHandler, slot);
-                be.setChanged();
                 return false;
             }
-            ItemStack remainder = itemHandler.insertItem(containerSlot(), containerMaterial, false);
+            ItemStack remainder = placeInput(inputs.get(inputEnd), be, itemHandler, containerSlot(), containerMaterial);
             if (!remainder.isEmpty()) {
                 RSIntegrationMod.LOGGER.warn(
                         "[RSI-Batch-CookingPot] 容器槽实际插入失败 pos={} remainder={}",
                         myPos, remainder.getCount());
-                rollbackInputs(itemHandler, slot);
-                be.setChanged();
                 return false;
             }
             be.setChanged();
-            placedContainer = containerMaterial.copy();
         }
 
         if (spellPot != null) {
-            if (!installScroll(selectedScroll)) return false;
+            if (scrollInput != null && !installScroll(selectedScroll, scrollInput)) return false;
             spellPot.rsi$setManagedCooking(true);
         }
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-CookingPot] Materials inserted, cooking should start next tick");
         markCraftStarted();
         return true;
+    }
+
+    private ItemStack placeInput(Input input, BlockEntity be, IItemHandler handler, int slot, ItemStack stack) {
+        if (!handler.getStackInSlot(slot).isEmpty()) return stack;
+        input.place(be, handler, slot);
+        ItemStack remainder = handler.insertItem(slot, stack.copy(), false);
+        if (!remainder.isEmpty()) inputRecovery.hold(remainder);
+        return remainder;
+    }
+
+    @Override
+    @Nullable
+    public String lastStartFailureDetail() {
+        return startFailureDetail;
     }
 
     @Override
@@ -649,7 +679,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         ItemStack storedContainer = itemHandler.getStackInSlot(containerSlot());
         ItemStack meal = itemHandler.getStackInSlot(mealDisplaySlot());
         return !inferred.isEmpty() && storedContainer.getCount() >= inferred.getCount()
-                && ItemStack.isSameItemSameTags(inferred, storedContainer)
+                && ItemStack.isSameItem(inferred, storedContainer)
                 && matchesRecipeOutput(meal) && meal.getCount() >= expectedCount;
     }
 
@@ -671,7 +701,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
             ItemStack inferred = getRequiredContainer(recipe, myLevel.registryAccess());
             ItemStack storedContainer = itemHandler.getStackInSlot(containerSlot());
             if (declared.isEmpty() && !inferred.isEmpty() && storedContainer.getCount() >= inferred.getCount()
-                    && ItemStack.isSameItemSameTags(inferred, storedContainer)
+                    && ItemStack.isSameItem(inferred, storedContainer)
                     && matchesRecipeOutput(meal)) {
                 result = itemHandler.extractItem(mealDisplaySlot(), meal.getCount(), false);
                 itemHandler.extractItem(containerSlot(), inferred.getCount(), false);
@@ -684,11 +714,8 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     protected void clearMachineState(BlockEntity be, ServerPlayer player) {
-        List<ItemStack> recovered = recoverFailureInputs(be);
-        ItemStack scroll = takeOwnedScroll();
-        if (!scroll.isEmpty()) recovered.add(scroll);
+        recoverFailureInputs(myLevel);
         stopManagedCooking();
-        recordFailureRecoveredInputs(recovered);
         forceChunkLoad(false);
         craftDone = false;
         plannedOperations = 1;
@@ -696,11 +723,13 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
     @Override
     protected void clearMissingMachineState(@Nullable ServerPlayer player) {
+        if (inputRecovery != null) recoverFailureInputs(null);
         stopManagedCooking();
     }
 
     @Override
     protected void clearUnavailableMachineState(@Nullable ServerPlayer player) {
+        if (inputRecovery != null) recoverFailureInputs(null);
         stopManagedCooking();
     }
 
@@ -709,6 +738,8 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         stopManagedCooking();
         forceChunkLoad(false);
         clearMachineSlotsAndRefund();
+        if (inputRecovery != null) inputRecovery.release();
+        inputRecovery = null;
         craftDone = false;
         plannedOperations = 1;
         if (placedScroll.isEmpty()) setStorageEndpoint(null);
@@ -729,10 +760,12 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         return slot.getStackInSlot(0).isEmpty();
     }
 
-    private boolean installScroll(ItemStack selectedScroll) {
-        if (selectedScroll.isEmpty() || !placedScroll.isEmpty()) return true;
+    private boolean installScroll(ItemStack selectedScroll, Input scrollInput) {
+        if (!placedScroll.isEmpty()) return true;
         var slot = spellPot.rsi$scrollInventory();
-        if (!slot.getStackInSlot(0).isEmpty() || !slot.insertItem(0, selectedScroll.copy(), false).isEmpty()) return false;
+        if (!slot.getStackInSlot(0).isEmpty()
+                || !placeInput(scrollInput, spellPotEntity, slot, 0, selectedScroll).isEmpty()) return false;
+        scrollInput.release();
         placedScroll = selectedScroll.copy();
         return true;
     }
@@ -1051,48 +1084,16 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
 
     // ── cleanup ──
 
-    private void rollbackInputs(IItemHandler handler, int insertedSlots) {
-        for (int back = 0; back < insertedSlots; back++) {
-            ItemStack refund = handler.extractItem(back, 64, false);
-            if (!refund.isEmpty()) {
-                detachedRecoveredInputs.add(refund.copy());
-                if (!usingSharedLedger) refundToRSNetwork(refund);
-            }
+    private void recoverFailureInputs(@Nullable ServerLevel level) {
+        List<ItemStack> recovered = new ArrayList<>();
+        if (inputRecovery != null) {
+            recovered.addAll(inputRecovery.recover(level));
+            inputRecovery = null;
         }
-    }
-
-    private List<ItemStack> recoverFailureInputs(BlockEntity be) {
-        List<ItemStack> recovered = new ArrayList<>(detachedRecoveredInputs);
-        detachedRecoveredInputs.clear();
-        if (!isSupportedBlockEntity(be)) return recovered;
-        IItemHandler handler = getInventory(be);
-        if (handler == null || handler.getSlots() < inventorySize()) return recovered;
-        for (int slot = 0; slot < placedInputs.size() && slot < inputSlots(); slot++) {
-            ItemStack expected = placedInputs.get(slot);
-            ItemStack visible = handler.getStackInSlot(slot);
-            if (visible.isEmpty() || !ItemStack.isSameItemSameTags(visible, expected)) continue;
-            ItemStack removed = handler.extractItem(slot,
-                    Math.min(visible.getCount(), expected.getCount()), false);
-            if (!removed.isEmpty()) {
-                recovered.add(removed.copy());
-                if (!usingSharedLedger) refundToRSNetwork(removed);
-            }
-        }
-        if (!placedContainer.isEmpty()) {
-            ItemStack visible = handler.getStackInSlot(containerSlot());
-            if (!visible.isEmpty() && ItemStack.isSameItemSameTags(visible, placedContainer)) {
-                ItemStack removed = handler.extractItem(containerSlot(),
-                        Math.min(visible.getCount(), placedContainer.getCount()), false);
-                if (!removed.isEmpty()) {
-                    recovered.add(removed.copy());
-                    if (!usingSharedLedger) refundToRSNetwork(removed);
-                }
-            }
-        }
-        placedInputs.clear();
-        placedContainer = ItemStack.EMPTY;
-        be.setChanged();
-        return recovered;
+        ItemStack scroll = level == null ? ItemStack.EMPTY : takeOwnedScroll();
+        if (!scroll.isEmpty()) recovered.add(scroll);
+        recordFailureRecoveredInputs(recovered);
+        if (!usingSharedLedger) recovered.forEach(this::refundToRSNetwork);
     }
 
     private void clearMachineSlotsAndRefund() {
@@ -1110,9 +1111,7 @@ public class CookingPotBatchDelegate extends AbstractBatchDelegate {
         }
         ItemStack meal = handler.extractItem(mealDisplaySlot(), 64, false);
         if (!meal.isEmpty()) refundToRSNetwork(meal);
-        // Container was reserved via the shared ledger (separated from materials in
-        // startPreparedOperation L204-216). When usingSharedLedger=true, the ledger's
-        // refundCommitted() will restore it; delegate must not double-refund.
+        // 共享账本负责结算容器，委托不能重复返还。
         ItemStack container = handler.extractItem(containerSlot(), 64, false);
         if (!container.isEmpty() && !usingSharedLedger) refundToRSNetwork(container);
         ItemStack out = handler.extractItem(outputSlot(), 64, false);

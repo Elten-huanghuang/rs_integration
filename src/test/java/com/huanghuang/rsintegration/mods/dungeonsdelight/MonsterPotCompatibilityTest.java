@@ -296,6 +296,7 @@ class MonsterPotCompatibilityTest extends BootstrapTest {
             recipe = recipe(food, servings);
             when(player.level()).thenReturn(level);
             when(player.serverLevel()).thenReturn(level);
+            when(machine.getBlockPos()).thenReturn(pos);
             when(machine.getInventory()).thenReturn(inventory);
             when(machine.isHeated()).thenReturn(true);
             when(level.hasChunkAt(pos)).thenReturn(true);
