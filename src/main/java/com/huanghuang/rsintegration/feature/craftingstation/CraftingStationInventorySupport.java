@@ -1,5 +1,8 @@
 package com.huanghuang.rsintegration.feature.craftingstation;
 
+import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.network.grid.IGrid;
 import com.refinedmods.refinedstorage.api.network.grid.INetworkAwareGrid;
@@ -42,19 +45,16 @@ final class CraftingStationInventorySupport {
             player.getInventory().placeItemBackInInventory(stack);
             return;
         }
-        int before = stack.getCount();
-        ItemStack remaining = network.insertItem(
-                stack, before, Action.PERFORM);
-        int inserted = before - remaining.getCount();
-        if (inserted > 0) {
-            // RS 只在物品经终端进出网络时刷新「最后修改时间」，直接调用
-            // insertItem 不会写入追踪记录；不补记的话，工作站悄悄退回网络的
-            // 物品无法按时间排序找到，只能逐个搜索。
-            ItemStack accepted = stack.copy();
-            accepted.setCount(inserted);
-            var tracker = network.getItemStorageTracker();
-            if (tracker != null) tracker.changed(player, accepted);
+        // 退料不是产物；由带玩家身份的写回统一刷新「最后修改时间」。
+        var result = CraftStorageEndpoint.insertInternal(
+                CraftStorageEndpoints.fromResolvedNetwork(network), player, stack, false);
+        var remainder = result.remainder();
+        if (remainder.isEmpty()) {
+            RSIntegrationMod.LOGGER.error("[RSI-工作站] 退料写回结果不确定，不重复返还：{}（{}）",
+                    stack, result.diagnosticCode());
+            return;
         }
+        ItemStack remaining = remainder.orElseThrow();
         if (!remaining.isEmpty()) {
             player.getInventory().placeItemBackInInventory(remaining);
         }

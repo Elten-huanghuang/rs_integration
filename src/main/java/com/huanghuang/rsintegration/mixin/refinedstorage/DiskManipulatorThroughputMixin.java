@@ -10,6 +10,8 @@ import com.huanghuang.rsintegration.storage.disk.rs.DiskManipulatorTransferSessi
 import com.huanghuang.rsintegration.storage.disk.rs.DiskManipulatorTransferSession.Step;
 import com.huanghuang.rsintegration.storage.disk.rs.UnifiedBoundDisk;
 import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.storage.disk.IStorageDisk;
 import com.refinedmods.refinedstorage.api.util.Action;
@@ -93,6 +95,21 @@ public abstract class DiskManipulatorThroughputMixin {
         }
         rsi$batchExtractFluids(disk, slot);
         ci.cancel();
+    }
+
+    // 原版速度下只隔离磁盘拒收的反向退回；主动导入 RS 仍可供任务认领。
+    @WrapOperation(method = "extractItemFromNetwork", at = @At(value = "INVOKE",
+            target = "Lcom/refinedmods/refinedstorage/api/network/INetwork;insertItem(Lnet/minecraft/world/item/ItemStack;ILcom/refinedmods/refinedstorage/api/util/Action;)Lnet/minecraft/world/item/ItemStack;"), require = 1)
+    private ItemStack rsi$returnRejectedItems(INetwork network, ItemStack stack, int amount, Action action,
+                                              Operation<ItemStack> original) {
+        return NetworkOutputReception.internal(() -> original.call(network, stack, amount, action));
+    }
+
+    @WrapOperation(method = "extractFluidFromNetwork", at = @At(value = "INVOKE",
+            target = "Lcom/refinedmods/refinedstorage/api/network/INetwork;insertFluid(Lnet/minecraftforge/fluids/FluidStack;ILcom/refinedmods/refinedstorage/api/util/Action;)Lnet/minecraftforge/fluids/FluidStack;"), require = 1)
+    private FluidStack rsi$returnRejectedFluids(INetwork network, FluidStack stack, int amount, Action action,
+                                                Operation<FluidStack> original) {
+        return NetworkOutputReception.internal(() -> original.call(network, stack, amount, action));
     }
 
     @Unique

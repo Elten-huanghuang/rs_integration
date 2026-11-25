@@ -1,17 +1,36 @@
 package com.huanghuang.rsintegration.storage.disk;
 
+import com.huanghuang.rsintegration.api.IntegrationResourceKey;
+import com.huanghuang.rsintegration.crafting.TaskOutputReception;
+import com.huanghuang.rsintegration.mixin.refinedstorage.DiskManipulatorThroughputMixin;
+import com.huanghuang.rsintegration.storage.rs.RefinedStorageOutputReception;
+import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import com.refinedmods.refinedstorage.api.network.INetwork;
+import com.refinedmods.refinedstorage.api.util.Action;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.material.Fluids;
+import net.minecraftforge.fluids.FluidStack;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.tree.AnnotationNode;
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
+import org.spongepowered.asm.util.Annotations;
 
 import java.io.InputStream;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.mock;
 
 /** 检查实际 RS 字节码中的调用位置，防止 lambda 名称和接口调用发生变化。 */
-class UnifiedDiskInjectionTest {
+class UnifiedDiskInjectionTest extends BootstrapTest {
     private static final String RS = "com/refinedmods/refinedstorage/";
     private ClassNode read(String name) throws Exception {
         try (InputStream input = getClass().getClassLoader().getResourceAsStream(RS + name + ".class")) {
@@ -61,6 +80,84 @@ class UnifiedDiskInjectionTest {
         assertTrue(mixin.innerClasses == null || mixin.innerClasses.stream()
                         .noneMatch(inner -> inner.name.startsWith(mixin.name + "$")),
                 "Mixin 内部类会被 Mixin 框架禁止直接引用");
+    }
+    @ParameterizedTest
+    @ValueSource(strings = {"Item", "Fluid"})
+    void diskReturnHookMatchesOnlyTheOriginalRejectPath(String kind) throws Exception {
+        ClassNode manipulator = read("apiimpl/network/node/diskmanipulator/DiskManipulatorNetworkNode");
+        ClassNode mixin = readOwn("com/huanghuang/rsintegration/mixin/refinedstorage/DiskManipulatorThroughputMixin");
+        String extract = "extract" + kind + "FromNetwork";
+        String insert = "insert" + kind;
+        var callback = mixin.methods.stream().filter(method -> method.name.equals("rsi$returnRejected" + kind + "s"))
+                .findFirst().orElseThrow();
+        var wrap = Annotations.getVisible(callback, WrapOperation.class);
+        assertNotNull(wrap);
+        assertEquals(List.of(extract), Annotations.getValue(wrap, "method"));
+        List<AnnotationNode> locations = Annotations.getValue(wrap, "at", true);
+        assertEquals(1, locations.size());
+
+        MethodNode original = manipulator.methods.stream().filter(method -> method.name.equals(extract))
+                .findFirst().orElseThrow();
+        assertEquals(1, calls(manipulator, extract, "api/network/INetwork", insert));
+        for (var instruction : original.instructions) {
+            if (!(instruction instanceof MethodInsnNode invoke)
+                    || !invoke.owner.equals(RS + "api/network/INetwork") || !invoke.name.equals(insert)) continue;
+            assertEquals("L" + invoke.owner + ";" + invoke.name + invoke.desc,
+                    Annotations.getValue(locations.get(0), "target"));
+        }
+        assertEquals(1, calls(manipulator, insert + "IntoNetwork", "api/network/INetwork", insert));
+    }
+    @Test void itemDiskReturnsReachStorageButOnlyActiveImportsFeedTheTask() throws Exception {
+        var network = mock(INetwork.class);
+        var stack = new ItemStack(Items.IRON_INGOT, 4);
+        var key = TaskOutputReception.resource(stack);
+        var stored = new AtomicInteger();
+        Operation<ItemStack> insert = args -> RefinedStorageOutputReception.insertItem(
+                (INetwork) args[0], (ItemStack) args[1], (int) args[2], (Action) args[3], (remaining, count) -> {
+                    stored.addAndGet(count);
+                    return ItemStack.EMPTY;
+                });
+        try (var task = waiting(network, key)) {
+            var method = DiskManipulatorThroughputMixin.class.getDeclaredMethod("rsi$returnRejectedItems",
+                    INetwork.class, ItemStack.class, int.class, Action.class, Operation.class);
+            method.setAccessible(true);
+            assertSame(ItemStack.EMPTY, method.invoke(new DiskManipulatorThroughputMixin() {},
+                    network, stack, stack.getCount(), Action.PERFORM, insert));
+            assertEquals(4, stored.get());
+            assertEquals(0, task.received(key));
+            assertTrue(insert.call(network, stack, stack.getCount(), Action.PERFORM).isEmpty());
+            assertEquals(4, task.received(key));
+            assertEquals(4, stored.get());
+        }
+    }
+    @Test void fluidDiskReturnsReachStorageButOnlyActiveImportsFeedTheTask() throws Exception {
+        var network = mock(INetwork.class);
+        var stack = new FluidStack(Fluids.WATER, 4);
+        var key = TaskOutputReception.resource(stack);
+        var stored = new AtomicInteger();
+        Operation<FluidStack> insert = args -> RefinedStorageOutputReception.insertFluid(
+                (INetwork) args[0], (FluidStack) args[1], (int) args[2], (Action) args[3], (remaining, amount) -> {
+                    stored.addAndGet(amount);
+                    return FluidStack.EMPTY;
+                });
+        try (var task = waiting(network, key)) {
+            var method = DiskManipulatorThroughputMixin.class.getDeclaredMethod("rsi$returnRejectedFluids",
+                    INetwork.class, FluidStack.class, int.class, Action.class, Operation.class);
+            method.setAccessible(true);
+            assertSame(FluidStack.EMPTY, method.invoke(new DiskManipulatorThroughputMixin() {},
+                    network, stack, stack.getAmount(), Action.PERFORM, insert));
+            assertEquals(4, stored.get());
+            assertEquals(0, task.received(key));
+            assertTrue(insert.call(network, stack, stack.getAmount(), Action.PERFORM).isEmpty());
+            assertEquals(4, task.received(key));
+            assertEquals(4, stored.get());
+        }
+    }
+    private TaskOutputReception.Session waiting(INetwork network, IntegrationResourceKey key) {
+        var task = TaskOutputReception.open();
+        task.bindNetwork(network, () -> true);
+        task.prepare(List.of(new TaskOutputReception.Demand("out", key, 4, 4))).activate();
+        return task;
     }
     @Test void itemAndFluidNetworkHooksAndCacheIterationExistOnce() throws Exception {
         ClassNode network = read("apiimpl/network/Network");

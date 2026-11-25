@@ -1,10 +1,12 @@
 package com.huanghuang.rsintegration.mixin.constructionwand;
 
-import java.lang.reflect.Method;
-
+import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.crafting.CraftItemRecovery;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
 import com.huanghuang.rsintegration.storage.StorageRestockSupport;
+import com.huanghuang.rsintegration.util.PlayerUtils;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -59,9 +61,25 @@ public abstract class SupplierInventoryNetworkMixin {
         for (ItemStack stack : stacks) {
             if (stack == null || stack.isEmpty()) continue;
             try {
-                CraftStorageEndpoint.insertInternal(endpoint, player, stack, false);
-            } catch (RuntimeException | LinkageError ignored) {
-                // 由存储后端记录恢复故障，不中断建筑杖操作。
+                var result = CraftStorageEndpoint.insertInternal(endpoint, player, stack, false);
+                var remainder = result.remainder();
+                if (remainder.isEmpty()) {
+                    RSIntegrationMod.LOGGER.error("[RSI-Wand] 退料写回结果不确定，不重复返还：{}（{}）",
+                            stack, result.diagnosticCode());
+                    continue;
+                }
+                ItemStack rejected = remainder.orElseThrow();
+                if (rejected.isEmpty()) continue;
+
+                CraftItemRecovery recovery = CraftItemRecovery.get(player.server);
+                var owner = player.getUUID();
+                boolean alreadyPending = recovery.hasPending(owner);
+                recovery.retain(owner, rejected);
+                if (!alreadyPending) {
+                    PlayerUtils.safeSendMessage(player, Component.translatable("rsi.item_recovery.pending"));
+                }
+            } catch (RuntimeException | LinkageError failure) {
+                RSIntegrationMod.LOGGER.error("[RSI-Wand] 退料处理失败，不重复返还：" + stack, failure);
             }
         }
     }

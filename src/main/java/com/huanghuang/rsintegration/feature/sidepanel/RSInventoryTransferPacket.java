@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.feature.sidepanel;
 import java.lang.reflect.Method;
 
 import com.huanghuang.rsintegration.util.Reflect;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import java.util.HashSet;
 import net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket;
@@ -13,11 +14,11 @@ import com.huanghuang.rsintegration.network.RSIntegrationNetwork;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.crafting.CraftItemRecovery;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.IngredientSpec;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.network.security.Permission;
-import com.refinedmods.refinedstorage.api.util.Action;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -137,6 +138,7 @@ public final class RSInventoryTransferPacket {
             return;
         }
 
+        CraftStorageEndpoint endpoint = CraftStorageEndpoints.fromResolvedNetwork(network);
         var inv = new CombinedInvWrapper(
                 new PlayerMainInvWrapper(player.getInventory()),
                 new PlayerArmorInvWrapper(player.getInventory()),
@@ -166,8 +168,7 @@ public final class RSInventoryTransferPacket {
                 ItemStack req = stored.copy();
                 req.setCount(take);
                 ItemStack extracted = CraftStorageEndpoints.extractExact(
-                        CraftStorageEndpoints.fromResolvedNetwork(network),
-                        player, req, take, false);
+                        endpoint, player, req, take, false);
                 if (!extracted.isEmpty()) {
                     ItemStack remainder = ItemHandlerHelper.insertItemStacked(inv, extracted, false);
                     if (!remainder.isEmpty()) {
@@ -175,9 +176,7 @@ public final class RSInventoryTransferPacket {
                             player.drop(remainder, false);
                             dropsRemaining--;
                         } else {
-                            // Drop throttle exhausted: refund to RS network
-                            CraftStorageEndpoints.fromResolvedNetwork(network)
-                                    .insert(player, remainder, false);
+                            returnOverflow(endpoint, player, remainder);
                         }
                     }
                     transferred += extracted.getCount() - remainder.getCount();
@@ -199,6 +198,27 @@ public final class RSInventoryTransferPacket {
         if (missing > 0) {
             player.sendSystemMessage(Component.translatable(
                     "rsi.side_panel.transfer_missing", missing));
+        }
+    }
+
+    private static void returnOverflow(CraftStorageEndpoint endpoint, ServerPlayer player, ItemStack stack) {
+        var result = CraftStorageEndpoint.insertInternal(endpoint, player, stack, false);
+        var remainder = result.remainder();
+        if (remainder.isEmpty()) {
+            RSIntegrationMod.LOGGER.error("[RSI-InvTransfer] 退料写回结果不确定，不重复返还：{}（{}）",
+                    stack, result.diagnosticCode());
+            return;
+        }
+        ItemStack rejected = remainder.orElseThrow();
+        if (rejected.isEmpty()) return;
+
+        // 掉落额度已用完，只暂存 RS 明确退回的数量。
+        CraftItemRecovery recovery = CraftItemRecovery.get(player.server);
+        var owner = player.getUUID();
+        boolean alreadyPending = recovery.hasPending(owner);
+        recovery.retain(owner, rejected);
+        if (!alreadyPending) {
+            player.sendSystemMessage(Component.translatable("rsi.item_recovery.pending"));
         }
     }
 
