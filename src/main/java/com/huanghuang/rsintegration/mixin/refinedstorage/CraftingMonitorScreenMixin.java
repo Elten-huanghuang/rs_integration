@@ -11,12 +11,14 @@ import com.huanghuang.rsintegration.client.gui.ScrollBarStyle;
 import com.huanghuang.rsintegration.crafting.plan.PlanBackgroundClient;
 import com.huanghuang.rsintegration.crafting.plan.PlanScreenHost;
 import com.huanghuang.rsintegration.mods.rs.monitor.MonitorNavigationAccess;
+import com.huanghuang.rsintegration.crafting.MachineManagementScreen;
 import com.huanghuang.rsintegration.crafting.planning.PlanningTasksScreen;
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressTracker;
 import com.huanghuang.rsintegration.crafting.progress.CraftProgressSnapshot;
 import com.huanghuang.rsintegration.crafting.progress.CraftMaterialView;
 import com.huanghuang.rsintegration.mods.rs.monitor.MonitorMenuAccess;
 import com.huanghuang.rsintegration.mods.rs.monitor.MonitorPlansButton;
+import com.huanghuang.rsintegration.mods.rs.monitor.MonitorMachinesButton;
 import com.huanghuang.rsintegration.mods.rs.monitor.MonitorDetailsButton;
 import com.huanghuang.rsintegration.mods.rs.monitor.MonitorDetailsPanel;
 import com.huanghuang.rsintegration.mods.rs.monitor.MonitorGridStyle;
@@ -160,6 +162,8 @@ public abstract class CraftingMonitorScreenMixin extends BaseScreen<CraftingMoni
         int footerY = y + rsi$layout.footerY();
         rsi$plansButton = new MonitorPlansButton(rsi$screen(), this::rsi$showPlans);
         rsi$screen().addSideButton(rsi$plansButton);
+        addSideButton(new MonitorMachinesButton(rsi$screen(), () -> rsi$setPlanPage(
+                new MachineManagementScreen(null, MachineManagementScreen.View.ALL_BOUND, this))));
         // 保留原生按钮的回调，只替换外观及宽度；取消仍经过原来的来源分派。
         Button nativeCancel = cancelButton;
         Button nativeCancelAll = cancelAllButton;
@@ -383,7 +387,7 @@ public abstract class CraftingMonitorScreenMixin extends BaseScreen<CraftingMoni
         rsi$setPlanPage(new PlanningTasksScreen(scope.network(), request -> {
             var plan = PlanBackgroundClient.completedPlans().get(request);
             if (plan != null) rsi$setPlanPage(new CraftingPlanScreen(plan, request, null, this::rsi$showPlans));
-        }, () -> rsi$setPlanPage(null)));
+        }, this));
     }
 
     @Override public Screen rsi$planPage() { return rsi$page; }
@@ -408,6 +412,10 @@ public abstract class CraftingMonitorScreenMixin extends BaseScreen<CraftingMoni
     }
     @Override public GlobalPos rsi$returnTerminal() { return rsi$returnTerminal; }
     @Override public void rsi$returnTerminal(@Nullable GlobalPos terminal) { rsi$returnTerminal = terminal; }
+    @Override public boolean rsi$canOpenPlans() {
+        var scope = rsi$scope();
+        return scope != null && scope.network() != null;
+    }
     @Override public void rsi$openPlans() { rsi$showPlans(); }
     @Override public void rsi$setPlanPage(@Nullable Screen page) {
         if (rsi$page != null) rsi$page.removed();
@@ -421,7 +429,7 @@ public abstract class CraftingMonitorScreenMixin extends BaseScreen<CraftingMoni
         rsi$submittedRequest = 0L;
         // 用户已经切到另一份计划时不抢页面。
         if (rsi$page instanceof CraftingPlanScreen plan && plan.activeRequestId() != requestId) return;
-        rsi$setPlanPage(null);
+        if (rsi$page instanceof PlanningTasksScreen || rsi$page instanceof CraftingPlanScreen) rsi$setPlanPage(null);
         rsi$pendingSelection = craftId;
     }
 }

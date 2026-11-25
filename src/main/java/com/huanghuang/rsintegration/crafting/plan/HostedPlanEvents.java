@@ -8,7 +8,7 @@ import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
-/** 只将已打开的计划页事件交给组件；原生容器继续 tick 和验证有效性。 */
+/** 将事件交给当前嵌入页；原生容器继续 tick 和验证有效性。 */
 @Mod.EventBusSubscriber(modid = RSIntegrationMod.MOD_ID, value = Dist.CLIENT)
 public final class HostedPlanEvents {
     private HostedPlanEvents() {}

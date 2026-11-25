@@ -6,10 +6,11 @@ import net.minecraft.client.gui.screens.Screen;
 import javax.annotation.Nullable;
 import java.util.UUID;
 
-/** 将计划组件嵌入容器页面，不切换 Minecraft 的原生菜单屏幕。 */
+/** 将计划与机器管理页面嵌入容器，不切换 Minecraft 的原生菜单屏幕。 */
 public interface PlanScreenHost {
     @Nullable Screen rsi$planPage();
     void rsi$setPlanPage(@Nullable Screen page);
+    boolean rsi$canOpenPlans();
     void rsi$openPlans();
     default void rsi$planSubmitted(long requestId) {}
     default void rsi$planAccepted(long requestId, UUID craftId) {}

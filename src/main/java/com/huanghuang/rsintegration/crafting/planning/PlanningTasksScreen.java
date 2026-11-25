@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
 import com.huanghuang.rsintegration.crafting.plan.PlanBackgroundClient;
+import com.huanghuang.rsintegration.crafting.plan.PlanScreenHost;
 import com.huanghuang.rsintegration.crafting.MachineManagementScreen;
 import com.huanghuang.rsintegration.crafting.progress.ExecutionMonitorClient;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
@@ -33,7 +34,7 @@ public final class PlanningTasksScreen extends Screen implements CraftingPanelBo
     private final Screen previous;
     private final StorageReference network;
     private final LongConsumer openPlan;
-    private final Runnable closePage;
+    private final PlanScreenHost host;
     private List<Row> rows = List.of();
     private Component monitorNotice;
     private Button executionMonitorButton;
@@ -52,17 +53,17 @@ public final class PlanningTasksScreen extends Screen implements CraftingPanelBo
     }
 
     /** 原生监控器内的计划组件，切页不调用 Minecraft.setScreen。 */
-    public PlanningTasksScreen(StorageReference network, LongConsumer openPlan, Runnable closePage) {
-        this(null, network, openPlan, closePage);
+    public PlanningTasksScreen(StorageReference network, LongConsumer openPlan, PlanScreenHost host) {
+        this(null, network, openPlan, host);
     }
 
     private PlanningTasksScreen(Screen previous, StorageReference network,
-                                LongConsumer openPlan, Runnable closePage) {
+                                LongConsumer openPlan, PlanScreenHost host) {
         super(Component.translatable("rsi.planning.tasks"));
         this.previous = previous;
         this.network = network;
         this.openPlan = openPlan;
-        this.closePage = closePage;
+        this.host = host;
         var current = PlanningProgressTracker.current();
         if (current != null && network == null) PlanBackgroundClient.detach(current.requestId());
     }
@@ -108,16 +109,16 @@ public final class PlanningTasksScreen extends Screen implements CraftingPanelBo
         themeButton = addRenderableWidget(new CraftingThemeButton(panelX + 12, panelY + 12, false));
         themeButton.setWheelViewport(width, height);
         int contentWidth = panelWidth - 24;
-        int navigationWidth = (contentWidth - (closePage == null ? 12 : 6)) / (closePage == null ? 3 : 2);
+        int navigationWidth = (contentWidth - 12) / 3;
         addRenderableWidget(new ActionButton(left, panelY + 44, navigationWidth, 22,
                 Component.translatable("rsi.planning.tasks.open"), true, button -> {}));
         executionMonitorButton = addRenderableWidget(new ActionButton(left + navigationWidth + 6, panelY + 44, navigationWidth, 22,
                 Component.translatable("rsi.planning.tasks.executions"), false,
                 button -> openExecutionMonitor()));
         if (monitorNotice != null) executionMonitorButton.setTooltip(Tooltip.create(monitorNotice));
-        if (closePage == null) addRenderableWidget(new ActionButton(left + (navigationWidth + 6) * 2,
+        addRenderableWidget(new ActionButton(left + (navigationWidth + 6) * 2,
                 panelY + 44, navigationWidth, 22, Component.translatable("rsi.control_center.machines"), false,
-                button -> minecraft.setScreen(new MachineManagementScreen(this, MachineManagementScreen.View.ALL_BOUND))));
+                button -> openMachines()));
         int start = page * rowsPerPage;
         for (int i = start; i < Math.min(rows.size(), start + rowsPerPage); i++) {
             Row row = rows.get(i);
@@ -158,7 +159,7 @@ public final class PlanningTasksScreen extends Screen implements CraftingPanelBo
         }
         addRenderableWidget(new ActionButton(left + contentWidth - footerButtonWidth,
                 panelY + panelHeight - 30, footerButtonWidth, 22,
-                Component.translatable(closePage == null ? "gui.back" : "rsi.monitor.back"), false, button -> onClose()));
+                Component.translatable(host == null ? "gui.back" : "rsi.monitor.back"), false, button -> onClose()));
     }
 
     private void updateVisibilityButton() {
@@ -189,7 +190,7 @@ public final class PlanningTasksScreen extends Screen implements CraftingPanelBo
         return super.mouseScrolled(mouseX, mouseY, delta);
     }
     @Override public void onClose() {
-        if (closePage != null) closePage.run();
+        if (host != null) host.rsi$setPlanPage(null);
         else minecraft.setScreen(previous);
     }
 
@@ -252,13 +253,19 @@ public final class PlanningTasksScreen extends Screen implements CraftingPanelBo
     }
 
     private void openExecutionMonitor() {
-        if (closePage != null) {
-            closePage.run();
+        if (host != null) {
+            host.rsi$setPlanPage(null);
             return;
         }
         monitorNotice = null;
         executionMonitorButton.setTooltip(null);
         ExecutionMonitorClient.open();
+    }
+
+    private void openMachines() {
+        var machines = new MachineManagementScreen(this, MachineManagementScreen.View.ALL_BOUND, host);
+        if (host != null) host.rsi$setPlanPage(machines);
+        else minecraft.setScreen(machines);
     }
 
     public void showMonitorNotice(Component message) {

@@ -5,6 +5,7 @@ import com.huanghuang.rsintegration.client.gui.CraftingPanelBounds;
 import com.huanghuang.rsintegration.config.CraftingUiColors;
 import com.huanghuang.rsintegration.client.gui.CraftingUiStyle.ActionButton;
 import com.huanghuang.rsintegration.client.gui.ScrollBarStyle;
+import com.huanghuang.rsintegration.crafting.plan.PlanScreenHost;
 import com.huanghuang.rsintegration.crafting.planning.PlanningTasksScreen;
 import com.huanghuang.rsintegration.crafting.progress.ExecutionMonitorClient;
 import com.huanghuang.rsintegration.util.PinyinUtil;
@@ -18,6 +19,7 @@ import com.huanghuang.rsintegration.machine.client.data.BindingCache;
 import com.huanghuang.rsintegration.network.binding.BindingInfo;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.renderer.Rect2i;
@@ -51,9 +53,12 @@ public final class MachineManagementScreen extends Screen implements CraftingPan
     private final View view;
     @Nullable
     private final Screen parent;
+    @Nullable
+    private final PlanScreenHost host;
     private String searchText = "";
     private int scrollRow;
     private EditBox searchBox;
+    private Button plansButton;
 
     private int panelX;
     private int panelY;
@@ -74,11 +79,16 @@ public final class MachineManagementScreen extends Screen implements CraftingPan
     private BindingInfo rightClickStartMachine;
 
     public MachineManagementScreen(@Nullable Screen parent, View view) {
+        this(parent, view, null);
+    }
+
+    public MachineManagementScreen(@Nullable Screen parent, View view, @Nullable PlanScreenHost host) {
         super(Component.translatable(view == View.GUI_ONLY
                 ? "rsi.control_center.gui_machines"
                 : "rsi.control_center.all_machines"));
         this.view = view == null ? View.ALL_BOUND : view;
         this.parent = parent;
+        this.host = host;
     }
 
     @Override
@@ -103,12 +113,16 @@ public final class MachineManagementScreen extends Screen implements CraftingPan
         });
         addRenderableWidget(searchBox);
         int navigationWidth = (panelWidth - 36) / 3;
-        addRenderableWidget(new ActionButton(panelX + 12, panelY + 44, navigationWidth, 22,
+        plansButton = addRenderableWidget(new ActionButton(panelX + 12, panelY + 44, navigationWidth, 22,
                 Component.translatable("rsi.planning.tasks.open"), false,
-                button -> minecraft.setScreen(new PlanningTasksScreen(this))));
+                button -> openPlans()));
+        plansButton.active = host == null || host.rsi$canOpenPlans();
         addRenderableWidget(new ActionButton(panelX + 18 + navigationWidth, panelY + 44, navigationWidth, 22,
                 Component.translatable("rsi.planning.tasks.executions"), false,
-                button -> ExecutionMonitorClient.open()));
+                button -> {
+                    if (host != null) host.rsi$setPlanPage(null);
+                    else ExecutionMonitorClient.open();
+                }));
         addRenderableWidget(new ActionButton(panelX + 24 + navigationWidth * 2, panelY + 44, navigationWidth, 22,
                 Component.translatable("rsi.control_center.machines"), true, button -> {}));
         addRenderableWidget(new ActionButton(panelX + panelWidth - 106,
@@ -120,7 +134,19 @@ public final class MachineManagementScreen extends Screen implements CraftingPan
     @Override
     public void tick() {
         if (searchBox != null) searchBox.tick();
+        if (host != null) plansButton.active = host.rsi$canOpenPlans();
         refreshMachines();
+    }
+
+    private void openPlans() {
+        if (parent instanceof PlanningTasksScreen) showPage(parent);
+        else if (host != null) host.rsi$openPlans();
+        else showPage(new PlanningTasksScreen(this));
+    }
+
+    private void showPage(@Nullable Screen page) {
+        if (host != null) host.rsi$setPlanPage(page);
+        else if (minecraft != null) minecraft.setScreen(page);
     }
 
     private void updateLayout() {
@@ -400,7 +426,7 @@ public final class MachineManagementScreen extends Screen implements CraftingPan
             TileBounds bounds = hoveredTileBounds(mouseX, mouseY);
             if (canRename(info) && bounds != null && inside(mouseX, mouseY,
                     bounds.x() + tileWidth - 23, bounds.y() + 45, 16, 16) && button == 0) {
-                minecraft.setScreen(new MachineRenameScreen(this, info));
+                showPage(new MachineRenameScreen(info, () -> showPage(this)));
                 return true;
             }
             if (view == View.ALL_BOUND && bounds != null && inside(mouseX, mouseY,
@@ -606,7 +632,7 @@ public final class MachineManagementScreen extends Screen implements CraftingPan
     @Override
     public void onClose() {
         clearSelection();
-        if (minecraft != null) minecraft.setScreen(parent);
+        showPage(parent);
     }
 
     @Override

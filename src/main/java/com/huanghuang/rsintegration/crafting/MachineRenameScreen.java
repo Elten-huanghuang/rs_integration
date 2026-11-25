@@ -16,7 +16,7 @@ import org.lwjgl.glfw.GLFW;
 
 /** 为单条机器绑定设置名称；留空恢复方块原名。 */
 final class MachineRenameScreen extends Screen {
-    private final Screen parent;
+    private final Runnable back;
     private final BindingInfo machine;
     private String draft;
     private EditBox nameBox;
@@ -24,10 +24,10 @@ final class MachineRenameScreen extends Screen {
     private int panelY;
     private int panelWidth;
 
-    MachineRenameScreen(Screen parent, BindingInfo machine) {
+    MachineRenameScreen(BindingInfo machine, Runnable back) {
         super(Component.translatable("rsi.control_center.rename"));
-        this.parent = parent;
         this.machine = machine;
+        this.back = back;
         this.draft = machine.customName();
     }
 
@@ -96,7 +96,7 @@ final class MachineRenameScreen extends Screen {
 
     @Override
     public void onClose() {
-        if (minecraft != null) minecraft.setScreen(parent);
+        back.run();
     }
 
     @Override
