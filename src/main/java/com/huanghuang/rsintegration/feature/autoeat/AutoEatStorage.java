@@ -1,8 +1,7 @@
 package com.huanghuang.rsintegration.feature.autoeat;
 
-import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
-import com.huanghuang.rsintegration.storage.StorageOperationResult;
+import com.huanghuang.rsintegration.storage.StorageItemKey;
 import com.huanghuang.rsintegration.storage.StoragePermission;
 import com.huanghuang.rsintegration.storage.StorageRestockSupport;
 import com.huanghuang.rsintegration.storage.StorageSnapshot;
@@ -49,28 +48,27 @@ final class AutoEatStorage {
         return snapshot.items();
     }
 
-    ItemStack extract(ServerPlayer player, ItemStack template, int amount, boolean simulate) {
-        if (!simulate) {
-            return StorageRestockSupport.extract(endpoint, player, template, amount);
-        }
-        StorageOperationResult result = endpoint.extractExact(player, template, amount, simulate);
-        return merge(template, result.extractedStacks());
+    StorageItemKey key(ItemStack stack) {
+        return endpoint.session().itemKey(stack);
     }
 
-    ItemStack insert(ServerPlayer player, ItemStack stack, boolean simulate) {
-        return endpoint.insert(player, stack, simulate).remainder().orElse(stack.copy());
+    boolean accessible(ServerPlayer player) {
+        return endpoint.session().isAvailable()
+                && endpoint.session().hasPermission(player, StoragePermission.VIEW)
+                && endpoint.session().hasPermission(player, StoragePermission.EXTRACT);
     }
 
-    private ItemStack merge(ItemStack template, List<ItemStack> stacks) {
-        ItemStack merged = ItemStack.EMPTY;
-        for (ItemStack stack : stacks) {
-            if (stack == null || stack.isEmpty()) continue;
-            if (!endpoint.session().itemKey(template).equals(endpoint.session().itemKey(stack))) {
-                return ItemStack.EMPTY;
-            }
-            if (merged.isEmpty()) merged = stack.copy();
-            else merged.grow(stack.getCount());
+    StorageRestockSupport.Extraction extract(ServerPlayer player, ItemStack template, int amount) {
+        return StorageRestockSupport.extractOutcome(endpoint, player, template, amount);
+    }
+
+    void returnStack(ServerPlayer player, ItemStack stack) {
+        if (stack.isEmpty()) return;
+        ItemStack leftover = endpoint.insert(player, stack, false).remainder().orElseThrow(
+                () -> new IllegalStateException("Indeterminate auto-eat refund for " + stack));
+        if (!leftover.isEmpty()) {
+            player.getInventory().add(leftover);
+            if (!leftover.isEmpty()) player.drop(leftover, false);
         }
-        return merged;
     }
 }

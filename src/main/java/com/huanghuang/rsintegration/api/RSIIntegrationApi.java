@@ -21,7 +21,7 @@ import java.util.Optional;
  */
 public interface RSIIntegrationApi {
     int API_MAJOR = 1;
-    int API_MINOR = 3;
+    int API_MINOR = 4;
 
     /**
      * 返回当前公共 API 版本。

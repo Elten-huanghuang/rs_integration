@@ -5,7 +5,7 @@
 | Minecraft | 1.20.1 |
 | Java | 17 |
 | Forge | 47.x |
-| Integration API | 1.3.x |
+| Integration API | 1.4.x |
 | Resonance Inventory API | 1.0.x |
 | Consumer API | 1.0.x |
 
@@ -1597,3 +1597,21 @@ RSI 解析当前网络，并检查权限、物品身份、交付目标和容量�
 表示转移结果不明，其数量只代表已确认交付的部分。调用方依据状态和交付数量统一发消息或收藏。
 `Fallback.REGISTERED` 允许 RSI 在确认缺货时使用已注册兜底。`Fallback.DISABLED`
 让调用方自行决定后续行为。调用方可以用 `confirmedZeroDelivery()` 判断零交付是否已确定。
+
+### 18.7 注册一键进食的食物来源（1.4）
+
+在 common setup 调用 `RSIAutoEatFoodSources.register(id, source)`。重复 ID 返回 `false`。
+服务端每个批次校验网络权限和模式后，调用一次各来源的 `candidates(context)`。
+堆叠暴食的 `wantedItems()` 是所选物品类型的不可变集合，其他模式传空集合，查询全部食物。
+返回当前能提供一份的食物，每个模板数量为 1 并保留 NBT。枚举只读，多个模板可以共享同一份余额。
+
+RSI 优先提取网络实物。确认同一变体缺货后，先从网络暂收本份费用，再按来源 ID 的稳定顺序
+调用 `takeOne(context, exactTemplate)`。来源应在服务端主线程复核可用性并对本份结算。
+
+- `new TakeResult.Taken(stack)` 交付一个独立的、身份相符的单件栈。该栈归 RSI 持有。
+- `new TakeResult.Unavailable()` 表示未扣费且未交付。RSI 可尝试下一来源。
+- `new TakeResult.Indeterminate()` 表示扣费或交付结果不明。RSI 记录来源、退还暂存费用并终止请求。
+  提交抛出异常或返回错误的栈也按此处理。
+
+来源都不可用时退还暂存费用。交付后未通过食用校验时退还食物实物及费用，来源保留已收款项。
+成功进食后由 RSI 处理食用事件及碗、瓶等返回物。

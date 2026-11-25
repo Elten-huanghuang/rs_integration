@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.feature.autoeat;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.api.RSIAutoEatFoodSources.Context;
+import com.huanghuang.rsintegration.feature.autoeat.AutoEatFoodBatch.Candidate;
 import com.huanghuang.rsintegration.feature.autoeat.network.AutoEatSyncPacket;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
@@ -304,7 +306,7 @@ public final class AutoEatEngine {
     // ── Inner execution ─────────────────────────────────────────
 
     private static int executeInner(ServerPlayer player, AutoEatMode mode,
-                                    List<ResourceLocation> selectedItems, int batchLimit) {
+                                    List<ResourceLocation> selectedItems, int batchLimit) throws Throwable {
         Optional<AutoEatStorage> resolved = AutoEatStorage.resolve(player);
         if (resolved.isEmpty()) {
             failState(player, mode, "rsi.autoeat.error.network_unavailable", "storage_unavailable");
@@ -347,7 +349,7 @@ public final class AutoEatEngine {
 
     // ── Mode 1: Diversity ───────────────────────────────────────
 
-    private static boolean executeDiversity(ServerPlayer player, AutoEatStorage storage) {
+    private static boolean executeDiversity(ServerPlayer player, AutoEatStorage storage) throws Throwable {
         if (foodList_get == null) {
             NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                     new AutoEatSyncPacket(AutoEatMode.DIVERSITY, 0,
@@ -365,11 +367,9 @@ public final class AutoEatEngine {
         int maxPerBatch = 16;
         int eaten = 0;
 
-        // Collect stacks first (avoid concurrent mod during iteration)
-        List<ItemStack> stacks = new ArrayList<>();
-        for (var entry : storage.items()) stacks.add(entry.stack());
-
-        for (ItemStack stack : stacks) {
+        var batch = new AutoEatFoodBatch(storage, new Context(player, Set.of()), configuredCost());
+        for (Candidate candidate : batch.candidates()) {
+            ItemStack stack = candidate.template;
             if (!runningTasks.contains(player.getUUID())) break;
             if (eaten >= maxPerBatch) break;
             if (stack.isEmpty()) continue;
@@ -385,51 +385,28 @@ public final class AutoEatEngine {
             if (isFoodBlacklisted(stack, getBlacklist(player))) continue;
             if (hasBlacklistedEffect(stack, player, effectBlacklist)) continue;
 
-            ItemStack taken = storage.extract(player, stack, 1, false);
+            ItemStack taken = batch.take(candidate, food -> !isFoodBlacklisted(food, getBlacklist(player))
+                    && !hasBlacklistedEffect(food, player, getEffectBlacklist(player)));
+            if (batch.failure() != null) break;
             if (taken.isEmpty()) continue;
 
-            // 黑名单可能在请求排队期间刚刚更新，提取后再做一次服务端校验。
-            if (isFoodBlacklisted(taken, getBlacklist(player))) {
-                returnToStorage(storage, player, taken);
-                continue;
-            }
-
-            if (!payCost(storage, player, AutoEatMode.DIVERSITY)) {
-                storage.insert(player, taken, false);
-                break;
-            }
-
-            ItemStack beforeEat = taken.copy();
-            ItemStack remainder = taken.finishUsingItem(player.level(), player);
-            remainder = fireEatEvent(player, beforeEat, remainder);
-            // Recover container items (bowls, bottles, etc.) returned by eat()
-            if (!remainder.isEmpty()) {
-                ItemStack leftover = storage.insert(player, remainder, false);
-                if (!leftover.isEmpty()) {
-                    if (!player.getInventory().add(leftover)) {
-                        player.drop(leftover, false);
-                    }
-                }
-            }
-            try {
-                foodList_addFood.invoke(foodList, item);
-            } catch (Throwable ignored) {}
+            finishServing(storage, player, taken);
+            foodList_addFood.invoke(foodList, item);
             eaten++;
         }
 
         if (eaten > 0) {
-            try {
-                maxHealth_update.invoke(player);
-                solApi_sync.invoke(player);
-            } catch (Throwable ignored) {}
+            maxHealth_update.invoke(player);
+            solApi_sync.invoke(player);
             NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                     new AutoEatSyncPacket(AutoEatMode.DIVERSITY, eaten,
                             Component.translatable("rsi.autoeat.result.diversity", eaten)));
-        } else {
+        } else if (batch.failure() == null) {
             NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                     new AutoEatSyncPacket(AutoEatMode.DIVERSITY, 0,
                             Component.translatable("rsi.autoeat.result.none")));
         }
+        if (batch.failure() != null) sendFailure(player, AutoEatMode.DIVERSITY, batch.failure());
         // Every button press is one bounded request. Do not retain the task
         // after a full batch, otherwise the server consumes another batch on
         // the next tick while storage still contains matching food.
@@ -438,33 +415,18 @@ public final class AutoEatEngine {
 
     // ── Cost deduction ────────────────────────────────────────────
 
-    private static boolean payCost(AutoEatStorage storage, ServerPlayer player, AutoEatMode mode) {
-        int perItem = RSIntegrationConfig.AUTO_EAT_COST_PER_ITEM.get();
-        if (perItem <= 0) return true;
-        String costStr = RSIntegrationConfig.AUTO_EAT_COST_ITEM.get();
-        ResourceLocation rl = ResourceLocation.tryParse(costStr);
-        if (rl == null) return true;
-        Item costItem = ForgeRegistries.ITEMS.getValue(rl);
-        if (costItem == null) return true;
-
-        ItemStack template = new ItemStack(costItem, perItem);
-        ItemStack extracted = storage.extract(player, template, perItem, false);
-        if (extracted.getCount() < perItem) {
-            if (!extracted.isEmpty()) {
-                storage.insert(player, extracted, false);
-            }
-            NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
-                    new AutoEatSyncPacket(mode, 0,
-                            Component.translatable("rsi.autoeat.missing_cost")));
-            return false;
-        }
-        return true;
+    private static ItemStack configuredCost() {
+        int count = RSIntegrationConfig.AUTO_EAT_COST_PER_ITEM.get();
+        if (count <= 0) return ItemStack.EMPTY;
+        ResourceLocation id = ResourceLocation.tryParse(RSIntegrationConfig.AUTO_EAT_COST_ITEM.get());
+        Item item = id == null ? null : ForgeRegistries.ITEMS.getValue(id);
+        return item == null ? ItemStack.EMPTY : new ItemStack(item, count);
     }
 
     // ── Mode 2: Stack ───────────────────────────────────────────
 
     private static int executeStack(ServerPlayer player, AutoEatStorage storage,
-                                    List<ResourceLocation> selectedItems, int maxPerBatch) {
+                                    List<ResourceLocation> selectedItems, int maxPerBatch) throws Throwable {
         if (selectedItems.isEmpty()) {
             NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                     new AutoEatSyncPacket(AutoEatMode.STACK, 0,
@@ -472,7 +434,8 @@ public final class AutoEatEngine {
             return 0;
         }
 
-        LinkedHashMap<ResourceLocation, List<ItemStack>> candidates = new LinkedHashMap<>();
+        LinkedHashMap<ResourceLocation, List<Candidate>> candidates = new LinkedHashMap<>();
+        Set<Item> wanted = new HashSet<>();
         for (ResourceLocation selectedItem : selectedItems) {
             Item targetItem = ForgeRegistries.ITEMS.getValue(selectedItem);
             if (!ForgeRegistries.ITEMS.containsKey(selectedItem)
@@ -482,24 +445,24 @@ public final class AutoEatEngine {
                                 Component.translatable("rsi.autoeat.not_edible", selectedItem.toString())));
                 return 0;
             }
+            wanted.add(targetItem);
             candidates.put(selectedItem, new ArrayList<>());
         }
 
         Set<ResourceLocation> effectBlacklist = getEffectBlacklist(player);
         boolean effectBlocked = false;
-        for (var entry : storage.items()) {
-            ItemStack stored = entry.stack();
+        var batch = new AutoEatFoodBatch(storage, new Context(player, wanted), configuredCost());
+        for (Candidate candidate : batch.candidates()) {
+            ItemStack stored = candidate.template;
             if (stored.isEmpty()) continue;
             ResourceLocation key = ForgeRegistries.ITEMS.getKey(stored.getItem());
-            List<ItemStack> itemCandidates = candidates.get(key);
+            List<Candidate> itemCandidates = candidates.get(key);
             if (itemCandidates == null) continue;
             if (hasBlacklistedEffect(stored, player, effectBlacklist)) {
                 effectBlocked = true;
                 continue;
             }
-            ItemStack template = stored.copy();
-            template.setCount(1);
-            itemCandidates.add(template);
+            itemCandidates.add(candidate);
         }
         if (candidates.values().stream().allMatch(List::isEmpty)) {
             sendFailure(player, AutoEatMode.STACK,
@@ -517,12 +480,10 @@ public final class AutoEatEngine {
         }
 
         MobEffect gnawsGift = ForgeRegistries.MOB_EFFECTS.getValue(GNAWS_GIFT);
-        boolean hasGnawsGift = gnawsGift != null && player.hasEffect(gnawsGift);
 
         int eaten = 0;
         boolean hungerBlocked = false;
-        boolean costFailed = false;
-        List<List<ItemStack>> candidateGroups = new ArrayList<>(candidates.values());
+        List<List<Candidate>> candidateGroups = new ArrayList<>(candidates.values());
         int startIndex = Math.floorMod(
                 stackRoundRobinOffsets.getOrDefault(player.getUUID(), 0), candidateGroups.size());
 
@@ -532,61 +493,36 @@ public final class AutoEatEngine {
             for (int step = 0; step < candidateGroups.size(); step++) {
                 if (eaten >= maxPerBatch || !runningTasks.contains(player.getUUID())) break outer;
                 int groupIndex = (startIndex + step) % candidateGroups.size();
-                List<ItemStack> itemCandidates = candidateGroups.get(groupIndex);
+                List<Candidate> itemCandidates = candidateGroups.get(groupIndex);
 
                 ItemStack taken = ItemStack.EMPTY;
-                for (ItemStack template : itemCandidates) {
-                    FoodProperties properties = template.getFoodProperties(player);
-                    boolean alwaysEat = properties != null && properties.canAlwaysEat();
-                    boolean ignoreFullHunger = AutoEatHungerPolicy.canIgnoreFullHunger(alwaysEat, hasGnawsGift);
-                    if (!player.canEat(ignoreFullHunger)) {
+                for (Candidate candidate : itemCandidates) {
+                    if (!canStackEat(player, candidate.template, gnawsGift)) {
                         hungerBlocked = true;
                         continue;
                     }
-                taken = storage.extract(player, template, 1, false);
-                    if (!taken.isEmpty() && hasBlacklistedEffect(taken, player, effectBlacklist)) {
-                        returnToStorage(storage, player, taken);
-                        taken = ItemStack.EMPTY;
-                        continue;
-                    }
+                    taken = batch.take(candidate, food -> canStackEat(player, food, gnawsGift)
+                            && !hasBlacklistedEffect(food, player, getEffectBlacklist(player)));
+                    if (batch.failure() != null) break outer;
                     if (!taken.isEmpty()) break;
                 }
                 if (taken.isEmpty()) continue;
-                if (!payCost(storage, player, AutoEatMode.STACK)) {
-                    returnToStorage(storage, player, taken);
-                    costFailed = true;
-                    break outer;
-                }
-                Item foodItem = taken.getItem();
-                ItemStack beforeEat = taken.copy();
-                ItemStack remainder = taken.finishUsingItem(player.level(), player);
-                remainder = fireEatEvent(player, beforeEat, remainder);
+                ItemStack beforeEat = finishServing(storage, player, taken);
                 eaten++;
                 ateThisPass = true;
                 stackRoundRobinOffsets.put(player.getUUID(),
                         (groupIndex + 1) % candidateGroups.size());
                 if (foodList_get != null) {
-                    try {
-                        Object foodList = foodList_get.invoke(player);
-                        if (foodList != null) foodList_addFood.invoke(foodList, foodItem);
-                    } catch (Throwable ignored) {}
+                    Object foodList = foodList_get.invoke(player);
+                    if (foodList != null) foodList_addFood.invoke(foodList, beforeEat.getItem());
                 }
-                if (dietTracker != null) {
-                    try {
-                        dietTracker_consume.invoke(dietTracker, new ItemStack(foodItem));
-                    } catch (Throwable ignored) {}
-                }
-                returnToStorage(storage, player, remainder);
+                if (dietTracker != null) dietTracker_consume.invoke(dietTracker, beforeEat);
             }
             if (!ateThisPass) break;
             startIndex = stackRoundRobinOffsets.getOrDefault(player.getUUID(), 0);
         }
 
-        if (dietTracker != null) {
-            try {
-                dietTracker_sync.invoke(dietTracker);
-            } catch (Throwable ignored) {}
-        }
+        if (dietTracker != null) dietTracker_sync.invoke(dietTracker);
 
         if (eaten > 0) {
             Component result = selectedItems.size() == 1
@@ -595,20 +531,21 @@ public final class AutoEatEngine {
                     : Component.translatable("rsi.autoeat.result.stack_multi", eaten);
             NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                     new AutoEatSyncPacket(AutoEatMode.STACK, eaten, result));
-        } else if (!costFailed) {
+        } else if (batch.failure() == null) {
             sendFailure(player, AutoEatMode.STACK,
                     hungerBlocked ? "rsi.autoeat.full" : "rsi.autoeat.result.none");
         }
-        // 返回 true 让同一个请求在后续 tick 继续分片，直到配置上限或没有可吃食物。
+        if (batch.failure() != null) {
+            sendFailure(player, AutoEatMode.STACK, batch.failure());
+            return 0; // End this request even if some servings in this tick succeeded.
+        }
         return eaten;
     }
 
-    private static void returnToStorage(AutoEatStorage storage, ServerPlayer player, ItemStack stack) {
-        if (stack.isEmpty()) return;
-        ItemStack leftover = storage.insert(player, stack, false);
-        if (!leftover.isEmpty() && !player.getInventory().add(leftover)) {
-            player.drop(leftover, false);
-        }
+    private static boolean canStackEat(ServerPlayer player, ItemStack food, MobEffect gnawsGift) {
+        FoodProperties properties = food.getFoodProperties(player);
+        return player.canEat(AutoEatHungerPolicy.canIgnoreFullHunger(
+                properties != null && properties.canAlwaysEat(), gnawsGift != null && player.hasEffect(gnawsGift)));
     }
 
     private static List<ResourceLocation> boundedSelection(Collection<ResourceLocation> selectedItems) {
@@ -623,7 +560,7 @@ public final class AutoEatEngine {
 
     // ── Mode 3: Diet ────────────────────────────────────────────
 
-    private static boolean executeDiet(ServerPlayer player, AutoEatStorage storage) {
+    private static boolean executeDiet(ServerPlayer player, AutoEatStorage storage) throws Throwable {
         if (dietCapability_get == null) {
             NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                     new AutoEatSyncPacket(AutoEatMode.DIET, 0,
@@ -666,8 +603,8 @@ public final class AutoEatEngine {
         int maxPerBatch = 16;
         int eaten = 0;
 
-        List<ItemStack> stacks = new ArrayList<>();
-        for (var entry : storage.items()) stacks.add(entry.stack());
+        var batch = new AutoEatFoodBatch(storage, new Context(player, Set.of()), configuredCost());
+        Collection<Candidate> candidates = batch.candidates();
 
         while (eaten < maxPerBatch && runningTasks.contains(player.getUUID())) {
             // 不复用模式切换前的快照，确保本轮每次选食物都遵守最新黑名单。
@@ -682,12 +619,16 @@ public final class AutoEatEngine {
             }
             if (lowestGroup == null || lowestValue >= 1.0f) break;
 
-            ItemStack foodToEat = null;
-            for (ItemStack stack : stacks) {
+            ItemStack taken = ItemStack.EMPTY;
+            var remaining = candidates.iterator();
+            while (remaining.hasNext()) {
+                Candidate candidate = remaining.next();
+                ItemStack stack = candidate.template;
                 if (!stack.getItem().isEdible()) continue;
                 if (isFoodBlacklisted(stack, blacklist)) continue;
                 if (hasBlacklistedEffect(stack, player, effectBlacklist)) continue;
 
+                boolean inGroup = false;
                 try {
                     @SuppressWarnings("unchecked")
                     Set<Object> itemGroups = (Set<Object>) dietApi_getGroupsForStack.invoke(
@@ -695,91 +636,59 @@ public final class AutoEatEngine {
                     if (itemGroups != null) {
                         for (Object g : itemGroups) {
                             if (lowestGroup.equals(dietGroup_getName.invoke(g))) {
-                                foodToEat = stack;
+                                inGroup = true;
                                 break;
                             }
                         }
                     }
                 } catch (Throwable e) { continue; }
-                if (foodToEat != null) break;
+                if (!inGroup) continue;
+                taken = batch.take(candidate, food -> !isFoodBlacklisted(food, getBlacklist(player))
+                        && !hasBlacklistedEffect(food, player, getEffectBlacklist(player)));
+                if (batch.failure() != null || !taken.isEmpty()) break;
+                remaining.remove();
             }
-
-            if (foodToEat == null) {
-                values.put(lowestGroup, 1.0f);
-                continue;
-            }
-
-            ItemStack taken = storage.extract(player, foodToEat, 1, false);
+            if (batch.failure() != null) break;
             if (taken.isEmpty()) {
                 values.put(lowestGroup, 1.0f);
                 continue;
             }
 
-            // 再次读取服务端状态，防止黑名单更新与本次提取并发到达。
-            if (isFoodBlacklisted(taken, getBlacklist(player))) {
-                returnToStorage(storage, player, taken);
-                values.put(lowestGroup, 1.0f);
-                continue;
-            }
-
-            if (hasBlacklistedEffect(taken, player, effectBlacklist)) {
-                returnToStorage(storage, player, taken);
-                values.put(lowestGroup, 1.0f);
-                continue;
-            }
-
-            if (!payCost(storage, player, AutoEatMode.DIET)) {
-                storage.insert(player, taken, false);
-                break;
-            }
-
-            Item foodItem = taken.getItem();
-            ItemStack beforeEat = taken.copy();
-            ItemStack remainder = taken.finishUsingItem(player.level(), player);
-            remainder = fireEatEvent(player, beforeEat, remainder);
+            ItemStack beforeEat = finishServing(storage, player, taken);
             eaten++;
             if (foodList_get != null) {
-                try {
-                    Object fl = foodList_get.invoke(player);
-                    if (fl != null) foodList_addFood.invoke(fl, foodItem);
-                } catch (Throwable ignored) {}
+                Object fl = foodList_get.invoke(player);
+                if (fl != null) foodList_addFood.invoke(fl, beforeEat.getItem());
             }
-            try {
-                dietTracker_consume.invoke(tracker, new ItemStack(foodItem));
-            } catch (Throwable ignored) {}
+            dietTracker_consume.invoke(tracker, beforeEat);
 
-            try {
-                @SuppressWarnings("unchecked")
-                Map<String, Float> fresh = (Map<String, Float>) dietTracker_getValues.invoke(tracker);
-                values.putAll(fresh);
-            } catch (Throwable ignored) {}
-
-            if (!remainder.isEmpty()) {
-                ItemStack leftover = storage.insert(player, remainder, false);
-                if (!leftover.isEmpty()) {
-                    if (!player.getInventory().add(leftover)) {
-                        player.drop(leftover, false);
-                    }
-                }
-            }
+            @SuppressWarnings("unchecked")
+            Map<String, Float> fresh = (Map<String, Float>) dietTracker_getValues.invoke(tracker);
+            values.putAll(fresh);
         }
 
-        try {
-            dietTracker_sync.invoke(tracker);
-        } catch (Throwable ignored) {}
+        dietTracker_sync.invoke(tracker);
 
         if (eaten > 0) {
             NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                     new AutoEatSyncPacket(AutoEatMode.DIET, eaten,
                             Component.translatable("rsi.autoeat.result.diet", eaten)));
-        } else {
+        } else if (batch.failure() == null) {
             NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                     new AutoEatSyncPacket(AutoEatMode.DIET, 0,
                             Component.translatable("rsi.autoeat.result.none")));
         }
+        if (batch.failure() != null) sendFailure(player, AutoEatMode.DIET, batch.failure());
         // Diet mode is also one-shot; reaching the batch limit is not a
         // request to continue eating indefinitely.
         return false;
+    }
+
+    private static ItemStack finishServing(AutoEatStorage storage, ServerPlayer player, ItemStack food) {
+        ItemStack beforeEat = food.copy();
+        ItemStack remainder = food.finishUsingItem(player.level(), player);
+        storage.returnStack(player, fireEatEvent(player, beforeEat.copy(), remainder));
+        return beforeEat;
     }
 
     private static ItemStack fireEatEvent(ServerPlayer player, ItemStack eaten, ItemStack remainder) {

@@ -132,12 +132,16 @@ public final class StorageRestockSupport {
         return extractOutcome(endpoint, player, template, amount).stack();
     }
 
-    public record Extraction(ItemStack stack, boolean confirmedMissing) {}
+    public record Extraction(ItemStack stack, boolean confirmedMissing, boolean failed) {
+        public Extraction(ItemStack stack, boolean confirmedMissing) {
+            this(stack, confirmedMissing, false);
+        }
+    }
 
     public static Extraction extractOutcome(CraftStorageEndpoint endpoint, ServerPlayer player,
                                             ItemStack template, int amount) {
         if (endpoint == null || template == null || template.isEmpty() || amount <= 0) {
-            return new Extraction(ItemStack.EMPTY, false);
+            return new Extraction(ItemStack.EMPTY, false, true);
         }
         StorageOperationResult result = endpoint.extractExact(player, template, amount, false);
         refund(endpoint, player, result.recoveryStacks(), "recovery");
@@ -148,7 +152,10 @@ public final class StorageRestockSupport {
         if (merged.isEmpty() && !extracted.isEmpty()) {
             refund(endpoint, player, extracted, "invalid exact extraction");
         }
-        return new Extraction(merged, confirmedMissing(result));
+        boolean missing = confirmedMissing(result);
+        boolean failed = !missing && (merged.isEmpty() || !(result.complete()
+                || result.status() == StorageOperationStatus.PARTIAL));
+        return new Extraction(merged, missing, failed);
     }
 
     public static boolean confirmedMissing(StorageOperationResult result) {
