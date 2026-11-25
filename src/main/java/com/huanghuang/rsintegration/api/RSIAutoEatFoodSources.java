@@ -10,16 +10,16 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
-/** External sources for the server-side one-click eating service, since Integration API 1.4. */
+/** 服务端一键进食的外部食物来源，自 Integration API 1.4 起可用。 */
 public final class RSIAutoEatFoodSources {
     private RSIAutoEatFoodSources() {}
 
-    /** Register during common setup. Duplicate IDs are rejected. */
+    /** 在通用初始化阶段注册，重复 ID 返回 {@code false}。 */
     public static boolean register(ResourceLocation id, Source source) {
         return AutoEatFoodBatch.register(id, source);
     }
 
-    /** An empty wantedItems set requests all foods. Both callbacks run on the server thread. */
+    /** {@code wantedItems} 为空时查询全部食物。两个回调均在服务端主线程执行。 */
     public record Context(ServerPlayer player, Set<Item> wantedItems) {
         public Context {
             Objects.requireNonNull(player);
@@ -28,19 +28,19 @@ public final class RSIAutoEatFoodSources {
     }
 
     public interface Source {
-        /** Read-only, one exact count-one template per available variant, once per batch. */
+        /** 每批只读枚举一次，每个可供应的变体返回一个数量为 1 的精确模板。 */
         List<ItemStack> candidates(Context context);
 
-        /** Revalidate and charge for one unit. Transfer ownership only through the result. */
+        /** 重新检查并结算一份食物，仅通过返回结果转移食物的所有权。 */
         TakeResult takeOne(Context context, ItemStack exactTemplate);
     }
 
     public sealed interface TakeResult {
-        /** A separately owned count-one stack matching the quoted identity. */
+        /** 独立且数量为 1 的物品栈，完整序列化身份（含 Forge 能力数据）须与模板一致。 */
         record Taken(ItemStack stack) implements TakeResult {}
-        /** No charge and no delivery. RSI can try the next source. */
+        /** 未收费且未交付，RSI 可以尝试下一来源。 */
         record Unavailable() implements TakeResult {}
-        /** Charge or delivery uncertain. RSI stops the entire request. */
+        /** 收费或交付结果不明，RSI 停止整个请求。 */
         record Indeterminate() implements TakeResult {}
     }
 }

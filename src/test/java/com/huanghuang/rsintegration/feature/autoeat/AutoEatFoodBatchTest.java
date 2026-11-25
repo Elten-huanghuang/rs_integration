@@ -9,6 +9,7 @@ import com.huanghuang.rsintegration.storage.StorageItemKey;
 import com.huanghuang.rsintegration.storage.StorageRestockSupport.Extraction;
 import com.huanghuang.rsintegration.storage.StoredItem;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
@@ -35,7 +36,6 @@ class AutoEatFoodBatchTest extends BootstrapTest {
     @BeforeEach
     void setup() {
         when(storage.accessible(player)).thenReturn(true);
-        when(storage.key(any())).thenAnswer(call -> StorageItemKey.fromItemStack(BACKEND, call.getArgument(0)));
         when(storage.extract(eq(player), any(), eq(1))).thenReturn(new Extraction(ItemStack.EMPTY, true));
         when(storage.extract(player, fee, 2)).thenReturn(new Extraction(fee, false));
     }
@@ -55,7 +55,7 @@ class AutoEatFoodBatchTest extends BootstrapTest {
         Source unavailable = source("priority_a", food, food);
         when(unavailable.takeOne(eq(context), any())).thenReturn(new TakeResult.Unavailable());
         when(supplier.takeOne(eq(context), any())).thenAnswer(call -> new TakeResult.Taken(food.copy()));
-        var stored = new StoredItem(storage.key(food), 1);
+        var stored = new StoredItem(StorageItemKey.fromItemStack(BACKEND, food), 1);
         when(storage.items()).thenReturn(List.of(stored));
         when(storage.extract(eq(player), any(), eq(1))).thenReturn(
                 new Extraction(food, false), new Extraction(ItemStack.EMPTY, true));
@@ -127,6 +127,53 @@ class AutoEatFoodBatchTest extends BootstrapTest {
         verify(storage).returnStack(player, fee);
         verify(faulty).takeOne(eq(context), any());
         verify(next, never()).takeOne(any(), any());
+    }
+
+    @Test
+    void capabilityVariantsStaySeparateAndWrongCapabilityIsNotDelivered() {
+        ItemStack first = foodWithCapability(1);
+        ItemStack second = foodWithCapability(2);
+        Source supplier = source("capabilities", first, second);
+        when(supplier.takeOne(eq(context), any())).thenAnswer(call -> {
+            ItemStack requested = call.getArgument(1);
+            assertEquals(1, requested.save(new CompoundTag()).getCompound("ForgeCaps").getInt("test"));
+            return new TakeResult.Taken(second);
+        });
+
+        var batch = new AutoEatFoodBatch(storage, context, fee);
+        var candidates = List.copyOf(batch.candidates());
+        assertEquals(2, candidates.size());
+        assertTrue(batch.take(candidates.get(0), stack -> fail("错误能力的食物不得进入食用检查")).isEmpty());
+        assertEquals("rsi.autoeat.error.food_source", batch.failure());
+        verify(storage).returnStack(player, fee);
+    }
+
+    @Test
+    void broaderNativeMatchDoesNotCountAsConfirmedStockout() {
+        ItemStack nativeFood = foodWithCapability(2);
+        Source supplier = source("broader_native_match", foodWithCapability(1));
+        when(storage.extract(eq(player), any(), eq(1))).thenReturn(new Extraction(nativeFood, false));
+
+        var batch = new AutoEatFoodBatch(storage, context, fee);
+        assertTrue(batch.take(batch.candidates().iterator().next(), stack -> true).isEmpty());
+        assertNull(batch.failure());
+        verify(storage).returnStack(player, nativeFood);
+        verify(storage, never()).extract(player, fee, 2);
+        verify(supplier, never()).takeOne(any(), any());
+    }
+
+    private ItemStack foodWithCapability(int variant) {
+        ItemStack stack = spy(food.copy());
+        // 不启动 Forge 附加事件，只模拟物品存档中独立于普通 NBT 的能力字段。
+        doAnswer(call -> {
+            CompoundTag saved = (CompoundTag) call.callRealMethod();
+            CompoundTag capabilities = new CompoundTag();
+            capabilities.putInt("test", variant);
+            saved.put("ForgeCaps", capabilities);
+            return saved;
+        }).when(stack).save(any(CompoundTag.class));
+        doAnswer(call -> foodWithCapability(variant)).when(stack).copy();
+        return stack;
     }
 
     @Test

@@ -1603,12 +1603,13 @@ RSI 解析当前网络，并检查权限、物品身份、交付目标和容量�
 在 common setup 调用 `RSIAutoEatFoodSources.register(id, source)`。重复 ID 返回 `false`。
 服务端每个批次校验网络权限和模式后，调用一次各来源的 `candidates(context)`。
 堆叠暴食的 `wantedItems()` 是所选物品类型的不可变集合，其他模式传空集合，查询全部食物。
-返回当前能提供一份的食物，每个模板数量为 1 并保留 NBT。枚举只读，多个模板可以共享同一份余额。
+返回当前能提供一份的食物，每个模板数量为 1 并保留完整序列化数据（包括 NBT 和 Forge 能力数据）。
+枚举只读，多个模板可以共享同一份余额。
 
 RSI 优先提取网络实物。确认同一变体缺货后，先从网络暂收本份费用，再按来源 ID 的稳定顺序
 调用 `takeOne(context, exactTemplate)`。来源应在服务端主线程复核可用性并对本份结算。
 
-- `new TakeResult.Taken(stack)` 交付一个独立的、身份相符的单件栈。该栈归 RSI 持有。
+- `new TakeResult.Taken(stack)` 交付一个独立的单件栈，完整序列化身份须与模板相符。该栈归 RSI 持有。
 - `new TakeResult.Unavailable()` 表示未扣费且未交付。RSI 可尝试下一来源。
 - `new TakeResult.Indeterminate()` 表示扣费或交付结果不明。RSI 记录来源、退还暂存费用并终止请求。
   提交抛出异常或返回错误的栈也按此处理。

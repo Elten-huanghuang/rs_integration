@@ -16,7 +16,7 @@ import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.function.BiPredicate;
 
-/** Shared backend-neutral extraction helper for GUI restock actions. */
+/** 界面补货共用的提取工具，不依赖具体存储后端。 */
 public final class StorageRestockSupport {
     private static final StorageBackendId BEYOND_DIMENSIONS =
             new StorageBackendId("beyonddimensions");
@@ -31,16 +31,12 @@ public final class StorageRestockSupport {
     static StorageResolutionResult resolveForRetrieval(ServerPlayer player) {
         var registry = RSIntegrationMod.STORAGE_BACKENDS.registry();
         StorageResolutionStatus failure = StorageResolutionStatus.NOT_FOUND;
-        // A held BD terminal is an explicit user choice for these one-shot
-        // GUI actions. This prevents the RS-first backend order from stealing
-        // a refill when both networks are installed.
+        // 手持超越维度终端表示玩家明确选网，避免操作被默认优先的 RS 网络截走。
         OptionalInt heldNetwork = beyondDimensionsNetworkId(player.getMainHandItem());
         if (heldNetwork.isEmpty()) {
             heldNetwork = beyondDimensionsNetworkId(player.getOffhandItem());
         }
-        // BD terminals can be equipped in a Curios slot. Treat an equipped
-        // terminal as an explicit credential too, otherwise resolveDefault()
-        // may select an unrelated RS network when both backends are present.
+        // 饰品栏中的超越维度终端同样是访问凭据，优先于默认网络。
         if (heldNetwork.isEmpty()) {
             for (ItemStack stack : CuriosAccess.stacks(player)) {
                 heldNetwork = beyondDimensionsNetworkId(stack);
@@ -187,7 +183,7 @@ public final class StorageRestockSupport {
             if (stack == null || stack.isEmpty()) continue;
             StorageOperationResult result;
             try {
-                result = endpoint.insert(player, stack, false);
+                result = CraftStorageEndpoint.insertInternal(endpoint, player, stack, false);
             } catch (RuntimeException | LinkageError failure) {
                 RSIntegrationMod.LOGGER.error("[RSI-Restock] {} refund failed for {}", reason, stack, failure);
                 known = false;

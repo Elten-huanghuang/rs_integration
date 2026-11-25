@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.feature.autoeat.AutoEatFoodBatch.Candidate;
 import com.huanghuang.rsintegration.feature.autoeat.network.AutoEatSyncPacket;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
+import com.mojang.logging.LogUtils;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.StringTag;
@@ -25,6 +26,7 @@ import net.minecraftforge.event.entity.living.LivingEntityUseItemEvent;
 import net.minecraftforge.fml.ModList;
 import net.minecraftforge.network.PacketDistributor;
 import net.minecraftforge.registries.ForgeRegistries;
+import org.slf4j.Logger;
 
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
@@ -33,19 +35,15 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 public final class AutoEatEngine {
+    private static final Logger LOGGER = LogUtils.getLogger();
 
-    /**
-     * Keep one request bounded even if an existing server config still says
-     * 128/1024. Auto-eat performs storage operations and food callbacks on the
-     * server thread, so an unbounded request can stall every player's tick.
-     */
-    /** 每 tick 的安全分片上限；一个请求可跨多个 tick 完成。 */
+    /** 每刻处理份数上限，避免存储操作和食物回调长时间占用服务端主线程。 */
     private static final int SAFE_MAX_PER_REQUEST = 16;
 
     private static final String NBT_KEY = "rsi:food_blacklist";
     private static final String EFFECT_NBT_KEY = "rsi:food_effect_blacklist";
     private static final ResourceLocation GNAWS_GIFT = new ResourceLocation("crockpot", "gnaws_gift");
-    /** Keep this equal to the wire decoder bound: the UI can blacklist the full food registry. */
+    /** 与数据包解码上限保持一致，界面允许屏蔽注册表中的全部食物。 */
     public static final int MAX_BLACKLIST_SIZE = AutoEatBlacklistPolicy.MAX_SIZE;
     private static final Set<UUID> runningTasks = ConcurrentHashMap.newKeySet();
     private static final Map<UUID, Request> pendingTasks = new ConcurrentHashMap<>();
@@ -59,7 +57,7 @@ public final class AutoEatEngine {
         }
     }
 
-    // MethodHandles for SolCarrot (com.cazsius.solcarrot)
+    // SolCarrot 联动使用的方法句柄。
     private static MethodHandle foodList_get;
     private static MethodHandle foodList_hasEaten;
     private static MethodHandle foodList_addFood;
@@ -67,7 +65,7 @@ public final class AutoEatEngine {
     private static MethodHandle maxHealth_update;
     private static MethodHandle solApi_sync;
 
-    // MethodHandles for Diet (com.illusivesoulworks.diet)
+    // Diet 联动使用的方法句柄。
     private static MethodHandle lazyOptional_orElse;
     private static MethodHandle dietCapability_get;
     private static MethodHandle dietApi_getInstance;
@@ -153,7 +151,7 @@ public final class AutoEatEngine {
         return Math.max(1, Math.min(64, RSIntegrationConfig.AUTO_EAT_MAX_PER_BATCH.get()));
     }
 
-    // ── Public API ──────────────────────────────────────────────
+    // 公共入口
 
     public static void execute(ServerPlayer player, AutoEatMode mode,
                                Collection<ResourceLocation> selectedItems) {
@@ -166,7 +164,7 @@ public final class AutoEatEngine {
         runningTasks.remove(player.getUUID());
     }
 
-    /** Process at most one bounded batch per player per server tick. */
+    /** 每个服务端刻为每名玩家处理至多一批。 */
     public static void tick(MinecraftServer server) {
         for (var entry : pendingTasks.entrySet()) {
             UUID playerId = entry.getKey();
@@ -303,10 +301,10 @@ public final class AutoEatEngine {
         return key == null || blacklist.contains(key);
     }
 
-    // ── Inner execution ─────────────────────────────────────────
+    // 请求执行
 
     private static int executeInner(ServerPlayer player, AutoEatMode mode,
-                                    List<ResourceLocation> selectedItems, int batchLimit) throws Throwable {
+                                    List<ResourceLocation> selectedItems, int batchLimit) {
         Optional<AutoEatStorage> resolved = AutoEatStorage.resolve(player);
         if (resolved.isEmpty()) {
             failState(player, mode, "rsi.autoeat.error.network_unavailable", "storage_unavailable");
@@ -314,7 +312,7 @@ public final class AutoEatEngine {
         }
         AutoEatStorage storage = resolved.orElseThrow();
 
-        // Cost check
+        // 检查启动进食所需的状态效果。
         String requiredEffect = RSIntegrationConfig.AUTO_EAT_REQUIRED_EFFECT.get();
         if (!requiredEffect.isEmpty()) {
             String[] parts = requiredEffect.split(":", 2);
@@ -347,9 +345,9 @@ public final class AutoEatEngine {
         };
     }
 
-    // ── Mode 1: Diversity ───────────────────────────────────────
+    // 多样饮食
 
-    private static boolean executeDiversity(ServerPlayer player, AutoEatStorage storage) throws Throwable {
+    private static boolean executeDiversity(ServerPlayer player, AutoEatStorage storage) {
         if (foodList_get == null) {
             NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                     new AutoEatSyncPacket(AutoEatMode.DIVERSITY, 0,
@@ -391,13 +389,13 @@ public final class AutoEatEngine {
             if (taken.isEmpty()) continue;
 
             finishServing(storage, player, taken);
-            foodList_addFood.invoke(foodList, item);
             eaten++;
+            runNutritionHook("SolCarrot addFood", () -> foodList_addFood.invoke(foodList, item));
         }
 
         if (eaten > 0) {
-            maxHealth_update.invoke(player);
-            solApi_sync.invoke(player);
+            runNutritionHook("SolCarrot update health", () -> maxHealth_update.invoke(player));
+            runNutritionHook("SolCarrot sync", () -> solApi_sync.invoke(player));
             NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                     new AutoEatSyncPacket(AutoEatMode.DIVERSITY, eaten,
                             Component.translatable("rsi.autoeat.result.diversity", eaten)));
@@ -407,13 +405,11 @@ public final class AutoEatEngine {
                             Component.translatable("rsi.autoeat.result.none")));
         }
         if (batch.failure() != null) sendFailure(player, AutoEatMode.DIVERSITY, batch.failure());
-        // Every button press is one bounded request. Do not retain the task
-        // after a full batch, otherwise the server consumes another batch on
-        // the next tick while storage still contains matching food.
+        // 每次点击只处理一批，网络仍有符合条件的食物也不续跑。
         return false;
     }
 
-    // ── Cost deduction ────────────────────────────────────────────
+    // 进食费用
 
     private static ItemStack configuredCost() {
         int count = RSIntegrationConfig.AUTO_EAT_COST_PER_ITEM.get();
@@ -423,10 +419,10 @@ public final class AutoEatEngine {
         return item == null ? ItemStack.EMPTY : new ItemStack(item, count);
     }
 
-    // ── Mode 2: Stack ───────────────────────────────────────────
+    // 堆叠暴食
 
     private static int executeStack(ServerPlayer player, AutoEatStorage storage,
-                                    List<ResourceLocation> selectedItems, int maxPerBatch) throws Throwable {
+                                    List<ResourceLocation> selectedItems, int maxPerBatch) {
         if (selectedItems.isEmpty()) {
             NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                     new AutoEatSyncPacket(AutoEatMode.STACK, 0,
@@ -470,14 +466,7 @@ public final class AutoEatEngine {
             return 0;
         }
 
-        // Resolve Diet tracker once (so Diet nutrition values update correctly)
-        Object dietTracker = null;
-        if (dietCapability_get != null) {
-            try {
-                Object lazyOpt = dietCapability_get.invoke(player);
-                dietTracker = lazyOptional_orElse.invoke(lazyOpt, (Object) null);
-            } catch (Throwable ignored) {}
-        }
+        Object dietTracker = findOptionalDietTracker(player);
 
         MobEffect gnawsGift = ForgeRegistries.MOB_EFFECTS.getValue(GNAWS_GIFT);
 
@@ -512,17 +501,16 @@ public final class AutoEatEngine {
                 ateThisPass = true;
                 stackRoundRobinOffsets.put(player.getUUID(),
                         (groupIndex + 1) % candidateGroups.size());
-                if (foodList_get != null) {
-                    Object foodList = foodList_get.invoke(player);
-                    if (foodList != null) foodList_addFood.invoke(foodList, beforeEat.getItem());
+                recordOptionalSolFood(player, beforeEat.getItem());
+                if (dietTracker != null) {
+                    runNutritionHook("Diet consume", () -> dietTracker_consume.invoke(dietTracker, beforeEat));
                 }
-                if (dietTracker != null) dietTracker_consume.invoke(dietTracker, beforeEat);
             }
             if (!ateThisPass) break;
             startIndex = stackRoundRobinOffsets.getOrDefault(player.getUUID(), 0);
         }
 
-        if (dietTracker != null) dietTracker_sync.invoke(dietTracker);
+        if (dietTracker != null) syncDiet(dietTracker);
 
         if (eaten > 0) {
             Component result = selectedItems.size() == 1
@@ -537,7 +525,7 @@ public final class AutoEatEngine {
         }
         if (batch.failure() != null) {
             sendFailure(player, AutoEatMode.STACK, batch.failure());
-            return 0; // End this request even if some servings in this tick succeeded.
+            return 0; // 即使这一批吃成了几份，失败后也不再续跑。
         }
         return eaten;
     }
@@ -558,9 +546,9 @@ public final class AutoEatEngine {
         return List.copyOf(unique);
     }
 
-    // ── Mode 3: Diet ────────────────────────────────────────────
+    // 膳食均衡
 
-    private static boolean executeDiet(ServerPlayer player, AutoEatStorage storage) throws Throwable {
+    private static boolean executeDiet(ServerPlayer player, AutoEatStorage storage) {
         if (dietCapability_get == null) {
             NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                     new AutoEatSyncPacket(AutoEatMode.DIET, 0,
@@ -656,18 +644,18 @@ public final class AutoEatEngine {
 
             ItemStack beforeEat = finishServing(storage, player, taken);
             eaten++;
-            if (foodList_get != null) {
-                Object fl = foodList_get.invoke(player);
-                if (fl != null) foodList_addFood.invoke(fl, beforeEat.getItem());
-            }
-            dietTracker_consume.invoke(tracker, beforeEat);
+            recordOptionalSolFood(player, beforeEat.getItem());
 
-            @SuppressWarnings("unchecked")
-            Map<String, Float> fresh = (Map<String, Float>) dietTracker_getValues.invoke(tracker);
-            values.putAll(fresh);
+            // 营养值更新失败后不能继续选食，但已经吃下的份数仍需反馈给玩家。
+            if (!runNutritionHook("Diet consume and refresh", () -> {
+                dietTracker_consume.invoke(tracker, beforeEat);
+                @SuppressWarnings("unchecked")
+                Map<String, Float> fresh = (Map<String, Float>) dietTracker_getValues.invoke(tracker);
+                values.putAll(fresh);
+            })) break;
         }
 
-        dietTracker_sync.invoke(tracker);
+        syncDiet(tracker);
 
         if (eaten > 0) {
             NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
@@ -679,9 +667,50 @@ public final class AutoEatEngine {
                             Component.translatable("rsi.autoeat.result.none")));
         }
         if (batch.failure() != null) sendFailure(player, AutoEatMode.DIET, batch.failure());
-        // Diet mode is also one-shot; reaching the batch limit is not a
-        // request to continue eating indefinitely.
+        // 膳食均衡每次点击也只处理一批。
         return false;
+    }
+
+    private static Object findOptionalDietTracker(ServerPlayer player) {
+        if (dietCapability_get == null) return null;
+        try {
+            Object lazyOpt = dietCapability_get.invoke(player);
+            return lazyOptional_orElse.invoke(lazyOpt, (Object) null);
+        } catch (VirtualMachineError | ThreadDeath fatal) {
+            throw fatal;
+        } catch (Throwable error) {
+            LOGGER.debug("[RSI-AutoEat] Diet tracker unavailable", error);
+            return null;
+        }
+    }
+
+    private static void recordOptionalSolFood(ServerPlayer player, Item item) {
+        if (foodList_get == null) return;
+        runNutritionHook("SolCarrot addFood", () -> {
+            Object foodList = foodList_get.invoke(player);
+            if (foodList != null) foodList_addFood.invoke(foodList, item);
+        });
+    }
+
+    private static void syncDiet(Object tracker) {
+        runNutritionHook("Diet sync", () -> dietTracker_sync.invoke(tracker));
+    }
+
+    @FunctionalInterface
+    interface NutritionHook {
+        void run() throws Throwable;
+    }
+
+    static boolean runNutritionHook(String description, NutritionHook operation) {
+        try {
+            operation.run();
+            return true;
+        } catch (VirtualMachineError | ThreadDeath fatal) {
+            throw fatal;
+        } catch (Throwable error) {
+            LOGGER.debug("[RSI-AutoEat] {} failed", description, error);
+            return false;
+        }
     }
 
     private static ItemStack finishServing(AutoEatStorage storage, ServerPlayer player, ItemStack food) {

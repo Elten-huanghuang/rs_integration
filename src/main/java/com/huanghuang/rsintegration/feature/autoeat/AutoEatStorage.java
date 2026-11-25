@@ -1,7 +1,6 @@
 package com.huanghuang.rsintegration.feature.autoeat;
 
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
-import com.huanghuang.rsintegration.storage.StorageItemKey;
 import com.huanghuang.rsintegration.storage.StoragePermission;
 import com.huanghuang.rsintegration.storage.StorageRestockSupport;
 import com.huanghuang.rsintegration.storage.StorageSnapshot;
@@ -13,12 +12,12 @@ import net.minecraft.world.item.ItemStack;
 import java.util.List;
 import java.util.Optional;
 
-/** Backend-neutral storage view used by the auto-eat service. */
+/** 一键进食使用的存储视图，不依赖具体后端。 */
 final class AutoEatStorage {
     private final CraftStorageEndpoint endpoint;
     private final StorageSnapshot snapshot;
 
-    private AutoEatStorage(CraftStorageEndpoint endpoint, StorageSnapshot snapshot) {
+    AutoEatStorage(CraftStorageEndpoint endpoint, StorageSnapshot snapshot) {
         this.endpoint = endpoint;
         this.snapshot = snapshot;
     }
@@ -37,19 +36,11 @@ final class AutoEatStorage {
     }
 
     private static Optional<CraftStorageEndpoint> resolveEndpoint(ServerPlayer player) {
-        // StorageRestockSupport gives a held BD terminal precedence when both
-        // RS and BD are installed, then falls back to the registered default.
-        // An active RS Grid still resolves to RS because RS is the authenticated
-        // current context and remains the first default backend.
         return StorageRestockSupport.resolve(player);
     }
 
     List<StoredItem> items() {
         return snapshot.items();
-    }
-
-    StorageItemKey key(ItemStack stack) {
-        return endpoint.session().itemKey(stack);
     }
 
     boolean accessible(ServerPlayer player) {
@@ -64,7 +55,7 @@ final class AutoEatStorage {
 
     void returnStack(ServerPlayer player, ItemStack stack) {
         if (stack.isEmpty()) return;
-        ItemStack leftover = endpoint.insert(player, stack, false).remainder().orElseThrow(
+        ItemStack leftover = CraftStorageEndpoint.insertInternal(endpoint, player, stack, false).remainder().orElseThrow(
                 () -> new IllegalStateException("Indeterminate auto-eat refund for " + stack));
         if (!leftover.isEmpty()) {
             player.getInventory().add(leftover);
