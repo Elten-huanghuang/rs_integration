@@ -12,7 +12,6 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.food.FoodProperties;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.items.ItemHandlerHelper;
 import net.minecraftforge.event.ForgeEventFactory;
 import net.minecraft.world.level.Level;
 import net.p3pp3rf1y.sophisticatedcore.api.IStorageWrapper;
@@ -122,15 +121,11 @@ public abstract class FeedingUpgradeWrapperMixin
                 ItemStack finished = food.getItem().finishUsingItem(food, level, player);
                 remainder = ForgeEventFactory.onItemUseFinish(player, consumedSnapshot, 0, finished);
             } catch (RuntimeException ex) {
-                StorageBackpackUtils.returnAfterLocalFailure(session, serverPlayer, food.copy());
+                StorageBackpackUtils.returnExtracted(session, serverPlayer, food);
                 continue;
             }
 
-            if (!remainder.isEmpty()) {
-                StorageOperationResult returned = session.insert(serverPlayer, remainder, false);
-                if (returned.remainder().isPresent() && !returned.remainder().orElseThrow().isEmpty())
-                    ItemHandlerHelper.giveItemToPlayer(player, returned.remainder().orElseThrow());
-            }
+            StorageBackpackUtils.returnExtracted(session, serverPlayer, remainder);
 
             cir.setReturnValue(true);
             cir.cancel();

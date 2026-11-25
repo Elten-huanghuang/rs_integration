@@ -3,7 +3,6 @@ package com.huanghuang.rsintegration.mods;
 import com.huanghuang.rsintegration.mods.eidolon.EidolonCraftPacket;
 import com.huanghuang.rsintegration.mods.forbidden.FaCraftPacket;
 import com.huanghuang.rsintegration.mods.malum.MalumCraftPacket;
-import com.huanghuang.rsintegration.mods.wizardsreborn.WRWandCraftPacket;
 import com.huanghuang.rsintegration.network.packet.NetworkHandler;
 import com.huanghuang.rsintegration.network.packet.NetworkPacketIds;
 import java.util.Optional;
@@ -11,7 +10,7 @@ import net.minecraftforge.network.NetworkDirection;
 
 public final class ModCraftNetworkHandlers {
 
-    private static boolean malumRegistered, faRegistered, eidolonRegistered, wrWandRegistered;
+    private static boolean malumRegistered, faRegistered, eidolonRegistered;
 
     private ModCraftNetworkHandlers() {}
 
@@ -40,15 +39,6 @@ public final class ModCraftNetworkHandlers {
                 EidolonCraftPacket::encode, EidolonCraftPacket::decode, EidolonCraftPacket::handle,
                 Optional.of(NetworkDirection.PLAY_TO_SERVER));
         eidolonRegistered = true;
-    }
-
-    public static void registerWRWand() {
-        if (wrWandRegistered) return;
-        var ch = NetworkHandler.CHANNEL;
-        ch.registerMessage(NetworkPacketIds.WR_WAND_CRAFT, WRWandCraftPacket.class,
-                WRWandCraftPacket::encode, WRWandCraftPacket::decode, WRWandCraftPacket::handle,
-                Optional.of(NetworkDirection.PLAY_TO_SERVER));
-        wrWandRegistered = true;
     }
 
     public static void registerArsNouveau() {

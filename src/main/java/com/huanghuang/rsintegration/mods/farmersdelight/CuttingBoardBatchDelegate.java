@@ -424,7 +424,7 @@ public final class CuttingBoardBatchDelegate extends AbstractBatchDelegate {
             }
             CraftStorageEndpoint endpoint = toolReturnEndpoint;
             if (!leftover.isEmpty() && endpoint != null) {
-                leftover = endpoint.insert(player, leftover, false)
+                leftover = CraftStorageEndpoint.insertInternal(endpoint, player, leftover, false)
                         .remainder().orElse(ItemStack.EMPTY);
             }
             if (!leftover.isEmpty()) PlayerUtils.safeGiveToStorage(player, leftover, endpoint);

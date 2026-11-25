@@ -34,7 +34,7 @@ public final class WRAlchemyRecovery {
             FluidStack fluid = tank.getFluidInTank(0);
             if (!fluid.isEmpty()) contents.add(token.apply(fluid.copy()));
         }
-        return contents.stream().allMatch(stack -> endpoint.insert(player, stack, true).status()
+        return contents.stream().allMatch(stack -> CraftStorageEndpoint.insertInternal(endpoint, player, stack, true).status()
                 == StorageOperationStatus.SUCCESS);
     }
 
@@ -47,7 +47,7 @@ public final class WRAlchemyRecovery {
             for (int slot = 0; slot < inventory.getSlots(); slot++) {
                 ItemStack original = inventory.getStackInSlot(slot).copy();
                 if (original.isEmpty()) continue;
-                StorageOperationResult stored = endpoint.insert(player, original.copy(), false);
+                StorageOperationResult stored = CraftStorageEndpoint.insertInternal(endpoint, player, original, false);
                 // 先存入，再按确认存入的数量清除。网络异常时不凭空重建未知结果。
                 if (stored.transferredAmount().isEmpty()) throw new IllegalStateException("旧物品入库数量不确定");
                 modifiable.setStackInSlot(slot, original.copyWithCount(
@@ -61,7 +61,7 @@ public final class WRAlchemyRecovery {
             FluidStack removed = tank.drain(original.copy(), IFluidHandler.FluidAction.EXECUTE);
             if (removed.isEmpty()) return false;
             ItemStack transfer = token.apply(removed);
-            StorageOperationResult stored = endpoint.insert(player, transfer, false);
+            StorageOperationResult stored = CraftStorageEndpoint.insertInternal(endpoint, player, transfer, false);
             if (stored.remainder().isEmpty()) throw new IllegalStateException("旧流体入库结果不确定");
             ItemStack remainder = stored.remainder().orElseThrow();
             if (!remainder.isEmpty()) {

@@ -382,7 +382,7 @@ public final class EmbersStamperBatchDelegate extends AbstractBatchDelegate {
         CraftStorageEndpoint endpoint = stampReturnEndpoint != null
                 ? stampReturnEndpoint : storageEndpoint();
         for (ItemStack stamp : collectReusableMaterials(player)) {
-            ItemStack leftover = endpoint == null ? stamp : endpoint.insert(player, stamp, false)
+            ItemStack leftover = endpoint == null ? stamp : CraftStorageEndpoint.insertInternal(endpoint, player, stamp, false)
                     .remainder().orElse(ItemStack.EMPTY);
             if (!leftover.isEmpty()) PlayerUtils.safeGiveToStorage(player, leftover, endpoint);
         }

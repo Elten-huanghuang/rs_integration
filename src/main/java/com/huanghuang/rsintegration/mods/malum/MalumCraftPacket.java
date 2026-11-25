@@ -353,7 +353,7 @@ public final class MalumCraftPacket {
                         .getMethod("getStackInSlot", int.class).invoke(invMain, i);
                 if (!stack.isEmpty()) {
                     ItemStack leftover = endpoint == null ? stack.copy()
-                            : endpoint.insert(player, stack.copy(), false)
+                            : CraftStorageEndpoint.insertInternal(endpoint, player, stack.copy(), false)
                             .remainder().orElse(ItemStack.EMPTY);
                     if (!leftover.isEmpty() && player != null) {
                         ItemHandlerHelper.giveItemToPlayer(player, leftover);
@@ -368,7 +368,7 @@ public final class MalumCraftPacket {
                         .getMethod("getStackInSlot", int.class).invoke(invSpirit, i);
                 if (!stack.isEmpty()) {
                     ItemStack leftover = endpoint == null ? stack.copy()
-                            : endpoint.insert(player, stack.copy(), false)
+                            : CraftStorageEndpoint.insertInternal(endpoint, player, stack.copy(), false)
                             .remainder().orElse(ItemStack.EMPTY);
                     if (!leftover.isEmpty() && player != null) {
                         ItemHandlerHelper.giveItemToPlayer(player, leftover);
@@ -392,7 +392,7 @@ public final class MalumCraftPacket {
                         .getMethod("getStackInSlot", int.class).invoke(inv, 0);
                 if (!stack.isEmpty()) {
                     ItemStack leftover = endpoint == null ? stack.copy()
-                            : endpoint.insert(player, stack.copy(), false)
+                            : CraftStorageEndpoint.insertInternal(endpoint, player, stack.copy(), false)
                             .remainder().orElse(ItemStack.EMPTY);
                     if (!leftover.isEmpty() && player != null) {
                         ItemHandlerHelper.giveItemToPlayer(player, leftover);

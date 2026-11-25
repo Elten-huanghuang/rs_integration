@@ -72,7 +72,7 @@ final class FluidVoucherRecovery {
             } catch (RuntimeException | LinkageError unavailable) {
                 return new Receipt(StorageOperationStatus.UNAVAILABLE, 0);
             }
-            var result = endpoint.insert(player, token, false);
+            var result = CraftStorageEndpoint.insertInternal(endpoint, player, token, false);
             if (result == null || result.kind() != StorageOperationResult.Kind.INSERT
                     || result.mode() != StorageOperationMode.PERFORM || result.requestedAmount() != fluid.getAmount()
                     || result.transferredAmount().isEmpty()) return Receipt.unknown();

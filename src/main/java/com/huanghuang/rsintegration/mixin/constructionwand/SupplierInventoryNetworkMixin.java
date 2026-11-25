@@ -42,7 +42,7 @@ public abstract class SupplierInventoryNetworkMixin {
             result.transferredAmount().ifPresent(transferred -> callback.setReturnValue(
                     Math.max(0, remaining - (int) Math.min(Integer.MAX_VALUE, transferred))));
         } catch (RuntimeException | LinkageError ignored) {
-            // Leave the original remainder intact when an optional backend is unavailable.
+            // 可选存储后端不可用时，保留原始余量。
         }
     }
 
@@ -59,9 +59,9 @@ public abstract class SupplierInventoryNetworkMixin {
         for (ItemStack stack : stacks) {
             if (stack == null || stack.isEmpty()) continue;
             try {
-                endpoint.insert(player, stack, false);
+                CraftStorageEndpoint.insertInternal(endpoint, player, stack, false);
             } catch (RuntimeException | LinkageError ignored) {
-                // The backend owns recovery diagnostics; do not break wand use.
+                // 由存储后端记录恢复故障，不中断建筑杖操作。
             }
         }
     }

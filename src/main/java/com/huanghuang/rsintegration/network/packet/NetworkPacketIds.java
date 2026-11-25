@@ -37,7 +37,7 @@ public final class NetworkPacketIds {
     public static final int MALUM_CRAFT = 20;
     public static final int FA_CRAFT = 21;
     public static final int EIDOLON_CRAFT = 22;
-    public static final int WR_WAND_CRAFT = 23;
+    // 23：WR 旧合成包已下线，编号不再复用。
     // 24: formerly ARS_NOUVEAU_CRAFT (now uses GenericCraftPacket via IBatchDelegate)
 
     // ── Goety ritual GUI (30-39) ───────────────────────────────────

@@ -27,7 +27,7 @@ final class ArsPedestalRecovery {
             container.setItem(0, ItemStack.EMPTY);
             pedestal.setChanged();
             ItemStack remainder = endpoint == null ? stack
-                    : endpoint.insert(player, stack, false)
+                    : CraftStorageEndpoint.insertInternal(endpoint, player, stack, false)
                     .remainder().orElse(ItemStack.EMPTY);
             if (!remainder.isEmpty()) {
                 PlayerUtils.safeGiveToStorage(player, remainder, endpoint);

@@ -612,7 +612,7 @@ extends AbstractBatchDelegate {
                 for (ItemStack s : recycled) {
                     ItemStack leftover;
                     if (s.isEmpty()) continue;
-                    leftover = endpoint.insert(player, s, false)
+                    leftover = CraftStorageEndpoint.insertInternal(endpoint, player, s, false)
                             .remainder().orElse(ItemStack.EMPTY);
                     if (!leftover.isEmpty()) {
                         RSIntegrationMod.LOGGER.warn("[RSI-Embers] Recycle partial: {} x{} \u2192 leftover {}", (Object)s.getHoverName().getString(), (Object)s.getCount(), (Object)leftover.getCount());

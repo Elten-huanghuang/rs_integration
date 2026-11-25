@@ -1,6 +1,8 @@
 package com.huanghuang.rsintegration.mods.wizardsreborn;
 
 import com.huanghuang.rsintegration.crafting.batch.OperationOutputSource;
+import com.huanghuang.rsintegration.crafting.batch.OperationInputRecovery;
+import com.huanghuang.rsintegration.crafting.batch.OperationInputRecovery.Input;
 import com.huanghuang.rsintegration.crafting.batch.MaterialPlan;
 import com.huanghuang.rsintegration.crafting.batch.OutputContract;
 import com.huanghuang.rsintegration.crafting.TaskOutputReception;
@@ -873,61 +875,75 @@ public final class WRBatchDelegate extends DrivenMachineDelegate {
         // Phase 3: commit (physical extraction of center book + first side set).
         if (!ledger.commitToEndpoint(storageEndpoint(), player)) return false;
 
-        // Phase 4: place center book + first side set on their pedestals.
+        // 首轮同时投放中心书和侧边材料。
+        OperationInputRecovery recovery = new OperationInputRecovery();
         this.placedPedestalItems = new HashMap<>();
         this.filledPedestals = new ArrayList<>();
-        int placed = 0;
-        for (int i = 0; i < templates.size(); i++) {
-            ItemStack taken = templates.get(i);
-            if (taken.isEmpty()) { placed = i + 1; continue; }
-            try {
-                Object ped = pedestals.get(i);
-                ItemStack existing = getContainerItem(ped, 0);
-                if (!existing.isEmpty()) {
-                    ItemHandlerHelper.giveItemToPlayer(player, existing.copy());
-                }
-                setContainerItem(ped, 0, taken);
-                filledPedestals.add(ped);
-                placedPedestalItems.put(ped, taken.copy());
-                placed = i + 1;
-                syncBlockEntity(ped);
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] Failed to place item on ArcaneIterator pedestal {}: {}", i, e.getMessage());
-                // Hard abort of the first level: physically recover placed pedestals
-                // + return the still-unplaced (already extracted) templates, then
-                // reset the ledger so its committed entries are not double-refunded.
-                clearFilledPedestals(!usingSharedLedger);
-                for (int k = placed; k < templates.size(); k++) {
-                    if (!templates.get(k).isEmpty()) returnItem(templates.get(k));
-                }
-                ledger.reset();
-                return false;
-            }
-        }
-
-        // The committed center book + first side set are now physically on the
-        // pedestals. Reset the private ledger to IDLE so (a) it can atomically
-        // extract the NEXT level's side set later and (b) its now-stale committed
-        // entries are never re-refunded — abort recovers items from the pedestals
-        // instead (the plain book "becomes" the output book in-place, so it must
-        // not be refunded separately).
-        ledger.reset();
-
-        craftStarted = true;
-        iteratorCraftProcessing = false;
-        iteratorCenterBefore = getContainerItem(pedestals.get(0), 0).copy();
-        try {
-            if (!WRContainerHelper.invokeWissenWandFunction(be)) {
-                throw new IllegalStateException("wissenWandFunction is unavailable");
-            }
-            syncBlockEntity(be);
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] wissenWandFunction invoke failed, rolling back", e);
-            clearFilledPedestals(!usingSharedLedger);
+        if (!placeIteratorInputs(pedestals, 0, templates, recovery, filledPedestals)
+                || !startIteratorRun(pedestals.get(0))) {
+            refundIteratorInputs(recovery);
+            filledPedestals.clear();
             return false;
         }
 
+        // 启动后中心书可能原地转化；下轮只重新提取侧边材料。
+        ledger.reset();
+        craftStarted = true;
         return true;
+    }
+
+    private boolean placeIteratorInputs(List<?> pedestals, int offset, List<ItemStack> stacks,
+                                        OperationInputRecovery recovery, List<Object> filled) {
+        List<Input> inputs = stacks.stream().map(recovery::hold).toList();
+        for (int i = 0; i < stacks.size(); i++) {
+            ItemStack stack = stacks.get(i);
+            if (stack.isEmpty()) continue;
+            try {
+                if (!(pedestals.get(i + offset) instanceof BlockEntity pedestal)
+                        || !placeIteratorInput(pedestal, player, stack, inputs.get(i))) return false;
+                filled.add(pedestal);
+                placedPedestalItems.put(pedestal, stack.copy());
+                syncBlockEntity(pedestal);
+            } catch (RuntimeException failure) {
+                RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] 迭代器底座 {} 投料失败", i + offset, failure);
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static boolean placeIteratorInput(BlockEntity pedestal, ServerPlayer player, ItemStack stack, Input input) {
+        SimpleContainer inventory = WRContainerHelper.getLiveSimpleContainer(pedestal);
+        if (inventory == null || inventory.getContainerSize() == 0) return false;
+        ItemStack existing = inventory.removeItem(0, inventory.getItem(0).getCount());
+        if (!existing.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, existing);
+        input.place(pedestal, inventory, 0);
+        inventory.setItem(0, stack.copy());
+        pedestal.setChanged();
+        ItemStack current = inventory.getItem(0);
+        return current.getCount() == stack.getCount() && MaterialMatcher.equivalentRuntimeFragment(current, stack);
+    }
+
+    private boolean startIteratorRun(Object centerPedestal) {
+        try {
+            iteratorCenterBefore = getContainerItem(centerPedestal, 0).copy();
+        } catch (RuntimeException failure) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] 无法读取迭代器中心书", failure);
+            return false;
+        }
+        iteratorCraftProcessing = false;
+        if (!WRContainerHelper.invokeWissenWandFunction(be)) return false;
+        try {
+            syncBlockEntity(be);
+        } catch (RuntimeException failure) {
+            RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] 迭代器已启动，但同步失败", failure);
+        }
+        return true;
+    }
+
+    private void refundIteratorInputs(OperationInputRecovery recovery) {
+        ledger.retainCommittedRefunds(recovery.recover(resolveMachineLevel(player)));
+        ledger.refundCommittedToEndpoint(storageEndpoint(), player);
     }
 
     /**
@@ -981,77 +997,25 @@ public final class WRBatchDelegate extends DrivenMachineDelegate {
             return false; // lost an extraction race → graceful stop
         }
 
-        // Place the side set on side pedestals (indices 1+). Rebuild filledPedestals
-        // as [center, ...placed sides] so abort physically recovers the evolved
-        // center book plus any side items this run hasn't consumed yet.
+        // 后续轮次不认领中心书；失败时仍可收取上轮已完成的附魔书。
         Object centerPed = pedestals.get(0);
         List<Object> newFilled = new ArrayList<>();
         newFilled.add(centerPed);
         this.placedPedestalItems = new HashMap<>();
-        int placed = 0;
-        for (int i = 0; i < sideTemplates.size(); i++) {
-            ItemStack taken = sideTemplates.get(i);
-            if (taken.isEmpty()) { placed = i + 1; continue; }
-            Object ped = pedestals.get(i + 1);
-            try {
-                ItemStack existing = getContainerItem(ped, 0);
-                if (!existing.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, existing.copy());
-                setContainerItem(ped, 0, taken);
-                newFilled.add(ped);
-                placedPedestalItems.put(ped, taken.copy());
-                placed = i + 1;
-                syncBlockEntity(ped);
-            } catch (Exception e) {
-                RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] Failed to place side material for next iterator level: {}", e.getMessage());
-                // Graceful: recover this level's side items (placed → physical,
-                // unplaced → in-memory), preserve the evolved center book so
-                // collectResult still returns the level reached so far.
-                for (int k = 1; k < newFilled.size(); k++) {
-                    Object sp = newFilled.get(k);
-                    ItemStack s = getContainerItem(sp, 0);
-                    if (!s.isEmpty()) { returnItem(s); setContainerItem(sp, 0, ItemStack.EMPTY); syncBlockEntity(sp); }
-                }
-                for (int k = placed; k < sideTemplates.size(); k++) {
-                    if (!sideTemplates.get(k).isEmpty()) returnItem(sideTemplates.get(k));
-                }
-                ledger.reset();
-                this.filledPedestals = new ArrayList<>();
-                this.filledPedestals.add(centerPed);
-                return false;
-            }
+        OperationInputRecovery recovery = new OperationInputRecovery();
+        if (!placeIteratorInputs(pedestals, 1, sideTemplates, recovery, newFilled)
+                || !startIteratorRun(centerPed)) {
+            refundIteratorInputs(recovery);
+            this.filledPedestals = List.of(centerPed);
+            return false;
         }
         this.filledPedestals = newFilled;
-
-        // Committed side set is now physically on the pedestals; reset ledger so
-        // stale committed entries are never re-refunded (physical recovery on abort).
         ledger.reset();
 
-        iteratorCraftProcessing = false;
-        iteratorCenterBefore = getContainerItem(centerPed, 0).copy();
-        // Reset stall tracking so the previous run's final progress value can't
-        // trip a false stall on the fresh run (which restarts progress near 0).
-        // Also reset the delegate's per-run timeout window; the chain-level
-        // timeout (MULTIBLOCK_CRAFT_TIMEOUT_SECONDS) remains the global ceiling.
+        // 每轮重新计时，避免沿用上一轮的进度误判停滞。
         lastCraftProgress = -1;
         stallTicks = 0;
         waitTicks = 0;
-        try {
-            if (!WRContainerHelper.invokeWissenWandFunction(be)) {
-                throw new IllegalStateException("wissenWandFunction is unavailable");
-            }
-            syncBlockEntity(be);
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.warn("[RSI-Batch-WR] wissenWandFunction re-trigger failed", e);
-            // Recover side items, preserve center book, graceful stop.
-            for (int k = 1; k < newFilled.size(); k++) {
-                Object sp = newFilled.get(k);
-                ItemStack s = getContainerItem(sp, 0);
-                if (!s.isEmpty()) { returnItem(s); setContainerItem(sp, 0, ItemStack.EMPTY); syncBlockEntity(sp); }
-            }
-            this.filledPedestals = new ArrayList<>();
-            this.filledPedestals.add(centerPed);
-            return false;
-        }
         RSIntegrationMod.LOGGER.debug("[RSI-Batch-WR] ArcaneIterator leveling: started run {} of {}",
                 iteratorCompletedRuns + 1, iteratorTargetLevel);
         return true;
@@ -2159,7 +2123,7 @@ public final class WRBatchDelegate extends DrivenMachineDelegate {
 
     private void returnItem(ItemStack stack) {
         if (stack.isEmpty()) return;
-        if (storageEndpoint() != null || storageEndpoint() != null) {
+        if (storageEndpoint() != null) {
             ItemStack leftover = insertIntoStorage(player, stack, false);
             // The player may be offline (server stop / disconnect abort), so this
             // must not assume one is present the way the branch below does.

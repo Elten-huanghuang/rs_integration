@@ -1,14 +1,36 @@
 package com.huanghuang.rsintegration.storage;
 
+import com.huanghuang.rsintegration.crafting.TaskOutputReception;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
+import com.huanghuang.rsintegration.storage.rs.RefinedStorageOutputReception;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import com.refinedmods.refinedstorage.api.network.INetwork;
+import com.refinedmods.refinedstorage.api.network.security.ISecurityManager;
+import com.refinedmods.refinedstorage.api.network.security.Permission;
+import com.refinedmods.refinedstorage.api.util.Action;
+import com.refinedmods.refinedstorage.apiimpl.storage.tracker.ItemStorageTracker;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.Level;
+import net.minecraftforge.common.util.FakePlayer;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class StorageRestockSupportTest extends BootstrapTest {
     @Test
@@ -33,5 +55,57 @@ class StorageRestockSupportTest extends BootstrapTest {
                 ItemStack::isSameItemSameTags);
 
         assertTrue(merged.isEmpty());
+    }
+
+    @Test
+    void refundUpdatesLastModifiedWithoutFeedingWaitingCraft() throws Exception {
+        MinecraftServer server = mock(MinecraftServer.class);
+        when(server.isSameThread()).thenReturn(true);
+        ServerPlayer player = mock(FakePlayer.class);
+        var serverField = ServerPlayer.class.getField("server");
+        serverField.setAccessible(true);
+        serverField.set(player, server);
+        when(player.getName()).thenReturn(Component.literal("refund-player"));
+
+        var tracker = new ItemStorageTracker(() -> { });
+        INetwork network = mock(INetwork.class, RETURNS_DEEP_STUBS);
+        ServerLevel level = mock(ServerLevel.class);
+        when(level.dimension()).thenReturn(Level.OVERWORLD);
+        when(network.canRun()).thenReturn(true);
+        when(network.getLevel()).thenReturn(level);
+        when(network.getPosition()).thenReturn(new BlockPos(1, 64, 1));
+        when(network.getItemStorageTracker()).thenReturn(tracker);
+        ISecurityManager security = mock(ISecurityManager.class);
+        when(security.hasPermission(Permission.INSERT, player)).thenReturn(true);
+        when(network.getSecurityManager()).thenReturn(security);
+
+        var stored = new AtomicInteger();
+        when(network.insertItem(any(), anyInt(), any())).thenAnswer(call ->
+                RefinedStorageOutputReception.insertItem(network, call.getArgument(0), call.getArgument(1),
+                        call.getArgument(2), (stack, size) -> {
+                            if (call.getArgument(2) == Action.PERFORM) stored.addAndGet(size);
+                            return ItemStack.EMPTY;
+                        }));
+
+        var endpoint = CraftStorageEndpoints.fromResolvedNetwork(network);
+        ItemStack iron = new ItemStack(Items.IRON_INGOT, 3);
+        var resource = TaskOutputReception.resource(iron);
+        try (var reception = TaskOutputReception.open()) {
+            reception.bindNetwork(network, () -> true);
+            reception.prepare(List.of(new TaskOutputReception.Demand("iron", resource, 5, 5))).activate();
+
+            long beforeRefund = System.currentTimeMillis();
+            assertTrue(StorageRestockSupport.refund(endpoint, player, List.of(iron), "test"));
+            assertEquals(3, stored.get());
+            assertEquals(0, reception.received(resource));
+            var modification = tracker.get(iron.copyWithCount(1));
+            assertNotNull(modification);
+            assertTrue(modification.getTime() >= beforeRefund);
+            assertEquals("refund-player", modification.getName());
+
+            assertTrue(network.insertItem(iron, 3, Action.PERFORM).isEmpty());
+            assertEquals(3, reception.received(resource));
+            assertEquals(3, stored.get());
+        }
     }
 }

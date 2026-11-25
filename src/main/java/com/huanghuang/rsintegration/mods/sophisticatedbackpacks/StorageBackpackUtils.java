@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.mods.sophisticatedbackpacks;
 
 import com.huanghuang.rsintegration.RSIntegrationMod;
+import com.huanghuang.rsintegration.crafting.NetworkOutputReception;
 import com.huanghuang.rsintegration.storage.StorageBackendId;
 import com.huanghuang.rsintegration.storage.StorageOperationResult;
 import com.huanghuang.rsintegration.storage.StorageOperationStatus;
@@ -185,17 +186,12 @@ public final class StorageBackpackUtils {
                     remaining = backpackInv.insertItem(slot, remaining, false);
                 }
             } catch (RuntimeException ex) {
-                returnAfterLocalFailure(session, player, remaining);
+                returnExtracted(session, player, remaining);
                 continue;
             }
             int inserted = extracted.getCount() - remaining.getCount();
             if (inserted > 0) restocked.add(extracted.copyWithCount(inserted));
-            if (!remaining.isEmpty()) {
-                StorageOperationResult returned = session.insert(player, remaining, false);
-                if (returned.remainder().isPresent() && !returned.remainder().orElseThrow().isEmpty()) {
-                    player.getInventory().placeItemBackInInventory(returned.remainder().orElseThrow());
-                }
-            }
+            returnExtracted(session, player, remaining);
         }
         return restocked;
     }
@@ -224,26 +220,18 @@ public final class StorageBackpackUtils {
         return session.extractMatching(player, ingredient, amount, simulate);
     }
 
-    /**
-     * Return a stack extracted for a local backpack operation. If the backend
-     * reports a known remainder, only that remainder is handed to the player;
-     * an indeterminate insert is deliberately not duplicated.
-     */
-    public static void returnAfterLocalFailure(StorageSession session, ServerPlayer player,
-                                               ItemStack stack) {
+    /** 返还背包操作剩下的实物；写回结果不确定时不重复发放。 */
+    public static void returnExtracted(StorageSession session, ServerPlayer player, ItemStack stack) {
         if (session == null || player == null || stack == null || stack.isEmpty()) return;
+        StorageOperationResult returned;
         try {
-            StorageOperationResult returned = session.insert(player, stack.copy(), false);
-            if (returned.remainder().isPresent()) {
-                ItemStack remainder = returned.remainder().orElse(ItemStack.EMPTY);
-                if (!remainder.isEmpty()) {
-                    player.getInventory().placeItemBackInInventory(remainder);
-                }
-            }
-        } catch (RuntimeException ignored) {
-            // The local operation failed before the backend could provide a
-            // reliable settlement result; preserve the extracted item locally.
-            player.getInventory().placeItemBackInInventory(stack.copy());
+            returned = NetworkOutputReception.internal(
+                    () -> session.insert(player, stack.copy(), false));
+        } catch (RuntimeException failure) {
+            RSIntegrationMod.LOGGER.error("[RSI-Backpack] 返还失败，不重复发放：{}", stack, failure);
+            return;
         }
+        ItemStack remainder = returned.remainder().orElse(ItemStack.EMPTY);
+        if (!remainder.isEmpty()) player.getInventory().placeItemBackInInventory(remainder);
     }
 }

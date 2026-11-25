@@ -361,7 +361,7 @@ public final class ApotheosisLibraryService {
     }
 
     private static RefundOutcome refund(CraftStorageEndpoint endpoint, ServerPlayer player, ItemStack stack) {
-        ItemStack remaining = endpoint.insert(player, stack, false)
+        ItemStack remaining = CraftStorageEndpoint.insertInternal(endpoint, player, stack, false)
                 .remainder().orElse(ItemStack.EMPTY);
         if (remaining.isEmpty()) return RefundOutcome.REFUNDED;
         ItemStack inventoryCopy = remaining.copy();

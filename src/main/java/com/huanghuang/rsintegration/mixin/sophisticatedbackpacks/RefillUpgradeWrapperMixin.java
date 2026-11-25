@@ -150,20 +150,15 @@ public abstract class RefillUpgradeWrapperMixin
                     Object filler = rsi$tsFillerField.get(targetSlot);
                     remainder = (ItemStack) rsi$fillerMethod.invoke(filler, player, playerInv, toFill);
                 } catch (Exception e) {
-                    // The filler receives a mutable stack. If it fails after
-                    // consuming part of it, return only the current remainder.
-                    StorageBackpackUtils.returnAfterLocalFailure(session, serverPlayer, toFill);
+                    // 补货可能已消耗一部分，只返还当前剩余量。
+                    StorageBackpackUtils.returnExtracted(session, serverPlayer, toFill);
                     continue;
                 }
 
                 int filled = toFill.getCount() - remainder.getCount();
                 missing -= filled;
 
-                if (!remainder.isEmpty()) {
-                    StorageOperationResult returned = session.insert(serverPlayer, remainder, false);
-                    if (returned.remainder().isPresent() && !returned.remainder().orElseThrow().isEmpty())
-                        ItemHandlerHelper.giveItemToPlayer(player, returned.remainder().orElseThrow());
-                }
+                StorageBackpackUtils.returnExtracted(session, serverPlayer, remainder);
                 if (missing <= 0) break;
             }
         }

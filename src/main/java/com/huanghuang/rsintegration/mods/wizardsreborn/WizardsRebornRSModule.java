@@ -4,7 +4,6 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 import com.huanghuang.rsintegration.mods.IModIntegration;
-import com.huanghuang.rsintegration.mods.ModCraftNetworkHandlers;
 import com.huanghuang.rsintegration.network.binding.BindingEventHandler;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.mods.wizardsreborn.WRRecipeHandler;
@@ -81,9 +80,7 @@ public final class WizardsRebornRSModule implements IModIntegration {
     }
 
     @Override
-    public void registerNetworkPackets() {
-        ModCraftNetworkHandlers.registerWRWand();
-    }
+    public void registerNetworkPackets() {}
 
     @Override
     public void initCommon() {

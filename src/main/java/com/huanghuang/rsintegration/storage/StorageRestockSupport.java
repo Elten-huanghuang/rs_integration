@@ -180,7 +180,7 @@ public final class StorageRestockSupport {
             if (stack == null || stack.isEmpty()) continue;
             StorageOperationResult result;
             try {
-                result = endpoint.insert(player, stack, false);
+                result = CraftStorageEndpoint.insertInternal(endpoint, player, stack, false);
             } catch (RuntimeException | LinkageError failure) {
                 RSIntegrationMod.LOGGER.error("[RSI-Restock] {} refund failed for {}", reason, stack, failure);
                 known = false;

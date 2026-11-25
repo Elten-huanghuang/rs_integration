@@ -503,7 +503,7 @@ public final class FaCraftPacket {
                 ItemStack stack = (ItemStack) Reflect.getMethodOrThrow(FAReflection.pedestalBEClass, "getStack", "getStack").invoke(ped);
                 if (stack != null && !stack.isEmpty()) {
                     ItemStack leftover = endpoint == null ? stack
-                            : endpoint.insert(player, stack, false)
+                            : CraftStorageEndpoint.insertInternal(endpoint, player, stack, false)
                             .remainder().orElse(ItemStack.EMPTY);
                     if (!leftover.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, leftover);
                 }
@@ -516,7 +516,7 @@ public final class FaCraftPacket {
             ItemStack stack = FaRitualHelper.getForgeSlot(forge, mainSlot);
             if (!stack.isEmpty()) {
                 ItemStack leftover = endpoint == null ? stack
-                        : endpoint.insert(player, stack, false)
+                        : CraftStorageEndpoint.insertInternal(endpoint, player, stack, false)
                         .remainder().orElse(ItemStack.EMPTY);
                 if (!leftover.isEmpty()) ItemHandlerHelper.giveItemToPlayer(player, leftover);
             }

@@ -1341,10 +1341,13 @@ public final class MalumSpiritCrucibleBatchDelegate extends AbstractBatchDelegat
                     returnPlayer, myLevel.dimension(), myPos).orElse(null);
         }
         if (endpoint != null && returnPlayer != null) {
-            ItemStack leftover = endpoint.insert(returnPlayer, stack.copy(), false)
-                    .remainder().orElseGet(stack::copy);
+            var writeback = CraftStorageEndpoint.insertInternal(endpoint, returnPlayer, stack, false);
+            ItemStack leftover = writeback.remainder().orElse(ItemStack.EMPTY);
+            if (writeback.remainder().isEmpty()) {
+                RSIntegrationMod.LOGGER.error("[RSI-Malum] 入库结果不确定，不重复返还：{}", stack);
+            }
             if (!leftover.isEmpty()) {
-                PlayerUtils.safeGiveToStorage(returnPlayer, leftover, endpoint);
+                PlayerUtils.safeGiveToStorage(returnPlayer, leftover, null);
             }
             return true;
         } else if (returnPlayer != null) {

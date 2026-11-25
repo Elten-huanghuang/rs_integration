@@ -10,7 +10,7 @@ import net.minecraft.world.item.crafting.Ingredient;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Owns items extracted for a quest until each task has accepted or rejected them. */
+/** 在各目标结算前暂存从库存提取的任务物品。 */
 final class QuestSubmissionEscrow implements AutoCloseable {
 
     record Entry(long taskId, ItemStack stack, ExtractionLedger.ReservationToken token) {}
@@ -56,18 +56,12 @@ final class QuestSubmissionEscrow implements AutoCloseable {
 
     private void refund(ItemStack stack) {
         if (stack.isEmpty()) return;
-        ItemStack remainder = ledgerStorageInsert(stack);
+        ItemStack remainder = endpoint == null ? stack
+                : CraftStorageEndpoint.insertInternal(endpoint, player, stack, false)
+                        .remainder().orElse(ItemStack.EMPTY);
         if (!remainder.isEmpty()) {
-            PlayerUtils.safeGiveToStorage(player, remainder, endpoint);
+            PlayerUtils.safeGiveToStorage(player, remainder, null);
         }
-    }
-
-    private ItemStack ledgerStorageInsert(ItemStack stack) {
-        if (endpoint != null) {
-            return endpoint.insert(player, stack, false)
-                    .remainder().orElse(ItemStack.EMPTY);
-        }
-        return stack.copy();
     }
 
     @Override

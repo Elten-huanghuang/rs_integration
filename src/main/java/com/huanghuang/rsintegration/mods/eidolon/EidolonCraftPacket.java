@@ -21,7 +21,6 @@ import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
-import com.huanghuang.rsintegration.util.PlayerUtils;
 import com.huanghuang.rsintegration.crafting.ExtractionLedger;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
 import com.huanghuang.rsintegration.util.ChunkUtils;
@@ -44,7 +43,6 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraftforge.fluids.capability.IFluidHandler;
-import net.minecraftforge.items.ItemHandlerHelper;
 import net.minecraftforge.network.NetworkEvent;
 
 import javax.annotation.Nullable;
@@ -231,12 +229,10 @@ public final class EidolonCraftPacket {
             }
         }
 
-        // Phase 1: reserve all ingredients via ledger (no physical extraction yet)
-        // Preserve the binding-resolved network from earlier; only fall back
-        // to player-inventory scan if no binding was found.
+        // 优先使用机器绑定的网络，没有绑定时才从玩家上下文查找。
         if (endpoint == null) endpoint = StorageRestockSupport.resolve(player).orElse(null);
         List<Object> crucibleSteps = new ArrayList<>();
-        List<ItemStack> allExtracted = new ArrayList<>(); // actual items extracted, for refund
+        ItemStack result;
 
         try (ExtractionLedger ledger = ExtractionLedger.external()) {
             ledger.setStorageEndpoint(endpoint);
@@ -252,7 +248,6 @@ public final class EidolonCraftPacket {
                         return;
                     }
                     stepItems.add(stack);
-                    allExtracted.add(stack.copy());
                 }
 
                 Constructor<?> ctor = EidolonReflection.crucibleStepInnerClass.getConstructor(int.class, List.class);
@@ -275,10 +270,38 @@ public final class EidolonCraftPacket {
                 return;
             }
 
-            // Phase 2: commit all extractions atomically
+            Method getResultMethod = Reflect.findMethod(
+                    recipe.getClass(), "getResult", new Class<?>[0]);
+            if (getResultMethod == null) throw new NoSuchMethodException(recipe.getClass().getName() + ".getResult");
+            result = ((ItemStack) getResultMethod.invoke(recipe)).copy();
+            if (result.isEmpty()) {
+                player.sendSystemMessage(Component.translatable("rsi.eidolon.error.result_failed"));
+                return;
+            }
+
+            ItemEntity itemEntity = new ItemEntity(level, pos.getX() + 0.5,
+                    pos.getY() + 0.75, pos.getZ() + 0.5, result);
+            itemEntity.setPickUpDelay(10);
+            double angle = level.random.nextDouble() * Math.PI * 2;
+            itemEntity.setDeltaMovement(Math.sin(angle) * 0.125, 0.25, Math.cos(angle) * 0.125);
+
             if (!ledger.commitToEndpoint(endpoint, player)) {
                 RSIntegrationMod.LOGGER.error("[RSI-Eidolon] Ledger commit failed for recipe {}", recipeId);
                 player.sendSystemMessage(Component.translatable("rsi.eidolon.error.craft_failed", "commit failed"));
+                return;
+            }
+
+            // 只有产物未加入世界时才退回账本中的实物；完成提示不参与退款判断。
+            boolean spawned;
+            try {
+                spawned = level.addFreshEntity(itemEntity);
+            } catch (Exception failure) {
+                RSIntegrationMod.LOGGER.error("[RSI-Eidolon] Failed to spawn result for {}:", recipeId, failure);
+                spawned = itemEntity.isAddedToWorld();
+            }
+            if (!spawned) {
+                ledger.refundCommittedToEndpoint(endpoint, player);
+                player.sendSystemMessage(Component.translatable("rsi.eidolon.error.result_failed"));
                 return;
             }
         } catch (Exception e) {
@@ -287,44 +310,7 @@ public final class EidolonCraftPacket {
             return;
         }
 
-        // Get result first — validate before consuming resources
-        try {
-            Method getResultMethod = Reflect.findMethod(
-                    recipe.getClass(), "getResult", new Class<?>[0]);
-            if (getResultMethod == null) throw new NoSuchMethodException(recipe.getClass().getName() + ".getResult");
-            ItemStack result = ((ItemStack) getResultMethod.invoke(recipe)).copy();
-            double x = pos.getX() + 0.5;
-            double y = pos.getY() + 0.75;
-            double z = pos.getZ() + 0.5;
-            ItemEntity itemEntity = new ItemEntity(level, x, y, z, result);
-            itemEntity.setPickUpDelay(10);
-            double angle = level.random.nextDouble() * Math.PI * 2;
-            itemEntity.setDeltaMovement(
-                    Math.sin(angle) * 0.125,
-                    0.25,
-                    Math.cos(angle) * 0.125);
-            level.addFreshEntity(itemEntity);
-
-            player.displayClientMessage(Component.translatable("rsi.eidolon.info.craft_complete", result.getDisplayName()), true);
-            RSIntegrationMod.LOGGER.debug("[RSI-Eidolon] Player {} completed crucible recipe '{}'",
-                    player.getName().getString(), recipeId);
-        } catch (Exception e) {
-            RSIntegrationMod.LOGGER.error("[RSI-Eidolon] Failed to spawn result for {}:", recipeId, e);
-            player.sendSystemMessage(Component.translatable("rsi.eidolon.error.result_failed"));
-            // Refund committed items — use actual extracted items, not ingredient.getItems()[0]
-            for (ItemStack refundStack : allExtracted) {
-                if (refundStack.isEmpty()) continue;
-                ItemStack leftover = endpoint == null ? refundStack.copy()
-                        : endpoint.insert(player, refundStack, false)
-                        .remainder().orElse(ItemStack.EMPTY);
-                if (!leftover.isEmpty()) {
-                    PlayerUtils.safeGiveToStorage(player, leftover, endpoint);
-                }
-            }
-            return;
-        }
-
-        // Drain water, stop boiling, clear steps (consume resources)
+        // 消耗坩埚里的水并清空步骤。
         try {
             Field tankField = be.getClass().getDeclaredField("tank");
             tankField.setAccessible(true);
@@ -344,6 +330,9 @@ public final class EidolonCraftPacket {
         be.setChanged();
         BlockState state = level.getBlockState(pos);
         level.sendBlockUpdated(pos, state, state, 3);
+        player.displayClientMessage(Component.translatable("rsi.eidolon.info.craft_complete", result.getDisplayName()), true);
+        RSIntegrationMod.LOGGER.debug("[RSI-Eidolon] Player {} completed crucible recipe '{}'",
+                player.getName().getString(), recipeId);
     }
 
     // ── helpers ────────────────────────────────────────────────

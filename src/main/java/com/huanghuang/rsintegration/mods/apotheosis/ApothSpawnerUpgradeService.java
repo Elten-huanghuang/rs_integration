@@ -226,9 +226,7 @@ public final class ApothSpawnerUpgradeService {
                             modifier.getMainhandInput(), 1, endpoint, player);
                     if (reserved.isEmpty() || !ledger.commitToEndpoint(endpoint, player)) { skipped++; break; }
                     if (!modifier.apply(context.tile)) {
-                        ItemStack remaining = endpoint.insert(player, reserved, false)
-                                .remainder().orElse(ItemStack.EMPTY);
-                        if (!remaining.isEmpty()) player.drop(remaining, false);
+                        ledger.refundCommittedToEndpoint(endpoint, player);
                         skipped++;
                         break;
                     }

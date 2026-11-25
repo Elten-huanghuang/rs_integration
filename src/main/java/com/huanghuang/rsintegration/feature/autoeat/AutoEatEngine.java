@@ -385,32 +385,24 @@ public final class AutoEatEngine {
             if (isFoodBlacklisted(stack, getBlacklist(player))) continue;
             if (hasBlacklistedEffect(stack, player, effectBlacklist)) continue;
 
-            ItemStack taken = storage.extract(player, stack, 1, false);
+            ItemStack taken = storage.extract(player, stack, 1);
             if (taken.isEmpty()) continue;
 
             // 黑名单可能在请求排队期间刚刚更新，提取后再做一次服务端校验。
             if (isFoodBlacklisted(taken, getBlacklist(player))) {
-                returnToStorage(storage, player, taken);
+                storage.returnItem(player, taken);
                 continue;
             }
 
             if (!payCost(storage, player, AutoEatMode.DIVERSITY)) {
-                storage.insert(player, taken, false);
+                storage.returnItem(player, taken);
                 break;
             }
 
             ItemStack beforeEat = taken.copy();
             ItemStack remainder = taken.finishUsingItem(player.level(), player);
             remainder = fireEatEvent(player, beforeEat, remainder);
-            // Recover container items (bowls, bottles, etc.) returned by eat()
-            if (!remainder.isEmpty()) {
-                ItemStack leftover = storage.insert(player, remainder, false);
-                if (!leftover.isEmpty()) {
-                    if (!player.getInventory().add(leftover)) {
-                        player.drop(leftover, false);
-                    }
-                }
-            }
+            storage.returnItem(player, remainder);
             try {
                 foodList_addFood.invoke(foodList, item);
             } catch (Throwable ignored) {}
@@ -448,11 +440,9 @@ public final class AutoEatEngine {
         if (costItem == null) return true;
 
         ItemStack template = new ItemStack(costItem, perItem);
-        ItemStack extracted = storage.extract(player, template, perItem, false);
+        ItemStack extracted = storage.extract(player, template, perItem);
         if (extracted.getCount() < perItem) {
-            if (!extracted.isEmpty()) {
-                storage.insert(player, extracted, false);
-            }
+            storage.returnItem(player, extracted);
             NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                     new AutoEatSyncPacket(mode, 0,
                             Component.translatable("rsi.autoeat.missing_cost")));
@@ -543,9 +533,9 @@ public final class AutoEatEngine {
                         hungerBlocked = true;
                         continue;
                     }
-                taken = storage.extract(player, template, 1, false);
+                taken = storage.extract(player, template, 1);
                     if (!taken.isEmpty() && hasBlacklistedEffect(taken, player, effectBlacklist)) {
-                        returnToStorage(storage, player, taken);
+                        storage.returnItem(player, taken);
                         taken = ItemStack.EMPTY;
                         continue;
                     }
@@ -553,7 +543,7 @@ public final class AutoEatEngine {
                 }
                 if (taken.isEmpty()) continue;
                 if (!payCost(storage, player, AutoEatMode.STACK)) {
-                    returnToStorage(storage, player, taken);
+                    storage.returnItem(player, taken);
                     costFailed = true;
                     break outer;
                 }
@@ -576,7 +566,7 @@ public final class AutoEatEngine {
                         dietTracker_consume.invoke(dietTracker, new ItemStack(foodItem));
                     } catch (Throwable ignored) {}
                 }
-                returnToStorage(storage, player, remainder);
+                storage.returnItem(player, remainder);
             }
             if (!ateThisPass) break;
             startIndex = stackRoundRobinOffsets.getOrDefault(player.getUUID(), 0);
@@ -601,14 +591,6 @@ public final class AutoEatEngine {
         }
         // 返回 true 让同一个请求在后续 tick 继续分片，直到配置上限或没有可吃食物。
         return eaten;
-    }
-
-    private static void returnToStorage(AutoEatStorage storage, ServerPlayer player, ItemStack stack) {
-        if (stack.isEmpty()) return;
-        ItemStack leftover = storage.insert(player, stack, false);
-        if (!leftover.isEmpty() && !player.getInventory().add(leftover)) {
-            player.drop(leftover, false);
-        }
     }
 
     private static List<ResourceLocation> boundedSelection(Collection<ResourceLocation> selectedItems) {
@@ -709,7 +691,7 @@ public final class AutoEatEngine {
                 continue;
             }
 
-            ItemStack taken = storage.extract(player, foodToEat, 1, false);
+            ItemStack taken = storage.extract(player, foodToEat, 1);
             if (taken.isEmpty()) {
                 values.put(lowestGroup, 1.0f);
                 continue;
@@ -717,19 +699,19 @@ public final class AutoEatEngine {
 
             // 再次读取服务端状态，防止黑名单更新与本次提取并发到达。
             if (isFoodBlacklisted(taken, getBlacklist(player))) {
-                returnToStorage(storage, player, taken);
+                storage.returnItem(player, taken);
                 values.put(lowestGroup, 1.0f);
                 continue;
             }
 
             if (hasBlacklistedEffect(taken, player, effectBlacklist)) {
-                returnToStorage(storage, player, taken);
+                storage.returnItem(player, taken);
                 values.put(lowestGroup, 1.0f);
                 continue;
             }
 
             if (!payCost(storage, player, AutoEatMode.DIET)) {
-                storage.insert(player, taken, false);
+                storage.returnItem(player, taken);
                 break;
             }
 
@@ -754,14 +736,7 @@ public final class AutoEatEngine {
                 values.putAll(fresh);
             } catch (Throwable ignored) {}
 
-            if (!remainder.isEmpty()) {
-                ItemStack leftover = storage.insert(player, remainder, false);
-                if (!leftover.isEmpty()) {
-                    if (!player.getInventory().add(leftover)) {
-                        player.drop(leftover, false);
-                    }
-                }
-            }
+            storage.returnItem(player, remainder);
         }
 
         try {

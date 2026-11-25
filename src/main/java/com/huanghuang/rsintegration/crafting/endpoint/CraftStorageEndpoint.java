@@ -36,6 +36,7 @@ public interface CraftStorageEndpoint {
         return NetworkOutputReception.internal(() -> endpoint.insert(stack, simulate));
     }
 
+    /** 只屏蔽任务收货，保留后端的玩家权限校验和修改时间记录。 */
     static StorageOperationResult insertInternal(CraftStorageEndpoint endpoint, ServerPlayer player, ItemStack stack, boolean simulate) {
         return NetworkOutputReception.internal(() -> endpoint.insert(player, stack, simulate));
     }

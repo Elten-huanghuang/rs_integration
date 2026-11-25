@@ -18,10 +18,7 @@ import net.minecraft.world.SimpleContainer;
 
 import javax.annotation.Nullable;
 
-/**
- * Shared container-reflection helpers for WR machine blocks.
- * Used by both {@link WRBatchDelegate} and {@link WRWandCraftPacket}.
- */
+/** WR 机器的容器访问与反射工具。 */
 public final class WRContainerHelper {
 
     private WRContainerHelper() {}

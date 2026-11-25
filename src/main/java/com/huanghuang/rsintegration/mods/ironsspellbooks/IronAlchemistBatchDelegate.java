@@ -271,7 +271,11 @@ public final class IronAlchemistBatchDelegate extends AbstractBatchDelegate impl
         if (tank == null || endpoint == null || player == null) return false;
         for (int slot = 0; slot < tank.getTanks(); slot++) {
             FluidStack stored = tank.getFluidInTank(slot).copy();
-            if (!stored.isEmpty() && !canStoreOutput(endpoint, player, tokens.apply(stored))) return false;
+            if (stored.isEmpty()) continue;
+            ItemStack token = tokens.apply(stored);
+            if (token.isEmpty() || !MachineWaterSupply.supportsFluidStorage(endpoint)
+                    || CraftStorageEndpoint.insertInternal(endpoint, player, token, true).status()
+                    != StorageOperationStatus.SUCCESS) return false;
         }
         return true;
     }
@@ -288,7 +292,8 @@ public final class IronAlchemistBatchDelegate extends AbstractBatchDelegate impl
         for (FluidStack stored : contents) {
             FluidStack drained = tank.drain(stored.copy(), IFluidHandler.FluidAction.EXECUTE);
             if (drained.isEmpty()) return false;
-            StorageOperationResult inserted = endpoint.insert(player, tokens.apply(drained), false);
+            StorageOperationResult inserted = CraftStorageEndpoint.insertInternal(
+                    endpoint, player, tokens.apply(drained), false);
             ItemStack remainder = inserted.remainder().orElseThrow(
                     () -> new IllegalStateException("炼金锅旧流体入库数量不确定"));
             if (!remainder.isEmpty()) {
