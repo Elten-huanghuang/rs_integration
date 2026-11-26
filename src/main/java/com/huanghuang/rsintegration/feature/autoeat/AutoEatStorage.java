@@ -1,6 +1,5 @@
 package com.huanghuang.rsintegration.feature.autoeat;
 
-import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.storage.StoragePermission;
 import com.huanghuang.rsintegration.storage.StorageRestockSupport;
@@ -19,7 +18,7 @@ final class AutoEatStorage {
     private final CraftStorageEndpoint endpoint;
     private final StorageSnapshot snapshot;
 
-    private AutoEatStorage(CraftStorageEndpoint endpoint, StorageSnapshot snapshot) {
+    AutoEatStorage(CraftStorageEndpoint endpoint, StorageSnapshot snapshot) {
         this.endpoint = endpoint;
         this.snapshot = snapshot;
     }
@@ -41,18 +40,20 @@ final class AutoEatStorage {
         return snapshot.items();
     }
 
-    ItemStack extract(ServerPlayer player, ItemStack template, int amount) {
-        return StorageRestockSupport.extract(endpoint, player, template, amount);
+    boolean accessible(ServerPlayer player) {
+        return endpoint.session().isAvailable()
+                && endpoint.session().hasPermission(player, StoragePermission.VIEW)
+                && endpoint.session().hasPermission(player, StoragePermission.EXTRACT);
     }
 
-    void returnItem(ServerPlayer player, ItemStack stack) {
+    StorageRestockSupport.Extraction extract(ServerPlayer player, ItemStack template, int amount) {
+        return StorageRestockSupport.extractOutcome(endpoint, player, template, amount);
+    }
+
+    void returnStack(ServerPlayer player, ItemStack stack) {
         if (stack.isEmpty()) return;
-        var result = CraftStorageEndpoint.insertInternal(endpoint, player, stack, false);
-        var remainder = result.remainder();
-        if (remainder.isEmpty()) {
-            RSIntegrationMod.LOGGER.error("[RSI-AutoEat] 入库结果不确定，不重复返还：{}", stack);
-            return;
-        }
-        PlayerUtils.safeGiveToStorage(player, remainder.orElseThrow(), null);
+        ItemStack leftover = CraftStorageEndpoint.insertInternal(endpoint, player, stack, false).remainder().orElseThrow(
+                () -> new IllegalStateException("Indeterminate auto-eat refund for " + stack));
+        if (!leftover.isEmpty()) PlayerUtils.safeGiveToStorage(player, leftover, null);
     }
 }

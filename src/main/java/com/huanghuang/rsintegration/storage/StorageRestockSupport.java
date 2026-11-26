@@ -16,7 +16,7 @@ import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.function.BiPredicate;
 
-/** Shared backend-neutral extraction helper for GUI restock actions. */
+/** 界面补货共用的提取工具，不依赖具体存储后端。 */
 public final class StorageRestockSupport {
     private static final StorageBackendId BEYOND_DIMENSIONS =
             new StorageBackendId("beyonddimensions");
@@ -31,16 +31,12 @@ public final class StorageRestockSupport {
     static StorageResolutionResult resolveForRetrieval(ServerPlayer player) {
         var registry = RSIntegrationMod.STORAGE_BACKENDS.registry();
         StorageResolutionStatus failure = StorageResolutionStatus.NOT_FOUND;
-        // A held BD terminal is an explicit user choice for these one-shot
-        // GUI actions. This prevents the RS-first backend order from stealing
-        // a refill when both networks are installed.
+        // 手持超越维度终端表示玩家明确选网，避免操作被默认优先的 RS 网络截走。
         OptionalInt heldNetwork = beyondDimensionsNetworkId(player.getMainHandItem());
         if (heldNetwork.isEmpty()) {
             heldNetwork = beyondDimensionsNetworkId(player.getOffhandItem());
         }
-        // BD terminals can be equipped in a Curios slot. Treat an equipped
-        // terminal as an explicit credential too, otherwise resolveDefault()
-        // may select an unrelated RS network when both backends are present.
+        // 饰品栏中的超越维度终端同样是访问凭据，优先于默认网络。
         if (heldNetwork.isEmpty()) {
             for (ItemStack stack : CuriosAccess.stacks(player)) {
                 heldNetwork = beyondDimensionsNetworkId(stack);
@@ -132,12 +128,16 @@ public final class StorageRestockSupport {
         return extractOutcome(endpoint, player, template, amount).stack();
     }
 
-    public record Extraction(ItemStack stack, boolean confirmedMissing) {}
+    public record Extraction(ItemStack stack, boolean confirmedMissing, boolean failed) {
+        public Extraction(ItemStack stack, boolean confirmedMissing) {
+            this(stack, confirmedMissing, false);
+        }
+    }
 
     public static Extraction extractOutcome(CraftStorageEndpoint endpoint, ServerPlayer player,
                                             ItemStack template, int amount) {
         if (endpoint == null || template == null || template.isEmpty() || amount <= 0) {
-            return new Extraction(ItemStack.EMPTY, false);
+            return new Extraction(ItemStack.EMPTY, false, true);
         }
         StorageOperationResult result = endpoint.extractExact(player, template, amount, false);
         refund(endpoint, player, result.recoveryStacks(), "recovery");
@@ -148,7 +148,10 @@ public final class StorageRestockSupport {
         if (merged.isEmpty() && !extracted.isEmpty()) {
             refund(endpoint, player, extracted, "invalid exact extraction");
         }
-        return new Extraction(merged, confirmedMissing(result));
+        boolean missing = confirmedMissing(result);
+        boolean failed = !missing && (merged.isEmpty() || !(result.complete()
+                || result.status() == StorageOperationStatus.PARTIAL));
+        return new Extraction(merged, missing, failed);
     }
 
     public static boolean confirmedMissing(StorageOperationResult result) {

@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.storage;
 
 import com.huanghuang.rsintegration.crafting.TaskOutputReception;
+import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoint;
 import com.huanghuang.rsintegration.crafting.endpoint.CraftStorageEndpoints;
 import com.huanghuang.rsintegration.storage.rs.RefinedStorageOutputReception;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
@@ -24,6 +25,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -33,6 +35,33 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class StorageRestockSupportTest extends BootstrapTest {
+    @Test
+    void onlyConfirmedZeroStockEnablesFallback() {
+        var endpoint = mock(CraftStorageEndpoint.class);
+        var player = mock(ServerPlayer.class);
+        var template = new ItemStack(Items.APPLE);
+        var mode = StorageOperationMode.PERFORM;
+        var key = StorageItemKey.fromItemStack(new StorageBackendId("test"), template);
+        var session = mock(StorageSession.class);
+        when(endpoint.session()).thenReturn(session);
+        when(session.itemKey(any())).thenReturn(key);
+        when(endpoint.extractExact(player, template, 1, false)).thenReturn(
+                StorageOperationResult.extracted(mode, 1, List.of()),
+                StorageOperationResult.failedExtraction(mode, 1, StorageOperationStatus.DENIED, List.of(), List.of()),
+                StorageOperationResult.indeterminateExtraction(1, List.of(template), List.of(),
+                        StorageDiagnosticCode.NATIVE_OPERATION_FAILED_AFTER_MUTATION));
+        var missing = StorageRestockSupport.extractOutcome(endpoint, player, template, 1);
+        assertTrue(missing.confirmedMissing());
+        assertFalse(missing.failed());
+        var denied = StorageRestockSupport.extractOutcome(endpoint, player, template, 1);
+        assertFalse(denied.confirmedMissing());
+        assertTrue(denied.failed());
+        var uncertain = StorageRestockSupport.extractOutcome(endpoint, player, template, 1);
+        assertFalse(uncertain.confirmedMissing());
+        assertTrue(uncertain.failed());
+        assertTrue(uncertain.stack().is(Items.APPLE));
+    }
+
     @Test
     void exactFragmentsAreMergedWithoutChangingTheirIdentity() {
         ItemStack template = new ItemStack(Items.LAPIS_LAZULI);

@@ -1389,6 +1389,7 @@
   "rsi.autoeat.result.none": "没有可食用的食物",
   "rsi.autoeat.missing_effect": "缺少所需效果: %s",
   "rsi.autoeat.invalid_effect_config": "自动进食配置错误: 无效效果 '%s' (请使用 命名空间:路径 格式)",
+  "rsi.autoeat.error.food_source": "无法确认食物来源是否已交付，本次进食已停止",
   "rsi.autoeat.missing_cost": "存储网络中材料不足",
   "rsi.autoeat.full": "已经饱了",
   "rsi.autoeat.no_item_selected": "未选择食物",

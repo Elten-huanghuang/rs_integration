@@ -1389,6 +1389,7 @@
   "rsi.autoeat.result.none": "No edible food found",
   "rsi.autoeat.missing_effect": "Missing required effect: %s",
   "rsi.autoeat.invalid_effect_config": "Auto-eat config error: invalid effect '%s' (use namespace:path format)",
+  "rsi.autoeat.error.food_source": "Food source delivery could not be confirmed. Eating stopped.",
   "rsi.autoeat.missing_cost": "Insufficient materials in storage network",
   "rsi.autoeat.full": "Already full",
   "rsi.autoeat.no_item_selected": "No item selected",
