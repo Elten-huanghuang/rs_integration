@@ -1,4 +1,7 @@
 {
+  "advancement.rs_integration.skip_life.title": "跳过人生",
+  "advancement.rs_integration.skip_life.description": "使用递归合成成功制作一件物品。",
+  "item.rs_integration.skip_life_icon": "跳过人生",
   "rsi.common.all": "全部",
   "rsi.common.items": "物品",
   "rsi.common.favorite": "收藏",

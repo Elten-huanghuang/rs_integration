@@ -45,6 +45,9 @@ public final class ModItems {
             ITEMS.register("alchemist_ink_fluid", FluidTokenItem::new);
     public static final RegistryObject<Item> FLUID_REFUND =
             ITEMS.register("fluid_refund", FluidRefundItem::new);
+    // 原版进度图标使用物品模型，这个物品仅负责显示图标。
+    private static final RegistryObject<Item> SKIP_LIFE_ICON =
+            ITEMS.register("skip_life_icon", () -> new Item(new Item.Properties()));
     public static final RegistryObject<Item> ORDER_TERMINAL =
             ITEMS.register("order_terminal", FoodOrderTerminalItem::new);
     public static final RegistryObject<Item> RESONANT_EXPERIENCE_WAND =

@@ -1,4 +1,7 @@
 {
+  "advancement.rs_integration.skip_life.title": "Skip Life",
+  "advancement.rs_integration.skip_life.description": "Successfully craft an item using recursive crafting.",
+  "item.rs_integration.skip_life_icon": "Skip Life",
   "rsi.common.all": "All",
   "rsi.common.items": "Items",
   "rsi.common.favorite": "Favorite",

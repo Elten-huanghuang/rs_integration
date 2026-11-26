@@ -1,0 +1,22 @@
+{
+  "display": {
+    "icon": {
+      "item": "rs_integration:skip_life_icon"
+    },
+    "title": {
+      "translate": "advancement.rs_integration.skip_life.title"
+    },
+    "description": {
+      "translate": "advancement.rs_integration.skip_life.description"
+    },
+    "background": "minecraft:textures/gui/advancements/backgrounds/stone.png",
+    "frame": "task",
+    "show_toast": true,
+    "announce_to_chat": false
+  },
+  "criteria": {
+    "crafted_item": {
+      "trigger": "minecraft:impossible"
+    }
+  }
+}
