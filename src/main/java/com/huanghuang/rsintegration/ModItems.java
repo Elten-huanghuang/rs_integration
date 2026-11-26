@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration;
 import com.huanghuang.rsintegration.feature.foodorder.FoodOrderTerminalItem;
 import com.huanghuang.rsintegration.feature.experience.ResonantExperienceWandItem;
 import com.huanghuang.rsintegration.storage.disk.UnifiedDiskVisibility;
+import com.huanghuang.rsintegration.util.ModIds;
 import com.huanghuang.rsintegration.crafting.recovery.FluidRefundItem;
 import com.huanghuang.rsintegration.crafting.recovery.FluidTokenItem;
 import net.minecraft.core.registries.Registries;
@@ -17,6 +18,7 @@ import net.minecraft.world.item.Items;
 import com.huanghuang.rsintegration.feature.resonance.backpack.ResonanceBackpackContainer;
 import net.minecraftforge.common.extensions.IForgeMenuType;
 import net.minecraftforge.eventbus.api.IEventBus;
+import net.minecraftforge.fml.ModList;
 import net.minecraftforge.registries.DeferredRegister;
 import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraftforge.registries.RegistryObject;
@@ -53,7 +55,11 @@ public final class ModItems {
     public static final RegistryObject<Item> RESONANT_EXPERIENCE_WAND =
             ITEMS.register("resonant_experience_wand", ResonantExperienceWandItem::new);
     public static final RegistryObject<Item> INFINITY_WATER_DISK =
-            ITEMS.register("infinity_water_disk", () -> new Item(new Item.Properties().stacksTo(1)));
+            ITEMS.register("infinity_water_disk", () -> ModList.get().isLoaded(ModIds.REFINED_STORAGE)
+                    ? RSOptionalBootstrap.createInfiniteWaterDisk() : new Item(new Item.Properties().stacksTo(1)));
+    public static final RegistryObject<Item> INFINITY_LAVA_DISK =
+            ITEMS.register("infinity_lava_disk", () -> ModList.get().isLoaded(ModIds.REFINED_STORAGE)
+                    ? RSOptionalBootstrap.createInfiniteLavaDisk() : new Item(new Item.Properties().stacksTo(1)));
     public static final RegistryObject<MenuType<?>> RESONANCE_BACKPACK = MENUS.register(
             "resonance_backpack",
             () -> IForgeMenuType.create(ResonanceBackpackContainer::new));
@@ -80,6 +86,7 @@ public final class ModItems {
                         }
                         if (UnifiedDiskVisibility.visible()) output.accept(UNIFIED_STORAGE_DISK.get());
                         output.accept(INFINITY_WATER_DISK.get());
+                        output.accept(INFINITY_LAVA_DISK.get());
                         // Backpack upgrades are only registered when Sophisticated
                         // Backpacks is present. Look them up by registry name so we
                         // never link SophisticatedBackpacksItems (which would throw

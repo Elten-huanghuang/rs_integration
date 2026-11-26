@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
 
+import com.huanghuang.rsintegration.storage.disk.rs.InfiniteDisk;
 import com.huanghuang.rsintegration.storage.disk.rs.UnifiedDiskMounts;
 import com.refinedmods.refinedstorage.api.storage.disk.IStorageDisk;
 import com.refinedmods.refinedstorage.util.StackUtils;
@@ -20,6 +21,7 @@ public abstract class UnifiedDiskStackUtilsMixin {
                                     IStorageDisk<ItemStack>[] items, IStorageDisk<FluidStack>[] fluids,
                                     Function<IStorageDisk<ItemStack>, IStorageDisk> itemWrapper,
                                     Function<IStorageDisk<FluidStack>, IStorageDisk> fluidWrapper, CallbackInfo ci) {
-        if (UnifiedDiskMounts.create(level, stack, slot, items, fluids, itemWrapper, fluidWrapper)) ci.cancel();
+        if (UnifiedDiskMounts.create(level, stack, slot, items, fluids, itemWrapper, fluidWrapper)
+                || InfiniteDisk.mount(stack, slot, items, fluids)) ci.cancel();
     }
 }

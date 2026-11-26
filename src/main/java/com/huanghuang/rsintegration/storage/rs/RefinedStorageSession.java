@@ -36,6 +36,7 @@ import java.util.Set;
 import net.minecraft.world.item.Item;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -46,6 +47,8 @@ import org.apache.logging.log4j.Logger;
 final class RefinedStorageSession implements StorageSession {
     private static final Logger LOGGER = LogManager.getLogger(RefinedStorageSession.class);
     private static final LogSampler SKIPPED_ITEM_WARNINGS = new LogSampler(60_000L);
+    // 一次调用最多物化这么多栈；大任务仍可分批提取。
+    private static final long MAX_FLUID_PER_CALL = 1024L * Integer.MAX_VALUE;
     private final RefinedStorageDriver driver;
     private final StorageReference reference;
     private final StorageInsertObserver insertObserver;
@@ -126,8 +129,14 @@ final class RefinedStorageSession implements StorageSession {
                         amount
                 ));
             }
+            Set<StorageFluidKey> infinite = new HashSet<>();
+            if (driver.hasPermission(player, StoragePermission.EXTRACT)) {
+                for (FluidStack source : driver.infiniteFluids()) {
+                    infinite.add(StorageFluidKey.fromStack(reference.backendId(), source));
+                }
+            }
             return StorageFluidSnapshotResult.success(
-                    new StorageFluidSnapshot(reference.backendId(), fluids));
+                    new StorageFluidSnapshot(reference.backendId(), fluids, infinite));
         } catch (RefinedStorageUnavailableException exception) {
             return StorageFluidSnapshotResult.failure(
                     StorageSnapshotStatus.UNAVAILABLE);
@@ -344,7 +353,7 @@ final class RefinedStorageSession implements StorageSession {
                         snapshot.diagnosticCode());
             }
             long available = snapshot.snapshotValue().orElseThrow()
-                    .countExact(key);
+                    .availableExact(key);
             return StorageFluidOperationResult.extracted(
                     mode(true),
                     amount,
@@ -353,14 +362,14 @@ final class RefinedStorageSession implements StorageSession {
         }
         FluidStack template = key.toStack(1);
         List<FluidStack> extracted = new ArrayList<>();
-        long remaining = amount;
+        long remaining = Math.min(amount, MAX_FLUID_PER_CALL);
         try {
             while (remaining > 0L) {
                 int chunk = (int) Math.min(Integer.MAX_VALUE, remaining);
                 FluidStack got = driver.extractFluid(
                         template, chunk, false);
                 if (got == null || got.isEmpty()) break;
-                if (!key.equals(StorageFluidKey.fromStack(
+                if (got.getAmount() > chunk || !key.equals(StorageFluidKey.fromStack(
                         reference.backendId(), got))) {
                     return StorageFluidOperationResult.failedExtraction(
                             mode(false), amount,
@@ -492,7 +501,7 @@ final class RefinedStorageSession implements StorageSession {
     ) {
         if (template.isEmpty() || amount <= 0L) return List.of();
         List<FluidStack> stacks = new ArrayList<>();
-        long remaining = amount;
+        long remaining = Math.min(amount, MAX_FLUID_PER_CALL);
         while (remaining > 0L) {
             int chunk = (int) Math.min(Integer.MAX_VALUE, remaining);
             FluidStack copy = template.copy();

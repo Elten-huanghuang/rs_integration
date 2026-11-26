@@ -31,9 +31,13 @@ import com.huanghuang.rsintegration.storage.disk.rs.UnifiedDiskEvents;
 import com.huanghuang.rsintegration.storage.disk.rs.UnifiedDiskTooltipPackets;
 import com.huanghuang.rsintegration.storage.disk.rs.UnifiedDiskTooltipClient;
 import com.huanghuang.rsintegration.storage.disk.rs.RSInfiniteDiskTooltip;
+import com.huanghuang.rsintegration.storage.disk.rs.InfiniteDiskItem;
 import com.refinedmods.refinedstorage.api.network.INetwork;
+import com.refinedmods.refinedstorage.api.storage.StorageType;
 import com.refinedmods.refinedstorage.apiimpl.API;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.Item;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.DistExecutor;
@@ -42,6 +46,14 @@ import net.minecraftforge.common.MinecraftForge;
 /** All code in this class is linked only after Forge confirms RS is present. */
 public final class RSOptionalBootstrap {
     private RSOptionalBootstrap() {}
+
+    public static Item createInfiniteWaterDisk() {
+        return new InfiniteDiskItem(StorageType.FLUID, new ResourceLocation("minecraft", "water"));
+    }
+
+    public static Item createInfiniteLavaDisk() {
+        return new InfiniteDiskItem(StorageType.FLUID, new ResourceLocation("minecraft", "lava"));
+    }
 
     public static void registerItems(IEventBus modBus) {
         ModItems.registerOptionalUnifiedDisk(UnifiedDiskItem::new);
