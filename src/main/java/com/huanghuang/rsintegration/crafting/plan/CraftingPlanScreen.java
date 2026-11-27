@@ -654,6 +654,10 @@ public final class CraftingPlanScreen extends Screen {
         if (changed) requestPlanRefresh();
     }
 
+    private void applyRepeatCountOffset(int offset) {
+        setRepeatCount(clampRepeatCount(PlanQuantityControls.applyOffset(currentRepeat, offset)), true);
+    }
+
     private void commitRepeatCountInput() {
         if (repeatCountBox == null) return;
         long requested = currentRepeat;
@@ -1312,7 +1316,7 @@ public final class CraftingPlanScreen extends Screen {
                 chrome.button(g, new Rect(x, y, 28, 18), "+10", false, true, mouseX, mouseY,
                         () -> setRepeatCount(clampRepeatCount(currentRepeat + 10L), true)); x += 32;
                 chrome.button(g, new Rect(x, y, 28, 18), "+64", false, true, mouseX, mouseY,
-                        () -> setRepeatCount(clampRepeatCount(currentRepeat + 64L), true)); x += 32;
+                        () -> applyRepeatCountOffset(64)); x += 32;
             }
             chrome.button(g, new Rect(x, y, 16, 18), "▾", quantityMenuOpen, true, mouseX, mouseY,
                     () -> quantityMenuOpen = !quantityMenuOpen); x += 22;
@@ -1422,7 +1426,10 @@ public final class CraftingPlanScreen extends Screen {
         for (int i = 0; i < labels.length; i++) {
             int offset = offsets[i];
             chrome.button(g, new Rect(r.x() + 4 + i % 4 * 39, r.y() + 4 + i / 4 * 21, 36, 18), labels[i], false, true,
-                    mouseX, mouseY, () -> { setRepeatCount(offset == 0 ? 1 : clampRepeatCount(currentRepeat + (long) offset), true); quantityMenuOpen = false; });
+                    mouseX, mouseY, () -> {
+                        applyRepeatCountOffset(offset);
+                        quantityMenuOpen = false;
+                    });
         }
         g.pose().popPose();
     }
