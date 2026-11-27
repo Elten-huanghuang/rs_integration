@@ -20,6 +20,9 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.alchemy.PotionUtils;
 import net.minecraft.world.item.alchemy.Potions;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.item.crafting.RecipeManager;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fluids.capability.IFluidHandler;
@@ -45,6 +48,40 @@ class IronAlchemistBrewingTest extends BootstrapTest {
 
     private static ItemStack token(FluidStack fluid) {
         return InkFluidSupport.token(InkFluidTestFixtures.tokenItem(), fluid);
+    }
+
+    @Test void partialCatalogIsNotPublishedAndInvalidationRestartsWithNewRecipes() {
+        IronAlchemistRecipeCatalog.invalidate();
+        Level level = mock(Level.class);
+        RecipeManager manager = mock(RecipeManager.class);
+        Recipe<?> stale = mock(Recipe.class);
+        Recipe<?> current = mock(Recipe.class);
+        when(level.getRecipeManager()).thenReturn(manager);
+        doReturn(List.of(stale, stale)).when(manager).getRecipes();
+        try (var tokens = mockStatic(InkFluidSupport.class, CALLS_REAL_METHODS)) {
+            tokens.when(() -> InkFluidSupport.token(any(FluidStack.class)))
+                    .thenAnswer(call -> token(call.getArgument(0)));
+            var build = new IronAlchemistRecipeCatalog.IncrementalCatalog(level);
+            var checks = new AtomicInteger();
+            assertFalse(build.advance(() -> checks.getAndIncrement() >= 3));
+            assertTrue(IronAlchemistRecipeCatalog.cachedRecipes().isEmpty());
+
+            IronAlchemistRecipeCatalog.invalidate();
+            doReturn(List.of(current)).when(manager).getRecipes();
+            int slices = 0;
+            do {
+                checks.set(0);
+                assertTrue(++slices < 1000);
+                assertTrue(IronAlchemistRecipeCatalog.cachedRecipes().isEmpty());
+            } while (!build.advance(() -> checks.getAndIncrement() >= 8));
+
+            assertTrue(slices > 1);
+            assertTrue(build.result().stream().anyMatch(IronSpellBooksRecipe::isBottling));
+            assertSame(build.result(), IronAlchemistRecipeCatalog.allRecipes(level));
+            verify(manager, times(2)).getRecipes();
+        } finally {
+            IronAlchemistRecipeCatalog.invalidate();
+        }
     }
 
     @Test void indexesNativePotionBrewingForRsAndKeepsBottlingSeparate() {

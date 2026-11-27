@@ -14,13 +14,16 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.PotionItem;
 import net.minecraft.world.item.alchemy.Potion;
 import net.minecraft.world.item.alchemy.PotionBrewing;
 import net.minecraft.world.item.alchemy.PotionUtils;
 import net.minecraft.world.level.Level;
 import net.minecraftforge.common.brewing.BrewingRecipeRegistry;
 import net.minecraftforge.common.brewing.IBrewingRecipe;
+import net.minecraftforge.common.brewing.VanillaBrewingRecipe;
 import org.slf4j.Logger;
+import javax.annotation.Nullable;
 import java.util.HashMap;
 
 import java.util.ArrayList;
@@ -34,7 +37,7 @@ import java.util.Set;
 import java.util.function.BooleanSupplier;
 import net.minecraft.world.item.crafting.Ingredient;
 
-/** Builds deterministic synthetic recipes from the live Forge brewing registry. */
+/** 从运行中的 Forge 炼药注册表生成确定性的虚拟配方。 */
 public final class VanillaBrewingCatalog {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final Map<ResourceLocation, VanillaBrewingRecipeDefinition> BY_ID = new LinkedHashMap<>();
@@ -47,42 +50,40 @@ public final class VanillaBrewingCatalog {
     }
 
     /**
-     * Builds the runtime index and, when requested, publishes the same dynamic
-     * recipes to the immutable planner graph.  Brewing recipes are not owned by
-     * RecipeManager, so omitting this projection makes preview and execution see
-     * different producer sets for potion intermediates.
+     * 构建运行时索引，并按需将同一批炼药配方投影到不可变规划图。
+     * 炼药配方不由 RecipeManager 管理；缺少投影时，预览和执行会看到不同的药水来源。
      */
     public static synchronized int index(
             Level level, Map<Item, List<RecipeIndex.Entry>> index,
             Set<ResourceLocation> seen,
             Map<ImmutableRecipeGraph.MaterialRef, List<ImmutableRecipeGraph.RecipeNode>> projected) {
-        IncrementalIndex build = incrementalIndex(level, index, seen);
+        IncrementalIndex build = incrementalIndex(level, index, seen, projected);
         while (!build.advance(() -> false)) { }
-        if (projected != null) projectIndexedDefinitions(projected);
         return build.indexedCount();
     }
 
     public static synchronized IncrementalIndex incrementalIndex(
             Level level, Map<Item, List<RecipeIndex.Entry>> index,
-            Set<ResourceLocation> seen) {
-        return new IncrementalIndex(index, seen, inputCandidates(), itemCandidates());
-    }
-
-    public static synchronized void projectIndexedDefinitions(
-            Map<ImmutableRecipeGraph.MaterialRef, List<ImmutableRecipeGraph.RecipeNode>> projected) {
-        projectDefinitions(projected);
+            Set<ResourceLocation> seen,
+            @Nullable Map<ImmutableRecipeGraph.MaterialRef, List<ImmutableRecipeGraph.RecipeNode>> projected) {
+        List<ItemStack> items = itemCandidates();
+        return new IncrementalIndex(index, seen, inputCandidates(items), items,
+                BrewingRecipeRegistry.getRecipes(), projected);
     }
 
     public static synchronized void invalidate() {
         BY_ID.clear();
     }
 
-    /** Splits registry probing into resumable units while retaining main-thread access. */
+    /** 在主线程上分片探测注册表，每次从上次的位置继续。 */
     public static final class IncrementalIndex {
         private final Map<Item, List<RecipeIndex.Entry>> index;
         private final Set<ResourceLocation> seen;
+        @Nullable
+        private final Map<ImmutableRecipeGraph.MaterialRef, List<ImmutableRecipeGraph.RecipeNode>> projected;
         private final List<ItemStack> inputs;
         private final List<ItemStack> reagents;
+        private final List<ItemStack> potionInputs;
         private final List<ItemStack> potionReagents;
         private final List<IBrewingRecipe> forgeRecipes;
         private final Set<IBrewingRecipe> rejectedForgeRecipes =
@@ -99,20 +100,17 @@ public final class VanillaBrewingCatalog {
         private final List<ItemStack> acceptedReagents = new ArrayList<>();
         private List<VanillaBrewingRecipeDefinition> existingDefinitions = List.of();
 
-        private IncrementalIndex(Map<Item, List<RecipeIndex.Entry>> index,
-                                 Set<ResourceLocation> seen,
-                                 List<ItemStack> inputs, List<ItemStack> reagents) {
-            this(index, seen, inputs, reagents, BrewingRecipeRegistry.getRecipes());
-        }
-
         IncrementalIndex(Map<Item, List<RecipeIndex.Entry>> index,
                          Set<ResourceLocation> seen,
                          List<ItemStack> inputs, List<ItemStack> reagents,
-                         List<IBrewingRecipe> forgeRecipes) {
+                         List<IBrewingRecipe> forgeRecipes,
+                         @Nullable Map<ImmutableRecipeGraph.MaterialRef, List<ImmutableRecipeGraph.RecipeNode>> projected) {
             this.index = index;
             this.seen = seen;
+            this.projected = projected;
             this.inputs = inputs;
             this.reagents = reagents;
+            this.potionInputs = inputs.stream().filter(stack -> stack.getItem() instanceof PotionItem).toList();
             this.potionReagents = reagents.stream().filter(PotionBrewing::isIngredient).toList();
             this.forgeRecipes = List.copyOf(forgeRecipes);
         }
@@ -150,8 +148,8 @@ public final class VanillaBrewingCatalog {
         }
 
         private boolean advancePotionMix() {
-            if (inputIndex >= inputs.size() || potionReagents.isEmpty()) return false;
-            ItemStack input = inputs.get(inputIndex);
+            if (inputIndex >= potionInputs.size() || potionReagents.isEmpty()) return false;
+            ItemStack input = potionInputs.get(inputIndex);
             ItemStack reagent = potionReagents.get(reagentIndex++);
             if (PotionBrewing.hasMix(input, reagent)) {
                 int before = seen.size();
@@ -162,14 +160,15 @@ public final class VanillaBrewingCatalog {
                 reagentIndex = 0;
                 inputIndex++;
             }
-            return inputIndex < inputs.size();
+            return inputIndex < potionInputs.size();
         }
 
         private boolean advanceForgeRecipe() {
             if (currentForgeRecipe == null) {
                 while (forgeIndex < forgeRecipes.size()) {
                     IBrewingRecipe next = forgeRecipes.get(forgeIndex++);
-                    if (rejectedForgeRecipes.contains(next)) continue;
+                    // 原生转换已在第一阶段枚举；子类仍走第三方探测。
+                    if (next.getClass() == VanillaBrewingRecipe.class || rejectedForgeRecipes.contains(next)) continue;
                     currentForgeRecipe = next;
                     indexDeclaredMappings(currentForgeRecipe, index, seen);
                     acceptedInputs.clear();
@@ -190,6 +189,10 @@ public final class VanillaBrewingCatalog {
                 }
                 return true;
             }
+            if (acceptedInputs.isEmpty()) {
+                currentForgeRecipe = null;
+                return forgeIndex < forgeRecipes.size();
+            }
             if (filterIndex < reagents.size()) {
                 ItemStack candidate = reagents.get(filterIndex++);
                 try {
@@ -200,7 +203,7 @@ public final class VanillaBrewingCatalog {
                 }
                 return true;
             }
-            if (acceptedInputs.isEmpty() || acceptedReagents.isEmpty()) {
+            if (acceptedReagents.isEmpty()) {
                 currentForgeRecipe = null;
                 return forgeIndex < forgeRecipes.size();
             }
@@ -213,7 +216,6 @@ public final class VanillaBrewingCatalog {
                 rejectForgeRecipe(error, "getOutput");
                 return forgeIndex < forgeRecipes.size();
             }
-            if (output == null) output = ItemStack.EMPTY;
             int before = seen.size();
             addDefinition(input, reagent, output, index, seen);
             if (seen.size() > before) indexedCount++;
@@ -241,6 +243,7 @@ public final class VanillaBrewingCatalog {
             if (definitionIndex >= existingDefinitions.size()) return false;
             VanillaBrewingRecipeDefinition definition =
                     existingDefinitions.get(definitionIndex++);
+            if (projected != null) projectDefinition(projected, definition);
             if (seen.add(definition.getId())) {
                 index.computeIfAbsent(definition.outputUnit().getItem(), ignored -> new ArrayList<>())
                         .add(new RecipeIndex.Entry(definition,
@@ -253,9 +256,8 @@ public final class VanillaBrewingCatalog {
     }
 
     /**
-     * Some advanced-potion recipes distinguish variants through NBT stored in
-     * their Ingredient stacks. Registry-wide default ItemStacks cannot discover
-     * those variants, but several implementations expose the exact mapping.
+     * 部分扩展药水配方通过材料堆叠的 NBT 区分变体，扫描默认物品堆叠无法发现它们。
+     * 对提供确切转换映射的实现，直接读取该映射。
      */
     private static void indexDeclaredMappings(IBrewingRecipe brewing,
                                               Map<Item, List<RecipeIndex.Entry>> index,
@@ -276,8 +278,7 @@ public final class VanillaBrewingCatalog {
                 }
             }
         } catch (NoSuchMethodException ignored) {
-            // Most brewing recipes do not expose a mapping; the ordinary
-            // candidate scan below remains the generic fallback.
+            // 没有可读映射时，由通用候选扫描兜底。
         } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
             LOGGER.debug(
                     "[RecipeIndex] unable to inspect brewing mappings for {}",
@@ -288,7 +289,7 @@ public final class VanillaBrewingCatalog {
     private static void addDefinition(ItemStack input, ItemStack reagent, ItemStack output,
                                       Map<Item, List<RecipeIndex.Entry>> index,
                                       Set<ResourceLocation> seen) {
-        if (output.isEmpty() || ItemStack.isSameItemSameTags(input, output)) return;
+        if (output == null || output.isEmpty() || ItemStack.isSameItemSameTags(input, output)) return;
         ResourceLocation id = recipeId(input, reagent, output);
         if (!seen.add(id)) return;
         VanillaBrewingRecipeDefinition definition =
@@ -300,20 +301,19 @@ public final class VanillaBrewingCatalog {
                         new ResourceLocation("minecraft", "brewing"), true));
     }
 
-    private static void projectDefinitions(
-            Map<ImmutableRecipeGraph.MaterialRef, List<ImmutableRecipeGraph.RecipeNode>> projected) {
+    private static void projectDefinition(
+            Map<ImmutableRecipeGraph.MaterialRef, List<ImmutableRecipeGraph.RecipeNode>> projected,
+            VanillaBrewingRecipeDefinition definition) {
         ResourceLocation recipeType = new ResourceLocation("minecraft", "brewing");
-        for (VanillaBrewingRecipeDefinition definition : BY_ID.values()) {
-            List<IngredientSpec> specs = List.of(
-                    new IngredientSpec(definition.getIngredients().get(0), 3),
-                    new IngredientSpec(definition.getIngredients().get(1), 1),
-                    new IngredientSpec(definition.getIngredients().get(2), 1));
-            ImmutableRecipeGraph.RecipeNode node = ImmutableRecipeGraphProjector.projectRecipe(
-                    definition.getId(), definition.output(), specs,
-                    "vanilla_brewing_stand", recipeType);
-            if (node != null) {
-                projected.computeIfAbsent(node.output(), ignored -> new ArrayList<>()).add(node);
-            }
+        List<IngredientSpec> specs = List.of(
+                new IngredientSpec(definition.getIngredients().get(0), 3),
+                new IngredientSpec(definition.getIngredients().get(1), 1),
+                new IngredientSpec(definition.getIngredients().get(2), 1));
+        ImmutableRecipeGraph.RecipeNode node = ImmutableRecipeGraphProjector.projectRecipe(
+                definition.getId(), definition.output(), specs,
+                "vanilla_brewing_stand", recipeType);
+        if (node != null) {
+            projected.computeIfAbsent(node.output(), ignored -> new ArrayList<>()).add(node);
         }
     }
 
@@ -330,7 +330,7 @@ public final class VanillaBrewingCatalog {
         return null;
     }
 
-    /** Register an exact JEI-visible conversion that candidate enumeration missed. */
+    /** 登记 JEI 可见、但候选扫描未覆盖的确切药水转换。 */
     public static synchronized ResourceLocation registerExact(ItemStack input, ItemStack reagent,
                                                                ItemStack output) {
         if (input.isEmpty() || reagent.isEmpty() || output.isEmpty()) return null;
@@ -345,8 +345,8 @@ public final class VanillaBrewingCatalog {
         if (BY_ID.isEmpty()) index(level, new HashMap<>(), new HashSet<>());
     }
 
-    private static List<ItemStack> inputCandidates() {
-        List<ItemStack> candidates = itemCandidates();
+    private static List<ItemStack> inputCandidates(List<ItemStack> items) {
+        List<ItemStack> candidates = new ArrayList<>(items);
         for (Potion potion : BuiltInRegistries.POTION) {
             candidates.add(PotionUtils.setPotion(new ItemStack(Items.POTION), potion));
             candidates.add(PotionUtils.setPotion(new ItemStack(Items.SPLASH_POTION), potion));

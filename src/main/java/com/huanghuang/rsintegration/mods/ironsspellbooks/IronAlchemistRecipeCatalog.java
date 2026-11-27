@@ -30,6 +30,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.WeakHashMap;
+import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 
 /** 将炼金锅原生数据包和酿造规则转换为 RS 内部索引。 */
@@ -39,86 +40,139 @@ public final class IronAlchemistRecipeCatalog {
     private static final String EMPTY_CLASS = "io.redspace.ironsspellbooks.recipe_types.alchemist_cauldron.EmptyAlchemistCauldronRecipe";
     private static final Map<RecipeManager, List<IronSpellBooksRecipe>> CATALOGS = new WeakHashMap<>();
     private static final Map<ResourceLocation, IronSpellBooksRecipe> BY_ID = new LinkedHashMap<>();
+    private static long generation;
 
     private IronAlchemistRecipeCatalog() { }
 
     public static synchronized List<IronSpellBooksRecipe> allRecipes(Level level) {
-        if (level == null) return List.of();
-        return CATALOGS.computeIfAbsent(level.getRecipeManager(), manager -> {
-            List<IronSpellBooksRecipe> recipes = discover(manager.getRecipes(), InkFluidSupport::token);
-            for (IronSpellBooksRecipe recipe : recipes) BY_ID.put(recipe.getId(), recipe);
-            return recipes;
-        });
+        IncrementalCatalog build = new IncrementalCatalog(level);
+        while (!build.advance(() -> false)) { }
+        return build.result();
     }
 
     public static synchronized IronSpellBooksRecipe byId(ResourceLocation id) { return BY_ID.get(id); }
     public static synchronized List<IronSpellBooksRecipe> cachedRecipes() { return List.copyOf(BY_ID.values()); }
-    public static synchronized void invalidate() { CATALOGS.clear(); BY_ID.clear(); }
+    public static synchronized void invalidate() { generation++; CATALOGS.clear(); BY_ID.clear(); }
 
-    static List<IronSpellBooksRecipe> discover(Collection<Recipe<?>> nativeRecipes,
-                                               Function<FluidStack, ItemStack> tokens) {
-        Map<ResourceLocation, IronSpellBooksRecipe> recipes = new LinkedHashMap<>();
-        for (Recipe<?> nativeRecipe : nativeRecipes) {
-            try {
-                Class<?> type = nativeRecipe.getClass();
-                if (type.getName().equals(BREW_CLASS)) {
-                    FluidStack fluid = (FluidStack) type.getMethod("fluidIn").invoke(nativeRecipe);
-                    Ingredient reagent = (Ingredient) type.getMethod("reagent").invoke(nativeRecipe);
-                    List<?> results = (List<?>) type.getMethod("results").invoke(nativeRecipe);
-                    Optional<?> byproduct = (Optional<?>) type.getMethod("byproduct").invoke(nativeRecipe);
-                    List<ItemStack> outputs = new ArrayList<>();
-                    for (Object result : results) outputs.add(tokens.apply((FluidStack) result));
-                    if (byproduct.orElse(null) instanceof ItemStack extra && !extra.isEmpty()) outputs.add(extra.copy());
-                    if (!fluid.isEmpty() && !outputs.isEmpty() && outputs.stream().noneMatch(ItemStack::isEmpty)
-                            && reagent.getItems().length > 0) {
-                        ResourceLocation id = nativeId("brew", nativeRecipe.getId());
-                        recipes.put(id, IronSpellBooksRecipe.brewRecipe(id, tokens.apply(fluid), reagent, outputs));
-                    }
-                } else if (type.getName().equals(EMPTY_CLASS)) {
-                    FluidStack fluid = (FluidStack) type.getMethod("fluid").invoke(nativeRecipe);
-                    Ingredient input = (Ingredient) type.getMethod("input").invoke(nativeRecipe);
-                    ItemStack output = (ItemStack) type.getMethod("result").invoke(nativeRecipe);
-                    if (!fluid.isEmpty() && !output.isEmpty() && input.test(new ItemStack(Items.GLASS_BOTTLE))) {
-                        ResourceLocation id = nativeId("bottle", nativeRecipe.getId());
-                        recipes.put(id, IronSpellBooksRecipe.bottleRecipe(id, tokens.apply(fluid), output));
-                    }
+    static final class IncrementalCatalog {
+        private final RecipeManager manager;
+        private CatalogBuildSteps steps;
+        private Map<ResourceLocation, IronSpellBooksRecipe> recipes;
+        private List<IronSpellBooksRecipe> result;
+        private long buildGeneration;
+
+        IncrementalCatalog(Level level) {
+            manager = level == null ? null : level.getRecipeManager();
+        }
+
+        boolean advance(BooleanSupplier budgetExpired) {
+            synchronized (IronAlchemistRecipeCatalog.class) {
+                if (manager == null) {
+                    result = List.of();
+                    return true;
                 }
-            } catch (ReflectiveOperationException | RuntimeException | LinkageError failure) {
-                LOGGER.warn("无法读取炼金锅配方 {}", nativeRecipe.getId(), failure);
+                result = CATALOGS.get(manager);
+                if (result != null) {
+                    steps = null;
+                    recipes = null;
+                    return true;
+                }
+                if (budgetExpired.getAsBoolean()) return false;
+                if (steps == null || buildGeneration != generation) {
+                    buildGeneration = generation;
+                    steps = new CatalogBuildSteps();
+                    recipes = new LinkedHashMap<>();
+                    scheduleDiscovery(steps, recipes, manager.getRecipes(), InkFluidSupport::token);
+                }
+                if (!steps.advance(() -> buildGeneration != generation || budgetExpired.getAsBoolean())
+                        || buildGeneration != generation) return false;
+                result = List.copyOf(recipes.values());
+                BY_ID.putAll(recipes);
+                CATALOGS.put(manager, result);
+                steps = null;
+                recipes = null;
+                return true;
             }
         }
-        indexPotionRecipes(recipes, tokens, allowsPotionBrewing());
-        return List.copyOf(recipes.values());
+
+        List<IronSpellBooksRecipe> result() { return result; }
+    }
+
+    private static void scheduleDiscovery(CatalogBuildSteps steps, Map<ResourceLocation, IronSpellBooksRecipe> recipes,
+                                          Collection<Recipe<?>> nativeRecipes, Function<FluidStack, ItemStack> tokens) {
+        steps.then(() -> steps.each(nativeRecipes.iterator(), recipe -> indexNativeRecipe(recipes, tokens, recipe)));
+        steps.then(() -> schedulePotionRecipes(steps, recipes, tokens, allowsPotionBrewing()));
+    }
+
+    private static void indexNativeRecipe(Map<ResourceLocation, IronSpellBooksRecipe> recipes,
+                                          Function<FluidStack, ItemStack> tokens, Recipe<?> nativeRecipe) {
+        try {
+            Class<?> type = nativeRecipe.getClass();
+            if (type.getName().equals(BREW_CLASS)) {
+                FluidStack fluid = (FluidStack) type.getMethod("fluidIn").invoke(nativeRecipe);
+                Ingredient reagent = (Ingredient) type.getMethod("reagent").invoke(nativeRecipe);
+                List<?> results = (List<?>) type.getMethod("results").invoke(nativeRecipe);
+                Optional<?> byproduct = (Optional<?>) type.getMethod("byproduct").invoke(nativeRecipe);
+                List<ItemStack> outputs = new ArrayList<>();
+                for (Object result : results) outputs.add(tokens.apply((FluidStack) result));
+                if (byproduct.orElse(null) instanceof ItemStack extra && !extra.isEmpty()) outputs.add(extra.copy());
+                if (!fluid.isEmpty() && !outputs.isEmpty() && outputs.stream().noneMatch(ItemStack::isEmpty)
+                        && reagent.getItems().length > 0) {
+                    ResourceLocation id = nativeId("brew", nativeRecipe.getId());
+                    recipes.put(id, IronSpellBooksRecipe.brewRecipe(id, tokens.apply(fluid), reagent, outputs));
+                }
+            } else if (type.getName().equals(EMPTY_CLASS)) {
+                FluidStack fluid = (FluidStack) type.getMethod("fluid").invoke(nativeRecipe);
+                Ingredient input = (Ingredient) type.getMethod("input").invoke(nativeRecipe);
+                ItemStack output = (ItemStack) type.getMethod("result").invoke(nativeRecipe);
+                if (!fluid.isEmpty() && !output.isEmpty() && input.test(new ItemStack(Items.GLASS_BOTTLE))) {
+                    ResourceLocation id = nativeId("bottle", nativeRecipe.getId());
+                    recipes.put(id, IronSpellBooksRecipe.bottleRecipe(id, tokens.apply(fluid), output));
+                }
+            }
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError failure) {
+            LOGGER.warn("无法读取炼金锅配方 {}", nativeRecipe.getId(), failure);
+        }
     }
 
     /** 药水酿造仅用于 RS 材料规划和执行；JEI 沿用炼金锅原生分类。 */
     static void indexPotionRecipes(Map<ResourceLocation, IronSpellBooksRecipe> recipes,
                                    Function<FluidStack, ItemStack> tokens, boolean brewing) {
+        CatalogBuildSteps steps = new CatalogBuildSteps();
+        schedulePotionRecipes(steps, recipes, tokens, brewing);
+        steps.advance(() -> false);
+    }
+
+    private static void schedulePotionRecipes(CatalogBuildSteps steps,
+                                              Map<ResourceLocation, IronSpellBooksRecipe> recipes,
+                                              Function<FluidStack, ItemStack> tokens, boolean brewing) {
         if (!ForgeRegistries.FLUIDS.containsKey(new ResourceLocation("irons_spellbooks", "potion"))) return;
         List<ItemStack> reagents = new ArrayList<>();
-        if (brewing) for (var item : BuiltInRegistries.ITEM) {
-            ItemStack stack = item.getDefaultInstance();
-            if (BrewingRecipeRegistry.isValidIngredient(stack)) reagents.add(stack);
-        }
-        for (var potion : BuiltInRegistries.POTION) {
-            if (potion == Potions.EMPTY) continue;
-            for (var item : List.of(Items.POTION, Items.SPLASH_POTION, Items.LINGERING_POTION)) {
+        var containers = List.of(Items.POTION, Items.SPLASH_POTION, Items.LINGERING_POTION);
+        steps.afterCurrent(() -> steps.each(BuiltInRegistries.POTION.iterator(), potion -> {
+            if (potion == Potions.EMPTY) return;
+            steps.each(containers.iterator(), item -> {
                 ItemStack input = PotionUtils.setPotion(new ItemStack(item), potion);
                 FluidStack fluid = AlchemistPotionSupport.fluid(input);
-                if (fluid.isEmpty()) continue;
+                if (fluid.isEmpty()) return;
+                ItemStack inputToken = tokens.apply(fluid);
                 ResourceLocation bottleId = potionId("bottle", input, ItemStack.EMPTY, input);
-                recipes.put(bottleId, IronSpellBooksRecipe.bottleRecipe(bottleId, tokens.apply(fluid), input));
-                for (ItemStack reagent : reagents) {
+                recipes.put(bottleId, IronSpellBooksRecipe.bottleRecipe(bottleId, inputToken, input));
+                steps.each(reagents.iterator(), reagent -> {
                     ItemStack output = BrewingRecipeRegistry.getOutput(input.copy(), reagent.copy());
                     if (output.isEmpty() && PotionBrewing.hasMix(input, reagent)) output = PotionBrewing.mix(reagent, input);
                     FluidStack produced = AlchemistPotionSupport.fluid(output);
-                    if (produced.isEmpty() || produced.isFluidEqual(fluid)) continue;
+                    if (produced.isEmpty() || produced.isFluidEqual(fluid)) return;
                     ResourceLocation id = potionId("brew", input, reagent, output);
-                    recipes.put(id, IronSpellBooksRecipe.potionBrewRecipe(id, tokens.apply(fluid),
+                    recipes.put(id, IronSpellBooksRecipe.potionBrewRecipe(id, inputToken,
                             Ingredient.of(reagent), tokens.apply(produced)));
-                }
-            }
-        }
+                });
+            });
+        }));
+        if (brewing) steps.each(BuiltInRegistries.ITEM.iterator(), item -> {
+            ItemStack stack = item.getDefaultInstance();
+            if (BrewingRecipeRegistry.isValidIngredient(stack)) reagents.add(stack);
+        });
     }
 
     private static boolean allowsPotionBrewing() {

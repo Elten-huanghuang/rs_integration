@@ -7,6 +7,8 @@ import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.crafting.fluid.FluidContainerCatalog;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidTestFixtures;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipe;
+import com.huanghuang.rsintegration.mods.ironsspellbooks.IronSpellBooksRecipeCatalog;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fluids.FluidUtil;
 import net.minecraftforge.common.util.LazyOptional;
@@ -26,6 +28,7 @@ import com.huanghuang.rsintegration.mods.untileternity.EndCraftingRecipeHandler;
 import com.huanghuang.rsintegration.mods.untileternity.UntilEternityRSModule;
 import com.huanghuang.rsintegration.recipe.ModRecipeHandlers;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import com.huanghuang.rsintegration.util.ModIds;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.NonNullList;
@@ -61,11 +64,63 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class RecipeIndexBuildSessionTest extends BootstrapTest {
+    @Test
+    void ironSourceYieldsBeforeIndexingCompletedRecipesOneAtATime() throws Exception {
+        boolean loaded = RSIntegrationConfig.COMMON_SPEC.isLoaded();
+        if (!loaded) {
+            CommentedConfig config = CommentedConfig.inMemory();
+            RSIntegrationConfig.COMMON_SPEC.correct(config);
+            RSIntegrationConfig.COMMON_SPEC.setConfig(config);
+        }
+        try {
+            assertIronSourceYields();
+        } finally {
+            if (!loaded) RSIntegrationConfig.COMMON_SPEC.setConfig(null);
+        }
+    }
+
+    private static void assertIronSourceYields() throws Exception {
+        withServer((level, manager) -> {
+            RecipeIndex.BuildSession session = newSession(level);
+            session.phase = RecipeIndex.BuildPhase.SOURCES;
+            session.sourceStep = 3;
+            when(ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)).thenReturn(true);
+            var first = ironRecipe("first");
+            var second = ironRecipe("second");
+            try (var catalogs = mockConstruction(IronSpellBooksRecipeCatalog.IncrementalCatalog.class, (mock, context) -> {
+                when(mock.advance(any(BooleanSupplier.class))).thenReturn(false, true);
+                when(mock.spellRecipes()).thenReturn(List.of(first));
+                when(mock.alchemistRecipes()).thenReturn(List.of(second));
+            })) {
+                assertFalse(session.advance(1, new AtomicLong()::getAndIncrement));
+                assertEquals(1, catalogs.constructed().size());
+                assertFalse(session.advance(1, new AtomicLong()::getAndIncrement));
+                assertTrue(session.seen.isEmpty());
+                assertFalse(session.advance(1, new AtomicLong()::getAndIncrement));
+                assertTrue(session.seen.isEmpty());
+                assertFalse(session.advance(1, new AtomicLong()::getAndIncrement));
+                assertEquals(Set.of(first.getId()), session.seen);
+                assertFalse(session.advance(1, new AtomicLong()::getAndIncrement));
+                assertEquals(Set.of(first.getId(), second.getId()), session.seen);
+            }
+        });
+    }
+
+    private static IronSpellBooksRecipe ironRecipe(String path) {
+        var recipe = mock(IronSpellBooksRecipe.class);
+        when(recipe.getId()).thenReturn(new ResourceLocation("test", path));
+        when(recipe.machine()).thenReturn(IronSpellBooksRecipe.Machine.SCROLL_FORGE);
+        when(recipe.getResultItem(any())).thenReturn(new ItemStack(Items.PAPER));
+        when(recipe.getIngredients()).thenReturn(NonNullList.create());
+        return recipe;
+    }
+
     @Test
     void budgetBoundaryDoesNotWarnAndRealOverrunsAreReportedOnce() {
         var overruns = new RecipeIndex.CaptureOverruns();

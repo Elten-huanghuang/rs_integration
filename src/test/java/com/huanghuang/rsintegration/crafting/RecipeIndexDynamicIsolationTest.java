@@ -9,32 +9,38 @@ import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 class RecipeIndexDynamicIsolationTest extends BootstrapTest {
     @Test
     void failedOptionalSpellSourceHasRuntimeAndLinkageIsolation() throws Exception {
-        MethodNode method = recipeIndex().methods.stream()
-                .filter(candidate -> candidate.name.equals("indexIronSpellBooks"))
+        MethodNode method = readClass("RecipeIndex$BuildSession.class").methods.stream()
+                .filter(candidate -> candidate.name.equals("advance") && candidate.desc.contains("LongSupplier"))
                 .findFirst().orElseThrow();
-        MethodInsnNode sourceCall = null;
+        Set<String> protectedCalls = new HashSet<>();
         for (AbstractInsnNode instruction : method.instructions) {
-            if (instruction instanceof MethodInsnNode call && call.name.equals("allRecipes")) {
-                sourceCall = call;
+            if (instruction instanceof MethodInsnNode call
+                    && call.owner.endsWith("IronSpellBooksRecipeCatalog$IncrementalCatalog")) {
+                if (!call.name.equals("<init>") && !call.name.equals("advance")) continue;
+                int callIndex = method.instructions.indexOf(call);
+                for (String type : List.of("java/lang/RuntimeException", "java/lang/LinkageError")) {
+                    assertTrue(method.tryCatchBlocks.stream().anyMatch(handler -> type.equals(handler.type)
+                            && method.instructions.indexOf(handler.start) <= callIndex
+                            && method.instructions.indexOf(handler.end) > callIndex));
+                }
+                protectedCalls.add(call.name);
             }
         }
-        assertNotNull(sourceCall);
-        int callIndex = method.instructions.indexOf(sourceCall);
-        for (String type : new String[]{"java/lang/RuntimeException", "java/lang/LinkageError"}) {
-            assertTrue(method.tryCatchBlocks.stream().anyMatch(handler -> type.equals(handler.type)
-                    && method.instructions.indexOf(handler.start) <= callIndex
-                    && method.instructions.indexOf(handler.end) > callIndex));
-        }
+        assertEquals(Set.of("<init>", "advance"), protectedCalls);
     }
 
     @Test
     void runtimeFingerprintStaysOnServerThreadAndNeverSubmitsThirdPartyWorker() throws Exception {
-        ClassNode node = recipeIndex();
+        ClassNode node = readClass("RecipeIndex.class");
         MethodNode refresh = node.methods.stream()
                 .filter(candidate -> candidate.name.equals("refreshDynamicRuntimeIfNeeded"))
                 .findFirst().orElseThrow();
@@ -69,8 +75,8 @@ class RecipeIndexDynamicIsolationTest extends BootstrapTest {
         assertTrue(RecipeIndex.driftCheckDue(0, 1000));
     }
 
-    private static ClassNode recipeIndex() throws Exception {
-        try (var input = RecipeIndex.class.getResourceAsStream("RecipeIndex.class")) {
+    private static ClassNode readClass(String className) throws Exception {
+        try (var input = RecipeIndex.class.getResourceAsStream(className)) {
             assertNotNull(input);
             ClassNode node = new ClassNode(Opcodes.ASM9);
             new ClassReader(input).accept(node, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);

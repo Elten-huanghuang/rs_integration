@@ -66,12 +66,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Unified recipe index replacing the split {@code CraftingPlanManager} +
- * {@code ModRecipeIndex} dual-index pattern.
- *
- * <p>Single build pass, delegates extraction to {@link ModRecipeHandler}
- * when available, producing {@code Map<Item, List<Entry>>} for both vanilla
- * and mod recipe lookups.</p>
+ * 统一的配方索引，按产物查询原版及模组配方。
+ * 有匹配的 {@link ModRecipeHandler} 时，由处理器提取配方信息。
  */
 public final class RecipeIndex {
 
@@ -122,13 +118,11 @@ public final class RecipeIndex {
         return BUILD_IN_FLIGHT.get();
     }
 
-    /** Rebuilds once when late spell-config synchronization changes ink mappings. */
+    /** 法术配置晚于索引同步并改变墨水映射时，触发重建。 */
     public static void refreshDynamicRuntimeIfNeeded(Level level) {
         requireServerLevel(level);
         if (!ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)) return;
-        // Config publication can invalidate an in-flight generation after its
-        // revision was captured. Retry on subsequent ticks until it is rebuilt;
-        // warmUp's in-flight guard keeps this to one worker at a time.
+        // 配置同步可能让正在构建的版本失效。后续 tick 重试，warmUp 保证不会并发启动。
         if (!isReady(level)) {
             if (!generationBuildFailed()) warmUp(level);
             return;
@@ -254,9 +248,7 @@ public final class RecipeIndex {
         BUILD_IN_FLIGHT.set(false);
     }
 
-    /**
-     * Returns only a complete generation published during startup or reload.
-     */
+    /** 只返回启动或重载时发布的完整索引。 */
     public static Map<Item, List<Entry>> get(Level level) {
         return readyGeneration(level).result.index;
     }
@@ -346,6 +338,13 @@ public final class RecipeIndex {
                 session.captureNanos / 1_000_000L, result.finalizeNanos / 1_000_000L,
                 session.skippedUnknown, session.skippedEmptyResult, session.skippedIdentity,
                 session.timing.slowestRecipe, session.timing.slowestRecipeNanos / 1_000_000L);
+        if (session.ironTiming.nanos > 0 || session.brewingTiming.nanos > 0) {
+            RSIntegrationMod.LOGGER.info(
+                    "[RecipeCatalog] source timing: iron spells {}ms capture, {}ms max unit; "
+                            + "vanilla brewing {}ms capture, {}ms max unit",
+                    session.ironTiming.nanos / 1_000_000L, session.ironTiming.maxUnit / 1_000_000L,
+                    session.brewingTiming.nanos / 1_000_000L, session.brewingTiming.maxUnit / 1_000_000L);
+        }
         RecipeIndexDiagnostics.summarize("catalog_ready");
         if (!session.unknownRecipeTypes.isEmpty()) {
             RSIntegrationMod.LOGGER.debug("[RecipeCatalog] unsupported native recipe types: {}",
@@ -364,6 +363,16 @@ public final class RecipeIndex {
     }
 
     enum BuildPhase { RECIPES, SOURCES, SPELL_SCROLLS, OUTPUT_IDS, COMPLETE }
+
+    private static final class SourceTiming {
+        long nanos;
+        long maxUnit;
+
+        void record(long elapsed) {
+            nanos += elapsed;
+            maxUnit = Math.max(maxUnit, elapsed);
+        }
+    }
 
     static final class CaptureOverruns {
         private long count;
@@ -412,6 +421,8 @@ public final class RecipeIndex {
         final Map<String, UnknownRecipeTypeStats> unknownRecipeTypes = new HashMap<>();
         final BuildTiming timing = new BuildTiming();
         final CaptureOverruns captureOverruns = new CaptureOverruns();
+        final SourceTiming ironTiming = new SourceTiming();
+        final SourceTiming brewingTiming = new SourceTiming();
         BuildPhase phase = BuildPhase.RECIPES;
         int sourceStep;
         int skippedUnknown;
@@ -420,6 +431,11 @@ public final class RecipeIndex {
         long captureNanos;
         Iterator<Entry> scrollEntries = Collections.emptyIterator();
         Iterator<Item> outputItems = Collections.emptyIterator();
+        @Nullable
+        IronSpellBooksRecipeCatalog.IncrementalCatalog ironCatalog;
+        @Nullable
+        Iterator<IronSpellBooksRecipe> ironRecipes;
+        Iterator<IronSpellBooksRecipe> alchemistRecipes = Collections.emptyIterator();
         @Nullable
         VanillaBrewingCatalog.IncrementalIndex brewingIndex;
         @Nullable
@@ -458,6 +474,7 @@ public final class RecipeIndex {
             while (phase != BuildPhase.COMPLETE && nanoTime.getAsLong() < deadline) {
                 long unitStarted = System.nanoTime();
                 String unit = phase.name();
+                SourceTiming sourceTiming = null;
                 switch (phase) {
                     case RECIPES -> {
                         if (!recipes.hasNext()) {
@@ -479,13 +496,36 @@ public final class RecipeIndex {
                         else if (outcome == IndexOutcome.IDENTITY) skippedIdentity++;
                     }
                     case SOURCES -> {
-                        if (fluidIndex != null && sourceStep == 7) {
+                        if (ironCatalog != null) {
+                            unit = "iron spell catalog";
+                            sourceTiming = ironTiming;
+                            try {
+                                if (ironCatalog.advance(() -> !isCurrent() || nanoTime.getAsLong() >= deadline)) {
+                                    ironRecipes = ironCatalog.spellRecipes().iterator();
+                                    alchemistRecipes = ironCatalog.alchemistRecipes().iterator();
+                                    ironCatalog = null;
+                                }
+                            } catch (RuntimeException | LinkageError failure) {
+                                logIronSourceFailure(failure);
+                                ironCatalog = null;
+                                sourceStep++;
+                            }
+                        } else if (ironRecipes != null) {
+                            unit = "iron spell recipes";
+                            sourceTiming = ironTiming;
+                            if (ironRecipes.hasNext()) indexIronSpellRecipe(ironRecipes.next());
+                            else if (alchemistRecipes.hasNext()) indexIronSpellRecipe(alchemistRecipes.next());
+                            else {
+                                ironRecipes = null;
+                                sourceStep++;
+                            }
+                        } else if (fluidIndex != null && sourceStep == 7) {
                             unit = "fluid containers";
                             if (fluidIndex.advance(() -> nanoTime.getAsLong() >= deadline)) sourceStep++;
                         } else if (brewingIndex != null) {
                             unit = "vanilla brewing";
+                            sourceTiming = brewingTiming;
                             if (brewingIndex.advance(() -> nanoTime.getAsLong() >= deadline)) {
-                                VanillaBrewingCatalog.projectIndexedDefinitions(projected);
                                 brewingIndex = null;
                                 sourceStep++;
                             }
@@ -503,16 +543,30 @@ public final class RecipeIndex {
                                 case 0 -> indexFARituals(level, index, seen);
                                 case 1 -> indexMarketEntries(index, seen);
                                 case 2 -> indexGemCutting(level, index, seen);
-                                case 3 -> indexIronSpellBooks(level, index, seen);
+                                case 3 -> {
+                                    if (ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)
+                                            && RSIntegrationConfig.ENABLE_IRONS_SPELLBOOKS.get()) {
+                                        unit = "iron spell setup";
+                                        sourceTiming = ironTiming;
+                                        try {
+                                            ironCatalog = new IronSpellBooksRecipeCatalog.IncrementalCatalog(level);
+                                        } catch (RuntimeException | LinkageError failure) {
+                                            logIronSourceFailure(failure);
+                                        }
+                                    }
+                                }
                                 case 4 -> indexDistantWorldsFiron(index, seen);
                                 case 5 -> indexPmmoSalvage(index, seen);
-                                case 6 -> brewingIndex =
-                                        VanillaBrewingCatalog.incrementalIndex(level, index, seen);
+                                case 6 -> {
+                                    unit = "vanilla brewing setup";
+                                    sourceTiming = brewingTiming;
+                                    brewingIndex = VanillaBrewingCatalog.incrementalIndex(level, index, seen, projected);
+                                }
                                 case 7 -> fluidIndex = FluidContainerCatalog.incrementalIndex(
                                         level, index, seen, projected, this::isCurrent);
                                 default -> { }
                             }
-                            if (activeSource != 6 && activeSource != 7) sourceStep++;
+                            if (ironCatalog == null && activeSource != 6 && activeSource != 7) sourceStep++;
                         }
                     }
                     case SPELL_SCROLLS -> {
@@ -543,12 +597,36 @@ public final class RecipeIndex {
                     case COMPLETE -> { }
                 }
                 long elapsed = System.nanoTime() - unitStarted;
+                if (sourceTiming != null) sourceTiming.record(elapsed);
                 captureNanos += elapsed;
                 captureOverruns.record(unit, elapsed);
                 // 第三方目录刷新可能改变 revision；下一 tick 必须重新开始采集。
                 if (!isCurrent()) return false;
             }
             return phase == BuildPhase.COMPLETE;
+        }
+
+        private static void logIronSourceFailure(Throwable failure) {
+            RSIntegrationMod.LOGGER.warn(
+                    "[RecipeCatalog] Iron spell dynamic source unavailable; retaining other recipe sources", failure);
+        }
+
+        private void indexIronSpellRecipe(IronSpellBooksRecipe recipe) {
+            long started = System.nanoTime();
+            if (!seen.add(recipe.getId())) return;
+            ItemStack output = recipe.getResultItem(level.registryAccess());
+            if (output.isEmpty()) return;
+            String machinePath = switch (recipe.machine()) {
+                case SCROLL_FORGE -> "scroll_forge";
+                case ARCANE_ANVIL -> "arcane_anvil";
+                case ALCHEMIST_CAULDRON -> "alchemist_cauldron";
+            };
+            index.computeIfAbsent(output.getItem(), key -> new ArrayList<>()).add(new Entry(
+                    recipe, ModType.byId("irons_spellbooks_" + machinePath),
+                    new ResourceLocation("irons_spellbooks", machinePath), true));
+            RecipeIndexDiagnostics.record("iron_spell_recipe",
+                    System.nanoTime() - started, recipe.getId(), recipe.machine(),
+                    recipe.getClass(), recipe.getIngredients().size(), index.size());
         }
 
         BuildInput input() {
@@ -732,7 +810,7 @@ public final class RecipeIndex {
         };
     }
 
-    /** Returns whether the immutable recipe graph can represent this recipe's inputs. */
+    /** 检查不可变配方图能否表示此配方的输入。 */
     public static boolean isBackgroundProjectable(Recipe<?> recipe) {
         if (recipe == null || RecursiveRecipePolicy.isExcluded(recipe)) return false;
         ModRecipeHandler handler = ModRecipeHandlers.claimFor(recipe).winner();
@@ -752,7 +830,7 @@ public final class RecipeIndex {
         return Collections.unmodifiableMap(frozen);
     }
 
-    /** Exact spell-level producers, avoiding a scan of every scroll recipe. */
+    /** 按法术和等级直接查找生产配方，无需遍历所有卷轴配方。 */
     public static List<Entry> spellScrollCandidates(Level level, ItemStack requested) {
         BuildResult ready = readyGeneration(level).result;
         var key = IronSpellBooksRecipeCatalog.spellScrollKey(requested);
@@ -766,12 +844,12 @@ public final class RecipeIndex {
         return Map.copyOf(frozen);
     }
 
-    /** Outputs with at least one indexed producer that uses a reusable catalyst. */
+    /** 至少有一条已索引配方使用可复用催化剂的产物。 */
     public static Set<ResourceLocation> reusableCatalystOutputIds(Level level) {
         return readyGeneration(level).result.catalystOutputs;
     }
 
-    /** Indexed crafting recipes containing at least one reusable catalyst input. */
+    /** 含有至少一种可复用催化剂的已索引配方。 */
     public static Set<ResourceLocation> reusableCatalystRecipeIds(Level level) {
         return readyGeneration(level).result.catalystRecipes;
     }
@@ -810,7 +888,7 @@ public final class RecipeIndex {
             if (id != null) typeId = id.toString();
             else if (recipe.getType() != null) typeId = recipe.getType().toString();
         } catch (RuntimeException ignored) {
-            // A broken third-party recipe type must not abort catalog creation.
+            // 第三方配方类型异常时，不中断其余目录的构建。
         }
         target.computeIfAbsent(typeId, ignored -> new UnknownRecipeTypeStats())
                 .record(recipe.getId());
@@ -875,46 +953,7 @@ public final class RecipeIndex {
         return count;
     }
 
-    private static int indexIronSpellBooks(Level level, Map<Item, List<Entry>> idx,
-                                           Set<ResourceLocation> seen) {
-        if (!ModList.get().isLoaded(ModIds.IRONS_SPELLBOOKS)
-                || !RSIntegrationConfig.ENABLE_IRONS_SPELLBOOKS.get()) return 0;
-        Collection<IronSpellBooksRecipe> recipes;
-        long catalogStarted = System.nanoTime();
-        try {
-            recipes = IronSpellBooksRecipeCatalog.allRecipes(level);
-        } catch (RuntimeException | LinkageError failure) {
-            RSIntegrationMod.LOGGER.warn(
-                    "[RecipeCatalog] Iron spell dynamic source unavailable; retaining other recipe sources", failure);
-            return 0;
-        }
-        RecipeIndexDiagnostics.record("iron_spell_catalog",
-                System.nanoTime() - catalogStarted, "<catalog>", "all",
-                IronSpellBooksRecipeCatalog.class, 0, recipes.size());
-        int count = 0;
-        for (var recipe : recipes) {
-            long recipeStarted = System.nanoTime();
-            if (!seen.add(recipe.getId())) continue;
-            ItemStack output = recipe.getResultItem(level.registryAccess());
-            if (output.isEmpty()) continue;
-            String machinePath = switch (recipe.machine()) {
-                case SCROLL_FORGE -> "scroll_forge";
-                case ARCANE_ANVIL -> "arcane_anvil";
-                case ALCHEMIST_CAULDRON -> "alchemist_cauldron";
-            };
-            String typeId = "irons_spellbooks_" + machinePath;
-            idx.computeIfAbsent(output.getItem(), key -> new ArrayList<>()).add(new Entry(
-                    recipe, ModType.byId(typeId), new ResourceLocation("irons_spellbooks",
-                    machinePath), true));
-            count++;
-            RecipeIndexDiagnostics.record("iron_spell_recipe",
-                    System.nanoTime() - recipeStarted, recipe.getId(), recipe.machine(),
-                    recipe.getClass(), recipe.getIngredients().size(), idx.size());
-        }
-        return count;
-    }
-
-    // ── FA ritual indexing ──────────────────────────────────────
+    // 禁忌与奥秘仪式索引
 
     private static volatile boolean faClassesProbed;
     private static volatile boolean faAvailable;
@@ -944,8 +983,7 @@ public final class RecipeIndex {
         }
     }
 
-    /** Create a HephaestusForgeBlock ItemStack with {@code upgradedTier}
-     *  applied via {@code setTierOnStack}, matching FA's own JEI display. */
+    /** 按原生 JEI 的方式，用 {@code setTierOnStack} 将升级等级写入锻炉物品。 */
     private static ItemStack rsi$makeFaUpgradeOutput(int upgradedTier) {
         try {
             if (faForgeBlockItem == null) {
@@ -969,8 +1007,7 @@ public final class RecipeIndex {
         }
     }
 
-    /** Fallback output for FA rituals whose {@code result()} is null or
-     *  has an unrecognized type (e.g. {@code apply_eternal_modifier}). */
+    /** 获取 {@code result()} 为空或产物类型未知时的仪式兜底产物。 */
     private static ItemStack rsi$faFallbackOutput(Object ritual, ResourceLocation id) {
         try {
             var m = Reflect.findMethod(ritual.getClass(), "mainIngredient", new Class<?>[0]);
@@ -990,10 +1027,7 @@ public final class RecipeIndex {
         return ItemStack.EMPTY;
     }
 
-    /**
-     * Scan {@code FARegistries.RITUAL} and add item-producing rituals
-     * to the index.  Returns the number of rituals indexed.
-     */
+    /** 索引 {@code FARegistries.RITUAL} 中有物品产物的仪式，返回入库数量。 */
     @SuppressWarnings("unchecked")
     private static int indexFARituals(Level level, Map<Item, List<Entry>> idx,
                                       Set<ResourceLocation> seen) {
@@ -1045,9 +1079,7 @@ public final class RecipeIndex {
                         continue;
                     }
 
-                    // Fallback: rituals that modify items in-place (e.g.
-                    // apply_eternal_modifier) may have null result.  Use
-                    // mainIngredient's first matching item as the output.
+                    // 原地修改物品的仪式可能没有显式产物，取主材料的首个匹配物品兜底。
                     if (output.isEmpty()) {
                         output = rsi$faFallbackOutput(ritual, id);
                     }
@@ -1069,7 +1101,7 @@ public final class RecipeIndex {
         return count;
     }
 
-    // ── Market entry indexing ──────────────────────────────────────
+    // 市场交易索引
 
     private static volatile boolean marketClassesProbed;
     private static volatile boolean marketAvailable;
@@ -1099,10 +1131,7 @@ public final class RecipeIndex {
         if (!marketAvailable || marketRegistryInst == null) return 0;
         int count = 0;
         try {
-            // Farming for Blockheads exposes these accessors as static methods
-            // in current releases. Resolve them from the declared registry
-            // class and invoke statically; older builds that used instance
-            // methods are handled by the instance fallback below.
+            // 优先调用注册表的静态访问方法，旧版本回退到实例方法。
             Class<?> registryClass = Class.forName(
                     "net.blay09.mods.farmingforblockheads.registry.MarketRegistry");
             Method getEntries = Reflect.findMethod(registryClass,
@@ -1117,9 +1146,7 @@ public final class RecipeIndex {
                             ? null : marketRegistryInst);
             Collection<Object> entries = (Collection<Object>) entriesValue;
             if (entries == null || entries.isEmpty()) {
-                // MarketRegistry exists but has no entries yet — may be built
-                // before MarketRegistryReloadEvent fires. Reset probe state so
-                // the next index rebuild can pick up entries loaded later.
+                // 市场重载事件可能还没触发，重置探测状态以便下次构建重新读取。
                 RSIntegrationMod.LOGGER.warn("[RecipeIndex] MarketRegistry has {} entries — will retry on next build",
                         entries == null ? "null" : "0");
                 marketClassesProbed = false;
@@ -1151,7 +1178,7 @@ public final class RecipeIndex {
 
                     if (output.isEmpty() || cost.isEmpty()) continue;
 
-                    // Skip identity entries (cost == output) — would create circular deps
+                    // 跳过成本和产物相同的交易，避免循环依赖。
                     if (ItemStack.isSameItem(output, cost)) continue;
 
                     ResourceLocation rid = new ResourceLocation(ModIds.FARMINGFORBLOCKHEADS, "market/" + uuid);
@@ -1174,7 +1201,7 @@ public final class RecipeIndex {
         return count;
     }
 
-    // ── Distant Worlds Firon Lithum Altar indexing ─────────────────
+    // Distant Worlds 祭坛配方索引
 
     private static int indexDistantWorldsFiron(Map<Item, List<Entry>> idx,
                                                 Set<ResourceLocation> seen) {
@@ -1196,20 +1223,15 @@ public final class RecipeIndex {
     }
 
     /**
-     * Returns true if the recipe's output item matches EVERY non-empty input
-     * item type.  A true identity recipe (e.g. CraftTweaker {@code .copy()})
-     * creates circular auto-crafting dependencies and must be skipped.
+     * 产物与所有非空输入的物品类型一致时，视为原样复制（如 CraftTweaker 的
+     * {@code .copy()}）。这种配方会造成自动合成循环依赖，必须跳过。
      *
-     * <p>Recipes where the output matches only SOME inputs (e.g. smithing
-     * transform: template + weapon + addition → modified weapon) are
-     * <em>not</em> identity — they consume a second distinct item and are
-     * therefore transformative, even if the output item type happens to
-     * match one of the input slots.</p>
+     * <p>产物只与部分输入同类时不算原样复制。例如锻造改造仍消耗模板和附加材料，
+     * 即使武器类型不变，也应保留配方。</p>
      */
     static boolean isIdentityRecipe(Recipe<?> recipe, ItemStack result,
                                             ModRecipeHandler handler) {
-        // NBT-bearing results indicate a transformation (charge, repair, clean,
-        // compress-with-NBT, etc.) — not a trivial identity recipe.
+        // 带 NBT 的产物可能经过充能、修复等变换，不视为原样复制。
         if (result.hasTag()) return false;
         Item resultItem = result.getItem();
         List<Ingredient> ingredients;
@@ -1239,7 +1261,7 @@ public final class RecipeIndex {
         return anyNonEmpty;
     }
 
-    /** Invalidate the cached index (e.g. on recipe reload). */
+    /** 使缓存索引失效，例如在配方重载时调用。 */
     public static synchronized void invalidate() {
         buildEpoch++;
         generation = null;

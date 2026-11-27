@@ -13,29 +13,35 @@ import net.minecraftforge.registries.ForgeRegistries;
 import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.LongStream;
 
 /** 配方和墨水映射来自运行中的法术注册表，兼容没有流体炼金锅的旧版本。 */
 final class IronAlchemistRecipes {
     private IronAlchemistRecipes() {}
 
-    static void addRecipes(Map<ResourceLocation, IronSpellBooksRecipe> recipes,
+    static void addRecipes(CatalogBuildSteps steps, Map<ResourceLocation, IronSpellBooksRecipe> recipes,
                            List<AbstractSpell> spells, List<InkItem> inks,
                            IronSpellCatalogDiagnostics diagnostics) {
-        for (InkItem ink : inks) {
+        steps.afterCurrent(() -> addRecycling(steps, recipes, spells, diagnostics));
+        steps.each(inks.iterator(), ink -> {
             FluidStack fluid = inkFluid(ink);
-            if (fluid.isEmpty()) continue;
+            if (fluid.isEmpty()) return;
             ResourceLocation inkId = ForgeRegistries.ITEMS.getKey(ink);
             ResourceLocation id = new ResourceLocation("rs_integration", "irons_spellbooks/bottle/" + inkId.getPath());
             recipes.put(id, IronSpellBooksRecipe.bottleRecipe(id, InkFluidSupport.token(fluid), new ItemStack(ink)));
-        }
+        });
+    }
+
+    private static void addRecycling(CatalogBuildSteps steps, Map<ResourceLocation, IronSpellBooksRecipe> recipes,
+                                     List<AbstractSpell> spells, IronSpellCatalogDiagnostics diagnostics) {
         try {
             Method inkFromScroll = Class.forName("io.redspace.ironsspellbooks.block.alchemist_cauldron.AlchemistCauldronTile")
                     .getMethod("getInkFromScroll", ItemStack.class);
-            for (AbstractSpell spell : spells) {
+            steps.each(spells.iterator(), spell -> {
                 diagnostics.read("alchemist_spell", spell.getClass().getName(), 0, () -> {
-                    for (int level = spell.getMinLevel(); level <= spell.getMaxLevel(); level++) {
-                        int scrollLevel = level;
-                        diagnostics.read("alchemist_scroll", spell.getClass().getName(), level, () -> {
+                    steps.each(LongStream.rangeClosed(spell.getMinLevel(), spell.getMaxLevel()).iterator(), level -> {
+                        int scrollLevel = level.intValue();
+                        diagnostics.read("alchemist_scroll", spell.getClass().getName(), scrollLevel, () -> {
                             ItemStack scroll = IronSpellBooksRecipeCatalog.scrollFor(spell, scrollLevel);
                             Object item = inkFromScroll.invoke(null, scroll);
                             if (!(item instanceof Item ink)) return null;
@@ -48,10 +54,10 @@ final class IronAlchemistRecipes {
                                     List.of(scroll), InkFluidSupport.token(fluid), spell.getSpellId()));
                             return null;
                         });
-                    }
+                    });
                     return null;
                 });
-            }
+            });
         } catch (ReflectiveOperationException | LinkageError failure) {
             RSIntegrationMod.LOGGER.warn("[RSI-IronSpells] 炼金锅卷轴回收配方不可用", failure);
         }
