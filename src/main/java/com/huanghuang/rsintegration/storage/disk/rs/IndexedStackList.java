@@ -27,7 +27,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.function.Supplier;
 
-/** 仅有统一盘的网络使用；精确索引与按来源统计避免同类 NBT 扫描及饱和减量丢失。 */
+/** 统一盘或无限盘的网络使用；实际库存按来源统计，无限供给单独投影。 */
 public final class IndexedStackList<T> implements IStackList<T> {
     private final class Entry {
         final FrozenKey key;
@@ -36,6 +36,7 @@ public final class IndexedStackList<T> implements IStackList<T> {
         int[] amounts = new int[2];
         SaturatedTree total = new SaturatedTree(2);
         boolean pending;
+        boolean infinite;
         Entry(FrozenKey key, UUID id) {
             this.key = key; view = new StackListEntry<>(id, stack(key, 0));
             sourceSlots.defaultReturnValue(-1);
@@ -115,6 +116,11 @@ public final class IndexedStackList<T> implements IStackList<T> {
         if (identity == null) return;
         Entry entry = ensure(resource, identity);
         if (entry == null) return;
+        if (source instanceof InfiniteDisk<?>) {
+            entry.infinite = true;
+            entry.pending = true;
+            return;
+        }
         int old = entry.source(source);
         if (source instanceof IExternalStorage<?>) {
             T current = source.extract(stack(entry.key, 1), Integer.MAX_VALUE, IComparer.COMPARE_NBT, Action.SIMULATE);
@@ -125,16 +131,20 @@ public final class IndexedStackList<T> implements IStackList<T> {
 
     private void reconcile(Entry entry) {
         entry.sourceSlots.clear(); entry.amounts = new int[2]; entry.total = new SaturatedTree(2);
+        entry.infinite = false;
         T template = stack(entry.key, 1);
         for (IStorage<T> storage : storages.get()) {
             if (storage.getAccessType() == AccessType.INSERT) continue;
             T found = storage.extract(template, Integer.MAX_VALUE, IComparer.COMPARE_NBT, Action.SIMULATE);
-            if (found != null && amount(found) > 0) entry.source(storage, amount(found));
+            if (found != null && amount(found) > 0) {
+                if (storage instanceof InfiniteDisk<?>) entry.infinite = true;
+                else entry.source(storage, amount(found));
+            }
         }
     }
 
     private StackListResult<T> publish(Entry entry, int before) {
-        int after = entry.total.total();
+        int after = entry.infinite ? Integer.MAX_VALUE : entry.total.total();
         amount(entry.view.getStack(), after);
         if (after == 0) {
             entries.remove(entry.key); ids.remove(entry.view.getId());
@@ -156,7 +166,8 @@ public final class IndexedStackList<T> implements IStackList<T> {
         int before = amount(entry.view.getStack());
         if (rebuilding || storages == null) {
             Object origin = rebuilding && rebuildSource != null ? rebuildSource : anonymous;
-            entry.source(origin, SaturatedTree.add(entry.source(origin), size));
+            if (origin instanceof InfiniteDisk<?>) entry.infinite = true;
+            else entry.source(origin, SaturatedTree.add(entry.source(origin), size));
         } else if (!entry.pending) reconcile(entry);
         return publish(entry, before);
     }
@@ -190,6 +201,10 @@ public final class IndexedStackList<T> implements IStackList<T> {
     @Override public T get(T source, int flags) { Entry entry = find(source, flags); return entry != null ? entry.view.getStack() : exceptional == null ? null : exceptional.get(source, flags); }
     @Override public StackListEntry<T> getEntry(T source, int flags) { Entry entry = find(source, flags); return entry != null ? entry.view : exceptional == null ? null : exceptional.getEntry(source, flags); }
     @Override public int getCount(T source, int flags) { T found = get(source, flags); return found == null ? 0 : amount(found); }
+    public int finiteCount(T source) {
+        Entry entry = find(source, IComparer.COMPARE_NBT);
+        return entry != null ? entry.total.total() : getCount(source, IComparer.COMPARE_NBT);
+    }
     @Override public T get(UUID id) { Entry entry = ids.get(id); return entry != null ? entry.view.getStack() : exceptional == null ? null : exceptional.get(id); }
     @Override public void clear() { entries.clear(); ids.clear(); types.clear(); rebuildSource = null; if (exceptional != null) exceptional.clear(); }
     @Override public boolean isEmpty() { return entries.isEmpty() && (exceptional == null || exceptional.isEmpty()); }

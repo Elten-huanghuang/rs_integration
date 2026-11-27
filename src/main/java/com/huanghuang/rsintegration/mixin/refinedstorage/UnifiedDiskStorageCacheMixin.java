@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.mixin.refinedstorage;
 
 import com.huanghuang.rsintegration.storage.disk.core.FrozenKey;
 import com.huanghuang.rsintegration.storage.disk.rs.IndexedStackList;
+import com.huanghuang.rsintegration.storage.disk.rs.InfiniteDisk;
 import com.huanghuang.rsintegration.storage.disk.rs.UnifiedDiskRoot;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
@@ -42,9 +43,9 @@ public abstract class UnifiedDiskStorageCacheMixin {
     @Inject(method = "sort", at = @At("RETURN"), require = 1)
     private void rsi$selectIndex(CallbackInfo ci) {
         IStorageCache<Object> cache = (IStorageCache<Object>) (Object) this;
-        boolean unified = cache.getStorages().stream().anyMatch(storage -> storage instanceof IStorageDisk<?> disk
-                && UnifiedDiskRoot.FACTORY_ID.equals(disk.getFactoryId()));
-        if (unified && !(list instanceof IndexedStackList<?>)) {
+        boolean needsIndex = cache.getStorages().stream().anyMatch(storage -> storage instanceof InfiniteDisk<?>
+                || storage instanceof IStorageDisk<?> disk && UnifiedDiskRoot.FACTORY_ID.equals(disk.getFactoryId()));
+        if (needsIndex && !(list instanceof IndexedStackList<?>)) {
             IndexedStackList<Object> indexed = new IndexedStackList<>((Object) this instanceof ItemStorageCache ? FrozenKey.Kind.ITEM : FrozenKey.Kind.FLUID, cache::getStorages);
             if (!rsi$rebuilding) {
                 indexed.beginRebuild();
@@ -56,7 +57,7 @@ public abstract class UnifiedDiskStorageCacheMixin {
                 indexed.endRebuild();
             }
             list = indexed;
-        } else if (!unified && list instanceof IndexedStackList<?>) {
+        } else if (!needsIndex && list instanceof IndexedStackList<?>) {
             IStackList<?> original = (Object) this instanceof ItemStorageCache ? new ItemStackList() : new FluidStackList();
             for (var entry : list.getStacks()) ((IStackList<Object>) original).add(entry.getStack());
             list = (IStackList<Object>) original;

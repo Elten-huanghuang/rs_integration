@@ -105,8 +105,7 @@ public final class RSJeiPlugin implements IModPlugin {
         fluidContainerRuntime = new FluidContainerJeiRuntime(jeiRuntime.getRecipeManager());
         MinecraftForge.EVENT_BUS.register(fluidContainerRuntime);
         jeiRuntime.getIngredientManager().removeIngredientsAtRuntime(VanillaTypes.ITEM_STACK,
-                List.of(new ItemStack(ModItems.ALCHEMIST_INK_FLUID.get()),
-                        new ItemStack(ModItems.INFINITY_WATER_DISK.get())));
+                List.of(new ItemStack(ModItems.ALCHEMIST_INK_FLUID.get())));
         unifiedDiskRemoved = false;
         refreshUnifiedDiskVisibility();
         TetraWorkbenchMaterialState.refreshForJei();

@@ -25,6 +25,10 @@ interface RefinedStorageDriver {
         return List.of();
     }
 
+    default List<FluidStack> infiniteFluids() {
+        return List.of();
+    }
+
     default Optional<StorageItemSubscription> subscribeItemChanges(StorageItemChangeListener listener) {
         return Optional.empty();
     }

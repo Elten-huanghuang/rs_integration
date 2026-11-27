@@ -1,13 +1,13 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
 
 import com.huanghuang.rsintegration.storage.disk.rs.IndexedStackList;
+import com.huanghuang.rsintegration.storage.disk.rs.InfiniteDisk;
 import com.huanghuang.rsintegration.util.ItemStackUtils;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.storage.IStorage;
 import com.refinedmods.refinedstorage.api.storage.cache.IStorageCache;
-import com.refinedmods.refinedstorage.api.storage.externalstorage.IExternalStorage;
 import com.refinedmods.refinedstorage.api.util.Action;
 import com.refinedmods.refinedstorage.apiimpl.network.Network;
 import net.minecraft.world.item.ItemStack;
@@ -36,6 +36,9 @@ public abstract class UnifiedDiskNetworkContributionMixin {
     @WrapOperation(method = {"extractItem", "extractFluid"}, at = @At(value = "INVOKE", target =
             "Lcom/refinedmods/refinedstorage/api/storage/IStorage;extract(Ljava/lang/Object;IILcom/refinedmods/refinedstorage/api/util/Action;)Ljava/lang/Object;"), require = 2)
     private Object rsi$extract(IStorage<Object> storage, Object resource, int amount, int flags, Action action, Operation<Object> original) {
+        if (storage instanceof InfiniteDisk<?> disk && !disk.online((INetwork) (Object) this)) {
+            return disk.empty();
+        }
         Object extracted = original.call(storage, resource, amount, flags, action);
         if (action == Action.PERFORM && extracted != null) {
             rsi$record(storage, extracted, -rsi$amount(extracted));

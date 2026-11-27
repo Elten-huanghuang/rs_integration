@@ -4,6 +4,7 @@ import com.huanghuang.rsintegration.RSIntegrationMod;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.storage.disk.core.FrozenKey;
 import com.huanghuang.rsintegration.storage.disk.rs.UnifiedDiskAmountResolver;
+import com.huanghuang.rsintegration.storage.disk.rs.InfiniteDisk;
 import com.huanghuang.rsintegration.magic.MagicResourceDirty;
 import com.huanghuang.rsintegration.magic.MagicResourceEndpoint;
 import com.huanghuang.rsintegration.magic.MagicResourceInteraction;
@@ -255,11 +256,21 @@ public final class UnifiedGridSession {
     }
 
     private long displayAmount(GridResourceKind kind, Object stack, long cachedAmount) {
+        if (isInfinite(kind, stack, cachedAmount)) {
+            return Long.MAX_VALUE;
+        }
         return kind == GridResourceKind.item()
                 ? UnifiedDiskAmountResolver.itemAmount(network,
                         (ItemStack) stack, cachedAmount)
                 : UnifiedDiskAmountResolver.fluidAmount(network,
                         (FluidStack) stack, cachedAmount);
+    }
+
+    private boolean isInfinite(GridResourceKind kind, Object stack, long cachedAmount) {
+        if (cachedAmount != Integer.MAX_VALUE) return false;
+        return kind == GridResourceKind.item()
+                ? InfiniteDisk.supplies(network, (ItemStack) stack)
+                : InfiniteDisk.supplies(network, (FluidStack) stack);
     }
 
     static long mergeExactAmount(@Nullable Long exact, long cachedAmount) {
@@ -343,7 +354,8 @@ public final class UnifiedGridSession {
                     keysById.put(stored.getId(), row.key);
                     long cached = Math.max(0L, kind.amount(stored.getStack()));
                     FrozenKey key = storedKey(kind, stored.getStack());
-                    row.amount = key == null ? cached
+                    row.amount = isInfinite(kind, stored.getStack(), cached)
+                            ? Long.MAX_VALUE : key == null ? cached
                             : mergeExactAmount(exactAmounts.get(key), cached);
                     row.tracker = tracker(stored.getStack());
                 }

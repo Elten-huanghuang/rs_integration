@@ -199,6 +199,10 @@ sourceSets {
         compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
         runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
     }
+    gametest {
+        compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+        runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
+    }
 }
 sourceSets.test.compileClasspath += sourceSets.apismoke.output
 sourceSets.test.runtimeClasspath += sourceSets.apismoke.output
@@ -233,6 +237,16 @@ apismokeJarTask.configure {
 
 minecraft {
     runs {
+        gameTestServer {
+            workingDirectory project.file('build/gametest')
+            property 'forge.enabledGameTestNamespaces', 'rs_integration'
+            mods {
+                rs_integration {
+                    source sourceSets.main
+                    source sourceSets.gametest
+                }
+            }
+        }
         client {
             mods {
                 rsi_api_smoke {

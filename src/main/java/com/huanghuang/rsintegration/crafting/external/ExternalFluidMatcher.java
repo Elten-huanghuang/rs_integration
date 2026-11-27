@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.storage.StoredFluid;
 
 import javax.annotation.Nullable;
 import java.util.List;
+import java.util.LinkedHashSet;
 import java.util.Map;
 
 final class ExternalFluidMatcher {
@@ -27,33 +28,30 @@ final class ExternalFluidMatcher {
                 ))
                 .toList();
         for (StorageFluidKey alternative : alternatives) {
-            long available = Math.max(
-                    0L,
-                    snapshot.countExact(alternative)
-                            - reserved.getOrDefault(alternative, 0L)
-            );
-            if (available >= requirement.amount()) return alternative;
+            if (canSupply(snapshot, reserved, alternative, requirement.amount())) return alternative;
         }
-        for (StoredFluid fluid : snapshot.fluids()) {
+        var candidates = new LinkedHashSet<>(snapshot.infiniteFluids());
+        for (StoredFluid fluid : snapshot.fluids()) candidates.add(fluid.key());
+        for (StorageFluidKey candidate : candidates) {
             boolean accepted = alternatives.stream().anyMatch(template ->
-                    template.fluidId().equals(fluid.key().fluidId())
+                    template.fluidId().equals(candidate.fluidId())
                             && switch (requirement.fluid().matchMode()) {
                         case ANY_IDENTITY -> true;
                         case EXACT_IDENTITY ->
-                                template.equals(fluid.key());
+                                template.equals(candidate);
                         case PARTIAL_IDENTITY ->
                                 ExternalRecipeProjection.compoundContains(
-                                        fluid.key().tag(), template.tag());
+                                        candidate.tag(), template.tag());
                     });
-            if (!accepted) continue;
-            long available = Math.max(
-                    0L,
-                    snapshot.countExact(fluid.key())
-                            - reserved.getOrDefault(fluid.key(), 0L)
-            );
-            if (available >= requirement.amount()) return fluid.key();
+            if (accepted && canSupply(snapshot, reserved, candidate, requirement.amount())) return candidate;
         }
         return null;
+    }
+
+    private static boolean canSupply(StorageFluidSnapshot snapshot, Map<StorageFluidKey, Long> reserved,
+                                     StorageFluidKey key, long amount) {
+        return snapshot.infiniteFluids().contains(key)
+                || snapshot.countExact(key) - reserved.getOrDefault(key, 0L) >= amount;
     }
 
     static void reserve(

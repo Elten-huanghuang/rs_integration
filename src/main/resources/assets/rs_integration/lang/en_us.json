@@ -1,4 +1,7 @@
 {
+  "advancement.rs_integration.skip_life.title": "Skip Life",
+  "advancement.rs_integration.skip_life.description": "Successfully craft an item using recursive crafting.",
+  "item.rs_integration.skip_life_icon": "Skip Life",
   "rsi.common.all": "All",
   "rsi.common.items": "Items",
   "rsi.common.favorite": "Favorite",
@@ -259,6 +262,9 @@
   "item.rs_integration.fluid_refund": "Fluid Refund Item",
   "item.rs_integration.fluid_refund.named": "%s Refund Item",
   "item.rs_integration.infinity_water_disk": "Infinity Water Disk",
+  "item.rs_integration.infinity_water_disk.tooltip": "Provides unlimited water when installed in an online RS disk drive.",
+  "item.rs_integration.infinity_lava_disk": "Infinity Lava Disk",
+  "item.rs_integration.infinity_lava_disk.tooltip": "Provides unlimited lava when installed in an online RS disk drive.",
   "item.rs_integration.unified_storage_disk": "Myriad Realms Guixu Disk",
   "item.rs_integration.unified_storage_disk.desc": "Stores long-quantity items and fluids in a standard RS disk drive",
   "item.rs_integration.unified_storage_disk.limit": "Up to 9,223,372,036,854,775,807 per exact entry; native RS operations use int chunks",

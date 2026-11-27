@@ -1961,6 +1961,10 @@ public final class ConsumerCraftingRuntime {
                             SaturatingLongMath::add
                     );
                 }
+                for (var key : fluidSnapshot.infiniteFluids()) {
+                    availableResources.put(MaterialRef.fluid(key.fluidId(), CanonicalNbt.exactSnbt(key.tag())),
+                            Long.MAX_VALUE);
+                }
             }
         }
         CraftPlanningApplicationService.BindingAwareGraph bindingGraph =

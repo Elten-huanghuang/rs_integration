@@ -1,5 +1,6 @@
 package com.huanghuang.rsintegration.mixin.refinedstorage;
 
+import com.huanghuang.rsintegration.storage.disk.rs.InfiniteDisk;
 import com.huanghuang.rsintegration.storage.disk.rs.UnifiedDiskRoot;
 import com.huanghuang.rsintegration.storage.disk.rs.UnifiedMountCoordinator;
 import com.huanghuang.rsintegration.storage.disk.rs.UnifiedDiskItem;
@@ -75,6 +76,11 @@ public abstract class UnifiedDiskDriveMixin {
         DiskDriveNetworkNode node = (DiskDriveNetworkNode) (Object) this;
         DiskState[] states = cir.getReturnValue();
         for (int slot = 0; slot < states.length; slot++) {
+            if (node.getItemDisks()[slot] instanceof InfiniteDisk<?> || node.getFluidDisks()[slot] instanceof InfiniteDisk<?>) {
+                // 供给盘没有可写容量，避免 RS 将 0/0 识别为满盘。
+                if (states[slot] != DiskState.DISCONNECTED) states[slot] = DiskState.NORMAL;
+                continue;
+            }
             ItemStack physical = node.getDisks().getStackInSlot(slot);
             if (!(physical.getItem() instanceof UnifiedDiskItem item)) continue;
             if (node.getItemDisks()[slot] == null || node.getFluidDisks()[slot] == null) { states[slot] = DiskState.DISCONNECTED; continue; }

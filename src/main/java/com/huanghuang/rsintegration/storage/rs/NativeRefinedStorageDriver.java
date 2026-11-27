@@ -5,6 +5,8 @@ import com.huanghuang.rsintegration.crafting.TaskOutputReception;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.storage.disk.core.FrozenKey;
 import com.huanghuang.rsintegration.storage.disk.rs.UnifiedDiskAmountResolver;
+import com.huanghuang.rsintegration.storage.disk.rs.IndexedStackList;
+import com.huanghuang.rsintegration.storage.disk.rs.InfiniteDisk;
 import com.huanghuang.rsintegration.mods.ironsspellbooks.InkFluidSupport;
 import com.huanghuang.rsintegration.storage.StoragePermission;
 import com.huanghuang.rsintegration.storage.StorageItemChangeListener;
@@ -166,11 +168,29 @@ final class NativeRefinedStorageDriver implements RefinedStorageDriver {
 
     @Override
     public long exactStoredAmount(ItemStack stack, long nativeAmount) {
+        // 共振下单通过流体凭据查询可提取量，实际取料仍走网络和任务账本。
+        if (InkFluidSupport.isToken(stack)) {
+            return availableFluidAmount(InkFluidSupport.fluid(stack), nativeAmount);
+        }
+        if (nativeAmount == Integer.MAX_VALUE && InfiniteDisk.supplies(network, stack)) return Long.MAX_VALUE;
         return UnifiedDiskAmountResolver.itemAmount(network, stack, nativeAmount);
     }
 
     @Override
+    public List<FluidStack> infiniteFluids() {
+        return InfiniteDisk.onlineFluids(network);
+    }
+
+    private long availableFluidAmount(FluidStack stack, long nativeAmount) {
+        return InfiniteDisk.supplies(network, stack) ? Long.MAX_VALUE : exactStoredFluidAmount(stack, nativeAmount);
+    }
+
+    @Override
     public long exactStoredFluidAmount(FluidStack stack, long nativeAmount) {
+        IStorageCache<FluidStack> cache = network.getFluidStorageCache();
+        if (cache != null && cache.getList() instanceof IndexedStackList<FluidStack> indexed) {
+            nativeAmount = indexed.finiteCount(stack);
+        }
         return UnifiedDiskAmountResolver.fluidAmount(network, stack, nativeAmount);
     }
 
@@ -230,7 +250,7 @@ final class NativeRefinedStorageDriver implements RefinedStorageDriver {
                     var list = fluidCache.getList();
                     var entry = list == null ? null : list.getEntry(changed, IComparer.COMPARE_NBT);
                     FluidStack cached = entry == null ? null : entry.getStack();
-                    long amount = exactStoredFluidAmount(changed, cached == null ? 0L : cached.getAmount());
+                    long amount = availableFluidAmount(changed, cached == null ? 0L : cached.getAmount());
                     listener.onFluidChanged(changed, Math.max(0L, amount));
                 } catch (RuntimeException | LinkageError failure) {
                     listener.onInvalidated();
