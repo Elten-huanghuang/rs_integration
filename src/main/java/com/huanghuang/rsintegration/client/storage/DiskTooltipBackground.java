@@ -21,7 +21,7 @@ import java.util.List;
 /**
  * 为 RSI 的特殊物品提示绘制动态底板。
  *
- * <p>原版 tooltip 背景只支持上下两种颜色。这里先绘制星云底图和流动星芒，
+ * <p>原版 tooltip 背景只支持上下两种颜色。这里先绘制主题底图，
  * 再把原版底板设为透明，使文字和布局仍然由原版负责。</p>
  */
 @OnlyIn(Dist.CLIENT)
@@ -69,6 +69,10 @@ public final class DiskTooltipBackground {
     private static final Theme VOID = new Theme(
             texture("resonance_nebula"), 0xFFBB9DE2, 0xFFEAC7F6,
             0xFFA997CA, 0xFFC4ABD9, Artwork.VOID);
+    private static final Theme INFINITE_WATER = new Theme(
+            texture("water_disk_story"), 0, 0, 0xFF599BA7, 0xFF355C77, Artwork.FLUID_STORY);
+    private static final Theme INFINITE_LAVA = new Theme(
+            texture("lava_disk_story"), 0, 0, 0xFFB97859, 0xFF64435B, Artwork.FLUID_STORY);
 
     private DiskTooltipBackground() {}
 
@@ -164,6 +168,8 @@ public final class DiskTooltipBackground {
                 RSIntegrationConfig.TOOLTIP_CUSTOM_BACKGROUNDS)) return null;
         if (id == null || !MOD_ID.equals(id.getNamespace())) return null;
         return switch (id.getPath()) {
+            case "infinity_water_disk" -> INFINITE_WATER;
+            case "infinity_lava_disk" -> INFINITE_LAVA;
             case "resonance_storage_disk" -> RESONANCE_DISK;
             case "resonance_network_generator" -> RESONANCE;
             case "unified_storage_disk" -> GUIXU;
@@ -241,6 +247,8 @@ public final class DiskTooltipBackground {
                         phase + 3.1, 0.53, 0.30, 0.14, theme.glowA());
             } else if (theme.artwork() == Artwork.EXPERIENCE || theme.artwork() == Artwork.FOOD) {
                 ItemTooltipArt.draw(graphics, left, top, width, height, theme, phase);
+            } else if (theme.artwork() == Artwork.FLUID_STORY) {
+                FluidDiskTooltipArt.draw(graphics, theme.background(), left, top, width, height);
             } else {
                 EquipmentTooltipArt.draw(graphics, left, top, width, height, theme, phase);
             }
@@ -393,7 +401,7 @@ public final class DiskTooltipBackground {
         return red << 16 | green << 8 | blue;
     }
 
-    enum Artwork { NEBULA, RESONANCE, GUIXU, EXPERIENCE, FOOD, MANA, SOURCE, DIMENSION, VOID }
+    enum Artwork { NEBULA, RESONANCE, GUIXU, EXPERIENCE, FOOD, MANA, SOURCE, DIMENSION, VOID, FLUID_STORY }
 
     record Theme(ResourceLocation background, int glowA, int glowB,
                  int borderA, int borderB, Artwork artwork) {}

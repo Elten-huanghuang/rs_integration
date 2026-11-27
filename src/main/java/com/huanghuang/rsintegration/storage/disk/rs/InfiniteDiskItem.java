@@ -67,6 +67,7 @@ public final class InfiniteDiskItem extends Item implements IStorageDiskProvider
 
     @Override
     public void appendHoverText(ItemStack stack, @Nullable Level level, List<Component> tooltip, TooltipFlag flag) {
-        tooltip.add(Component.translatable(getDescriptionId() + ".tooltip"));
+        tooltip.add(Component.translatable(getDescriptionId() + ".tooltip")
+                .withStyle(style -> style.withColor(0xEDF1F4)));
     }
 }
