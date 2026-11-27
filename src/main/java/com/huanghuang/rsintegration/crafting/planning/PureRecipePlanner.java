@@ -1770,40 +1770,27 @@ public final class PureRecipePlanner {
             // 大候选集共享有界局部探测，避免首个分支先支付整图分析成本。
             boolean useReachability = pruneUnseeded
                     && candidates.size() >= REACHABILITY_PRECHECK_MIN_CANDIDATES;
-            // Reachability is only a heuristic: it is based on the initial stock
-            // snapshot and cannot see dynamic/NBT-sensitive outputs produced while
-            // solving this plan. Keep the fast filter in the common case, but fall
-            // back to all producers when it would remove every candidate. This
-            // prevents false "missing material" results without making every broad
-            // recipe search traverse the entire graph.
-            List<RecipeNode> ordered = candidates.stream()
-                    .filter(candidate -> isForcedCandidate(wanted, candidate)
-                            || !pruneUnseeded || hasAllInputsInStock(candidate)
-                            || (useReachability
-                            ? reachability().canReach(candidate)
-                            : hasLocalSeedPath(candidate, new HashSet<>(),
-                            new int[] { limits.seedProbeMaxNodes() })))
-                    .collect(Collectors.toCollection(ArrayList::new));
-            // Seeded reachability is only an ordering hint. A partially stocked direct
-            // recipe must still be attempted so its concrete missing inputs can be
-            // reported instead of letting a sibling reverse conversion mark the whole
-            // search as cyclic.
-            candidates.stream()
-                    .filter(this::hasAnyInputInStock)
-                    .filter(candidate -> !ordered.contains(candidate))
-                    .forEach(ordered::add);
-            if (ordered.isEmpty() && !candidates.isEmpty()) {
-                // A conservative escape hatch for stale reachability results:
-                // require at least one concrete stock seed before reopening a
-                // candidate.  A recipe whose inputs are all absent would only
-                // create an unproductive empty-material search.
-                candidates.stream()
-                        .filter(this::hasAnyInputInStock)
-                        .forEach(ordered::add);
+            // 只在本次排序期间共享库存读数；回溯或进入下一需求时重新读取。
+            Map<IngredientRef, Long> counts = useReachability ? new HashMap<>() : null;
+            List<RecipeNode> ordered = new ArrayList<>();
+            Set<RecipeNode> partial = null;
+            for (RecipeNode candidate : candidates) {
+                if (counts != null) checkBudget();
+                if (!pruneUnseeded || isForcedCandidate(wanted, candidate)
+                        || hasAllInputsInStock(candidate, counts)
+                        || (useReachability ? reachability().canReach(candidate)
+                                : hasLocalSeedPath(candidate, new HashSet<>(), new int[] { limits.seedProbeMaxNodes() }))) {
+                    ordered.add(candidate);
+                } else if (hasAnyInputInStock(candidate)) {
+                    // 保留旧排序的次级候选及登记顺序，不再逐条扫描已选中的配方。
+                    if (partial == null) partial = new LinkedHashSet<>();
+                    partial.add(candidate);
+                }
             }
+            if (partial != null) ordered.addAll(partial);
             if (ordered.size() < 2) return ordered;
             List<CandidateScore> scores = new ArrayList<>(ordered.size());
-            for (RecipeNode candidate : ordered) scores.add(new CandidateScore(candidate));
+            for (RecipeNode candidate : ordered) scores.add(new CandidateScore(candidate, counts));
             Comparator<CandidateScore> coverage = Comparator
                     .comparingDouble((CandidateScore score) -> score.coverage).reversed();
             Comparator<CandidateScore> dependencyCost = Comparator
@@ -1833,9 +1820,9 @@ public final class PureRecipePlanner {
             private int alternativeCount = -1;
             private String recipeId;
 
-            private CandidateScore(RecipeNode candidate) {
+            private CandidateScore(RecipeNode candidate, @Nullable Map<IngredientRef, Long> counts) {
                 this.candidate = candidate;
-                coverage = inputStockCoverage(candidate);
+                coverage = inputStockCoverage(candidate, counts);
             }
 
             private int dependencyCost() {
@@ -1909,8 +1896,12 @@ public final class PureRecipePlanner {
                     .sum();
         }
 
-        private boolean hasAllInputsInStock(RecipeNode candidate) {
-            return candidate.inputs().stream().allMatch(input -> stockAcross(input) >= input.count());
+        private long rankingStock(IngredientRef input, @Nullable Map<IngredientRef, Long> counts) {
+            return counts == null ? stockAcross(input) : counts.computeIfAbsent(input, this::stockAcross);
+        }
+
+        private boolean hasAllInputsInStock(RecipeNode candidate, @Nullable Map<IngredientRef, Long> counts) {
+            return candidate.inputs().stream().allMatch(input -> rankingStock(input, counts) >= input.count());
         }
 
         /**
@@ -2024,12 +2015,12 @@ public final class PureRecipePlanner {
             return reachability();
         }
 
-        private double inputStockCoverage(RecipeNode candidate) {
+        private double inputStockCoverage(RecipeNode candidate, @Nullable Map<IngredientRef, Long> counts) {
             long required = 0L;
             long covered = 0L;
             for (IngredientRef input : normalizedInputs(candidate)) {
                 required += input.count();
-                covered += Math.min(input.count(), stockAcross(input));
+                covered += Math.min(input.count(), rankingStock(input, counts));
             }
             return required <= 0L ? 1.0D : (double) covered / (double) required;
         }

@@ -6,6 +6,7 @@ import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.NbtMatchMode;
+import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.RecipeNode;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
@@ -27,6 +28,27 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class ImmutableRecipeGraphProjectorTest extends BootstrapTest {
+    @Test
+    void matchingBucketKeepsBothProducersAndOnlySpecializesTargetableDynamicOutputs() {
+        var wanted = material("{grade:1}");
+        var other = material("{grade:2}");
+        var unknown = new MaterialRef(wanted.itemId(), "", true);
+        var inputs = List.of(any(material("")));
+        var first = new RecipeNode(ResourceLocation.parse("test:a"), wanted, 1, inputs);
+        var second = new RecipeNode(ResourceLocation.parse("test:b"), wanted, 2, inputs);
+        var wrong = new RecipeNode(ResourceLocation.parse("test:c"), other, 1, inputs);
+        var opaque = new RecipeNode(ResourceLocation.parse("test:d"), unknown, 1, inputs);
+        var dynamic = new RecipeNode(ResourceLocation.parse("test:e"), unknown, 1, inputs,
+                "generic", ResourceLocation.parse("minecraft:crafting"), List.of(), false, true);
+        var graph = new ImmutableRecipeGraph(Map.of(wanted, List.of(second, first), other, List.of(wrong),
+                unknown, List.of(opaque, dynamic)));
+
+        var result = ImmutableRecipeGraphProjector.candidates(graph, wanted, NbtMatchMode.EXACT);
+        assertEquals(List.of(second, first), result.stream().filter(node -> node == first || node == second).toList());
+        assertEquals(3, result.size());
+        assertTrue(result.stream().anyMatch(node -> node.recipeId().equals(dynamic.recipeId()) && node.output().equals(wanted)));
+    }
+
     @Test
     void installedStampContextLeavesCopperShortageVisibleInRecursiveGraph() {
         ResourceLocation recipeId = new ResourceLocation("embers", "stamping/copper_aspectus");

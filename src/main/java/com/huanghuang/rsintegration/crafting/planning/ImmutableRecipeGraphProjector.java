@@ -862,10 +862,14 @@ public final class ImmutableRecipeGraphProjector {
         IngredientRef demand = new IngredientRef(List.of(wanted), 1, mode);
         List<RecipeNode> candidates = new ArrayList<>();
         for (MaterialRef output : PlanningLookupCache.outputVariants(graph, wanted.itemId())) {
-            for (RecipeNode recipe : graph.recipesByOutput().get(output)) {
-                if (matchesIngredient(output, demand)) {
-                    candidates.add(recipe);
-                } else if ("smithing".equals(recipe.modTypeId())
+            List<RecipeNode> producers = graph.recipesByOutput().get(output);
+            // 桶键包含完整产物身份。只有不直接匹配时才逐配方验证动态或继承产物。
+            if (matchesIngredient(output, demand)) {
+                candidates.addAll(producers);
+                continue;
+            }
+            for (RecipeNode recipe : producers) {
+                if ("smithing".equals(recipe.modTypeId())
                         || mode == NbtMatchMode.SLASHBLADE && recipe.output().constrainedNbt()) {
                     RecipeNode specialized = withDemandedOutput(recipe, wanted, mode);
                     if (specialized != null && matchesIngredient(specialized.output(), demand)) {
