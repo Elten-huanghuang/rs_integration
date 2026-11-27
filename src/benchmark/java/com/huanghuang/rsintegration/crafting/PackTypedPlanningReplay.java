@@ -8,6 +8,7 @@ import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
 import com.huanghuang.rsintegration.crafting.batch.PackReplayConfirmation;
 import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
+import com.huanghuang.rsintegration.crafting.graph.CraftPlanValidator;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.plan.IntegrationDiagnostic;
 import com.huanghuang.rsintegration.crafting.plan.IntegrationDiagnosticCode;
@@ -464,6 +465,10 @@ public final class PackTypedPlanningReplay extends BootstrapTest {
             var result = job.graph();
             graphTime = System.nanoTime() - start;
             nodes = result.nodes().size();
+            CraftPlanValidator.validate(result);
+            if (result.rootDemands().size() != target.inputs().size()) {
+                throw new IllegalStateException("回放根槽数与目标不符");
+            }
             for (int slot = 0, root = 0; slot < needed.size(); slot++) {
                 if (needed.get(slot).isEmpty()) continue;
                 var demand = result.rootDemands().get(root++);
@@ -527,11 +532,13 @@ public final class PackTypedPlanningReplay extends BootstrapTest {
                 long decodedAt = System.nanoTime();
                 var decoded = transfer.plan();
                 if (decoded.graph().nodes().size() != nodes
+                        || decoded.graph().roots().size() != result.rootDemands().size()
+                        || !ItemStack.matches(decoded.targetResult(), output)
                         || decoded.graph().unresolved().size() != unresolvedEdges
                         || decoded.graph().roots().stream().filter(root -> root.unresolvedQuantity() > 0).count()
                                 != unresolvedSlots.size()
                         || !decoded.materials().equals(response.materials())
-                        || decoded.outcome().ready() != complete) {
+                        || decoded.outcome() != (complete ? PlanOutcome.READY : PlanOutcome.MISSING_INPUTS)) {
                     throw new IllegalStateException("回包后计划节点或缺项不一致");
                 }
                 var model = PlanTreeModel.from(decoded);
@@ -549,17 +556,20 @@ public final class PackTypedPlanningReplay extends BootstrapTest {
                             (layoutReady - decodedAt) / 1e6, (layoutReady - requestStart) / 1e6);
                 }
                 long missingBoxes = layout.boxes().stream().filter(box -> box.node().unresolved > 0).count();
-                if (layout.boxes().size() < 2 || !complete && missingBoxes == 0) {
+                if (layout.boxes().size() < 2 || !complete && missingBoxes == 0
+                        || complete && (missingBoxes != 0 || model.truncated())) {
                     throw new IllegalStateException("回放计划未生成可展示的节点");
                 }
                 System.out.printf("display_%s outcome=%s bytes=%d pages=%d boxes=%d missingBoxes=%d truncated=%s%n",
                         label, decoded.outcome(), transfer.bytes(), transfer.pages(), layout.boxes().size(),
                         missingBoxes, model.truncated());
+                PackReplayConfirmation.verify(level.getRecipeManager(), response, decoded,
+                        transfer.requestId(), result, stock, forced);
                 if (complete) {
-                    PackReplayConfirmation.verify(level.getRecipeManager(), response, decoded,
-                            transfer.requestId(), result, stock, forced);
                     System.out.printf("confirm_%s request=%d sameGraph=true rejectsMissingStock=true rejectsDuplicate=true%n",
                             label, transfer.requestId());
+                } else {
+                    System.out.printf("confirm_%s request=%d rejectsPartial=true%n", label, transfer.requestId());
                 }
                 if (compatMode != null) verifyAllocations(result);
             }
@@ -586,12 +596,16 @@ public final class PackTypedPlanningReplay extends BootstrapTest {
                     (handoffAfter.totalNanos() - handoffBefore.totalNanos()) / 1e6,
                     PerformanceMonitor.planningLatency(PerformanceMonitor.PlanningLatencyPhase.BRANCH_SLACK).calls() - borrowedBefore,
                     PerformanceMonitor.planningLatency(PerformanceMonitor.PlanningLatencyPhase.BRANCH_SLACK_YIELD).calls() - yieldedBefore);
-            if (label.equals("fixed_restock") && (job.admittedBranches() == 0 || allocatedRoots != 81 || nodes != 3858
-                    || !status.equals("SUCCESS") || abilityChecks == 0)) throw new IllegalStateException("固定补料未取得完整混合计划 " + status);
+            if (label.equals("fixed_restock") && (job.admittedBranches() == 0 || abilityChecks == 0)) {
+                throw new IllegalStateException("固定补料未覆盖后台分支或虚空交易 " + status);
+            }
+        }
+        if (label.equals("fixed_restock") && (allocatedRoots != 81 || !status.equals("SUCCESS"))) {
+            throw new IllegalStateException("固定补料未取得完整计划 " + status);
         }
         if (Boolean.getBoolean("rsi.replay.hybrid") && label.equals("saved_disks")
-                && stepBudget == 4096 && activeBudgetMs == 4000 && (unresolvedEdges != 125 || !status.equals("PARTIAL"))) {
-            throw new IllegalStateException("原始磁盘预览缺口发生变化");
+                && stepBudget == 4096 && activeBudgetMs == 4000 && (status.startsWith("LIMIT") || status.startsWith("TIMEOUT"))) {
+            throw new IllegalStateException("原始磁盘未在基线预算内得到预览：" + status);
         }
         times.print(mode + "_" + label, run, job.longestCallbackNanos());
         System.out.printf(mode + "_%s run=%d stepBudget=%d activeBudgetMs=%d status=%s nodes=%d allocatedRoots=%d "

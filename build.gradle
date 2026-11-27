@@ -526,6 +526,7 @@ tasks.register('packPlanningReplay', JavaExec) {
     systemProperty 'rsi.replay.activeMs', providers.gradleProperty('packPlanningActiveMs').getOrElse('4000')
     systemProperty 'rsi.replay.restock', providers.gradleProperty('packPlanningRestock').getOrElse('false')
     systemProperty 'rsi.replay.hybrid', providers.gradleProperty('packPlanningHybrid').getOrElse('false')
+    systemProperty 'rsi.replay.scenario', providers.gradleProperty('packPlanningScenario').getOrElse('all')
     systemProperty 'rsi.replay.compatCompare', providers.gradleProperty('packPlanningCompatCompare').getOrElse('false')
     systemProperty 'rsi.replay.rounds', providers.gradleProperty('packPlanningRounds').getOrElse('3')
     systemProperty 'rsi.replay.skipPure', providers.gradleProperty('packPlanningSkipPure').getOrElse('false')

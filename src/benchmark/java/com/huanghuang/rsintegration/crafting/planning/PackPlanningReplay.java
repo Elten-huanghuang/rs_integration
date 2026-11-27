@@ -61,6 +61,11 @@ public final class PackPlanningReplay {
 
     public static void main(String[] args) throws Exception {
         if (args[0].isBlank()) throw new IllegalArgumentException("需要 -PpackPlanningPath");
+        String scenario = System.getProperty("rsi.replay.scenario", "all");
+        if (!Set.of("all", "saved_disks", "fixed_restock").contains(scenario)
+                || !scenario.equals("all") && !Boolean.getBoolean("rsi.replay.hybrid")) {
+            throw new IllegalArgumentException("独立场景需要 packPlanningHybrid=true 和 saved_disks 或 fixed_restock");
+        }
         Path root = Path.of(args[0]);
         PackPlanningReplay replay = new PackPlanningReplay();
         replay.enabledEnigmaticItems = readEnigmaticOptions(root);
@@ -76,7 +81,7 @@ public final class PackPlanningReplay {
         if (node.waitFor() != 0) throw new IOException("KubeJS 配方提取失败");
         replay.applyScripts(scripts);
         replay.applyCraftTweaker(root.resolve("scripts/wujin.zs"));
-        replay.solve(root, scripts, args.length > 2 && Boolean.parseBoolean(args[2]));
+        replay.solve(root, scripts, args.length > 2 && Boolean.parseBoolean(args[2]), scenario);
     }
 
     private static Set<String> readEnigmaticOptions(Path root) throws IOException {
@@ -203,7 +208,8 @@ public final class PackPlanningReplay {
         raw.put(CATALYST_RECIPE, recipe);
     }
 
-    private void solve(Path root, JsonObject scripts, boolean typed) throws IOException {
+    private void solve(Path root, JsonObject scripts, boolean typed, String scenario) throws IOException {
+        boolean all = scenario.equals("all");
         Map<MaterialRef, List<RecipeNode>> recipes = new LinkedHashMap<>();
         Map<String, Set<String>> unprojectedOutputs = new HashMap<>();
         int skipped = 0;
@@ -246,7 +252,7 @@ public final class PackPlanningReplay {
         var uncovered = coverage.uncovered() == null ? "-" : coverage.uncovered().itemId().toString();
         System.out.printf("offline_projection coverage=%s uncovered=%s omittedTypes=%s%n",
                 coverage.status(), uncovered, unprojectedOutputs.getOrDefault(uncovered, Set.of()));
-        solveCase("saved_disks", graph, target, stock, forced, unprojectedOutputs);
+        if (all) solveCase("saved_disks", graph, target, stock, forced, unprojectedOutputs);
         Map<MaterialRef, Long> frontier = new HashMap<>();
         graph.recipesById().values().forEach(node -> node.inputs().forEach(input ->
                 input.alternatives().forEach(item -> {
@@ -262,7 +268,7 @@ public final class PackPlanningReplay {
                 .filter(item -> unprojectedOutputs.containsKey(item.itemId().toString())).count();
         System.out.printf("hypothetical_frontier_keys=%d unprojected_frontier_keys=%d%n",
                 frontier.size(), unprojectedFrontier);
-        solveCase("synthetic_frontier", graph, target, frontier, forced, unprojectedOutputs);
+        if (all) solveCase("synthetic_frontier", graph, target, frontier, forced, unprojectedOutputs);
         Map<MaterialRef, Long> gathered = new HashMap<>(frontier);
         // 压缩/解压存在闭环，是否有直接生产配方不能判定物品能否自然取得。
         for (String tag : List.of("forge:ores", "forge:raw_materials", "minecraft:logs")) {
@@ -279,7 +285,7 @@ public final class PackPlanningReplay {
         }
         System.out.println("assumed_direct_drops=" + directDrops);
         System.out.println("gathered_resource_keys=" + (gathered.size() - frontier.size()));
-        solveCase("synthetic_gathered", graph, target, gathered, forced, unprojectedOutputs);
+        if (all) solveCase("synthetic_gathered", graph, target, gathered, forced, unprojectedOutputs);
         Map<MaterialRef, List<RecipeNode>> abilityRecipes = new LinkedHashMap<>(recipes);
         for (var entry : raw.entrySet()) {
             if (!VOID_FAVOR.equals(text(entry.getValue().get("type")))) continue;
@@ -292,8 +298,12 @@ public final class PackPlanningReplay {
         }
         var abilityGraph = ImmutableRecipeGraphProjector.restrictToDependencies(
                 new ImmutableRecipeGraph(abilityRecipes), targetId);
-        inspectMissingMaterialRoutes(graph, abilityGraph, target, stock, forced);
-        if (cauldronBrewing) verifyFireShardSupply(abilityGraph);
+        if (scenario.equals("saved_disks")) {
+            runSavedDisks(graph, abilityGraph, target, stock, forced, forcedGraph, incomplete, coverage);
+            return;
+        }
+        if (all) inspectMissingMaterialRoutes(graph, abilityGraph, target, stock, forced);
+        if (cauldronBrewing && all) verifyFireShardSupply(abilityGraph);
         // 使用同一组物资，只将现在可以规划的虚空交易产物从假设供料中移除。
         Map<MaterialRef, Long> abilityStock = new HashMap<>(gathered);
         int virtualRecipes = 0;
@@ -304,7 +314,7 @@ public final class PackPlanningReplay {
             }
         }
         System.out.println("hypothetical_void_favor_recipes=" + virtualRecipes);
-        solveCase("synthetic_gathered_with_void_favor", abilityGraph, target, abilityStock, forced, unprojectedOutputs);
+        if (all) solveCase("synthetic_gathered_with_void_favor", abilityGraph, target, abilityStock, forced, unprojectedOutputs);
         // Malum 的末影人和烈焰人灵魂数据允许这三种灵魂直接采集。
         Map<MaterialRef, Long> spiritStock = new HashMap<>(abilityStock);
         List<String> spiritDrops = List.of("malum:eldritch_spirit", "malum:arcane_spirit", "malum:infernal_spirit");
@@ -312,7 +322,7 @@ public final class PackPlanningReplay {
             spiritStock.putIfAbsent(material(id), 1_000_000_000_000L);
         }
         System.out.println("assumed_spirit_drops=" + spiritDrops);
-        solveCase("synthetic_gathered_with_spirits", abilityGraph, target, spiritStock, forced, unprojectedOutputs);
+        if (all) solveCase("synthetic_gathered_with_spirits", abilityGraph, target, spiritStock, forced, unprojectedOutputs);
         Map<MaterialRef, Long> expandedGathered = new HashMap<>(spiritStock);
         // 成熟马铃薯、凋灵骷髅和下界矿脉都有外部获取来源，即使整合包同时注册了生产路线。
         List<String> additionalDrops = List.of(
@@ -321,7 +331,7 @@ public final class PackPlanningReplay {
             expandedGathered.putIfAbsent(material(id), 1_000_000_000_000L);
         }
         System.out.println("assumed_additional_drops=" + additionalDrops);
-        solveCase("synthetic_expanded_gathered", abilityGraph, target, expandedGathered, forced, unprojectedOutputs);
+        if (all) solveCase("synthetic_expanded_gathered", abilityGraph, target, expandedGathered, forced, unprojectedOutputs);
         Map<MaterialRef, Long> farmStock = new HashMap<>(expandedGathered);
         // 农夫乐事作物的方块掉落表、原版采集和酿造材料；余烬精华来自火焰首领或要塞守卫。
         // 灵魂取自 Malum 的鸡、牛和蜘蛛数据，假设已使用能收魂的装备。
@@ -331,12 +341,14 @@ public final class PackPlanningReplay {
                 "malum:aerial_spirit", "malum:sacred_spirit", "malum:earthen_spirit", "malum:wicked_spirit");
         harvest.forEach(id -> farmStock.putIfAbsent(material(id), 1_000_000_000_000L));
         System.out.println("assumed_harvest_and_spirits=" + harvest);
-        solveCase("synthetic_farm_and_spirits", abilityGraph, target, farmStock, forced, unprojectedOutputs);
-        verifySupplyChanges(abilityGraph, target, farmStock, forced, unprojectedOutputs);
+        if (all) {
+            solveCase("synthetic_farm_and_spirits", abilityGraph, target, farmStock, forced, unprojectedOutputs);
+            verifySupplyChanges(abilityGraph, target, farmStock, forced, unprojectedOutputs);
+        }
         if (Boolean.getBoolean("rsi.replay.hybrid")) {
-            logVoidSupply("saved_disks", forcedGraph, stock);
-            PackTypedPlanningReplay.run("saved_disks", graph, abilityGraph, target, stock, forced,
-                    enabled -> routeEvidence(forcedGraph, target, stock, forced, incomplete, coverage, enabled));
+            if (all) {
+                runSavedDisks(graph, abilityGraph, target, stock, forced, forcedGraph, incomplete, coverage);
+            }
             var fixed = new HashMap<>(farmStock);
             Map.ofEntries(
                     Map.entry("apotheosis:mythic_material", 24), Map.entry("avaritia:eternal_singularity", 8),
@@ -386,6 +398,15 @@ public final class PackPlanningReplay {
             solveBranch("isolated_reported_dependency", abilityGraph, target, spiritStock, forced,
                     new IngredientRef(List.of(material(id)), 1L, NbtMatchMode.ANY));
         }
+    }
+
+    private static void runSavedDisks(ImmutableRecipeGraph graph, ImmutableRecipeGraph abilityGraph, RecipeNode target,
+                                      Map<MaterialRef, Long> stock, Map<ResourceLocation, ResourceLocation> forced,
+                                      ImmutableRecipeGraph forcedGraph, Set<ResourceLocation> incomplete,
+                                      PurePlanningCoverage.Probe coverage) {
+        logVoidSupply("saved_disks", forcedGraph, stock);
+        PackTypedPlanningReplay.run("saved_disks", graph, abilityGraph, target, stock, forced,
+                enabled -> routeEvidence(forcedGraph, target, stock, forced, incomplete, coverage, enabled));
     }
 
     private static void inspectMissingMaterialRoutes(ImmutableRecipeGraph graph, ImmutableRecipeGraph abilityGraph,

@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting.batch;
 import com.huanghuang.rsintegration.crafting.CraftPacketUtils;
 import com.huanghuang.rsintegration.crafting.CraftingResolver.StackKey;
 import com.huanghuang.rsintegration.crafting.MaterialSources;
+import com.huanghuang.rsintegration.crafting.MaterialSources.AvailabilityLoad;
 import com.huanghuang.rsintegration.crafting.OutputDestination;
 import com.huanghuang.rsintegration.crafting.graph.CraftPlanGraph;
 import com.huanghuang.rsintegration.crafting.plan.PlanResponse;
@@ -94,8 +95,8 @@ public final class PackReplayConfirmation {
              var resonance = mockStatic(ResonanceInventoryBridge.class)) {
             storage.when(() -> CraftPacketUtils.resolveEndpointForCraft(player, Level.OVERWORLD, BlockPos.ZERO))
                     .thenReturn(Optional.empty());
-            materials.when(() -> MaterialSources.listAvailableForTypes(eq(player), isNull(), any(), any()))
-                    .thenAnswer(unused -> Map.copyOf(currentStock));
+            materials.when(() -> MaterialSources.readAvailableForTypes(eq(player), isNull(), any(), any()))
+                    .thenAnswer(unused -> new AvailabilityLoad(currentStock, true));
             machines.when(() -> MachineFavoritesSavedData.get(null)).thenReturn(favorites);
             resonance.when(() -> ResonanceInventoryBridge.getViews(player)).thenReturn(List.of());
             var snapshot = new PlanningSnapshot(playerId, 1L, key.recipeRevision(), recipeId, stock, overrides,
@@ -113,6 +114,12 @@ public final class PackReplayConfirmation {
                 confirmation = GenericCraftPacketCodec.read(buffer);
             } finally {
                 buffer.release();
+            }
+            if (!displayed.outcome().ready()) {
+                if (cache.peekForRequest(key, requestId) == null || !confirm(player, recipeId, confirmation).rejected()) {
+                    throw new IllegalStateException("缺料预览没有进入确认复检或被误接受");
+                }
+                return;
             }
             var material = plan.graph().edges().stream().filter(edge -> edge.source().initial())
                     .findFirst().orElseThrow().material();
