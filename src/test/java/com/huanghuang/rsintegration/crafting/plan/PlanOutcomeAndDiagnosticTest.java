@@ -2,6 +2,7 @@ package com.huanghuang.rsintegration.crafting.plan;
 
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.testutil.BootstrapTest;
+import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.Test;
@@ -13,6 +14,20 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PlanOutcomeAndDiagnosticTest extends BootstrapTest {
+
+    @Test
+    void unfinishedPreviewDoesNotReportZeroShortagesInEitherTitle() {
+        for (boolean compact : List.of(false, true)) {
+            for (PlanOutcome outcome : List.of(PlanOutcome.BUDGET_EXHAUSTED, PlanOutcome.UNSUPPORTED_SEMANTICS)) {
+                var label = PlanDetailsPanel.shortageTitle(outcome, false, 0, compact);
+                assertEquals("rsi.plan.details.no_draft_gaps", ((TranslatableContents) label.getContents()).getKey());
+                var gaps = PlanDetailsPanel.shortageTitle(outcome, false, 3, compact);
+                assertEquals("rsi.plan.details.draft_gaps", ((TranslatableContents) gaps.getContents()).getKey());
+            }
+            var actual = PlanDetailsPanel.shortageTitle(PlanOutcome.MISSING_INPUTS, false, 3, compact);
+            assertEquals(3, ((TranslatableContents) actual.getContents()).getArgs()[0]);
+        }
+    }
 
     @Test
     void legacyPlanInfersMaterialShortageOutcome() {

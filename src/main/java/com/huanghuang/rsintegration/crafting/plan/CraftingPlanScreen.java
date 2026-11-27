@@ -580,6 +580,7 @@ public final class CraftingPlanScreen extends Screen {
     }
 
     private Component executionActionLabel(Confirmation confirmation, PlanConfirmationAction inventoryAction) {
+        if (confirmation == Confirmation.BLOCKED && plan.outcome().incomplete()) return workspaceText("draft_only");
         if (confirmation == Confirmation.WAIT) {
             return Component.translatable("rsi.plan.confirm_waiting");
         }
@@ -1088,9 +1089,7 @@ public final class CraftingPlanScreen extends Screen {
         g.pose().scale(iconSize / 16f, iconSize / 16f, 1);
         InkFluidRenderer.render(g, plan.targetResult(), 0, 0);
         g.pose().popPose();
-        String shortages = (detailsPanel.hasUnitemizedShortages()
-                ? Component.translatable("rsi.plan.details.shortage_detected")
-                : workspaceText("shortage_status", detailsPanel.shortageCount())).getString();
+        String shortages = detailsPanel.shortageTitle(false).getString();
         String conditions = workspaceText("condition_status", detailsPanel.conditionCount()).getString();
         int maxBadgeWidth = Math.max(40, (r.width() - (compact ? 90 : 190) - (compact ? 0 : 26) - 5) / 2);
         int firstWidth = Math.min(maxBadgeWidth, font.width(shortages) + 12);
@@ -1130,7 +1129,7 @@ public final class CraftingPlanScreen extends Screen {
         }
         // 将缺料/条件合并为标题栏中的两个状态入口：显示数量，同时点击直接打开右侧对应列表。
         chrome.statusButton(g, new Rect(buttonsX, r.y() + 3, firstWidth, 20), shortages,
-                detailsPanel.shortageCount() == 0 ? Color.READY : Color.WARNING,
+                !plan.outcome().incomplete() && detailsPanel.shortageCount() == 0 ? Color.READY : Color.WARNING,
                 mouseX, mouseY, () -> showDiagnostics(false));
         chrome.statusButton(g, new Rect(buttonsX + firstWidth + 5, r.y() + 3, secondWidth, 20), conditions,
                 detailsPanel.conditionCount() == 0 ? Color.READY : Color.WARNING,

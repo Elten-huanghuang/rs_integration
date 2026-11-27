@@ -23,6 +23,14 @@ import java.util.Set;
 public final class PlanMaterialBill {
     private PlanMaterialBill() {}
 
+    /** 草稿只统计树上已有的未分配端口；展示变体不是整单缺料或可执行供料的证明。 */
+    static Map<IngredientKey, Long> draftGaps(PlanResponse plan) {
+        if (!plan.outcome().incomplete() || plan.graph() == null) return Map.of();
+        Map<IngredientKey, Long> gaps = new LinkedHashMap<>();
+        plan.graph().visitUnresolvedDemand((stack, quantity) -> mergeDemand(gaps, stack, quantity));
+        return Collections.unmodifiableMap(gaps);
+    }
+
     /** 草稿只汇总已分配的外部材料，不把未结算的需求提示当成缺料。 */
     static Map<IngredientKey, PlanResponse.Availability> completedAllocations(
             @Nullable PlanGraphView graph, Map<StackKey, Long> snapshotStock) {

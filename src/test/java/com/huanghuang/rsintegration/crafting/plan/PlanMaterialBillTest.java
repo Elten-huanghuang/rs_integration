@@ -50,6 +50,27 @@ class PlanMaterialBillTest extends BootstrapTest {
     }
 
     @Test
+    void draftShowsUnallocatedMaterialsSeparatelyFromConfirmedShortages() {
+        var book = new ItemStack(Items.BOOK);
+        var variant = book.copy();
+        variant.getOrCreateTag().putString("variant", "chosen");
+        var graph = new PlanGraphView(1, List.of(), List.of(),
+                List.of(new PlanGraphView.RootView(variant, 5, 3, List.of(new PlanGraphView.RootEdgeView(
+                        PlanGraphView.SourceView.fromInitial(), variant, 2)))),
+                List.of(new PlanGraphView.UnresolvedView(0, 0, book, 4),
+                        new PlanGraphView.UnresolvedView(0, 1, variant, 2)), List.of());
+        var plan = PlanResponse.incomplete(TARGET_RECIPE, new ItemStack(Items.DIAMOND), 1, null, null,
+                null, null, null, graph, Map.of(StackKey.of(variant, true), 7L),
+                IntegrationDiagnostic.error(IntegrationDiagnosticCode.PLANNING_TIMEOUT));
+        var decoded = PlanResponsePacket.decodePayload(PlanResponsePacket.encodePayload(plan, 1L)).plan();
+        assertEquals(Map.of(IngredientKey.of(variant), 5L, IngredientKey.of(book), 4L),
+                PlanMaterialBill.draftGaps(decoded));
+        assertEquals(Map.of(IngredientKey.of(variant), new PlanResponse.Availability(2, 7, 0)), decoded.materials());
+        assertTrue(MissingMaterialBookmarkList.from(decoded).isEmpty());
+        assertFalse(decoded.canConfirmExecution());
+    }
+
+    @Test
     void partialTraceIncludesKnownInputsEvenWhenTheDisplayCannotLinkTheirProducer() {
         ItemStack target = new ItemStack(Items.DIAMOND);
         var first = new PlanStep(new ResourceLocation("test", "iron"), new ItemStack(Items.IRON_INGOT),

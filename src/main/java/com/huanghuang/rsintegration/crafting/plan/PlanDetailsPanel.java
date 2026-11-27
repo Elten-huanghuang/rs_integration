@@ -140,7 +140,15 @@ public final class PlanDetailsPanel {
     }
 
     public int shortageCount() { return missingRows.size(); }
-    public boolean hasUnitemizedShortages() { return !unitemizedShortages.isEmpty(); }
+    static Component shortageTitle(PlanOutcome outcome, boolean unitemized, int count, boolean compact) {
+        if (outcome.incomplete()) return count > 0 ? text("draft_gaps", count) : text("no_draft_gaps");
+        if (unitemized) return text("shortage_detected");
+        return compact ? text("shortages", count) : Component.translatable("rsi.plan.workspace.shortage_status", count);
+    }
+
+    Component shortageTitle(boolean compact) {
+        return shortageTitle(plan.outcome(), !unitemizedShortages.isEmpty(), shortageCount(), compact);
+    }
     public int conditionCount() { return conditionRows.size(); }
     public void setShowAllMaterials(Runnable action) { showAllMaterials = action; }
     public void layout(PlanWorkspaceLayout.Rect rect) { bounds = new Bounds(rect.x(), rect.y(), rect.width(), rect.height()); }
@@ -291,8 +299,7 @@ public final class PlanDetailsPanel {
             PlanWorkspaceChrome.panel(graphics, new PlanWorkspaceLayout.Rect(x, y, w, h), Color.PANEL, Color.BORDER);
             graphics.enableScissor(x + 1, y + 1, x + w - 1, y + h - 1);
             try {
-                String shortages = hasUnitemizedShortages() ? text("shortage_detected").getString()
-                        : text("shortages", shortageCount()).getString();
+                String shortages = shortageTitle(true).getString();
                 String conditionTitle = text("conditions", conditionCount()).getString();
                 String heading = tab == Tab.ISSUES ? (conditions ? conditionTitle : shortages)
                         : tab == Tab.STEPS ? text("tab_steps").getString() : tab == Tab.MACHINES ? text("machines").getString()
@@ -301,7 +308,8 @@ public final class PlanDetailsPanel {
                 chrome.heading(graphics, heading, x + 10, y + 9, w - 42, roomy ? 1.35f : 1);
                 int tabY = y + (roomy ? 45 : 33);
                 graphics.drawString(font, fit(text(tab == Tab.NODE ? "view_hint" : tab == Tab.ISSUES
-                        ? conditions ? "conditions_hint" : "shortages_hint" : "navigate_hint").getString(), w - 16),
+                        ? conditions ? "conditions_hint" : plan.outcome().incomplete() ? "draft_gaps_hint" : "shortages_hint"
+                        : "navigate_hint").getString(), w - 16),
                         x + 10, y + (roomy ? 29 : 22), Color.MUTED.value(), false);
                 button(graphics, "×", x + w - 22, y + 4, 17, 17, false, true, mouseX, mouseY, this::close);
                 int tw = (w - 12) / 3;
@@ -554,7 +562,8 @@ public final class PlanDetailsPanel {
                     }
                 }
             }
-            if (rows.isEmpty()) graphics.drawString(font, text("empty"), x + 5, listTop + 8, Color.MUTED.value(), false);
+            if (rows.isEmpty()) graphics.drawString(font, text(source.isEmpty() && tab == Tab.ISSUES && !conditions && plan.outcome().incomplete()
+                    ? "shortage_unknown_hint" : "empty"), x + 5, listTop + 8, Color.MUTED.value(), false);
         } finally {
             graphics.disableScissor();
         }
@@ -670,14 +679,26 @@ public final class PlanDetailsPanel {
     private void rebuildMaterialRows() {
         List<Row> materials = new ArrayList<>();
         plan.materials().forEach((key, value) -> materials.add(new Row(key.stack(1),
-                key.stack(1).getHoverName().getString(), text("availability", value.needed(), value.available(),
-                        value.missingCount()).getString(), value.isEnough() ? Color.READY : Color.WARNING,
+                key.stack(1).getHoverName().getString(), (plan.outcome().incomplete()
+                        ? text("settled_availability", value.needed(), value.available())
+                        : text("availability", value.needed(), value.available(), value.missingCount())).getString(),
+                plan.outcome().incomplete() ? Color.MUTED : value.isEnough() ? Color.READY : Color.WARNING,
                 firstNodeByKey.get(key), value.missingCount(), false)));
         materials.sort(Comparator.comparing((Row row) -> row.shortage() == 0).thenComparing(Row::title));
         plan.leftovers().forEach((key, value) -> materials.add(new Row(key.stack(1),
                 key.stack(1).getHoverName().getString(), text("leftover", value).getString(),
                 Color.REFERENCE, firstNodeByKey.get(key), 0, false)));
         materialRows = List.copyOf(materials);
+        if (plan.outcome().incomplete()) {
+            hasBookmarkableShortage = false;
+            missingRows = PlanMaterialBill.draftGaps(plan).entrySet().stream().map(entry -> {
+                var key = entry.getKey();
+                var stack = key.stack(1);
+                return new Row(stack, stack.getHoverName().getString(), text("draft_gap_amount", entry.getValue()).getString(),
+                        Color.WARNING, firstNodeByKey.get(key), 0L, true);
+            }).sorted(Comparator.comparing(Row::title)).toList();
+            return;
+        }
         List<MissingMaterialBookmarkList.TextEntry> entries = MissingMaterialBookmarkList.textEntries(plan);
         hasBookmarkableShortage = entries.stream().anyMatch(MissingMaterialBookmarkList.TextEntry::bookmarkable);
         List<Row> shortages = new ArrayList<>();

@@ -65,8 +65,13 @@ public final class PlanMaterialTable {
             }
         }
         List<Row> data = new ArrayList<>();
+        var gaps = PlanMaterialBill.draftGaps(plan);
         plan.materials().forEach((key, value) -> data.add(new Row(key, value.needed(),
-                value.available(), value.missingCount(), false, materialSourceKey(value, unresolved.contains(key)))));
+                value.available(), incomplete ? gaps.getOrDefault(key, 0L) : value.missingCount(), false,
+                materialSourceKey(value, unresolved.contains(key)))));
+        gaps.forEach((key, quantity) -> {
+            if (!plan.materials().containsKey(key)) data.add(new Row(key, 0, -1, quantity, false, "unconfirmed_source"));
+        });
         data.sort(Comparator.comparing((Row row) -> row.missing() == 0)
                 .thenComparing(row -> row.key().stack(1).getHoverName().getString()));
         plan.leftovers().forEach((key, count) -> data.add(new Row(key, count, 0, 0, true, "leftovers")));
@@ -93,12 +98,12 @@ public final class PlanMaterialTable {
         chrome.resetActions();
         PlanWorkspaceChrome.panel(g, bounds, Color.BACKGROUND, Color.BORDER);
         int x = bounds.x() + 7, width = bounds.width() - 14;
-        chrome.button(g, new Rect(x, bounds.y() + 6, 62, 18), text(incomplete ? "settled_materials" : "all_materials"),
+        chrome.button(g, new Rect(x, bounds.y() + 6, 62, 18), text(incomplete ? "draft_materials" : "all_materials"),
                 !onlyMissing, true, mouseX, mouseY, () -> { onlyMissing = false; scroll = 0; filterDirty = true; });
-        chrome.button(g, new Rect(x + 66, bounds.y() + 6, 62, 18), text("only_missing"),
-                onlyMissing, !incomplete, mouseX, mouseY, () -> { onlyMissing = true; scroll = 0; filterDirty = true; });
+        chrome.button(g, new Rect(x + 66, bounds.y() + 6, 62, 18), text(incomplete ? "only_draft_gaps" : "only_missing"),
+                onlyMissing, true, mouseX, mouseY, () -> { onlyMissing = true; scroll = 0; filterDirty = true; });
         chrome.button(g, new Rect(bounds.right() - 105, bounds.y() + 6, 98, 18), text("bookmark_all_short"),
-                false, rows.stream().anyMatch(row -> row.missing() > 0), mouseX, mouseY, bookmarkAll);
+                false, !incomplete && rows.stream().anyMatch(row -> row.missing() > 0), mouseX, mouseY, bookmarkAll);
         boolean wide = width >= 500;
         int nameEnd = x + width * (wide ? 36 : 34) / 100;
         int countWidth = width * 11 / 100;
@@ -108,9 +113,9 @@ public final class PlanMaterialTable {
         int headerY = bounds.y() + 48;
         g.fill(x, headerY - 9, x + width, headerY + 14, Color.SURFACE.value());
         label(g, text("column_material"), x + 5, headerY, nameEnd - x - 10, Color.MUTED);
-        label(g, text("column_need"), needX, headerY, countWidth - 2, Color.MUTED);
+        label(g, text(incomplete ? "settled_source" : "column_need"), needX, headerY, countWidth - 2, Color.MUTED);
         label(g, text(incomplete ? "snapshot_stock" : "column_stock"), stockX, headerY, countWidth - 2, Color.MUTED);
-        label(g, text("column_missing"), missingX, headerY, countWidth - 2, Color.MUTED);
+        label(g, text(incomplete ? "draft_gap" : "column_missing"), missingX, headerY, countWidth - 2, Color.MUTED);
         if (wide) label(g, text("column_source"), sourceX, headerY, actionX - sourceX - 4, Color.MUTED);
         int top = headerY + 17, bottom = bounds.bottom() - 19;
         int rowHeight = extensions.hasNotes() ? 40 : 30;
@@ -143,14 +148,14 @@ public final class PlanMaterialTable {
                         InkFluidRenderer.render(g, stack, x + 4, y + 3);
                         label(g, stack.getHoverName().getString(), x + 26, y + 7, nameEnd - x - 30, Color.TEXT);
                         label(g, PlanRenderEngine.formatCompact(row.needed()), needX, y + 7, countWidth - 2, Color.TEXT);
-                        label(g, row.leftover() ? "—" : PlanRenderEngine.formatCompact(row.available()), stockX,
+                        label(g, row.leftover() || row.available() < 0 ? "—" : PlanRenderEngine.formatCompact(row.available()), stockX,
                                 y + 7, countWidth - 2, Color.MUTED);
                         label(g, row.missing() == 0 ? "—" : PlanRenderEngine.formatCompact(row.missing()),
                                 missingX, y + 7, countWidth - 2, row.missing() > 0 ? Color.WARNING : Color.MUTED);
-                        if (wide) label(g, text(incomplete ? "settled_source" : row.sourceKey()),
+                        if (wide) label(g, text(incomplete ? (row.missing() > 0 ? "draft_gap" : "settled_source") : row.sourceKey()),
                                 sourceX, y + 7, actionX - sourceX - 4, row.missing() > 0 ? Color.WARNING
                                         : row.sourceKey().equals("ready_source") ? Color.READY : Color.MUTED);
-                        label(g, text(row.missing() > 0 ? "locate_star" : "locate_short"), actionX, y + 7,
+                        label(g, text(!incomplete && row.missing() > 0 ? "locate_star" : "locate_short"), actionX, y + 7,
                                 bounds.right() - actionX - 8, Color.MUTED);
                         if (!notes.isEmpty()) label(g, notes.stream().map(MaterialNote::note)
                                         .filter(note -> !note.isBlank()).collect(Collectors.joining(" | ")),
@@ -161,7 +166,7 @@ public final class PlanMaterialTable {
                 }
             } finally { g.disableScissor(); }
         }
-        label(g, text(incomplete ? "settled_materials_only" : "table_hint"),
+        label(g, text(incomplete ? "draft_gap_hint" : "table_hint"),
                 x, bounds.bottom() - 13, width, Color.MUTED);
         if (maxScroll > 0 && bottom > top) {
             int trackHeight = bottom - top;
@@ -187,7 +192,7 @@ public final class PlanMaterialTable {
         if (bounds == null || !bounds.contains(x, y)) return false;
         if (chrome.click(x, y, button)) return true;
         for (Hit hit : hits) if (hit.bounds().contains(x, y)) {
-            if (hit.row().missing() > 0 && (button == 1 || button == 2 || x >= bounds.right() - 24)) {
+            if (!incomplete && hit.row().missing() > 0 && (button == 1 || button == 2 || x >= bounds.right() - 24)) {
                 bookmark.accept(hit.row().key().stack(1), hit.row().missing());
             } else if (button == 0) locate.accept(hit.row().key());
             return true;
