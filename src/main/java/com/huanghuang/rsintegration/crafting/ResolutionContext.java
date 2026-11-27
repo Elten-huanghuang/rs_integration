@@ -46,6 +46,11 @@ import java.util.function.Supplier;
  */
 final class ResolutionContext {
     HybridBranchPlanning hybrid;
+    @Nullable PreviewMaterialProfile materialProfile;
+
+    void materialStage(PreviewMaterialProfile.Stage stage) {
+        if (materialProfile != null) materialProfile.stage(stage);
+    }
 
     private static final int MAX_DIAGNOSTIC_LINES = 4096;
 

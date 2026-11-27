@@ -46,6 +46,8 @@ import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeManager;
+import net.minecraft.world.item.crafting.ShapedRecipe;
+import net.minecraft.world.item.crafting.ShapelessRecipe;
 import net.minecraft.world.level.Level;
 import net.minecraftforge.common.crafting.StrictNBTIngredient;
 import net.minecraftforge.fluids.FluidStack;
@@ -62,6 +64,7 @@ import net.minecraft.world.item.Items;
 import javax.annotation.Nullable;
 import java.util.*;
 import java.util.function.Function;
+import com.huanghuang.rsintegration.crafting.PreviewMaterialProfile.Stage;
 import java.util.function.Consumer;
 import java.util.function.BooleanSupplier;
 import java.util.stream.Collectors;
@@ -724,6 +727,7 @@ public final class CraftingResolver {
         EdgeTracker edges = new EdgeTracker();
         Map<Integer, RootDemand> rootsByOrder = new TreeMap<>();
         PreviewCheckpoint checkpoint = checkPreviewBudget ? new PreviewCheckpoint() : null;
+        if (checkPreviewBudget) ctx.materialProfile = new PreviewMaterialProfile(System::nanoTime);
         var stack = new PlanningStack();
         var job = stack.<List<RootDemand>>start(done -> {
             if (activeRoot != null && !activeRoot.output().isEmpty()) {
@@ -916,9 +920,14 @@ public final class CraftingResolver {
             suspendedAt = 0L;
             // 实际机器状态可能在两个切片之间改变，不跨切片复用其可用性。
             context.beginCandidateSlice();
-            if (job.advance(sliceNanos, () -> allowed.getAsBoolean()
-                    && (context.hybrid == null || !context.hybrid.waiting())
-                    && (checkpoint == null || !context.timedOut()))) return true;
+            if (context.materialProfile != null) context.materialProfile.startSlice();
+            try {
+                if (job.advance(sliceNanos, () -> allowed.getAsBoolean()
+                        && (context.hybrid == null || !context.hybrid.waiting())
+                        && (checkpoint == null || !context.timedOut()))) return true;
+            } finally {
+                if (context.materialProfile != null) context.materialProfile.endSlice();
+            }
             if (checkpoint != null && context.timeoutReached()) {
                 job.cancel();
                 throw new CraftingPlanningTimeoutException();
@@ -938,6 +947,11 @@ public final class CraftingResolver {
 
         public long longestCallbackNanos() { return context.longestCallbackNanos; }
 
+        /** 整包回放在首次推进前还原替身的材料名；不改变匹配谓词。 */
+        void profileReplayMaterials(Function<ItemStack, ResourceLocation> materialId) {
+            context.materialProfile = new PreviewMaterialProfile(System::nanoTime, materialId);
+        }
+
         CompatibilityProfile profileCompatibility(boolean reuseGroups, boolean skipSort) {
             context.reuseScoreGroups = reuseGroups;
             context.skipTrivialSort = skipSort;
@@ -953,7 +967,12 @@ public final class CraftingResolver {
         public String timeoutSummary() {
             return "rootSlot=" + context.timeoutRootSlot + " ensureCalls=" + context.ensureCalls
                     + " attemptedRecipeTypes=" + context.busiestPreviewTypes()
-                    + (context.hybrid == null ? "" : " " + context.hybrid.summary());
+                    + (context.hybrid == null ? "" : " " + context.hybrid.summary())
+                    + (context.materialProfile == null ? "" : " slowMaterials=" + context.materialProfile.hottest());
+        }
+
+        List<String> replayMaterialDetails(List<ResourceLocation> ids) {
+            return context.materialProfile == null ? List.of() : context.materialProfile.selected(ids);
         }
 
         /** 超时草稿仅用于展示，不走执行图的校验、压缩或并行机器估算。 */
@@ -1142,9 +1161,7 @@ public final class CraftingResolver {
                                  EdgeTracker edges, @Nullable InputPortId consumer,
                                  @Nullable List<ResolutionContext.SupplySlice> consumedOut,
                                  PlanningStack stack, Consumer<Boolean> done) {
-        prepareSharedAmplification(ingredient, count, ctx, depth, edges, stack,
-                () -> resolveIngredient(ingredient, count, ctx, depth, edges, consumer,
-                        consumedOut, false, stack, done));
+        resolveIngredient(ingredient, count, ctx, depth, edges, consumer, consumedOut, false, true, stack, done);
     }
 
     private static void resolveIngredient(Ingredient ingredient, long count, ResolutionContext ctx,
@@ -1152,6 +1169,31 @@ public final class CraftingResolver {
                                             @Nullable InputPortId consumer,
                                             @Nullable List<ResolutionContext.SupplySlice> consumedOut,
                                             boolean prepareOnly, PlanningStack stack, Consumer<Boolean> done) {
+        resolveIngredient(ingredient, count, ctx, depth, edges, consumer, consumedOut, prepareOnly, false, stack, done);
+    }
+
+    private static void resolveIngredient(Ingredient ingredient, long count, ResolutionContext ctx, int depth,
+                                          EdgeTracker edges, @Nullable InputPortId consumer,
+                                          @Nullable List<ResolutionContext.SupplySlice> consumedOut,
+                                          boolean prepareOnly, boolean probeSeed, PlanningStack stack, Consumer<Boolean> done) {
+        var profile = ctx.materialProfile;
+        var parent = profile == null ? null : profile.enter(ingredient);
+        Consumer<Boolean> finish = profile == null ? done : ok -> {
+            profile.switchTo(parent);
+            done.accept(ok);
+        };
+        if (probeSeed) {
+            ctx.materialStage(Stage.SEED);
+            prepareSharedAmplification(ingredient, count, ctx, depth, edges, stack,
+                    () -> resolveIngredientBody(ingredient, count, ctx, depth, edges, consumer, consumedOut, prepareOnly, stack, finish));
+        } else resolveIngredientBody(ingredient, count, ctx, depth, edges, consumer, consumedOut, prepareOnly, stack, finish);
+    }
+
+    private static void resolveIngredientBody(Ingredient ingredient, long count, ResolutionContext ctx,
+                                            int depth, EdgeTracker edges, @Nullable InputPortId consumer,
+                                            @Nullable List<ResolutionContext.SupplySlice> consumedOut,
+                                            boolean prepareOnly, PlanningStack stack, Consumer<Boolean> done) {
+        ctx.materialStage(Stage.STOCK);
         if (count <= 0) {
             stack.complete(done, true);
             return;
@@ -1289,6 +1331,7 @@ public final class CraftingResolver {
         }
 
         long candStart = System.nanoTime();
+        ctx.materialStage(Stage.FIND);
         // 调试日志开启时顺手记下被跳过的候选与原因：玩家报告「计划树里有的配方执行时不见了」，
         // 现有日志只能看到剩下几个候选，看不到是谁按什么规则被滤掉的。
         List<CandidateEngine.CandidateDiagnostic> candidateDiag =
@@ -1311,6 +1354,7 @@ public final class CraftingResolver {
                                                @Nullable List<CandidateEngine.CandidateDiagnostic> candidateDiag,
                                                List<RecipeIndex.Entry> candidates,
                                                PlanningStack stack, Consumer<Boolean> done) {
+        ctx.materialStage(Stage.VIABLE);
         if (forceProduction) {
             candidates = prioritizeForcedCandidate(candidates,
                     candidate -> candidate.recipe().getId(), forcedRecipeId);
@@ -1324,7 +1368,8 @@ public final class CraftingResolver {
         if (candidates.isEmpty()) {
             if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient FAILED: no candidates for " + describeFirstItem(ingredient));
             logSkippedCandidates("no-candidates", ingredient, candidateDiag);
-            finishMissing(ctx, consumer, ingredient, count, "no-candidates", missingCheckpoint, stack, done);
+            finishStockShortfall(ctx, consumer, consumedOut, ingredient, count, prepareOnly, forceProduction,
+                    "no-candidates", missingCheckpoint, stack, done);
             return;
         }
 
@@ -1411,7 +1456,8 @@ public final class CraftingResolver {
                         describeFirstItem(ingredient), candidateCount, aliveMs);
             }
             logSkippedCandidates("no-viable-candidates", ingredient, candidateDiag);
-            finishMissing(ctx, consumer, ingredient, count, "no-viable-candidates", missingCheckpoint, stack, done);
+            finishStockShortfall(ctx, consumer, consumedOut, ingredient, count, prepareOnly, forceProduction,
+                    "no-viable-candidates", missingCheckpoint, stack, done);
             return;
         }
 
@@ -1434,8 +1480,8 @@ public final class CraftingResolver {
 
         List<AliveCandidate> viable = alive;
         long needed = remaining;
-        boolean ownsTwoPhase = ctx.bestEffort
-                && !ctx.strictCandidatePass && !ctx.bestEffortFallbackPass;
+        boolean ownsTwoPhase = ctx.bestEffort && !ctx.strictCandidatePass
+                && (!ctx.bestEffortFallbackPass || !forceProduction && !prepareOnly && isRestockBoundary(ingredient));
         int candidatePasses = ownsTwoPhase ? 2 : 1;
         boolean previousStrict = ctx.strictCandidatePass;
         boolean previousFallback = ctx.bestEffortFallbackPass;
@@ -1446,33 +1492,93 @@ public final class CraftingResolver {
         class Candidates implements Runnable {
             private int pass;
             private int position;
+            private boolean partialPass;
+            private boolean stockBoundary;
+            private long stockBeforeBatch;
+            private long restockRemaining = needed;
+            private List<AliveCandidate> ordered = viable;
+            private int nextEstimate;
+            private List<ShortageChoice> estimates;
 
             @Override
             public void run() {
+                ctx.materialStage(Stage.SELECT);
                 if (pass < candidatePasses) {
-                    if (position == 0 && ownsTwoPhase) {
+                    if (position == 0 && nextEstimate == 0 && ownsTwoPhase && !partialPass) {
                         ctx.strictCandidatePass = pass == 0;
                         ctx.bestEffortFallbackPass = pass == 1;
+                        if (pass == 1 && ctx.materialProfile != null) ctx.materialProfile.fallback();
                         if (ctx.diagnosticsEnabled()) ctx.diag(pass == 0
                                 ? "ensureIngredient candidate pass=strict"
                                 : "ensureIngredient candidate pass=best-effort-fallback");
                     }
+                    if (position == 0 && ctx.bestEffortFallbackPass && !forceProduction && !prepareOnly) {
+                        stockBoundary = ownsTwoPhase && isRestockBoundary(ingredient);
+                        if (stockBoundary) partialPass = true;
+                        if (!stockBoundary && viable.size() > 1 && ingredient.getItems().length == 1
+                                && nextEstimate < viable.size() && !ctx.timedOut()) {
+                            int index = nextEstimate++;
+                            var estimate = estimateShortage(viable.get(index), needed, ctx, index);
+                            if (estimate != null) {
+                                if (estimates == null) estimates = new ArrayList<>();
+                                estimates.add(estimate);
+                            }
+                            if (nextEstimate == viable.size() && estimates != null && estimates.size() > 1) {
+                                // 不能静态估算的动态配方保留原位；同等缺口沿用原有偏好顺序。
+                                var ranked = new ArrayList<>(viable);
+                                var sorted = new ArrayList<>(estimates);
+                                sorted.sort(Comparator.comparingInt(ShortageChoice::missingKinds)
+                                        .thenComparing(Comparator.comparingLong(ShortageChoice::stockedOutput).reversed())
+                                        .thenComparingLong(ShortageChoice::missingUnits));
+                                for (int i = 0; i < estimates.size(); i++) {
+                                    ranked.set(estimates.get(i).index(), sorted.get(i).candidate());
+                                }
+                                ordered = ranked;
+                            }
+                            stack.resume(this);
+                            return;
+                        }
+                    }
+                    if (stockBoundary && (position == viable.size() || restockRemaining == 0L)) {
+                        // 严格整单和拆批均已验证失败；不要把回收/反向转换的缺口当作必需材料。
+                        stack.leave();
+                        finishStockShortfall(ctx, consumer, consumedOut, ingredient, count, false, false,
+                                "restock-boundary", missingCheckpoint, stack, done);
+                        return;
+                    }
                     if (position < viable.size()) {
-                        if (!tryCandidate(viable.get(position++))) stack.resume(this);
+                        AliveCandidate candidate = ordered.get(position++);
+                        long batches = Math.max(1L, SaturatingLongMath.ceilDiv(
+                                stockBoundary ? restockRemaining : needed, candidate.netGain()));
+                        if (partialPass) {
+                            batches = stockedBatches(candidate, batches, stockBoundary, ctx);
+                            if (batches == 0L) {
+                                stack.resume(this);
+                                return;
+                            }
+                        }
+                        if (!tryCandidate(candidate, batches)) stack.resume(this);
                         return;
                     }
                     position = 0;
-                    pass++;
+                    if (!partialPass && !ctx.bestEffortFallbackPass && !forceProduction && !prepareOnly
+                            && needed > 1L && viable.size() > 1 && !ctx.timedOut()) {
+                        partialPass = true;
+                    } else {
+                        partialPass = false;
+                        pass++;
+                    }
                     stack.resume(this);
                     return;
                 }
                 stack.leave();
                 if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient FAILED: exhausted " + viable.size()
                         + " viable candidates for " + describeFirstItem(ingredient));
-                finishMissing(ctx, consumer, ingredient, count, "candidates-exhausted", missingCheckpoint, stack, done);
+                finishStockShortfall(ctx, consumer, consumedOut, ingredient, count, prepareOnly, forceProduction,
+                        "candidates-exhausted", missingCheckpoint, stack, done);
             }
 
-            private boolean tryCandidate(AliveCandidate a) {
+            private boolean tryCandidate(AliveCandidate a, long batches) {
             // Don't check timedOut() before the first candidate — the alive-building
             // loop may have exhausted the deadline with expensive result-item probes
             // for mod recipes. The first candidate is the highest-scored and is near-
@@ -1489,6 +1595,13 @@ public final class CraftingResolver {
                 return false;
             }
 
+            int selfConsumed = a.selfConsumed();
+            Ingredient seed = selfConsumed > 0 ? ingredientOf(a.output, a.output.hasTag()) : null;
+            long firstBatchLimit = seed == null ? batches : ctx.countMatching(seed) / selfConsumed;
+            if (firstBatchLimit <= 0L) {
+                if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId() + ": seed unavailable");
+                return false;
+            }
             if (requiresMissingSelfInput(a.entry, a.output, ctx)) {
                 if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId() + ": self-input missing");
                 return false;
@@ -1525,13 +1638,17 @@ public final class CraftingResolver {
                 altModTypes.add(other.entry.modType().id());
             }
 
-            long batches = Math.max(1L,
-                    SaturatingLongMath.ceilDiv(needed, a.netGain));
-            int selfConsumed = a.selfConsumed();
-
             ctx.recordPreviewCandidate(a.entry);
+            if (ctx.materialProfile != null) ctx.materialProfile.attempted();
+            if (partialPass) stockBeforeBatch = ctx.countMatching(ingredient);
             ctx.beginUndo();
             edges.beginUndo();
+            boolean previousCandidateStrict = ctx.strictCandidatePass;
+            boolean previousCandidateFallback = ctx.bestEffortFallbackPass;
+            if (stockBoundary) {
+                ctx.strictCandidatePass = true;
+                ctx.bestEffortFallbackPass = false;
+            }
             ctx.recipeCycles.enter(a.entry.recipe().getId(), a.output);
             Set<Set<Item>> conversionFamilies = a.entry.recipe() instanceof CraftingRecipe cr
                     ? NonProductiveTagConversionGuard.conversionFamilies(cr, a.output)
@@ -1541,6 +1658,8 @@ public final class CraftingResolver {
             boolean activatedForcedRecipe = forceProduction
                     && ctx.activateForcedRecipe(a.entry.recipe().getId());
             stack.enter(() -> {
+                ctx.strictCandidatePass = previousCandidateStrict;
+                ctx.bestEffortFallbackPass = previousCandidateFallback;
                 if (activatedForcedRecipe) ctx.deactivateForcedRecipe(a.entry.recipe().getId());
                 ctx.recipeCycles.leave(a.entry.recipe().getId(), a.output);
                 for (Set<Item> family : conversionFamilies) ctx.popConversionFamily(family);
@@ -1555,19 +1674,20 @@ public final class CraftingResolver {
 
                     @Override
                     public void run() {
+                    ctx.materialStage(Stage.INPUTS);
                     int stageBatches = SaturatingLongMath.clampToInt(batchesLeft);
-                    if (selfConsumed > 0) {
-                        Ingredient exactOutput = ingredientOf(a.output, a.output.hasTag());
+                    if (seed != null) {
                         stageBatches = SaturatingLongMath.clampToInt(Math.min(batchesLeft,
-                                ctx.countMatching(exactOutput) / selfConsumed));
+                                batchesLeft == batches ? firstBatchLimit : ctx.countMatching(seed) / selfConsumed));
                         if (stageBatches <= 0) {
                             if (ctx.diagnosticsEnabled()) {
                                 ctx.diag("ensureIngredient bootstrap missing recipe="
                                         + a.entry.recipe().getId()
-                                        + " output=" + describeFirstItem(exactOutput)
-                                        + " available=" + ctx.countMatching(exactOutput)
+                                        + " output=" + describeFirstItem(seed)
+                                        + " available=" + ctx.countMatching(seed)
                                         + " requiredSeed=" + selfConsumed);
                             }
+                            if (ctx.materialProfile != null) ctx.materialProfile.failure("seed-unavailable");
                             finishCandidate(a, false);
                             return;
                         }
@@ -1585,11 +1705,43 @@ public final class CraftingResolver {
             }
 
             private void finishCandidate(AliveCandidate a, boolean allOk) {
+            ctx.materialStage(Stage.SETTLE);
             stack.leave();
             if (!allOk) {
                 if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId() + ": craftOnce failed");
                 ctx.rollback();
-                retryOrTimeout("timeout-after-craft-failure");
+                retryOrTimeout(a, "craft-failed", "timeout-after-craft-failure");
+                return;
+            }
+
+            if (partialPass) {
+                long gained = ctx.countMatching(ingredient) - stockBeforeBatch;
+                if (gained <= 0L) {
+                    ctx.rollback();
+                    retryOrTimeout(a, "no-net-gain", "partial-batch-no-progress");
+                    return;
+                }
+                if (stockBoundary) {
+                    // 保留已真正完成的批次；用同一账本尝试其他来源，最后只报告余量。
+                    ctx.commitUndo();
+                    restockRemaining = Math.max(0L, restockRemaining - gained);
+                    stack.resume(this);
+                    return;
+                }
+                // 本次执行已结算，正式搜索按当前账本补完原需求；失败时撤回整段。
+                List<ResolutionContext.SupplySlice> slices = new ArrayList<>();
+                resolveIngredient(ingredient, count, ctx, depth + 1, edges, consumer, slices, false, stack, ok -> {
+                    if (ok) {
+                        if (consumedOut != null) consumedOut.addAll(slices);
+                        ctx.truncateMissing(missingCheckpoint);
+                        ctx.commitUndo();
+                        stack.leave();
+                        stack.complete(done, true);
+                    } else {
+                        ctx.rollback();
+                        retryOrTimeout(a, "remainder-unresolved", "timeout-after-partial-batch");
+                    }
+                });
                 return;
             }
 
@@ -1608,10 +1760,11 @@ public final class CraftingResolver {
 
             if (ctx.diagnosticsEnabled()) ctx.diag("ensureIngredient SKIP " + a.entry.recipe().getId() + ": consumeMatching failed after craft");
             ctx.rollback();
-            retryOrTimeout("timeout-after-consume-failure");
+            retryOrTimeout(a, "output-not-allocatable", "timeout-after-consume-failure");
             }
 
-            private void retryOrTimeout(String reason) {
+            private void retryOrTimeout(AliveCandidate candidate, String failure, String reason) {
+                if (ctx.materialProfile != null) ctx.materialProfile.rolledBack(candidate.entry.recipe().getId(), failure);
                 if (!ctx.timedOut()) {
                     stack.resume(this);
                     return;
@@ -1624,6 +1777,97 @@ public final class CraftingResolver {
             }
         }
         stack.resume(new Candidates());
+    }
+
+    private record ShortageChoice(AliveCandidate candidate, int index, int missingKinds, long stockedOutput, long missingUnits) {}
+
+    /** 只估算无返还、单一身份的固定投入；估算不分配库存，不充当可执行性证明。 */
+    @Nullable
+    private static ShortageChoice estimateShortage(AliveCandidate candidate, long needed, ResolutionContext ctx, int index) {
+        Recipe<?> recipe = candidate.entry().recipe();
+        Class<?> type = recipe.getClass();
+        boolean grid = recipe instanceof CraftingRecipe crafting && (type == ShapedRecipe.class
+                || type == ShapelessRecipe.class || KubeJsCraftingSemantics.isKubeJsRecipe(crafting));
+        if (candidate.selfConsumed() != 0 || candidate.output().hasTag()
+                || !grid && !HybridBranchPlanning.nativeMachine(type)) return null;
+        var specs = grid ? CraftPacketUtils.extractCraftingIngredientSpecs((CraftingRecipe) recipe)
+                : recipeSpecs(candidate.entry(), ctx.level.registryAccess(), ctx);
+        if (specs == null) return null;
+        Map<Item, Ingredient> predicates = new LinkedHashMap<>();
+        Map<Item, Long> counts = new LinkedHashMap<>();
+        for (IngredientSpec spec : specs) {
+            if (spec.isEmpty()) continue;
+            if (spec.consumption().kind() != InputConsumption.Kind.CONSUMED) return null;
+            Ingredient input = ctx.lockedIngredient(recipe.getId(), spec.ingredient());
+            if (input.getClass() != Ingredient.class || input.getItems().length != 1
+                    || ctx.forcedRecipeFor(input) != null) return null;
+            ItemStack material = input.getItems()[0];
+            if (material.isEmpty() || material.hasTag() || !material.getCraftingRemainingItem().isEmpty()) return null;
+            predicates.putIfAbsent(material.getItem(), input);
+            counts.merge(material.getItem(), (long) spec.count(), SaturatingLongMath::add);
+        }
+        if (counts.isEmpty()) return null;
+        long batches = SaturatingLongMath.ceilDiv(needed, candidate.netGain()), stocked = batches, missingUnits = 0L;
+        int missingKinds = 0;
+        for (var entry : counts.entrySet()) {
+            Ingredient input = predicates.get(entry.getKey());
+            long have = Math.max(0L, ctx.countMatching(input) - RSIntegrationConfig.getProtectedReserve(input));
+            long perBatch = entry.getValue();
+            stocked = Math.min(stocked, have / perBatch);
+            long gap = SaturatingLongMath.multiply(batches, perBatch) - have;
+            if (gap > 0L) {
+                missingKinds++;
+                missingUnits = SaturatingLongMath.add(missingUnits, gap);
+            }
+        }
+        return new ShortageChoice(candidate, index, missingKinds,
+                Math.min(needed, SaturatingLongMath.multiply(stocked, candidate.netGain())), missingUnits);
+    }
+
+    /** 仅试普通单输入、无返还的固定配方；不能估算的路线仍走原搜索。 */
+    private static long stockedBatches(AliveCandidate candidate, long requested, boolean allowFull, ResolutionContext ctx) {
+        if ((!allowFull && requested <= 1L) || candidate.selfConsumed() != 0 || candidate.output().hasTag()) return 0L;
+        Recipe<?> recipe = candidate.entry().recipe();
+        Class<?> type = recipe.getClass();
+        if (type != ShapelessRecipe.class && type != ShapedRecipe.class && !HybridBranchPlanning.nativeMachine(type)) return 0L;
+        var ingredients = recipe.getIngredients();
+        if (ingredients.size() != 1) return 0L;
+        Ingredient input = ingredients.get(0);
+        if (input.getClass() != Ingredient.class || input.getItems().length != 1) return 0L;
+        ItemStack material = input.getItems()[0];
+        if (material.isEmpty() || material.hasTag() || material.is(candidate.output().getItem())
+                || !material.getCraftingRemainingItem().isEmpty()) return 0L;
+        long available = ctx.countMatching(input) - RSIntegrationConfig.getProtectedReserve(input);
+        return available > 0L && (allowFull || available < requested) ? Math.min(available, requested) : 0L;
+    }
+
+    private static boolean isRestockBoundary(Ingredient ingredient) {
+        if (ingredient.getClass() != Ingredient.class || ingredient.getItems().length != 1) return false;
+        ItemStack option = ingredient.getItems()[0];
+        if (option.isEmpty() || option.hasTag()) return false;
+        ResourceLocation id = ForgeRegistries.ITEMS.getKey(option.getItem());
+        return id != null && RSIntegrationConfig.RESTOCK_BOUNDARIES.get().contains(id.toString());
+    }
+
+    private static void finishStockShortfall(ResolutionContext ctx, @Nullable InputPortId consumer,
+                                             @Nullable List<ResolutionContext.SupplySlice> consumedOut,
+                                             Ingredient ingredient, long count, boolean prepareOnly,
+                                             boolean forceProduction, String reason, int missingCheckpoint,
+                                             PlanningStack stack, Consumer<Boolean> done) {
+        if (ctx.bestEffort && !ctx.strictCandidatePass && !forceProduction && !prepareOnly && !ctx.timedOut()) {
+            long usable = Math.max(0L, ctx.countMatching(ingredient) - RSIntegrationConfig.getProtectedReserve(ingredient));
+            if (usable > 0L) {
+                var stock = ctx.consumeMatchingDetailed(ingredient, Math.min(count, usable));
+                recordSupplyConsumption(ctx, consumer, consumedOut, stock);
+                count -= stock.supplied();
+            }
+            ctx.truncateMissing(missingCheckpoint);
+            if (count == 0L) {
+                stack.complete(done, true);
+                return;
+            }
+        }
+        finishMissing(ctx, consumer, ingredient, count, reason, missingCheckpoint, stack, done);
     }
 
     private static void finishMissing(ResolutionContext ctx, @Nullable InputPortId consumer,

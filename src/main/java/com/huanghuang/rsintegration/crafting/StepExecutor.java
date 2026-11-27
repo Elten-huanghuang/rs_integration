@@ -86,6 +86,7 @@ final class StepExecutor {
                                            CraftingResolver.EdgeTracker edges, int batches, NodeId graphNodeId,
                                            List<IngredientSpec> specs, List<InputDemand> graphInputs,
                                            PlanningStack stack, Consumer<Boolean> done) {
+        ctx.materialStage(PreviewMaterialProfile.Stage.OUTPUTS);
         if (!canFinishStep(graphInputs, ctx, edges, stack, done)) return;
 
         List<OutputDeclaration> graphOutputs = new ArrayList<>();
@@ -127,16 +128,19 @@ final class StepExecutor {
                              CraftingResolver.EdgeTracker edges, int batches, ItemStack demandedOutput,
                              PlanningStack stack, Consumer<Boolean> done) {
         if (ctx.timedOut()) {
+            if (ctx.materialProfile != null) ctx.materialProfile.failure("deadline");
             PerformanceMonitor.recordResolveTimeout();
             stack.complete(done, false);
             return;
         }
         if (depth > maxDepth()) {
+            if (ctx.materialProfile != null) ctx.materialProfile.failure("depth-limit");
             ctx.recordDepthGuard(depth, maxDepth());
             stack.complete(done, false);
             return;
         }
         if (ctx.steps.size() + 1 > maxSteps()) {
+            if (ctx.materialProfile != null) ctx.materialProfile.failure("step-limit");
             ctx.recordStepGuard(ctx.steps.size(), maxSteps());
             stack.complete(done, false);
             return;
@@ -153,6 +157,7 @@ final class StepExecutor {
                              List<ResourceLocation> altIds, List<String> altModTypes,
                              CraftingResolver.EdgeTracker edges, int batches, ItemStack demandedOutput,
                              PlanningStack stack, Consumer<Boolean> done) {
+        ctx.materialStage(PreviewMaterialProfile.Stage.INPUTS);
         if (entry.modType() == ModType.GENERIC && entry.recipe() instanceof CraftingRecipe cr) {
             craftBatched(cr, ctx, depth, altIds, altModTypes, edges, batches, stack, done);
             return;
@@ -227,6 +232,7 @@ final class StepExecutor {
         specs = narrowMaterialLocks(entry.recipe().getId(), specs, ctx);
 
         if (specs == null || specs.isEmpty()) {
+            if (ctx.materialProfile != null) ctx.materialProfile.failure("empty-specs");
             ctx.rollback();
             edges.rollback();
             stack.complete(done, false);
@@ -246,6 +252,7 @@ final class StepExecutor {
                                         NodeId graphNodeId, boolean goetyDynamic, List<IngredientSpec> specs,
                                         ItemStack plannedBladeOutput, List<InputDemand> graphInputs,
                                         PlanningStack stack, Consumer<Boolean> done) {
+        ctx.materialStage(PreviewMaterialProfile.Stage.OUTPUTS);
         if (!canFinishStep(graphInputs, ctx, edges, stack, done)) return;
 
         List<OutputDeclaration> graphOutputs = new ArrayList<>();
@@ -330,7 +337,10 @@ final class StepExecutor {
                                          PlanningStack stack, Consumer<Boolean> done) {
         // 子步骤已经提交到当前候选，回到父层时需要再次检查总步骤预算。
         if (inputs != null && ctx.steps.size() < maxSteps()) return true;
-        if (inputs != null) ctx.recordStepGuard(ctx.steps.size(), maxSteps());
+        if (inputs != null) {
+            if (ctx.materialProfile != null) ctx.materialProfile.failure("step-limit");
+            ctx.recordStepGuard(ctx.steps.size(), maxSteps());
+        }
         ctx.rollback();
         edges.rollback();
         stack.complete(done, false);
@@ -394,6 +404,7 @@ final class StepExecutor {
                     resolveDurabilityTools(spec.ingredient(), batches, spec.consumption(), ctx, depth + 1,
                             edges, port, stack, result -> {
                                 if (result == null) {
+                                    if (ctx.materialProfile != null) ctx.materialProfile.failedSlot(originalIndex, spec.ingredient());
                                     stack.leave();
                                     stack.complete(done, null);
                                     return;
@@ -411,6 +422,7 @@ final class StepExecutor {
                 // 刀的展示栈只代表条件下限，不能把工作台原料锁成整份 NBT 相等。
                 Consumer<Ingredient> resolvedSlot = plannedIngredient -> {
                     if (plannedIngredient == null) {
+                        if (ctx.materialProfile != null) ctx.materialProfile.failedSlot(originalIndex, spec.ingredient());
                         stack.leave();
                         stack.complete(done, null);
                         return;
@@ -591,16 +603,30 @@ final class StepExecutor {
                 }));
 
         List<String> variantFailures = new ArrayList<>();
-        var candidates = variants.iterator();
+        boolean strictVariants = ctx.bestEffort && !ctx.strictCandidatePass && !ctx.bestEffortFallbackPass;
+        boolean previousStrict = ctx.strictCandidatePass;
+        stack.enter(() -> ctx.strictCandidatePass = previousStrict);
+        if (strictVariants) ctx.strictCandidatePass = true;
         class TryVariant implements Runnable {
+            private int position;
+
             @Override
             public void run() {
-                if (!candidates.hasNext()) {
+                if (position == variants.size()) {
+                    // 先验证全部变体，再允许缺料草图；所有试探共用原预算。
+                    if (strictVariants && ctx.strictCandidatePass && !ctx.timedOut() && !ctx.ensureLimitReached) {
+                        ctx.strictCandidatePass = false;
+                        variantFailures.clear();
+                        position = 0;
+                        stack.resume(this);
+                        return;
+                    }
                     recordVariantFailure(ingredient, quantity, variantFailures, ctx);
+                    stack.leave();
                     stack.complete(done, null);
                     return;
                 }
-                tryVariant(candidates.next());
+                tryVariant(variants.get(position++));
             }
 
             private void tryVariant(ItemStack variant) {
@@ -616,6 +642,7 @@ final class StepExecutor {
                 ctx.commitUndo();
                 edges.commitUndo();
                 if (consumedOut != null) consumedOut.addAll(consumed);
+                stack.leave();
                 stack.complete(done, selected);
                 return;
             }

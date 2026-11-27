@@ -36,6 +36,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.never;
 
 class MaterialSourcesFreshSnapshotTest extends BootstrapTest {
 
@@ -66,13 +68,15 @@ class MaterialSourcesFreshSnapshotTest extends BootstrapTest {
         tagged.getOrCreateTag().putString("variant", "specific");
         inventory.items.set(0, tagged);
         inventory.items.set(1, new ItemStack(Items.BOOK, 5));
-        inventory.items.set(2, new ItemStack(Items.DIAMOND, 64));
+        var unrelated = spy(new ItemStack(Items.DIAMOND, 64));
+        inventory.items.set(2, unrelated);
         try (var mods = mockStatic(ModList.class)) {
             mods.when(ModList::get).thenReturn(mock(ModList.class));
-            var counts = MaterialSources.countInventoryForTypes(player, Set.of(Items.BOOK));
+            var counts = MaterialSources.listAvailableForTypes(player, null, Set.of(Items.BOOK));
             assertEquals(2, counts.size());
             assertEquals(3, counts.get(StackKey.of(tagged, true)));
             assertEquals(5, counts.get(new StackKey(Items.BOOK, null)));
+            verify(unrelated, never()).getTag();
         }
     }
 

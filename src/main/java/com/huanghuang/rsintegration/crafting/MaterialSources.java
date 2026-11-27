@@ -219,8 +219,7 @@ public final class MaterialSources {
     private static AvailabilityLoad readAvailableForTypes(
             ServerPlayer player, @Nullable CraftStorageEndpoint endpoint, Set<Item> itemTypes) {
         if (itemTypes == null || itemTypes.isEmpty()) return new AvailabilityLoad(Map.of(), true);
-        Map<StackKey, Long> available = new HashMap<>(toLongCounts(countInventory(player)));
-        available.entrySet().removeIf(entry -> !itemTypes.contains(entry.getKey().item()));
+        Map<StackKey, Long> available = countInventoryForTypes(player, itemTypes);
         if (endpoint == null || !MaterialSourceSelection.current().storageNetwork()) {
             return new AvailabilityLoad(available, true);
         }

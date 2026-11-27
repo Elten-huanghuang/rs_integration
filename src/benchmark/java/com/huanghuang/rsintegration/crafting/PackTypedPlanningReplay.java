@@ -91,6 +91,7 @@ public final class PackTypedPlanningReplay extends BootstrapTest {
     private static final int ACTIVE_BUDGET_MS = Integer.parseInt(System.getProperty("rsi.replay.activeMs", "4000"));
     private static final int STEP_BUDGET = Integer.parseInt(System.getProperty("rsi.replay.maxSteps", "4096"));
     private static final boolean RESTOCK = Boolean.getBoolean("rsi.replay.restock");
+    private static final ResourceLocation PEWEN_BRANCH = ResourceLocation.parse("alexscaves:pewen_branch");
     private static final int HYBRID_ROUNDS = Integer.parseInt(System.getProperty("rsi.replay.rounds", "3"));
     private static final boolean COMPARE_COMPAT = Boolean.getBoolean("rsi.replay.compatCompare");
     private CompatMode compatMode;
@@ -144,6 +145,11 @@ public final class PackTypedPlanningReplay extends BootstrapTest {
         var replay = new PackTypedPlanningReplay();
         replay.routeEvidence = routeEvidence;
         replay.solve(label, graph, aliasGraph, target, stock, forced);
+    }
+
+    private ResourceLocation profileMaterialId(ItemStack stack) {
+        var material = materialsByAlias.get(CraftingResolver.StackKey.of(stack, true));
+        return material == null ? BuiltInRegistries.ITEM.getKey(stack.getItem()) : material.itemId();
     }
 
     private void solve(String label, ImmutableRecipeGraph graph, ImmutableRecipeGraph aliasGraph, RecipeNode target,
@@ -324,6 +330,7 @@ public final class PackTypedPlanningReplay extends BootstrapTest {
         var job = CraftingResolver.startTypedPreview(needed, stock, level, player, null, new ArrayList<>(),
                 forced, true, 80, new CraftingResolver.ActiveRootRecipe(target.recipeId(), output),
                 Map.of(), PlanningPreferences.empty());
+        job.profileReplayMaterials(this::profileMaterialId);
         long longest = 0;
         try {
             boolean done;
@@ -337,6 +344,7 @@ public final class PackTypedPlanningReplay extends BootstrapTest {
             } while (!done);
             System.out.println("display_timeout_saved_disks completed_within_budget=true");
         } catch (CraftingPlanningTimeoutException timeout) {
+            System.out.println("timeout_material_profile " + job.timeoutSummary());
             verifyDraft("timeout_saved_disks", job.completedRootsGraph(), target, stock,
                     IntegrationDiagnosticCode.PLANNING_TIMEOUT, longest);
         }
@@ -408,6 +416,7 @@ public final class PackTypedPlanningReplay extends BootstrapTest {
                 : CraftingResolver.startTypedPreview(needed, stock, level, player, null, missing, forced,
                 true, activeBudgetMs, new CraftingResolver.ActiveRootRecipe(target.recipeId(), aliases.get(target.output())),
                 Map.of(), PlanningPreferences.empty());
+        job.profileReplayMaterials(this::profileMaterialId);
         ReplaySliceTimes times = new ReplaySliceTimes(job, compatMode);
         int slices = 0;
         int worstCallbacks = 0;
@@ -423,6 +432,8 @@ public final class PackTypedPlanningReplay extends BootstrapTest {
         List<String> unresolvedSlots = new ArrayList<>();
         Map<ResourceLocation, Long> unresolvedMaterials = new HashMap<>();
         Map<CraftingResolver.StackKey, Long> shortageSupply = new HashMap<>();
+        boolean replayDisplayedBill = RESTOCK && !hybrid && run == 0 && label.equals("saved_disks");
+        Map<CraftingResolver.StackKey, Long> displayedShortages = new LinkedHashMap<>();
         String firstMissing = "-";
         int unresolvedEdges = 0;
         try {
@@ -541,6 +552,23 @@ public final class PackTypedPlanningReplay extends BootstrapTest {
                         || decoded.outcome() != (complete ? PlanOutcome.READY : PlanOutcome.MISSING_INPUTS)) {
                     throw new IllegalStateException("回包后计划节点或缺项不一致");
                 }
+                if (replayDisplayedBill) {
+                    decoded.materials().forEach((material, row) -> {
+                        if (row.missingCount() == 0) return;
+                        var key = CraftingResolver.StackKey.of(material.stack(1), true);
+                        var original = materialsByAlias.get(key);
+                        if (original == null || original.equals(target.output())) {
+                            throw new IllegalStateException("补料清单含无法还原的物品或目标产物：" + material);
+                        }
+                        displayedShortages.merge(key, row.missingCount(), Math::addExact);
+                    });
+                }
+                if (label.equals("saved_disks_after_one_row") && decoded.materials().entrySet().stream()
+                        .filter(entry -> entry.getValue().missingCount() > 0)
+                        .map(entry -> materialsByAlias.get(CraftingResolver.StackKey.of(entry.getKey().stack(1), true)))
+                        .anyMatch(material -> material != null && material.itemId().equals(PEWEN_BRANCH))) {
+                    throw new IllegalStateException("按精确账单补入树枝后，该项仍列为缺料");
+                }
                 var model = PlanTreeModel.from(decoded);
                 var layout = new PlanTreeLayout();
                 layout.rebuild(model.root);
@@ -608,6 +636,10 @@ public final class PackTypedPlanningReplay extends BootstrapTest {
             throw new IllegalStateException("原始磁盘未在基线预算内得到预览：" + status);
         }
         times.print(mode + "_" + label, run, job.longestCallbackNanos());
+        if (run == 0) System.out.println((hybrid ? "hybrid" : "typed") + "_material_profile_" + label + " " + job.timeoutSummary());
+        if (run == 0) System.out.println("material_focus " + mode + " " + label + " "
+                + job.replayMaterialDetails(List.of(ResourceLocation.parse("minecraft:emerald_block"),
+                ResourceLocation.parse("goety:magic_emerald"), ResourceLocation.parse("farmersdelight:rice"))));
         System.out.printf(mode + "_%s run=%d stepBudget=%d activeBudgetMs=%d status=%s nodes=%d allocatedRoots=%d "
                         + "draftRoots=%d draftNodes=%d unresolvedRoots=%d unresolvedEdges=%d slices=%d activeMs=%.1f maxSliceMs=%.1f graphMs=%.1f "
                         + "inputs=%d outputs=%d bindings=%d maxCallbacks=%d hottest=%s hottestBindings=%s firstMissing=%s unresolvedMaterials=%s unresolvedSlots=%s%n",
@@ -630,6 +662,31 @@ public final class PackTypedPlanningReplay extends BootstrapTest {
                                 .thenComparing(Map.Entry.comparingByKey()))
                         .limit(8).map(entry -> entry.getKey() + "*" + entry.getValue()).toList(),
                 unresolvedSlots);
+        if (label.equals("saved_disks_after_one_row") && !status.equals("PARTIAL")
+                || label.equals("saved_disks_after_displayed_bill") && !status.equals("SUCCESS")) {
+            throw new IllegalStateException("原始磁盘补货后未得到预期的计划状态：" + label + " " + status);
+        }
+        if (replayDisplayedBill) {
+            if (!status.equals("PARTIAL") || displayedShortages.isEmpty()) {
+                throw new IllegalStateException("原始磁盘补货对照缺少可核验的缺料账单：" + status);
+            }
+            // 只改玩家实际收到的材料账单所列库存，不使用隐藏供料边或固定足料夹具。
+            var restocked = new LinkedHashMap<>(stock);
+            displayedShortages.forEach((key, quantity) -> restocked.merge(key, quantity, Math::addExact));
+            System.out.printf("displayed_bill_%s variants=%d quantity=%d%n", label, displayedShortages.size(),
+                    displayedShortages.values().stream().reduce(0L, Math::addExact));
+            displayedShortages.entrySet().stream().map(entry -> {
+                MaterialRef material = materialsByAlias.get(entry.getKey());
+                return material.itemId() + material.nbt() + " * " + entry.getValue();
+            }).sorted().forEach(line -> System.out.println("displayed_bill_material " + line));
+            var branch = displayedShortages.entrySet().stream()
+                    .filter(entry -> materialsByAlias.get(entry.getKey()).itemId().equals(PEWEN_BRANCH))
+                    .findFirst().orElseThrow(() -> new IllegalStateException("原始磁盘缺少树枝账单对照"));
+            var oneRow = new LinkedHashMap<>(stock);
+            oneRow.merge(branch.getKey(), branch.getValue(), Math::addExact);
+            measure("saved_disks_after_one_row", run, level, player, oneRow, forced, needed, target, activeBudgetMs);
+            measure("saved_disks_after_displayed_bill", run, level, player, restocked, forced, needed, target, activeBudgetMs);
+        }
         if (RESTOCK && run == 2 && "synthetic_farm_and_spirits".equals(label)
                 && "PARTIAL".equals(status) && unresolvedSlots.isEmpty() && !shortageSupply.isEmpty()) {
             // 只补这一轮已观测到的材料数量，保留精确变体，再从头求解一次。

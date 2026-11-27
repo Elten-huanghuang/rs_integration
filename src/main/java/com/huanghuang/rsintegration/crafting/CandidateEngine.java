@@ -109,6 +109,7 @@ final class CandidateEngine {
         private Iterator<RecipeIndex.Entry> indexed = Collections.emptyIterator();
         private Iterator<RecipeIndex.Entry> outputs;
         private boolean checkingCrafting = true;
+        private int craftingEntries;
         private int nextScore;
         private Map<Ingredient, Long> matchCache;
         private Map<CandidateKey, Integer> scoreCache;
@@ -140,6 +141,7 @@ final class CandidateEngine {
         // 每次只筛一个配方或展开一个标签成员，原生调用之间允许让出当前 tick。
         private void gather() {
             if (ctx.timedOut() || (!indexed.hasNext() && nextItem == items.length)) {
+                checkingCrafting = craftingEntries != 0;
                 outputs = byId.values().iterator();
                 stack.resume(this::checkOutput);
                 return;
@@ -169,6 +171,7 @@ final class CandidateEngine {
         }
 
         private void gatherEntry(RecipeIndex.Entry entry) {
+            if (ctx.materialProfile != null) ctx.materialProfile.scanned();
             ResourceLocation rid = entry.recipe().getId();
             if (ctx.excludedRecipes.contains(rid)) return;
             CandidateKey candidateKey = CandidateKey.of(entry);
@@ -195,10 +198,12 @@ final class CandidateEngine {
                 }
             }
             byId.put(candidateKey, entry);
+            if (entry.recipe() instanceof CraftingRecipe) craftingEntries++;
         }
 
         private void checkOutput() {
-            if (ctx.timedOut() || (!outputs.hasNext() && !checkingCrafting)) {
+            // 保留工作台优先的检查顺序；同类候选不再为不存在的另一类空扫一轮。
+            if (ctx.timedOut() || (!outputs.hasNext() && (!checkingCrafting || craftingEntries == byId.size()))) {
                 if (result.size() < 2 && diag == null) {
                     stack.complete(done, result);
                     return;
@@ -243,11 +248,13 @@ final class CandidateEngine {
         }
 
         private void score() {
+            ctx.materialStage(PreviewMaterialProfile.Stage.SCORE);
             if (ctx.timedOut() || nextScore == result.size()) {
                 stack.resume(this::sort);
                 return;
             }
             RecipeIndex.Entry entry = result.get(nextScore++);
+            if (ctx.materialProfile != null) ctx.materialProfile.scored();
             CandidateKey key = CandidateKey.of(entry);
             long start = ctx.profileStart();
             var score = scoreEntry(entry, ctx, nbtStrict, matchCache);
@@ -625,6 +632,7 @@ final class CandidateEngine {
                 && reusableCatalystsAvailable(recipeSpecs, ctx, matchCache)) {
             score += bonus;
         }
+        if (ctx.reusableCatalystRoutes.isEmpty()) return score;
         for (IngredientDemand demand : demands) {
             if (demand.role() != DemandRole.CATALYST
                     && hasAvailableReusableCatalystProducer(
@@ -639,12 +647,13 @@ final class CandidateEngine {
     private static boolean hasAvailableReusableCatalystProducer(
             Ingredient demanded, ResolutionContext ctx,
           @Nullable Map<Ingredient, Long> matchCache) {
-        Set<ResourceLocation> checked = new HashSet<>();
+        Set<ResourceLocation> checked = null;
         for (ItemStack option : demanded.getItems()) {
             if (option.isEmpty()) continue;
             List<RecipeIndex.ReusableCatalystRoute> routes =
                     ctx.reusableCatalystRoutes.get(option.getItem());
-            if (routes == null) continue;
+            if (routes == null || routes.isEmpty()) continue;
+            if (checked == null) checked = new HashSet<>();
             for (RecipeIndex.ReusableCatalystRoute route : routes) {
                 if (!checked.add(route.recipeId())) continue;
                 if (!IngredientMatcher.test(demanded, route.output())) continue;

@@ -264,6 +264,8 @@ class DeepPlanningTest extends BootstrapTest {
                 return true;
             }));
             var graph = job.completedRootsGraph();
+            assertTrue(job.timeoutSummary().contains("slowMaterials=[minecraft:"));
+            assertTrue(job.timeoutSummary().contains(",tried="));
             CraftPlanValidator.validate(graph);
             assertEquals(12, graph.nodes().size());
             assertEquals(1, graph.rootDemands().size());

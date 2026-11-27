@@ -99,18 +99,21 @@ public final class ModRecipeHandlers {
     /** 返回同一配方在最高优先级上的唯一 winner，供 typed/pure 路径共享。 */
     public static Claim claimFor(Recipe<?> recipe) {
         Objects.requireNonNull(recipe, "recipe");
-        List<ModRecipeHandler> matching = new ArrayList<>(
-                CLAIM_CACHE.computeIfAbsent(recipe.getClass(), ignored -> {
-                    List<ModRecipeHandler> classMatches = new ArrayList<>();
-                    for (ModRecipeHandler handler : CLASS_HANDLERS) {
-                        if (handler.canHandle(recipe)) classMatches.add(handler);
-                    }
-                    return selectClaim(classMatches);
-                }).candidates());
+        Claim fixed = CLAIM_CACHE.computeIfAbsent(recipe.getClass(), ignored -> {
+            List<ModRecipeHandler> classMatches = new ArrayList<>();
+            for (ModRecipeHandler handler : CLASS_HANDLERS) {
+                if (handler.canHandle(recipe)) classMatches.add(handler);
+            }
+            return selectClaim(classMatches);
+        });
+        // 实例相关处理器仍逐个检查；未匹配时无需复制列表并重新选择同一个处理器。
+        List<ModRecipeHandler> matching = null;
         for (ModRecipeHandler handler : RECIPE_SENSITIVE_HANDLERS) {
-            if (handler.canHandle(recipe)) matching.add(handler);
+            if (!handler.canHandle(recipe)) continue;
+            if (matching == null) matching = new ArrayList<>(fixed.candidates());
+            matching.add(handler);
         }
-        Claim claim = selectClaim(matching);
+        Claim claim = matching == null ? fixed : selectClaim(matching);
         if (claim.ambiguous() && AMBIGUOUS_CLAIMS_LOGGED.add(recipe.getId())) {
             RESULT_LOGGER.warn("[RSI] Ambiguous recipe handlers for {}: {}",
                     recipe.getId(), claim.candidates().stream()

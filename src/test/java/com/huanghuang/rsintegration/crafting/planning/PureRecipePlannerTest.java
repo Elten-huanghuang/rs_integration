@@ -50,7 +50,8 @@ class PureRecipePlannerTest extends BootstrapTest {
         var constructor = searchType.getDeclaredConstructors()[0];
         constructor.setAccessible(true);
         Object search = constructor.newInstance(new ImmutableRecipeGraph(Map.of()), Map.of(), 100, 10000, 256,
-                Long.MAX_VALUE, (LongSupplier) System::nanoTime, Set.of(), Map.of(), PlanningPreferences.empty(), PurePlannerLimits.load());
+                Long.MAX_VALUE, (LongSupplier) System::nanoTime, Set.of(), Map.of(),
+                PlanningPreferences.empty(), PurePlannerLimits.load(), false);
         Class<?> completionType = Arrays.stream(PureRecipePlanner.class.getDeclaredClasses())
                 .filter(type -> type.getSimpleName().equals("CompleteRecipeTask")).findFirst().orElseThrow();
         var completion = completionType.getDeclaredConstructors()[0];
@@ -1436,6 +1437,94 @@ class PureRecipePlannerTest extends BootstrapTest {
     }
 
     @Test
+    void wholeOrderStockRankingAvoidsTryingASingleBatchSeedFirst() {
+        MaterialRef target = new MaterialRef(id("stock_rank_target"), "{grade:1}");
+        RecipeNode scarce = recipe("a_scarce", target, 4, ingredient(LOG, 1), ingredient(LOG, 1));
+        RecipeNode stocked = recipe("z_stocked", target, 4, ingredient(PLANK, 2), catalyst(STICK, 1));
+        List<IngredientRef> roots = List.of(ingredient(target, 65));
+        Map<MaterialRef, Integer> stock = Map.of(target, 1, LOG, 2, PLANK, 32, STICK, 1);
+        for (List<RecipeNode> order : List.of(List.of(scarce, stocked), List.of(stocked, scarce))) {
+            ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(target, order));
+            var baseline = rankOrder(graph, stock, roots, false);
+            var ranked = rankOrder(graph, stock, roots, true);
+            assertEquals(PureRecipePlanner.Status.SUCCESS, baseline.status());
+            assertEquals(baseline.steps(), ranked.steps());
+            assertEquals(List.of(new PureRecipePlanner.PlannedStep(stocked.recipeId(), 16)), ranked.steps());
+            assertEquals(1L, ranked.remaining().get(STICK));
+            assertTrue(ranked.expandedStates() < baseline.expandedStates(),
+                    () -> "旧排序=" + baseline.expandedStates() + "，整单排序=" + ranked.expandedStates());
+        }
+    }
+
+    @Test
+    void wholeOrderStockRankingCanRollBackAfterAnUnreservedSiblingFails() {
+        MaterialRef target = new MaterialRef(id("stock_rank_rollback"), "{grade:1}");
+        RecipeNode first = recipe("z_shared", target, 1, ingredient(LOG, 1));
+        RecipeNode second = recipe("a_independent", target, 1, ingredientAny(PLANK));
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(target, List.of(first, second)));
+        List<IngredientRef> roots = List.of(ingredient(target, 8),
+                new IngredientRef(List.of(LOG, STICK), 1, NbtMatchMode.EXACT, DemandRole.CONSUMED, false));
+        var stock = Map.of(LOG, 8, PLANK, 8);
+        var baseline = rankOrder(graph, stock, roots, false);
+        var result = rankOrder(graph, stock, roots, true);
+        assertEquals(PureRecipePlanner.Status.SUCCESS, baseline.status());
+        assertEquals(0, baseline.backtracks());
+        assertEquals(PureRecipePlanner.Status.SUCCESS, result.status());
+        assertEquals(List.of(new PureRecipePlanner.PlannedStep(second.recipeId(), 8)), result.steps());
+        assertEquals(7L, result.remaining().get(LOG));
+        assertEquals(baseline.materialFlow(), result.materialFlow());
+        assertTrue(result.backtracks() > 0);
+
+        var limited = PureRecipePlanner.resolve(graph, stock, roots, 20, baseline.expandedStates(), 256,
+                Long.MAX_VALUE, System::nanoTime, Set.of(), Map.of(), PlanningPreferences.empty(), false, true);
+        assertEquals(PureRecipePlanner.Status.SEARCH_LIMIT, limited.status());
+        assertEquals(PureRecipePlanner.Feasibility.UNKNOWN, limited.feasibility());
+        assertTrue(limited.steps().isEmpty());
+    }
+
+    @Test
+    void wholeOrderStockRankingCannotOverrideALockOrExclusion() {
+        MaterialRef target = new MaterialRef(id("stock_rank_lock"), "{grade:1}");
+        RecipeNode scarce = recipe("a_scarce", target, 1, ingredient(LOG, 1));
+        RecipeNode stocked = recipe("z_stocked", target, 1, ingredient(PLANK, 1));
+        var graph = new ImmutableRecipeGraph(Map.of(target, List.of(scarce, stocked)));
+        var stock = Map.of(LOG, 1, PLANK, 8);
+        var roots = List.of(ingredient(target, 8));
+        var forced = PureRecipePlanner.resolve(graph, stock, roots, 20, 4096, 256,
+                Long.MAX_VALUE, System::nanoTime, Set.of(),
+                Map.of(ForcedRecipeGraphProjector.preferenceKey(target), scarce.recipeId()),
+                PlanningPreferences.empty(), false, true);
+        var excluded = PureRecipePlanner.resolve(graph, stock, roots, 20, 4096, 256,
+                Long.MAX_VALUE, System::nanoTime, Set.of(), Map.of(),
+                new PlanningPreferences(Map.of(), Map.of(), Set.of(stocked.recipeId())), false, true);
+        assertEquals(PureRecipePlanner.Status.UNRESOLVABLE, forced.status());
+        assertEquals(PureRecipePlanner.Status.UNRESOLVABLE, excluded.status());
+    }
+
+    @Test
+    void wholeOrderStockRankingDeductsExactSiblingReservations() {
+        MaterialRef target = new MaterialRef(id("reserved_target"), "{grade:1}");
+        RecipeNode shared = recipe("a_reserved", target, 1, ingredient(LOG, 1));
+        RecipeNode independent = recipe("z_unreserved", target, 1, ingredient(PLANK, 1));
+        ImmutableRecipeGraph graph = new ImmutableRecipeGraph(Map.of(target, List.of(shared, independent)));
+        List<IngredientRef> roots = List.of(ingredient(target, 8), ingredient(LOG, 1));
+        var stock = Map.of(LOG, 8, PLANK, 8);
+        var baseline = rankOrder(graph, stock, roots, false);
+        var ranked = rankOrder(graph, stock, roots, true);
+        assertEquals(PureRecipePlanner.Status.SUCCESS, ranked.status());
+        assertEquals(baseline.steps(), ranked.steps());
+        assertTrue(baseline.backtracks() > 0);
+        assertEquals(0, ranked.backtracks());
+    }
+
+    private static PureRecipePlanner.Result rankOrder(ImmutableRecipeGraph graph,
+                                                       Map<MaterialRef, Integer> stock,
+                                                       List<IngredientRef> roots, boolean enabled) {
+        return PureRecipePlanner.resolve(graph, stock, roots, 20, 4096, 256, Long.MAX_VALUE,
+                System::nanoTime, Set.of(), Map.of(), PlanningPreferences.empty(), true, enabled);
+    }
+
+    @Test
     void equalScoredCandidatesUseRecipeIdAsStableFinalTieBreaker() {
         MaterialRef target = material("stable_tie_target");
         MaterialRef input = material("stable_tie_input");
@@ -1935,6 +2024,19 @@ class PureRecipePlannerTest extends BootstrapTest {
         assertEquals(List.of(
                 new PureRecipePlanner.PlannedStep(id("pack_cluster"), 1),
                 new PureRecipePlanner.PlannedStep(id("unpack_cluster"), 1)), result.steps());
+    }
+
+    @Test
+    void partialTraceRanksStockForTheOutstandingOrder() {
+        MaterialRef target = material("partial_order"), rare = material("rare"), common = material("common");
+        MaterialRef binder = material("binder");
+        var rareRoute = recipe("a_rare", target, 1, ingredient(rare, 1), ingredient(binder, 1));
+        var commonRoute = recipe("z_common", target, 1, ingredient(common, 2), ingredient(binder, 2));
+        var result = PureRecipePlanner.resolve(new ImmutableRecipeGraph(Map.of(target, List.of(rareRoute, commonRoute))),
+                Map.of(rare, 1, common, 16), List.of(ingredient(target, 10)), 20, 256);
+        assertFalse(result.feasible());
+        assertEquals(List.of(new PureRecipePlanner.PlannedStep(commonRoute.recipeId(), 10)), result.steps());
+        assertTrue(result.missing().containsAll(List.of(ingredient(common, 4), ingredient(binder, 20))));
     }
 
     @Test

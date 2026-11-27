@@ -388,6 +388,7 @@ public final class RSIntegrationConfig {
     public static ForgeConfigSpec.IntValue REPEAT_COUNT_MAX;
     public static ForgeConfigSpec.IntValue SERVER_CONFIG_SCHEMA_VERSION;
     public static ForgeConfigSpec.ConfigValue<List<? extends String>> PROTECTED_ITEMS;
+    public static ForgeConfigSpec.ConfigValue<List<? extends String>> RESTOCK_BOUNDARIES;
     public static ForgeConfigSpec.IntValue PROTECTED_RESERVE;
     public static ForgeConfigSpec.IntValue CONTAINER_TRANSFER_KEY;
     public static ForgeConfigSpec.IntValue RS_SIDE_PANEL_KEY;
@@ -1469,6 +1470,12 @@ public final class RSIntegrationConfig {
                         "填写物品 ID；配方消耗这些物品前先补足，确保合成后仍保留指定数量。")
                 .defineList("protectedItems", List.of(),
                         obj -> obj instanceof String str && ResourceLocation.tryParse(str) != null);
+        RESTOCK_BOUNDARIES = s
+                .comment("普通补货材料（物品 ID）。未锁定路线且严格制作失败时，优先显示还要补多少该材料；不禁止任何制作配方。",
+                        "仅匹配单一、无 NBT 的普通需求。清空列表可恢复展开替代配方的提示。")
+                .defineListAllowEmpty("restockBoundaries", List.of("minecraft:iron_ingot",
+                        "minecraft:raw_iron", "minecraft:gold_ingot", "minecraft:copper_ingot",
+                        "minecraft:diamond"), obj -> obj instanceof String str && ResourceLocation.tryParse(str) != null);
         PROTECTED_RESERVE = s
                 .comment("保留物品最低数量",
                         "对保留物品列表中的每种物品设置最低保有数量。")

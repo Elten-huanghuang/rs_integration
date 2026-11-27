@@ -160,9 +160,19 @@ public final class PureRecipePlanner {
                           LongSupplier nanoTime, Set<MaterialRef> activeRootOutputs,
                           Map<ResourceLocation, ResourceLocation> forcedRecipes,
                           PlanningPreferences preferences, boolean buildPartialPreview) {
+        return resolve(graph, available, roots, maxSteps, maxSearchStates, maxMemoizedFailures,
+                deadlineNanos, nanoTime, activeRootOutputs, forcedRecipes, preferences, buildPartialPreview,
+                Boolean.getBoolean("rsi.planning.wholeOrderStockRanking"));
+    }
+
+    static Result resolve(ImmutableRecipeGraph graph, Map<MaterialRef, ? extends Number> available,
+                          List<IngredientRef> roots, int maxSteps, int maxSearchStates, int maxMemoizedFailures,
+                          long deadlineNanos, LongSupplier nanoTime, Set<MaterialRef> activeRootOutputs,
+                          Map<ResourceLocation, ResourceLocation> forcedRecipes, PlanningPreferences preferences,
+                          boolean buildPartialPreview, boolean wholeOrderStockRanking) {
         return PlanningLookupCache.run(() -> resolveInScope(graph, available, roots,
                 maxSteps, maxSearchStates, maxMemoizedFailures, deadlineNanos, nanoTime,
-                activeRootOutputs, forcedRecipes, preferences, buildPartialPreview));
+                activeRootOutputs, forcedRecipes, preferences, buildPartialPreview, wholeOrderStockRanking));
     }
 
     private static Result resolveInScope(ImmutableRecipeGraph graph,
@@ -171,14 +181,15 @@ public final class PureRecipePlanner {
                                         int maxMemoizedFailures, long deadlineNanos,
                                         LongSupplier nanoTime, Set<MaterialRef> activeRootOutputs,
                                         Map<ResourceLocation, ResourceLocation> forcedRecipes,
-                                        PlanningPreferences preferences, boolean buildPartialPreview) {
+                                        PlanningPreferences preferences, boolean buildPartialPreview,
+                                        boolean wholeOrderStockRanking) {
         List<IngredientRef> normalizedRoots = PureDemandNormalizer.mergeEquivalent(roots);
         Map<MaterialRef, Long> preciseAvailable = longAvailability(available);
         graph = ImmutableRecipeGraphProjector.bindSmithingStates(
                 graph, preciseAvailable, normalizedRoots);
         Search search = new Search(graph, preciseAvailable, maxSteps, maxSearchStates,
                 maxMemoizedFailures, deadlineNanos, nanoTime, activeRootOutputs, forcedRecipes,
-                preferences, PurePlannerLimits.load());
+                preferences, PurePlannerLimits.load(), wholeOrderStockRanking);
         List<Task> rootTasks = new ArrayList<>(normalizedRoots.size());
         for (int index = 0; index < normalizedRoots.size(); index++) {
             rootTasks.add(new DemandTask(normalizedRoots.get(index), -1, index));
@@ -637,6 +648,7 @@ public final class PureRecipePlanner {
         private final Map<ResourceLocation, ResourceLocation> forcedRecipes;
         private final PlanningPreferences preferences;
         private final PurePlannerLimits limits;
+        private final boolean wholeOrderStockRanking;
         private final MaterialVariantPreferences.Snapshot variantPreferences;
         private final Map<ResourceLocation, List<MaterialRef>> stockByItem = new HashMap<>();
         private final Map<MaterialRef, Integer> stockVariantOrder = new HashMap<>();
@@ -695,9 +707,10 @@ public final class PureRecipePlanner {
                        long deadlineNanos, LongSupplier nanoTime,
                        Set<MaterialRef> activeRootOutputs,
                        Map<ResourceLocation, ResourceLocation> forcedRecipes,
-                       PlanningPreferences preferences, PurePlannerLimits limits) {
+                       PlanningPreferences preferences, PurePlannerLimits limits, boolean wholeOrderStockRanking) {
             this.graph = graph;
             this.limits = limits;
+            this.wholeOrderStockRanking = wholeOrderStockRanking;
             available.forEach((material, count) -> {
                 if (count != null && count > 0) {
                     stock.put(material, count);
@@ -979,7 +992,8 @@ public final class PureRecipePlanner {
                             ? unreservedStockAcross(ingredient, rest) : unreservedStock(rest, wanted);
                     needed = Math.max(0L, ingredient.count() - present);
                     if (needed <= 0L) continue;
-                    List<RecipeNode> raw = inventoryFirstCandidates(wanted, !broadFamily, ingredient.nbtMatchMode());
+                    List<RecipeNode> raw = inventoryFirstCandidates(wanted, !broadFamily, ingredient.nbtMatchMode(),
+                            needed, rest);
                     producers = preferNonCyclicCandidates(raw);
                     candidateCursor = 0;
                     batchHints = null;
@@ -1145,7 +1159,7 @@ public final class PureRecipePlanner {
                         }
                         if (needsTransitiveProbe) {
                             routeSearch = compilationCache.routes(material ->
-                                    inventoryFirstCandidates(material, true, NbtMatchMode.EXACT),
+                                    inventoryFirstCandidates(material, true, NbtMatchMode.EXACT, 0L, null),
                                     Search.this::routeReachability);
                         }
                     }
@@ -1763,7 +1777,8 @@ public final class PureRecipePlanner {
 
         private List<RecipeNode> inventoryFirstCandidates(MaterialRef wanted,
                                                            boolean pruneUnseeded,
-                                                           NbtMatchMode mode) {
+                                                           NbtMatchMode mode, long needed,
+                                                           @Nullable PersistentTaskQueue<Task> rest) {
             List<RecipeNode> candidates = candidates(wanted, mode).stream()
                     .filter(candidate -> !preferences.excludes(candidate.recipeId()))
                     .toList();
@@ -1790,9 +1805,17 @@ public final class PureRecipePlanner {
             if (partial != null) ordered.addAll(partial);
             if (ordered.size() < 2) return ordered;
             List<CandidateScore> scores = new ArrayList<>(ordered.size());
-            for (RecipeNode candidate : ordered) scores.add(new CandidateScore(candidate, counts));
+            boolean rankWholeOrder = wholeOrderStockRanking && needed > 0L && rest != null;
+            for (RecipeNode candidate : ordered) {
+                boolean stocked = rankWholeOrder && coversWholeOrder(candidate, needed, rest);
+                scores.add(new CandidateScore(candidate, counts, stocked));
+            }
             Comparator<CandidateScore> coverage = Comparator
                     .comparingDouble((CandidateScore score) -> score.coverage).reversed();
+            if (rankWholeOrder) {
+                coverage = Comparator.comparing((CandidateScore score) -> !score.wholeOrderStocked)
+                        .thenComparing(coverage);
+            }
             Comparator<CandidateScore> dependencyCost = Comparator
                     .comparingInt(CandidateScore::dependencyCost)
                     .thenComparing(Comparator.comparingLong(
@@ -1813,16 +1836,43 @@ public final class PureRecipePlanner {
             return preferForcedCandidate(wanted, ordered);
         }
 
+        /** 只给独立、精确的现货槽提档；没有提档不是缺料证明。 */
+        private boolean coversWholeOrder(RecipeNode candidate, long needed, PersistentTaskQueue<Task> rest) {
+            checkBudget();
+            MaterialRef output = candidate.output();
+            if (output.runtimeNbt() || output.constrainedNbt() || candidate.dynamicIdentityTargetable()
+                    || !candidate.magicCosts().isEmpty()) return false;
+            long batches = batchesFor(needed, candidate.outputCount());
+            if (batches > Long.MAX_VALUE / candidate.outputCount()) return false;
+            List<IngredientRef> inputs = normalizedInputs(candidate);
+            Set<MaterialRef> seen = inputs.size() > 1 ? new HashSet<>() : null;
+            for (IngredientRef input : inputs) {
+                if (input.nbtMatchMode() != NbtMatchMode.EXACT || input.alternatives().size() != 1
+                        || input.role() != DemandRole.CONSUMED && input.role() != DemandRole.CATALYST) return false;
+                MaterialRef material = input.alternatives().get(0);
+                if (material.runtimeNbt() || material.constrainedNbt()
+                        || SelfAmplifyingRecipePolicy.isSelfInput(input, output)
+                        || seen != null && !seen.add(material)) return false;
+                long available = unreservedStock(rest, material);
+                // 用除法避免极大订单溢出；可复用催化剂只借一批的数量。
+                if (available / input.count() < (input.role() == DemandRole.CATALYST ? 1L : batches)) return false;
+            }
+            return true;
+        }
+
         private final class CandidateScore {
             private final RecipeNode candidate;
             private final double coverage;
+            private final boolean wholeOrderStocked;
             private int dependencyCost = -1;
             private int alternativeCount = -1;
             private String recipeId;
 
-            private CandidateScore(RecipeNode candidate, @Nullable Map<IngredientRef, Long> counts) {
+            private CandidateScore(RecipeNode candidate, @Nullable Map<IngredientRef, Long> counts,
+                                   boolean wholeOrderStocked) {
                 this.candidate = candidate;
                 coverage = inputStockCoverage(candidate, counts);
+                this.wholeOrderStocked = wholeOrderStocked;
             }
 
             private int dependencyCost() {
@@ -2469,7 +2519,7 @@ public final class PureRecipePlanner {
                 return false;
             }
 
-            List<PartialChoice> choices = choicesFor(ingredient);
+            List<PartialChoice> choices = choicesFor(ingredient, remaining);
             for (PartialChoice choice : choices) {
                 if (visiting.contains(choice.output())) continue;
                 RecipeNode recipe = choice.recipe();
@@ -2596,7 +2646,7 @@ public final class PureRecipePlanner {
                     .add(material);
         }
 
-        private List<PartialChoice> choicesFor(IngredientRef ingredient) {
+        private List<PartialChoice> choicesFor(IngredientRef ingredient, long remaining) {
             List<PartialChoice> choices = new ArrayList<>();
             Map<RecipeNode, Boolean> zeroGainCycles = new HashMap<>();
             for (MaterialRef alternative : ingredient.alternatives()) {
@@ -2621,11 +2671,14 @@ public final class PureRecipePlanner {
                     choices.add(new PartialChoice(alternative, recipe));
                 }
             }
+            if (choices.size() < 2) return choices;
+            Map<RecipeNode, Double> coverage = new HashMap<>();
             choices.sort(Comparator
                     .comparingInt((PartialChoice choice) -> isForced(choice) ? 0 : 1)
                     .thenComparingInt(choice -> isSavedPreference(choice) ? 0 : 1)
                     .thenComparing(Comparator.comparingDouble(
-                            (PartialChoice choice) -> inputStockCoverage(choice.recipe()))
+                            (PartialChoice choice) -> coverage.computeIfAbsent(choice.recipe(),
+                                    recipe -> inputStockCoverage(recipe, remaining)))
                     .reversed()
                     .thenComparing(choice -> choice.recipe().recipeId().toString())));
             return choices;
@@ -2676,18 +2729,20 @@ public final class PureRecipePlanner {
                     node -> PureDemandNormalizer.mergeEquivalent(node.inputs()));
         }
 
-        private double inputStockCoverage(RecipeNode recipe) {
+        private double inputStockCoverage(RecipeNode recipe, long remaining) {
             budgetCheck.run();
-            long required = 0L;
-            long available = 0L;
+            long batches = Search.batchesFor(remaining, recipe.outputCount());
+            double required = 0D;
+            double available = 0D;
             for (IngredientRef input : normalizedInputs(recipe)) {
-                required += input.count();
+                long quantity = scaledInputCount(input, batches);
+                required += quantity;
                 long matching = 0L;
                 for (MaterialRef alternative : input.alternatives()) {
                     matching = saturatedAdd(matching,
                             stock.getOrDefault(alternative, 0L));
                 }
-                available += Math.min(input.count(), matching);
+                available += Math.min(quantity, matching);
             }
             return required == 0L ? 1.0D : (double) available / (double) required;
         }

@@ -131,6 +131,7 @@ final class HybridBranchPlanning {
         }
 
         void advance() {
+            ctx.materialStage(PreviewMaterialProfile.Stage.CAPTURE);
             long start = System.nanoTime();
             try {
                 if (!queue.isEmpty()) {
@@ -240,6 +241,7 @@ final class HybridBranchPlanning {
         }
 
         void validate() {
+            ctx.materialStage(PreviewMaterialProfile.Stage.VALIDATE);
             long start = System.nanoTime();
             try {
                 if (candidate == null || candidate.steps().isEmpty()
@@ -249,6 +251,7 @@ final class HybridBranchPlanning {
                     return;
                 }
                 if (!CandidateEngine.frozenRouteStillAvailable(root, ctx)) {
+                    if (ctx.materialProfile != null) ctx.materialProfile.failure("frozen-route-unavailable");
                     stack.complete(done, false);
                     return;
                 }
@@ -262,6 +265,7 @@ final class HybridBranchPlanning {
         }
 
         void merge() {
+            ctx.materialStage(PreviewMaterialProfile.Stage.MERGE);
             long start = System.nanoTime();
             try {
                 if (cursor < candidate.steps().size()) {
@@ -276,6 +280,7 @@ final class HybridBranchPlanning {
                     long validationStart = System.nanoTime();
                     boolean current;
                     try {
+                        ctx.materialStage(PreviewMaterialProfile.Stage.LIVE_STOCK);
                         current = checkStock.check(initial.keySet(), (key, previous, live) -> {
                             if (transaction) {
                                 stack.leave();
@@ -284,6 +289,7 @@ final class HybridBranchPlanning {
                             return ctx.reduceUnusedInitial(key, previous, live);
                         });
                     } finally {
+                        ctx.materialStage(PreviewMaterialProfile.Stage.MERGE);
                         PerformanceMonitor.recordPlanningLatency(PlanningLatencyPhase.HYBRID_VALIDATE,
                                 System.nanoTime() - validationStart);
                     }

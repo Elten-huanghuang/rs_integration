@@ -161,6 +161,126 @@ class TypedSelfAmplificationTest extends BootstrapTest {
     }
 
     @Test
+    void typedPreviewTriesOtherMachineVariantsBeforeReturningMissing() {
+        var makeGold = fixedRecipe("variant_gold", Items.RAW_GOLD, Items.GOLD_INGOT, 1);
+        var graph = restockGraph(new IngredientSpec(Ingredient.of(Items.IRON_INGOT, Items.GOLD_INGOT), 4),
+                Map.of(Items.GOLD_INGOT, List.of(craftingEntry(makeGold))),
+                Map.of(new StackKey(Items.IRON_INGOT, null), 1L, new StackKey(Items.RAW_GOLD, null), 4L), null);
+        assertEquals(0L, graph.rootDemands().get(0).unresolvedQuantity());
+        assertEquals(List.of(makeGold.getId()), graph.nodes().stream().map(node -> node.recipeId()).toList());
+        assertTrue(graph.unresolvedDemands().isEmpty());
+    }
+
+    @Test
+    void failedUnpackNamesItsInputButDoesNotHideTheWorkingRoute() {
+        var unpack = fixedRecipe("a_unpack", Items.EMERALD_BLOCK, Items.EMERALD, 9);
+        var infuse = fixedRecipe("z_infuse", Items.DIAMOND, Items.EMERALD, 1);
+        var precursor = fixedRecipe("make_precursor", Items.COAL, Items.DIAMOND, 1);
+        var level = mock(Level.class);
+        when(level.registryAccess()).thenReturn(RegistryAccess.EMPTY);
+        try (var index = mockStatic(RecipeIndex.class)) {
+            index.when(() -> RecipeIndex.get(level)).thenReturn(Map.of(
+                    Items.EMERALD, List.of(craftingEntry(unpack), craftingEntry(infuse)),
+                    Items.DIAMOND, List.of(craftingEntry(precursor))));
+            var need = ScaledIngredientSpec.of(new IngredientSpec(Ingredient.of(Items.EMERALD), 1), 1);
+            var job = CraftingResolver.startTypedPreview(List.of(need), Map.of(new StackKey(Items.COAL, null), 1L),
+                    level, null, null, new ArrayList<>(), null, true, 10_000, null, Map.of(), PlanningPreferences.empty());
+            assertTrue(job.advance(Long.MAX_VALUE));
+            String report = job.timeoutSummary();
+            assertTrue(report.contains("test:a_unpack/input[0]:minecraft:emerald_block=1"), report);
+            var graph = job.graph();
+            assertEquals(List.of(precursor.getId(), infuse.getId()), graph.nodes().stream().map(n -> n.recipeId()).toList());
+            assertTrue(graph.unresolvedDemands().isEmpty());
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"7,1,0,0", "7,0,0,1", "6,2,0,8", "0,0,11,53", "0,0,0,64"})
+    void restockPreviewUsesRealSupplyAndStopsAtTheRemainingIron(int blocks, int ore, int ingots, int missing) {
+        var unpack = fixedRecipe("unpack_iron", Items.IRON_BLOCK, Items.IRON_INGOT, 9);
+        var smelt = fixedRecipe("smelt_iron", Items.RAW_IRON, Items.IRON_INGOT, 1);
+        var graph = restockGraph(new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 64),
+                Map.of(Items.IRON_INGOT, List.of(craftingEntry(unpack), craftingEntry(smelt))),
+                Map.of(new StackKey(Items.IRON_BLOCK, null), (long) blocks,
+                        new StackKey(Items.IRON_INGOT, null), (long) ingots,
+                        new StackKey(Items.RAW_IRON, null), (long) ore), null);
+        var root = graph.rootDemands().get(0);
+        assertEquals(missing, root.unresolvedQuantity());
+        assertEquals(64L - missing, root.allocations().stream().mapToLong(a -> a.quantity()).sum());
+        assertTrue(graph.unresolvedDemands().isEmpty());
+        assertEquals(blocks + ore, graph.nodes().stream().mapToInt(node -> node.executions()).sum());
+    }
+
+    @Test
+    void unseededCopyDoesNotStartATransactionAndCanRunOnceSeeded() {
+        var copy = fixedRecipe("copy_compass", Items.COMPASS, Items.COMPASS, 2);
+        var level = mock(Level.class);
+        when(level.registryAccess()).thenReturn(RegistryAccess.EMPTY);
+        try (var index = mockStatic(RecipeIndex.class)) {
+            index.when(() -> RecipeIndex.get(level)).thenReturn(Map.of(Items.COMPASS, List.of(craftingEntry(copy))));
+            var need = ScaledIngredientSpec.of(new IngredientSpec(Ingredient.of(Items.COMPASS), 1), 4);
+            for (long seeds : List.of(0L, 1L)) {
+                var job = CraftingResolver.startTypedPreview(List.of(need), Map.of(new StackKey(Items.COMPASS, null), seeds),
+                        level, null, null, new ArrayList<>(), null, true, 10_000, null, Map.of(), PlanningPreferences.empty());
+                assertTrue(job.advance(Long.MAX_VALUE));
+                var graph = job.graph();
+                assertEquals(seeds == 0 ? 4L : 0L, graph.rootDemands().get(0).unresolvedQuantity());
+                if (seeds == 0) {
+                    assertTrue(job.timeoutSummary().contains("tried=0,rollback=0"), job.timeoutSummary());
+                    assertTrue(graph.nodes().isEmpty());
+                } else assertFalse(graph.nodes().isEmpty());
+            }
+        }
+    }
+
+    @Test
+    void missingPreviewRanksTheRequestedBatchAndRespectsRecipeLock() {
+        var rare = fixedRecipe("a_rare", Items.DIAMOND, Items.COMPASS, 1);
+        var common = new ShapelessRecipe(ResourceLocation.parse("test:z_common"), "", CraftingBookCategory.MISC,
+                new ItemStack(Items.COMPASS), NonNullList.of(Ingredient.EMPTY, Ingredient.of(Items.COAL), Ingredient.of(Items.COAL)));
+        var recipes = Map.of(Items.COMPASS, List.of(craftingEntry(rare), craftingEntry(common)));
+        var root = new IngredientSpec(Ingredient.of(Items.COMPASS), 10);
+        // 原料总共最多供 9 件，两条路线都不可能满足整单。
+        var stock = Map.of(new StackKey(Items.DIAMOND, null), 1L, new StackKey(Items.COAL, null), 16L);
+        var plan = restockGraph(root, recipes, stock, null);
+        assertEquals(List.of(common.getId()), plan.nodes().stream().map(n -> n.recipeId()).toList());
+        assertEquals(4L, plan.unresolvedDemands().stream().mapToLong(d -> d.quantity()).sum());
+        var locked = restockGraph(root, recipes, stock, Map.of(ResourceLocation.parse("minecraft:compass"), rare.getId()));
+        assertEquals(List.of(rare.getId()), locked.nodes().stream().map(n -> n.recipeId()).toList());
+        assertEquals(9L, locked.unresolvedDemands().stream().mapToLong(d -> d.quantity()).sum());
+    }
+
+    @Test
+    void lockedRestockRecipeStillShowsItsOwnMissingInput() {
+        var unpack = fixedRecipe("locked_unpack", Items.IRON_BLOCK, Items.IRON_INGOT, 9);
+        var graph = restockGraph(new IngredientSpec(Ingredient.of(Items.IRON_INGOT), 9),
+                Map.of(Items.IRON_INGOT, List.of(craftingEntry(unpack))), Map.of(),
+                Map.of(new ResourceLocation("minecraft", "iron_ingot"), unpack.getId()));
+        assertEquals(List.of(unpack.getId()), graph.nodes().stream().map(node -> node.recipeId()).toList());
+        assertEquals(1L, graph.unresolvedDemands().get(0).quantity());
+        assertTrue(graph.unresolvedDemands().get(0).ingredient().test(new ItemStack(Items.IRON_BLOCK)));
+    }
+
+    private static ShapelessRecipe fixedRecipe(String name, Item input, Item output, int count) {
+        return new ShapelessRecipe(new ResourceLocation("test", name), "", CraftingBookCategory.MISC,
+                new ItemStack(output, count), NonNullList.of(Ingredient.EMPTY, Ingredient.of(input)));
+    }
+
+    private static CraftPlanGraph restockGraph(IngredientSpec root, Map<Item, List<RecipeIndex.Entry>> entries,
+                                                Map<StackKey, Long> stock, Map<ResourceLocation, ResourceLocation> locks) {
+        Level level = mock(Level.class);
+        when(level.registryAccess()).thenReturn(RegistryAccess.EMPTY);
+        try (var index = mockStatic(RecipeIndex.class)) {
+            index.when(() -> RecipeIndex.reusableCatalystRoutes(level)).thenReturn(Map.of());
+            index.when(() -> RecipeIndex.get(level)).thenReturn(entries);
+            var graph = CraftingResolver.resolveMachineGraphForSpecsWithTypes(List.of(root), stock, level,
+                    null, null, new ArrayList<>(), locks, true, 10_000);
+            CraftPlanValidator.validate(graph);
+            return graph;
+        }
+    }
+
+    @Test
     void sharedSeedProbeYieldsBetweenCandidateRecipes() {
         var probes = new AtomicInteger();
         List<RecipeIndex.Entry> candidates = new ArrayList<>();
