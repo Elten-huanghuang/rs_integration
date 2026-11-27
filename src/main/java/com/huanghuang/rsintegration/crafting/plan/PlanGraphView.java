@@ -8,11 +8,13 @@ import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.crafting.graph.MaterialSource;
 import com.huanghuang.rsintegration.crafting.graph.NodeId;
 import com.huanghuang.rsintegration.crafting.graph.OutputKind;
+import com.huanghuang.rsintegration.crafting.ScaledIngredientSpec;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.crafting.tree.IngredientKey;
 import com.huanghuang.rsintegration.magic.MagicResourceCost;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.Ingredient;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -68,6 +70,15 @@ public record PlanGraphView(
 
     public static PlanGraphView from(CraftPlanGraph graph) {
         return from(graph, Map.of());
+    }
+
+    public static PlanGraphView pendingRoots(List<ScaledIngredientSpec> specs) {
+        var roots = new ArrayList<RootView>();
+        for (var spec : specs) {
+            if (spec.isEmpty()) continue;
+            roots.add(RootView.pending(spec.ingredient(), spec.count(), spec.role()));
+        }
+        return new PlanGraphView(CraftPlanGraph.CURRENT_VERSION, List.of(), List.of(), roots, List.of(), List.of());
     }
 
     /**
@@ -200,7 +211,7 @@ public record PlanGraphView(
     }
 
     public boolean hasUnresolvedDemands() {
-        return !unresolved.isEmpty() || roots.stream().anyMatch(root -> root.unresolvedQuantity() > 0);
+        return !unresolved.isEmpty() || roots.stream().anyMatch(root -> root.unresolvedQuantity() > 0 || root.pending());
     }
 
     /** 卡片和递归树共用已经通过服务端可用性检查的候选，不改动执行节点或材料边。 */
@@ -391,6 +402,18 @@ public record PlanGraphView(
 
     public record RootView(ItemStack display, long quantity, long unresolvedQuantity,
                            List<RootEdgeView> allocations, int roleOrdinal) {
+        /** 已结算的正数量根必有分配或明确缺口；两者都没有表示尚未展开，非执行图状态。 */
+        public boolean pending() { return quantity > 0L && unresolvedQuantity == 0L && allocations.isEmpty(); }
+
+        public static RootView pending(Ingredient input, long quantity, DemandRole role) {
+            try {
+                for (var option : input.getItems()) if (!option.isEmpty())
+                    return new RootView(option, quantity, 0L, List.of(), role.ordinal());
+            } catch (RuntimeException | LinkageError unavailable) {
+                // 动态谓词连展示变体也无法提供时，仍保留槽位数量，不伪造物品。
+            }
+            return new RootView(ItemStack.EMPTY, quantity, 0L, List.of(), role.ordinal());
+        }
         public RootView(ItemStack display, long quantity, long unresolvedQuantity,
                         List<RootEdgeView> allocations) {
             this(display, quantity, unresolvedQuantity, allocations, DemandRole.CONSUMED.ordinal());

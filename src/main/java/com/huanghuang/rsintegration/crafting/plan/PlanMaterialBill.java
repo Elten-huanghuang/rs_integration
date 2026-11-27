@@ -31,6 +31,15 @@ public final class PlanMaterialBill {
         return Collections.unmodifiableMap(gaps);
     }
 
+    static Map<IngredientKey, Long> pendingRoots(PlanResponse plan) {
+        if (!plan.outcome().incomplete() || plan.graph() == null) return Map.of();
+        Map<IngredientKey, Long> pending = new LinkedHashMap<>();
+        for (var root : plan.graph().roots()) {
+            if (root.pending()) mergeDemand(pending, root.display(), root.quantity());
+        }
+        return Collections.unmodifiableMap(pending);
+    }
+
     /** 草稿只汇总已分配的外部材料，不把未结算的需求提示当成缺料。 */
     static Map<IngredientKey, PlanResponse.Availability> completedAllocations(
             @Nullable PlanGraphView graph, Map<StackKey, Long> snapshotStock) {

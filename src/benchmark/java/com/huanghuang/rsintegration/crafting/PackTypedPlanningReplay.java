@@ -345,21 +345,20 @@ public final class PackTypedPlanningReplay extends BootstrapTest {
             System.out.println("display_timeout_saved_disks completed_within_budget=true");
         } catch (CraftingPlanningTimeoutException timeout) {
             System.out.println("timeout_material_profile " + job.timeoutSummary());
-            verifyDraft("timeout_saved_disks", job.completedRootsGraph(), target, stock,
+            verifyDraft("timeout_saved_disks", job.draftView(), target, stock,
                     IntegrationDiagnosticCode.PLANNING_TIMEOUT, longest);
         }
     }
 
-    private void verifyDraft(String label, CraftPlanGraph draft, RecipeNode target,
+    private void verifyDraft(String label, PlanGraphView graph, RecipeNode target,
                              Map<CraftingResolver.StackKey, Long> stock, IntegrationDiagnosticCode diagnostic, long longest) {
-        var graph = PlanGraphView.from(draft);
         var response = PlanResponse.incomplete(target.recipeId(), aliases.get(target.output()), 1, null,
                 null, null, null, null, graph, stock, IntegrationDiagnostic.error(diagnostic));
         var transfer = PackReplayPages.roundTrip(response);
         var decoded = transfer.plan();
         if (decoded.targetResult().isEmpty() || decoded.success() || !decoded.executionBlocked()
                 || decoded.outcome() != PlanOutcome.BUDGET_EXHAUSTED
-                || !decoded.missing().isEmpty() || decoded.graph().roots().size() != graph.roots().size()
+                || !decoded.missing().isEmpty() || decoded.graph().roots().size() != target.inputs().size()
                 || decoded.graph().nodes().size() != graph.nodes().size()
                 || !decoded.materials().equals(response.materials())
                 || decoded.materials().values().stream().anyMatch(row -> row.missingCount() != 0)) {
@@ -605,8 +604,8 @@ public final class PackTypedPlanningReplay extends BootstrapTest {
             boolean timedOut = exhausted instanceof CraftingPlanningTimeoutException;
             status = timedOut
                     ? "TIMEOUT " + job.timeoutSummary() : "LIMIT " + exhausted.getMessage() + " " + job.timeoutSummary();
-            var draft = job.completedRootsGraph();
-            draftRoots = draft.rootDemands().size();
+            var draft = job.draftView();
+            draftRoots = draft.roots().size();
             draftNodes = draft.nodes().size();
             if (run == 2) verifyDraft(label, draft, target, stock, timedOut
                     ? IntegrationDiagnosticCode.PLANNING_TIMEOUT : IntegrationDiagnosticCode.COMPLEXITY_LIMIT, longest);

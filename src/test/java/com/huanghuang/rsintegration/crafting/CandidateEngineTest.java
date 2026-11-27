@@ -3,6 +3,7 @@ package com.huanghuang.rsintegration.crafting;
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.huanghuang.rsintegration.ModType;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
+import com.huanghuang.rsintegration.crafting.CandidateEngine.CandidateRank;
 import com.huanghuang.rsintegration.crafting.batch.GenericBatchDelegate;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.mods.vanilla.VanillaMachineRecipeHandler;
@@ -26,12 +27,10 @@ import net.minecraftforge.common.crafting.StrictNBTIngredient;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
-import java.util.HashMap;
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -99,6 +98,34 @@ class CandidateEngineTest extends BootstrapTest {
         assertEquals(1, diagnostics.size());
         assertFalse(diagnostics.get(0).skipped());
         return diagnostics.get(0).score();
+    }
+
+    @Test
+    void candidateChecksShareOnlyNonGridDeclarationsWithinOneSlice() {
+        var recipe = new BlastingRecipe(ResourceLocation.parse("test:slice_result"), "", CookingBookCategory.MISC,
+                Ingredient.of(Items.RAW_IRON), new ItemStack(Items.IRON_INGOT), 0, 100);
+        var grid = mock(ShapedRecipe.class);
+        var level = mock(Level.class);
+        when(level.registryAccess()).thenReturn(RegistryAccess.EMPTY);
+        var output = new ItemStack(Items.IRON_INGOT);
+        try (var handlers = mockStatic(ModRecipeHandlers.class);
+             var index = mockStatic(RecipeIndex.class)) {
+            handlers.when(() -> ModRecipeHandlers.tryGetResultItem(recipe, RegistryAccess.EMPTY))
+                    .thenReturn(output, new ItemStack(Items.GOLD_INGOT));
+            handlers.when(() -> ModRecipeHandlers.tryGetResultItem(grid, RegistryAccess.EMPTY))
+                    .thenReturn(output, new ItemStack(Items.DIAMOND));
+            var entry = new RecipeIndex.Entry(recipe, ModType.GENERIC, ResourceLocation.parse("minecraft:blasting"));
+            var ctx = new ResolutionContext(level, Map.of(), List.of(), null);
+            ctx.beginCandidateSlice();
+            var demand = Ingredient.of(Items.IRON_INGOT);
+            CandidateEngine.outputForDemand(entry, demand, ctx).setCount(8);
+            assertEquals(1, CandidateEngine.outputForDemand(entry, demand, ctx).getCount());
+            handlers.verify(() -> ModRecipeHandlers.tryGetResultItem(recipe, RegistryAccess.EMPTY));
+            assertTrue(ctx.candidateDeclaredResult(grid).is(Items.IRON_INGOT));
+            assertTrue(ctx.candidateDeclaredResult(grid).is(Items.DIAMOND));
+            ctx.beginCandidateSlice();
+            assertTrue(ctx.candidateDeclaredResult(recipe).is(Items.GOLD_INGOT));
+        }
     }
 
     @Test
@@ -249,66 +276,36 @@ class CandidateEngineTest extends BootstrapTest {
 
     @Test
     void timedOutScoringTailUsesNeutralDefaults() {
-        ResourceLocation scored = new ResourceLocation("example", "scored");
-        ResourceLocation timedOut = new ResourceLocation("example", "timed_out");
-        Map<ResourceLocation, Integer> scores = new HashMap<>();
-        Map<ResourceLocation, Integer> availability = new HashMap<>();
-        scores.put(scored, 20);
-        availability.put(scored, 1);
-
-        int comparison = assertDoesNotThrow(() -> CandidateEngine.compareCandidateIds(
-                scored, timedOut, scores, availability));
-
-        assertTrue(comparison < 0);
+        assertTrue(new CandidateRank(20, 1, 1, 1).compareTo(CandidateRank.UNSCORED) < 0);
+        assertTrue(new CandidateRank(-1, 1, 0, 1).compareTo(CandidateRank.UNSCORED) > 0);
+        assertEquals(0, new CandidateRank(0, Integer.MAX_VALUE, 0, Integer.MAX_VALUE)
+                .compareTo(CandidateRank.UNSCORED));
     }
 
     @Test
     void equalScoreAndCoveragePreferFewerIndependentInputGroups() {
-        ResourceLocation complex = new ResourceLocation("example", "a_complex");
-        ResourceLocation simple = new ResourceLocation("example", "z_simple");
-        Map<ResourceLocation, Integer> scores = Map.of(complex, 20, simple, 20);
-        Map<ResourceLocation, Integer> availability = Map.of(complex, 0, simple, 0);
-        Map<ResourceLocation, Integer> inputGroups = Map.of(complex, 9, simple, 2);
-
-        int comparison = CandidateEngine.compareCandidateMetrics(
-                simple, complex, scores, availability, inputGroups);
-
-        assertTrue(comparison < 0);
+        CandidateRank complex = new CandidateRank(20, 1, 0, 9);
+        CandidateRank simple = new CandidateRank(20, 1, 0, 2);
+        assertTrue(simple.compareTo(complex) < 0);
+        assertTrue(new CandidateRank(20, 1, 1, 9).compareTo(simple) < 0);
     }
 
     @Test
     void equalScoreCoverageAndGroupsPreferFewerOperations() {
         // 同一份 810 mB 流体：粒每炉 10 mB（81 炉）、块每炉 1000 mB（1 炉）。
-        ResourceLocation nuggets = new ResourceLocation("embers", "melting/nuggets/iron");
-        ResourceLocation blocks = new ResourceLocation("embers", "melting/blocks/iron");
-        Map<ResourceLocation, Integer> scores = Map.of(nuggets, 24, blocks, 24);
-        Map<ResourceLocation, Integer> availability = Map.of(nuggets, 1, blocks, 1);
-        Map<ResourceLocation, Integer> inputGroups = Map.of(nuggets, 1, blocks, 1);
-        Map<ResourceLocation, Integer> operations = Map.of(nuggets, 81, blocks, 1);
-
-        int comparison = CandidateEngine.compareCandidateMetrics(
-                blocks, nuggets, scores, availability, inputGroups, operations);
-
-        assertTrue(comparison < 0);
-        assertTrue(CandidateEngine.compareCandidateMetrics(
-                nuggets, blocks, scores, availability, inputGroups, operations) > 0);
+        CandidateRank nuggets = new CandidateRank(24, 81, 1, 1);
+        CandidateRank blocks = new CandidateRank(24, 1, 1, 1);
+        assertTrue(blocks.compareTo(nuggets) < 0);
+        assertTrue(nuggets.compareTo(blocks) > 0);
     }
 
     @Test
     void stockedInputsOutrankFewerOperations() {
         // 库存差异先体现在分数上：块配方原料不在库存（分数低）时，
         // 不能因为「少烧几次」就去用库存里没有的原料，粒配方仍应优先。
-        ResourceLocation nuggets = new ResourceLocation("embers", "melting/nuggets/iron");
-        ResourceLocation blocks = new ResourceLocation("embers", "melting/blocks/iron");
-        Map<ResourceLocation, Integer> scores = Map.of(nuggets, 24, blocks, 4);
-        Map<ResourceLocation, Integer> availability = Map.of(nuggets, 1, blocks, 0);
-        Map<ResourceLocation, Integer> inputGroups = Map.of(nuggets, 1, blocks, 1);
-        Map<ResourceLocation, Integer> operations = Map.of(nuggets, 81, blocks, 1);
-
-        int comparison = CandidateEngine.compareCandidateMetrics(
-                nuggets, blocks, scores, availability, inputGroups, operations);
-
-        assertTrue(comparison < 0);
+        CandidateRank nuggets = new CandidateRank(24, 81, 1, 1);
+        CandidateRank blocks = new CandidateRank(4, 1, 0, 1);
+        assertTrue(nuggets.compareTo(blocks) < 0);
     }
 
     @Test

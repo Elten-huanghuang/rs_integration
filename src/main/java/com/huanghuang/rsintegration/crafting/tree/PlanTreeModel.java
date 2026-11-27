@@ -239,6 +239,18 @@ public final class PlanTreeModel {
             applyAvailability(missing, plan, missingRef.display());
             root.children.add(missing);
         }
+        for (var demand : graph.roots()) {
+            if (!demand.pending() || demand.display().isEmpty()) continue;
+            if (!budget.tryClaimNode(1)) {
+                root.viewTruncated = true;
+                break;
+            }
+            var pending = new PlanTreeNode(IngredientKey.of(demand.display()), demand.display(),
+                    demand.quantity(), 1, null, null, demand.role());
+            pending.pendingRoot = true;
+            pending.hints = List.of(Component.translatable("rsi.plan.workspace.pending_root"));
+            root.children.add(pending);
+        }
         mergeEquivalentProducedChildren(root, index);
         collapseRepeatedStages(root, index);
         rebaseDepths(root, 0);
@@ -358,7 +370,7 @@ public final class PlanTreeModel {
                 continue;
             }
             VisualKey key = child.step == null
-                    ? new MaterialVisualKey(child.key, child.initialSource, child.demandRole)
+                    ? new MaterialVisualKey(child.key, child.initialSource, child.pendingRoot, child.demandRole)
                     : recipeVisualKey(child);
             PlanTreeNode existing = merged.get(key);
             if (existing == null) {
@@ -467,7 +479,7 @@ public final class PlanTreeModel {
         for (PlanTreeNode child : node.children) rebaseDepths(child, depth + 1);
     }
 
-    private record MaterialVisualKey(IngredientKey material, boolean initialSource,
+    private record MaterialVisualKey(IngredientKey material, boolean initialSource, boolean pendingRoot,
                                      DemandRole demandRole) implements VisualKey {}
 
     private static List<GraphReference> mergeRootEdges(List<PlanGraphView.RootView> roots) {

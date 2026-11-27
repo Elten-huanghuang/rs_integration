@@ -143,6 +143,7 @@ final class ResolutionContext {
     private final Map<Recipe<?>, List<RecipeOutputSpec>> declaredRecipeOutputs = new IdentityHashMap<>();
     final Map<RecipeIndex.Entry, Set<CraftingResolver.StackKey>> candidateCycleInputs = new HashMap<>();
     @Nullable private Map<RecipeIndex.Entry, String> candidateRouteChecks;
+    private final Map<Recipe<?>, ItemStack> sliceDeclaredResults = new IdentityHashMap<>();
     long longestCallbackNanos;
     private long nextInventoryOrder;
 
@@ -169,6 +170,16 @@ final class ResolutionContext {
     void beginCandidateSlice() {
         if (candidateRouteChecks == null) candidateRouteChecks = new HashMap<>();
         else candidateRouteChecks.clear();
+        sliceDeclaredResults.clear();
+    }
+
+    ItemStack candidateDeclaredResult(Recipe<?> recipe) {
+        // 非网格配方的主产物已有声明缓存；只复用切片内的读取，需求适配仍由调用者完成。
+        if (candidateRouteChecks == null || recipe instanceof CraftingRecipe) {
+            return ModRecipeHandlers.tryGetResultItem(recipe, level.registryAccess());
+        }
+        return sliceDeclaredResults.computeIfAbsent(recipe, key ->
+                ModRecipeHandlers.tryGetResultItem(key, level.registryAccess()).copy()).copy();
     }
 
     String candidateRouteCheck(RecipeIndex.Entry entry, Supplier<String> probe) {
@@ -807,10 +818,23 @@ final class ResolutionContext {
     long countMatching(Ingredient ingredient) {
         if (ingredient.isEmpty()) return 0;
         long total = 0L;
-        for (CraftingResolver.StackKey key : candidateKeys(ingredient)) {
-            long count = counts.getOrDefault(key, 0L);
-            if (count > 0 && matches(ingredient, key)) {
-                total = MaterialSources.saturatedAdd(total, count);
+        Set<Item> types = IngredientMatcher.itemTypesForMatching(ingredient);
+        if (types == null) {
+            for (var entry : counts.entrySet()) {
+                long count = entry.getValue();
+                if (count > 0 && matches(ingredient, entry.getKey())) {
+                    total = MaterialSources.saturatedAdd(total, count);
+                }
+            }
+        } else {
+            // 物品桶仅缩小范围；数量读取当前模拟库存，NBT 仍用原谓词核验。
+            for (Item item : types) {
+                for (CachedStack cached : inventoryIndex.getOrDefault(item, List.of())) {
+                    long count = counts.getOrDefault(cached.key, 0L);
+                    if (count > 0 && IngredientMatcher.test(ingredient, cached.stack)) {
+                        total = MaterialSources.saturatedAdd(total, count);
+                    }
+                }
             }
         }
         if (extensionBudget != null && total < Long.MAX_VALUE) {
@@ -866,7 +890,7 @@ final class ResolutionContext {
     private Iterable<CraftingResolver.StackKey> candidateKeys(Ingredient ingredient) {
         Set<Item> items = IngredientMatcher.itemTypesForMatching(ingredient);
         if (items == null) return counts.keySet();
-        // 物品集合和 indexStack 已分别去重；惰性遍历避免计数时复制或排序库存。
+        // 物品集合和 indexStack 已分别去重；不把回滚后数量为零的旧变体交给消费排序。
         return () -> items.stream()
                 .flatMap(item -> inventoryIndex.getOrDefault(item, List.of()).stream())
                 .map(cached -> cached.key)

@@ -51,7 +51,7 @@ class PureRecipePlannerTest extends BootstrapTest {
         constructor.setAccessible(true);
         Object search = constructor.newInstance(new ImmutableRecipeGraph(Map.of()), Map.of(), 100, 10000, 256,
                 Long.MAX_VALUE, (LongSupplier) System::nanoTime, Set.of(), Map.of(),
-                PlanningPreferences.empty(), PurePlannerLimits.load(), false);
+                PlanningPreferences.empty(), PurePlannerLimits.load(), false, true);
         Class<?> completionType = Arrays.stream(PureRecipePlanner.class.getDeclaredClasses())
                 .filter(type -> type.getSimpleName().equals("CompleteRecipeTask")).findFirst().orElseThrow();
         var completion = completionType.getDeclaredConstructors()[0];
@@ -1434,6 +1434,60 @@ class PureRecipePlannerTest extends BootstrapTest {
                 new PureRecipePlanner.PlannedStep(id("make_simple_input"), 1),
                 new PureRecipePlanner.PlannedStep(id("z_simple_route"), 1)), result.steps());
         assertEquals(0, result.backtracks());
+    }
+
+    @Test
+    void uniqueDirectStockSkipsWideReachabilityWithoutChangingThePlan() {
+        var target = new MaterialRef(id("wide_direct"), "{grade:1}");
+        var producers = new ArrayList<RecipeNode>();
+        for (int i = 0; i < 128; i++) {
+            producers.add(recipe("empty_" + i, target, 1, ingredient(material("absent_" + i), 1)));
+        }
+        producers.add(recipe("stocked_last", target, 1, ingredient(LOG, 1)));
+        var graph = new ImmutableRecipeGraph(Map.of(target, producers));
+        var roots = List.of(ingredient(target, 8));
+        var stock = Map.of(LOG, 8);
+        var baselineClock = new AtomicLong();
+        var directClock = new AtomicLong();
+        var baseline = directOrder(graph, stock, roots, baselineClock, false);
+        var direct = directOrder(graph, stock, roots, directClock, true);
+        assertEquals(PureRecipePlanner.Status.SUCCESS, baseline.status());
+        assertEquals(baseline, direct);
+        assertTrue(directClock.get() < baselineClock.get(),
+                () -> "预算检查次数：原搜索=" + baselineClock.get() + "，现货优先=" + directClock.get());
+    }
+
+    @Test
+    void directStockFallsBackInTheSameFrameWhenASiblingNeedsItsInput() {
+        var target = new MaterialRef(id("wide_shared"), "{grade:1}");
+        var intermediate = material("unstocked_intermediate");
+        var direct = recipe("shared", target, 1, ingredient(LOG, 1));
+        var alternative = recipe("recursive", target, 1, ingredient(intermediate, 1));
+        var upstream = recipe("upstream", intermediate, 1, ingredient(PLANK, 1));
+        var producers = new ArrayList<>(List.of(direct));
+        for (int i = 0; i < 6; i++) {
+            producers.add(recipe("empty_" + i, target, 1, ingredient(material("absent_" + i), 1)));
+        }
+        producers.add(alternative);
+        var graph = new ImmutableRecipeGraph(Map.of(target, producers, intermediate, List.of(upstream)));
+        var roots = List.of(ingredient(target, 1),
+                new IngredientRef(List.of(LOG, STICK), 1, NbtMatchMode.EXACT, DemandRole.CONSUMED, false));
+        var stock = Map.of(LOG, 1, PLANK, 1);
+        var baseline = directOrder(graph, stock, roots, new AtomicLong(), false);
+        var result = directOrder(graph, stock, roots, new AtomicLong(), true);
+        assertEquals(PureRecipePlanner.Status.SUCCESS, result.status());
+        assertTrue(result.backtracks() > 0);
+        assertEquals(List.of(new PureRecipePlanner.PlannedStep(upstream.recipeId(), 1),
+                new PureRecipePlanner.PlannedStep(alternative.recipeId(), 1)), result.steps());
+        assertEquals(baseline, result);
+    }
+
+    private static PureRecipePlanner.Result directOrder(ImmutableRecipeGraph graph,
+                                                        Map<MaterialRef, Integer> stock, List<IngredientRef> roots,
+                                                        AtomicLong work, boolean directStockFirst) {
+        // 非无限截止值才会读取时钟；这里统计检查次数，不依赖测试机运行速度。
+        return PureRecipePlanner.resolve(graph, stock, roots, 20, 4096, 256, Long.MAX_VALUE - 1,
+                work::incrementAndGet, Set.of(), Map.of(), PlanningPreferences.empty(), false, false, directStockFirst);
     }
 
     @Test

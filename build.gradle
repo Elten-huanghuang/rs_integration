@@ -527,6 +527,7 @@ tasks.register('packPlanningReplay', JavaExec) {
     systemProperty 'rsi.replay.restock', providers.gradleProperty('packPlanningRestock').getOrElse('false')
     systemProperty 'rsi.replay.hybrid', providers.gradleProperty('packPlanningHybrid').getOrElse('false')
     systemProperty 'rsi.planning.wholeOrderStockRanking', providers.gradleProperty('packPlanningWholeOrderRanking').getOrElse('false')
+    systemProperty 'rsi.planning.disableDirectStockFirst', providers.gradleProperty('packPlanningDisableDirectStockFirst').getOrElse('false')
     systemProperty 'rsi.replay.scenario', providers.gradleProperty('packPlanningScenario').getOrElse('all')
     systemProperty 'rsi.replay.compatCompare', providers.gradleProperty('packPlanningCompatCompare').getOrElse('false')
     systemProperty 'rsi.replay.rounds', providers.gradleProperty('packPlanningRounds').getOrElse('3')

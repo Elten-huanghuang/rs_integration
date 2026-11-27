@@ -1981,6 +1981,7 @@
   "rsi.plan.workspace.only_draft_gaps": "Draft gaps",
   "rsi.plan.workspace.draft_gap": "Draft gap",
   "rsi.plan.workspace.draft_gap_hint": "Gaps reflect this route only. Other ingredients or recipes may change them. A dash means stock was not recorded.",
+  "rsi.plan.workspace.pending_root": "Not explored",
   "rsi.plan.details.settled_availability": "Allocated %s · Initial stock %s",
   "rsi.plan.workspace.draft_only": "Draft cannot run",
   "rsi.plan.workspace.shortage_status": "%s materials missing",

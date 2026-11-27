@@ -1589,7 +1589,7 @@ final class CraftPlanningApplicationService {
             // UNKNOWN means the planner did not prove feasibility. Its
             // diagnostic trace is not an authoritative shortage report.
             sink.incomplete(PlanResponse.incomplete(recipeId, planTargetOutput, repeatCount, dim, pos,
-                    baseItem, clickedOutput, planStorageReference, null, Map.of(),
+                    baseItem, clickedOutput, planStorageReference, PlanGraphView.pendingRoots(recipeSpecs), available,
                     CraftFailureMessages.purePreviewDiagnostic(precomputedPlan)));
             return;
         }
@@ -1761,7 +1761,7 @@ final class CraftPlanningApplicationService {
                                 preview),
                         diagnostic -> sink.incomplete(PlanResponse.incomplete(recipeId, activeRoot.output(),
                                 repeatCount, dim, pos, baseItem, clickedOutput, planStorageReference,
-                                PlanGraphView.from(job.completedRootsGraph()), available, diagnostic)),
+                                job.draftView(), available, diagnostic)),
                         missing, activeRoot.output(), rootKeys, extensionAttempt);
                 return;
             }

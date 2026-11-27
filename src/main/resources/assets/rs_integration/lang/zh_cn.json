@@ -1896,6 +1896,7 @@
   "rsi.plan.details.shortage_unknown_hint": "已算分支暂无缺口，整单尚未算完。",
   "rsi.plan.details.draft_gap_amount": "当前路线尚未分配 ×%s，不是最终缺料。",
   "rsi.plan.workspace.draft_materials": "草稿材料",
+  "rsi.plan.workspace.pending_root": "尚未展开",
   "rsi.plan.workspace.only_draft_gaps": "只看草稿缺口",
   "rsi.plan.workspace.draft_gap": "草稿缺口",
   "rsi.plan.workspace.draft_gap_hint": "草稿缺口来自当前路线；换用其他材料或配方后可能变化。库存未记录时显示为 —。",

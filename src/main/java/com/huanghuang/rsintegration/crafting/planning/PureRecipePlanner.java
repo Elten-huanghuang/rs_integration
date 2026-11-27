@@ -7,6 +7,7 @@ import com.huanghuang.rsintegration.config.PurePlannerLimits;
 import com.huanghuang.rsintegration.config.RSIntegrationConfig;
 
 import com.huanghuang.rsintegration.crafting.MaterialVariantPreferences;
+import com.huanghuang.rsintegration.crafting.RecoveryRoutePolicy;
 import com.huanghuang.rsintegration.crafting.SelfAmplifyingRecipePolicy;
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
 import com.huanghuang.rsintegration.magic.MagicResourceCost;
@@ -170,9 +171,19 @@ public final class PureRecipePlanner {
                           long deadlineNanos, LongSupplier nanoTime, Set<MaterialRef> activeRootOutputs,
                           Map<ResourceLocation, ResourceLocation> forcedRecipes, PlanningPreferences preferences,
                           boolean buildPartialPreview, boolean wholeOrderStockRanking) {
+        return resolve(graph, available, roots, maxSteps, maxSearchStates, maxMemoizedFailures, deadlineNanos,
+                nanoTime, activeRootOutputs, forcedRecipes, preferences, buildPartialPreview, wholeOrderStockRanking,
+                !Boolean.getBoolean("rsi.planning.disableDirectStockFirst"));
+    }
+
+    static Result resolve(ImmutableRecipeGraph graph, Map<MaterialRef, ? extends Number> available,
+                          List<IngredientRef> roots, int maxSteps, int maxSearchStates, int maxMemoizedFailures,
+                          long deadlineNanos, LongSupplier nanoTime, Set<MaterialRef> activeRootOutputs,
+                          Map<ResourceLocation, ResourceLocation> forcedRecipes, PlanningPreferences preferences,
+                          boolean buildPartialPreview, boolean wholeOrderStockRanking, boolean directStockFirst) {
         return PlanningLookupCache.run(() -> resolveInScope(graph, available, roots,
                 maxSteps, maxSearchStates, maxMemoizedFailures, deadlineNanos, nanoTime,
-                activeRootOutputs, forcedRecipes, preferences, buildPartialPreview, wholeOrderStockRanking));
+                activeRootOutputs, forcedRecipes, preferences, buildPartialPreview, wholeOrderStockRanking, directStockFirst));
     }
 
     private static Result resolveInScope(ImmutableRecipeGraph graph,
@@ -182,14 +193,14 @@ public final class PureRecipePlanner {
                                         LongSupplier nanoTime, Set<MaterialRef> activeRootOutputs,
                                         Map<ResourceLocation, ResourceLocation> forcedRecipes,
                                         PlanningPreferences preferences, boolean buildPartialPreview,
-                                        boolean wholeOrderStockRanking) {
+                                        boolean wholeOrderStockRanking, boolean directStockFirst) {
         List<IngredientRef> normalizedRoots = PureDemandNormalizer.mergeEquivalent(roots);
         Map<MaterialRef, Long> preciseAvailable = longAvailability(available);
         graph = ImmutableRecipeGraphProjector.bindSmithingStates(
                 graph, preciseAvailable, normalizedRoots);
         Search search = new Search(graph, preciseAvailable, maxSteps, maxSearchStates,
                 maxMemoizedFailures, deadlineNanos, nanoTime, activeRootOutputs, forcedRecipes,
-                preferences, PurePlannerLimits.load(), wholeOrderStockRanking);
+                preferences, PurePlannerLimits.load(), wholeOrderStockRanking, directStockFirst);
         List<Task> rootTasks = new ArrayList<>(normalizedRoots.size());
         for (int index = 0; index < normalizedRoots.size(); index++) {
             rootTasks.add(new DemandTask(normalizedRoots.get(index), -1, index));
@@ -235,7 +246,7 @@ public final class PureRecipePlanner {
             try {
                 PartialTrace partial = partialBuilder.build(normalizedRoots);
                 if (!partial.missing().isEmpty()
-                        && partial.steps().size() >= resultSteps.size()) {
+                        && (partialBuilder.usedRestockBoundary || partial.steps().size() >= resultSteps.size())) {
                     missing = partial.missing();
                     resultSteps = partial.steps();
                     previewTrace = partial.trace();
@@ -649,6 +660,7 @@ public final class PureRecipePlanner {
         private final PlanningPreferences preferences;
         private final PurePlannerLimits limits;
         private final boolean wholeOrderStockRanking;
+        private final boolean directStockFirst;
         private final MaterialVariantPreferences.Snapshot variantPreferences;
         private final Map<ResourceLocation, List<MaterialRef>> stockByItem = new HashMap<>();
         private final Map<MaterialRef, Integer> stockVariantOrder = new HashMap<>();
@@ -707,10 +719,12 @@ public final class PureRecipePlanner {
                        long deadlineNanos, LongSupplier nanoTime,
                        Set<MaterialRef> activeRootOutputs,
                        Map<ResourceLocation, ResourceLocation> forcedRecipes,
-                       PlanningPreferences preferences, PurePlannerLimits limits, boolean wholeOrderStockRanking) {
+                       PlanningPreferences preferences, PurePlannerLimits limits, boolean wholeOrderStockRanking,
+                       boolean directStockFirst) {
             this.graph = graph;
             this.limits = limits;
             this.wholeOrderStockRanking = wholeOrderStockRanking;
+            this.directStockFirst = directStockFirst;
             available.forEach((material, count) -> {
                 if (count != null && count > 0) {
                     stock.put(material, count);
@@ -801,6 +815,7 @@ public final class PureRecipePlanner {
             private boolean assignedFromStock;
             private List<MaterialRef> wantedAlternatives;
             private List<RecipeNode> producers = List.of();
+            private RecipeNode directProducer;
             private MaterialRef wanted;
             private long have;
             private long needed;
@@ -970,6 +985,12 @@ public final class PureRecipePlanner {
                         undo = () -> setResolving(resolvingMaterial, false);
                         return branch;
                     }
+                    if (directProducer != null) {
+                        // 首选的整批分支已退出（包括下游失败）；此时账本已回滚，拆批阶段仍保留该配方。
+                        loadProducers(ingredient, directProducer);
+                        directProducer = null;
+                        continue;
+                    }
                     if (wantedCursor >= wantedAlternatives.size()) {
                         if (partialProduction || splittable.isEmpty()) break;
                         partialProduction = true;
@@ -992,12 +1013,15 @@ public final class PureRecipePlanner {
                             ? unreservedStockAcross(ingredient, rest) : unreservedStock(rest, wanted);
                     needed = Math.max(0L, ingredient.count() - present);
                     if (needed <= 0L) continue;
-                    List<RecipeNode> raw = inventoryFirstCandidates(wanted, !broadFamily, ingredient.nbtMatchMode(),
-                            needed, rest);
-                    producers = preferNonCyclicCandidates(raw);
+                    directProducer = directStockFirst && !partialProduction && !broadFamily
+                            ? uniqueStockedProducer(wanted, ingredient.nbtMatchMode(), needed, rest) : null;
+                    if (directProducer == null) {
+                        loadProducers(ingredient, null);
+                        continue;
+                    }
+                    producers = List.of(directProducer);
                     candidateCursor = 0;
                     batchHints = null;
-                    if (producers.size() < raw.size()) cycleBlocked = true;
                 }
                 PersistentTaskQueue<Task> deferred = deferForCoProduct(demand);
                 if (deferred != null) return deferred;
@@ -1008,6 +1032,16 @@ public final class PureRecipePlanner {
                                     ? FailureReason.CYCLE : FailureReason.MISSING_INPUTS);
                 }
                 return null;
+            }
+
+            private void loadProducers(IngredientRef ingredient, @Nullable RecipeNode alreadyTried) {
+                var raw = inventoryFirstCandidates(wanted, ingredient.alternatives().size() == 1,
+                        ingredient.nbtMatchMode(), needed, rest);
+                producers = preferNonCyclicCandidates(raw);
+                if (producers.size() < raw.size()) cycleBlocked = true;
+                if (alreadyTried != null && !producers.isEmpty()) producers.remove(alreadyTried);
+                candidateCursor = 0;
+                batchHints = null;
             }
 
             /**
@@ -1775,6 +1809,30 @@ public final class PureRecipePlanner {
             return ordered;
         }
 
+        /** 宽产物桶只有一条直接足料路线、其余路线单输入且毫无现货时，原覆盖率排序的首选已确定。 */
+        @Nullable
+        private RecipeNode uniqueStockedProducer(MaterialRef wanted, NbtMatchMode mode, long needed,
+                                                 PersistentTaskQueue<Task> rest) {
+            var bucket = candidates(wanted, mode);
+            if (bucket.size() < REACHABILITY_PRECHECK_MIN_CANDIDATES
+                    || preferences.preferredRecipe(wanted) != null
+                    || !forcedRecipes.isEmpty() && ForcedRecipeGraphProjector.forcedRecipeFor(wanted, forcedRecipes) != null) return null;
+            RecipeNode direct = null;
+            for (RecipeNode candidate : bucket) {
+                checkBudget();
+                if (preferences.excludes(candidate.recipeId())) continue;
+                var inputs = candidate.inputs();
+                // 只用物品族索引证明零覆盖；有其他 NBT 变体也视为未知，交回完整排序。
+                if (inputs.size() != 1 || inputs.get(0).alternatives().size() != 1) return null;
+                if (!stockByItem.containsKey(inputs.get(0).alternatives().get(0).itemId())) continue;
+                if (direct != null || RecoveryRoutePolicy.classify(candidate) != RecoveryRoutePolicy.NORMAL
+                        || !coversWholeOrder(candidate, needed, rest)
+                        || cycleRelation(candidate, resolving).consumesOnlyAncestor()) return null;
+                direct = candidate;
+            }
+            return direct;
+        }
+
         private List<RecipeNode> inventoryFirstCandidates(MaterialRef wanted,
                                                            boolean pruneUnseeded,
                                                            NbtMatchMode mode, long needed,
@@ -1803,7 +1861,7 @@ public final class PureRecipePlanner {
                 }
             }
             if (partial != null) ordered.addAll(partial);
-            if (ordered.size() < 2) return ordered;
+            if (ordered.size() < 2) return preferForcedCandidate(wanted, ordered);
             List<CandidateScore> scores = new ArrayList<>(ordered.size());
             boolean rankWholeOrder = wholeOrderStockRanking && needed > 0L && rest != null;
             for (RecipeNode candidate : ordered) {
@@ -1833,7 +1891,11 @@ public final class PureRecipePlanner {
                             .thenComparing(structuralCost)
                             .thenComparing(CandidateScore::recipeId));
             for (int i = 0; i < scores.size(); i++) ordered.set(i, scores.get(i).candidate);
-            return preferForcedCandidate(wanted, ordered);
+            var preferred = preferForcedCandidate(wanted, ordered);
+            if (preferred.size() > 1 && preferred.stream().anyMatch(node -> RecoveryRoutePolicy.classify(node) != RecoveryRoutePolicy.NORMAL)) {
+                preferred.sort(Comparator.comparing(RecoveryRoutePolicy::classify));
+            }
+            return preferred;
         }
 
         /** 只给独立、精确的现货槽提档；没有提档不是缺料证明。 */
@@ -2449,6 +2511,9 @@ public final class PureRecipePlanner {
         private final List<PreviewDemand> rootDemands = new ArrayList<>();
         private List<IngredientRef> roots = List.of();
         private int finishedRoots;
+        private boolean usedRestockBoundary;
+        private final List<? extends String> restockMaterials = List.copyOf(RSIntegrationConfig.SERVER_SPEC.isLoaded()
+                ? RSIntegrationConfig.RESTOCK_BOUNDARIES.get() : RSIntegrationConfig.RESTOCK_BOUNDARIES.getDefault());
         private final Map<MaterialRef, ArrayDeque<PreviewLot>> lots = new HashMap<>();
         private final Set<MaterialRef> visiting = new HashSet<>();
         private final Map<List<MaterialRef>, PartialFamilyCost> familyCosts = new HashMap<>();
@@ -2520,6 +2585,7 @@ public final class PureRecipePlanner {
             }
 
             List<PartialChoice> choices = choicesFor(ingredient, remaining);
+            if (isRestockDemand(ingredient)) return expandStockedBatches(ingredient, remaining, choices, demands);
             for (PartialChoice choice : choices) {
                 if (visiting.contains(choice.output())) continue;
                 RecipeNode recipe = choice.recipe();
@@ -2571,6 +2637,56 @@ public final class PureRecipePlanner {
 
             noteMissing(ingredient, remaining);
             recordBoundary(ingredient, remaining, demands);
+            return false;
+        }
+
+        private boolean isRestockDemand(IngredientRef demand) {
+            if (demand.alternatives().size() != 1 || demand.role() != DemandRole.CONSUMED
+                    || demand.nbtMatchMode() != NbtMatchMode.EXACT && demand.nbtMatchMode() != NbtMatchMode.ANY) return false;
+            var material = demand.alternatives().get(0);
+            return material.isItem() && material.nbt().isEmpty() && !material.constrainedNbt() && !material.runtimeNbt()
+                    && restockMaterials.contains(material.itemId().toString())
+                    && ForcedRecipeGraphProjector.forcedRecipeFor(material, forcedRecipes) == null;
+        }
+
+        /** 严格搜索结束后，只用现有账本抵扣可直接启动的简单批次，不为补货建议制造回收原料。 */
+        private boolean expandStockedBatches(IngredientRef demand, long remaining, List<PartialChoice> choices,
+                                             List<PreviewDemand> demands) {
+            usedRestockBoundary = true;
+            for (PartialChoice choice : choices) {
+                budgetCheck.run();
+                if (steps.size() >= maxSteps) break;
+                var recipe = choice.recipe();
+                if (visiting.contains(choice.output()) || !recipe.output().equals(choice.output())
+                        || RecoveryRoutePolicy.classify(recipe) == RecoveryRoutePolicy.EQUIPMENT_RECOVERY
+                        || recipe.dynamicIdentityTargetable() || recipe.hasFluidOutputs() || !recipe.magicCosts().isEmpty()
+                        || recipe.guaranteedOutputs().size() != 1 || recipe.inputs().size() != 1) continue;
+                var input = recipe.inputs().get(0);
+                if (input.role() != DemandRole.CONSUMED || input.alternatives().size() != 1
+                        || input.alternatives().get(0).itemId().equals(choice.output().itemId())
+                        || ForcedRecipeGraphProjector.forcedRecipeFor(input.alternatives().get(0), forcedRecipes) != null) continue;
+                long available = 0L;
+                for (var variant : stockByItem.getOrDefault(input.alternatives().get(0).itemId(), Set.of())) {
+                    budgetCheck.run();
+                    if (ImmutableRecipeGraphProjector.matchesIngredient(variant, input))
+                        available = saturatedAdd(available, stock.getOrDefault(variant, 0L));
+                }
+                long batches = Math.min(Search.batchesFor(remaining, recipe.outputCount()), available / input.count());
+                if (batches == 0L || batches > Long.MAX_VALUE / recipe.outputCount()) continue;
+                var children = new ArrayList<PreviewDemand>();
+                consumeAvailable(input.withCount(batches * input.count()), children);
+                int producer = steps.size();
+                steps.add(new PlannedStep(recipe.recipeId(), batches));
+                inputs.add(List.copyOf(children));
+                long produced = batches * recipe.outputCount();
+                long used = Math.min(remaining, produced);
+                demands.add(new PreviewDemand(recipe.output(), used, demand.role(), producer));
+                if (produced > used) addStock(recipe.output(), produced - used, producer);
+                remaining -= used;
+                if (remaining == 0L) return true;
+            }
+            noteMissing(demand, remaining);
+            recordBoundary(demand, remaining, demands);
             return false;
         }
 
@@ -2675,6 +2791,7 @@ public final class PureRecipePlanner {
             Map<RecipeNode, Double> coverage = new HashMap<>();
             choices.sort(Comparator
                     .comparingInt((PartialChoice choice) -> isForced(choice) ? 0 : 1)
+                    .thenComparing(choice -> RecoveryRoutePolicy.classify(choice.recipe()))
                     .thenComparingInt(choice -> isSavedPreference(choice) ? 0 : 1)
                     .thenComparing(Comparator.comparingDouble(
                             (PartialChoice choice) -> coverage.computeIfAbsent(choice.recipe(),

@@ -72,6 +72,8 @@ public final class PlanMaterialTable {
         gaps.forEach((key, quantity) -> {
             if (!plan.materials().containsKey(key)) data.add(new Row(key, 0, -1, quantity, false, "unconfirmed_source"));
         });
+        PlanMaterialBill.pendingRoots(plan).forEach((key, quantity) ->
+                data.add(new Row(key, quantity, -1, 0, false, "pending_root")));
         data.sort(Comparator.comparing((Row row) -> row.missing() == 0)
                 .thenComparing(row -> row.key().stack(1).getHoverName().getString()));
         plan.leftovers().forEach((key, count) -> data.add(new Row(key, count, 0, 0, true, "leftovers")));
@@ -147,14 +149,19 @@ public final class PlanMaterialTable {
                         }
                         InkFluidRenderer.render(g, stack, x + 4, y + 3);
                         label(g, stack.getHoverName().getString(), x + 26, y + 7, nameEnd - x - 30, Color.TEXT);
-                        label(g, PlanRenderEngine.formatCompact(row.needed()), needX, y + 7, countWidth - 2, Color.TEXT);
-                        label(g, row.leftover() || row.available() < 0 ? "—" : PlanRenderEngine.formatCompact(row.available()), stockX,
-                                y + 7, countWidth - 2, Color.MUTED);
-                        label(g, row.missing() == 0 ? "—" : PlanRenderEngine.formatCompact(row.missing()),
-                                missingX, y + 7, countWidth - 2, row.missing() > 0 ? Color.WARNING : Color.MUTED);
-                        if (wide) label(g, text(incomplete ? (row.missing() > 0 ? "draft_gap" : "settled_source") : row.sourceKey()),
-                                sourceX, y + 7, actionX - sourceX - 4, row.missing() > 0 ? Color.WARNING
-                                        : row.sourceKey().equals("ready_source") ? Color.READY : Color.MUTED);
+                        boolean pending = row.sourceKey().equals("pending_root");
+                        if (pending) label(g, text("pending_root") + " ×" + PlanRenderEngine.formatCompact(row.needed()),
+                                needX, y + 7, sourceX - needX - 2, Color.MUTED);
+                        else {
+                            label(g, PlanRenderEngine.formatCompact(row.needed()), needX, y + 7, countWidth - 2, Color.TEXT);
+                            label(g, row.leftover() || row.available() < 0 ? "—" : PlanRenderEngine.formatCompact(row.available()), stockX,
+                                    y + 7, countWidth - 2, Color.MUTED);
+                            label(g, row.missing() == 0 ? "—" : PlanRenderEngine.formatCompact(row.missing()),
+                                    missingX, y + 7, countWidth - 2, row.missing() > 0 ? Color.WARNING : Color.MUTED);
+                            if (wide) label(g, text(incomplete ? (row.missing() > 0 ? "draft_gap" : "settled_source") : row.sourceKey()),
+                                    sourceX, y + 7, actionX - sourceX - 4, row.missing() > 0 ? Color.WARNING
+                                            : row.sourceKey().equals("ready_source") ? Color.READY : Color.MUTED);
+                        }
                         label(g, text(!incomplete && row.missing() > 0 ? "locate_star" : "locate_short"), actionX, y + 7,
                                 bounds.right() - actionX - 8, Color.MUTED);
                         if (!notes.isEmpty()) label(g, notes.stream().map(MaterialNote::note)

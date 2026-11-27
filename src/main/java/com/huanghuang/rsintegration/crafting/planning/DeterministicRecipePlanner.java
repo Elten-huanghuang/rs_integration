@@ -1,6 +1,7 @@
 package com.huanghuang.rsintegration.crafting.planning;
 
 import com.huanghuang.rsintegration.crafting.graph.DemandRole;
+import com.huanghuang.rsintegration.crafting.RecoveryRoutePolicy;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.IngredientRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.MaterialRef;
 import com.huanghuang.rsintegration.crafting.planning.ImmutableRecipeGraph.NbtMatchMode;
@@ -514,9 +515,11 @@ final class DeterministicRecipePlanner {
                     branchable &= recipe.guaranteedOutputs().size() == 1;
                     alternatives.add(recipe);
                     ResourceLocation preferred = preferences.preferredRecipe(material);
-                    if (selected == null || recipe.recipeId().equals(preferred)
+                    int tier = selected == null ? 0 : RecoveryRoutePolicy.classify(recipe)
+                            .compareTo(RecoveryRoutePolicy.classify(selected));
+                    if (selected == null || tier < 0 || tier == 0 && (recipe.recipeId().equals(preferred)
                             || !selected.recipeId().equals(preferred)
-                            && recipe.recipeId().toString().compareTo(selected.recipeId().toString()) < 0) {
+                            && recipe.recipeId().toString().compareTo(selected.recipeId().toString()) < 0)) {
                         selected = recipe;
                     }
                 }

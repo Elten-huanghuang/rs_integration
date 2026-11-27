@@ -51,6 +51,7 @@ public final class PlanTreeNode {
     public boolean initialSource;
     /** Number of unresolved units attached to this input port. */
     public long unresolved;
+    public boolean pendingRoot;
     /** Output kind for producer nodes (PRIMARY/SECONDARY/REMAINDER/SYNTHETIC ordinal). */
     public int outputKindOrdinal;
 

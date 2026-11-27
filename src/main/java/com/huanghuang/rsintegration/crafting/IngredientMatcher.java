@@ -53,8 +53,12 @@ public final class IngredientMatcher {
     /** Null means the predicate may match outside its display items; never filter those ingredients. */
     public static Set<Item> itemTypesForMatching(Ingredient ingredient) {
         if (!hasCompleteItemList(ingredient)) return null;
+        ItemStack[] templates = ingredient.getItems();
+        if (templates.length == 1) {
+            return templates[0].isEmpty() ? Set.of() : Set.of(templates[0].getItem());
+        }
         Set<Item> types = new HashSet<>();
-        for (ItemStack template : ingredient.getItems()) {
+        for (ItemStack template : templates) {
             if (!template.isEmpty()) types.add(template.getItem());
         }
         return Set.copyOf(types);

@@ -274,7 +274,7 @@ class DeepPlanningTest extends BootstrapTest {
 
             var diagnostic = IntegrationDiagnostic.error(IntegrationDiagnosticCode.PLANNING_TIMEOUT);
             var response = PlanResponse.incomplete(new ResourceLocation("test", "target"), fixture.target(), 1,
-                    null, null, null, null, null, PlanGraphView.from(graph),
+                    null, null, null, null, null, job.draftView(),
                     Map.of(new StackKey(Items.STICK, null), 2L), diagnostic);
             var decoded = PlanResponsePacket.decodePayload(PlanResponsePacket.encodePayload(response, 17L)).plan();
             assertEquals(response.recipeId(), decoded.recipeId());
@@ -287,7 +287,10 @@ class DeepPlanningTest extends BootstrapTest {
                     new PlanResponse.Availability(1, 2, 0)), decoded.materials());
             var layout = new PlanTreeLayout();
             layout.rebuild(PlanTreeModel.from(decoded).root);
-            assertEquals(14, layout.boxes().size());
+            assertEquals(2, decoded.graph().roots().size());
+            assertEquals(1, decoded.graph().roots().stream().filter(PlanGraphView.RootView::pending).count());
+            assertEquals(15, layout.boxes().size());
+            assertTrue(layout.boxes().stream().anyMatch(box -> box.node().pendingRoot));
             assertTrue(layout.boxes().stream().noneMatch(box -> box.node().unresolved > 0));
         }
     }

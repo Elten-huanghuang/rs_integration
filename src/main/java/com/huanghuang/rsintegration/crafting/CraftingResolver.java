@@ -29,6 +29,7 @@ import com.huanghuang.rsintegration.crafting.graph.OutputPortId;
 import com.huanghuang.rsintegration.crafting.graph.RootAllocation;
 import com.huanghuang.rsintegration.crafting.graph.RootDemand;
 import com.huanghuang.rsintegration.crafting.planning.PlanningPreferences;
+import com.huanghuang.rsintegration.crafting.plan.PlanGraphView;
 import com.huanghuang.rsintegration.crafting.quantity.SaturatingLongMath;
 import com.huanghuang.rsintegration.crafting.consumption.InputConsumption;
 import com.huanghuang.rsintegration.util.PerformanceMonitor;
@@ -726,7 +727,7 @@ public final class CraftingResolver {
         ctx.excludedRecipes = Set.copyOf(excludedRecipes);
         EdgeTracker edges = new EdgeTracker();
         Map<Integer, RootDemand> rootsByOrder = new TreeMap<>();
-        PreviewCheckpoint checkpoint = checkPreviewBudget ? new PreviewCheckpoint() : null;
+        PreviewCheckpoint checkpoint = checkPreviewBudget ? new PreviewCheckpoint(needed) : null;
         if (checkPreviewBudget) ctx.materialProfile = new PreviewMaterialProfile(System::nanoTime);
         var stack = new PlanningStack();
         var job = stack.<List<RootDemand>>start(done -> {
@@ -751,6 +752,8 @@ public final class CraftingResolver {
                 Ingredient input = activeRoot == null ? root.ingredient()
                         : ctx.lockedIngredient(activeRoot.recipeId(), root.ingredient());
                 pendingRoots.add(new ScaledIngredientSpec(input, root.count(), root.consumption()));
+                if (checkpoint != null) checkpoint.known.put(root.order(),
+                        new RootSpec(input, root.count(), root.consumption(), root.order()));
             }
             ctx.pendingInputs.push(pendingRoots);
             stack.enter(ctx.pendingInputs::pop);
@@ -841,12 +844,31 @@ public final class CraftingResolver {
         private static final int MAX_NODES = RSIntegrationConfig.MIN_CRAFTING_MAX_GRAPH_NODES;
         private static final int MAX_DETAILS = 4096;
         private final Map<Integer, RootDemand> roots = new TreeMap<>();
+        private final Map<Integer, RootSpec> known = new TreeMap<>();
+        private final List<RootSpec> original;
         private int nodes;
         private int edges;
         private int unresolved;
         private long nodeDetails;
         private long rootDetails;
         private boolean frozen;
+
+        PreviewCheckpoint(List<RootSpec> original) {
+            this.original = List.copyOf(original);
+        }
+
+        PlanGraphView draft(ResolutionContext context) {
+            var settled = PlanGraphView.from(graph(context));
+            var ordered = new TreeMap<Integer, PlanGraphView.RootView>();
+            var it = settled.roots().iterator();
+            for (int order : roots.keySet()) ordered.put(order, it.next());
+            for (RootSpec root : known.isEmpty() ? original : known.values()) {
+                if (!root.isEmpty() && !ordered.containsKey(root.order()))
+                    ordered.put(root.order(), PlanGraphView.RootView.pending(root.ingredient(), root.count(), root.role()));
+            }
+            return new PlanGraphView(settled.version(), settled.nodes(), settled.edges(), List.copyOf(ordered.values()),
+                    settled.unresolved(), settled.topologicalOrder(), settled.magicCosts());
+        }
 
         void completedRoot(ResolutionContext context, int order, RootDemand root) {
             if (frozen) return;
@@ -979,6 +1001,12 @@ public final class CraftingResolver {
         public CraftPlanGraph completedRootsGraph() {
             if (checkpoint == null) throw new IllegalStateException("仅类型预览保留展示进度");
             return checkpoint.graph(context);
+        }
+
+        /** 未展开根只进入展示 DTO，不放入可校验、可执行的材料流图。 */
+        public PlanGraphView draftView() {
+            if (checkpoint == null) throw new IllegalStateException("仅类型预览保留展示进度");
+            return checkpoint.draft(context);
         }
 
         public CraftPlanGraph graph() {
@@ -1343,7 +1371,8 @@ public final class CraftingResolver {
                         candStart, candidateDiag, candidates, stack, done));
     }
 
-    private record AliveCandidate(RecipeIndex.Entry entry, ItemStack output, int netGain, int selfConsumed) {}
+    private record AliveCandidate(RecipeIndex.Entry entry, ItemStack output, int netGain, int selfConsumed,
+                                  RecoveryRoutePolicy policy) {}
 
     private static void collectViableCandidates(Ingredient ingredient, long count, ResolutionContext ctx,
                                                int depth, EdgeTracker edges, @Nullable InputPortId consumer,
@@ -1421,7 +1450,10 @@ public final class CraftingResolver {
                 }
                 return;
             }
-            alive.add(new AliveCandidate(candidate, out, ng, selfConsumed));
+            var policy = RecoveryRoutePolicy.classify(candidate, out, ctx);
+            if (policy != RecoveryRoutePolicy.NORMAL && ctx.diagnosticsEnabled())
+                ctx.diag("ensureIngredient recovery route=" + candidate.recipe().getId() + " tier=" + policy);
+            alive.add(new AliveCandidate(candidate, out, ng, selfConsumed, policy));
             }
         }
         stack.resume(new Outputs());
@@ -1438,6 +1470,9 @@ public final class CraftingResolver {
                                            PlanningStack stack, Consumer<Boolean> done) {
         // Forced selection controls which candidate may execute, but the complete viable list
         // must remain available as UI alternatives so the player can switch back afterwards.
+        if (!forceProduction && alive.size() > 1 && alive.stream().anyMatch(a -> a.policy() != RecoveryRoutePolicy.NORMAL)) {
+            alive.sort(Comparator.comparing(AliveCandidate::policy));
+        }
         List<AliveCandidate> selectableAlive = List.copyOf(alive);
         if (forceProduction) {
             alive = forcedExecutionCandidates(alive,
@@ -1527,7 +1562,8 @@ public final class CraftingResolver {
                                 // 不能静态估算的动态配方保留原位；同等缺口沿用原有偏好顺序。
                                 var ranked = new ArrayList<>(viable);
                                 var sorted = new ArrayList<>(estimates);
-                                sorted.sort(Comparator.comparingInt(ShortageChoice::missingKinds)
+                                sorted.sort(Comparator.comparing((ShortageChoice choice) -> choice.candidate().policy())
+                                        .thenComparingInt(ShortageChoice::missingKinds)
                                         .thenComparing(Comparator.comparingLong(ShortageChoice::stockedOutput).reversed())
                                         .thenComparingLong(ShortageChoice::missingUnits));
                                 for (int i = 0; i < estimates.size(); i++) {
@@ -1551,6 +1587,10 @@ public final class CraftingResolver {
                         long batches = Math.max(1L, SaturatingLongMath.ceilDiv(
                                 stockBoundary ? restockRemaining : needed, candidate.netGain()));
                         if (partialPass) {
+                            if (stockBoundary && candidate.policy() == RecoveryRoutePolicy.EQUIPMENT_RECOVERY) {
+                                stack.resume(this);
+                                return;
+                            }
                             batches = stockedBatches(candidate, batches, stockBoundary, ctx);
                             if (batches == 0L) {
                                 stack.resume(this);
@@ -2247,10 +2287,8 @@ public final class CraftingResolver {
     static boolean consumesOutput(Ingredient ingredient, ItemStack output) {
         if (ingredient == null || ingredient.isEmpty()
                 || output == null || output.isEmpty()) return false;
-        // 先检查真实材料谓词，避免把共用 Item 的不同流体或 NBT 状态误判为自消耗。
-        if (!IngredientMatcher.test(ingredient, output)) return false;
         if (!IngredientMatcher.hasCompleteItemList(ingredient)) {
-            return true;
+            return IngredientMatcher.test(ingredient, output);
         }
         int candidates = 0;
         for (ItemStack template : ingredient.getItems()) {
@@ -2258,7 +2296,8 @@ public final class CraftingResolver {
             candidates++;
             if (template.getItem() != output.getItem()) return false;
         }
-        return candidates > 0;
+        // 仅同物品的候选需要继续核验流体或 NBT；不同物品不可能形成必然自消耗。
+        return candidates > 0 && IngredientMatcher.test(ingredient, output);
     }
 
     private static List<IngredientSpec> recipeSpecs(RecipeIndex.Entry entry, @Nullable RegistryAccess access,

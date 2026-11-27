@@ -112,10 +112,7 @@ final class CandidateEngine {
         private int craftingEntries;
         private int nextScore;
         private Map<Ingredient, Long> matchCache;
-        private Map<CandidateKey, Integer> scoreCache;
-        private Map<CandidateKey, Integer> availCache;
-        private Map<CandidateKey, Integer> inputGroupCache;
-        private Map<CandidateKey, Integer> operationCache;
+        private Map<RecipeIndex.Entry, CandidateRank> ranks;
         private Map<ResourceLocation, Integer> scrollLevels;
         private Map<ResourceLocation, Integer> scrollRarities;
         private int nextScroll;
@@ -209,10 +206,7 @@ final class CandidateEngine {
                     return;
                 }
                 matchCache = new HashMap<>();
-                scoreCache = new HashMap<>();
-                availCache = new HashMap<>();
-                inputGroupCache = new HashMap<>();
-                operationCache = new HashMap<>();
+                ranks = new IdentityHashMap<>(result.size());
                 stack.resume(this::score);
                 return;
             }
@@ -255,25 +249,18 @@ final class CandidateEngine {
             }
             RecipeIndex.Entry entry = result.get(nextScore++);
             if (ctx.materialProfile != null) ctx.materialProfile.scored();
-            CandidateKey key = CandidateKey.of(entry);
             long start = ctx.profileStart();
             var score = scoreEntry(entry, ctx, nbtStrict, matchCache);
             ctx.profileEnd(Phase.SCORE, start);
-            scoreCache.put(key, score.score());
-            availCache.put(key, score.availableGroups());
-            inputGroupCache.put(key, score.inputGroups());
-            operationCache.put(key, remaining > 0L
+            ranks.put(entry, new CandidateRank(score.score(), remaining > 0L
                     ? estimatedOperations(remaining, score.outputCount())
-                    : Integer.MAX_VALUE);
+                    : Integer.MAX_VALUE, score.availableGroups(), score.inputGroups()));
             stack.resume(this::score);
         }
 
         private void sort() {
             result.sort((a, b) -> {
-                CandidateKey keyA = CandidateKey.of(a);
-                CandidateKey keyB = CandidateKey.of(b);
-                int cmp = compareCandidateMetrics(keyA, keyB,
-                        scoreCache, availCache, inputGroupCache, operationCache);
+                int cmp = rankOf(a).compareTo(rankOf(b));
                 if (cmp != 0) return cmp;
                 cmp = a.recipe().getId().compareTo(b.recipe().getId());
                 return cmp != 0 ? cmp : a.modType().id().compareTo(b.modType().id());
@@ -290,8 +277,7 @@ final class CandidateEngine {
         private void scoreScroll() {
             if (nextScroll < result.size() && !ctx.timedOut()) {
                 RecipeIndex.Entry entry = result.get(nextScroll++);
-                ItemStack output = ModRecipeHandlers.tryGetResultItem(
-                        entry.recipe(), ctx.level.registryAccess());
+                ItemStack output = ctx.candidateDeclaredResult(entry.recipe());
                 scrollLevels.put(entry.recipe().getId(), SpellScrollSelection.level(output));
                 scrollRarities.put(entry.recipe().getId(), SpellScrollSelection.rarity(output));
                 stack.resume(this::scoreScroll);
@@ -312,19 +298,15 @@ final class CandidateEngine {
                 return;
             }
             RecipeIndex.Entry entry = result.get(nextDiagnostic++);
-            int score = scoreCache.getOrDefault(CandidateKey.of(entry), 0);
+            int score = rankOf(entry).score();
             String pref = isPreferred(entry, ctx) ? " (PREFERRED)" : "";
             logDiag(diag, null, entry, score, entry.modType(), false, "Score=" + score + pref);
             stack.resume(this::diagnose);
         }
-    }
 
-    static <K> int compareCandidateMetrics(K keyA, K keyB,
-                                            Map<K, Integer> scoreCache,
-                                            Map<K, Integer> availCache,
-                                            Map<K, Integer> inputGroupCache) {
-        return compareCandidateMetrics(keyA, keyB, scoreCache, availCache, inputGroupCache,
-                Map.of());
+        private CandidateRank rankOf(RecipeIndex.Entry entry) {
+            return ranks.getOrDefault(entry, CandidateRank.UNSCORED);
+        }
     }
 
     /**
@@ -335,22 +317,19 @@ final class CandidateEngine {
      * 库存差异仍然先体现在分数里（原料不可用要扣分，全齐才有产出加成），
      * 因此不会为了大批量而动用库存里没有的原料。
      */
-    static <K> int compareCandidateMetrics(K keyA, K keyB,
-                                            Map<K, Integer> scoreCache,
-                                            Map<K, Integer> availCache,
-                                            Map<K, Integer> inputGroupCache,
-                                            Map<K, Integer> operationCache) {
-        int cmp = Integer.compare(scoreCache.getOrDefault(keyB, 0),
-                scoreCache.getOrDefault(keyA, 0));
-        if (cmp != 0) return cmp;
-        cmp = Integer.compare(operationCache.getOrDefault(keyA, Integer.MAX_VALUE),
-                operationCache.getOrDefault(keyB, Integer.MAX_VALUE));
-        if (cmp != 0) return cmp;
-        cmp = Integer.compare(availCache.getOrDefault(keyB, 0),
-                availCache.getOrDefault(keyA, 0));
-        if (cmp != 0) return cmp;
-        return Integer.compare(inputGroupCache.getOrDefault(keyA, Integer.MAX_VALUE),
-                inputGroupCache.getOrDefault(keyB, Integer.MAX_VALUE));
+    record CandidateRank(int score, int operations, int availableGroups, int inputGroups)
+            implements Comparable<CandidateRank> {
+        static final CandidateRank UNSCORED = new CandidateRank(0, Integer.MAX_VALUE, 0, Integer.MAX_VALUE);
+
+        @Override
+        public int compareTo(CandidateRank other) {
+            int cmp = Integer.compare(other.score, score);
+            if (cmp != 0) return cmp;
+            cmp = Integer.compare(operations, other.operations);
+            if (cmp != 0) return cmp;
+            cmp = Integer.compare(other.availableGroups, availableGroups);
+            return cmp != 0 ? cmp : Integer.compare(inputGroups, other.inputGroups);
+        }
     }
 
     /** Resolves shared runtime recipes against the exact NBT-bearing item being requested. */
@@ -360,8 +339,7 @@ final class CandidateEngine {
             ItemStack dynamic = GoetyDynamicRitualRecipe.matchingOutput(entry.recipe(), demand);
             if (!dynamic.isEmpty()) return dynamic;
         }
-        ItemStack output = ModRecipeHandlers.tryGetResultItem(
-                entry.recipe(), ctx.level.registryAccess());
+        ItemStack output = ctx.candidateDeclaredResult(entry.recipe());
         return adaptOutputForDemand(entry, output, demand, ctx);
     }
 
@@ -487,26 +465,6 @@ final class CandidateEngine {
         }
     }
 
-    static int compareCandidateIds(ResourceLocation idA, ResourceLocation idB,
-                                   Map<ResourceLocation, Integer> scoreCache,
-                                   Map<ResourceLocation, Integer> availCache) {
-        // Scoring intentionally stops on timeout. Keep the unscored tail
-        // neutral instead of unboxing a missing cache value and throwing NPE.
-        int cmp = Integer.compare(scoreCache.getOrDefault(idB, 0),
-                scoreCache.getOrDefault(idA, 0));
-        if (cmp != 0) return cmp;
-
-        cmp = Integer.compare(availCache.getOrDefault(idB, 0),
-                availCache.getOrDefault(idA, 0));
-        if (cmp != 0) return cmp;
-
-        boolean aMc = "minecraft".equals(idA.getNamespace());
-        boolean bMc = "minecraft".equals(idB.getNamespace());
-        if (aMc && !bMc) return -1;
-        if (bMc && !aMc) return 1;
-        return 0;
-    }
-
     private static void logDiag(List<CandidateDiagnostic> diag, @Nullable Item item,
                                  @Nullable RecipeIndex.Entry entry, int score,
                                  @Nullable ModType mt, boolean skipped, String reason) {
@@ -567,7 +525,7 @@ final class CandidateEngine {
     }
 
     private static boolean isPreferred(RecipeIndex.Entry entry, ResolutionContext ctx) {
-        ItemStack output = ModRecipeHandlers.tryGetResultItem(entry.recipe(), ctx.level.registryAccess());
+        ItemStack output = ctx.candidateDeclaredResult(entry.recipe());
         if (output.isEmpty()) return false;
         ResourceLocation pref = ctx.preferredRecipeFor(output);
         return pref != null && pref.equals(entry.recipe().getId());
@@ -599,7 +557,7 @@ final class CandidateEngine {
         }
         if (specs != null) score += reusableCatalystPreferenceScore(specs, demands, ctx, matchCache);
 
-        ItemStack declared = ModRecipeHandlers.tryGetResultItem(entry.recipe(), ctx.level.registryAccess());
+        ItemStack declared = ctx.candidateDeclaredResult(entry.recipe());
         ItemStack output = adaptOutputForDemand(entry, declared, Ingredient.EMPTY, ctx);
         if (crafting || !output.isEmpty()) {
             if (entry.recipe().getId().equals(ctx.preferredRecipeFor(declared))) score += PREFERRED_RECIPE_BONUS;
