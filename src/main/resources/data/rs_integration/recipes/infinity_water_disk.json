@@ -1,0 +1,14 @@
+{
+  "conditions": [
+    { "type": "forge:mod_loaded", "modid": "refinedstorage" }
+  ],
+  "type": "minecraft:crafting_shaped",
+  "pattern": ["GWG", "WHW", "DDD"],
+  "key": {
+    "G": { "item": "minecraft:glass" },
+    "W": { "item": "minecraft:water_bucket" },
+    "H": { "item": "refinedstorage:storage_housing" },
+    "D": { "tag": "forge:gems/diamond" }
+  },
+  "result": { "item": "rs_integration:infinity_water_disk" }
+}

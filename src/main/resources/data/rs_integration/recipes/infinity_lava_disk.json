@@ -1,0 +1,14 @@
+{
+  "conditions": [
+    { "type": "forge:mod_loaded", "modid": "refinedstorage" }
+  ],
+  "type": "minecraft:crafting_shaped",
+  "pattern": ["OLO", "LHL", "DDD"],
+  "key": {
+    "O": { "item": "minecraft:obsidian" },
+    "L": { "item": "minecraft:lava_bucket" },
+    "H": { "item": "refinedstorage:storage_housing" },
+    "D": { "tag": "forge:gems/diamond" }
+  },
+  "result": { "item": "rs_integration:infinity_lava_disk" }
+}
